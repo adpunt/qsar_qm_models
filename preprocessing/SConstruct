@@ -1,0 +1,3 @@
+# SConstruct
+SharedLibrary("libtanimoto", ["libtanimoto.c"],
+              CFLAGS="-O3")
