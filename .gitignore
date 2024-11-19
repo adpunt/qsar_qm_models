@@ -6,3 +6,5 @@
 *.mmap
 __pycache__/
 *.pyc
+
+data/smiles_cache/
