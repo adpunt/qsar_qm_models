@@ -34,13 +34,15 @@ from sklearn.metrics import (
     average_precision_score,
 )
 
-import sys
-base_dir = os.path.dirname(os.path.abspath(__file__))
-models_path = os.path.join(base_dir, '..')
-sys.path.append(models_path)
-
-from qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, GIN, GCN, GINCoTeaching, MLPRegressor, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a
+from models.qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, GIN, GCN, GINCoTeaching, MLPRegressor, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a
 from similarity_calculations import DistanceNetworkLightning
+
+# Get the current script's directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Construct the path to 'valid_qm9_indices.pth' in the '/data' directory
+data_dir = os.path.join(script_dir, '..', 'data')
+valid_indices_path = os.path.join(data_dir, 'valid_qm9_indices.pth')
 
 # Initialize the cache
 cache = diskcache.Cache('./smiles_cache')
@@ -97,7 +99,7 @@ def load_qm9(qm_property):
     qm9 = QM9(root=osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'QM9'))
 
     # Filter out molecules that cannot be processed by RDKit
-    valid_indices_tensor = torch.load('valid_qm9_indices.pth')
+    valid_indices_tensor = torch.load(valid_indices_path)
     qm9 = qm9.index_select(valid_indices_tensor)
 
     # Isolate a single regression target
