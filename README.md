@@ -1,77 +1,92 @@
-# QSAR QM Models Testing Framework
+# QSAR/QM Models Testing Framework
 
-This repository contains a testing framework for evaluating the accuracy and robustness of QSAR (Quantitative Structure-Activity Relationship) models. Our framework uses pre-calculated quantum mechanical (QM) properties and experimental data to benchmark various molecular representations and machine learning models under different noise conditions.
+This repository contains a comprehensive framework for testing and evaluating QSAR (Quantitative Structure-Activity Relationship) models using pre-calculated quantum mechanical (QM) properties, experimental data, and molecular representations. It supports various machine learning architectures and noise conditions, enabling robust benchmarking of model performance and feature utility.
 
 ## Features
 
-- **Molecular Representations**: Supports bit vector-based representations like ECFP4, OHE SMILES, Sort & Slice fingerprints, and molecular graphs for GCN, GIN, and GATv2.
-- **Machine Learning Models**: Includes Random Forest (RF), Support Vector Machine (SVM), XGBoost, Gaussian Process (GP), and various graph-based neural networks.
-- **Noise Simulation**: Introduces controlled artificial noise (Gaussian, left-tailed, right-tailed, U-shaped, and uniform) to mimic real-world conditions.
-- **Efficiency**: Memory-safe processing using Rust, threading, and memory-mapped files.
-- **Advanced Testing Capabilities**: Hyperparameter tuning with Bayesian optimization, bootstrapping for error bars, and plotting with Vega-Altair.
-- **Primary QM Property**: Focuses on predicting HOMO and LUMO gaps.
+### Molecular Representations
+- **Bit Vector-Based Representations**: Includes ECFP4, Sort & Slice fingerprints, and One-Hot Encoded (OHE) SMILES.
+- **Graph-Based Representations**: Supports GIN, GCN, GATv2, and MPNN architectures with advanced molecular embedding methods.
+- **Alternative SMILES**: Generates canonical and alternative SMILES representations with customizable randomization.
+
+### Machine Learning Models
+- **Standard Models**: Random Forest (RF), Support Vector Machine (SVM), Gradient Boosting (GB), and Gaussian Processes (GP).
+- **Graph-Based Neural Networks**: Includes GIN, GCN, and Co-Teaching methods.
+- **Custom Architectures**: Supports Gauche GP implementation and various deep learning models.
+
+### Noise Simulation
+- Introduces controlled artificial noise (Gaussian, uniform, and other distributions) to simulate real-world variability.
+- Supports domain-specific noise injection with clustering-based sampling.
+
+### Efficiency
+- Memory-safe processing with Rust integration for pre-processing and data manipulation.
+- Multi-threaded execution using `concurrent.futures`.
+- Support for memory-mapped (mmap) file storage to handle large datasets.
+
+### Advanced Testing Capabilities
+- Hyperparameter optimization with Bayesian Optimization.
+- Bootstrapping for error bars and confidence intervals.
+- Robust metric calculation for regression and classification tasks.
+
+### Datasets
+- **QM9**: Pre-calculated QM properties for small organic molecules.
+- **PolarisHub Datasets**: Supports external datasets for classification tasks, such as binding affinity and toxicity prediction.
 
 ## Installation
 
-1. **Rust**: Ensure Rust is installed. Instructions can be found [here](https://www.rust-lang.org/tools/install).
-2. **Clone the Repository**:
-    ```sh
-    git clone https://github.com/adpunt/qsar_qm_models
-    cd qsar_qm_models
-    ```
-3. Install the required Python packages:
-	```sh
-	pip install numpy torch torch-geometric rdkit bayesian-optimization altair pandas scikit-learn xgboost catboost
-	```
+### 1. Clone the Repository
+git clone https://github.com/adpunt/qsar_qm_models.git
+cd qsar_qm_models
 
-## Usage 
+### 2. Python Requirements
+Install the necessary Python packages:
+pip install numpy torch torch-geometric rdkit bayesian-optimization altair pandas scikit-learn xgboost catboost deepchem polaris
 
-### Arguments
+### 3. Rust Requirements
+Ensure Rust is installed. Instructions are available at https://www.rust-lang.org/tools/install. Once installed, build the Rust processor:
+cd rust_processor
+cargo build --release
 
-The framework uses command-line arguments for configuration. Below are the details of each argument:
+## Usage
 
-### Required Arguments
-- `-q`, `--qm_property` (str): The QM property to predict (e.g., HOMO, LUMO).
-- `-m`, `--models` (list of str): Models to use for prediction (e.g., rf, svm, xgboost).
-- `-r`, `--molecular_representations` (list of str): Molecular representations to use (e.g., smiles, ecfp4).
-- `-n`, `--sample-size` (int): Number of samples to use.
+### Running the Framework
+The framework uses command-line arguments for configuration. Below are the available arguments:
 
-### Optional Arguments
-- `--random-seed` (int): Random seed for reproducibility (default: 42).
-- `-b`, `--bootstrapping` (int): Number of bootstrapping iterations for generating error bars (default: 1).
-- `--use-extra` (bool): Use information from the entire dataset rather than just the training set (default: False).
-- `--sampling-proportion` (list of float): Proportion of the dataset to which artificial noise will be added (default: None).
-- `--noise` (bool): Flag to generate artificial Gaussian noise (default: False).
-- `--sigma` (list of float): Standard deviation(s) of artificially added Gaussian noise (default: None).
-- `--distribution` (str): Distribution of artificial noise (default: Gaussian).
-- `-t`, `--hyperparameter-tuning` (bool): Flag for hyperparameter tuning (default: False).
-- `--pair-comparison` (bool): Flag to create a plot comparing the noise response of different model/representation pairs (default: False).
-- `--raw-filename` (str): Filename for saving raw data (default: ../results/raw_data.pkl).
-- `--pred-tracking` (bool): Flag to plot the top misclassified samples and track predictions (default: False).
-- `-a`, `--alternative-smiles` (int): Generate alternative SMILES for the same molecules in the fixed test set (default: 0, mixed train is 1, alternative train is 2, alternative test is 3).
+#### Required Arguments
+- `-q`, `--qm_property`: The QM property to predict (e.g., `homo_lumo_gap`, `alpha`).
+- `-m`, `--models`: Models to use for prediction (e.g., `rf`, `svm`, `gb`).
+- `-r`, `--molecular_representations`: Molecular representations to use (e.g., `smiles`, `ecfp4`).
+- `-n`, `--sample-size`: Number of samples to use.
 
-### Example
+#### Optional Arguments
+- `--random-seed`: Random seed for reproducibility (default: `42`).
+- `-b`, `--bootstrapping`: Number of bootstrapping iterations (default: `1`).
+- `--sampling-proportion`: Proportion of the dataset to which artificial noise will be added.
+- `--noise`: Flag to generate artificial Gaussian noise (default: `False`).
+- `--sigma`: Standard deviation(s) of artificially added Gaussian noise.
+- `--distribution`: Distribution of artificial noise (default: `gaussian`).
+- `-t`, `--hyperparameter-tuning`: Enable hyperparameter tuning (default: `False`).
+- `-d`, `--dataset`: Dataset to run experiments on (`QM9` or PolarisHub datasets).
+- `-s`, `--split`: Method for splitting data (default: `random`).
 
-Run the program with specific options:
-```bash
-python ./noise_detection/run_qm_models.py -e 30 -q homo_lumo_gap -m rf svm -r ecfp4 smiles --batch-size 32 --hyperparameter_tuning True --random-seed 123
-```
+#### Example
+python scripts/run_qm_qsar_models.py -q homo_lumo_gap -m rf svm -r ecfp4 smiles -n 10000 --noise True --sigma 1.0 --distribution gaussian
 
-This command predicts the `homo_lumo_gap` property using `rf` and `svm` models with `ecfp4` and `smiles` representations, with 30 epochs, a batch size of 32, hyperparameter tuning enabled, and a random seed of 123.
+This command predicts the `homo_lumo_gap` property using RF and SVM models with ECFP4 and SMILES representations, introducing Gaussian noise with a standard deviation of 1.0.
 
 ### Warnings to Ignore
+Warnings such as:
+Explicit valence for atom # 5 C, 5, is greater than permitted.
+are caused by invalid molecules in the QM9 dataset. These can be ignored.
 
-- **Warnings**: On first run, you may encounter warnings such as:
-	```sh
-	Explicit valence for atom # 5 C, 5, is greater than permitted.
-	```
-	These are due to some invalid molecules in the QM9 dataset and can be ignored as they are relatively few.
+## Testing
 
-### Testing
+Run unit tests to ensure the framework is functioning correctly:
+python -m unittest scripts/test_run_qm_models.py
 
-Run a unit test to make sure the baseline functionality is working:
-```bash
-python -m unittest ./noise_detection/test_run_qm_models.py
-```
+This runs baseline tests for RF/ECFP4, GB/ECFP4, SVM/ECFP4, RF/SMILES, GB/SMILES, SVM/SMILES, and GIN/Graph. Each experiment checks for R-squared values greater than 0.7.
 
-This command runs a unit testing, which runs all the baseline pairs (RF/ECFP4, GB/ECFP4, SVM/ECFP4, RF/SMILES, GB/SMILES, SVM/SMILES, GIN/Graph) with N=30,000 and default settings and ensures that for every experiment, the experiment successfully runs and the R-squared value is greater than 0.7.
+---
+
+### Contact
+For questions or issues, please open a GitHub issue or reach out to the repository owner.
