@@ -22,6 +22,7 @@ from sklearn.manifold import MDS
 from scipy.stats import f_oneway, kruskal
 import polaris as po
 from PIL import Image
+import sys
 
 # Get the current script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -77,7 +78,7 @@ def compute_molecular_descriptors(smiles):
             descriptors.append(None)  # Handle invalid SMILES gracefully
     return descriptors
 
-def compare_molecular_descriptors(domain_labels, molecular_descriptors, m):
+def compare_molecular_descriptors(domain_labels, molecular_descriptors, m, save_dir):
     """
     Compare molecular descriptors across domains and visualize the top M descriptors using Matplotlib,
     while handling cases where descriptors are constant across all samples.
@@ -125,13 +126,13 @@ def compare_molecular_descriptors(domain_labels, molecular_descriptors, m):
         ax.grid(True, linestyle="--", alpha=0.7)
 
     # Save the plot as a PNG
-    output_file = "descriptor_comparison.png"
-    plt.savefig(output_file)
+    filepath = os.path.join(save_dir, "descriptor_comparison.png")
+    plt.savefig(filepath)
     print(f"Saved molecular descriptor plot as {output_file}")
 
     return results
 
-def plot_pca(domain_labels, molecular_descriptors):
+def plot_pca(domain_labels, molecular_descriptors, save_dir):
     """
     Perform PCA on molecular descriptors and plot the results.
     """
@@ -156,11 +157,12 @@ def plot_pca(domain_labels, molecular_descriptors):
     ).interactive()
 
     # Save the chart
-    chart.save("pca_plot.html")
+    filepath = os.path.join(save_dir, "pca_plot.html")
+    chart.save(filepath)
     print("Saved PCA plot as pca_plot.html")
     return chart
 
-def plot_mds(domain_labels, distance_matrix):
+def plot_mds(domain_labels, distance_matrix, save_dir):
     """
     Perform MDS on the distance matrix and plot the results.
     """
@@ -177,12 +179,13 @@ def plot_mds(domain_labels, distance_matrix):
         tooltip=["MDS1", "MDS2", "Domain"]
     ).interactive()
 
-    chart.save("mds_plot.html")
+    filepath = os.path.join(save_dir, "mds_plot.html")
+    chart.save(filepath)
     print("Saved MDS plot as mds_plot.html")
     return chart
 
 
-def plot_tsne(domain_labels, molecular_descriptors):
+def plot_tsne(domain_labels, molecular_descriptors, save_dir):
     df = pd.DataFrame(molecular_descriptors)
     df["Domain"] = domain_labels
     tsne = TSNE(n_components=2, random_state=42)
@@ -198,11 +201,12 @@ def plot_tsne(domain_labels, molecular_descriptors):
         tooltip=["tSNE1", "tSNE2", "Domain"]
     ).interactive()
 
-    chart.save("tsne_plot.html")
+    filepath = os.path.join(save_dir, "tsne_plot.html")
+    chart.save(filepath)
     print("Saved t-SNE plot as tsne_plot.html")
     return chart
 
-def plot_umap(domain_labels, molecular_descriptors):
+def plot_umap(domain_labels, molecular_descriptors, save_dir):
     df = pd.DataFrame(molecular_descriptors)
     df["Domain"] = domain_labels
     reducer = umap.UMAP(n_components=2, random_state=42)
@@ -218,11 +222,12 @@ def plot_umap(domain_labels, molecular_descriptors):
         tooltip=["UMAP1", "UMAP2", "Domain"]
     ).interactive()
 
-    chart.save("umap_plot.html")
+    filepath = os.path.join(save_dir, "umap_plot.html")
+    chart.save(filepath)
     print("Saved UMAP plot as umap_plot.html")
     return chart
 
-def plot_tsne_from_matrix(domain_labels, distance_matrix):
+def plot_tsne_from_matrix(domain_labels, distance_matrix, save_dir):
     """
     Perform t-SNE using the distance matrix and plot the results.
     """
@@ -243,11 +248,12 @@ def plot_tsne_from_matrix(domain_labels, distance_matrix):
     ).interactive()
 
     # Save the plot to an HTML file
-    chart.save("tsne_distance_matrix.html")
+    filepath = os.path.join(save_dir, "tsne_distance_matrix.html")
+    chart.save(filepath)
     print("Saved t-SNE plot as tsne_distance_matrix.html")
     return chart
 
-def plot_umap_from_matrix(domain_labels, distance_matrix):
+def plot_umap_from_matrix(domain_labels, distance_matrix, save_dir):
     """
     Perform UMAP using the distance matrix and plot the results.
     """
@@ -264,7 +270,8 @@ def plot_umap_from_matrix(domain_labels, distance_matrix):
         tooltip=["UMAP1", "UMAP2", "Domain"]
     ).interactive()
 
-    chart.save("umap_distance_matrix.html")
+    filepath = os.path.join(save_dir, "umap_distance_matrix.html")
+    chart.save(filepath)
     print("Saved UMAP plot as umap_distance_matrix.html")
     return chart
 
@@ -284,10 +291,10 @@ def visualize_molecule(smiles, title=None):
     else:
         print(f"Invalid SMILES: {smiles}")
 
-def identify_and_visualise_model(domain_labels, smiles_list, distance_matrix, dataset, clustering_method, k_domains, iteration_seed, sample_size):
+def identify_and_visualise_model(domain_labels, smiles_list, distance_matrix, dataset, clustering_method, k_domains, iteration_seed, sample_size, save_dir):
     """
     Identify three representative molecules for each domain and save them in a single image, 
-    with each domain occupying its own row.
+    with each domain occupying its own row, in the specified save directory.
     """
     # Create a mapping of domain -> indices
     domain_to_indices = {domain: [] for domain in set(domain_labels)}
@@ -354,10 +361,9 @@ def identify_and_visualise_model(domain_labels, smiles_list, distance_matrix, da
             combined_image.paste(row_image, (0, y_offset))
             y_offset += row_image.height
 
-        # Save the combined image with the naming scheme
+        # Save the combined image with the naming scheme in the specified save_dir
         filename = f"{dataset}_{clustering_method}_k{k_domains}_seed{iteration_seed}_n{sample_size}.png"
-        save_path = os.path.join("domain_images", filename)
-        os.makedirs("domain_images", exist_ok=True)
+        save_path = os.path.join(save_dir, filename)
         combined_image.save(save_path)
         print(f"Saved combined domain images to {save_path}")
 
@@ -418,7 +424,7 @@ def descriptor_analysis(domain_labels, molecular_descriptors):
     print(results_df)
     return results_df
 
-def determine_butina_cutoff(distance_matrix, min_cutoff=0.01, max_cutoff=0.99, num_cutoffs=5):
+def determine_butina_cutoff(distance_matrix, save_dir, min_cutoff=0.01, max_cutoff=0.99, num_cutoffs=5):
     """
     Determine the optimal cutoff for Butina clustering.
     """
@@ -436,7 +442,8 @@ def determine_butina_cutoff(distance_matrix, min_cutoff=0.01, max_cutoff=0.99, n
         x="Cutoff:Q",
         y="ClusterCount:Q"
     ).properties(title="Butina Cutoff vs Cluster Count")
-    chart.save("butina_cutoff_analysis.html")
+    filepath = os.path.join(save_dir, "butina_cutoff_analysis.html")
+    chart.save(filepath)
 
     # Return the cutoff with the desired number of clusters
     optimal_cutoff = cutoff_df.loc[cutoff_df['ClusterCount'] == max(cluster_counts, key=lambda x: x[1])[1], 'Cutoff']
@@ -636,46 +643,57 @@ def load_and_collect_train_smiles(args):
 
     return train_smiles
 
+def redirect_output(save_dir):
+    """Redirect all print statements to a log file."""
+    log_file = os.path.join(save_dir, "output.log")
+    sys.stdout = open(log_file, "w")
+    sys.stderr = sys.stdout
+
+def create_unique_directory(dataset, clustering_method, k_domains, iteration_seed, sample_size):
+    """Create a unique directory for saving data."""
+    base_dir = os.path.abspath(os.path.join(os.getcwd(), "../data"))  # Adjust relative to /scripts
+    folder_name = f"{dataset}_{clustering_method}_k{k_domains}_seed{iteration_seed}_n{sample_size}"
+    save_dir = os.path.join(base_dir, folder_name)
+    
+    try:
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"Directory created: {save_dir}")  # Debugging output
+    except Exception as e:
+        print(f"Failed to create directory {save_dir}: {e}")
+    
+    return save_dir
+
 def save_domain_labels(domain_labels, iteration_seed, dataset, clustering_method, k_domains, sample_size):
-    """Save domain labels with metadata to a file."""
-    save_dir = "domain_labels"
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Construct a unique filename based on the metadata
-    filename = f"{dataset}_{clustering_method}_k{k_domains}_seed{iteration_seed}_n{sample_size}.json"
-    filepath = os.path.join(save_dir, filename)
-
-    # Save labels and metadata
-    data_to_save = {
-        "iteration_seed": iteration_seed,
-        "dataset": dataset,
-        "clustering_method": clustering_method,
-        "k_domains": k_domains,
-        "domain_labels": domain_labels.tolist(),
-    }
-
-    with open(filepath, "w") as f:
-        json.dump(data_to_save, f)
-    print(f"Saved domain labels to {filepath}")
-
+    """Save domain labels in a JSON file within the unique folder."""
+    save_dir = create_unique_directory(dataset, clustering_method, k_domains, iteration_seed, sample_size)
+    filename = os.path.join(save_dir, "domain_labels.json")
+    
+    # Convert domain_labels to a list if it's a NumPy array
+    if isinstance(domain_labels, np.ndarray):
+        domain_labels = domain_labels.tolist()
+    
+    try:
+        with open(filename, "w") as f:
+            json.dump({"domain_labels": domain_labels}, f)
+        print(f"Saved domain labels to {filename}")
+    except Exception as e:
+        print(f"Error saving domain labels: {e}")
+    
+    return save_dir
 
 def load_domain_labels(iteration_seed, dataset, clustering_method, k_domains, sample_size):
-    """Load precomputed domain labels from a file."""
-    save_dir = "domain_labels"
-
-    # Construct the filename to locate the saved file
-    filename = f"{dataset}_{clustering_method}_k{k_domains}_seed{iteration_seed}_n{sample_size}.json"
-    filepath = os.path.join(save_dir, filename)
-
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"Domain labels file not found: {filepath}")
-
-    with open(filepath, "r") as f:
+    """Load precomputed domain labels from the unique folder."""
+    save_dir = create_unique_directory(dataset, clustering_method, k_domains, iteration_seed, sample_size)
+    filename = os.path.join(save_dir, "domain_labels.json")
+    
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"Domain labels file not found: {filename}")
+    
+    with open(filename, "r") as f:
         data = json.load(f)
-
-    print(f"Loaded domain labels from {filepath}")
+    
+    print(f"Loaded domain labels from {filename}")
     return data["domain_labels"]
-
 
 def main():
     args = parse_arguments()
@@ -684,13 +702,25 @@ def main():
         qm9 = load_qm9_smiles()
 
     for iteration in range(args.bootstrapping):
-        # Generate a unique seed for each iteration
+        # Generate a unique seed for this iteration
         iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
 
         # Set random seeds for reproducibility
         random.seed(iteration_seed)
         np.random.seed(iteration_seed)
         torch.manual_seed(iteration_seed)
+
+        # Create the unique save directory for this iteration
+        save_dir = create_unique_directory(
+            dataset=args.dataset,
+            clustering_method=args.clustering_method,
+            k_domains=args.k_domains,
+            iteration_seed=iteration_seed,
+            sample_size=args.sample_size
+        )
+
+        # Redirect all output to a log file
+        redirect_output(save_dir)
 
         distance_matrix = None
 
@@ -705,33 +735,44 @@ def main():
 
             # Perform clustering to generate domain labels
             if args.determine_cutoff:
-                determine_butina_cutoff()
+                determine_butina_cutoff(distance_matrix, save_dir)
             else:
                 domain_labels, distance_matrix = cluster(train_smiles, args, molecular_descriptors)
 
             # Save domain labels
-            save_domain_labels(domain_labels, iteration_seed, args.dataset, args.clustering_method, args.k_domains, args.sample_size)
+            save_domain_labels(
+                domain_labels,
+                iteration_seed,
+                args.dataset,
+                args.clustering_method,
+                args.k_domains,
+                args.sample_size
+            )
 
-            print(domain_labels)
-            # TODO: fix this
+            # Visualize domain representatives
             if not args.clustering_only and not args.determine_cutoff:
-                identify_and_visualise_model(domain_labels, train_smiles, distance_matrix, args.dataset, args.clustering_method, args.k_domains, iteration, args.sample_size)
-
+                identify_and_visualise_model(
+                    domain_labels, train_smiles, distance_matrix,
+                    args.dataset, args.clustering_method, args.k_domains,
+                    iteration, args.sample_size, save_dir
+                )
         else:
             # Load precomputed domain labels
-            domain_labels = load_domain_labels(iteration_seed, args.dataset, args.clustering_method, args.k_domains, args.sample_size)
+            domain_labels = load_domain_labels(
+                iteration_seed, args.dataset, args.clustering_method, args.k_domains, args.sample_size
+            )
 
         if not args.clustering_only and not args.determine_cutoff:
             # Perform molecular descriptor calculations and visualizations
-            plot_pca(domain_labels, molecular_descriptors)
-            plot_tsne(domain_labels, molecular_descriptors)
-            plot_umap(domain_labels, molecular_descriptors)
+            plot_pca(domain_labels, molecular_descriptors, save_dir)
+            plot_tsne(domain_labels, molecular_descriptors, save_dir)
+            plot_umap(domain_labels, molecular_descriptors, save_dir)
             descriptor_analysis(domain_labels, molecular_descriptors)
-            compare_molecular_descriptors(domain_labels, molecular_descriptors, 3)
+            compare_molecular_descriptors(domain_labels, molecular_descriptors, 5, save_dir)
             if distance_matrix is not None:
-                plot_mds(domain_labels, distance_matrix)
-                plot_tsne_from_matrix(domain_labels, distance_matrix)
-                plot_umap_from_matrix(domain_labels, distance_matrix)
+                plot_mds(domain_labels, distance_matrix, save_dir)
+                plot_tsne_from_matrix(domain_labels, distance_matrix, save_dir)
+                plot_umap_from_matrix(domain_labels, distance_matrix, save_dir)
 
 if __name__ == "__main__":
     main()
