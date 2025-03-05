@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from xgboost import XGBRegressor
 from sklearn.ensemble import RandomForestRegressor
 from threading import Lock
-from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 import os.path as osp
@@ -33,12 +32,28 @@ from sklearn.metrics import (
     f1_score,
     average_precision_score,
 )
+import multiprocessing
+# For dgl, use `pip install dgl==2.0.0`
 
-from models.qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, GIN, GCN, GINCoTeaching, MLPRegressor, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a
+# Need to run the following: 
+# export PYTHONPATH=/Users/apunt/repos/qsar_qm_models:$PYTHONPATH
+
+# TODO: save mmap files to a better location and clean them up
+# TODO: use torchbnn to make bayesian versions of bit vector NNs and GINs 
+# TODO: start using Bayesian optimisation to tune hyperparameters before running any larger scale tests (ideally with scaffold splits)
+# TODO: figure out why running multiple representations in parallel is so slow (mmap issue?)
+
+import sys
+sys.path.append('../models/')
+sys.path.append('../preprocessing/')
+sys.path.append('../results/')
+
+from qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, GIN, GCN, GINCoTeaching, MLPRegressor, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a
 from similarity_calculations import DistanceNetworkLightning
 
 # Get the current script's directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
+base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Construct the path to 'valid_qm9_indices.pth' in the '/data' directory
 data_dir = os.path.join(script_dir, '..', 'data')
@@ -57,7 +72,7 @@ properties = {
 }
 
 graph_models = ['gin', 'gcn', 'gin_co_teaching', 'gauche_graph']
-bit_vector_models = ['rf', 'gb', 'catboost', 'svm', 'gp', 'gauche']
+bit_vector_models = ['rf', 'xgboost', 'catboost', 'svm', 'gp', 'gauche']
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Framework for running QSAR/QM property prediction models")
@@ -110,6 +125,8 @@ def load_qm9(qm_property):
 
 def split_qm9(qm9, args, files):
     raw_results = {}
+    mols_train = []
+    ecfp_featuriser = None
 
     if args.shuffle:
         qm9 = qm9.shuffle()
@@ -159,17 +176,37 @@ def split_qm9(qm9, args, files):
         else:
             # Generate canonical SMILES and store it in cache
             mol = Chem.MolFromSmiles(smiles_isomeric)
+            if not mol:
+                cache[smiles_isomeric] = None
+                continue
             if 'alternative_smiles' in args.molecular_representations:
                 smiles_alternative = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
             cache[smiles_isomeric] = smiles_canonical
 
+        if 'sns' in args.molecular_representations:
+            mol = Chem.MolFromSmiles(smiles_isomeric)
+            if mol:
+                mols_train.append(mol)
+
         # TODO: replace -1 with domain labels
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_alternative, data.y.item(), -1, category, files)
+        if smiles_canonical:
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_alternative, data.y.item(), -1, category, files)
 
-    return len(train_idx), len(test_idx)
+    if 'sns' in args.molecular_representations:
+        ecfp_featuriser = construct_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
+                                                               max_radius = 2, 
+                                                               pharm_atom_invs = False, 
+                                                               bond_invs = True, 
+                                                               chirality = False, 
+                                                               sub_counts = True, 
+                                                               vec_dimension = 1024)
+    X_sns = np.array([ecfp_featuriser(mol) for mol in mols_train])
+    del mols_train
 
-def load_and_split_polaris(files, splitting_type):
+    return len(train_idx), len(test_idx), ecfp_featuriser, X_sns
+
+def load_and_split_polaris(files, splitting_type, molecular_representations):
     dataset_name = "BELKA"
 
     if dataset_name == "BELKA":
@@ -198,6 +235,10 @@ def load_and_split_polaris(files, splitting_type):
     train_count = 0
     test_count = 0
 
+    mols_train = []
+    ecfp_featuriser = None
+    sns = None
+
     # Iterate over the selected random indices in batches
     for batch_start in range(0, N, batch_size):
         batch_indices = random_indices[batch_start:batch_start + batch_size]
@@ -216,13 +257,19 @@ def load_and_split_polaris(files, splitting_type):
         	split_list = [dataset.get_data(row, "split_group") for row in batch_indices]
 
         for i, smiles_isomeric in enumerate(smiles_isomeric_list):
+            mol = None
+
+            if 'sns' in molecular_representations:
+                mol = Chem.MolFromSmiles(smiles_isomeric)
+                mols_train.append(mol)
 
             if smiles_isomeric in cache and not 'alternative_smiles' in args.molecular_representations:
                 smiles_canonical = cache[smiles_isomeric]
                 # TODO: potentially keep alternative SMILES in the same cache if they look promising (smiles_isomeric, smiles_alternative)
             else:
                 # Generate canonical SMILES and store it in cache
-                mol = Chem.MolFromSmiles(smiles_isomeric)
+                if not mol:
+                    mol = Chem.MolFromSmiles(smiles_isomeric)
                 if 'alternative_smiles' in args.molecular_representations:
                     smiles_alternative = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
                 else:
@@ -252,7 +299,15 @@ def load_and_split_polaris(files, splitting_type):
 
             write_to_mmap(smiles_isomeric, smiles_canonical, smiles_alternative, properties_list[i], domain_labels_list[i], category, files)
 
-    return train_count, test_count
+    ecfp_featuriser = construct_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
+                                                       max_radius = 2, 
+                                                       pharm_atom_invs = False, 
+                                                       bond_invs = True, 
+                                                       chirality = False, 
+                                                       sub_counts = True, 
+                                                       vec_dimension = 1024)
+    X_sns = np.array([ecfp_featuriser(mol) for mol in mols_train])
+    del mols_train
 
     # Scaffold splitting process (if needed)
     if splitting_type == "scaffold":
@@ -270,26 +325,28 @@ def load_and_split_polaris(files, splitting_type):
 
                 write_to_mmap(smiles_isomeric, smiles_canonical, property_value, domain_label, category, files)
 
-def chemdist_func(s: str, network) -> np.ndarray or None:
-    """
-    Compute the molecular embedding using a provided neural network based on the molecule's graph representation.
+    return train_count, test_count, ecfp_featuriser, X_sns
+
+# def chemdist_func(s: str, network) -> np.ndarray or None:
+#     """
+#     Compute the molecular embedding using a provided neural network based on the molecule's graph representation.
     
-    Parameters:
-        s (str): The SMILES string of the molecule.
-        network: The neural network model to use for computing the embedding.
+#     Parameters:
+#         s (str): The SMILES string of the molecule.
+#         network: The neural network model to use for computing the embedding.
     
-    Returns:
-        np.ndarray or None: The computed molecular embedding as a numpy array, or None if computation fails.
-    """
-    try:
-        g = smiles_to_bigraph(smiles=s, node_featurizer=CanonicalAtomFeaturizer(), edge_featurizer=CanonicalBondFeaturizer())
-        nfeats = g.ndata.pop('h')
-        efeats = g.edata.pop('e')
-        membed = network._net(g, nfeats, efeats).cpu().detach().numpy().ravel()
-        return membed
-    except Exception as e:
-        # print(f"Error computing embedding for SMILES '{s}': {e}")
-        return None
+#     Returns:
+#         np.ndarray or None: The computed molecular embedding as a numpy array, or None if computation fails.
+#     """
+#     try:
+#         g = smiles_to_bigraph(smiles=s, node_featurizer=CanonicalAtomFeaturizer(), edge_featurizer=CanonicalBondFeaturizer())
+#         nfeats = g.ndata.pop('h')
+#         efeats = g.edata.pop('e')
+#         membed = network._net(g, nfeats, efeats).cpu().detach().numpy().ravel()
+#         return membed
+#     except Exception as e:
+#         # print(f"Error computing embedding for SMILES '{s}': {e}")
+#         return None
 
 def pad_fingerprints(fp_array, max_fp_length):
     """
@@ -385,6 +442,46 @@ def calculate_domain_metrics(y_test, y_pred, domain_labels, target_domain, datas
     else:
         print(f"Not enough samples in target domain: {target_domain}")
 
+def add_graph_noise(y_target, sigma, distribution="gaussian", alpha_skew=5, beta_params=(0.5, 0.5), sampling_proportion=None, fixed_seed=42):
+    noisy_values = []
+    mu = 0  # mean of noise
+    np.random.seed(fixed_seed)
+
+    # Determine indices to be modified based on sampling proportion
+    if sampling_proportion is not None and 0 < sampling_proportion < 1:
+        indices_to_modify = set(random.sample(range(len(y_target)), int(len(y_target) * sampling_proportion)))
+    elif sampling_proportion == 1:
+        indices_to_modify = set(range(len(y_target)))
+    else:
+        indices_to_modify = []
+
+    for idx, y_value in y_target.iterrows():
+        if idx in indices_to_modify:
+            # Debug: Print the original y_value
+            
+            if distribution == 'gaussian':
+                noise = torch.normal(mean=mu, std=sigma, size=(1,)).item()
+            elif distribution == 'left-tailed':
+                noise = skewnorm.rvs(a=-alpha_skew, loc=mu, scale=sigma, size=1)[0]
+            elif distribution == 'right-tailed':
+                noise = skewnorm.rvs(a=alpha_skew, loc=mu, scale=sigma, size=1)[0]
+            elif distribution == 'u-shaped':
+                noise = beta.rvs(beta_params[0], beta_params[1], loc=mu, scale=sigma, size=1)[0]
+            elif distribution == 'uniform':
+                range_extension = sigma * 2
+                low = mu - range_extension / 2
+                high = mu + range_extension / 2
+                noise = np.random.uniform(low=low, high=high, size=1)[0]
+            else:
+                raise ValueError(f"Invalid noise type specified: {distribution}")
+
+            noisy_y = y_value + noise
+            
+            noisy_values.append(noisy_y)
+        else:
+            noisy_values.append(y_value)
+    return pd.DataFrame(noisy_values)
+
 def run_gauche(x_train, x_test, y_train, logging_bb, sigma, proportion, dataset):
     kernel = "tanimoto"
 
@@ -422,16 +519,29 @@ def run_gauche(x_train, x_test, y_train, logging_bb, sigma, proportion, dataset)
         metrics = calculate_regression_metrics(y_test, y_pred, logging_bb=logging_bb)
     else:
         metrics = calculate_classification_metrics(y_test, y_pred, logging_bb=logging_bb)
-    bootstrapped_results.put((molecular_representation, model_type, metrics))
 
-    if sigma is not None and proportion is not None:
-        target_metric.put((molecular_representation, model_type, (sigma, proportion), metrics[3]))
+    # Save results with all relevant information
+    save_results(
+        metrics=metrics,
+        sigma=sigma,
+        proportion=proportion,
+        noise_dist=distribution,
+        sample_size=len(y_train),
+        dataset=dataset,
+        seed=current_seed,
+        iteration=bootstrapping,
+        output_file="results.jsonl"
+    )
 
     return metrics[3]
 
-def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representation, hyperparameter_tuning, bootstrapping, sigma, proportion, current_seed, target_metric, bootstrapped_results, network, distribution, dataset):
+def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representation, hyperparameter_tuning, bootstrapping, sigma, proportion, current_seed, network, distribution, dataset, featuriser, X_sns):
     def black_box_function(tuning_active=False, logging_bb=False, sigma=None, proportion=None, **params):
         nonlocal x_train, x_test, y_train
+
+        if molecular_representation == 'sns':
+            x_train = X_sns
+            x_test = np.array([featuriser(Chem.MolFromSmiles(smiles)) for smiles in x_test])
 
         # Configure model parameters based on the model type
         # if molecular_representation == 'mpnn':
@@ -491,7 +601,7 @@ def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representa
                     params['kernel'] = 'sigmoid'
             model = SVR(**params) if params else SVR()
 
-        elif model_type == 'gb':
+        elif model_type == 'xgboost':
             # Adjust Gradient Boosting parameters
             if params: 
                 params['n_estimators'] = int(round(params['n_estimators']))
@@ -506,6 +616,10 @@ def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representa
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
 
+        print(x_train)
+        print(y_train)
+        print(model_type)
+        model = XGBRegressor()
         # Train the model and make predictions
         model.fit(x_train, y_train)
         y_pred = model.predict(x_test)
@@ -517,10 +631,19 @@ def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representa
             print(proportion)
         
         metrics = calculate_regression_metrics(y_test, y_pred, logging_bb=logging_bb)
-        bootstrapped_results.put((molecular_representation, model_type, metrics))
 
-        if sigma is not None and proportion is not None:
-            target_metric.put((molecular_representation, model_type, (sigma, proportion), metrics[3]))
+        # Save results with all relevant information
+        save_results(
+            metrics=metrics,
+            sigma=sigma,
+            proportion=proportion,
+            noise_dist=distribution,
+            sample_size=len(y_train),
+            dataset=dataset,
+            seed=current_seed,
+            iteration=bootstrapping,
+            output_file="results.jsonl"
+        )
 
         return metrics[3]  # Return the negative MSE for optimization
 
@@ -541,7 +664,7 @@ def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representa
                 'gamma': (0, 1),
                 'kernel': (0, 3),  # Mapped to rbf, poly, sigmoid
             }
-        elif model_type == 'gb':
+        elif model_type == 'xgboost':
             pbounds = {
                 'max_depth': (0, 20),  # >15 max_depth is interpreted as None, rounded to int
                 'learning_rate': (0.001, 0.2),
@@ -587,7 +710,7 @@ def run_model(x_train, y_train, x_test, y_test, model_type, molecular_representa
         black_box_function(sigma=sigma, proportion=proportion, logging_bb=True)
     
 
-def process_and_run(args, iteration, iteration_seed, train_count, test_count, target_domain, env, rust_executable_path, files, target_metric, bootstrapped_results, network, dataset):
+def process_and_run(args, iteration, iteration_seed, train_count, test_count, target_domain, env, rust_executable_path, files, network, dataset, featuriser, X_sns):
     config = {
         'sample_size': args.sample_size,
         'noise': args.noise,
@@ -655,12 +778,11 @@ def process_and_run(args, iteration, iteration_seed, train_count, test_count, ta
                                                 s, 
                                                 p, 
                                                 iteration_seed, 
-                                                target_metric, 
-                                                bootstrapped_results, 
-                                                bootstrapped_results, 
                                                 network, 
                                                 args.distribution,
                                                 dataset,
+                                                featuriser,
+                                                X_sns
                                             )
                                             futures.append(future)
                                 except json.JSONDecodeError as e:
@@ -714,12 +836,25 @@ def process_data_from_rust(data, molecular_representation):
     # print("R-squared:", r_squared)  # Print R-squared value
     return fps_train_np, y_train_np, fps_test_np, y_fixed_test_np
 
+def save_results(metrics, sigma, proportion, noise_dist, sample_size, dataset, seed, iteration, output_file="results.jsonl"):
+    """
+    Save metrics to JSON Lines file with distinguishing keys for tracking.
+    """
+    result_entry = {
+        "sigma": sigma,
+        "proportion": proportion,
+        "distribution": noise_dist,
+        "sample_size": sample_size,
+        "dataset": dataset,
+        "seed": seed,
+        "bootstrapping_iteration": iteration,
+        "metrics": metrics
+    }
+    with open(output_file, "a") as f:  # Append mode
+        f.write(json.dumps(result_entry) + "\n")
+
 def main():
     args = parse_arguments()
-
-    # Initialise queues to store results across threads
-    target_metric = Queue()
-    bootstrapped_results = Queue()
 
     # Define the sigma and sampling proportion associated with artificial noise
     if args.sigma is None and args.noise:
@@ -730,16 +865,17 @@ def main():
         args.sigma = [0.0]
 
     if args.sampling_proportion is None and args.noise:
-        args.sampling_proportion = [0.0, 0.25, 0.5, 0.75, 1.0]
+        args.sampling_proportion = [1.0]
     elif args.noise:
         args.sampling_proportion = [float(p) for p in args.sampling_proportion]
     else:
         args.sampling_proportion = [0.0]
 
-    # Prepare for commmunication with Rust
+    # Prepare for communication with Rust
     env = os.environ.copy()
-    env["RUST_BACKTRACE"] = "1"
-    rust_executable_path = os.path.join(base_dir, 'rust_processor/target/release/rust_processor')
+    env["RUST_BACKTRACE"] = "1"  # Enable Rust backtraces for debugging
+
+    rust_executable_path = os.path.join(base_dir, '../rust/target/release/rust_processor')
 
     # Load DistanceNetworkLightning for MPNN generation
     network = None
@@ -764,13 +900,13 @@ def main():
         torch.manual_seed(iteration_seed)
 
         if args.dataset == "QM9":
-            train_count, test_count = split_qm9(qm9, args, files)
+            train_count, test_count, featuriser, X_sns = split_qm9(qm9, args, files)
 
         else:
-            train_count, test_count = load_and_split_polaris(files, args.split)
+            train_count, test_count, featuriser, X_sns = load_and_split_polaris(files, args.split)
         
         target_domain = 1 # TODO: change, this is just a placeholder
-        process_and_run(args, iteration, iteration_seed, train_count, test_count, target_domain, env, rust_executable_path, files, target_metric, bootstrapped_results, network, args.dataset)
+        process_and_run(args, iteration, iteration_seed, train_count, test_count, target_domain, env, rust_executable_path, files, network, args.dataset, featuriser, X_sns)
 
 
 # TODO: add the following Polaris datasets: tdcommons/cyp2d6-veith, tdcommons/cyp2c9-veith, tdcommons/cyp3a4-veith, graphium/tox21-v1

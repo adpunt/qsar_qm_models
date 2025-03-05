@@ -88,5 +88,94 @@ This runs baseline tests for RF/ECFP4, GB/ECFP4, SVM/ECFP4, RF/SMILES, GB/SMILES
 
 ---
 
+## Using Custom .pt Models in the Framework
+
+### 1. How to Save a Model (.pt Format)
+
+#### Using a Full Model Save (Recommended for Ease of Use)
+torch.save(model, "my_model.pt")
+- Pros: Simple, architecture is included.
+- Cons: Larger file size, not as version-friendly.
+
+#### Using state_dict Save (Recommended for Stability & Version Control)
+torch.save({"state_dict": model.state_dict()}, "my_model.pt")
+- Pros: Smaller file, easier to update.
+- Cons: Requires redefining model architecture before loading.
+
+---
+
+### 2. Required Model Architecture for state_dict Loads
+If using state_dict, your architecture must be defined before loading.
+Modify get_predefined_model_class() in run_model.py to match your architecture.
+
+def get_predefined_model_class():
+    """Define your model architecture to match the saved state_dict."""
+    class CustomModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc1 = torch.nn.Linear(100, 50)
+            self.fc2 = torch.nn.Linear(50, 1)
+        
+        def forward(self, x):
+            x = torch.relu(self.fc1(x))
+            return self.fc2(x)
+
+    return CustomModel
+
+---
+
+### 3. JSON File Format for Hyperparameters
+If tuning is enabled, provide a JSON file containing hyperparameter bounds.
+
+Example (my_model_metadata.json):
+
+{
+    "learning_rate": [0.0001, 0.01],
+    "batch_size": [8, 64],
+    "dropout": [0.1, 0.5]
+}
+
+- If no metadata file is provided, hyperparameter tuning is disabled.
+
+---
+
+### 4. Running run_model() with a .pt Model
+
+Basic Usage (No Hyperparameter Tuning):
+
+run_model(x_train, y_train, x_test, y_test, 
+          model_type="custom", 
+          molecular_representation="ecfp4", 
+          hyperparameter_tuning=False, 
+          bootstrapping=1, 
+          sigma=None, 
+          current_seed=42, 
+          distribution="normal", 
+          dataset="my_dataset", 
+          featuriser="morgan",
+          model_path="my_model.pt",
+          metadata_path=None)
+
+With Hyperparameter Tuning:
+
+run_model(x_train, y_train, x_test, y_test, 
+          model_type="custom", 
+          molecular_representation="ecfp4", 
+          hyperparameter_tuning=True, 
+          bootstrapping=1, 
+          sigma=None, 
+          current_seed=42, 
+          distribution="normal", 
+          dataset="my_dataset", 
+          featuriser="morgan",
+          model_path="my_model.pt",
+          metadata_path="my_model_metadata.json")
+
+- If metadata_path is None, no tuning occurs.
+- If metadata_path is provided, the specified hyperparameter ranges are used.
+
+
+---
+
 ### Contact
 For questions or issues, please open a GitHub issue or reach out to the repository owner.

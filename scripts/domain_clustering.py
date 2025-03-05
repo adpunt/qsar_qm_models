@@ -128,7 +128,7 @@ def compare_molecular_descriptors(domain_labels, molecular_descriptors, m, save_
     # Save the plot as a PNG
     filepath = os.path.join(save_dir, "descriptor_comparison.png")
     plt.savefig(filepath)
-    print(f"Saved molecular descriptor plot as {output_file}")
+    print(f"Saved molecular descriptor plot as {filepath}")
 
     return results
 
@@ -503,6 +503,7 @@ def butina_clustering(distance_matrix, cutoff=0.93375):
             clustering_results[idx] = cluster_id
     return clustering_results
 
+# TODO: not all the methods are useing the distance matrix as intended, fix it?? 
 def cluster(train_smiles, args, descriptors):
     """
     Perform clustering using the specified method on the dataset.

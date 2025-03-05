@@ -11,10 +11,16 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_geometric.datasets import QM9
-from torch_geometric.nn import GCNConv, GINConv
+from torch_geometric.nn import GCNConv, GINConv, MessagePassing
 from torch_geometric.loader import DataLoader
+from torch_geometric.typing import Adj, OptTensor, PairTensor, Size
+from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
+# from torch_sparse import SparseTensor
+from torch_geometric.nn.inits import glorot, zeros
 from bayes_opt import BayesianOptimization, UtilityFunction
 import gpytorch
+from typing import Union
+
 # from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel
 # from gauche.kernels.fingerprint_kernels.braun_blanquet_kernel import BraunBlanquetKernel
 # from gauche.kernels.fingerprint_kernels.dice_kernel import DiceKernel
@@ -29,7 +35,7 @@ import gpytorch
 # from gauche.kernels.fingerprint_kernels.russell_rao_kernel import RussellRaoKernel
 # from gauche.kernels.fingerprint_kernels.sogenfrei_kernel import SogenfreiKernel
 # from gauche.kernels.fingerprint_kernels.sokal_sneath_kernel import SokalSneathKernel
-from gauce.kernels.fingerprint_kernels import *
+from gauche.kernels.fingerprint_kernels import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -261,6 +267,7 @@ class ModelTrainer(object):
         loss, y_pred, y_targ = self._eval_epoch(val_loader)
         return loss, y_pred, y_targ
 
+# TODO: create a class GTAT like GCN/GIN using the GTATConv
 
 class GCN(torch.nn.Module):
     """Graph Convolutional Network class with 3 convolutional layers and a linear layer"""
@@ -422,7 +429,7 @@ class MLPRegressor(nn.Module):
 # define GP model from Gauche library
 class Gauche(gpytorch.models.ExactGP):
   def __init__(self, train_x, train_y, likelihood, kernel):
-    super(GaucheGP, self).__init__(train_x, train_y, likelihood)
+    super(Gauche, self).__init__(train_x, train_y, likelihood)
     self.mean_module = gpytorch.means.ConstantMean()
     if kernel == 'tanimoto':
         self.covar_module = gpytorch.kernels.ScaleKernel(TanimotoKernel())
@@ -461,6 +468,158 @@ class Gauche(gpytorch.models.ExactGP):
     mean_x = self.mean_module(x)
     covar_x = self.covar_module(x)
     return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+# TODO: fix imports
+# GTAT from https://github.com/kouzheng
+# class GTATConv(MessagePassing):
+#     _alpha: OptTensor
+
+#     def __init__(self, in_channels: int, out_channels: int, heads: int,
+#                  topology_channels:int = 15,
+#                  concat: bool = True, negative_slope: float = 0.2,
+#                  dropout: float = 0., add_self_loops: bool = True,
+#                  bias: bool = True, share_weights: bool = False, **kwargs):
+#         super(GTATConv, self).__init__(node_dim=0, **kwargs)
+
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         self.topology_channels = topology_channels
+#         self.heads = heads
+#         self.concat = concat
+#         self.negative_slope = negative_slope
+#         self.dropout = dropout
+#         self.add_self_loops = add_self_loops
+#         self.share_weights = share_weights
+#         self.lin_l = Linear(in_channels, heads * out_channels, bias=bias,
+#                             weight_initializer='glorot')
+        
+#         if share_weights:
+#             self.lin_r = self.lin_l
+#         else:
+#             self.lin_r = Linear(in_channels, heads * out_channels, bias=bias,
+#                                 weight_initializer='glorot')
+        
+        
+
+#         self.att = Parameter(torch.Tensor(1, heads, out_channels))
+
+#         self.att2 = Parameter(torch.Tensor(1, heads, self.topology_channels))
+
+#         if bias and concat:
+#             self.bias = Parameter(torch.Tensor(heads * out_channels))
+#         elif bias and not concat:
+#             self.bias = Parameter(torch.Tensor(out_channels))
+#         else:
+#             self.register_parameter('bias', None)
+
+#         self._alpha1 = None
+#         self._alpha2 = None
+
+#         self.bias2 =  Parameter(torch.Tensor(self.topology_channels))
+
+#         self.reset_parameters()
+
+#     def reset_parameters(self):
+#         self.lin_l.reset_parameters()
+#         self.lin_r.reset_parameters()
+#         glorot(self.att)
+#         glorot(self.att2)
+#         zeros(self.bias)
+#         zeros(self.bias2)
+
+#     def forward(self, x: Union[Tensor, PairTensor], edge_index: Adj,
+#                 topology: Tensor,
+#                 size: Size = None, return_attention_weights: bool = None):
+#         # type: (Union[Tensor, PairTensor], Tensor , Tensor, Size, NoneType) -> Tensor  # noqa
+#         # type: (Union[Tensor, PairTensor], SparseTensor, Size, NoneType) -> Tensor  # noqa
+#         # type: (Union[Tensor, PairTensor], Tensor, Size, bool) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
+#         # type: (Union[Tensor, PairTensor], SparseTensor, Size, bool) -> Tuple[Tensor, SparseTensor]  # noqa
+#         r"""
+#         Args:
+#             return_attention_weights (bool, optional): If set to :obj:`True`,
+#                 will additionally return the tuple
+#                 :obj:`(edge_index, attention_weights)`, holding the computed
+#                 attention weights for each edge. (default: :obj:`None`)
+#         """
+#         H, C = self.heads, self.out_channels
+
+#         x_l: OptTensor = None
+#         x_r: OptTensor = None
+#         if isinstance(x, Tensor):
+#             assert x.dim() == 2
+#             x_l = self.lin_l(x).view(-1, H, C)  #(N , heads, features)
+#             if self.share_weights:
+#                 x_r = x_l
+#             else:
+#                 x_r = self.lin_r(x).view(-1, H, C)
+
+
+#         assert x_l is not None
+#         assert x_r is not None
+#         topology = topology.unsqueeze(dim = 1)
+#         topology = topology.repeat(1, self.heads, 1)
+#         x_l = torch.cat((x_l,topology), dim = -1)
+#         x_r = torch.cat((x_r,topology), dim = -1)
+
+#         if self.add_self_loops:
+#             if isinstance(edge_index, Tensor):
+#                 num_nodes = x_l.size(0)
+#                 if x_r is not None:
+#                     num_nodes = min(num_nodes, x_r.size(0))
+#                 if size is not None:
+#                     num_nodes = min(size[0], size[1])
+#                 edge_index, _ = remove_self_loops(edge_index)
+#                 edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
+#             # elif isinstance(edge_index, SparseTensor):
+#             #     edge_index = set_diag(edge_index)
+
+#         out_all = self.propagate(edge_index, x=(x_l, x_r), size=size)
+#         out = out_all[ : , : , :self.out_channels ]
+#         out2 = out_all[ : , : , self.out_channels:]
+#         alpha1 = self._alpha1
+#         self._alpha1 = None
+#         alpha2 = self._alpha2
+#         self._alpha2 = None
+
+#         if self.concat:
+#             out = out.reshape(-1, self.heads * self.out_channels)
+#         else:
+#             out = out.mean(dim=1)
+
+#         if self.bias is not None:
+#             out += self.bias
+
+#         out2 = out2.mean(dim=1)
+#         out2 += self.bias2
+
+#         if isinstance(return_attention_weights, bool):
+#             assert alpha is not None
+#             if isinstance(edge_index, Tensor):
+#                 return out, (edge_index, alpha)
+#             # elif isinstance(edge_index, SparseTensor):
+#             #     return out, edge_index.set_value(alpha, layout='coo')
+#         else:
+#             return out , out2
+
+#     def message(self, x_j: Tensor, x_i: Tensor, index: Tensor, ptr: OptTensor,
+#                 size_i: Optional[int]) -> Tensor:
+#         x = x_i + x_j
+#         alpha1 = (x[:, :, :self.out_channels] * self.att).sum(dim=-1)
+#         alpha2 = (x[:, :, self.out_channels:] * self.att2).sum(dim=-1)
+#         alpha1 = F.leaky_relu(alpha1 ,self.negative_slope )
+#         alpha2 = F.leaky_relu(alpha2 ,self.negative_slope )
+#         alpha1 = softmax(alpha1, index, ptr, size_i)
+#         alpha2 = softmax(alpha2, index, ptr, size_i)
+#         self._alpha1 = alpha1
+#         self._alpha2 = alpha2
+#         alpha1= F.dropout(alpha1, p=self.dropout, training=self.training)
+#         alpha2= F.dropout(alpha2, p=self.dropout, training=self.training)
+#         return torch.cat((x_j[:, :, :self.out_channels]* alpha2.unsqueeze(-1), x_j[:, :, self.out_channels: ]* alpha1.unsqueeze(-1)) ,dim = -1)
+
+#     def __repr__(self):
+#         return '{}({}, {}, heads={})'.format(self.__class__.__name__,
+#                                              self.in_channels,
+#                                              self.out_channels, self.heads)
 
 def train_mlp(model, train_loader, val_loader, epochs, lr=0.001, weight_decay=0, print_every=10, logging=False):
     criterion = nn.MSELoss()
@@ -508,7 +667,6 @@ def predict_mlp(model, test_loader):
             outputs = model(data).squeeze()  # Squeeze the output
             predictions.extend(outputs.cpu().numpy())
     return predictions
-
 
 def training(loader, model, loss, optimizer):
     """Training one epoch
@@ -632,3 +790,263 @@ def train_epochs(epochs, model, train_loader, val_loader, path):
                 + str(v_loss.item())
             )
     return train_loss, val_loss, train_target, train_y_target, model
+
+class GINCoTeaching:
+    def __init__(self, dim_h, learning_rate=0.001, dropout_rate=0.5):
+        self.model_f = GIN(dim_h, dropout_rate)
+        self.model_g = GIN(dim_h, dropout_rate)
+        self.optimizer_f = torch.optim.Adam(self.model_f.parameters(), lr=learning_rate)
+        self.optimizer_g = torch.optim.Adam(self.model_g.parameters(), lr=learning_rate)
+        self.criterion = torch.nn.MSELoss()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_f.to(self.device)
+        self.model_g.to(self.device)
+
+    def train_epoch(self, loader, epoch, tau, R):
+        self.model_f.train()
+        self.model_g.train()
+
+        for data in loader:
+            data = data.to(self.device)
+            self.optimizer_f.zero_grad()
+            self.optimizer_g.zero_grad()
+
+            output_f = self.model_f(data)
+            output_g = self.model_g(data)
+
+            loss_f = self.criterion(output_f, data.y.view(-1, 1))
+            loss_g = self.criterion(output_g, data.y.view(-1, 1))
+
+            # Select small-loss instances
+            _, indices_f = torch.topk(loss_f, int(R * len(loss_f)), largest=False)
+            _, indices_g = torch.topk(loss_g, int(R * len(loss_g)), largest=False)
+
+            small_loss_data_f = data.x[indices_f], data.edge_index[:, indices_f], data.batch[indices_f], data.y[indices_f]
+            small_loss_data_g = data.x[indices_g], data.edge_index[:, indices_g], data.batch[indices_g], data.y[indices_g]
+
+            # Update networks with peer network's small-loss instances
+            self.optimizer_f.zero_grad()
+            peer_output_f = self.model_f(Data(*small_loss_data_g))
+            peer_loss_f = self.criterion(peer_output_f, small_loss_data_g[-1].view(-1, 1))
+            peer_loss_f.backward()
+            self.optimizer_f.step()
+
+            self.optimizer_g.zero_grad()
+            peer_output_g = self.model_g(Data(*small_loss_data_f))
+            peer_loss_g = self.criterion(peer_output_g, small_loss_data_f[-1].view(-1, 1))
+            peer_loss_g.backward()
+            self.optimizer_g.step()
+
+        # Adjust R
+        R = 1 - min(epoch / tau, tau)
+        return R
+
+    def train(self, loader, epochs, tau):
+        R = 1.0
+        for epoch in range(epochs):
+            R = self.train_epoch(loader, epoch, tau, R)
+            print(f'Epoch {epoch+1}/{epochs} completed. R: {R:.4f}')
+
+    def evaluate(self, loader):
+        self.model_f.eval()
+        self.model_g.eval()
+        loss_f = 0
+        loss_g = 0
+
+        with torch.no_grad():
+            for data in loader:
+                data = data.to(self.device)
+                output_f = self.model_f(data)
+                output_g = self.model_g(data)
+                loss_f += self.criterion(output_f, data.y.view(-1, 1)).item()
+                loss_g += self.criterion(output_g, data.y.view(-1, 1)).item()
+
+        loss_f /= len(loader)
+        loss_g /= len(loader)
+
+        return loss_f, loss_g
+
+@torch.no_grad()
+def testing_co_teaching(loader, model):
+    loss = torch.nn.MSELoss()
+    test_loss_f = 0
+    test_loss_g = 0
+    test_target = np.empty((0))
+    test_y_target = np.empty((0))
+
+    for data in loader:
+        data = data.to(model.device)
+        output_f = model.model_f(data)
+        output_g = model.model_g(data)
+
+        loss_f = loss(output_f, data.y.view(-1, 1))
+        loss_g = loss(output_g, data.y.view(-1, 1))
+
+        test_loss_f += loss_f.item() / len(loader)
+        test_loss_g += loss_g.item() / len(loader)
+
+        # Save prediction vs ground truth values for plotting
+        test_target = np.concatenate((test_target, output_f.cpu().detach().numpy()[:, 0]))
+        test_y_target = np.concatenate((test_y_target, data.y.cpu().detach().numpy()))
+
+    return (test_loss_f + test_loss_g) / 2, test_target, test_y_target
+
+def mutually_agreed_samples(loss_f, loss_g, tolerance=0.05):
+    """
+    Select mutually agreed samples where losses between the two models are within a tolerance range.
+    """
+    loss_diff = torch.abs(loss_f - loss_g)
+    agreed_indices = torch.where(loss_diff < tolerance)[0]
+    
+    return agreed_indices
+
+def training_co_teaching(loader, model, loss, ratio=0.5, tolerance=0.2):
+    model.model_f.train()
+    model.model_g.train()
+
+    current_loss_f = 0
+    current_loss_g = 0
+    
+    for data in loader:
+        data = data.to(model.device)
+        model.optimizer_f.zero_grad()
+        model.optimizer_g.zero_grad()
+
+        output_f = model.model_f(data)
+        output_g = model.model_g(data)
+
+        loss_f = loss(output_f, data.y.view(-1, 1)).squeeze()  # Remove extra dimension
+        loss_g = loss(output_g, data.y.view(-1, 1)).squeeze()
+
+        # Ranking losses to select small-loss samples
+        num_small_samples = int(ratio * len(loss_f))
+
+        # Ensure indices are 1D tensors
+        sorted_indices_f = torch.argsort(loss_f)[:num_small_samples]
+        sorted_indices_g = torch.argsort(loss_g)[:num_small_samples]
+
+        # Flatten the indices
+        sorted_indices_f = sorted_indices_f.view(-1)
+        sorted_indices_g = sorted_indices_g.view(-1)
+
+        # Get mutually agreed samples within a tolerance range
+        agreed_indices = mutually_agreed_samples(loss_f, loss_g, tolerance)
+
+        # Ensure agreed_indices is a 1D tensor
+        if agreed_indices.ndim > 1:
+            agreed_indices = agreed_indices.view(-1)
+
+        # Combine small-loss and agreed-upon samples for training
+        combined_indices = torch.cat([sorted_indices_f, sorted_indices_g, agreed_indices])
+
+        selected_indices = combined_indices.unique()
+
+        # Recompute the losses for the selected samples
+        selected_loss_f = loss_f[selected_indices]
+        selected_loss_g = loss_g[selected_indices]
+
+        # Compute average losses and perform backpropagation
+        current_loss_f += selected_loss_f.mean().item() / len(loader)
+        current_loss_g += selected_loss_g.mean().item() / len(loader)
+
+        selected_loss_f.mean().backward()
+        model.optimizer_f.step()
+
+        selected_loss_g.mean().backward()
+        model.optimizer_g.step()
+
+    return (current_loss_f + current_loss_g) / 2, model
+
+def validation_co_teaching(loader, model, loss, ratio=0.5, tolerance=0.2):
+    model.model_f.eval()
+    model.model_g.eval()
+    val_loss_f = 0
+    val_loss_g = 0
+
+    with torch.no_grad():
+        all_losses_f = []
+        all_losses_g = []
+        all_indices = []
+
+        for data in loader:
+            data = data.to(model.device)
+            output_f = model.model_f(data)
+            output_g = model.model_g(data)
+
+            loss_f = loss(output_f, data.y.view(-1, 1)).squeeze()  # Remove extra dimension
+            loss_g = loss(output_g, data.y.view(-1, 1)).squeeze()
+
+            all_losses_f.append(loss_f)
+            all_losses_g.append(loss_g)
+            all_indices.append(torch.arange(len(loss_f)))
+
+        # Concatenate all losses and indices
+        all_losses_f = torch.cat(all_losses_f)
+        all_losses_g = torch.cat(all_losses_g)
+        all_indices = torch.cat(all_indices)
+
+        # Ranking losses to select small-loss samples
+        num_small_samples = int(ratio * len(all_losses_f))
+        sorted_indices_f = torch.argsort(all_losses_f)[:num_small_samples]
+        sorted_indices_g = torch.argsort(all_losses_g)[:num_small_samples]
+
+        # Get mutually agreed samples within a tolerance range
+        agreed_indices = mutually_agreed_samples(all_losses_f, all_losses_g, tolerance)
+
+        # Ensure agreed_indices is a 1D tensor
+        if agreed_indices.ndim > 1:
+            agreed_indices = agreed_indices.view(-1)
+
+        # Combine small-loss and agreed-upon samples for training
+        combined_indices = torch.cat([sorted_indices_f, sorted_indices_g, agreed_indices])
+        selected_indices = combined_indices.unique()
+
+        # Recompute the losses for the selected samples
+        selected_loss_f = all_losses_f[selected_indices]
+        selected_loss_g = all_losses_g[selected_indices]
+
+        if selected_loss_f.numel() > 0:
+            val_loss_f = selected_loss_f.mean().item()
+            val_loss_g = selected_loss_g.mean().item()
+
+    return (val_loss_f + val_loss_g) / 2
+
+# Add forget_rate parameter to control the percentage of samples to drop at each epoch
+def train_epochs_co_teaching(epochs, model, train_loader, val_loader, path, ratio=0.5, tolerance=0.2, forget_rate=0.2):
+    loss = torch.nn.MSELoss(reduction='none')
+    train_target = np.empty((0))
+    train_y_target = np.empty((0))
+    train_loss = np.empty(epochs)
+    val_loss = np.empty(epochs)
+    best_loss = math.inf
+
+    for epoch in range(epochs):
+        epoch_loss, model = training_co_teaching(train_loader, model, loss, tolerance=tolerance, ratio=ratio)
+        v_loss = validation_co_teaching(val_loader, model, loss, tolerance=tolerance, ratio=ratio)
+
+        if v_loss < best_loss:
+            torch.save(model.model_f.state_dict(), f"{path}_f.pth")
+            torch.save(model.model_g.state_dict(), f"{path}_g.pth")
+            best_loss = v_loss
+
+        if epoch == epochs - 1:
+            for batch_idx, data in enumerate(train_loader):
+                data = data.to(model.device)
+                output_f = model.model_f(data)
+                output_g = model.model_g(data)
+
+                # Record truly vs predicted values for training data from last epoch
+                train_target = np.concatenate((train_target, output_f.cpu().detach().numpy()[:, 0]))
+                train_y_target = np.concatenate((train_y_target, noisy_y_values.cpu().numpy()))
+
+        train_loss[epoch] = epoch_loss
+        val_loss[epoch] = v_loss
+
+        # Print current train and val loss
+        if epoch % 2 == 0:
+            print(
+                f"Epoch: {epoch}, Train loss: {epoch_loss:.4f}, Val loss: {v_loss:.4f}"
+            )
+
+    return train_loss, val_loss, train_target, train_y_target, model
+
