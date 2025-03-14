@@ -42,6 +42,8 @@ impl SmilesTokenizer {
     }
 }
 
+// TODO: get rust on ARC, right now I'm just copying the target file
+
 #[derive(Deserialize, Debug)]
 struct Config {
     sample_size: usize,
