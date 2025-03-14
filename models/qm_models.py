@@ -15,7 +15,6 @@ from torch_geometric.typing import Adj, OptTensor, PairTensor, Size
 from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 # from torch_sparse import SparseTensor
 from torch_geometric.nn.inits import glorot, zeros
-from bayes_opt import BayesianOptimization, UtilityFunction
 import gpytorch
 from typing import Union
 
@@ -384,7 +383,6 @@ class MLPClassifier(nn.Module):
         x = self.dropout(x)
         x = self.output_layer(x)
         return self.softmax(x)  # Final activation for classification
-
 
 # define GP model from Gauche library
 class Gauche(gpytorch.models.ExactGP):

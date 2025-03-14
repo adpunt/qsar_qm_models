@@ -1066,10 +1066,10 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
             x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
             x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
 
-            if args.dataset == 'QM9':  # ✅ Regression
+            if args.dataset == 'QM9':  # Regression
                 y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
                 y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-            else:  # ✅ Classification
+            else:  # Classification
                 y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
                 y_test_tensor = torch.tensor(y_test, dtype=torch.long).to(device)
 
