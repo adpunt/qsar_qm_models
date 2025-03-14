@@ -5,8 +5,6 @@ from torch_geometric.nn import GCNConv, GINConv, GATv2Conv, global_mean_pool, gl
 import numpy as np
 import math
 
-import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
@@ -20,6 +18,8 @@ from torch_geometric.nn.inits import glorot, zeros
 from bayes_opt import BayesianOptimization, UtilityFunction
 import gpytorch
 from typing import Union
+
+# TODO: potentially have to specify different DataLoader
 
 # from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel
 # from gauche.kernels.fingerprint_kernels.braun_blanquet_kernel import BraunBlanquetKernel
@@ -38,69 +38,6 @@ from typing import Union
 from gauche.kernels.fingerprint_kernels import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# class RNNRegressionModel(nn.Module):
-#     """Vanilla RNN with one recurrent layer"""
-
-#     def __init__(self, input_size, hidden_size=32, num_layers=1, dropout_rate=0.2):
-#         """
-#         Vanilla RNN
-
-#         Parameters
-#         ----------
-#         input_size : int
-#             The number of expected features in the input vector
-#         hidden_size : int
-#             The number of features in the hidden state
-
-#         """
-#         super(RNNRegressionModel, self).__init__()
-#         self.hidden_size = hidden_size
-#         self.num_layers = num_layers
-#         self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True)
-#         self.fc = nn.Linear(hidden_size, 1)
-#         self.dropout_rate = dropout_rate
-#         self.dropout = nn.Dropout(p=self.dropout_rate)
-
-#     def forward(self, x):
-#         h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-#         out, hn = self.rnn(x, h0)
-#         out = out[:, -1]
-#         out = self.dropout(out)
-#         out = self.fc(out)
-#         return out
-
-
-# class GRURegressionModel(nn.Module):
-#     """GRU network with one recurrent layer"""
-
-#     def __init__(self, input_size, hidden_size=32, num_layers=1, dropout_rate=0.2):
-#         """
-#         GRU network
-
-#         Parameters
-#         ----------
-#         input_size : int
-#             The number of expected features in the input vector
-#         hidden_size : int
-#             The number of features in the hidden state
-
-#         """
-#         super(GRURegressionModel, self).__init__()
-#         self.hidden_size = hidden_size
-#         self.num_layers = num_layers
-#         self.gru = nn.GRU(input_size, hidden_size, num_layers=1, batch_first=True)
-#         self.fc = nn.Linear(hidden_size, 1)
-#         self.dropout_rate = dropout_rate
-#         self.dropout = nn.Dropout(p=self.dropout_rate)
-
-#     def forward(self, x):
-#         h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-#         out, hn = self.gru(x, h0)
-#         out = out[:, -1]
-#         out = self.dropout(out)
-#         out = self.fc(out)
-#         return out
 
 class RNNRegressionModel(nn.Module):
     """Vanilla RNN with one recurrent layer"""
@@ -425,6 +362,29 @@ class MLPRegressor(nn.Module):
         x = self.dropout(x)
         x = self.output_layer(x)
         return x
+
+class MLPClassifier(nn.Module):
+    """Multi-Layer Perceptron for classification on non-sequential data."""
+
+    def __init__(self, input_size, hidden_size=32, num_hidden_layers=2, num_classes=2, dropout_rate=0.2):
+        super(MLPClassifier, self).__init__()
+        self.input_layer = nn.Linear(input_size, hidden_size)
+        self.hidden_layers = nn.ModuleList()
+        for _ in range(num_hidden_layers - 1):
+            self.hidden_layers.append(nn.Linear(hidden_size, hidden_size))
+        self.output_layer = nn.Linear(hidden_size, num_classes)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=1)  # Softmax for classification
+
+    def forward(self, x):
+        x = self.relu(self.input_layer(x))
+        for layer in self.hidden_layers:
+            x = self.relu(layer(x))
+        x = self.dropout(x)
+        x = self.output_layer(x)
+        return self.softmax(x)  # Final activation for classification
+
 
 # define GP model from Gauche library
 class Gauche(gpytorch.models.ExactGP):
@@ -1050,3 +1010,107 @@ def train_epochs_co_teaching(epochs, model, train_loader, val_loader, path, rati
 
     return train_loss, val_loss, train_target, train_y_target, model
 
+# Define the DNN model
+class DNNRegressionModel(nn.Module):
+    """Densely-connected neural network for binding affinity prediction"""
+
+    def __init__(self, input_size, hidden_size1=32, hidden_size2=32):
+        """
+        Fully-connected neural network
+
+        Parameters
+        ----------
+        input_size : int
+            Number of features in the input vector
+        hidden_size1 : int
+            Number of neurons in the first hidden layer
+        hidden_size2 : int
+            Number of neurons in the second hidden layer
+        """
+        super(DNNRegressionModel, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, 1)
+        self.activation = nn.ReLU()  # Default activation (will be tuned)
+        self.dropout = nn.Dropout(p=0.2)
+
+    def forward(self, x):
+        x = self.activation(self.fc1(x))
+        x = self.dropout(x)
+        x = self.activation(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)  # No activation for regression output
+        return x
+
+class DNNClassificationModel(nn.Module):
+    """Densely-connected neural network for classification tasks"""
+
+    def __init__(self, input_size, hidden_size1=32, hidden_size2=32, num_classes=2):
+        """
+        Fully-connected neural network for classification
+
+        Parameters
+        ----------
+        input_size : int
+            Number of features in the input vector
+        hidden_size1 : int
+            Number of neurons in the first hidden layer
+        hidden_size2 : int
+            Number of neurons in the second hidden layer
+        num_classes : int
+            Number of output classes (2 for binary, >2 for multi-class)
+        """
+        super(DNNClassificationModel, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size1)
+        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+        self.fc3 = nn.Linear(hidden_size2, num_classes)
+        self.activation = nn.ReLU()  # Default activation (will be tuned)
+        self.dropout = nn.Dropout(p=0.2)
+        self.num_classes = num_classes
+
+    def forward(self, x):
+        x = self.activation(self.fc1(x))
+        x = self.dropout(x)
+        x = self.activation(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)  # No activation here, handled externally based on task
+        return x
+
+def train_dnn(model, train_loader, val_loader, criterion, optimizer, device, epochs, patience=20, tolerance=0.01):
+    model.to(device)
+    best_loss = float('inf')
+    epochs_no_improve = 0
+
+    for epoch in range(100):  # Max epochs
+        model.train()
+        train_loss = 0
+        for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs, y_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+
+        # Validation
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for X_val, y_val in val_loader:
+                X_val, y_val = X_val.to(device), y_val.to(device)
+                val_outputs = model(X_val)
+                loss = criterion(val_outputs, y_val)
+                val_loss += loss.item()
+
+        # Early stopping check
+        if val_loss < best_loss - tolerance:
+            best_loss = val_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
