@@ -9,7 +9,6 @@ use clap::{Arg, Command, ArgAction};
 use num_traits::{Float, FromPrimitive};
 use std::iter::Sum;
 use rand_distr::{Distribution, Normal, Uniform, Beta, SkewNormal};
-use rand::SeedableRng;
 use std::io::Write;
 use std::cmp::Reverse;
 use std::io::BufWriter;

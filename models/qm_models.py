@@ -99,6 +99,44 @@ class GRURegressionModel(nn.Module):
         out = self.fc(out)
         return out
 
+class RNNClassificationModel(nn.Module):
+    """Vanilla RNN for classification with one recurrent layer"""
+
+    def __init__(self, input_size, hidden_size=32, num_layers=1, num_classes=2):
+        super(RNNClassificationModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, num_classes)  # Multi-class output
+        self.dropout = nn.Dropout(p=0.2)
+
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        out, _ = self.rnn(x, h0)
+        out = out[:, -1]  # Take last time step
+        out = self.dropout(out)
+        out = self.fc(out)
+        return out  # No activation (CrossEntropyLoss expects raw logits)
+
+class GRUClassificationModel(nn.Module):
+    """GRU for classification with one recurrent layer"""
+
+    def __init__(self, input_size, hidden_size=32, num_layers=1, num_classes=2):
+        super(GRUClassificationModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.gru = nn.GRU(input_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, num_classes)  # Multi-class output
+        self.dropout = nn.Dropout(p=0.2)
+
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        out, _ = self.gru(x, h0)
+        out = out[:, -1]  # Take last time step
+        out = self.dropout(out)
+        out = self.fc(out)
+        return out  # No activation (CrossEntropyLoss expects raw logits)
+
 class ModelTrainer(object):
     """A class that provides training and validation infrastructure for the model and keeps track of training and validation metrics."""
 
@@ -163,7 +201,7 @@ class ModelTrainer(object):
         targets = np.concatenate(targets).flatten()
         return val_loss / len(loader), predictions, targets
 
-    def train(self, train_loader, val_loader, test_loader, n_epochs, print_every=10, logging=False):
+    def train(self, train_loader, val_loader, n_epochs, print_every=10):
         """
         Train the model
 
@@ -178,13 +216,12 @@ class ModelTrainer(object):
         """
         for e in range(n_epochs):
             train_loss, train_loss_batches = self._train_epoch(train_loader)
-            val_loss, _, _ = self._eval_epoch(test_loader)
+            val_loss, _, _ = self._eval_epoch(val_loader)
             self.batch_loss += train_loss_batches
             self.train_loss.append(train_loss)
             self.val_loss.append(val_loss)
-            if logging:
-                if e % print_every == 0:
-                    print(f"Epoch {e+0:03} | train_loss: {train_loss:.5f} | val_loss: {val_loss:.5f}")
+            if e % print_every == 0:
+                print(f"Epoch {e+0:03} | train_loss: {train_loss:.5f} | val_loss: {val_loss:.5f}")
 
     def validate(self, val_loader):
         """
@@ -202,8 +239,6 @@ class ModelTrainer(object):
         """
         loss, y_pred, y_targ = self._eval_epoch(val_loader)
         return loss, y_pred, y_targ
-
-# TODO: create a class GTAT like GCN/GIN using the GTATConv
 
 class GCN(torch.nn.Module):
     """Graph Convolutional Network class with 3 convolutional layers and a linear layer"""
@@ -578,6 +613,72 @@ class Gauche(gpytorch.models.ExactGP):
 #         return '{}({}, {}, heads={})'.format(self.__class__.__name__,
 #                                              self.in_channels,
 #                                              self.out_channels, self.heads)
+# TODO: test these and get rid of the bad ones, including regular MLPs
+class MTLRegressionModel(nn.Module):
+    """Multi-task learning model with shared hidden layers and multiple output heads."""
+    def __init__(self, input_size, hidden_size=128, num_tasks=2):
+        super(MTLRegressionModel, self).__init__()
+        self.shared_fc1 = nn.Linear(input_size, hidden_size)
+        self.shared_fc2 = nn.Linear(hidden_size, hidden_size)
+
+        # Separate output layers for different tasks
+        self.task_heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_tasks)])
+
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        x = self.activation(self.shared_fc1(x))
+        x = self.dropout(x)
+        x = self.activation(self.shared_fc2(x))
+        x = self.dropout(x)
+
+        return torch.cat([head(x) for head in self.task_heads], dim=1)
+
+class ResidualMLP(nn.Module):
+    """Fully connected model with residual connections."""
+    def __init__(self, input_size, hidden_size=128, num_layers=3):
+        super(ResidualMLP, self).__init__()
+        self.input_layer = nn.Linear(input_size, hidden_size)
+        self.hidden_layers = nn.ModuleList([nn.Linear(hidden_size, hidden_size) for _ in range(num_layers)])
+        self.output_layer = nn.Linear(hidden_size, 1)
+
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        x = self.activation(self.input_layer(x))
+        for layer in self.hidden_layers:
+            residual = x
+            x = self.activation(layer(x))
+            x = x + residual  # Residual connection
+        x = self.dropout(x)
+        return self.output_layer(x)
+class FactorizationMLP(nn.Module):
+    """Factorization Machine with MLP for bit vector data."""
+    def __init__(self, input_size, hidden_size=128, factor_size=16):
+        super(FactorizationMLP, self).__init__()
+        self.linear = nn.Linear(input_size, 1)
+        self.factor_matrix = nn.Parameter(torch.randn(input_size, factor_size))
+
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, 1)
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x):
+        linear_term = self.linear(x)
+
+        # Factorization term: element-wise interaction
+        interaction_term = 0.5 * torch.sum(torch.pow(torch.matmul(x, self.factor_matrix), 2) - 
+                                           torch.matmul(torch.pow(x, 2), torch.pow(self.factor_matrix, 2)), dim=1, keepdim=True)
+
+        x = self.activation(self.fc1(x))
+        x = self.dropout(x)
+        mlp_out = self.fc2(x)
+
+        return linear_term + interaction_term + mlp_out
+
 
 def train_mlp(model, train_loader, val_loader, epochs, lr=0.001, weight_decay=0, print_every=10, logging=False):
     criterion = nn.MSELoss()

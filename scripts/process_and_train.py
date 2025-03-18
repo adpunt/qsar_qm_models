@@ -50,13 +50,16 @@ from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_parameters as Vec2Params
 import matplotlib.pyplot as plt
+import torchbnn as bnn
+from torchhk import transform_model
 
 import sys
 sys.path.append('../models/')
 sys.path.append('../preprocessing/')
 sys.path.append('../results/')
 
-from qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, GIN, GCN, GINCoTeaching, MLPRegressor, MLPClassifier, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a, DNNRegressionModel, train_dnn
+# TODO: make this go on multiple lines
+from qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, RNNClassificationModel, GRUClassificationModel, GIN, GCN, GINCoTeaching, MLPRegressor, MLPClassifier, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a, DNNRegressionModel, train_dnn, MTLRegressionModel, ResidualMLP, FactorizationMLP
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +75,7 @@ MULTIPLE_SMILES_REPS = 3
 
 # Note: only run multiple_smiles on it's own, otherwise triplicate entries for every single entry
 # TODO: potentially fix this logic
+# TODO: get git to stop tracking Cargo.lock 
 
 properties = {
     'homo_lumo_gap': 4, 'alpha': 1, 'G': 10, 'H': 9, 'U': 8,
@@ -82,7 +86,16 @@ bit_vectors = ['ecfp4', 'mpnn', 'sns']
 graph_models = ['gin', 'gcn', 'ginct', 'gauche_graph', 'gin2d', 'gtat']
 
 # Initialize the cache
-cache = diskcache.Cache('./smiles_cache')
+cache_path = "./smiles_cache"
+
+# Check if the cache exists
+if not os.path.exists(cache_path):
+    print("Cache does not exist. Creating a new one...")
+    os.makedirs(cache_path, exist_ok=True)  # Ensure the directory exists
+    cache = diskcache.Cache(cache_path)  # Initialize a new cache
+else:
+    cache = diskcache.Cache(cache_path)
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -117,6 +130,7 @@ def parse_arguments():
     parser.add_argument("--clean-smiles", type=bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--loss-landscape", type=bool, default=False, help="Plot loss landscape (default is False)")
+    parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
     return parser.parse_args()
 
 # TODO: save the original QM9 index
@@ -890,6 +904,38 @@ def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, devi
     print("Loss landscape computation complete!")
 
 
+def apply_bayesian_transformation(model):
+    """
+    Converts an existing PyTorch model's Linear layers to Bayesian Linear layers.
+    
+    Parameters
+    ----------
+    model : nn.Module
+        The PyTorch model to be transformed.
+        
+    Returns
+    -------
+    model : nn.Module
+        The transformed model with Bayesian layers.
+    """
+    # Convert Linear -> BayesLinear
+    transform_model(
+        model, 
+        nn.Linear, 
+        bnn.BayesLinear, 
+        args={
+            "prior_mu": 0, 
+            "prior_sigma": 0.1, 
+            "in_features": ".in_features",
+            "out_features": ".out_features", 
+            "bias": ".bias"
+        }, 
+        attrs={"weight_mu": ".weight"}
+    )
+    return model
+
+# TODO: refactor this into a bunch of smaller functions - get ChatGPT to suggest refactor options
+# There's also a lot of repeated code with tensors
 def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed, rep, iteration, s):
     def black_box_function(trial=None):
         params = {}
@@ -978,6 +1024,7 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
         # TODO: DNN for classification
         # TODO: reduce number of print statements, find correct amount of epochs
         # Original source used 100 epochs
+        # TODO: consistent use of single and double quotations
         elif model_type == "dnn":
             if args.tuning:
                 params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [32, 64, 128, 256, 512, 1024, 2048, 4096])
@@ -1002,6 +1049,9 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
             else:
                 model = DNNClassificationModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
             
+            if args.bayesian_transformation:
+                model = apply_bayesian_transformation(model)
+
             model.activation = activation
             model.to(device)
 
@@ -1015,7 +1065,7 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
                 y_pred_tensor = model(x_test_tensor).cpu().numpy()
             y_pred = y_pred_tensor.flatten()
 
-                        # TODO: may need to modify save paths and such 
+            # TODO: may need to modify save paths and such 
             if args.loss_landscape:
                 loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, args.loss_landscape)
 
@@ -1094,6 +1144,9 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
                 )
                 criterion = nn.CrossEntropyLoss()
 
+            if args.bayesian_transformation:
+                model = apply_bayesian_transformation(model)
+
             model.to(device)
             optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
@@ -1107,13 +1160,162 @@ def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed
             else:
                 y_pred = np.array(y_pred_tensor).flatten()
 
+        # TODO: make sure this is only smiles
+        elif model_type == "rnn" or model_type == "gru":
+            if args.tuning:
+                params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+                params['num_layers'] = trial.suggest_int('num_layers', 1, 3)
+                params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
+                params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+            else:
+                params['hidden_size'], params['num_layers'], params['dropout_rate'], params['lr'] = 128, 1, 0.2, 0.001
+
+            # TODO: need to check if long or float for classifications - ideally it should be the same
+            if args.dataset == 'QM9':  # Regression
+                y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+                y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+            else:  # Classification
+                y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
+                y_test_tensor = torch.tensor(y_test, dtype=torch.long).to(device)
+
+            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).unsqueeze(1).to(device)  # Add sequence dimension
+            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).unsqueeze(1).to(device)    # Add sequence dimension
+
+            # Create data loaders
+            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+            test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=32, shuffle=False)
+
+            # Choose RNN or GRU
+            if args.dataset == 'QM9':
+                model = RNNRegressionModel(
+                    input_size=x_train.shape[1],
+                    hidden_size=params['hidden_size'],
+                    num_layers=params['num_layers']
+                ) if model_type == "rnn" else GRURegressionModel(
+                    input_size=x_train.shape[1],
+                    hidden_size=params['hidden_size'],
+                    num_layers=params['num_layers']
+                )
+                criterion = nn.MSELoss()
+            else:
+                model = RNNClassificationModel(
+                    input_size=x_train.shape[1],
+                    hidden_size=params['hidden_size'],
+                    num_layers=params['num_layers'],
+                    num_classes=len(set(y_train))
+                ) if model_type == "rnn" else GRUClassificationModel(
+                    input_size=x_train.shape[1],
+                    hidden_size=params['hidden_size'],
+                    num_layers=params['num_layers'],
+                    num_classes=len(set(y_train))
+                )
+                criterion = nn.CrossEntropyLoss()
+
+            model.to(device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
+
+            trainer = ModelTrainer(model, lr=params['lr'])
+            trainer.train(train_loader, train_loader, n_epochs=100)
+
+            # Predict using the trained model
+            y_pred_tensor = trainer.validate(test_loader)[1]  # Extract predictions
+            
+            # Convert probabilities to class labels if classification
+            if args.dataset != 'QM9':
+                y_pred = np.argmax(y_pred_tensor, axis=1)
+            else:
+                y_pred = np.array(y_pred_tensor).flatten()
+
+        # TODO: potentially get rid of mtl, residual_mlp, and factorization_mlp
+        elif model_type == "mtl":
+            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+
+            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+
+            model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128)
+            
+            if args.bayesian_transformation:
+                model = apply_bayesian_transformation(model)
+
+            model.to(device)
+
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
+
+            model.eval()
+            with torch.no_grad():
+                y_pred_tensor = model(x_test_tensor).cpu().numpy()
+            y_pred = y_pred_tensor.squeeze()
+
+            print("y_test shape:", y_test.shape)
+            print("y_pred shape:", y_pred.shape)
+
+            print("x_test_tensor shape:", x_test_tensor.shape)
+            print("y_test_tensor shape:", y_test_tensor.shape)
+
+        elif model_type == "residual_mlp":
+            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+
+            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+
+            model = ResidualMLP(input_size=x_train.shape[1], hidden_size=128, num_layers=3)
+
+            if args.bayesian_transformation:
+                model = apply_bayesian_transformation(model)
+
+            model.to(device)
+
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
+
+            model.eval()
+            with torch.no_grad():
+                y_pred_tensor = model(x_test_tensor).cpu().numpy()
+            y_pred = y_pred_tensor.flatten()
+
+        elif model_type == "factorization_mlp":
+            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+
+            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+
+            model = FactorizationMLP(input_size=x_train.shape[1], hidden_size=128, factor_size=16)
+
+            if args.bayesian_transformation:
+                model = apply_bayesian_transformation(model)
+
+            model.to(device)
+
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
+
+            model.eval()
+            with torch.no_grad():
+                y_pred_tensor = model(x_test_tensor).cpu().numpy()
+            y_pred = y_pred_tensor.flatten()
+
+
         elif model_type == 'custom':
             return run_custom_model(x_train, x_test, y_train, False, None, args.dataset, args.distribution)
 
         else:
             raise ValueError(f"Unsupported model_type: {model_type}")
 
-        if model_type not in ['lgb', 'dnn', 'mlp']:
+        if model_type not in ['lgb', 'dnn', 'mlp', 'rnn', 'gru', 'mtl', 'residual_mlp', 'factorization_mlp']:
             model.fit(x_train, y_train)
             y_pred = model.predict(x_test)
 
