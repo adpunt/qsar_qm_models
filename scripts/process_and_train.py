@@ -1,4 +1,4 @@
-import argparse
+gitimport argparse
 import os
 import os.path as osp
 import random
@@ -61,7 +61,7 @@ graph_models = ['gin', 'gcn', 'ginct', 'gauche_graph', 'gin2d', 'gtat']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
 # Initialize the cache
-cache_path = "./smiles_cache"
+cache_path = "../data/smiles_cache"
 
 # Check if the cache exists
 if not os.path.exists(cache_path):
