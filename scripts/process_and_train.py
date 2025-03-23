@@ -7,7 +7,6 @@ import subprocess
 import struct
 import warnings
 import numpy as np
-import torch
 import pandas as pd
 import csv
 from torch_geometric.datasets import QM9
@@ -18,40 +17,14 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem import rdFingerprintGenerator
 from collections import deque
 import gc
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.svm import SVR, SVC
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_squared_error,
-    r2_score,
-    accuracy_score,
-    roc_auc_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    average_precision_score
-)
-from xgboost import XGBRegressor, XGBClassifier
 import diskcache
 import deepchem as dc
 import gpytorch
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
-from botorch import fit_gpytorch_model
-from torch_geometric.utils import to_scipy_sparse_matrix
 import polaris as po
 from polaris.hub.client import PolarisHubClient
-from scipy.stats import pearsonr
-import shap
-import lightgbm as lgb
 import optuna
-import torch.nn as nn
-from torch.utils.data import TensorDataset
-from torch.utils.data import DataLoader as TorchDataLoader
-from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_parameters as Vec2Params
-import matplotlib.pyplot as plt
-import torchbnn as bnn
-from torchhk import transform_model
 
 import sys
 sys.path.append('../models/')
@@ -59,7 +32,7 @@ sys.path.append('../preprocessing/')
 sys.path.append('../results/')
 
 # TODO: make this go on multiple lines
-from qm_models import ModelTrainer, RNNRegressionModel, GRURegressionModel, RNNClassificationModel, GRUClassificationModel, GIN, GCN, GINCoTeaching, MLPRegressor, MLPClassifier, Gauche, train_epochs, train_epochs_co_teaching, testing, testing_co_teaching, train_mlp, predict_mlp, GATv2, GATv2a, DNNRegressionModel, train_dnn, MTLRegressionModel, ResidualMLP, FactorizationMLP
+from qm_models import *
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -76,14 +49,16 @@ MULTIPLE_SMILES_REPS = 3
 # Note: only run multiple_smiles on it's own, otherwise triplicate entries for every single entry
 # TODO: potentially fix this logic
 # TODO: get git to stop tracking Cargo.lock 
+# TODO: figure out tuning for GINs
 
 properties = {
     'homo_lumo_gap': 4, 'alpha': 1, 'G': 10, 'H': 9, 'U': 8,
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec']
 graph_models = ['gin', 'gcn', 'ginct', 'gauche_graph', 'gin2d', 'gtat']
+neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
 # Initialize the cache
 cache_path = "./smiles_cache"
@@ -102,8 +77,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # TODO: make sure everything above function definitions is properly formatted
 # TODO: make sure val is working for hyperparameter tuning
 # TODO: reformat import statements
-
-# TODO: add BNN 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Framework for running QSAR/QSPR prediction models")
@@ -126,14 +99,15 @@ def parse_arguments():
     parser.add_argument("--metadata_file", type=str, default=None, help="Filepath to custom model's metadata ie. hyperparameters")
     parser.add_argument("-f", "--filepath", type=str, default='../results/test.csv', help="Filepath to save raw results in csv (default is None)")
     parser.add_argument("--logging", type=bool, default=False, help="Extra logging to check individual entries in mmap files (default is False)")
-    parser.add_argument("--epochs", type=int, default=15, help="Number of epochs for training grpah-based models (default is 15)")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training grpah-based models (default is 100)")
     parser.add_argument("--clean-smiles", type=bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--loss-landscape", type=bool, default=False, help="Plot loss landscape (default is False)")
     parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
+    parser.add_argument("--n-trials", type=bool, default=20, help="Number of trials in hyperparameter tuning (default is 100)")
     return parser.parse_args()
 
-# TODO: save the original QM9 index
+# TODO: add PLEC
 def write_to_mmap(
     smiles_isomeric,
     smiles_canonical,
@@ -266,12 +240,17 @@ def load_and_split_polaris(args, files):
             cache[smiles_isomeric] = smiles_canonical
 
         sns_fp = None
-        if 'sns' in args.molecular_representations:
+        # TODO: need to define protein by pdb 
+        if 'sns' in args.molecular_representations or 'plec' in args.molecular_representations:
             if index in train_idx:
                 mol = mols_train.popleft()
             if not mol: 
                 mol = Chem.MolFromSmiles(smiles_isomeric)
-            sns_fp = ecfp_featuriser(mol)
+            if 'sns' in args.molecular_representations:
+                sns_fp = ecfp_featuriser(mol)
+            # if 'plec' in args.molecular_representations:
+            #     od_mol = oddt.toolkit.Molecule(rd_mol)
+            #     plec = PLEC(od_mol,protein) 
         
         if smiles_canonical and not (category == "excluded"):
             # TODO: don't call for graphs
@@ -298,7 +277,6 @@ def load_qm9(target):
 
     return qm9
 
-# TODO: somewhere in here record the indices so they can be used later
 def split_qm9(qm9, args, files):
 
     # Shuffle with random seed
@@ -346,7 +324,6 @@ def split_qm9(qm9, args, files):
                                                                sub_counts = True, 
                                                                vec_dimension = 1024, 
                                                                print_train_set_info = args.logging)
-
 
     for index, data in enumerate(qm9[:args.sample_size]):
         smiles_isomeric = data.smiles
@@ -464,86 +441,6 @@ def create_sort_and_slice_ecfp_featuriser(mols_train,
 
     return ecfp_featuriser
 
-def calculate_classification_metrics(y_test, prediction, logging=False):
-    accuracy = accuracy_score(y_test, y_test_preds)
-    roc_auc = roc_auc_score(y_test, y_test_probs[:, 1])  # Assuming binary classification
-    precision = precision_score(y_test, y_test_preds, average="weighted")
-    recall = recall_score(y_test, y_test_preds, average="weighted")
-    f1 = f1_score(y_test, y_test_preds, average="weighted")
-    pr_auc = average_precision_score(
-        y_test, y_test_probs[:, 1], average="weighted"
-    )
-    # TODO: pearson?
-
-    # Optionally log the metrics
-    if logging:
-        print("Accuracy:", accuracy)
-        print("ROC AUC:", roc_auc)
-        print("Precision", precision)
-        print("Recall:", recall)
-        print("F1:", f1)
-        print("PR AUC:", pr_auc)
-
-    return [accuracy, roc_auc, precision, recall, f1, pr_auc]
-
-def calculate_regression_metrics(y_test, prediction, logging=False):
-    mae = mean_absolute_error(y_test, prediction)
-    mse = mean_squared_error(y_test, prediction)
-    rmse = np.sqrt(mse)
-    r2 = r2_score(y_test, prediction)
-    pearson_corr, _ = pearsonr(y_test, prediction)
-
-    # Optionally log the metrics
-    if logging:
-        print("Mean Absolute Error:", mae)
-        print("Mean Squared Error:", mse)
-        print("RMSE:", rmse)
-        print("R-squared:", r2)
-        print("Pearson Correlation:", pearson_corr)
-
-    return mae, mse, rmse, r2, pearson_corr
-
-# TOOD: this doesn't work with non-gaussian distributions at the moment, nor do a lot of things that rely solely on sigma
-def save_results(filepath, s, iteration, model, rep, n, r2, mae, corr):
-    """
-    Save results to a CSV file specified by args.filepath.
-    """
-    if filepath:
-        file_exists = os.path.isfile(filepath)
-
-        with open(filepath, mode='a', newline='') as f:
-            writer = csv.writer(f)
-            
-            # Write header if the file is new
-            if not file_exists:
-                writer.writerow(["sigma", "iteration", "model", "rep", "sample_size", "r2_score", "mae", "pearson_corr"])
-            
-            # Save the results
-            writer.writerow([s, iteration, model, rep, n, r2, mae, corr])
-
-def save_shap_values(shap_values, feature_names, x_test, filepath, model, iteration, rep):
-    """
-    Save SHAP values to a CSV file or NumPy file for large datasets.
-    """
-    shap_filepath = filepath.replace('.csv', '_shap.csv')  # Store SHAP values separately
-
-    if shap_values is not None:
-        shap_df = pd.DataFrame(shap_values, columns=feature_names)
-        shap_df.insert(0, "Sample_Index", np.arange(len(shap_values)))  # Track sample index
-        shap_df.insert(1, "Model", model)
-        shap_df.insert(2, "Iteration", iteration)
-        shap_df.insert(3, "Rep", rep)
-
-        # Save to CSV (appending if file exists)
-        if os.path.exists(shap_filepath):
-            shap_df.to_csv(shap_filepath, mode='a', header=False, index=False)
-        else:
-            shap_df.to_csv(shap_filepath, index=False)
-
-    # Save as NumPy file for efficiency
-    npy_filepath = filepath.replace('.csv', '_shap.npy')
-    np.save(npy_filepath, shap_values)
-
 def load_custom_model(model_path):
     """
     Loads a PyTorch model from a .pt file.
@@ -559,121 +456,6 @@ def load_custom_model(model_path):
     model.eval()
     return model
 
-def run_gauche(args, x_train, x_test, y_train, y_test, sigma, iteration, rep):
-    """
-    Run Gauche model with kernel selection
-    """
-    # Convert input data to tensors
-    x_train_tensor = torch.from_numpy(x_train).double()
-    x_test_tensor = torch.from_numpy(x_test).double()
-    y_train_tensor = torch.from_numpy(y_train).double()
-
-    # Initialize the kernel wrapped with ScaleKernel
-    likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    kernel = gpytorch.kernels.ScaleKernel(kernel_map[kernel_name]())
-    model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel)
-
-    # Fit GP model using BoTorch
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-    fit_gpytorch_model(mll)
-
-    # Make predictions with the trained GP model
-    model.eval()
-    likelihood.eval()
-    with torch.no_grad():
-        preds = model(x_test_tensor)
-        y_pred = preds.mean.numpy()
-        pred_vars = preds.variance.numpy()
-
-    # Handle logging and domain-specific evaluations
-    if args.distribution in ["domain_mpnn", "domain_tanimoto"]:
-        calculate_domain_metrics(y_test, y_pred, domain_labels, target_domain, args.dataset)
-
-    # Compute metrics
-    if args.dataset == 'QM9':
-        metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    else:
-        metrics = calculate_classification_metrics(y_test, y_pred, logging=True)
-
-    save_results(args.filepath, sigma, iteration, "gauche", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3]  # Negative MSE for optimization
-
-# TODO: need to call save_results in here
-def run_custom(x_train, x_test, y_train, logging, sigma, dataset, model_path, metadata_path=None):
-    """
-    Runs a PyTorch model stored in a .pt file, trains it on x_train/y_train, and evaluates it on x_test.
-    Handles hyperparameter tuning if a metadata file is provided.
-    """
-
-    # Load model
-    model = load_custom_model(model_path)
-
-    # Convert inputs to PyTorch tensors
-    x_train_tensor = torch.tensor(x_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1)
-    x_test_tensor = torch.tensor(x_test, dtype=torch.float32)
-
-    # Load hyperparameters if available
-    hyperparams = get_custom_hyperparameter_bounds(metadata_path) if metadata_path else {}
-
-    # Define optimizer and loss function
-    learning_rate = hyperparams.get("learning_rate", [0.001, 0.001])[0]  # Default 0.001 if missing
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = torch.nn.MSELoss()  # Adjust if classification
-
-    # Train model
-    model.train()
-    for _ in range(10):  # Change 10 to desired number of epochs
-        optimizer.zero_grad()
-        y_pred_train = model(x_train_tensor).squeeze()
-        loss = loss_fn(y_pred_train, y_train_tensor)
-        loss.backward()
-        optimizer.step()
-
-    # Evaluate on test set
-    model.eval()
-    with torch.no_grad():
-        y_pred = model(x_test_tensor).squeeze().cpu().numpy()  # Ensure proper shape & detach from graph
-
-    # Optionally log results
-    if logging:
-        print("Results for custom model:", model_path)
-        print("Sigma:", sigma)
-
-    logging = True
-    if distribution == "domain_mpnn" or distribution == "domain_tanimoto":
-        calculate_domain_metrics(y_test, y_pred, domain_labels, target_domain, dataset)
-        logging = False
-
-    if dataset == 'QM9':
-        metrics = calculate_regression_metrics(y_test, y_pred, logging=logging)
-    else:
-        metrics = calculate_classification_metrics(y_test, y_pred, logging=logging)
-
-    save_results(args.filepath, sigma, iteration, "custom", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3]  # Return negative MSE
-
-# Sample hyperparameter file
-# {
-#     "learning_rate": [0.0001, 0.01],
-#     "batch_size": [8, 64],
-#     "dropout": [0.1, 0.5]
-# }
-def get_custom_hyperparameter_bounds(metadata_path):
-    """
-    Reads hyperparameter tuning bounds from a JSON file.
-    Assumes the JSON file contains a dictionary with parameter names and their bounds.
-    """
-    try:
-        with open(metadata_path, 'r') as f:
-            hyperparams = json.load(f)
-        return hyperparams
-    except FileNotFoundError:
-        raise ValueError("Metadata file not found. Please specify a valid path.")
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON format in metadata file.")
 
 def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, logging):
     x_data = []
@@ -713,7 +495,6 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 if logging:
                     print(f"domain_label: {domain_label}")
 
-            # TODO: you broke something in here
             sns_fp = None
             if "sns" in molecular_representations:
                 sns_fp = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
@@ -797,548 +578,42 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             # print(f"Skipping malformed line: {line}")
             continue
 
-    # TODO: may need a try/catch here with sufficient error messaging
     if rep != 'graph':
         x_data = np.vstack(x_data).astype(np.uint8)
     y_data = np.array(y_data, dtype=np.float32)
 
     return x_data, y_data
 
-# TODO: save plots to appropriate place
-def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, loss_landscape_flag):
-    """
-    Computes and visualizes 1D and 2D loss landscapes for a given neural network.
-
-    Parameters:
-    - model: PyTorch model (DNN or any NN)
-    - x_test_tensor: Input test tensor
-    - y_test_tensor: Ground truth labels for test set
-    - device: Device (CPU/GPU) to run computations
-    - iteration_seed: Identifier for saving plots
-    - loss_landscape_flag: Boolean flag to enable/disable landscape computation
-    """
-    if not loss_landscape_flag:
-        return  # Exit if landscape computation is disabled
-
-    print("Computing loss landscape...")
-
-    model_save_path = f"trained_dnn_{iteration_seed}.pt"
-    torch.save(model.state_dict(), model_save_path)
-
-    # Recreate the model with known architecture parameters
-    if isinstance(model, DNNRegressionModel):
-        infer_net = DNNRegressionModel(input_size=model.fc1.in_features,
-                                       hidden_size1=model.fc1.out_features,
-                                       hidden_size2=model.fc2.out_features).to(device)
-    elif isinstance(model, DNNClassificationModel):
-        infer_net = DNNClassificationModel(input_size=model.fc1.in_features,
-                                           hidden_size1=model.fc1.out_features,
-                                           hidden_size2=model.fc2.out_features,
-                                           num_classes=model.fc3.out_features).to(device)
-    else:
-        raise ValueError("Unsupported model type for loss landscape analysis")
-
-    # Load trained weights
-    infer_net.load_state_dict(torch.load(model_save_path))
-
-    infer_net.load_state_dict(torch.load(model_save_path))
-
-    # Convert parameters to vectors
-    theta_ast = Params2Vec(model.parameters()).detach()
-    theta = Params2Vec(infer_net.parameters()).detach()
-
-    loss_fn = torch.nn.MSELoss() if isinstance(model, DNNRegressionModel) else torch.nn.CrossEntropyLoss()
-
-    # 1D Loss Landscape
-    alphas = torch.linspace(-20, 20, 40)
-    losses_1d = []
-
-    for alpha in alphas:
-        Vec2Params(alpha * theta_ast + (1 - alpha) * theta, infer_net.parameters())
-        infer_net.eval()
-        with torch.no_grad():
-            y_pred = infer_net(x_test_tensor)
-            loss = loss_fn(y_pred, y_test_tensor).item()
-            losses_1d.append(loss)
-
-    # 2D Loss Landscape
-    x_range = torch.linspace(-20, 20, 20)
-    y_range = torch.linspace(-20, 20, 20)
-    alpha, beta = torch.meshgrid(x_range, y_range, indexing="ij")
-
-    def tau_2d(alpha, beta, theta_ast):
-        return alpha * theta_ast[:, None, None] + beta * alpha * theta_ast[:, None, None]
-
-    space = tau_2d(alpha, beta, theta_ast)
-    losses_2d = torch.empty_like(space[0, :, :])
-
-    for a, _ in enumerate(x_range):
-        print(f'Processing alpha = {a}')
-        for b, _ in enumerate(y_range):
-            Vec2Params(space[:, a, b] + theta_ast, infer_net.parameters())
-            infer_net.eval()
-            with torch.no_grad():
-                y_pred = infer_net(x_test_tensor)
-                losses_2d[a, b] = loss_fn(y_pred, y_test_tensor).item()
-
-    # Plot 1D loss landscape
-    plt.figure(figsize=(8, 6))
-    plt.plot(alphas.numpy(), losses_1d)
-    plt.xlabel("Alpha")
-    plt.ylabel("Loss")
-    plt.title("1D Loss Landscape")
-    plt.grid()
-    plt.savefig(f"../resuls/loss_landscape_1d_{model_type}_{rep}_{s}.png")
-    plt.close()
-
-    # Plot 2D loss contour
-    plt.figure(figsize=(8, 6))
-    plt.contourf(alpha.numpy(), beta.numpy(), losses_2d.numpy(), levels=50, cmap="viridis")
-    plt.colorbar(label="Loss")
-    plt.xlabel("Alpha")
-    plt.ylabel("Beta")
-    plt.title("2D Loss Contour")
-    plt.savefig(f"../resuls/loss_landscape_2d_{model_type}_{rep}_{s}.png")
-    plt.close()
-
-    print("Loss landscape computation complete!")
-
-
-def apply_bayesian_transformation(model):
-    """
-    Converts an existing PyTorch model's Linear layers to Bayesian Linear layers.
-    
-    Parameters
-    ----------
-    model : nn.Module
-        The PyTorch model to be transformed.
-        
-    Returns
-    -------
-    model : nn.Module
-        The transformed model with Bayesian layers.
-    """
-    # Convert Linear -> BayesLinear
-    transform_model(
-        model, 
-        nn.Linear, 
-        bnn.BayesLinear, 
-        args={
-            "prior_mu": 0, 
-            "prior_sigma": 0.1, 
-            "in_features": ".in_features",
-            "out_features": ".out_features", 
-            "bias": ".bias"
-        }, 
-        attrs={"weight_mu": ".weight"}
-    )
-    return model
-
-# TODO: refactor this into a bunch of smaller functions - get ChatGPT to suggest refactor options
-# There's also a lot of repeated code with tensors
-def run_model(x_train, y_train, x_test, y_test, model_type, args, iteration_seed, rep, iteration, s):
+# TODO: pass s as an argument 
+def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
     def black_box_function(trial=None):
-        params = {}
-
         if model_type == 'rf':
-            params = {}
-            if args.tuning:
-                params['max_depth'] = trial.suggest_int('max_depth', 10, 200)
-                params['max_features'] = trial.suggest_categorical('max_features', ['sqrt', 1.0, None])  # Allow no max feature restriction
-                params['min_samples_leaf'] = trial.suggest_int('min_samples_leaf', 1, 50)
-                params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
-                params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-                params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])  # Typically tuned
-            if args.dataset == 'QM9':
-                model = RandomForestRegressor(random_state=iteration_seed, **params)
-            else:
-                params['criterion'] = trial.suggest_categorical('criterion', ['gini', 'entropy'])  # Only for classification
-                model = RandomForestClassifier(random_state=iteration_seed, **params)
+            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
         elif model_type == 'svm':
-            params = {}
-            if args.tuning:
-                params['C'] = trial.suggest_float('C', 0.1, 100, log=True)
-                params['gamma'] = trial.suggest_categorical('gamma', ['scale', 'auto'])  # Allow automatic gamma scaling
-                params['kernel'] = trial.suggest_categorical('kernel', ['rbf', 'poly', 'sigmoid'])
-
-                if params['kernel'] == 'poly':  
-                    params['degree'] = trial.suggest_int('degree', 2, 5)  # Poly kernel degree (2-5 common in literature)
-                    params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)  # Bias term for 'poly' and 'sigmoid'
-                
-                if params['kernel'] == 'sigmoid':
-                    params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)  
-
-            if args.dataset == 'QM9':
-                model = SVR(**params)
-            else:
-                model = SVC(**params)
+            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
         elif model_type == 'xgboost':
-            params = {}
-            if args.tuning:
-                params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-                params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
-                params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
-                params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-                params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)  # Feature sampling per tree
-                params['colsample_bylevel'] = trial.suggest_float('colsample_bylevel', 0.5, 1.0)  # Feature sampling per level
-                params['min_child_weight'] = trial.suggest_int('min_child_weight', 1, 10)  # Minimum samples for a split
-                params['gamma'] = trial.suggest_float('gamma', 0, 5.0)  # L1 regularization for pruning
-                params['reg_alpha'] = trial.suggest_float('reg_alpha', 0.0, 1.0)  # L1 regularization
-                params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)  # L2 regularization
-
-            if args.dataset == 'QM9':
-                model = XGBRegressor(random_state=iteration_seed, **params)
-            else:
-                model = XGBClassifier(random_state=iteration_seed, **params)
+            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
         elif model_type == 'gauche':
-            params = {}
-            if args.tuning:
-                kernel_name = trial.suggest_categorical('kernel', [
-                    'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
-                    'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
-                    'Rand', 'RogersTanimoto', 'RussellRao', 'Sogenfrei', 'SokalSneath'
-                ])
+            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
-                # Kernel mapping
-                kernel_map = {
-                    'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
-                    'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
-                    'Dice': gauche.kernels.fingerprint_kernels.dice_kernel.DiceKernel,
-                    'Faith': gauche.kernels.fingerprint_kernels.faith_kernel.FaithKernel,
-                    'Forbes': gauche.kernels.fingerprint_kernels.forbes_kernel.ForbesKernel,
-                    'InnerProduct': gauche.kernels.fingerprint_kernels.inner_product_kernel.InnerProductKernel,
-                    'Intersection': gauche.kernels.fingerprint_kernels.intersection_kernel.IntersectionKernel,
-                    'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
-                    'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
-                    'Rand': gauche.kernels.fingerprint_kernels.rand_kernel.RandKernel,
-                    'RogersTanimoto': gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel.RogersTanimotoKernel,
-                    'RussellRao': gauche.kernels.fingerprint_kernels.russell_rao_kernel.RussellRaoKernel,
-                    'Sogenfrei': gauche.kernels.fingerprint_kernels.sogenfrei_kernel.SogenfreiKernel,
-                    'SokalSneath': gauche.kernels.fingerprint_kernels.sokal_sneath_kernel.SokalSneathKernel
-                }
-            return run_gauche(args, x_train, x_test, y_train, y_test, s, iteration, rep)
-
-        # TODO: DNN for classification
-        # TODO: reduce number of print statements, find correct amount of epochs
-        # Original source used 100 epochs
-        # TODO: consistent use of single and double quotations
         elif model_type == "dnn":
-            if args.tuning:
-                params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [32, 64, 128, 256, 512, 1024, 2048, 4096])
-                params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128, 256, 512, 1024, 2048, 4096])
-                params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh', 'softmax'])
-            else:
-                params['hidden_size1'], params['hidden_size2'] = 128, 64  # Default values if no tuning
-                params['activation'] = 'relu'
-
-            activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh(), 'softmax': nn.Softmax(dim=1)}
-            activation = activation_map[params['activation']]
-
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-
-            if args.dataset == 'QM9':
-                model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
-            else:
-                model = DNNClassificationModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
-            
-            if args.bayesian_transformation:
-                model = apply_bayesian_transformation(model)
-
-            model.activation = activation
-            model.to(device)
-
-            criterion = nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
-
-            model.eval()
-            with torch.no_grad():
-                y_pred_tensor = model(x_test_tensor).cpu().numpy()
-            y_pred = y_pred_tensor.flatten()
-
-            # TODO: may need to modify save paths and such 
-            if args.loss_landscape:
-                loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, args.loss_landscape)
+            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
         elif model_type == "lgb":
-            params = {}
-            if args.tuning:
-                params['num_leaves'] = trial.suggest_int('num_leaves', 10, 200)
-                params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-                params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
-                params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
-                params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
-                params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-                params['min_child_samples'] = trial.suggest_int('min_child_samples', 1, 50)
+            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
 
-            param_dict = {
-                'objective': 'regression' if args.dataset == 'QM9' else 'binary',
-                'metric': 'r2' if args.dataset == 'QM9' else 'binary_logloss',  # Ensure metric is defined
-                'random_state': iteration_seed
-            }
-            param_dict.update(params)
+        elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
+            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial)
 
-            # Create LightGBM datasets
-            train_data = lgb.Dataset(x_train, label=y_train)
-
-            # Train the model WITHOUT early stopping
-            # TODO: does this work with classification
-            model = lgb.train(
-                param_dict,
-                train_data,
-                num_boost_round=100
-            )
-
-            # Save the trained model
-            model.save_model(f"lgb_model_{iteration_seed}.txt")
-
-            # Make predictions
-            y_pred = model.predict(x_test)
-
-        elif model_type == "mlp":
-            if args.tuning:
-                params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256, 512, 1024])
-                params['num_hidden_layers'] = trial.suggest_int('num_hidden_layers', 1, 5)
-                params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
-                params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-            else:
-                params['hidden_size'], params['num_hidden_layers'], params['dropout_rate'], params['lr'] = 128, 2, 0.2, 0.001
-
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-
-            if args.dataset == 'QM9':  # Regression
-                y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-                y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-            else:  # Classification
-                y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
-                y_test_tensor = torch.tensor(y_test, dtype=torch.long).to(device)
-
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-            test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=32, shuffle=False)
-
-            if args.dataset == 'QM9':
-                model = MLPRegressor(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_hidden_layers=params['num_hidden_layers'],
-                    dropout_rate=params['dropout_rate']
-                )
-                criterion = nn.MSELoss()
-            else:
-                model = MLPClassifier(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_hidden_layers=params['num_hidden_layers'],
-                    num_classes=len(set(y_train)),  # Auto-detect number of classes
-                    dropout_rate=params['dropout_rate']
-                )
-                criterion = nn.CrossEntropyLoss()
-
-            if args.bayesian_transformation:
-                model = apply_bayesian_transformation(model)
-
-            model.to(device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
-
-            train_mlp(model, train_loader, train_loader, epochs=100, lr=params['lr'])
-
-            # Use predict_mlp instead of manual prediction loop
-            y_pred_tensor = predict_mlp(model, test_loader)
-            
-            if args.dataset != 'QM9':  # Convert probabilities to class predictions for classification
-                y_pred = np.argmax(y_pred_tensor, axis=1)
-            else:
-                y_pred = np.array(y_pred_tensor).flatten()
-
-        # TODO: make sure this is only smiles
-        elif model_type == "rnn" or model_type == "gru":
-            if args.tuning:
-                params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
-                params['num_layers'] = trial.suggest_int('num_layers', 1, 3)
-                params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
-                params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-            else:
-                params['hidden_size'], params['num_layers'], params['dropout_rate'], params['lr'] = 128, 1, 0.2, 0.001
-
-            # TODO: need to check if long or float for classifications - ideally it should be the same
-            if args.dataset == 'QM9':  # Regression
-                y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-                y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-            else:  # Classification
-                y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
-                y_test_tensor = torch.tensor(y_test, dtype=torch.long).to(device)
-
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).unsqueeze(1).to(device)  # Add sequence dimension
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).unsqueeze(1).to(device)    # Add sequence dimension
-
-            # Create data loaders
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-            test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=32, shuffle=False)
-
-            # Choose RNN or GRU
-            if args.dataset == 'QM9':
-                model = RNNRegressionModel(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_layers=params['num_layers']
-                ) if model_type == "rnn" else GRURegressionModel(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_layers=params['num_layers']
-                )
-                criterion = nn.MSELoss()
-            else:
-                model = RNNClassificationModel(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_layers=params['num_layers'],
-                    num_classes=len(set(y_train))
-                ) if model_type == "rnn" else GRUClassificationModel(
-                    input_size=x_train.shape[1],
-                    hidden_size=params['hidden_size'],
-                    num_layers=params['num_layers'],
-                    num_classes=len(set(y_train))
-                )
-                criterion = nn.CrossEntropyLoss()
-
-            model.to(device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
-
-            trainer = ModelTrainer(model, lr=params['lr'])
-            trainer.train(train_loader, train_loader, n_epochs=100)
-
-            # Predict using the trained model
-            y_pred_tensor = trainer.validate(test_loader)[1]  # Extract predictions
-            
-            # Convert probabilities to class labels if classification
-            if args.dataset != 'QM9':
-                y_pred = np.argmax(y_pred_tensor, axis=1)
-            else:
-                y_pred = np.array(y_pred_tensor).flatten()
-
-        # TODO: potentially get rid of mtl, residual_mlp, and factorization_mlp
-        elif model_type == "mtl":
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-
-            model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128)
-            
-            if args.bayesian_transformation:
-                model = apply_bayesian_transformation(model)
-
-            model.to(device)
-
-            criterion = nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
-
-            model.eval()
-            with torch.no_grad():
-                y_pred_tensor = model(x_test_tensor).cpu().numpy()
-            y_pred = y_pred_tensor.squeeze()
-
-            print("y_test shape:", y_test.shape)
-            print("y_pred shape:", y_pred.shape)
-
-            print("x_test_tensor shape:", x_test_tensor.shape)
-            print("y_test_tensor shape:", y_test_tensor.shape)
-
-        elif model_type == "residual_mlp":
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-
-            model = ResidualMLP(input_size=x_train.shape[1], hidden_size=128, num_layers=3)
-
-            if args.bayesian_transformation:
-                model = apply_bayesian_transformation(model)
-
-            model.to(device)
-
-            criterion = nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
-
-            model.eval()
-            with torch.no_grad():
-                y_pred_tensor = model(x_test_tensor).cpu().numpy()
-            y_pred = y_pred_tensor.flatten()
-
-        elif model_type == "factorization_mlp":
-            x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-            x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-            y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-
-            train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-
-            model = FactorizationMLP(input_size=x_train.shape[1], hidden_size=128, factor_size=16)
-
-            if args.bayesian_transformation:
-                model = apply_bayesian_transformation(model)
-
-            model.to(device)
-
-            criterion = nn.MSELoss()
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-            train_dnn(model, train_loader, train_loader, criterion, optimizer, device, args.epochs)
-
-            model.eval()
-            with torch.no_grad():
-                y_pred_tensor = model(x_test_tensor).cpu().numpy()
-            y_pred = y_pred_tensor.flatten()
-
-
-        elif model_type == 'custom':
-            return run_custom_model(x_train, x_test, y_train, False, None, args.dataset, args.distribution)
-
-        else:
-            raise ValueError(f"Unsupported model_type: {model_type}")
-
-        if model_type not in ['lgb', 'dnn', 'mlp', 'rnn', 'gru', 'mtl', 'residual_mlp', 'factorization_mlp']:
-            model.fit(x_train, y_train)
-            y_pred = model.predict(x_test)
-
-        if args.shap:
-            try:
-                explainer = None
-                shap_values = None
-                if model_type in ['rf', 'xgboost', 'lgb']:
-                    explainer = shap.TreeExplainer(model)
-                    shap_values = explainer.shap_values(x_test)
-                if shap_values is not None:
-                    save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, model_type, iteration, rep)
-            except Exception as e:
-                print(f"SHAP calculation failed for {model_type}: {e}")
-
-        metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-
-        save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-        return metrics[3] if args.dataset == 'QM9' else metrics[0]
+        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles', 'multiple_smiles']:
+            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial)
 
     if args.tuning:
         study = optuna.create_study(direction="minimize")
+        # TODO: Number of trials in hyperparameter tuning!!!
         study.optimize(black_box_function, n_trials=7)  # Adjust `n_trials` as needed
 
         best_params = study.best_params
@@ -1472,6 +747,7 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         'noise': s > 0,
         'train_count': len(train_idx),
         'test_count': len(test_idx),
+        'val_count': len(val_idx),
         'max_vocab': args.max_vocab,
         'iteration_seed': iteration_seed,
         'molecular_representations': args.molecular_representations,
@@ -1519,14 +795,20 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
 
         for model in args.models:
             if model not in graph_models:
-                # TODO: mlp, remove try to see specific error ADD THIS BACK IN
+                # TODO: remove this for debugging purposes
                 # try: 
+                x_val, y_val = None, None
+                if model in neural_nets:
+                    x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+
                 print(f"model: {model}")
                 run_model(
                     x_train, 
                     y_train, 
                     x_test, 
                     y_test, 
+                    x_val,
+                    y_val,
                     model, 
                     args, 
                     iteration_seed,
@@ -1605,3 +887,4 @@ if __name__ == "__main__":
 # TODO: sanity check to see if val set/epochs can be used for any others
 # What's the best practice - if RF doesn't use a val set should the val be merged with training? 
 # TODO: properly format all print statements
+# TODO: check if things in Cargo.toml are necessary

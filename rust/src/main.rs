@@ -13,6 +13,7 @@ use std::io::Write;
 use std::cmp::Reverse;
 use std::io::BufWriter;
 use std::fs::OpenOptions;
+use rand::SeedableRng;
 
 extern crate rdkit_sys;
 
@@ -41,14 +42,13 @@ impl SmilesTokenizer {
     }
 }
 
-// TODO: get rust on ARC, right now I'm just copying the target file
-
 #[derive(Deserialize, Debug)]
 struct Config {
     sample_size: usize,
     noise: bool,
     train_count: usize, 
     test_count: usize,
+    val_count: usize,
     max_vocab: usize,
     iteration_seed: usize,
     molecular_representations: Vec<String>,
@@ -114,7 +114,7 @@ fn generate_noise_by_indices(
                 mu + sigma * (beta.sample(&mut rng) - 0.5) * 2.0
             }
             NoiseDistribution::Uniform => {
-                let uniform = Uniform::new_inclusive(mu - sigma, mu + sigma);
+                let uniform = Uniform::new_inclusive(mu - sigma, mu + sigma).unwrap();
                 uniform.sample(&mut rng)
             }
         };
@@ -126,8 +126,6 @@ fn generate_noise_by_indices(
     noise_map
 }
 
-// TODO: test will all molecular_representations, then delete extraneous print statements
-// TODO: test the smiles that are failing, are they flawed or is my process not accepting certain strings?
 fn read_smiles_data(
     reader: &mut BufReader<File>,
     molecular_representations: Vec<std::string::String>,
@@ -202,7 +200,6 @@ fn read_smiles_data(
     Some(smiles_data)
 }
 
-// TODO: Remove logging when you're done testing all molecular representations
 fn write_data(
     reader: &mut BufReader<File>,
     writer: &mut BufWriter<File>,
@@ -521,9 +518,11 @@ fn preprocess_data(
 
     let train_file_path = format!("train_{}.mmap", config.iteration_seed);
     let test_file_path = format!("test_{}.mmap", config.iteration_seed);
+    let val_file_path = format!("val_{}.mmap", config.iteration_seed);
 
     let train_file = File::open(&train_file_path)?;
     let test_file = File::open(&test_file_path)?;
+    let val_file = File::open(&val_file_path)?;
 
     let mut train_reader = BufReader::new(train_file);
     let mut train_writer = BufWriter::new(
@@ -546,6 +545,30 @@ fn preprocess_data(
         vocab_size,
         max_sequence_length,
         config.train_count,
+        config.logging,
+    )?;
+
+    let mut val_reader = BufReader::new(val_file);
+    let mut val_writer = BufWriter::new(
+        OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&val_file_path)
+            .unwrap()
+    );
+    val_reader.seek(SeekFrom::Start(0))?;
+    write_data(
+        &mut val_reader,
+        &mut val_writer,
+        config,
+        mean,
+        std_dev,
+        noise_map,
+        &tokenizer,
+        vocab,
+        vocab_size,
+        max_sequence_length,
+        config.val_count,
         config.logging,
     )?;
 
@@ -675,7 +698,6 @@ fn main() -> io::Result<()> {
     let (mean, std_dev, vocab_size, vocab, max_sequence_length) =
         generate_aggregate_stats(&config, &noise_map)?;
 
-    // println!("Starting data preprocessing...");
     preprocess_data(
         &config,
         mean,
