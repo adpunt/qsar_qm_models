@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #vis.vega-embed {
+      width: 100%;
+      display: flex;
+    }
+
+    #vis.vega-embed details,
+    #vis.vega-embed details summary {
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-lite@5.20.1"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+</head>
+<body>
+  <div id="vis"></div>
+  <script>
+    (function(vegaEmbed) {
+      var spec = {"config": {"view": {"continuousWidth": 300, "continuousHeight": 300}}, "layer": [{"mark": {"type": "area", "opacity": 0.2}, "encoding": {"color": {"field": "rep", "title": "Representation", "type": "nominal"}, "strokeDash": {"field": "model", "title": "Model", "type": "nominal"}, "x": {"field": "sigma", "title": "Sigma (Noise Level)", "type": "quantitative"}, "y": {"field": "lower_bound", "type": "quantitative"}, "y2": {"field": "upper_bound"}}}, {"mark": {"type": "line", "point": true}, "encoding": {"color": {"field": "rep", "title": "Representation", "type": "nominal"}, "strokeDash": {"field": "model", "title": "Model", "type": "nominal"}, "x": {"field": "sigma", "title": "Sigma (Noise Level)", "type": "quantitative"}, "y": {"field": "mean", "scale": {"domain": [0, 1]}, "title": "Mean R\u00b2 Score", "type": "quantitative"}}}], "data": {"name": "data-c7c421fdae7256af32a27cdcd83dceb7"}, "height": 500, "title": "R\u00b2 vs. Sigma (Sample Size: 20000)", "width": 800, "$schema": "https://vega.github.io/schema/vega-lite/v5.20.1.json", "datasets": {"data-c7c421fdae7256af32a27cdcd83dceb7": [{"sample_size": 20000, "sigma": 0.0, "rep": "ecfp4", "model": "rf", "mean": 0.8012399153037835, "ci": 0.021074821869313524, "lower_bound": 0.7801650934344699, "upper_bound": 0.822314737173097}, {"sample_size": 20000, "sigma": 0.0, "rep": "ecfp4", "model": "xgboost", "mean": 0.791367769241333, "ci": 0.018436009945473578, "lower_bound": 0.7729317592958594, "upper_bound": 0.8098037791868066}, {"sample_size": 20000, "sigma": 0.0, "rep": "smiles", "model": "rf", "mean": 0.8195363654935758, "ci": 0.016045576334988494, "lower_bound": 0.8034907891585873, "upper_bound": 0.8355819418285643}, {"sample_size": 20000, "sigma": 0.0, "rep": "smiles", "model": "xgboost", "mean": 0.8169926762580871, "ci": 0.015166321047201734, "lower_bound": 0.8018263552108854, "upper_bound": 0.8321589973052889}, {"sample_size": 20000, "sigma": 0.0, "rep": "sns", "model": "rf", "mean": 0.6868035590708473, "ci": 0.028485661226391134, "lower_bound": 0.6583178978444562, "upper_bound": 0.7152892202972385}, {"sample_size": 20000, "sigma": 0.0, "rep": "sns", "model": "xgboost", "mean": 0.7194147348403931, "ci": 0.022947293361947556, "lower_bound": 0.6964674414784455, "upper_bound": 0.7423620282023407}, {"sample_size": 20000, "sigma": 0.5, "rep": "ecfp4", "model": "rf", "mean": 0.665033921584477, "ci": 0.017995960208517608, "lower_bound": 0.6470379613759595, "upper_bound": 0.6830298817929946}, {"sample_size": 20000, "sigma": 0.5, "rep": "ecfp4", "model": "xgboost", "mean": 0.6578841805458069, "ci": 0.020496105765645305, "lower_bound": 0.6373880747801616, "upper_bound": 0.6783802863114522}, {"sample_size": 20000, "sigma": 0.5, "rep": "smiles", "model": "rf", "mean": 0.6817764460175392, "ci": 0.020453289330989964, "lower_bound": 0.6613231566865492, "upper_bound": 0.7022297353485292}, {"sample_size": 20000, "sigma": 0.5, "rep": "smiles", "model": "xgboost", "mean": 0.689691710472107, "ci": 0.013410650847100233, "lower_bound": 0.6762810596250067, "upper_bound": 0.7031023613192072}, {"sample_size": 20000, "sigma": 0.5, "rep": "sns", "model": "rf", "mean": 0.5524524076305536, "ci": 0.031149934426238104, "lower_bound": 0.5213024732043154, "upper_bound": 0.5836023420567917}, {"sample_size": 20000, "sigma": 0.5, "rep": "sns", "model": "xgboost", "mean": 0.6067096948623657, "ci": 0.018320086920787907, "lower_bound": 0.5883896079415778, "upper_bound": 0.6250297817831536}, {"sample_size": 20000, "sigma": 1.0, "rep": "ecfp4", "model": "rf", "mean": 0.4244089329813356, "ci": 0.02802683813313083, "lower_bound": 0.39638209484820475, "upper_bound": 0.4524357711144664}, {"sample_size": 20000, "sigma": 1.0, "rep": "ecfp4", "model": "xgboost", "mean": 0.42671674489974976, "ci": 0.01666383862631426, "lower_bound": 0.4100529062734355, "upper_bound": 0.443380583526064}, {"sample_size": 20000, "sigma": 1.0, "rep": "smiles", "model": "rf", "mean": 0.4334388369304879, "ci": 0.03576139211053068, "lower_bound": 0.3976774448199572, "upper_bound": 0.4692002290410186}, {"sample_size": 20000, "sigma": 1.0, "rep": "smiles", "model": "xgboost", "mean": 0.45557632446289065, "ci": 0.03271599697851228, "lower_bound": 0.42286032748437835, "upper_bound": 0.48829232144140294}, {"sample_size": 20000, "sigma": 1.0, "rep": "sns", "model": "rf", "mean": 0.31177536669692096, "ci": 0.028994283340183516, "lower_bound": 0.28278108335673746, "upper_bound": 0.34076965003710447}, {"sample_size": 20000, "sigma": 1.0, "rep": "sns", "model": "xgboost", "mean": 0.40412001609802245, "ci": 0.019088740134409667, "lower_bound": 0.3850312759636128, "upper_bound": 0.4232087562324321}, {"sample_size": 20000, "sigma": 1.5, "rep": "ecfp4", "model": "rf", "mean": 0.24022656778037615, "ci": 0.04224284817786388, "lower_bound": 0.19798371960251226, "upper_bound": 0.28246941595824004}, {"sample_size": 20000, "sigma": 1.5, "rep": "ecfp4", "model": "xgboost", "mean": 0.22975754737853998, "ci": 0.028706404212055957, "lower_bound": 0.20105114316648404, "upper_bound": 0.25846395159059593}, {"sample_size": 20000, "sigma": 1.5, "rep": "smiles", "model": "rf", "mean": 0.24490201582028676, "ci": 0.03622081402336634, "lower_bound": 0.2086812017969204, "upper_bound": 0.2811228298436531}, {"sample_size": 20000, "sigma": 1.5, "rep": "smiles", "model": "xgboost", "mean": 0.27902204990386964, "ci": 0.03314717756131501, "lower_bound": 0.24587487234255462, "upper_bound": 0.31216922746518466}, {"sample_size": 20000, "sigma": 1.5, "rep": "sns", "model": "rf", "mean": 0.1206971041726856, "ci": 0.0346626058863922, "lower_bound": 0.08603449828629339, "upper_bound": 0.1553597100590778}, {"sample_size": 20000, "sigma": 1.5, "rep": "sns", "model": "xgboost", "mean": 0.24686235189437866, "ci": 0.016147778089302435, "lower_bound": 0.23071457380507623, "upper_bound": 0.2630101299836811}, {"sample_size": 20000, "sigma": 2.0, "rep": "ecfp4", "model": "rf", "mean": 0.13312496806011895, "ci": 0.04295124797204424, "lower_bound": 0.0901737200880747, "upper_bound": 0.1760762160321632}, {"sample_size": 20000, "sigma": 2.0, "rep": "ecfp4", "model": "xgboost", "mean": 0.12497342824935906, "ci": 0.04183449516088143, "lower_bound": 0.08313893308847763, "upper_bound": 0.16680792341024048}, {"sample_size": 20000, "sigma": 2.0, "rep": "smiles", "model": "rf", "mean": 0.12883001870204064, "ci": 0.04663310588734371, "lower_bound": 0.08219691281469693, "upper_bound": 0.17546312458938434}, {"sample_size": 20000, "sigma": 2.0, "rep": "smiles", "model": "xgboost", "mean": 0.16355516910552972, "ci": 0.03251734725925094, "lower_bound": 0.13103782184627877, "upper_bound": 0.19607251636478068}, {"sample_size": 20000, "sigma": 2.0, "rep": "sns", "model": "rf", "mean": 0.0092312467122666, "ci": 0.026720337168290607, "lower_bound": -0.01748909045602401, "upper_bound": 0.035951583880557206}, {"sample_size": 20000, "sigma": 2.0, "rep": "sns", "model": "xgboost", "mean": 0.14888619184494017, "ci": 0.014136842816531789, "lower_bound": 0.13474934902840838, "upper_bound": 0.16302303466147197}]}};
+      var embedOpt = {"mode": "vega-lite"};
+
+      function showError(el, error){
+          el.innerHTML = ('<div style="color:red;">'
+                          + '<p>JavaScript Error: ' + error.message + '</p>'
+                          + "<p>This usually means there's a typo in your chart specification. "
+                          + "See the javascript console for the full traceback.</p>"
+                          + '</div>');
+          throw error;
+      }
+      const el = document.getElementById('vis');
+      vegaEmbed("#vis", spec, embedOpt)
+        .catch(error => showError(el, error));
+    })(vegaEmbed);
+
+  </script>
+</body>
+</html>

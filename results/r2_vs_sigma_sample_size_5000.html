@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #vis.vega-embed {
+      width: 100%;
+      display: flex;
+    }
+
+    #vis.vega-embed details,
+    #vis.vega-embed details summary {
+      position: relative;
+    }
+  </style>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-lite@5.20.1"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+</head>
+<body>
+  <div id="vis"></div>
+  <script>
+    (function(vegaEmbed) {
+      var spec = {"config": {"view": {"continuousWidth": 300, "continuousHeight": 300}}, "layer": [{"mark": {"type": "area", "opacity": 0.2}, "encoding": {"color": {"field": "rep", "title": "Representation", "type": "nominal"}, "strokeDash": {"field": "model", "title": "Model", "type": "nominal"}, "x": {"field": "sigma", "title": "Sigma (Noise Level)", "type": "quantitative"}, "y": {"field": "lower_bound", "type": "quantitative"}, "y2": {"field": "upper_bound"}}}, {"mark": {"type": "line", "point": true}, "encoding": {"color": {"field": "rep", "title": "Representation", "type": "nominal"}, "strokeDash": {"field": "model", "title": "Model", "type": "nominal"}, "x": {"field": "sigma", "title": "Sigma (Noise Level)", "type": "quantitative"}, "y": {"field": "mean", "scale": {"domain": [0, 1]}, "title": "Mean R\u00b2 Score", "type": "quantitative"}}}], "data": {"name": "data-1f0ff5a59b79cc648ec8904d5440cc57"}, "height": 500, "title": "R\u00b2 vs. Sigma (Sample Size: 5000)", "width": 800, "$schema": "https://vega.github.io/schema/vega-lite/v5.20.1.json", "datasets": {"data-1f0ff5a59b79cc648ec8904d5440cc57": [{"sample_size": 5000, "sigma": 0.0, "rep": "ecfp4", "model": "rf", "mean": 0.7510138602496459, "ci": 0.0, "lower_bound": 0.7510138602496459, "upper_bound": 0.7510138602496459}, {"sample_size": 5000, "sigma": 0.0, "rep": "ecfp4", "model": "xgboost", "mean": 0.7754235863685608, "ci": 0.0, "lower_bound": 0.7754235863685608, "upper_bound": 0.7754235863685608}, {"sample_size": 5000, "sigma": 0.0, "rep": "smiles", "model": "rf", "mean": 0.780664292382822, "ci": 0.0, "lower_bound": 0.780664292382822, "upper_bound": 0.780664292382822}, {"sample_size": 5000, "sigma": 0.0, "rep": "smiles", "model": "xgboost", "mean": 0.7927584648132324, "ci": 0.0, "lower_bound": 0.7927584648132324, "upper_bound": 0.7927584648132324}, {"sample_size": 5000, "sigma": 0.0, "rep": "sns", "model": "rf", "mean": 0.6549926133623438, "ci": 0.0, "lower_bound": 0.6549926133623438, "upper_bound": 0.6549926133623438}, {"sample_size": 5000, "sigma": 0.0, "rep": "sns", "model": "xgboost", "mean": 0.6675375699996948, "ci": 0.0, "lower_bound": 0.6675375699996948, "upper_bound": 0.6675375699996948}]}};
+      var embedOpt = {"mode": "vega-lite"};
+
+      function showError(el, error){
+          el.innerHTML = ('<div style="color:red;">'
+                          + '<p>JavaScript Error: ' + error.message + '</p>'
+                          + "<p>This usually means there's a typo in your chart specification. "
+                          + "See the javascript console for the full traceback.</p>"
+                          + '</div>');
+          throw error;
+      }
+      const el = document.getElementById('vis');
+      vegaEmbed("#vis", spec, embedOpt)
+        .catch(error => showError(el, error));
+    })(vegaEmbed);
+
+  </script>
+</body>
+</html>
