@@ -31,28 +31,16 @@ from torchhk import transform_model
 import shap
 import lightgbm as lgb
 from botorch import fit_gpytorch_model
+import gauche
+from gauche.kernels.fingerprint_kernels import *
+from gauche.kernels.graph_kernels import *
+from gauche import SIGP, NonTensorialInputs
 
 from utils import * 
 
 # TODO: reorder imports
 
 # TODO: potentially have to specify different DataLoader
-
-# from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel
-# from gauche.kernels.fingerprint_kernels.braun_blanquet_kernel import BraunBlanquetKernel
-# from gauche.kernels.fingerprint_kernels.dice_kernel import DiceKernel
-# from gauche.kernels.fingerprint_kernels.faith_kernel import FaithKernel
-# from gauche.kernels.fingerprint_kernels.forbes_kernel import ForbesKernel
-# from gauche.kernels.fingerprint_kernels.inner_product_kernel import InnerProductKernel
-# from gauche.kernels.fingerprint_kernels.intersection_kernel import IntersectionKernel
-# from gauche.kernels.fingerprint_kernels.minmax_kernel import MinMaxKernel
-# from gauche.kernels.fingerprint_kernels.otsuka_kernel import OtsukaKernel
-# from gauche.kernels.fingerprint_kernels.rand_kernel import RandKernel
-# from gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel import RogersTanimotoKernel
-# from gauche.kernels.fingerprint_kernels.russell_rao_kernel import RussellRaoKernel
-# from gauche.kernels.fingerprint_kernels.sogenfrei_kernel import SogenfreiKernel
-# from gauche.kernels.fingerprint_kernels.sokal_sneath_kernel import SokalSneathKernel
-from gauche.kernels.fingerprint_kernels import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -436,7 +424,6 @@ class MLPClassifier(nn.Module):
         x = self.output_layer(x)
         return self.softmax(x)  # Final activation for classification
 
-# define GP model from Gauche library
 class Gauche(gpytorch.models.ExactGP):
   def __init__(self, train_x, train_y, likelihood, kernel):
     super(Gauche, self).__init__(train_x, train_y, likelihood)
@@ -479,158 +466,6 @@ class Gauche(gpytorch.models.ExactGP):
     covar_x = self.covar_module(x)
     return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
-# TODO: fix imports
-# GTAT from https://github.com/kouzheng
-# class GTATConv(MessagePassing):
-#     _alpha: OptTensor
-
-#     def __init__(self, in_channels: int, out_channels: int, heads: int,
-#                  topology_channels:int = 15,
-#                  concat: bool = True, negative_slope: float = 0.2,
-#                  dropout: float = 0., add_self_loops: bool = True,
-#                  bias: bool = True, share_weights: bool = False, **kwargs):
-#         super(GTATConv, self).__init__(node_dim=0, **kwargs)
-
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.topology_channels = topology_channels
-#         self.heads = heads
-#         self.concat = concat
-#         self.negative_slope = negative_slope
-#         self.dropout = dropout
-#         self.add_self_loops = add_self_loops
-#         self.share_weights = share_weights
-#         self.lin_l = Linear(in_channels, heads * out_channels, bias=bias,
-#                             weight_initializer='glorot')
-        
-#         if share_weights:
-#             self.lin_r = self.lin_l
-#         else:
-#             self.lin_r = Linear(in_channels, heads * out_channels, bias=bias,
-#                                 weight_initializer='glorot')
-        
-        
-
-#         self.att = Parameter(torch.Tensor(1, heads, out_channels))
-
-#         self.att2 = Parameter(torch.Tensor(1, heads, self.topology_channels))
-
-#         if bias and concat:
-#             self.bias = Parameter(torch.Tensor(heads * out_channels))
-#         elif bias and not concat:
-#             self.bias = Parameter(torch.Tensor(out_channels))
-#         else:
-#             self.register_parameter('bias', None)
-
-#         self._alpha1 = None
-#         self._alpha2 = None
-
-#         self.bias2 =  Parameter(torch.Tensor(self.topology_channels))
-
-#         self.reset_parameters()
-
-#     def reset_parameters(self):
-#         self.lin_l.reset_parameters()
-#         self.lin_r.reset_parameters()
-#         glorot(self.att)
-#         glorot(self.att2)
-#         zeros(self.bias)
-#         zeros(self.bias2)
-
-#     def forward(self, x: Union[Tensor, PairTensor], edge_index: Adj,
-#                 topology: Tensor,
-#                 size: Size = None, return_attention_weights: bool = None):
-#         # type: (Union[Tensor, PairTensor], Tensor , Tensor, Size, NoneType) -> Tensor  # noqa
-#         # type: (Union[Tensor, PairTensor], SparseTensor, Size, NoneType) -> Tensor  # noqa
-#         # type: (Union[Tensor, PairTensor], Tensor, Size, bool) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
-#         # type: (Union[Tensor, PairTensor], SparseTensor, Size, bool) -> Tuple[Tensor, SparseTensor]  # noqa
-#         r"""
-#         Args:
-#             return_attention_weights (bool, optional): If set to :obj:`True`,
-#                 will additionally return the tuple
-#                 :obj:`(edge_index, attention_weights)`, holding the computed
-#                 attention weights for each edge. (default: :obj:`None`)
-#         """
-#         H, C = self.heads, self.out_channels
-
-#         x_l: OptTensor = None
-#         x_r: OptTensor = None
-#         if isinstance(x, Tensor):
-#             assert x.dim() == 2
-#             x_l = self.lin_l(x).view(-1, H, C)  #(N , heads, features)
-#             if self.share_weights:
-#                 x_r = x_l
-#             else:
-#                 x_r = self.lin_r(x).view(-1, H, C)
-
-
-#         assert x_l is not None
-#         assert x_r is not None
-#         topology = topology.unsqueeze(dim = 1)
-#         topology = topology.repeat(1, self.heads, 1)
-#         x_l = torch.cat((x_l,topology), dim = -1)
-#         x_r = torch.cat((x_r,topology), dim = -1)
-
-#         if self.add_self_loops:
-#             if isinstance(edge_index, Tensor):
-#                 num_nodes = x_l.size(0)
-#                 if x_r is not None:
-#                     num_nodes = min(num_nodes, x_r.size(0))
-#                 if size is not None:
-#                     num_nodes = min(size[0], size[1])
-#                 edge_index, _ = remove_self_loops(edge_index)
-#                 edge_index, _ = add_self_loops(edge_index, num_nodes=num_nodes)
-#             # elif isinstance(edge_index, SparseTensor):
-#             #     edge_index = set_diag(edge_index)
-
-#         out_all = self.propagate(edge_index, x=(x_l, x_r), size=size)
-#         out = out_all[ : , : , :self.out_channels ]
-#         out2 = out_all[ : , : , self.out_channels:]
-#         alpha1 = self._alpha1
-#         self._alpha1 = None
-#         alpha2 = self._alpha2
-#         self._alpha2 = None
-
-#         if self.concat:
-#             out = out.reshape(-1, self.heads * self.out_channels)
-#         else:
-#             out = out.mean(dim=1)
-
-#         if self.bias is not None:
-#             out += self.bias
-
-#         out2 = out2.mean(dim=1)
-#         out2 += self.bias2
-
-#         if isinstance(return_attention_weights, bool):
-#             assert alpha is not None
-#             if isinstance(edge_index, Tensor):
-#                 return out, (edge_index, alpha)
-#             # elif isinstance(edge_index, SparseTensor):
-#             #     return out, edge_index.set_value(alpha, layout='coo')
-#         else:
-#             return out , out2
-
-#     def message(self, x_j: Tensor, x_i: Tensor, index: Tensor, ptr: OptTensor,
-#                 size_i: Optional[int]) -> Tensor:
-#         x = x_i + x_j
-#         alpha1 = (x[:, :, :self.out_channels] * self.att).sum(dim=-1)
-#         alpha2 = (x[:, :, self.out_channels:] * self.att2).sum(dim=-1)
-#         alpha1 = F.leaky_relu(alpha1 ,self.negative_slope )
-#         alpha2 = F.leaky_relu(alpha2 ,self.negative_slope )
-#         alpha1 = softmax(alpha1, index, ptr, size_i)
-#         alpha2 = softmax(alpha2, index, ptr, size_i)
-#         self._alpha1 = alpha1
-#         self._alpha2 = alpha2
-#         alpha1= F.dropout(alpha1, p=self.dropout, training=self.training)
-#         alpha2= F.dropout(alpha2, p=self.dropout, training=self.training)
-#         return torch.cat((x_j[:, :, :self.out_channels]* alpha2.unsqueeze(-1), x_j[:, :, self.out_channels: ]* alpha1.unsqueeze(-1)) ,dim = -1)
-
-#     def __repr__(self):
-#         return '{}({}, {}, heads={})'.format(self.__class__.__name__,
-#                                              self.in_channels,
-#                                              self.out_channels, self.heads)
-# TODO: test these and get rid of the bad ones, including regular MLPs
 class MTLRegressionModel(nn.Module):
     """Multi-task learning model with shared hidden layers and multiple output heads."""
     def __init__(self, input_size, hidden_size=128, num_tasks=2):
@@ -1275,7 +1110,7 @@ def apply_bayesian_transformation(model):
     )
     return model
 
-def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1316,7 +1151,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1349,11 +1184,11 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         except Exception as e:
             print(f"SHAP calculation failed for svm: {e}")
 
-    save_results(args.filepath, s, iteration_seed, 'svm', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1387,36 +1222,42 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         except Exception as e:
             print(f"SHAP calculation failed for xgboost: {e}")
 
-    save_results(args.filepath, s, iteration_seed, 'xgboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-# TODO: include more hyperparameters to tune
-# TODO: need to implement classification
-def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+# TODO: classification
+def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+    params = {}
+
     if args.tuning:
-        kernel_name = trial.suggest_categorical('kernel', [
+        params['kernel_name'] = trial.suggest_categorical('kernel', [
             'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
             'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
-            'Rand', 'RogersTanimoto', 'RussellRao', 'Sogenfrei', 'SokalSneath'
+            'Rand', 'RogersTanimoto', 'RussellRao', 'Sorgenfrei', 'SokalSneath'
         ])
+        params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
+        params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+    else:
+        params['kernel_name'] = 'Tanimoto'
+        params['outputscale'] = 1.0
+        params['likelihood_noise'] = 1e-3
 
-        kernel_map = {
-            'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
-            'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
-            'Dice': gauche.kernels.fingerprint_kernels.dice_kernel.DiceKernel,
-            'Faith': gauche.kernels.fingerprint_kernels.faith_kernel.FaithKernel,
-            'Forbes': gauche.kernels.fingerprint_kernels.forbes_kernel.ForbesKernel,
-            'InnerProduct': gauche.kernels.fingerprint_kernels.inner_product_kernel.InnerProductKernel,
-            'Intersection': gauche.kernels.fingerprint_kernels.intersection_kernel.IntersectionKernel,
-            'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
-            'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
-            'Rand': gauche.kernels.fingerprint_kernels.rand_kernel.RandKernel,
-            'RogersTanimoto': gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel.RogersTanimotoKernel,
-            'RussellRao': gauche.kernels.fingerprint_kernels.russell_rao_kernel.RussellRaoKernel,
-            'Sogenfrei': gauche.kernels.fingerprint_kernels.sogenfrei_kernel.SogenfreiKernel,
-            'SokalSneath': gauche.kernels.fingerprint_kernels.sokal_sneath_kernel.SokalSneathKernel
-        }
+    kernel_map = {
+        'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
+        'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
+        'Dice': gauche.kernels.fingerprint_kernels.dice_kernel.DiceKernel,
+        'Faith': gauche.kernels.fingerprint_kernels.faith_kernel.FaithKernel,
+        'Forbes': gauche.kernels.fingerprint_kernels.forbes_kernel.ForbesKernel,
+        'InnerProduct': gauche.kernels.fingerprint_kernels.inner_product_kernel.InnerProductKernel,
+        'Intersection': gauche.kernels.fingerprint_kernels.intersection_kernel.IntersectionKernel,
+        'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
+        'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
+        'Rand': gauche.kernels.fingerprint_kernels.rand_kernel.RandKernel,
+        'RogersTanimoto': gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel.RogersTanimotoKernel,
+        'RussellRao': gauche.kernels.fingerprint_kernels.russell_rao_kernel.RussellRaoKernel,
+        'SokalSneath': gauche.kernels.fingerprint_kernels.sokal_sneath_kernel.SokalSneathKernel
+    }
 
     if x_val is not None and y_val is not None:
         x_train = np.vstack((x_train, x_val))
@@ -1426,9 +1267,8 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     x_test_tensor = torch.from_numpy(x_test).double()
     y_train_tensor = torch.from_numpy(y_train).double()
 
-    likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    kernel = gpytorch.kernels.ScaleKernel(kernel_map[kernel_name]())
-    model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel)
+    likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
+    model = Gauche(x_train_tensor, y_train_tensor, likelihood, params['kernel_name'].lower())
 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
@@ -1440,17 +1280,52 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         y_pred = preds.mean.numpy()
         pred_vars = preds.variance.numpy()
 
-    # TODO: this definitely isn't right
-    if args.distribution in ["domain_mpnn", "domain_tanimoto"]:
-        calculate_domain_metrics(y_test, y_pred, domain_labels, target_domain, args.dataset)
-
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration_seed, "gauche", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3]
 
-def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+def train_nn(model, train_loader, val_loader, criterion, optimizer, device, epochs, patience=20, tolerance=0.01):
+    model.to(device)
+    best_loss = float('inf')
+    epochs_no_improve = 0
+
+    for epoch in range(100):  # Max epochs
+        model.train()
+        train_loss = 0
+        for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs, y_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+
+        # Validation
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for X_val, y_val in val_loader:
+                X_val, y_val = X_val.to(device), y_val.to(device)
+                val_outputs = model(X_val)
+                loss = criterion(val_outputs, y_val)
+                val_loss += loss.item()
+
+        # Early stopping check
+        if val_loss < best_loss - tolerance:
+            best_loss = val_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1486,43 +1361,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    best_loss = float('inf')
-    epochs_no_improve = 0
-    patience = 20
-    tolerance = 0.01
-
-    for epoch in range(args.epochs):
-        model.train()
-        train_loss = 0
-        for X_batch, y_batch in train_loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            optimizer.zero_grad()
-            outputs = model(X_batch)
-            loss = criterion(outputs, y_batch)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for X_val, y_val in val_loader or train_loader:
-                X_val, y_val = X_val.to(device), y_val.to(device)
-                val_outputs = model(X_val)
-                loss = criterion(val_outputs, y_val)
-                val_loss += loss.item()
-
-        if val_loss < best_loss - tolerance:
-            best_loss = val_loss
-            epochs_no_improve = 0
-        else:
-            epochs_no_improve += 1
-            if epochs_no_improve >= patience:
-                print(f"Early stopping at epoch {epoch}")
-                break
-
-        if epoch % 5 == 0:
-            print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args.epochs)
 
     model.eval()
     with torch.no_grad():
@@ -1534,11 +1373,12 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration_seed, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+
+def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1565,17 +1405,15 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     model = lgb.train(param_dict, train_data, num_boost_round=100)
 
-    model.save_model(f"lgb_model_{iteration_seed}.txt")
-
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration_seed, "lgb", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, "lgb", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial=None):
+def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1618,7 +1456,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         criterion = nn.MSELoss()
 
     elif model_type == "mtl":
-        model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128)
+        model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128, num_tasks=1)
         criterion = nn.MSELoss()
 
     if args.bayesian_transformation:
@@ -1627,7 +1465,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
-    train_dnn(model, train_loader, val_loader or train_loader, criterion, optimizer, device, args.epochs)
+    train_nn(model, train_loader, val_loader or train_loader, criterion, optimizer, device, args.epochs)
 
     model.eval()
     with torch.no_grad():
@@ -1639,11 +1477,11 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration_seed, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial=None):
+def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
     if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles', 'multiple_smiles']:
         raise ValueError("Invalid model type or representation for RNN/GRU training")
 
@@ -1717,11 +1555,12 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration_seed, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial=None):
+# TODO: actually need to call
+def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     model = load_custom_model(args.model_path)
 
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
@@ -1763,7 +1602,7 @@ def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=logging) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=logging)
 
-    save_results(args.filepath, s, iteration_seed, "custom", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, "custom", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 

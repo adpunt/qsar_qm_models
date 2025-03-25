@@ -455,7 +455,6 @@ def load_custom_model(model_path):
     model.eval()
     return model
 
-
 def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, logging):
     x_data = []
     y_data = []
@@ -587,28 +586,28 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
     def black_box_function(trial=None):
         if model_type == 'rf':
-            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type == 'svm':
-            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type == 'xgboost':
-            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type == 'gauche':
-            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type == "dnn":
-            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type == "lgb":
-            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration_seed, trial)
+            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
-            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial)
+            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles', 'multiple_smiles']:
-            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration_seed, trial)
+            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
     if args.tuning:
         study = optuna.create_study(direction="minimize")
@@ -788,6 +787,8 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
             try:
                 x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
                 x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+
             except Exception as e:
                 print(f"Error with parsing mmap file for {rep} and {model}; more details: {e}")
                 continue
@@ -796,10 +797,6 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
             if model not in graph_models:
                 # TODO: remove this for debugging purposes
                 # try: 
-                x_val, y_val = None, None
-                if model in neural_nets:
-                    x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-
                 print(f"model: {model}")
                 run_model(
                     x_train, 
