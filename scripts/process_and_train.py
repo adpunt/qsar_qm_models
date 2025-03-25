@@ -31,8 +31,7 @@ sys.path.append('../models/')
 sys.path.append('../preprocessing/')
 sys.path.append('../results/')
 
-# TODO: make this go on multiple lines
-from qm_models import *
+from models import *
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(os.path.abspath(__file__))

@@ -1,4 +1,4 @@
-gimport torch
+import torch
 import torch.nn as nn
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_geometric.nn import GCNConv, GINConv, GATv2Conv, global_mean_pool, global_add_pool

@@ -179,3 +179,25 @@ run_model(x_train, y_train, x_test, y_test,
 
 ### Contact
 For questions or issues, please open a GitHub issue or reach out to the repository owner.
+
+
+
+### Installing PyTorch Geometric (macOS / Linux, CPU-only)
+
+After activating your micromamba environment (e.g., `micromamba activate py_rust_env`), install the PyTorch Geometric dependencies using the official wheel index:
+
+```bash
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric \
+  -f https://data.pyg.org/whl/torch-2.5.1+cpu.html
+```
+
+### Installing torch-geometric (CPU-only server, PyTorch 2.5.1)
+
+After setting up your environment and installing PyTorch 2.5.1 (CPU-only), install the compatible PyTorch Geometric packages with:
+
+```bash
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric \
+  -f https://data.pyg.org/whl/torch-2.5.1+cpu.html
+```
+
+If you're using a different version of PyTorch or need CUDA support, update the torch-2.5.1+cpu.html portion of the URL to match your version and CUDA setup. See: https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html
