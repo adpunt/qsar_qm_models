@@ -103,7 +103,7 @@ def parse_arguments():
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--loss-landscape", type=bool, default=False, help="Plot loss landscape (default is False)")
     parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
-    parser.add_argument("--n-trials", type=bool, default=20, help="Number of trials in hyperparameter tuning (default is 100)")
+    parser.add_argument("--n-trials", type=bool, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     return parser.parse_args()
 
 # TODO: add PLEC
@@ -612,7 +612,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
     if args.tuning:
         study = optuna.create_study(direction="minimize")
         # TODO: Number of trials in hyperparameter tuning!!!
-        study.optimize(black_box_function, n_trials=7)  # Adjust `n_trials` as needed
+        study.optimize(black_box_function, n_trials=args.n_trials)  # Adjust `n_trials` as needed
 
         best_params = study.best_params
         print(f"Best params for {model_type} and {rep} with sigma {s}: {best_params}")
@@ -884,3 +884,4 @@ if __name__ == "__main__":
 # What's the best practice - if RF doesn't use a val set should the val be merged with training? 
 # TODO: properly format all print statements
 # TODO: check if things in Cargo.toml are necessary
+# TODO: address numerous server warnings 
