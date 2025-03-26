@@ -40,8 +40,6 @@ from utils import *
 
 # TODO: reorder imports
 
-# TODO: potentially have to specify different DataLoader
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class RNNRegressionModel(nn.Module):
@@ -979,7 +977,6 @@ class DNNClassificationModel(nn.Module):
         x = self.fc3(x)  # No activation here, handled externally based on task
         return x
 
-
 # TODO: save plots to appropriate place
 # TODO: modify this to work with non-DNN if anything else looks promising, right now it will fail
 def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, loss_landscape_flag):
@@ -1114,12 +1111,18 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
     params = {}
 
     if args.tuning:
-        params['max_depth'] = trial.suggest_int('max_depth', 10, 200)
+        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
+        if use_default_max_depth:
+            params['max_depth'] = None
+        else:
+            params['max_depth'] = trial.suggest_int('max_depth', 10, 200)
+
         params['max_features'] = trial.suggest_categorical('max_features', ['sqrt', 1.0, None])
         params['min_samples_leaf'] = trial.suggest_int('min_samples_leaf', 1, 50)
         params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
         params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
         params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
+
 
     if args.dataset == 'QM9':
         model = RandomForestRegressor(random_state=iteration_seed, **params)
@@ -1155,16 +1158,22 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     params = {}
 
     if args.tuning:
-        params['C'] = trial.suggest_float('C', 0.1, 100, log=True)
+        use_default_C = trial.suggest_categorical('use_default_C', [True, False])
+        if use_default_C:
+            params['C'] = None
+        else:
+            params['C'] = trial.suggest_float('C', 0.1, 100, log=True)
+
         params['gamma'] = trial.suggest_categorical('gamma', ['scale', 'auto'])
         params['kernel'] = trial.suggest_categorical('kernel', ['rbf', 'poly', 'sigmoid'])
 
-        if params['kernel'] == 'poly':  
+        if params['kernel'] == 'poly':
             params['degree'] = trial.suggest_int('degree', 2, 5)
             params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
 
         if params['kernel'] == 'sigmoid':
             params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
+
 
     x_train = np.vstack((x_train, x_val))
     y_train = np.hstack((y_train, y_val))
@@ -1192,8 +1201,18 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     params = {}
 
     if args.tuning:
-        params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-        params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
+        if use_default_max_depth:
+            params['max_depth'] = None
+        else:
+            params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
+
+        use_default_learning_rate = trial.suggest_categorical('use_default_learning_rate', [True, False])
+        if use_default_learning_rate:
+            params['learning_rate'] = None
+        else:
+            params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+
         params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
         params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
         params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
@@ -1383,8 +1402,19 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     if args.tuning:
         params['num_leaves'] = trial.suggest_int('num_leaves', 10, 200)
-        params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-        params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+
+        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
+        if use_default_max_depth:
+            params['max_depth'] = None
+        else:
+            params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
+
+        use_default_learning_rate = trial.suggest_categorical('use_default_learning_rate', [True, False])
+        if use_default_learning_rate:
+            params['learning_rate'] = None
+        else:
+            params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+
         params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
         params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
         params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
@@ -1626,10 +1656,6 @@ def get_custom_hyperparameter_bounds(metadata_path):
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON format in metadata file.")
 
-# TODO: consistent naming convention
-
 # TODO: test different loss functions
 # dnn, mlp, mtl, residual_mlp, factorization_mlp, rnn, gru, custom
 # You can customize or swap loss functions (e.g., use nn.L1Loss() instead of MSELoss) depending on your use case.
-
-

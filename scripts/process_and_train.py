@@ -25,6 +25,7 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 import polaris as po
 from polaris.hub.client import PolarisHubClient
 import optuna
+import logging
 
 import sys
 sys.path.append('../models/')
@@ -104,6 +105,7 @@ def parse_arguments():
     parser.add_argument("--loss-landscape", type=bool, default=False, help="Plot loss landscape (default is False)")
     parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
     parser.add_argument("--n-trials", type=bool, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
+    parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
     return parser.parse_args()
 
 # TODO: add PLEC
@@ -582,7 +584,6 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
     return x_data, y_data
 
-# TODO: pass s as an argument 
 def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
     def black_box_function(trial=None):
         if model_type == 'rf':
@@ -611,19 +612,57 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
 
     if args.tuning:
         study = optuna.create_study(direction="minimize")
-        # TODO: Number of trials in hyperparameter tuning!!!
         study.optimize(black_box_function, n_trials=args.n_trials)  # Adjust `n_trials` as needed
 
         best_params = study.best_params
         print(f"Best params for {model_type} and {rep} with sigma {s}: {best_params}")
 
+        # Save the best params as JSON next to the CSV
+        if args.filepath:
+            json_path = os.path.splitext(args.filepath)[0] + ".json"
+            dir_path = os.path.dirname(json_path)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+
+            # Load existing params if file exists
+            if os.path.exists(json_path):
+                with open(json_path, 'r') as f:
+                    all_params = json.load(f)
+            else:
+                all_params = {}
+
+            # Create nested structure if missing
+            if model_type not in all_params:
+                all_params[model_type] = {}
+            all_params[model_type][rep] = best_params
+
+            # Save updated structure
+            with open(json_path, 'w') as f:
+                json.dump(all_params, f, indent=4)
+
+
         res = black_box_function(optuna.trial.FixedTrial(best_params))
 
-    elif args.bootstrapping == 1:
-        black_box_function()
+    elif args.params:
+        with open(args.params, 'r') as f:
+            all_params = json.load(f)
+
+        best_params = all_params[model_type][rep]
+
+        # Reconstruct use_default flags
+        fixed_params = {}
+        for key, value in best_params.items():
+            if value is None:
+                fixed_params[f"use_default_{key}"] = True
+            else:
+                fixed_params[f"use_default_{key}"] = False
+                fixed_params[key] = value
+
+        return black_box_function(optuna.trial.FixedTrial(fixed_params))
 
     else:
-        black_box_function()
+        return black_box_function()
+
 
 def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s):
     for model_type in args.models:
@@ -796,24 +835,24 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         for model in args.models:
             if model not in graph_models:
                 # TODO: remove this for debugging purposes
-                # try: 
-                print(f"model: {model}")
-                run_model(
-                    x_train, 
-                    y_train, 
-                    x_test, 
-                    y_test, 
-                    x_val,
-                    y_val,
-                    model, 
-                    args, 
-                    iteration_seed,
-                    rep,
-                    iteration,
-                    s,
-                )
-                # except Exception as e:
-                #     print(f"Error with {rep} and {model}; more details: {e}")
+                try: 
+                    print(f"model: {model}")
+                    run_model(
+                        x_train, 
+                        y_train, 
+                        x_test, 
+                        y_test, 
+                        x_val,
+                        y_val,
+                        model, 
+                        args, 
+                        iteration_seed,
+                        rep,
+                        iteration,
+                        s,
+                    )
+                except Exception as e:
+                    print(f"Error with {rep} and {model}; more details: {e}")
             else:
                 if args.dataset == 'QM9':
                     run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s)
