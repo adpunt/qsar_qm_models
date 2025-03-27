@@ -44,6 +44,10 @@ RDLogger.DisableLog('rdApp.*')
 
 DELIMITER = b"\x1F"  # ASCII 31 (Unit Separator)
 NEWLINE = b"\n"
+MULTIPLE_SMILES_REPS = 3
+
+# Note: only run multiple_smiles on it's own, otherwise triplicate entries for every single entry
+# TODO: potentially fix this logic
 
 # TODO: get git to stop tracking Cargo.lock 
 # TODO: figure out tuning for GINs
@@ -335,6 +339,8 @@ def split_qm9(qm9, args, files):
             category = "val"
 
         smiles_reps = 1
+        if 'multiple_smiles' in args.molecular_representations:
+            smiles_reps = MULTIPLE_SMILES_REPS
 
         # TODO: only do this if not a graph
         randomized_smiles = []
@@ -347,6 +353,9 @@ def split_qm9(qm9, args, files):
             if not mol:
                 cache[smiles_isomeric] = None
                 continue
+            if 'multiple_smiles' in args.molecular_representations or 'randomized_smiles' in args.molecular_representations:
+                for _ in range(smiles_reps):
+                    randomized_smiles.append(Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True))
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
             cache[smiles_isomeric] = smiles_canonical
 
@@ -597,7 +606,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
             return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
+        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles', 'multiple_smiles']:
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
     if args.tuning:
@@ -762,9 +771,13 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         if model not in graph_models:
             graph_only = False 
 
-    train_count = len(train_idx)
-    test_count = len(test_idx)
-
+    if 'multiple_smiles' in args.molecular_representations:
+        train_count = MULTIPLE_SMILES_REPS * len(train_idx)
+        test_count = MULTIPLE_SMILES_REPS * len(test_idx)
+    else:
+        train_count = len(train_idx)
+        test_count = len(test_idx)
+    
     config = {
         'sample_size': args.sample_size,
         'noise': s > 0,

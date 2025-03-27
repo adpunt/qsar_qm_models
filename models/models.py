@@ -1341,7 +1341,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
 def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
-    if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles']:
+    if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles', 'multiple_smiles']:
         raise ValueError("Invalid model type or representation for RNN/GRU training")
 
     params = {}
