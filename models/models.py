@@ -29,6 +29,7 @@ from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_paramet
 import matplotlib.pyplot as plt
 import torchbnn as bnn
 from torchhk import transform_model
+import shap
 import lightgbm as lgb
 from botorch import fit_gpytorch_model
 import gauche
@@ -1054,6 +1055,18 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
+    if args.shap:
+        try:
+            explainer = None
+            shap_values = None
+            if args.dataset in ['rf', 'xgboost', 'lgb']:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(x_test)
+            if shap_values is not None:
+                save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, model_type, iteration, rep)
+        except Exception as e:
+            print(f"SHAP calculation failed for {model_type}: {e}")
+
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
@@ -1085,6 +1098,14 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+
+    if args.shap:
+        try:
+            explainer = shap.KernelExplainer(model.predict, x_test)
+            shap_values = explainer.shap_values(x_test)
+            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'svm', iteration_seed, args.rep)
+        except Exception as e:
+            print(f"SHAP calculation failed for svm: {e}")
 
     save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
@@ -1163,6 +1184,14 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+
+    if args.shap:
+        try:
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(x_test)
+            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'xgboost', iteration_seed, args.rep)
+        except Exception as e:
+            print(f"SHAP calculation failed for xgboost: {e}")
 
     save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
@@ -1472,7 +1501,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
 def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
-    if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles']:
+    if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles', 'multiple_smiles']:
         raise ValueError("Invalid model type or representation for RNN/GRU training")
 
     params = {}
