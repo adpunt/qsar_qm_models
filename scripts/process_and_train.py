@@ -44,10 +44,7 @@ RDLogger.DisableLog('rdApp.*')
 
 DELIMITER = b"\x1F"  # ASCII 31 (Unit Separator)
 NEWLINE = b"\n"
-MULTIPLE_SMILES_REPS = 3
 
-# Note: only run multiple_smiles on it's own, otherwise triplicate entries for every single entry
-# TODO: potentially fix this logic
 # TODO: get git to stop tracking Cargo.lock 
 # TODO: figure out tuning for GINs
 
@@ -78,6 +75,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # TODO: make sure val is working for hyperparameter tuning
 # TODO: reformat import statements
 
+# TODO: add argument for classification/regression, then dataset source 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Framework for running QSAR/QSPR prediction models")
     parser.add_argument("-d", "--dataset", type=str, default='QM9', help="Dataset to run experiments on (default is QM9)")
@@ -101,9 +99,6 @@ def parse_arguments():
     parser.add_argument("--logging", type=bool, default=False, help="Extra logging to check individual entries in mmap files (default is False)")
     parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training grpah-based models (default is 100)")
     parser.add_argument("--clean-smiles", type=bool, default=False, help="Clean the SMILES string (default is False)")
-    parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
-    parser.add_argument("--loss-landscape", type=bool, default=False, help="Plot loss landscape (default is False)")
-    parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
     parser.add_argument("--n-trials", type=bool, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
     return parser.parse_args()
@@ -340,8 +335,6 @@ def split_qm9(qm9, args, files):
             category = "val"
 
         smiles_reps = 1
-        if 'multiple_smiles' in args.molecular_representations:
-            smiles_reps = MULTIPLE_SMILES_REPS
 
         # TODO: only do this if not a graph
         randomized_smiles = []
@@ -354,9 +347,6 @@ def split_qm9(qm9, args, files):
             if not mol:
                 cache[smiles_isomeric] = None
                 continue
-            if 'multiple_smiles' in args.molecular_representations or 'randomized_smiles' in args.molecular_representations:
-                for _ in range(smiles_reps):
-                    randomized_smiles.append(Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True))
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
             cache[smiles_isomeric] = smiles_canonical
 
@@ -607,7 +597,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
             return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles', 'multiple_smiles']:
+        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
     if args.tuning:
@@ -772,12 +762,8 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         if model not in graph_models:
             graph_only = False 
 
-    if 'multiple_smiles' in args.molecular_representations:
-        train_count = MULTIPLE_SMILES_REPS * len(train_idx)
-        test_count = MULTIPLE_SMILES_REPS * len(test_idx)
-    else:
-        train_count = len(train_idx)
-        test_count = len(test_idx)
+    train_count = len(train_idx)
+    test_count = len(test_idx)
 
     config = {
         'sample_size': args.sample_size,

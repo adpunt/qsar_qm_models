@@ -33,25 +33,6 @@ def save_results(filepath, s, iteration, model, rep, n, r2, mae, corr):
             # Save the results
             writer.writerow([s, iteration, model, rep, n, r2, mae, corr])
 
-def save_shap_values(shap_values, feature_names, x_test, filepath, model, iteration, rep):
-    """
-    Save SHAP values to a CSV file or NumPy file for large datasets.
-    """
-    shap_filepath = filepath.replace('.csv', '_shap.csv')  # Store SHAP values separately
-
-    if shap_values is not None:
-        shap_df = pd.DataFrame(shap_values, columns=feature_names)
-        shap_df.insert(0, "Sample_Index", np.arange(len(shap_values)))  # Track sample index
-        shap_df.insert(1, "Model", model)
-        shap_df.insert(2, "Iteration", iteration)
-        shap_df.insert(3, "Rep", rep)
-
-        # Save to CSV (appending if file exists)
-        if os.path.exists(shap_filepath):
-            shap_df.to_csv(shap_filepath, mode='a', header=False, index=False)
-        else:
-            shap_df.to_csv(shap_filepath, index=False)
-
 def calculate_classification_metrics(y_test, prediction, logging=False):
     accuracy = accuracy_score(y_test, y_test_preds)
     roc_auc = roc_auc_score(y_test, y_test_probs[:, 1])  # Assuming binary classification
@@ -91,7 +72,3 @@ def calculate_regression_metrics(y_test, prediction, logging=False):
         print("Pearson Correlation:", pearson_corr)
 
     return mae, mse, rmse, r2, pearson_corr
-
-    # Save as NumPy file for efficiency
-    npy_filepath = filepath.replace('.csv', '_shap.npy')
-    np.save(npy_filepath, shap_values)
