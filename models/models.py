@@ -994,25 +994,105 @@ class DNNClassificationModel(nn.Module):
         x = self.fc3(x)  # No activation here, handled externally based on task
         return x
 
-class FlexibleDNNRegressionModel(nn.Module):
-    def __init__(self, input_size, hidden_sizes, activation_fn=nn.ReLU(), dropout=0.2):
-        super(FlexibleDNNRegressionModel, self).__init__()
+# TODO: save plots to appropriate place
+# TODO: modify this to work with non-DNN if anything else looks promising, right now it will fail
+def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, loss_landscape_flag):
+    """
+    Computes and visualizes 1D and 2D loss landscapes for a given neural network.
 
-        layers = []
-        in_size = input_size
+    Parameters:
+    - model: PyTorch model (DNN or any NN)
+    - x_test_tensor: Input test tensor
+    - y_test_tensor: Ground truth labels for test set
+    - device: Device (CPU/GPU) to run computations
+    - iteration_seed: Identifier for saving plots
+    - loss_landscape_flag: Boolean flag to enable/disable landscape computation
+    """
+    if not loss_landscape_flag:
+        return  # Exit if landscape computation is disabled
 
-        for h_size in hidden_sizes:
-            layers.append(nn.Linear(in_size, h_size))
-            layers.append(activation_fn)
-            layers.append(nn.Dropout(p=dropout))
-            in_size = h_size
+    print("Computing loss landscape...")
 
-        layers.append(nn.Linear(in_size, 1))  # Output layer (regression)
-        self.network = nn.Sequential(*layers)
+    model_save_path = f"trained_dnn_{iteration_seed}.pt"
+    torch.save(model.state_dict(), model_save_path)
 
-    def forward(self, x):
-        return self.network(x)
+    # Recreate the model with known architecture parameters
+    if isinstance(model, DNNRegressionModel):
+        infer_net = DNNRegressionModel(input_size=model.fc1.in_features,
+                                       hidden_size1=model.fc1.out_features,
+                                       hidden_size2=model.fc2.out_features).to(device)
+    elif isinstance(model, DNNClassificationModel):
+        infer_net = DNNClassificationModel(input_size=model.fc1.in_features,
+                                           hidden_size1=model.fc1.out_features,
+                                           hidden_size2=model.fc2.out_features,
+                                           num_classes=model.fc3.out_features).to(device)
+    else:
+        raise ValueError("Unsupported model type for loss landscape analysis")
 
+    # Load trained weights
+    infer_net.load_state_dict(torch.load(model_save_path))
+
+    infer_net.load_state_dict(torch.load(model_save_path))
+
+    # Convert parameters to vectors
+    theta_ast = Params2Vec(model.parameters()).detach()
+    theta = Params2Vec(infer_net.parameters()).detach()
+
+    loss_fn = torch.nn.MSELoss() if isinstance(model, DNNRegressionModel) else torch.nn.CrossEntropyLoss()
+
+    # 1D Loss Landscape
+    alphas = torch.linspace(-20, 20, 40)
+    losses_1d = []
+
+    for alpha in alphas:
+        Vec2Params(alpha * theta_ast + (1 - alpha) * theta, infer_net.parameters())
+        infer_net.eval()
+        with torch.no_grad():
+            y_pred = infer_net(x_test_tensor)
+            loss = loss_fn(y_pred, y_test_tensor).item()
+            losses_1d.append(loss)
+
+    # 2D Loss Landscape
+    x_range = torch.linspace(-20, 20, 20)
+    y_range = torch.linspace(-20, 20, 20)
+    alpha, beta = torch.meshgrid(x_range, y_range, indexing="ij")
+
+    def tau_2d(alpha, beta, theta_ast):
+        return alpha * theta_ast[:, None, None] + beta * alpha * theta_ast[:, None, None]
+
+    space = tau_2d(alpha, beta, theta_ast)
+    losses_2d = torch.empty_like(space[0, :, :])
+
+    for a, _ in enumerate(x_range):
+        print(f'Processing alpha = {a}')
+        for b, _ in enumerate(y_range):
+            Vec2Params(space[:, a, b] + theta_ast, infer_net.parameters())
+            infer_net.eval()
+            with torch.no_grad():
+                y_pred = infer_net(x_test_tensor)
+                losses_2d[a, b] = loss_fn(y_pred, y_test_tensor).item()
+
+    # Plot 1D loss landscape
+    plt.figure(figsize=(8, 6))
+    plt.plot(alphas.numpy(), losses_1d)
+    plt.xlabel("Alpha")
+    plt.ylabel("Loss")
+    plt.title("1D Loss Landscape")
+    plt.grid()
+    plt.savefig(f"../resuls/loss_landscape_1d_{model_type}_{rep}_{s}.png")
+    plt.close()
+
+    # Plot 2D loss contour
+    plt.figure(figsize=(8, 6))
+    plt.contourf(alpha.numpy(), beta.numpy(), losses_2d.numpy(), levels=50, cmap="viridis")
+    plt.colorbar(label="Loss")
+    plt.xlabel("Alpha")
+    plt.ylabel("Beta")
+    plt.title("2D Loss Contour")
+    plt.savefig(f"../resuls/loss_landscape_2d_{model_type}_{rep}_{s}.png")
+    plt.close()
+
+    print("Loss landscape computation complete!")
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1261,6 +1341,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred_tensor = model(x_test_tensor).cpu().numpy()
     y_pred = y_pred_tensor.flatten()
 
+    if args.loss_landscape:
+        loss_landscape(model, "dnn", rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, args.loss_landscape)
+
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
     save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
@@ -1417,6 +1500,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         y_pred_tensor = model(x_test_tensor).cpu().numpy()
     y_pred = y_pred_tensor.flatten() if args.dataset == 'QM9' else np.argmax(y_pred_tensor, axis=1)
 
+    if args.loss_landscape:
+        loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, args.loss_landscape)
+
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
@@ -1491,6 +1577,9 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     y_pred_tensor = trainer.validate(test_loader)[1] 
 
     y_pred = np.argmax(y_pred_tensor, axis=1) if args.dataset != 'QM9' else np.array(y_pred_tensor).flatten()
+
+    if args.loss_landscape:
+        loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, device, iteration_seed, args.loss_landscape)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
