@@ -1014,6 +1014,36 @@ class FlexibleDNNRegressionModel(nn.Module):
     def forward(self, x):
         return self.network(x)
 
+def apply_bayesian_transformation(model):
+    """
+    Converts an existing PyTorch model's Linear layers to Bayesian Linear layers.
+    
+    Parameters
+    ----------
+    model : nn.Module
+        The PyTorch model to be transformed.
+        
+    Returns
+    -------
+    model : nn.Module
+        The transformed model with Bayesian layers.
+    """
+    # Convert Linear -> BayesLinear
+    transform_model(
+        model, 
+        nn.Linear, 
+        bnn.BayesLinear, 
+        args={
+            "prior_mu": 0, 
+            "prior_sigma": 0.1, 
+            "in_features": ".in_features",
+            "out_features": ".out_features", 
+            "bias": ".bias"
+        }, 
+        attrs={"weight_mu": ".weight"}
+    )
+    return model
+
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial=None):
     params = {}
 
@@ -1320,6 +1350,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2']) if args.dataset == 'QM9' else DNNClassificationModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
 
+    if args.bayesian_transformation:
+        model = apply_bayesian_transformation(model)
+
     model.activation = activation
     model.to(device)
 
@@ -1478,6 +1511,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     elif model_type == "mtl":
         model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128, num_tasks=1)
         criterion = nn.MSELoss()
+
+    if args.bayesian_transformation:
+        model = apply_bayesian_transformation(model)
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
