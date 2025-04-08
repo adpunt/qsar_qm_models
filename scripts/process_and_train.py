@@ -1,4 +1,4 @@
-import argparse
+gitimport argparse
 import os
 import os.path as osp
 import random
@@ -66,7 +66,10 @@ if not os.path.exists(cache_path):
     os.makedirs(cache_path, exist_ok=True)  # Ensure the directory exists
     cache = diskcache.Cache(cache_path)  # Initialize a new cache
 else:
-    cache = diskcache.Cache(cache_path)
+    try:
+        cache = diskcache.Cache(cache_path)
+    except Exception as e:
+        cache = None
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
