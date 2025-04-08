@@ -221,19 +221,27 @@ def load_and_split_polaris(args, files):
             category = "val"
 
         smiles_randomized = None
+        # TODO: this try/catch logic is wrong
         if smiles_isomeric in cache and not 'randomized_smiles' in args.molecular_representations:
-            smiles_canonical = cache[smiles_isomeric]
+            try: 
+                smiles_canonical = cache[smiles_isomeric]
+            except Exception as e:
+                mol = Chem.MolFromSmiles(smiles_isomeric)
             # TODO: potentially keep randomized SMILES in the same cache if they look promising (smiles_isomeric, smiles_randomized)
         else:
             # Generate canonical SMILES and store it in cache
             mol = Chem.MolFromSmiles(smiles_isomeric)
-            if not mol:
+        
+        if not mol:
+            try:
                 cache[smiles_isomeric] = None
+            except Exception as e:
                 continue
-            if 'randomized_smiles' in args.molecular_representations:
-                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
-            smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-            cache[smiles_isomeric] = smiles_canonical
+            continue
+        if 'randomized_smiles' in args.molecular_representations:
+            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+        smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+        cache[smiles_isomeric] = smiles_canonical
 
         sns_fp = None
         # TODO: need to define protein by pdb 
@@ -338,17 +346,21 @@ def split_qm9(qm9, args, files):
 
         # TODO: only do this if not a graph
         randomized_smiles = []
-        if smiles_isomeric in cache and not 'randomized_smiles' in args.molecular_representations:
-            smiles_canonical = cache[smiles_isomeric]
-            # TODO: potentially keep randomized SMILES in the same cache if they look promising (smiles_isomeric, smiles_randomized)
-        else:
-            # Generate canonical SMILES and store it in cache
+        try: 
+            if smiles_isomeric in cache and not 'randomized_smiles' in args.molecular_representations:
+                smiles_canonical = cache[smiles_isomeric]
+                # TODO: potentially keep randomized SMILES in the same cache if they look promising (smiles_isomeric, smiles_randomized)
+            else:
+                # Generate canonical SMILES and store it in cache
+                mol = Chem.MolFromSmiles(smiles_isomeric)
+                if not mol:
+                    cache[smiles_isomeric] = None
+                    continue
+                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                cache[smiles_isomeric] = smiles_canonical
+        except Exception as e:
             mol = Chem.MolFromSmiles(smiles_isomeric)
-            if not mol:
-                cache[smiles_isomeric] = None
-                continue
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-            cache[smiles_isomeric] = smiles_canonical
 
         sns_fp = None
         if 'sns' in args.molecular_representations:
@@ -654,7 +666,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         return black_box_function()
 
 
-def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s):
+def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
     for model_type in args.models:
         if model_type == "gin" or model_type == "gin2d":
             model = GIN(dim_h=64)
@@ -754,6 +766,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s):
 
         metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
 
+        # TODO: iteration is broken!!!
         save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
 def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
@@ -841,7 +854,7 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
                     print(f"Error with {rep} and {model}; more details: {e}")
             else:
                 if args.dataset == 'QM9':
-                    run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s)
+                    run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
                 else:
                     # TODO: need to convert polaris molecules to 3D and 2D
                     return 
