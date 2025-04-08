@@ -1015,11 +1015,7 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     params = {}
 
     if args.tuning:
-        use_default_C = trial.suggest_categorical('use_default_C', [True, False])
-        if use_default_C:
-            params['C'] = None
-        else:
-            params['C'] = trial.suggest_float('C', 0.1, 100, log=True)
+        params['C'] = trial.suggest_int('C', 0, 100)
 
         params['gamma'] = trial.suggest_categorical('gamma', ['scale', 'auto'])
         params['kernel'] = trial.suggest_categorical('kernel', ['rbf', 'poly', 'sigmoid'])
@@ -1094,7 +1090,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         params['kernel_name'] = trial.suggest_categorical('kernel', [
             'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
             'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
-            'Rand', 'RogersTanimoto', 'RussellRao', 'Sorgenfrei', 'SokalSneath'
+            'Rand', 'RogersTanimoto', 'Sorgenfrei', 'SokalSneath'
         ])
         params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
         params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
