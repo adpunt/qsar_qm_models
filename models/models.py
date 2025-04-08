@@ -1,4 +1,4 @@
-import torch
+git import torch
 import torch.nn as nn
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_geometric.nn import GCNConv, GINConv, GATv2Conv, global_mean_pool, global_add_pool
@@ -1079,7 +1079,7 @@ def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, devi
     plt.ylabel("Loss")
     plt.title("1D Loss Landscape")
     plt.grid()
-    plt.savefig(f"../resuls/loss_landscape_1d_{model_type}_{rep}_{s}.png")
+    plt.savefig(f"../results/loss_landscape_1d_{model_type}_{rep}_{s}.png")
     plt.close()
 
     # Plot 2D loss contour
@@ -1089,7 +1089,7 @@ def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, devi
     plt.xlabel("Alpha")
     plt.ylabel("Beta")
     plt.title("2D Loss Contour")
-    plt.savefig(f"../resuls/loss_landscape_2d_{model_type}_{rep}_{s}.png")
+    plt.savefig(f"../results/loss_landscape_2d_{model_type}_{rep}_{s}.png")
     plt.close()
 
     print("Loss landscape computation complete!")
