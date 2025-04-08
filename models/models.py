@@ -1013,7 +1013,7 @@ def loss_landscape(model, model_type, rep, s, x_test_tensor, y_test_tensor, devi
 
     print("Computing loss landscape...")
 
-    model_save_path = f"trained_dnn_{iteration_seed}.pt"
+    model_save_path = f"trained_dnn_{iteration_seed}_{s}.pt"
     torch.save(model.state_dict(), model_save_path)
 
     # Recreate the model with known architecture parameters
