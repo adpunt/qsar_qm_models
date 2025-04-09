@@ -1,4 +1,4 @@
-gitimport argparse
+git import argparse
 import os
 import os.path as osp
 import random
