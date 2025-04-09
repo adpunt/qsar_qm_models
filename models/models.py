@@ -1057,11 +1057,8 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     if args.shap:
         try:
-            explainer = None
-            shap_values = None
-            if args.dataset in ['rf', 'xgboost', 'lgb']:
-                explainer = shap.TreeExplainer(model)
-                shap_values = explainer.shap_values(x_test)
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(x_test)
             if shap_values is not None:
                 save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, model_type, iteration, rep)
         except Exception as e:
@@ -1103,7 +1100,7 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         try:
             explainer = shap.KernelExplainer(model.predict, x_test)
             shap_values = explainer.shap_values(x_test)
-            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'svm', iteration_seed, args.rep)
+            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'svm', iteration_seed, args.rep, s)
         except Exception as e:
             print(f"SHAP calculation failed for svm: {e}")
 
