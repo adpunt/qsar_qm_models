@@ -910,7 +910,6 @@ def train_epochs_co_teaching(epochs, model, train_loader, val_loader, path, rati
 
     return train_loss, val_loss, train_target, train_y_target, model
 
-# Define the DNN model
 class DNNRegressionModel(nn.Module):
     """Densely-connected neural network for binding affinity prediction"""
 
@@ -975,6 +974,26 @@ class DNNClassificationModel(nn.Module):
         x = self.dropout(x)
         x = self.fc3(x)  # No activation here, handled externally based on task
         return x
+
+class FlexibleDNNRegressionModel(nn.Module):
+    def __init__(self, input_size, hidden_sizes, activation_fn=nn.ReLU(), dropout=0.2):
+        super(FlexibleDNNRegressionModel, self).__init__()
+
+        layers = []
+        in_size = input_size
+
+        for h_size in hidden_sizes:
+            layers.append(nn.Linear(in_size, h_size))
+            layers.append(activation_fn)
+            layers.append(nn.Dropout(p=dropout))
+            in_size = h_size
+
+        layers.append(nn.Linear(in_size, 1))  # Output layer (regression)
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.network(x)
+
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1223,6 +1242,51 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
+    save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+
+    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+
+def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+    params = {}
+
+    if args.tuning:
+        num_layers = trial.suggest_int("num_layers", 1, 4)
+        hidden_sizes = []
+        for i in range(num_layers):
+            hidden_size = trial.suggest_categorical(f"hidden_size_{i}", [32, 64, 128, 256, 512, 1024])
+            hidden_sizes.append(hidden_size)
+        params['hidden_sizes'] = hidden_sizes
+        params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh'])
+    else:
+        params['hidden_sizes'] = [128, 64]
+        params['activation'] = 'relu'
+
+    activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh()}
+    activation = activation_map[params['activation']]
+
+    x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+
+    model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args.epochs)
+
+    model.eval()
+    with torch.no_grad():
+        y_pred_tensor = model(x_test_tensor).cpu().numpy()
+    y_pred = y_pred_tensor.flatten()
+
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]

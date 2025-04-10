@@ -606,6 +606,9 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         elif model_type == "dnn":
             return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
+        elif model_type == "flexible_dnn":
+            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+
         elif model_type == "lgb":
             return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
@@ -770,7 +773,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
         metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
 
         # TODO: iteration is broken!!!
-        save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+        save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
 
 def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     graph_only = True
