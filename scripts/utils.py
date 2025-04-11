@@ -53,11 +53,11 @@ def save_shap_values(shap_values, feature_names, x_test, filepath, model, iterat
         else:
             shap_df.to_csv(shap_filepath, index=False)
 
-        # ⬇️ Save SHAP array to .npy
+        # Save SHAP array to .npy
         shap_npy_path = f"shap_{model}_{rep}_sigma{s}.npy"
         np.save(shap_npy_path, shap_values)
 
-        # ⬇️ Save x_test to .csv for plotting later
+        # Save x_test to .csv for plotting later
         x_csv_path = f"x_{model}_{rep}_sigma{s}.csv"
         x_test_df = pd.DataFrame(x_test, columns=feature_names)
         x_test_df.to_csv(x_csv_path, index=False)
