@@ -339,6 +339,7 @@ def split_qm9(qm9, args, files):
     for index, data in enumerate(qm9[:args.sample_size]):
         smiles_isomeric = data.smiles
         smiles_canonical = None
+        smiles_randomized = None
         mol = None
 
         category = "excluded"
@@ -349,10 +350,7 @@ def split_qm9(qm9, args, files):
         elif index in val_idx:
             category = "val"
 
-        smiles_reps = 1
-
         # TODO: only do this if not a graph
-        randomized_smiles = []
         if 'randomized_smiles' not in args.molecular_representations:
             cursor.execute("SELECT canonical FROM smiles_cache WHERE isomeric = ?", (smiles_isomeric,))
             result = cursor.fetchone()
@@ -361,7 +359,7 @@ def split_qm9(qm9, args, files):
         if smiles_canonical is None:
             mol = Chem.MolFromSmiles(smiles_isomeric)
             if 'randomized_smiles' in args.molecular_representations:
-                randomized_smiles = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
 
         sns_fp = None
@@ -373,16 +371,10 @@ def split_qm9(qm9, args, files):
             sns_fp = ecfp_featuriser(mol)
 
         if smiles_canonical and not (category == "excluded"):
-            for smiles_i in range(smiles_reps):
-                randomized_entry = None
-                if randomized_smiles != []:
-                    randomized_entry = randomized_smiles[smiles_i]
-
-                write_to_mmap(smiles_isomeric, smiles_canonical, randomized_entry, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
     if 'sns' in args.molecular_representations:
         del mols_train
-
 
     return train_idx, test_idx, val_idx
 
@@ -490,7 +482,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 randomized_smiles = fields[field_idx].decode("utf-8")
                 field_idx += 1
                 if logging: 
-                    print(f"randomized_smiles: {randomized_smiles}")
+                    print(f"randomized_smiles1: {randomized_smiles}")
 
             domain_label = None
             if "k_domains" in molecular_representations:
@@ -530,7 +522,6 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             smiles_ohe = None
             if "smiles" in molecular_representations:
-                # smiles_ohe = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8))
                 smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
                 smiles_ohe = np.unpackbits(smiles_packed, bitorder='little')
                 field_idx += 1
@@ -542,14 +533,15 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     y_data.append(processed_target)
                     continue
 
+            # TODO: figure out what's broken here
+            # Need to compare with SMILES, something with the OHE is broken
             randomized_smiles_ohe = None
             if "randomized_smiles" in molecular_representations:
-                # randomized_smiles_ohe = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8))
                 randomized_smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
                 randomized_smiles_ohe = np.unpackbits(randomized_smiles_packed, bitorder='little')
                 field_idx += 1
                 if logging:
-                    print(f"randomized_smiles: {randomized_smiles}")
+                    print(f"randomized_smiles2: {randomized_smiles_ohe}")
 
                 if "randomized_smiles" == rep:
                     x_data.append(randomized_smiles_ohe)

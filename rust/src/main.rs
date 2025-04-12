@@ -295,7 +295,6 @@ fn write_data(
                 }
             }
 
-
             // Write SMILES and randomized SMILES
             for smiles_type in ["smiles", "randomized_smiles"] {
                 if config.molecular_representations.contains(&smiles_type.to_string()) {
