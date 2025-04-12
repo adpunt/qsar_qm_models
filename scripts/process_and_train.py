@@ -26,6 +26,8 @@ import polaris as po
 from polaris.hub.client import PolarisHubClient
 import optuna
 import logging
+import sqlite3
+import pickle
 
 import sys
 sys.path.append('../models/')
@@ -57,8 +59,10 @@ bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec']
 graph_models = ['gin', 'gcn', 'ginct', 'gauche_graph', 'gin2d', 'gtat']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
-# Initialize the cache
-cache_path = "../data/smiles_cache"
+cache_path = "../data/smiles_cache.sqlite"
+conn = sqlite3.connect(cache_path)
+
+cursor = conn.cursor()
 
 # Check if the cache exists
 if not os.path.exists(cache_path):
@@ -349,20 +353,15 @@ def split_qm9(qm9, args, files):
 
         # TODO: only do this if not a graph
         randomized_smiles = []
-        try: 
-            if smiles_isomeric in cache and not 'randomized_smiles' in args.molecular_representations:
-                smiles_canonical = cache[smiles_isomeric]
-                # TODO: potentially keep randomized SMILES in the same cache if they look promising (smiles_isomeric, smiles_randomized)
-            else:
-                # Generate canonical SMILES and store it in cache
-                mol = Chem.MolFromSmiles(smiles_isomeric)
-                if not mol:
-                    cache[smiles_isomeric] = None
-                    continue
-                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-                cache[smiles_isomeric] = smiles_canonical
-        except Exception as e:
+        if 'randomized_smiles' not in args.molecular_representations:
+            cursor.execute("SELECT canonical FROM smiles_cache WHERE isomeric = ?", (smiles_isomeric,))
+            result = cursor.fetchone()
+            if result:
+                smiles_canonical = result[0]
+        if smiles_canonical is None:
             mol = Chem.MolFromSmiles(smiles_isomeric)
+            if 'randomized_smiles' in args.molecular_representations:
+                randomized_smiles = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
 
         sns_fp = None
