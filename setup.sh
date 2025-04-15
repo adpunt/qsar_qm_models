@@ -48,13 +48,13 @@ if [ -z "${CONDA_PREFIX:-}" ]; then
 fi
 
 echo "Setting shared library paths..."
-case "$OSTYPE" in
-  linux-gnu*) export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH" ;;
-  darwin*)
+if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+elif [[ "$OSTYPE" == darwin* ]]; then
     unset DYLD_LIBRARY_PATH
     export DYLD_FALLBACK_LIBRARY_PATH="$CONDA_PREFIX/lib"
-    ;;
-esac
+fi
+
 
 # --- Isolate from Homebrew ---
 unset PYTHONPATH
