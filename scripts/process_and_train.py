@@ -305,12 +305,12 @@ def split_qm9(qm9, args, files):
 
     elif args.split == 'scaffold':
         qm9_smiles = [data.smiles for data in qm9[:args.sample_size]]
-        np.array([data.y.item() for data in qm9[:args.sample_size]]).reshape(-1, 1)
-        dataset = dc.data.DiskDataset.from_numpy(X=Xs,ids=qm9_smiles)
+        Xs = np.zeros(len(qm9_smiles))  # Dummy features just for splitting
+        dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=qm9_smiles)
 
         splitter = dc.splits.ScaffoldSplitter()
-            
-        train_idx, val_idx, test_idx = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+        split = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+        train_idx, val_idx, test_idx = split
 
     else:
         raise ValueError("Invalid split type")
@@ -748,13 +748,13 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
             )
 
             test_loss, test_target, test_y = testing(test_loader, trained_model)
-        else:
+        # else:
 
-            train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
-                args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
-            )
+        #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
+        #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
+        #     )
 
-            test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
+        #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
 
         logging = True
         if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
