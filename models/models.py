@@ -422,46 +422,15 @@ class MLPClassifier(nn.Module):
         return self.softmax(x)  # Final activation for classification
 
 class Gauche(gpytorch.models.ExactGP):
-  def __init__(self, train_x, train_y, likelihood, kernel):
-    super(Gauche, self).__init__(train_x, train_y, likelihood)
-    self.mean_module = gpytorch.means.ConstantMean()
-    if kernel == 'tanimoto':
-        self.covar_module = gpytorch.kernels.ScaleKernel(TanimotoKernel())
-    elif kernel == 'braun_blanquet':
-        self.covar_module = gpytorch.kernels.ScaleKernel(BraunBlanquetKernel())
-    elif kernel == 'dice':
-        self.covar_module = gpytorch.kernels.ScaleKernel(DiceKernel())
-    elif kernel == 'faith':
-        self.covar_module = gpytorch.kernels.ScaleKernel(FaithKernel())
-    elif kernel == 'forbes':
-        self.covar_module = gpytorch.kernels.ScaleKernel(ForbesKernel())
-    elif kernel == 'inner_product':
-        self.covar_module = gpytorch.kernels.ScaleKernel(InnerProductKernel())
-    elif kernel == 'intersection':
-        self.covar_module = gpytorch.kernels.ScaleKernel(IntersectionKernel())
-    elif kernel == 'minmax':
-        self.covar_module = gpytorch.kernels.ScaleKernel(MinMaxKernel())
-    elif kernel == 'otsuka':
-        self.covar_module = gpytorch.kernels.ScaleKernel(OtsukaKernel())
-    elif kernel == 'rand':
-        self.covar_module = gpytorch.kernels.ScaleKernel(RandKernel())
-    elif kernel == 'rogers_tanimoto':
-        self.covar_module = gpytorch.kernels.ScaleKernel(RogersTanimotoKernel())
-    elif kernel == 'russell_rao':
-        self.covar_module = gpytorch.kernels.ScaleKernel(RussellRaoKernel())
-    elif kernel == 'sogenfrei':
-        self.covar_module = gpytorch.kernels.ScaleKernel(SogenfreiKernel())
-    elif kernel == 'sokal_sneath':
-        self.covar_module = gpytorch.kernels.ScaleKernel(SokalSneathKernel())
-    else:
-        raise ValueError(f"Unknown kernel: {kernel}")
-    # More kernels here
-    # Batch versions of Tanimoto, Braun-Blanquet, Dice, Faith, Forbes, Inner Product, Intersection, MinMax, Otsuka, Rand, Rogers Tanimoto, Russel Rao, Sogenfrei, Sokal Sneath
-  
-  def forward(self, x):
-    mean_x = self.mean_module(x)
-    covar_x = self.covar_module(x)
-    return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+    def __init__(self, train_x, train_y, likelihood, kernel_class):
+        super(Gauche, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(kernel_class())
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class MTLRegressionModel(nn.Module):
     """Multi-task learning model with shared hidden layers and multiple output heads."""
@@ -1143,7 +1112,9 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     y_train_tensor = torch.from_numpy(y_train).double()
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
-    model = Gauche(x_train_tensor, y_train_tensor, likelihood, params['kernel_name'].lower())
+
+    kernel_class = kernel_map[params['kernel_name']]
+    model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
