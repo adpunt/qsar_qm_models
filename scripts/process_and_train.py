@@ -1,3 +1,4 @@
+
 import argparse
 import os
 import os.path as osp
@@ -371,6 +372,8 @@ def split_qm9(qm9, args, files):
             sns_fp = ecfp_featuriser(mol)
 
         if smiles_canonical and not (category == "excluded"):
+            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
+                continue
             write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
     if 'sns' in args.molecular_representations:
