@@ -212,7 +212,7 @@ fn write_data(
     vocab_size: usize,
     max_sequence_length: usize,
     data_count: usize,
-    log_writes: bool,  // <-- Added flag for logging
+    log_writes: bool,
 ) -> io::Result<()> {
 
     for index in 0..data_count {
@@ -706,7 +706,6 @@ fn main() -> io::Result<()> {
         &noise_map,
         max_sequence_length
     )?;
-    // println!("Data preprocessing complete");
 
     Ok(())
 }

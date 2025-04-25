@@ -136,8 +136,11 @@ def write_to_mmap(
     entry += property_value_binary  # Append delimiter separately
 
     if "randomized_smiles" in molecular_representations:
-        randomized_smiles_binary = randomized_smiles.encode('utf-8') + DELIMITER
-        entry += randomized_smiles_binary
+        if randomized_smiles:
+            randomized_smiles_binary = randomized_smiles.encode('utf-8') + DELIMITER
+            entry += randomized_smiles_binary
+        else:
+            entry += DELIMITER
 
     if "sns" in molecular_representations:
         if sns_fp is not None:
@@ -357,11 +360,15 @@ def split_qm9(qm9, args, files):
             result = cursor.fetchone()
             if result:
                 smiles_canonical = result[0]
+
         if smiles_canonical is None:
             mol = Chem.MolFromSmiles(smiles_isomeric)
-            if 'randomized_smiles' in args.molecular_representations:
-                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
             smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+            if smiles_canonical is None:
+                continue
+
+        if 'randomized_smiles' in args.molecular_representations:
+            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
 
         sns_fp = None
         if 'sns' in args.molecular_representations:
@@ -456,6 +463,7 @@ def load_custom_model(model_path):
     model.eval()
     return model
 
+# TODO: refactor this, only do the processing if it's that rep 
 def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, logging):
     x_data = []
     y_data = []
@@ -482,10 +490,11 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             # Read optional fields
             randomized_smiles = None
             if "randomized_smiles" in molecular_representations:
-                randomized_smiles = fields[field_idx].decode("utf-8")
+                if "randomized_smiles" == rep:
+                    randomized_smiles = fields[field_idx].decode("utf-8")
+                    if logging:
+                        print(f"randomized_smiles1: {randomized_smiles}")
                 field_idx += 1
-                if logging: 
-                    print(f"randomized_smiles1: {randomized_smiles}")
 
             domain_label = None
             if "k_domains" in molecular_representations:
@@ -496,12 +505,13 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             sns_fp = None
             if "sns" in molecular_representations:
-                sns_fp = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
-
+                if "sns" == rep:
+                    sns_fp = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
+                    if logging:
+                        print(f"sns_fp: {sns_fp}")
                 field_idx += 1
-                if logging:
-                    print(f"sns_fp: {sns_fp}")
             
+            # Read required fields
             processed_target = struct.unpack("f", fields[field_idx])[0]
             field_idx += 1
             if logging:
@@ -523,54 +533,51 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 y_data.append(processed_target)
                 continue
 
+            # Continue reading optional fields
             smiles_ohe = None
             if "smiles" in molecular_representations:
-                smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
-                smiles_ohe = np.unpackbits(smiles_packed, bitorder='little')
-                field_idx += 1
-                if logging: 
-                    print(f"smiles: {smiles_ohe}")
-
                 if "smiles" == rep:
+                    smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
+                    smiles_ohe = np.unpackbits(smiles_packed, bitorder='little')
                     x_data.append(smiles_ohe)
                     y_data.append(processed_target)
+                    if logging:
+                        print(f"smiles_ohe: {smiles_ohe}")
                     continue
+                field_idx += 1
 
             # TODO: figure out what's broken here
             # Need to compare with SMILES, something with the OHE is broken
-            randomized_smiles_ohe = None
+            randomized_smiles_ohe = []
             if "randomized_smiles" in molecular_representations:
-                randomized_smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
-                randomized_smiles_ohe = np.unpackbits(randomized_smiles_packed, bitorder='little')
-                field_idx += 1
-                if logging:
-                    print(f"randomized_smiles2: {randomized_smiles_ohe}")
-
                 if "randomized_smiles" == rep:
-                    x_data.append(randomized_smiles_ohe)
-                    y_data.append(processed_target)
+                    randomized_smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
+                    randomized_smiles_ohe = np.unpackbits(randomized_smiles_packed, bitorder='little')
+                    if logging:
+                        print(f"randomized_smiles2: {randomized_smiles_ohe}")
+                    if len(randomized_smiles_ohe) > 0:
+                        x_data.append(randomized_smiles_ohe)
+                        y_data.append(processed_target)
                     continue
+                field_idx += 1
 
             ecfp4 = None
             if "ecfp4" in molecular_representations:
-                ecfp4 = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
-                field_idx += 1
-                if logging:
-                    print(f"ecfp4: {ecfp4}")
-
                 if "ecfp4" == rep:
-                    # Ensure correct size before unpacking
+                    ecfp4 = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
+                    if logging:
+                        print(f"ecfp4: {ecfp4}")
                     if ecfp4.size == 256: 
                         u64_array = np.frombuffer(ecfp4, dtype=np.uint64)
                         ecfp4 = np.unpackbits(ecfp4, bitorder='little')[:2048]
                     else:
                         # print(f"Warning: ECFP4 fingerprint has unexpected size {ecfp4.size} at index {field_idx}")
                         continue
-
                     feature_vector.append(ecfp4)
                     x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                     y_data.append(processed_target)
                     continue
+                field_idx += 1
 
         except Exception as e:
             # TODO: look into why there's so many of these
@@ -584,6 +591,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     return x_data, y_data
 
 def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
+    # try: 
     def black_box_function(trial=None):
         if model_type == 'rf':
             return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
@@ -664,6 +672,10 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
 
     else:
         return black_box_function()
+    # except Exception as e:
+    #    print(f"Error with {rep} and {model_type}; more details: {e}")
+    #    # TODO: remove this!!
+    #    print(f"x_train: {x_train}")
 
 
 def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
@@ -829,29 +841,24 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
 
             except Exception as e:
                 print(f"Error with parsing mmap file for {rep} and {model}; more details: {e}")
-                continue
 
         for model in args.models:
             if model not in graph_models:
-                # TODO: remove this for debugging purposes
-                try: 
-                    print(f"model: {model}")
-                    run_model(
-                        x_train, 
-                        y_train, 
-                        x_test, 
-                        y_test, 
-                        x_val,
-                        y_val,
-                        model, 
-                        args, 
-                        iteration_seed,
-                        rep,
-                        iteration,
-                        s,
-                    )
-                except Exception as e:
-                    print(f"Error with {rep} and {model}; more details: {e}")
+                print(f"model: {model}")
+                run_model(
+                    x_train, 
+                    y_train, 
+                    x_test, 
+                    y_test, 
+                    x_val,
+                    y_val,
+                    model, 
+                    args, 
+                    iteration_seed,
+                    rep,
+                    iteration,
+                    s,
+                )
             else:
                 if args.dataset == 'QM9':
                     run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
