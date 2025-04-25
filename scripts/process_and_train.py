@@ -156,9 +156,21 @@ def parse_arguments():
     parser.add_argument("--clean-smiles", type=str2bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
-    parser.add_argument("--bayesian-transformation", type=bool, default=False, help="Transform relevant models (DNN, MLP) with Bayesian layers (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
-    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")
+    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")    
+    parser.add_argument(
+        "--bayesian-transformation",
+        type=str,
+        default=None,
+        help=(
+            "Apply Bayesian transformation to applicable models (e.g., DNN, MLP). "
+            "Options:\n"
+            "  full        - Replace all nn.Linear layers with Bayesian layers (BayesLinear).\n"
+            "  last_layer  - Replace only the final nn.Linear layer with a Bayesian layer (VBLL-style).\n"
+            "  variational - Use variational Bayes for uncertainty (sampling-based, not deterministic).\n"
+            "Default is None (no transformation)."
+        )
+)
     return parser.parse_args()
 
 def write_to_mmap(

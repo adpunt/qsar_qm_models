@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_parameters as Vec2Params
 import matplotlib.pyplot as plt
 import torchbnn as bnn
-from torchhk import transform_model
+from torchhk import transform_model, transform_layer
 import lightgbm as lgb
 from botorch import fit_gpytorch_model
 import gauche
@@ -1044,6 +1044,117 @@ def apply_bayesian_transformation(model):
     )
     return model
 
+def apply_bayesian_transformation_last_layer(model):
+    """
+    Replaces only the final nn.Linear layer in the model with a Bayesian Linear layer.
+    Uses torchhk-style transform_layer to apply the conversion.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Your PyTorch model with at least one nn.Linear layer.
+
+    Returns
+    -------
+    model : nn.Module
+        The modified model with the final nn.Linear replaced by bnn.BayesLinear.
+    """
+    last_linear_name = None
+    last_linear_module = None
+
+    # Find the last nn.Linear layer
+    for name, module in reversed(list(model.named_modules())):
+        if isinstance(module, nn.Linear):
+            last_linear_name = name
+            last_linear_module = module
+            break
+
+    if last_linear_module is None:
+        raise ValueError("No nn.Linear layer found to replace.")
+
+    # Build Bayesian version of the final layer
+    bayesian_layer = transform_layer(
+        last_linear_module,
+        nn.Linear,
+        bnn.BayesLinear,
+        args={
+            "prior_mu": 0,
+            "prior_sigma": 0.1,
+            "in_features": ".in_features",
+            "out_features": ".out_features",
+            "bias": ".bias"
+        },
+        attrs={"weight_mu": ".weight"}
+    )
+
+    # Helper: assign new module to its place in the model
+    def set_nested_attr(obj, attr_path, value):
+        attrs = attr_path.split(".")
+        for a in attrs[:-1]:
+            obj = getattr(obj, a)
+        setattr(obj, attrs[-1], value)
+
+    # Replace the final linear layer
+    set_nested_attr(model, last_linear_name, bayesian_layer)
+
+    return model
+
+
+def apply_bayesian_transformation_last_layer_variational(model):
+    """
+    Converts the last Linear layer of a PyTorch model to a Bayesian Linear layer
+    (VBLL - Variational Bayesian Last Layer) while keeping the rest of the model deterministic.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The PyTorch model to be transformed.
+
+    Returns
+    -------
+    model : nn.Module
+        The transformed model with the last layer replaced by a Bayesian layer.
+    """
+    last_linear_name = None
+    last_linear_module = None
+
+    # Identify the last nn.Linear layer
+    for name, module in reversed(list(model.named_modules())):
+        if isinstance(module, nn.Linear):
+            last_linear_name = name
+            last_linear_module = module
+            break
+
+    if last_linear_module is None:
+        raise ValueError("No nn.Linear layer found to replace.")
+
+    # Transform using torchhk-style util
+    bayesian_layer = transform_layer(
+        last_linear_module,
+        nn.Linear,
+        bnn.BayesLinear,
+        args={
+            "prior_mu": 0,
+            "prior_sigma": 0.1,
+            "in_features": ".in_features",
+            "out_features": ".out_features",
+            "bias": ".bias"
+        },
+        attrs={"weight_mu": ".weight"}
+    )
+
+    # Helper for recursive attribute setting
+    def set_nested_attr(obj, attr_path, value):
+        attrs = attr_path.split(".")
+        for a in attrs[:-1]:
+            obj = getattr(obj, a)
+        setattr(obj, attrs[-1], value)
+
+    # Replace in the model
+    set_nested_attr(model, last_linear_name, bayesian_layer)
+
+    return model
+
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial=None):
     params = {}
 
@@ -1350,8 +1461,12 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2']) if args.dataset == 'QM9' else DNNClassificationModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
 
-    if args.bayesian_transformation:
+    if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
+    elif args.bayesian_transformation == "last_layer":
+        model = apply_bayesian_transformation_last_layer(model)
+    elif args.bayesian_transformation == "variational":
+        model = apply_bayesian_transformation_last_layer_variational(model)
 
     model.activation = activation
     model.to(device)
@@ -1512,8 +1627,12 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128, num_tasks=1)
         criterion = nn.MSELoss()
 
-    if args.bayesian_transformation:
+    if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
+    elif args.bayesian_transformation == "last_layer":
+        model = apply_bayesian_transformation_last_layer(model)
+    elif args.bayesian_transformation == "variational":
+        model = apply_bayesian_transformation_last_layer_variational(model)
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
