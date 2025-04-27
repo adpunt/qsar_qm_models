@@ -457,7 +457,7 @@ fn generate_aggregate_stats(
 
         for index in 0..config.train_count {
             if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
-                if config.molecular_representations.contains(&"smiles".to_string()) {
+                if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
                     smiles_list.push(smiles_data.canonical_smiles.clone());
                     let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
                     max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
