@@ -156,6 +156,7 @@ def parse_arguments():
     parser.add_argument("--clean-smiles", type=str2bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
+    parser.add_argument("-u", "--uncertainty", type=bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")    
     parser.add_argument(
