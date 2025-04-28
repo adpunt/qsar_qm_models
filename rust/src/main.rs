@@ -63,7 +63,8 @@ struct SmilesData {
     canonical_smiles: String,
     randomized_smiles: Option<String>,
     target_value: f32,
-    sns_buf: [u8; 16]
+    sns_buf: [u8; 16],
+    pdv_vec: Vec<f32>
 }
 
 #[derive(Serialize, Clone)]
@@ -188,13 +189,26 @@ fn read_smiles_data(
         reader.read_exact(&mut delimiter_buf).ok()?;  // Read delimiter
     }
 
+    // Read pdv (optional, 800 bytes)
+    let mut pdv_vec = Vec::new();
+    if molecular_representations.contains(&"pdv".to_string()) {
+        let mut pdv_bytes = vec![0u8; 800]; // 4 bytes per float32
+        reader.read_exact(&mut pdv_bytes).ok()?; 
+        reader.read_exact(&mut delimiter_buf).ok()?; // delimiter after PDV
+        pdv_vec = pdv_bytes
+            .chunks_exact(4)
+            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect();
+    }
+
     // Store parsed data
     let smiles_data = SmilesData {
         isomeric_smiles,
         canonical_smiles,
         randomized_smiles,
         target_value,
-        sns_buf
+        sns_buf,
+        pdv_vec
     };
 
     Some(smiles_data)
@@ -265,6 +279,20 @@ fn write_data(
                 writer.write_all(&[DELIMITER])?;
                 if log_writes {
                     println!("sns_fp: {:?}", sns_fp);
+                }
+            }
+
+            // Write pdv (800 bytes) if applicable
+            if config.molecular_representations.contains(&"pdv".to_string()) {
+                let pdv_bytes: Vec<u8> = smiles_data.pdv_vec
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes()) // turn each f32 into 4 bytes
+                    .collect();
+                writer.write_all(&pdv_bytes)?; // write all 800 bytes at once
+                writer.write_all(&[DELIMITER])?;
+                
+                if log_writes {
+                    println!("pdv: {:?}", &smiles_data.pdv_vec);
                 }
             }
 
