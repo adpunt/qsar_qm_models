@@ -1060,9 +1060,9 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(x_test)
             if shap_values is not None:
-                save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, model_type, iteration, rep)
+                save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'rf', iteration, rep, s)
         except Exception as e:
-            print(f"SHAP calculation failed for {model_type}: {e}")
+            print(f"SHAP calculation failed for rf: {e}")
 
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
@@ -1186,7 +1186,7 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         try:
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(x_test)
-            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'xgboost', iteration_seed, args.rep)
+            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'xgboost', iteration_seed, rep, s)
         except Exception as e:
             print(f"SHAP calculation failed for xgboost: {e}")
 
