@@ -14,6 +14,7 @@ import numpy as np
 import os
 import csv
 import shap
+import pandas as pd
 
 # TOOD: this doesn't work with non-gaussian distributions at the moment, nor do a lot of things that rely solely on sigma
 def save_results(filepath, s, iteration, model, rep, n, r2, mae, corr):
