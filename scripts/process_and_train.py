@@ -29,6 +29,7 @@ import optuna
 import logging
 import sqlite3
 import pickle
+from torch_geometric.utils import to_networkx
 
 import sys
 sys.path.append('../models/')
@@ -57,7 +58,7 @@ properties = {
 }
 
 bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec']
-graph_models = ['gin', 'gcn', 'ginct', 'gauche_graph', 'gin2d', 'gtat']
+graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d', 'gtat']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
 cache_path = "../data/smiles_cache.sqlite"
@@ -677,109 +678,101 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
     #    # TODO: remove this!!
     #    print(f"x_train: {x_train}")
 
+def qm9_to_networkx(data):
+    G = to_networkx(data, to_undirected=True)
+
+    # Add node labels (atomic numbers)
+    atomic_numbers = data.x[:, 0].long().tolist()
+    for i, atomic_num in enumerate(atomic_numbers):
+        G.nodes[i]['label'] = atomic_num
+
+    # Add edge labels (bond types)
+    if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+        bond_types = data.edge_attr[:, 0].long().tolist()
+        edge_list = data.edge_index.t().tolist()
+        for idx, (u, v) in enumerate(edge_list):
+            if G.has_edge(u, v):
+                G[u][v]['label'] = bond_types[idx]
+    
+    return G
 
 def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
     for model_type in args.models:
-        if model_type == "gin" or model_type == "gin2d":
-            model = GIN(dim_h=64)
-        elif model_type == "gcn":
-            model = GCN(dim_h=128)
-        elif model_type == "gin_co_teaching":
-            model = GINCoTeaching(dim_h=64)
-        # elif model_type == "gauche_graph":
-        #     # TODO: need to add label noise for gauche graph
-        #     # Potentially just take this whole section out for now
-        #     likelihood = gpytorch.likelihoods.GaussianLikelihood()
-        #     # TODO: change this
-        #     kernel = gpytorch.kernels.RBFKernel  # or whichever kernel you need
-        #     kernel_kwargs = {}  # specify any necessary kernel arguments
+        if model_type == "graph_gp":
+            # CASE 2: GraphGP (SIGP subclass over graphs)
+            # This is what YOU focus on
+            train_set = qm9[train_idx]
+            test_set = qm9[test_idx]
+            val_set = qm9[val_idx]
 
-        #     # Convert graph-structured inputs to custom data class for non-tensorial inputs and convert labels to PyTorch tensors
-        #     X_train = NonTensorialInputs(qm9[train_idx].data)
-        #     X_test = NonTensorialInputs(qm9[test_idx].data)
-        #     # TODO: use noisy_train instead
-        #     y_train = torch.tensor(qm9[train_idx].data.y.numpy()).flatten().float()
-        #     y_test = torch.tensor(qm9[test_idx].data.y.numpy()).flatten().float()
+            if s > 0:
+                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                train_set.data.y = train_set.data.y + noise
+                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
 
-        #     # Initialize the GaucheGraph model
-        #     model = GaucheGraph(X_train, y_train, likelihood, kernel, **kernel_kwargs)
+            # 1. Convert PyG to NetworkX graphs
+            train_graphs = [qm9_to_networkx(g) for g in train_set]
+            test_graphs = [qm9_to_networkx(g) for g in test_set]
+            val_graphs = [qm9_to_networkx(g) for g in val_set]
 
-        #     # Define the marginal log likelihood used to optimize the model hyperparameters
-        #     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+            # 2. Get labels
+            y_train = torch.stack([g.y for g in train_set])
+            y_test = torch.stack([g.y for g in test_set])
+            y_val = torch.stack([g.y for g in val_set])
 
-        #     # Use the BoTorch utility for fitting GPs in order to use the LBFGS-B optimizer (recommended)
-        #     fit_gpytorch_model(mll)
+            # 3. Train GraphGP model
+            train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=None)
+        else:
+            if model_type == "gin" or model_type == "gin2d":
+                model = GIN(dim_h=64)
+            elif model_type == "gcn":
+                model = GCN(dim_h=128)
+            elif model_type == "gin_co_teaching":
+                model = GINCoTeaching(dim_h=64)
 
-        #     # Get into evaluation (predictive posterior) mode and compute predictions
-        #     model.eval()
-        #     likelihood.eval()
-        #     with torch.no_grad():
-        #         f_pred = model(X_test)
-        #         y_pred = f_pred.mean
-        #         y_var = f_pred.variance
+            # Add label noise
+            train_set = qm9[train_idx]
+            if s > 0:
+                # Generate Gaussian noise with mean 0 and standard deviation s
+                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                
+                # Add noise to the original labels
+                train_set.data.y = train_set.data.y + noise
 
-        #     # Optionally log results
-        #     if logging:
-        #         print("Results for ", model_type, " and ", molecular_representation)
+                # Ensure the tensor is properly formatted
+                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
 
-        #     if pred_tracking:
-        #         predictions_dict.put((molecular_representation, model_type, (y_test, y_pred)))
+            # datasets into DataLoader
+            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+            test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
+            val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
 
-        #     logging = True
-        #     if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
-        #         calculate_domain_metrics(y_test, y_pred, domain_labels_subset, target_domain)
-        #         logging = False
-            
-        #     metrics = calculate_regression_metrics(y_test, y_pred, logging=logging)
+            test_loss = test_target = test_y = None
+            if model_type != "gin_co_teaching":
+                train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
+                    args.epochs, model, train_loader, test_loader, "GIN_model.pt"
+                )
 
-        #     pass
+                test_loss, test_target, test_y = testing(test_loader, trained_model)
+            # else:
 
-        # else: 
-        #     pass
+            #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
+            #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
+            #     )
 
-        # Add label noise
-        train_set = qm9[train_idx]
-        if s > 0:
-            # Generate Gaussian noise with mean 0 and standard deviation s
-            noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-            
-            # Add noise to the original labels
-            train_set.data.y = train_set.data.y + noise
+            #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
 
-            # Ensure the tensor is properly formatted
-            train_set.data.y = train_set.data.y.to(dtype=torch.float32)
+            logging = True
+            if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
+                calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
+                logging = False
 
-        # TODO: do I need to add noise for val? 
+            metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
 
-        # datasets into DataLoader
-        train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
-        test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
-        val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
+            # TODO: iteration is broken!!!
+            save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
 
-        test_loss = test_target = test_y = None
-        if model_type != "gin_co_teaching":
-            train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-                args.epochs, model, train_loader, test_loader, "GIN_model.pt"
-            )
 
-            test_loss, test_target, test_y = testing(test_loader, trained_model)
-        # else:
-
-        #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
-        #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
-        #     )
-
-        #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
-
-        logging = True
-        if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
-            calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
-            logging = False
-
-        metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
-
-        # TODO: iteration is broken!!!
-        save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
 
 def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     graph_only = True

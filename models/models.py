@@ -34,6 +34,10 @@ import gauche
 from gauche.kernels.fingerprint_kernels import *
 from gauche.kernels.graph_kernels import *
 from gauche import SIGP, NonTensorialInputs
+from gauche.dataloader import MolPropLoader
+from gauche.dataloader.data_utils import transform_data
+from gauche.kernels.graph_kernels import WeisfeilerLehmanKernel, VertexHistogramKernel
+
 
 from utils import * 
 
@@ -496,6 +500,52 @@ class FactorizationMLP(nn.Module):
         mlp_out = self.fc2(x)
 
         return linear_term + interaction_term + mlp_out
+
+# Subclass the SIGP call that allows us to use kernels over
+# discrete inputs with GPyTorch and BoTorch machinery
+class GraphGP(SIGP):
+    def __init__(
+        self,
+        train_x: NonTensorialInputs,
+        train_y: torch.Tensor,
+        likelihood: gpytorch.likelihoods.Likelihood,
+        kernel: gpytorch.kernels.Kernel,
+        **kernel_kwargs,
+    ):
+        """
+        A subclass of the SIGP class that allows us to use kernels over
+        discrete inputs with GPyTorch and BoTorch machinery.
+
+        Parameters:
+        -----------
+        train_x: NonTensorialInputs
+            The training inputs for the model. These are graph objects.
+        train_y: torch.Tensor
+            The training labels for the model.
+        likelihood: gpytorch.likelihoods.Likelihood
+            The likelihood function for the model.
+        kernel: gpytorch.kernels.Kernel
+            The kernel function for the model.
+        **kernel_kwargs:
+            The keyword arguments for the kernel function.
+        """
+
+        super().__init__(train_x, train_y, likelihood)
+        self.mean = gpytorch.means.ConstantMean()
+        self.covariance = kernel
+
+    def forward(self, x):
+        """
+        A forward pass through the model.
+        """
+        mean = self.mean(torch.zeros(len(x), 1)).float()
+        covariance = self.covariance(x)
+
+        # because graph kernels operate over discrete inputs it is beneficial
+        # to add some jitter for numerical stability
+        jitter = max(covariance.diag().mean().detach().item() * 1e-4, 1e-4)
+        covariance += torch.eye(len(x)) * jitter
+        return gpytorch.distributions.MultivariateNormal(mean, covariance)
 
 def training(loader, model, loss, optimizer):
     """Training one epoch
@@ -1445,6 +1495,68 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
+
+def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y, args, s, iteration, trial=None):
+    params = {}
+
+    if args.tuning and trial is not None:
+        params['kernel_name'] = trial.suggest_categorical('kernel', [
+            'WeisfeilerLehman', 'VertexHistogram', 'EdgeHistogram', 'NeighborhoodHash'
+        ])
+        params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
+        params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+    else:
+        params['kernel_name'] = 'WeisfeilerLehman'
+        params['outputscale'] = 1.0
+        params['likelihood_noise'] = 1e-3
+
+    kernel_map = {
+        'WeisfeilerLehman': WeisfeilerLehmanKernel,
+        'VertexHistogram': VertexHistogramKernel,
+        'EdgeHistogram': EdgeHistogramKernel,
+        'NeighborhoodHash': NeighborhoodHashKernel
+    }
+
+    if val_graphs is not None and val_y is not None:
+        train_graphs = train_graphs + val_graphs
+        train_y = torch.cat((train_y, val_y), dim=0)
+
+    # 1. Wrap graphs into NonTensorialInputs
+    X_train = NonTensorialInputs(train_graphs)
+    X_test = NonTensorialInputs(test_graphs)
+
+    # 2. Setup labels
+    y_train = train_y.flatten().float()
+    y_test = test_y.flatten().float()
+
+    # 3. Setup Likelihood and Kernel
+    likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
+
+    kernel_class = kernel_map[params['kernel_name']]
+    kernel = kernel_class(node_label='label')  # 'label' is what qm9_to_networkx() puts on nodes
+
+    # 4. Define GraphGP model
+    model = GraphGP(X_train, y_train, likelihood, kernel)
+
+    # 5. Fit GP model
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+    fit_gpytorch_model(mll)
+
+    # 6. Evaluate
+    model.eval()
+    likelihood.eval()
+    with torch.no_grad():
+        preds = model(X_test)
+        y_pred = preds.mean.numpy()
+
+    # 7. Metrics
+    metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
+
+    # 8. Save
+    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics[3], metrics[0], metrics[4])
+
+    return metrics[3]  # Return R^2 for Optuna if tuning
+
 
 # TODO: actually need to call
 def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
