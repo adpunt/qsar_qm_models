@@ -1389,6 +1389,17 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         y_pred = preds.mean.numpy()
         pred_vars = preds.variance.numpy()
 
+    save_uncertainty_values(
+        y_pred_mean=y_pred,
+        y_pred_std=np.sqrt(pred_vars),
+        y_true=y_test,
+        filepath=args.filepath,
+        model_name="gauche",
+        rep=rep,
+        sigma_noise=s,
+        iteration=iteration
+    )
+
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=True)
 
     save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
@@ -1477,18 +1488,51 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args.epochs)
 
     model.eval()
-    with torch.no_grad():
-        y_pred_tensor = model(x_test_tensor).cpu().numpy()
-    y_pred = y_pred_tensor.flatten()
 
+    # Check if the model was Bayesian-transformed
+    is_bayesian = args.bayesian_transformation is not None
+
+    if is_bayesian:
+        num_samples = 100  # or however many stochastic passes you want
+        preds = []
+
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds.append(model(x_test_tensor).cpu().numpy())
+
+        preds = np.stack(preds, axis=0)  # shape (num_samples, batch_size, 1)
+        y_pred_mean = preds.mean(axis=0).flatten()
+        y_pred_std = preds.std(axis=0).flatten()
+
+        y_pred = y_pred_mean  # for calculating standard metrics
+
+    else:
+        with torch.no_grad():
+            y_pred_tensor = model(x_test_tensor).cpu().numpy()
+        y_pred = y_pred_tensor.flatten()
+        y_pred_std = np.zeros_like(y_pred)  # no uncertainty if non-Bayesian
+
+    # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
+    # Save standard results
     save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+
+    # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
+    save_uncertainty_values(
+        y_pred_mean=y_pred,
+        y_pred_std=y_pred_std,
+        y_true=y_test,
+        filepath=args.filepath,
+        model_name="dnn",
+        rep=rep,
+        sigma_noise=s,
+        iteration=iteration
+    )
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
 
-# TODO: add bayesian here
 def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
