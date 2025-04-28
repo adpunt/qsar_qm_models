@@ -1342,7 +1342,6 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
-
 # TODO: add bayesian here
 def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
