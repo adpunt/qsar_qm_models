@@ -1389,16 +1389,17 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         y_pred = preds.mean.numpy()
         pred_vars = preds.variance.numpy()
 
-    save_uncertainty_values(
-        y_pred_mean=y_pred,
-        y_pred_std=np.sqrt(pred_vars),
-        y_true=y_test,
-        filepath=args.filepath,
-        model_name="gauche",
-        rep=rep,
-        sigma_noise=s,
-        iteration=iteration
-    )
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=np.sqrt(pred_vars),
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name="gauche",
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration
+        )
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=True)
 
@@ -1518,17 +1519,18 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     # Save standard results
     save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
-    # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
-    save_uncertainty_values(
-        y_pred_mean=y_pred,
-        y_pred_std=y_pred_std,
-        y_true=y_test,
-        filepath=args.filepath,
-        model_name="dnn",
-        rep=rep,
-        sigma_noise=s,
-        iteration=iteration
-    )
+    if args.uncertainty:
+        # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name="dnn",
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration
+        )
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
@@ -1819,6 +1821,21 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
     with torch.no_grad():
         preds = model(X_test)
         y_pred = preds.mean.numpy()
+        y_pred_var = preds.variance.numpy()
+        y_pred_std = np.sqrt(y_pred_var)
+
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true=y_test.numpy(),
+            filepath=args.filepath,
+            model_name="graph_gp",
+            rep="graph",  # graph-based model
+            sigma_noise=s,
+            iteration=iteration
+        )
+
 
     # Metrics
     metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
