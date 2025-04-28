@@ -85,11 +85,8 @@ enum NoiseDistribution {
 
 fn generate_noise_by_indices(
     indices: &[usize],
-    mu: f32,
-    sigma: f32,
+    target_sigma: f32,
     distribution: NoiseDistribution,
-    alpha_skew: f32,
-    beta_params: (f32, f32),
     seed: u64,
 ) -> HashMap<usize, f32> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -98,33 +95,41 @@ fn generate_noise_by_indices(
     for &idx in indices {
         let noise = match distribution {
             NoiseDistribution::Gaussian | NoiseDistribution::DomainMpnn | NoiseDistribution::DomainTanimoto => {
-                let normal = Normal::new(mu, sigma).unwrap();
+                let normal = Normal::new(0.0, target_sigma).unwrap();
                 normal.sample(&mut rng)
             }
             NoiseDistribution::LeftTailed => {
-                let skew_normal = SkewNormal::new(-alpha_skew, mu, sigma).unwrap();
+                let alpha = 5.0; // fixed skew strength
+                let skew_normal = SkewNormal::new(-alpha, 0.0, target_sigma).unwrap();
                 skew_normal.sample(&mut rng)
             }
             NoiseDistribution::RightTailed => {
-                let skew_normal = SkewNormal::new(alpha_skew, mu, sigma).unwrap();
+                let alpha = 5.0; // fixed skew strength
+                let skew_normal = SkewNormal::new(alpha, 0.0, target_sigma).unwrap();
                 skew_normal.sample(&mut rng)
             }
             NoiseDistribution::UShaped => {
-                let beta = Beta::new(beta_params.0, beta_params.1).unwrap();
-                mu + sigma * (beta.sample(&mut rng) - 0.5) * 2.0
+                // Beta(0.5, 0.5) is U-shaped; rescale to [-1,1]
+                let beta = Beta::new(1.5, 1.5).unwrap();
+                let sample = beta.sample(&mut rng);
+                let scaling_factor = target_sigma / 0.70710678118;
+                (sample - 0.5) * 2.0 * scaling_factor
             }
             NoiseDistribution::Uniform => {
-                let uniform = Uniform::new_inclusive(mu - sigma, mu + sigma).unwrap();
+                // Uniform between [-a, a], variance = a² / 3
+                // Solve a²/3 = target_sigma²
+                let a = (3.0 * target_sigma.powi(2)).sqrt();
+                let uniform = Uniform::new_inclusive(-a, a).unwrap();
                 uniform.sample(&mut rng)
             }
         };
 
-        // Convert noise to f32 before inserting it into noise_map
         noise_map.insert(idx, noise as f32);
     }
 
     noise_map
 }
+
 
 fn read_smiles_data(
     reader: &mut BufReader<File>,
@@ -619,26 +624,10 @@ fn main() -> io::Result<()> {
         //      .long("sampling_proportion")
         //      .action(ArgAction::Set)
         //      .help("Sampling proportion for artificial noise addition"))
-        // .arg(Arg::new("noise_mu")
-        //      .long("noise_mu")
-        //      .action(ArgAction::Set)
-        //      .help("Mean for noise distribution"))
         .arg(Arg::new("noise_distribution")
              .long("noise_distribution")
              .action(ArgAction::Set)
              .help("Distribution type for noise"));
-        // .arg(Arg::new("alpha_skew")
-        //      .long("alpha_skew")
-        //      .action(ArgAction::Set)
-        //      .help("Alpha skew for noise distribution"))
-        // .arg(Arg::new("beta_param1")
-        //      .long("beta_param1")
-        //      .action(ArgAction::Set)
-        //      .help("First parameter for beta distribution"))
-        // .arg(Arg::new("beta_param2")
-        //      .long("beta_param2")
-        //      .action(ArgAction::Set)
-        //      .help("Second parameter for beta distribution"));
 
     let matches = app.get_matches();
 
@@ -660,13 +649,6 @@ fn main() -> io::Result<()> {
         "domain_tanimoto" => NoiseDistribution::DomainTanimoto,
         _ => panic!("Invalid noise distribution specified"),
     };
-    // let alpha_skew: f32 = matches.get_one::<String>("alpha_skew").unwrap().parse().expect("Alpha skew must be a valid float");
-    // let beta_param1: f32 = matches.get_one::<String>("beta_param1").unwrap().parse().expect("Beta param1 must be a valid float");
-    // let beta_param2: f32 = matches.get_one::<String>("beta_param2").unwrap().parse().expect("Beta param2 must be a valid float");
-    let alpha_skew: f32 = 0.0;
-    let beta_param1: f32 = 0.5;
-    let beta_param2: f32 = 0.5;
-    let noise_mu: f32 = 0.0;
     // TODO: potentially change this
     let sampling_proportion: f32 = 1.0;
 
@@ -686,11 +668,8 @@ fn main() -> io::Result<()> {
 
     let noise_map: HashMap<usize, f32> = generate_noise_by_indices(
         &noise_indices,
-        noise_mu,
         sigma,
         noise_distribution.clone(),
-        alpha_skew,
-        (beta_param1, beta_param2),
         seed,
     );
 

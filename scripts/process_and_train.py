@@ -592,91 +592,96 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     return x_data, y_data
 
 def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
-    # try: 
-    def black_box_function(trial=None):
-        if model_type == 'rf':
-            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+    try: 
+        def black_box_function(trial=None):
+            if model_type == 'rf':
+                return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == 'svm':
-            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == 'svm':
+                return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == 'xgboost':
-            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == 'xgboost':
+                return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == 'gauche':
-            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == 'gauche':
+                return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == "dnn":
-            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == "dnn":
+                return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == "flexible_dnn":
-            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == "flexible_dnn":
+                return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type == "lgb":
-            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type == "lgb":
+                return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
-            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
+                return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
-        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
-            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
+            elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
+                return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
 
-    if args.tuning:
-        study = optuna.create_study(direction="minimize")
-        study.optimize(black_box_function, n_trials=args.n_trials)  # Adjust `n_trials` as needed
+        if args.tuning:
+            study = optuna.create_study(direction="minimize")
+            study.optimize(black_box_function, n_trials=args.n_trials)  # Adjust `n_trials` as needed
 
-        best_params = study.best_params
-        print(f"Best params for {model_type} and {rep} with sigma {s}: {best_params}")
+            best_params = study.best_params
+            print(f"Best params for {model_type} and {rep} with sigma {s}: {best_params}")
 
-        # Save the best params as JSON next to the CSV
-        if args.filepath:
-            json_path = os.path.splitext(args.filepath)[0] + ".json"
-            dir_path = os.path.dirname(json_path)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
+            # Save the best params as JSON next to the CSV
+            if args.filepath:
+                json_path = os.path.splitext(args.filepath)[0] + ".json"
+                dir_path = os.path.dirname(json_path)
+                if dir_path:
+                    os.makedirs(dir_path, exist_ok=True)
 
-            # Load existing params if file exists
-            if os.path.exists(json_path):
-                with open(json_path, 'r') as f:
-                    all_params = json.load(f)
+                # Load existing params if file exists
+                if os.path.exists(json_path):
+                    with open(json_path, 'r') as f:
+                        all_params = json.load(f)
+                else:
+                    all_params = {}
+
+                # Create nested structure if missing
+                if model_type not in all_params:
+                    all_params[model_type] = {}
+                all_params[model_type][rep] = best_params
+
+                # Save updated structure
+                with open(json_path, 'w') as f:
+                    json.dump(all_params, f, indent=4)
+
+
+            res = black_box_function(optuna.trial.FixedTrial(best_params))
+
+        elif args.params:
+            with open(args.params, 'r') as f:
+                all_params = json.load(f)
+
+            # PATCHED VERSION
+            if model_type in all_params and rep in all_params[model_type]:
+                best_params = all_params[model_type][rep]
+
+                # Reconstruct use_default flags
+                fixed_params = {}
+                for key, value in best_params.items():
+                    if value is None:
+                        fixed_params[f"use_default_{key}"] = True
+                    else:
+                        fixed_params[f"use_default_{key}"] = False
+                        fixed_params[key] = value
+
+                return black_box_function(optuna.trial.FixedTrial(fixed_params))
             else:
-                all_params = {}
+                print(f"No saved parameters for model_type '{model_type}' and rep '{rep}'. Using default settings.")
+                return black_box_function()
 
-            # Create nested structure if missing
-            if model_type not in all_params:
-                all_params[model_type] = {}
-            all_params[model_type][rep] = best_params
-
-            # Save updated structure
-            with open(json_path, 'w') as f:
-                json.dump(all_params, f, indent=4)
-
-
-        res = black_box_function(optuna.trial.FixedTrial(best_params))
-
-    elif args.params:
-        with open(args.params, 'r') as f:
-            all_params = json.load(f)
-
-        best_params = all_params[model_type][rep]
-
-        # Reconstruct use_default flags
-        fixed_params = {}
-        for key, value in best_params.items():
-            if value is None:
-                fixed_params[f"use_default_{key}"] = True
-            else:
-                fixed_params[f"use_default_{key}"] = False
-                fixed_params[key] = value
-
-        return black_box_function(optuna.trial.FixedTrial(fixed_params))
-
-    else:
-        return black_box_function()
-    # except Exception as e:
-    #    print(f"Error with {rep} and {model_type}; more details: {e}")
-    #    # TODO: remove this!!
-    #    print(f"x_train: {x_train}")
+        else:
+            return black_box_function()
+    except Exception as e:
+       print(f"Error with {rep} and {model_type}; more details: {e}")
+       # TODO: remove this!!
+       print(f"x_train: {x_train}")
 
 def qm9_to_networkx(data):
     G = to_networkx(data, to_undirected=True)
