@@ -12,6 +12,7 @@ from sklearn.model_selection import train_test_split
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator, AllChem
 from sklearn.neighbors import NearestNeighbors
+from itertools import product
 
 sys.path.append('../models/')
 sys.path.append('../results/')
@@ -29,7 +30,7 @@ properties = {
 model_types = ['dnn']
 bayesian_transforms = ['full', 'last_layer', 'variational']
 noise_identifications = ['std', 'residual', 'mc_percentile']
-label_smoothings = ['soft_smoothing', 'hard_replacement', 'removal']
+label_smoothings = ['hard_replacement_neighbor', 'hard_replacement_model', 'soft_smoothing_neighbor', 'soft_smoothing_model', 'removal']
 
 # Create the grid
 experiment_grid = []
