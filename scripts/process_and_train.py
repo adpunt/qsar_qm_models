@@ -1,4 +1,4 @@
-import argparse
+git adimport argparse
 import os
 import os.path as osp
 import random
@@ -834,41 +834,41 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
 
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
-        # try: 
-        if not graph_only:
-            # Reset pointed for each mmap file
-            for file in files.values():
-                file.seek(0)
+        try: 
+            if not graph_only:
+                # Reset pointed for each mmap file
+                for file in files.values():
+                    file.seek(0)
 
-            x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-            x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-            x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
 
-        for model in args.models:
-            if model not in graph_models:
-                print(f"model: {model}")
-                run_model(
-                    x_train, 
-                    y_train, 
-                    x_test, 
-                    y_test, 
-                    x_val,
-                    y_val,
-                    model, 
-                    args, 
-                    iteration_seed,
-                    rep,
-                    iteration,
-                    s,
-                )
-            else:
-                if args.dataset == 'QM9':
-                    run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
+            for model in args.models:
+                if model not in graph_models:
+                    print(f"model: {model}")
+                    run_model(
+                        x_train, 
+                        y_train, 
+                        x_test, 
+                        y_test, 
+                        x_val,
+                        y_val,
+                        model, 
+                        args, 
+                        iteration_seed,
+                        rep,
+                        iteration,
+                        s,
+                    )
                 else:
-                    # TODO: need to convert polaris molecules to 3D and 2D
-                    return 
-        # except Exception as e:
-        #      print(f"Error with {rep} and {model}; more details: {e}")
+                    if args.dataset == 'QM9':
+                        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
+                    else:
+                        # TODO: need to convert polaris molecules to 3D and 2D
+                        return 
+        except Exception as e:
+             print(f"Error with {rep} and {model}; more details: {e}")
 
     for file in files.values():
         # Distinction between direct refcount of the mmap object itself, and the number of "view" objects that are pointing to it
