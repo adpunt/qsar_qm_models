@@ -1,4 +1,4 @@
-git adimport argparse
+import argparse
 import os
 import os.path as osp
 import random
@@ -77,6 +77,7 @@ else:
         cache = diskcache.Cache(cache_path)
     except Exception as e:
         cache = None
+        print("No SMILES cache")
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
