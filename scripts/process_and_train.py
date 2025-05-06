@@ -17,7 +17,6 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem import rdFingerprintGenerator
 from collections import deque
 import gc
-import diskcache
 import deepchem as dc
 import gpytorch
 from gpytorch.likelihoods import GaussianLikelihood
@@ -62,22 +61,30 @@ bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec']
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d', 'gtat']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
-cache_path = "../data/smiles_cache.sqlite"
-conn = sqlite3.connect(cache_path)
+smiles_db_path = "../data/smiles_db.sqlite"
 
-cursor = conn.cursor()
+# Ensure parent directory exists
+os.makedirs(os.path.dirname(smiles_db_path), exist_ok=True)
 
-# Check if the cache exists
-if not os.path.exists(cache_path):
-    print("Cache does not exist. Creating a new one...")
-    os.makedirs(cache_path, exist_ok=True)  # Ensure the directory exists
-    cache = diskcache.Cache(cache_path)  # Initialize a new cache
-else:
-    try:
-        cache = diskcache.Cache(cache_path)
-    except Exception as e:
-        cache = None
-        print("No SMILES cache")
+try:
+    # Connect to the SQLite db
+    conn = sqlite3.connect(smiles_db_path)
+    cursor = conn.cursor()
+
+    # Create table if it doesn't exist
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS smiles_db (
+        isomeric TEXT PRIMARY KEY,
+        canonical TEXT
+    )
+    """)
+    conn.commit()
+
+except Exception as e:
+    conn = None
+    cursor = None
+    print("Failed to initialize SMILES db")
+    print(e)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -235,27 +242,40 @@ def load_and_split_polaris(args, files):
             category = "val"
 
         smiles_randomized = None
-        # TODO: this try/catch logic is wrong
-        if smiles_isomeric in cache and not 'randomized_smiles' in args.molecular_representations:
-            try: 
-                smiles_canonical = cache[smiles_isomeric]
-            except Exception as e:
+        smiles_canonical = None
+        mol = None
+
+        if 'randomized_smiles' not in args.molecular_representations:
+            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
+            result = cursor.fetchone()
+
+            print(f"smiles db result: {result}")
+
+            if result:
+                smiles_canonical = result[0]
+                mol = Chem.MolFromSmiles(smiles_canonical)
+            else:
                 mol = Chem.MolFromSmiles(smiles_isomeric)
-            # TODO: potentially keep randomized SMILES in the same cache if they look promising (smiles_isomeric, smiles_randomized)
         else:
-            # Generate canonical SMILES and store it in cache
             mol = Chem.MolFromSmiles(smiles_isomeric)
-        
+
         if not mol:
-            try:
-                cache[smiles_isomeric] = None
-            except Exception as e:
-                continue
+            cursor.execute(
+                "INSERT OR REPLACE INTO smiles_db (isomeric, canonical) VALUES (?, ?)",
+                (smiles_isomeric, None)
+            )
+            conn.commit()
             continue
+
         if 'randomized_smiles' in args.molecular_representations:
             smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+
         smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-        cache[smiles_isomeric] = smiles_canonical
+        cursor.execute(
+            "INSERT OR REPLACE INTO smiles_db (isomeric, canonical) VALUES (?, ?)",
+            (smiles_isomeric, smiles_canonical)
+        )
+        conn.commit()
 
         sns_fp = None
         # TODO: need to define protein by pdb 
@@ -357,21 +377,25 @@ def split_qm9(qm9, args, files):
         elif index in val_idx:
             category = "val"
 
-        # TODO: only do this if not a graph
-        if 'randomized_smiles' not in args.molecular_representations:
-            cursor.execute("SELECT canonical FROM smiles_cache WHERE isomeric = ?", (smiles_isomeric,))
+        smiles_canonical = None
+        if 'smiles' in args.molecular_representations:
+            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
             result = cursor.fetchone()
             if result:
                 smiles_canonical = result[0]
 
-        if smiles_canonical is None:
+        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
             mol = Chem.MolFromSmiles(smiles_isomeric)
-            smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-            if smiles_canonical is None:
+            if not mol:
                 continue
 
-        if 'randomized_smiles' in args.molecular_representations:
-            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+            if not smiles_canonical:
+                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                if smiles_canonical is None:
+                    continue
+
+            if 'randomized_smiles' in args.molecular_representations:
+                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
 
         sns_fp = None
         if 'sns' in args.molecular_representations:
@@ -686,10 +710,10 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return _black_box_function(optuna.trial.FixedTrial(fixed_params))
         else:
             print(f"No saved parameters for model_type '{model_type}' and rep '{rep}'. Using default settings.")
-            return _black_box_function()
+            return model_selector()
 
     else:
-        return black_box_function()
+        return model_selector()
 
 def qm9_to_networkx(data):
     G = to_networkx(data, to_undirected=True)

@@ -8,22 +8,27 @@ import argparse
 import os
 
 # -------------------- Constants --------------------
-BOOTSTRAPPING = 20
-RANDOM_SEED = 42
-SAMPLE_SIZE = 30_000
-TARGET = 0  # Modify if needed
+parser = argparse.ArgumentParser()
+parser.add_argument("--bootstrapping", type=int, default=20)
+parser.add_argument("--random-seed", type=int, default=42)
+parser.add_argument("--sample-size", type=int, default=30000)
+args = parser.parse_args()
+
+BOOTSTRAPPING = args.bootstrapping
+RANDOM_SEED = args.random_seed
+SAMPLE_SIZE = args.sample_size
 
 # -------------------- Load QM9 dataset --------------------
 dataset = load_qm9('homo_lumo_gap')
 print(f"Loaded QM9 with {len(dataset)} molecules")
 
 # -------------------- Setup SQLite DB --------------------
-cache_path = "../data/smiles_cache.sqlite"
-conn = sqlite3.connect(cache_path)
+smiles_db_path = "../data/smiles_db.sqlite"
+conn = sqlite3.connect(smiles_db_path)
 cursor = conn.cursor()
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS smiles_cache (
+CREATE TABLE IF NOT EXISTS smiles_db (
     isomeric TEXT PRIMARY KEY,
     canonical TEXT
 )
@@ -48,13 +53,13 @@ print(f"Collected {len(unique_smiles)} unique SMILES from {BOOTSTRAPPING} bootst
 
 # -------------------- Precompute and store canonical SMILES --------------------
 for i, smiles in enumerate(unique_smiles):
-    cursor.execute("SELECT 1 FROM smiles_cache WHERE isomeric = ?", (smiles,))
+    cursor.execute("SELECT 1 FROM smiles_db WHERE isomeric = ?", (smiles,))
     if cursor.fetchone():
-        continue  # Already cached
+        continue  # Already smiles_dbd
 
     mol = Chem.MolFromSmiles(smiles)
     canonical = Chem.MolToSmiles(mol, isomericSmiles=False) if mol else None
-    cursor.execute("INSERT OR REPLACE INTO smiles_cache (isomeric, canonical) VALUES (?, ?)", (smiles, canonical))
+    cursor.execute("INSERT OR REPLACE INTO smiles_db (isomeric, canonical) VALUES (?, ?)", (smiles, canonical))
 
     if i % 1000 == 0:
         conn.commit()
