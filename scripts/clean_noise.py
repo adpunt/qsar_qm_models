@@ -292,9 +292,68 @@ def run_experiment(config, x_train, y_train_noisy, x_test, y_test, sigma):
 
     return r2_noisy, r2_cleaned
 
+def variational_em_label_denoising(x_train, y_train_noisy, model, num_em_steps=5, num_samples=30, batch_size=64):
+    """
+    Perform Variational EM for label denoising.
+
+    Parameters:
+        x_train (np.ndarray): Training features.
+        y_train_noisy (torch.Tensor): Noisy labels (shape: [N]).
+        model (nn.Module): A Bayesian model supporting stochastic forward passes.
+        num_em_steps (int): Number of EM iterations.
+        num_samples (int): Number of Monte Carlo samples per E-step.
+        batch_size (int): Batch size for training in M-step.
+
+    Returns:
+        y_denoised (torch.Tensor): Denoised label estimates (posterior means).
+        y_var (torch.Tensor): Posterior variances (uncertainty).
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    x_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_noisy = y_train_noisy.to(device)
+
+    # Initialize y_denoised with noisy labels
+    y_denoised = y_noisy.clone().detach()
+
+    for em_step in range(num_em_steps):
+        model.eval()
+        preds_samples = []
+
+        # E-step: Sample from the predictive distribution
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds = model(x_tensor).squeeze(-1)
+                preds_samples.append(preds)
+
+        preds_samples = torch.stack(preds_samples)  # (num_samples, N)
+        posterior_mean = preds_samples.mean(dim=0)
+        posterior_var = preds_samples.var(dim=0)
+
+        # Update "cleaned" labels for next M-step
+        y_denoised = posterior_mean.detach()
+
+        # M-step: retrain model on cleaned labels
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        criterion = nn.MSELoss()
+
+        dataset = TensorDataset(x_tensor, y_denoised.unsqueeze(1))
+        train_loader = TorchDataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+        for epoch in range(5):  # You can adjust this
+            for xb, yb in train_loader:
+                optimizer.zero_grad()
+                output = model(xb)
+                loss = criterion(output, yb)
+                loss.backward()
+                optimizer.step()
+
+    return y_denoised.cpu(), posterior_var.cpu()
+
 if __name__ == "__main__":
     # Step 1: Load
-    smiles_list, y = load_qm9_data(target="homo_lumo_gap", sample_size=2000)
+    smiles_list, y = load_qm9_data(target="homo_lumo_gap", sample_size=10000)
 
     # Step 2: Featurize
     x, y = smiles_to_ecfp4(smiles_list, y)
@@ -306,15 +365,56 @@ if __name__ == "__main__":
     sigma_values = [0.1, 0.3, 0.5]
 
     # Step 5: Run experiments
+    # for sigma in sigma_values:
+    #     print(f"\n=== Sigma = {sigma} ===")
+    #     y_train_noisy = add_regression_noise(y_train, sigma=sigma)
+
+    #     for config in experiment_grid:
+    #         print(f"Running config: {config}")
+    #         r2_noisy, r2_cleaned = run_experiment(config, x_train, y_train_noisy, x_test, y_test, sigma)
+    #         print(f"   R² with noisy labels: {r2_noisy:.4f}")
+    #         print(f"   R² with cleaned labels: {r2_cleaned:.4f}")
+
+    # Run EM experiments
     for sigma in sigma_values:
         print(f"\n=== Sigma = {sigma} ===")
         y_train_noisy = add_regression_noise(y_train, sigma=sigma)
 
-        for config in experiment_grid:
-            print(f"Running config: {config}")
-            r2_noisy, r2_cleaned = run_experiment(config, x_train, y_train_noisy, x_test, y_test, sigma)
-            print(f"   R² with noisy labels: {r2_noisy:.4f}")
+        # Try different Bayesian model types if desired
+        for transform_type in ["full", "last_layer", "variational"]:
+            print(f"--- Using Bayesian transform: {transform_type} ---")
+
+            model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=128, hidden_size2=64)
+            if transform_type == "full":
+                model = apply_bayesian_transformation(model)
+            elif transform_type == "last_layer":
+                model = apply_bayesian_transformation_last_layer(model)
+            elif transform_type == "variational":
+                model = apply_bayesian_transformation_last_layer_variational(model)
+            else:
+                raise ValueError(f"Unknown transform: {transform_type}")
+
+            # Run Variational EM label denoising (still works for any stochastic model)
+            y_denoised, y_var = variational_em_label_denoising(
+                x_train=x_train,
+                y_train_noisy=y_train_noisy,
+                model=model,
+                num_em_steps=5,
+                num_samples=30
+            )
+
+            # Compare RF trained on noisy vs denoised
+            rf = RandomForestRegressor()
+            rf.fit(x_train, y_train_noisy.numpy())
+            r2_noisy = r2_score(y_test.numpy(), rf.predict(x_test))
+
+            rf.fit(x_train, y_denoised.numpy())
+            r2_cleaned = r2_score(y_test.numpy(), rf.predict(x_test))
+
+            print(f"   R² with noisy labels:   {r2_noisy:.4f}")
             print(f"   R² with cleaned labels: {r2_cleaned:.4f}")
+
+
 
 # Next up:
 # - Different bayesian transformations/models
