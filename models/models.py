@@ -1133,7 +1133,8 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             if rep == "smiles":
                 shap_array = None
             else:
-                explainer = shap.TreeExplainer(model)
+                background = shap.kmeans(x_train, 25)  # Reduce to 25 centroids
+                explainer = shap.KernelExplainer(model.predict, background)
                 shap_array = explainer.shap_values(x_test, check_additivity=False)
                 base_vals = explainer.expected_value
 
@@ -1154,14 +1155,6 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
                     'svm', iteration_seed, rep, s
                 )
 
-        except Exception as e:
-            print(f"SHAP calculation failed for svm: {e}")
-
-    if args.shap:
-        try:
-            explainer = shap.KernelExplainer(model.predict, x_test)
-            shap_values = explainer.shap_values(x_test)
-            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'svm', iteration_seed, args.rep, s)
         except Exception as e:
             print(f"SHAP calculation failed for svm: {e}")
 
