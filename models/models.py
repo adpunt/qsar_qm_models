@@ -1046,6 +1046,9 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
     x_train = np.vstack((x_train, x_val))
     y_train = np.hstack((y_train, y_val))
 
+    print(f"x_train shape: {x_train.shape}")
+    print(f"x_test shape: {x_test.shape}")
+
     model.fit(x_train, y_train)
 
     if isinstance(model, RandomForestRegressor) or isinstance(model, RandomForestClassifier):
@@ -1057,10 +1060,39 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     if args.shap:
         try:
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(x_test)
-            if shap_values is not None:
-                save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'rf', iteration, rep, s)
+            if rep == "smiles":
+                masker = shap.maskers.Independent(x_train)
+                explainer = shap.Explainer(model.predict, masker)
+                shap_values = explainer(x_test[:100])  # limit for performance
+                base_vals = shap_values.base_values
+                shap_array = shap_values.values
+                print(f"shap values: {shap_values}")
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_array = explainer.shap_values(x_test, check_additivity=False)
+                base_vals = explainer.expected_value
+
+            # SHAP sum check
+            if rep == "smiles":
+                shap_sum = shap_array[:10].sum(axis=1)
+                errors = np.abs(base_vals[:10] + shap_sum - y_pred[:10])
+            else:
+                shap_sum = shap_array[:10].sum(axis=1)
+                errors = np.abs(base_vals + shap_sum - y_pred[:10])
+
+            if np.mean(errors) > 1e6:
+                print("Exploding SHAP, skipping")
+                shap_array = None
+
+            if shap_array is not None:
+                save_shap_values(
+                    shap_array,
+                    [f'feature_{i}' for i in range(x_test.shape[1])],
+                    x_test[:100] if rep == "smiles" else x_test,
+                    args.filepath,
+                    'rf', iteration_seed, rep, s
+                )
+
         except Exception as e:
             print(f"SHAP calculation failed for rf: {e}")
 
@@ -1095,6 +1127,35 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+
+    if args.shap:
+        try:
+            if rep == "smiles":
+                shap_array = None
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_array = explainer.shap_values(x_test, check_additivity=False)
+                base_vals = explainer.expected_value
+
+                # SHAP sum check
+                shap_sum = shap_array[:10].sum(axis=1)
+                errors = np.abs(base_vals + shap_sum - y_pred[:10])
+
+                if np.mean(errors) > 1e6:
+                    print("Exploding SHAP, skipping")
+                    shap_array = None
+
+            if shap_array is not None:
+                save_shap_values(
+                    shap_array,
+                    [f'feature_{i}' for i in range(x_test.shape[1])],
+                    x_test[:100] if rep == "smiles" else x_test,
+                    args.filepath,
+                    'svm', iteration_seed, rep, s
+                )
+
+        except Exception as e:
+            print(f"SHAP calculation failed for svm: {e}")
 
     if args.shap:
         try:
@@ -1184,9 +1245,39 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
 
     if args.shap:
         try:
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(x_test)
-            save_shap_values(shap_values, [f'feature_{i}' for i in range(x_test.shape[1])], x_test, args.filepath, 'xgboost', iteration_seed, rep, s)
+            if rep == "smiles":
+                masker = shap.maskers.Independent(x_train)
+                explainer = shap.Explainer(model.predict, masker)
+                shap_values = explainer(x_test[:100])  # limit for performance
+                base_vals = shap_values.base_values
+                shap_array = shap_values.values
+                print(f"shap values: {shap_values}")
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_array = explainer.shap_values(x_test, check_additivity=False)
+                base_vals = explainer.expected_value
+
+            # SHAP sum check
+            if rep == "smiles":
+                shap_sum = shap_array[:10].sum(axis=1)
+                errors = np.abs(base_vals[:10] + shap_sum - y_pred[:10])
+            else:
+                shap_sum = shap_array[:10].sum(axis=1)
+                errors = np.abs(base_vals + shap_sum - y_pred[:10])
+
+            if np.mean(errors) > 1e6:
+                print("Exploding SHAP, skipping")
+                shap_array = None
+
+            if shap_array is not None:
+                save_shap_values(
+                    shap_array,
+                    [f'feature_{i}' for i in range(x_test.shape[1])],
+                    x_test[:100] if rep == "smiles" else x_test,
+                    args.filepath,
+                    'xgboost', iteration_seed, rep, s
+                )
+
         except Exception as e:
             print(f"SHAP calculation failed for xgboost: {e}")
 
