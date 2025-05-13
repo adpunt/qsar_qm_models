@@ -12,7 +12,7 @@ use rand_distr::{Distribution, Normal, Uniform, Beta, SkewNormal};
 use std::io::Write;
 use std::cmp::Reverse;
 use std::io::BufWriter;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, remove_file, rename};
 use rand::SeedableRng;
 
 extern crate rdkit_sys;
@@ -208,8 +208,6 @@ fn write_data(
             config.molecular_representations.clone(),
             config.k_domains,
         ) {
-            let reader_pos_after = reader.stream_position()?;
-            writer.seek(SeekFrom::Start(reader_pos_after))?;
 
             if log_writes {
                 println!("Writing data for index: {}", index);
@@ -338,7 +336,10 @@ fn write_data(
                 }
             }
 
-            println!("file pos before ecfp4: {}", writer.stream_position()?);
+            let current_pos = writer.stream_position()?;
+            if log_writes {
+                println!("file pos before ecfp4: {}", current_pos);
+            }
 
             // Write ECFP4 fingerprint
             if config.molecular_representations.contains(&"ecfp4".to_string()) {
@@ -349,6 +350,13 @@ fn write_data(
                         let cxx_vec_ptr: UniquePtr<CxxVector<u64>> = explicit_bit_vect_to_u64_vec(&fingerprint);
                         let cxx_vec_ref: &CxxVector<u64> = &*cxx_vec_ptr;
                         let mut u64_vec: Vec<u64> = cxx_vec_ref.iter().copied().collect();
+
+                        if u64_vec.len() != 32 {
+                            if log_writes {
+                                eprintln!("Index {}: ECFP4 is not 2048 bits! Got {} chunks", index, u64_vec.len());
+                            }
+                            continue;
+                        }
 
                         let mut packed_fingerprint = vec![0u8; 256];
                         for (i, chunk) in u64_vec.iter().enumerate() {
@@ -368,6 +376,12 @@ fn write_data(
                         continue;
                     }
                 }
+            }
+
+            let after_ecfp = writer.stream_position()?;
+            if log_writes {
+                println!("file pos after ecfp4: {}", after_ecfp);
+                println!("bytes written for ecfp4: {}", after_ecfp - current_pos);
             }
 
             if log_writes {
@@ -531,8 +545,11 @@ fn preprocess_data(
     let tokenizer = SmilesTokenizer::new();
 
     let train_file_path = format!("train_{}.mmap", config.iteration_seed);
+    let train_file_new_path = format!("train_{}_new.mmap", config.iteration_seed);
     let test_file_path = format!("test_{}.mmap", config.iteration_seed);
+    let test_file_new_path = format!("test_{}_new.mmap", config.iteration_seed);
     let val_file_path = format!("val_{}.mmap", config.iteration_seed);
+    let val_file_new_path = format!("val_{}_new.mmap", config.iteration_seed);
 
     let train_file = File::open(&train_file_path)?;
     let test_file = File::open(&test_file_path)?;
@@ -541,11 +558,12 @@ fn preprocess_data(
     let mut train_reader = BufReader::new(train_file);
     let mut train_writer = BufWriter::new(
         OpenOptions::new()
+            .create(true)
             .write(true)
-            .append(true)
-            .open(&train_file_path)
-            .unwrap()
+            .truncate(true)
+            .open(&train_file_new_path)?
     );
+
     train_reader.seek(SeekFrom::Start(0))?;
     write_data(
         &mut train_reader,
@@ -561,14 +579,16 @@ fn preprocess_data(
         config.train_count,
         config.logging,
     )?;
+    remove_file(&train_file_path)?;
+    rename(&train_file_new_path, &train_file_path)?;
 
     let mut val_reader = BufReader::new(val_file);
     let mut val_writer = BufWriter::new(
         OpenOptions::new()
+            .create(true)
             .write(true)
-            .append(true)
-            .open(&val_file_path)
-            .unwrap()
+            .truncate(true)
+            .open(&val_file_new_path)?
     );
     val_reader.seek(SeekFrom::Start(0))?;
     write_data(
@@ -585,14 +605,16 @@ fn preprocess_data(
         config.val_count,
         config.logging,
     )?;
+    remove_file(&val_file_path)?;
+    rename(&val_file_new_path, &val_file_path)?;
 
     let mut test_reader = BufReader::new(test_file);
     let mut test_writer = BufWriter::new(
         OpenOptions::new()
+            .create(true)
             .write(true)
-            .append(true)
-            .open(&test_file_path)
-            .unwrap()
+            .truncate(true)
+            .open(&test_file_new_path)?
     );
     test_reader.seek(SeekFrom::Start(0))?;
     write_data(
@@ -609,6 +631,8 @@ fn preprocess_data(
         config.test_count,
         config.logging,
     )?;
+    remove_file(&test_file_path)?;
+    rename(&test_file_new_path, &test_file_path)?;
 
     Ok(())
 }

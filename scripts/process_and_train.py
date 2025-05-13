@@ -583,8 +583,6 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 continue
             print(f"[{entry}] offset after processed_target: {mmap_file.tell()}")
 
-            processed_bytes = mmap_file.read(4)
-
             # --- domain label ---
             if k_domains > 1:
                 print(f"[{entry}] offset before domain_byte: {mmap_file.tell()}")
