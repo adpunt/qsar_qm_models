@@ -278,16 +278,12 @@ fn write_data(
                 property_value = (property_value - mean) / std_dev;
             }
 
-            println!("file pos before processed_target: {}", writer.stream_position()?);
-
             let processed_bytes = property_value.to_le_bytes();
             writer.write_all(&processed_bytes)?;
             if log_writes {
                 println!("noisy y: {}", property_value);
                 println!("noisy y bytes: {:02X?}", processed_bytes);
             }
-
-            println!("file pos after processed_target: {}", writer.stream_position()?);
 
             // Write domain label if applicable
             if config.k_domains > 1 {
@@ -336,11 +332,6 @@ fn write_data(
                 }
             }
 
-            let current_pos = writer.stream_position()?;
-            if log_writes {
-                println!("file pos before ecfp4: {}", current_pos);
-            }
-
             // Write ECFP4 fingerprint
             if config.molecular_representations.contains(&"ecfp4".to_string()) {
                 let_cxx_string!(smiles_cxx = smiles_data.isomeric_smiles.clone());
@@ -366,7 +357,6 @@ fn write_data(
                         writer.write_all(&packed_fingerprint)?;
                         if log_writes {
                             println!("ecfp4_fingerprint: {:?}", packed_fingerprint);
-                            println!("ecfp4_fingerprint bytes: {:02X?}", packed_fingerprint);
                         }
                     }
                     Err(_) => {
@@ -376,12 +366,6 @@ fn write_data(
                         continue;
                     }
                 }
-            }
-
-            let after_ecfp = writer.stream_position()?;
-            if log_writes {
-                println!("file pos after ecfp4: {}", after_ecfp);
-                println!("bytes written for ecfp4: {}", after_ecfp - current_pos);
             }
 
             if log_writes {
