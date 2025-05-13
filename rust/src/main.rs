@@ -63,7 +63,7 @@ struct SmilesData {
     canonical_smiles: String,
     randomized_smiles: Option<String>,
     target_value: f32,
-    sns_buf: [u8; 16]
+    sns_buf: [u8; 128]
 }
 
 #[derive(Serialize, Clone)]
@@ -130,79 +130,62 @@ fn generate_noise_by_indices(
     noise_map
 }
 
-
 fn read_smiles_data(
     reader: &mut BufReader<File>,
-    molecular_representations: Vec<std::string::String>,
-    k_domains: usize,
+    molecular_representations: Vec<String>,
+    _k_domains: usize,
 ) -> Option<SmilesData> {
-    let mut buffer = Vec::new();
-    let mut delimiter_buf = [0u8; 1];
-
-    let start_pos = reader.stream_position().unwrap();
-
-    // Read isomeric_smiles and ensure it's in proper form
-    buffer.clear();
-    if reader.read_until(DELIMITER, &mut buffer).is_err() || buffer.is_empty() {
-        return None; 
+    // Helper: read a 4-byte length-prefixed UTF-8 string
+    fn read_len_prefixed_string(reader: &mut BufReader<File>) -> Option<String> {
+        let mut len_buf = [0u8; 4];
+        reader.read_exact(&mut len_buf).ok()?;
+        let str_len = u32::from_le_bytes(len_buf) as usize;
+        let mut buf = vec![0u8; str_len];
+        reader.read_exact(&mut buf).ok()?;
+        String::from_utf8(buf).ok()
     }
-    let isomeric_smiles_raw = &buffer[..buffer.len().saturating_sub(1)];
-    let isomeric_smiles = match String::from_utf8(isomeric_smiles_raw.to_vec()) {
-        Ok(s) if s.chars().all(|c| c.is_ascii_graphic() || c.is_whitespace()) && !s.is_empty() => {
-            // Additional check: Ensure no weird characters (e.g., single quotes, unexpected punctuation)
-            if s.chars().any(|c| c == '\u{FFFD}' || c == '\0' || c == '\'' || c == '�') {
-                eprintln!("Skipping SMILES with bad characters: {:?}", s);
-                return None; // Skip this entry
-            }
-            
-            // Ensure SMILES length is within a reasonable range
-            let smiles_len = s.len();
-            if smiles_len < 5 || smiles_len > 300 {
-                eprintln!("Skipping unusual SMILES length ({} chars): {:?}", smiles_len, s);
-                return None;
-            }
 
-            s
-        }
-        _ => return None, // Invalid UTF-8 or empty string
-    };
+    // Read isomeric_smiles and check validity
+    let isomeric_smiles = read_len_prefixed_string(reader)?;
+    if isomeric_smiles.len() < 5 || isomeric_smiles.len() > 300 || isomeric_smiles.contains(['\u{FFFD}', '\0', '\'', '�']) {
+        eprintln!("Skipping malformed isomeric_smiles: {:?}", isomeric_smiles);
+        return None;
+    }
 
     // Read canonical_smiles
-    buffer.clear();
-    reader.read_until(DELIMITER, &mut buffer).ok()?;
-    let canonical_smiles = String::from_utf8_lossy(&buffer[..buffer.len() - 1]).to_string();
+    let canonical_smiles = read_len_prefixed_string(reader)?;
 
     // Read property_value (float)
-    let mut property_buf = [0u8; 4];
-    reader.read_exact(&mut property_buf).ok()?;
-    let target_value = f32::from_le_bytes(property_buf);
-    reader.read_exact(&mut delimiter_buf).ok()?;
+    let mut prop_buf = [0u8; 4];
+    reader.read_exact(&mut prop_buf).ok()?;
+    let target_value = f32::from_le_bytes(prop_buf);
 
-    // Read randomized_smiles (optional)
+    // Read randomized_smiles if applicable
     let mut randomized_smiles = None;
     if molecular_representations.contains(&"randomized_smiles".to_string()) {
-        buffer.clear();
-        reader.read_until(DELIMITER, &mut buffer).ok()?;
-        randomized_smiles = Some(String::from_utf8_lossy(&buffer[..buffer.len() - 1]).to_string());
+        let mut len_buf = [0u8; 4];
+        reader.read_exact(&mut len_buf).ok()?;
+        let rand_len = u32::from_le_bytes(len_buf) as usize;
+        if rand_len > 0 {
+            let mut rand_buf = vec![0u8; rand_len];
+            reader.read_exact(&mut rand_buf).ok()?;
+            randomized_smiles = String::from_utf8(rand_buf).ok();
+        }
     }
 
-    // Read sns_fp (optional, 16 bytes)
-    let mut sns_buf = [0u8; 16];
+    // Read sns_fp if applicable
+    let mut sns_buf = [0u8; 128];
     if molecular_representations.contains(&"sns".to_string()) {
-        reader.read_exact(&mut sns_buf).ok()?;  // Read 16 bytes
-        reader.read_exact(&mut delimiter_buf).ok()?;  // Read delimiter
+        reader.read_exact(&mut sns_buf).ok()?;
     }
 
-    // Store parsed data
-    let smiles_data = SmilesData {
+    Some(SmilesData {
         isomeric_smiles,
         canonical_smiles,
         randomized_smiles,
         target_value,
-        sns_buf
-    };
-
-    Some(smiles_data)
+        sns_buf,
+    })
 }
 
 fn write_data(
@@ -219,7 +202,6 @@ fn write_data(
     data_count: usize,
     log_writes: bool,
 ) -> io::Result<()> {
-
     for index in 0..data_count {
         if let Some(smiles_data) = read_smiles_data(
             reader,
@@ -233,48 +215,60 @@ fn write_data(
                 println!("Writing data for index: {}", index);
             }
 
-            // Write isomeric_smiles
-            writer.write_all(smiles_data.isomeric_smiles.as_bytes())?;
-            writer.write_all(&[DELIMITER])?;
+            // Write isomeric_smiles with length prefix
+            let iso_bytes = smiles_data.isomeric_smiles.as_bytes();
+            let iso_len_bytes = (iso_bytes.len() as u32).to_le_bytes();
+            writer.write_all(&iso_len_bytes)?;
+            writer.write_all(iso_bytes)?;
             if log_writes {
                 println!("isomeric_smiles: {}", smiles_data.isomeric_smiles);
+                println!("isomeric_smiles_len bytes: {:02X?}", iso_len_bytes);
+                println!("isomeric_smiles bytes: {:02X?}", iso_bytes);
             }
 
-            // Write canonical_smiles
-            writer.write_all(smiles_data.canonical_smiles.as_bytes())?;
-            writer.write_all(&[DELIMITER])?;
+            // Write canonical_smiles with length prefix
+            let canon_bytes = smiles_data.canonical_smiles.as_bytes();
+            let canon_len_bytes = (canon_bytes.len() as u32).to_le_bytes();
+            writer.write_all(&canon_len_bytes)?;
+            writer.write_all(canon_bytes)?;
             if log_writes {
                 println!("canonical_smiles: {}", smiles_data.canonical_smiles);
+                println!("canonical_smiles_len bytes: {:02X?}", canon_len_bytes);
+                println!("canonical_smiles bytes: {:02X?}", canon_bytes);
             }
 
-            // Write property_value (float)
-            writer.write_all(&smiles_data.target_value.to_le_bytes())?;
-            writer.write_all(&[DELIMITER])?;
+            // Write target value
+            let target_bytes = smiles_data.target_value.to_le_bytes();
+            writer.write_all(&target_bytes)?;
             if log_writes {
                 println!("property_value: {}", smiles_data.target_value);
+                println!("property_value bytes: {:02X?}", target_bytes);
             }
 
-            // Write randomized_smiles if it exists
+            // Write randomized_smiles if exists
             if let Some(randomized) = &smiles_data.randomized_smiles {
-                writer.write_all(randomized.as_bytes())?;
-                writer.write_all(&[DELIMITER])?;
+                let bytes = randomized.as_bytes();
+                let len_bytes = (bytes.len() as u32).to_le_bytes();
+                writer.write_all(&len_bytes)?;
+                writer.write_all(bytes)?;
                 if log_writes {
                     println!("randomized_smiles: {}", randomized);
+                    println!("randomized_smiles_len bytes: {:02X?}", len_bytes);
+                    println!("randomized_smiles bytes: {:02X?}", bytes);
                 }
             }
 
-            // Write sns_fp (16 bytes) if applicable
+            // Write sns_fp
             if config.molecular_representations.contains(&"sns".to_string()) {
-                let sns_fp = smiles_data.sns_buf; // sns_buf is already [u8; 16]
+                let sns_fp = smiles_data.sns_buf;
                 writer.write_all(&sns_fp)?;
-                writer.write_all(&[DELIMITER])?;
                 if log_writes {
                     println!("sns_fp: {:?}", sns_fp);
+                    println!("sns_fp bytes: {:02X?}", sns_fp);
                 }
             }
 
-            // Normalize and write property value
-            // TODO: add noise differently for classification
+            // Normalize and write processed target
             let mut property_value = smiles_data.target_value;
             if config.noise {
                 if let Some(&artificial_noise) = noise_map.get(&index) {
@@ -283,24 +277,30 @@ fn write_data(
             }
 
             if config.regression {
-                let property_value = (property_value - mean) / std_dev;
-            }
-            writer.write_all(&property_value.to_le_bytes())?;
-            writer.write_all(&[DELIMITER])?;
-            if log_writes {
-                println!("noisy y: {}", property_value);
+                property_value = (property_value - mean) / std_dev;
             }
 
-            // If multiple domains exist, write domain flag
+            println!("file pos before processed_target: {}", writer.stream_position()?);
+
+            let processed_bytes = property_value.to_le_bytes();
+            writer.write_all(&processed_bytes)?;
+            if log_writes {
+                println!("noisy y: {}", property_value);
+                println!("noisy y bytes: {:02X?}", processed_bytes);
+            }
+
+            println!("file pos after processed_target: {}", writer.stream_position()?);
+
+            // Write domain label if applicable
             if config.k_domains > 1 {
                 writer.write_all(&[0u8])?;
-                writer.write_all(&[DELIMITER])?;
                 if log_writes {
                     println!("domain_flag: 0");
+                    println!("domain_flag bytes: 00");
                 }
             }
 
-            // Write SMILES and randomized SMILES
+            // Write smiles or randomized_smiles OHE if used
             for smiles_type in ["smiles", "randomized_smiles"] {
                 if config.molecular_representations.contains(&smiles_type.to_string()) {
                     let smiles_string = if smiles_type == "smiles" {
@@ -316,9 +316,9 @@ fn write_data(
                         vocab_size,
                         max_sequence_length,
                     );
+
                     let bit_packed_len = (smiles_ohe.len() + 7) / 8;
                     let mut bit_packed_data = vec![0u8; bit_packed_len];
-
                     for (i, &bit) in smiles_ohe.iter().enumerate() {
                         let byte_index = i / 8;
                         let bit_offset = i % 8;
@@ -327,15 +327,20 @@ fn write_data(
                         }
                     }
 
+                    let len_bytes = (bit_packed_data.len() as u32).to_le_bytes();
+                    writer.write_all(&len_bytes)?;
                     writer.write_all(&bit_packed_data)?;
-                    writer.write_all(&[DELIMITER])?;
                     if log_writes {
                         println!("{}: {:?}", smiles_type, bit_packed_data);
+                        println!("{}_ohe_len bytes: {:02X?}", smiles_type, len_bytes);
+                        println!("{}_ohe bytes: {:02X?}", smiles_type, bit_packed_data);
                     }
                 }
             }
 
-            // Write ECFP4 fingerprint if applicable
+            println!("file pos before ecfp4: {}", writer.stream_position()?);
+
+            // Write ECFP4 fingerprint
             if config.molecular_representations.contains(&"ecfp4".to_string()) {
                 let_cxx_string!(smiles_cxx = smiles_data.isomeric_smiles.clone());
                 match smiles_to_mol(&smiles_cxx) {
@@ -343,35 +348,40 @@ fn write_data(
                         let fingerprint = rdk_fingerprint_mol(&mol);
                         let cxx_vec_ptr: UniquePtr<CxxVector<u64>> = explicit_bit_vect_to_u64_vec(&fingerprint);
                         let cxx_vec_ref: &CxxVector<u64> = &*cxx_vec_ptr;
-                        let u64_vec: Vec<u64> = cxx_vec_ref.iter().copied().collect();
+                        let mut u64_vec: Vec<u64> = cxx_vec_ref.iter().copied().collect();
 
-                        let mut packed_fingerprint = [0u8; 32];
-                        for (i, chunk) in u64_vec.iter().take(4).enumerate() {
-                            let byte_index = i * 8;
-                            packed_fingerprint[byte_index..byte_index + 8].copy_from_slice(&chunk.to_le_bytes());
+                        let mut packed_fingerprint = vec![0u8; 256];
+                        for (i, chunk) in u64_vec.iter().enumerate() {
+                            packed_fingerprint[i * 8..(i + 1) * 8].copy_from_slice(&chunk.to_le_bytes());
                         }
 
                         writer.write_all(&packed_fingerprint)?;
-                        writer.write_all(&[DELIMITER])?;
                         if log_writes {
                             println!("ecfp4_fingerprint: {:?}", packed_fingerprint);
+                            println!("ecfp4_fingerprint bytes: {:02X?}", packed_fingerprint);
                         }
                     }
-                    Err(_) => continue,
+                    Err(_) => {
+                        if log_writes {
+                            eprintln!("Skipping index {}: Failed to parse mol", index);
+                        }
+                        continue;
+                    }
                 }
             }
-
-            // Ensure writer is properly aligned for next entry
-            writer.write_all(b"\n")?;
-            writer.flush()?;
 
             if log_writes {
                 println!("Finished writing entry {}\n", index);
             }
         }
     }
+
+    writer.flush()?;
+
     Ok(())
 }
+
+
 
 fn tanimoto_distance(fp1: &Vec<u64>, fp2: &Vec<u64>) -> f32 {
     let intersection = fp1.iter().zip(fp2.iter()).map(|(&a, &b)| (a & b).count_ones()).sum::<u32>();

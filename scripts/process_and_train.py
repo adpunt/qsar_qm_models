@@ -119,9 +119,9 @@ def parse_arguments():
     parser.add_argument("--clean-smiles", type=bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
+    parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     return parser.parse_args()
 
-# TODO: add PLEC
 def write_to_mmap(
     smiles_isomeric,
     smiles_canonical,
@@ -136,29 +136,36 @@ def write_to_mmap(
 ):
     entry = b""
 
-    smiles_isomeric_binary = smiles_isomeric.encode('utf-8') + DELIMITER
-    entry += smiles_isomeric_binary
+    # Encode isomeric SMILES with length prefix
+    smiles_isomeric_bytes = smiles_isomeric.encode("utf-8")
+    entry += struct.pack("I", len(smiles_isomeric_bytes))
+    entry += smiles_isomeric_bytes
 
-    smiles_canonical_binary = smiles_canonical.encode('utf-8') + DELIMITER
-    entry += smiles_canonical_binary
+    # Encode canonical SMILES with length prefix
+    smiles_canonical_bytes = smiles_canonical.encode("utf-8")
+    entry += struct.pack("I", len(smiles_canonical_bytes))
+    entry += smiles_canonical_bytes
 
-    property_value_binary = struct.pack('f', property_value) + DELIMITER
-    entry += property_value_binary  # Append delimiter separately
+    # Encode property value (float)
+    entry += struct.pack("f", property_value)
 
+    # Encode randomized SMILES (optional, with length prefix)
     if "randomized_smiles" in molecular_representations:
         if randomized_smiles:
-            randomized_smiles_binary = randomized_smiles.encode('utf-8') + DELIMITER
-            entry += randomized_smiles_binary
+            randomized_smiles_bytes = randomized_smiles.encode("utf-8")
+            entry += struct.pack("I", len(randomized_smiles_bytes))
+            entry += randomized_smiles_bytes
         else:
-            entry += DELIMITER
+            entry += struct.pack("I", 0)  # Zero length = missing
 
+    # SNS fingerprint (packed bits, fixed length)
     if "sns" in molecular_representations:
         if sns_fp is not None:
-            sns_fp = sns_fp.astype(np.uint8).tolist()
-            sns_fp_binary = struct.pack('16B', *sns_fp[:16]) + DELIMITER
-            entry += sns_fp_binary
+            sns_fp_array = np.array(sns_fp, dtype=np.uint8)
+            sns_fp_packed = np.packbits(sns_fp_array, bitorder='little')
+            entry += sns_fp_packed.tobytes()
         else:
-            return
+            return  # skip incomplete entry
 
     files[category].write(entry)
     files[category].flush()
@@ -495,123 +502,165 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     x_data = []
     y_data = []
 
-    for i in range(entry_count):
-        line = mmap_file.readline().strip(NEWLINE)
+    for entry in range(entry_count):
         try:
+            start = mmap_file.tell()
             feature_vector = []
 
-            fields = line.split(DELIMITER)  # Split by delimiter
-
-            field_idx = 0  # Track current field position
-
-            # Read required fields
-            isomeric_smiles = fields[field_idx].decode("utf-8")
-            field_idx += 1
-
-            canonical_smiles = fields[field_idx].decode("utf-8")
-            field_idx += 1
-
-            target_value = struct.unpack("f", fields[field_idx])[0]
-            field_idx += 1
-
-            # Read optional fields
-            randomized_smiles = None
-            if "randomized_smiles" in molecular_representations:
-                if "randomized_smiles" == rep:
-                    randomized_smiles = fields[field_idx].decode("utf-8")
-                    if logging:
-                        print(f"randomized_smiles1: {randomized_smiles}")
-                field_idx += 1
-
-            domain_label = None
-            if "k_domains" in molecular_representations:
-                domain_label = struct.unpack("B", fields[field_idx])[0]
-                field_idx += 1
-                if logging:
-                    print(f"domain_label: {domain_label}")
-
-            sns_fp = None
-            if "sns" in molecular_representations:
-                if "sns" == rep:
-                    sns_fp = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
-                    if logging:
-                        print(f"sns_fp: {sns_fp}")
-                field_idx += 1
-            
-            # Read required fields
-            processed_target = struct.unpack("f", fields[field_idx])[0]
-            field_idx += 1
+            # --- isomeric SMILES ---
+            print(f"[{entry}] offset before iso_len: {mmap_file.tell()}")
+            iso_len_bytes = mmap_file.read(4)
+            iso_len = struct.unpack("I", iso_len_bytes)[0]
+            print(f"[{entry}] offset before isomeric_smiles: {mmap_file.tell()}")
+            iso_bytes = mmap_file.read(iso_len)
+            isomeric_smiles = iso_bytes.decode("utf-8")
             if logging:
-                print(f"processed_target: {processed_target}")
+                print(f"[{entry}] isomeric_smiles: {isomeric_smiles}")
+                print(f"[{entry}] isomeric_smiles_len bytes: {[f'{b:02X}' for b in iso_len_bytes]}")
+                print(f"[{entry}] isomeric_smiles bytes: {[f'{b:02X}' for b in iso_bytes]}")
 
-            # Check for NaN
-            if processed_target != processed_target:
-                continue
+            # --- canonical SMILES ---
+            print(f"[{entry}] offset before canon_len: {mmap_file.tell()}")
+            canon_len_bytes = mmap_file.read(4)
+            canon_len = struct.unpack("I", canon_len_bytes)[0]
+            print(f"[{entry}] offset before canonical_smiles: {mmap_file.tell()}")
+            canon_bytes = mmap_file.read(canon_len)
+            canonical_smiles = canon_bytes.decode("utf-8")
+            if logging:
+                print(f"[{entry}] canonical_smiles: {canonical_smiles}")
+                print(f"[{entry}] canonical_smiles_len bytes: {[f'{b:02X}' for b in canon_len_bytes]}")
+                print(f"[{entry}] canonical_smiles bytes: {[f'{b:02X}' for b in canon_bytes]}")
 
-            # Finish processing SNS after reading the target value
-            if "sns" == rep:
-                y_data.append(processed_target)
-                feature_vector.append(sns_fp)
-                x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
-                continue
-            
-            if "graph" == rep:
-                x_data.append(i)
-                y_data.append(processed_target)
-                continue
+            # --- target value (raw) ---
+            print(f"[{entry}] offset before target_value: {mmap_file.tell()}")
+            target_bytes = mmap_file.read(4)
+            target_value = struct.unpack("f", target_bytes)[0]
+            if logging:
+                print(f"[{entry}] target_value: {target_value}")
+                print(f"[{entry}] target_value bytes: {[f'{b:02X}' for b in target_bytes]}")
 
-            # Continue reading optional fields
-            smiles_ohe = None
+            # current = mmap_file.tell()
+            # print(f"[{entry}] offset before peek: {mmap_file.tell()}")
+            # peek = mmap_file.read(8)
+            # print(f"After target_value, next 8 bytes: {[f'{b:02X}' for b in peek]}")
+            # mmap_file.seek(current)
+
+            # --- randomized SMILES (length-prefixed) ---
+            if "randomized_smiles" in molecular_representations:
+                print(f"[{entry}] offset before rand_len: {mmap_file.tell()}")
+                rand_len_bytes = mmap_file.read(4)
+                rand_len = struct.unpack("I", rand_len_bytes)[0]
+                if rand_len > 0:
+                    print(f"[{entry}] offset before rand_bytes: {mmap_file.tell()}")
+                    rand_bytes = mmap_file.read(rand_len)
+                else:
+                    rand_bytes = b""
+                if logging:
+                    print(f"[{entry}] randomized_smiles_len bytes: {[f'{b:02X}' for b in rand_len_bytes]}")
+                    if rand_len > 0:
+                        print(f"[{entry}] randomized_smiles bytes: {[f'{b:02X}' for b in rand_bytes]}")
+
+            # --- sns_fp ---
+            if "sns" in molecular_representations:
+                print(f"[{entry}] offset before sns_bytes: {mmap_file.tell()}")
+                sns_bytes = mmap_file.read(128)
+                if rep == "sns":
+                    sns_fp = np.unpackbits(np.frombuffer(sns_bytes, dtype=np.uint8), bitorder="little")
+                    feature_vector.append(sns_fp)
+                    if logging:
+                        print(f"[{entry}] sns_fp: {sns_fp}")
+                if logging:
+                    print(f"[{entry}] sns_fp bytes: {[f'{b:02X}' for b in sns_bytes]}")
+
+            # --- processed target ---
+            print(f"[{entry}] offset before processed_target: {mmap_file.tell()}")
+            processed_bytes = mmap_file.read(4)
+            processed_target = struct.unpack("f", processed_bytes)[0]
+            if logging:
+                print(f"[{entry}] processed_target: {processed_target}")
+                print(f"[{entry}] processed_target bytes: {[f'{b:02X}' for b in processed_bytes]}")
+            if processed_target != processed_target:  # NaN check
+                continue
+            print(f"[{entry}] offset after processed_target: {mmap_file.tell()}")
+
+            processed_bytes = mmap_file.read(4)
+
+            # --- domain label ---
+            if k_domains > 1:
+                print(f"[{entry}] offset before domain_byte: {mmap_file.tell()}")
+                domain_byte = mmap_file.read(1)
+                if logging:
+                    print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
+
+            # --- SMILES OHE ---
             if "smiles" in molecular_representations:
-                if "smiles" == rep:
-                    smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
-                    smiles_ohe = np.unpackbits(smiles_packed, bitorder='little')
+                print(f"[{entry}] offset before ohe_len: {mmap_file.tell()}")
+                ohe_len_bytes = mmap_file.read(4)
+                ohe_len = struct.unpack("I", ohe_len_bytes)[0]
+                print(f"[{entry}] offset before packed smiles: {mmap_file.tell()}")
+                packed = mmap_file.read(ohe_len)
+                if rep == "smiles":
+                    smiles_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
                     x_data.append(smiles_ohe)
                     y_data.append(processed_target)
                     if logging:
-                        print(f"smiles_ohe: {smiles_ohe}")
-                    continue
-                field_idx += 1
+                        print(f"[{entry}] smiles_ohe: {smiles_ohe}")
+                if logging:
+                    print(f"[{entry}] smiles_ohe_len bytes: {[f'{b:02X}' for b in ohe_len_bytes]}")
+                    print(f"[{entry}] smiles_ohe bytes: {[f'{b:02X}' for b in packed]}")
+                continue
 
-            # TODO: figure out what's broken here
-            # Need to compare with SMILES, something with the OHE is broken
-            randomized_smiles_ohe = []
+            # --- randomized SMILES OHE ---
             if "randomized_smiles" in molecular_representations:
-                if "randomized_smiles" == rep:
-                    randomized_smiles_packed = np.frombuffer(fields[field_idx], dtype=np.uint8)
-                    randomized_smiles_ohe = np.unpackbits(randomized_smiles_packed, bitorder='little')
+                print(f"[{entry}] offset before ohe_len randomised: {mmap_file.tell()}")
+                ohe_len_bytes = mmap_file.read(4)
+                ohe_len = struct.unpack("I", ohe_len_bytes)[0]
+                print(f"[{entry}] offset before packed randomised smiles: {mmap_file.tell()}")
+                packed = mmap_file.read(ohe_len)
+                if rep == "randomized_smiles":
+                    rand_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
+                    x_data.append(rand_ohe)
+                    y_data.append(processed_target)
                     if logging:
-                        print(f"randomized_smiles2: {randomized_smiles_ohe}")
-                    if len(randomized_smiles_ohe) > 0:
-                        x_data.append(randomized_smiles_ohe)
-                        y_data.append(processed_target)
-                    continue
-                field_idx += 1
+                        print(f"[{entry}] randomized_ohe: {rand_ohe}")
+                if logging:
+                    print(f"[{entry}] randomized_ohe_len bytes: {[f'{b:02X}' for b in ohe_len_bytes]}")
+                    print(f"[{entry}] randomized_ohe bytes: {[f'{b:02X}' for b in packed]}")
+                continue
 
-            ecfp4 = None
+            # --- ECFP4 fingerprint ---
             if "ecfp4" in molecular_representations:
-                if "ecfp4" == rep:
-                    ecfp4 = np.unpackbits(np.frombuffer(fields[field_idx], dtype=np.uint8), bitorder='little')
-                    if logging:
-                        print(f"ecfp4: {ecfp4}")
-                    if ecfp4.size == 256: 
-                        u64_array = np.frombuffer(ecfp4, dtype=np.uint64)
-                        ecfp4 = np.unpackbits(ecfp4, bitorder='little')[:2048]
-                    else:
-                        # print(f"Warning: ECFP4 fingerprint has unexpected size {ecfp4.size} at index {field_idx}")
+                print(f"[{entry}] offset before raw_bytes ecfp4: {mmap_file.tell()}")
+                raw_bytes = mmap_file.read(256)
+                if rep == "ecfp4":
+                    if len(raw_bytes) != 256:
+                        if logging:
+                            print(f"[{entry}] malformed ecfp4, got {len(raw_bytes)} bytes")
                         continue
+                    ecfp4_packed = np.frombuffer(raw_bytes, dtype=np.uint8)
+                    ecfp4 = np.unpackbits(ecfp4_packed, bitorder="little")
                     feature_vector.append(ecfp4)
                     x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                     y_data.append(processed_target)
+                    if logging:
+                        print(f"[{entry}] ecfp4: {ecfp4}")
+                        print(f"[{entry}] ecfp4 bytes: {[f'{b:02X}' for b in raw_bytes]}")
+                    end = mmap_file.tell()
+                    print(f"[{entry}] bytes read: {end - start}")
                     continue
-                field_idx += 1
+
+            # --- graph fallback ---
+            if rep == "graph":
+                x_data.append(entry)
+                y_data.append(processed_target)
+                continue
 
         except Exception as e:
-            # TODO: look into why there's so many of these
-            # print(f"Skipping malformed line: {line}")
+            if logging:
+                print(f"[{entry}] Skipping malformed entry: {e}")
             continue
 
-    if rep != 'graph':
+    if rep != "graph":
         x_data = np.vstack(x_data).astype(np.uint8)
     y_data = np.array(y_data, dtype=np.float32)
 
@@ -809,8 +858,6 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
             # TODO: iteration is broken!!!
             save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
 
-
-
 def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     graph_only = True
     for model in args.models:
@@ -857,43 +904,49 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
 
+    files = {
+        "train": open('train_' + str(iteration_seed) + '.mmap', 'rb'),
+        "test": open('test_' + str(iteration_seed) + '.mmap', 'rb'),
+        "val": open('val_' + str(iteration_seed) + '.mmap', 'rb'),
+    }
+
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
-        try: 
-            if not graph_only:
-                # Reset pointed for each mmap file
-                for file in files.values():
-                    file.seek(0)
+        # try: 
+        if not graph_only:
+            # Reset pointed for each mmap file
+            for file in files.values():
+                file.seek(0)
 
-                x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+            x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+            x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+            x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
 
-            for model in args.models:
-                if model not in graph_models:
-                    print(f"model: {model}")
-                    run_model(
-                        x_train, 
-                        y_train, 
-                        x_test, 
-                        y_test, 
-                        x_val,
-                        y_val,
-                        model, 
-                        args, 
-                        iteration_seed,
-                        rep,
-                        iteration,
-                        s,
-                    )
+        for model in args.models:
+            if model not in graph_models:
+                print(f"model: {model}")
+                run_model(
+                    x_train, 
+                    y_train, 
+                    x_test, 
+                    y_test, 
+                    x_val,
+                    y_val,
+                    model, 
+                    args, 
+                    iteration_seed,
+                    rep,
+                    iteration,
+                    s,
+                )
+            else:
+                if args.dataset == 'QM9':
+                    run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
                 else:
-                    if args.dataset == 'QM9':
-                        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
-                    else:
-                        # TODO: need to convert polaris molecules to 3D and 2D
-                        return 
-        except Exception as e:
-             print(f"Error with {rep} and {model}; more details: {e}")
+                    # TODO: need to convert polaris molecules to 3D and 2D
+                    return 
+        # except Exception as e:
+        #      print(f"Error with {rep} and {model}; more details: {e}")
 
     for file in files.values():
         # Distinction between direct refcount of the mmap object itself, and the number of "view" objects that are pointing to it
@@ -934,6 +987,7 @@ def main():
                 "test": open('test_' + str(iteration_seed) + '.mmap', 'wb+'),
                 "val": open('val_' + str(iteration_seed) + '.mmap', 'wb+'),
             }
+
 
             train_size = int(args.sample_size * 0.8)
             test_size = int(args.sample_size * 0.1)
