@@ -562,6 +562,11 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 if logging:
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
+            # --- sns_fp ---
+            if rep == "sns":
+                x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
+                y_data.append(processed_target)
+
             # --- SMILES OHE ---
             if "smiles" in molecular_representations:
                 ohe_len_bytes = mmap_file.read(4)
