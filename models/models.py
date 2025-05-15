@@ -18,6 +18,7 @@ from torch_geometric.nn.inits import glorot, zeros
 import gpytorch
 from typing import Union
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from quantile_forest import RandomForestQuantileRegressor
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from sklearn.svm import SVR, SVC
@@ -1013,8 +1014,7 @@ class FlexibleDNNRegressionModel(nn.Module):
     def forward(self, x):
         return self.network(x)
 
-
-def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_rf_model(model, x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
 
     if args.tuning:
@@ -1030,24 +1030,34 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
         params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
         params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
 
-
-    if args.dataset == 'QM9':
-        model = RandomForestRegressor(random_state=iteration_seed, **params)
-    else:
-        params['criterion'] = trial.suggest_categorical('criterion', ['gini', 'entropy'])  # Classification
-        model = RandomForestClassifier(random_state=iteration_seed, **params)
+    if model == 'rf':
+        if args.dataset == 'QM9':
+            model = RandomForestRegressor(random_state=iteration_seed, **params)
+        else:
+            params['criterion'] = trial.suggest_categorical('criterion', ['gini', 'entropy'])  # Classification
+            model = RandomForestClassifier(random_state=iteration_seed, **params)
+    elif model == 'qrf':
+        quantile = trial.suggest_float('quantile', 0.1, 0.9) if args.tuning else 0.5
+        model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
+        if trial is not None:
+            trial.set_user_attr("quantile", quantile)
 
     x_train = np.vstack((x_train, x_val))
     y_train = np.hstack((y_train, y_val))
 
     model.fit(x_train, y_train)
-    y_pred = model.predict(x_test)
+
+    if isinstance(model, RandomForestRegressor) or isinstance(model, RandomForestClassifier):
+        y_pred = model.predict(x_test)
+    else:  # QuantileRegressor from quantile-forest
+        y_pred = model.predict(x_test, quantiles=[quantile]).squeeze()
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'rf', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
+
 
 def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1079,6 +1089,44 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
+
+def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+    from ngboost import NGBRegressor
+    from ngboost.distns import Normal
+    from ngboost.scores import MLE
+
+    if args.tuning:
+        learning_rate = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+        n_estimators = trial.suggest_int('n_estimators', 10, 2000)
+        natural_gradient = trial.suggest_categorical('natural_gradient', [True, False])
+    else:
+        learning_rate = 0.01
+        n_estimators = 500
+        natural_gradient = True
+
+    x_train = np.vstack((x_train, x_val))
+    y_train = np.hstack((y_train, y_val))
+
+    model = NGBRegressor(
+        Dist=Normal,
+        Score=MLE,
+        natural_gradient=natural_gradient,
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        verbose=False,
+        random_state=iteration_seed,
+    )
+
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+    y_dist = model.pred_dist(x_test)
+
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    nll = -y_dist.logpdf(y_test).mean()
+
+    save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+
+    return metrics[3]  # or return nll if that's your target
 
 def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1630,3 +1678,4 @@ def get_custom_hyperparameter_bounds(metadata_path):
 # TODO: test different loss functions
 # dnn, mlp, mtl, residual_mlp, factorization_mlp, rnn, gru, custom
 # You can customize or swap loss functions (e.g., use nn.L1Loss() instead of MSELoss) depending on your use case.
+# TODO: add NGBoost and QRF to environment files
