@@ -64,28 +64,48 @@ distance_matrix = np.zeros((N, N), dtype=np.float32)
 
 for i in tqdm(range(N), desc="Computing distances"):
     sims = BulkTanimotoSimilarity(fps[i], fps)
-    print(sims)
     for j in range(N):
         distance_matrix[i, j] = 1 - sims[j]  # similarity → distance
 
 # -------------------- Compute pairwise proximity matrcies --------------------
 
-def compute_rf_proximity_matrix(fingerprints, n_estimators=100, max_depth=20, seed=42):
+def compute_proximity_matrix(fingerprints, method="rf", n_estimators=100, max_depth=20, seed=42):
     """
-    Computes a proximity matrix from a trained Random Forest.
-    Proximity(i,j) = fraction of trees where i and j fall in the same leaf.
-    """
-    print("Training Random Forest for proximity matrix...")
+    Compute a tree-based proximity matrix using sklearn RF, quantile RF, or XGBoost.
 
-    # Convert ECFP4 bit vectors to numpy array
+    Parameters:
+        fingerprints (list of rdkit bit vectors)
+        method: 'rf', 'qrf', or 'xgboost'
+    Returns:
+        distance_matrix (np.ndarray)
+    """
+    print(f"Training {method.upper()} for proximity matrix...")
+
     X = np.array([np.asarray(fp) for fp in fingerprints])
-    y = np.random.rand(X.shape[0])  # dummy labels
+    y = np.random.rand(X.shape[0])  # dummy targets
 
-    rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, random_state=seed, n_jobs=-1)
-    rf.fit(X, y)
+    if method == "rf":
+        from sklearn.ensemble import RandomForestRegressor
+        model = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth,
+                                      random_state=seed, n_jobs=-1)
+    elif method == "qrf":
+        from quantile_forest import RandomForestQuantileRegressor
+        model = RandomForestQuantileRegressor(n_estimators=n_estimators, max_depth=max_depth,
+                                              random_state=seed, n_jobs=-1)
+    elif method == "xgboost":
+        from xgboost import XGBRegressor
+        model = XGBRegressor(n_estimators=n_estimators, max_depth=max_depth,
+                             random_state=seed, n_jobs=-1, tree_method="auto", verbosity=0)
+    else:
+        raise ValueError(f"Unsupported method: {method}")
 
-    print("Collecting leaf indices...")
-    leaf_indices = rf.apply(X)  # shape: (n_samples, n_trees)
+    model.fit(X, y)
+
+    if method in {"rf", "qrf"}:
+        leaf_indices = model.apply(X)  # shape (n_samples, n_trees)
+    elif method == "xgboost":
+        # returns shape (n_samples, n_trees)
+        leaf_indices = model.apply(X).astype(np.int32)
 
     print("Computing proximity matrix...")
     N = X.shape[0]
@@ -101,35 +121,61 @@ def compute_rf_proximity_matrix(fingerprints, n_estimators=100, max_depth=20, se
                 for j in indices:
                     proximity[i, j] += 1
 
-    proximity /= rf.n_estimators
+    proximity /= leaf_indices.shape[1]
     distance_matrix = 1.0 - np.round(proximity, 3)
 
-    print("Finished computing RF distance matrix.")
+    print(f"Finished computing {method.upper()} distance matrix.")
     return distance_matrix
 
 
-# -------------------- Save result --------------------
-# distance_matrix = np.round(distance_matrix, 3)
-# with open(args.output, "wb") as f:
-#     pickle.dump({
-#         "smiles": smiles_list,
-#         "distance_matrix": distance_matrix,
-#         "indices": all_indices,
-#         "seed": args.seed,
-#         "target": args.target
-#     }, f)
+# -------------------- Save Tanimoto distance --------------------
+distance_matrix = np.round(distance_matrix, 3)
+with open(args.output, "wb") as f:
+    pickle.dump({
+        "smiles": smiles_list,
+        "distance_matrix": distance_matrix,
+        "indices": all_indices,
+        "seed": args.seed,
+        "target": args.target,
+        "method": "tanimoto"
+    }, f)
+print(f"Tanimoto distance matrix saved to {args.output}")
 
-# print(f"Tanimoto distance matrix saved to {args.output}")
-
-rf_distance_matrix = compute_rf_proximity_matrix(fps)
-
+# -------------------- Save RF proximity distance --------------------
+rf_dist = compute_proximity_matrix(fps, method="rf")
 with open(args.output.replace(".pkl", "_rf.pkl"), "wb") as f:
     pickle.dump({
         "smiles": smiles_list,
-        "distance_matrix": rf_distance_matrix,
+        "distance_matrix": rf_dist,
         "indices": all_indices,
         "seed": args.seed,
         "target": args.target,
         "method": "rf_proximity"
     }, f)
+print(f"RF proximity matrix saved to {args.output.replace('.pkl', '_rf.pkl')}")
 
+# -------------------- Save QRF proximity distance --------------------
+qrf_dist = compute_proximity_matrix(fps, method="qrf")
+with open(args.output.replace(".pkl", "_qrf.pkl"), "wb") as f:
+    pickle.dump({
+        "smiles": smiles_list,
+        "distance_matrix": qrf_dist,
+        "indices": all_indices,
+        "seed": args.seed,
+        "target": args.target,
+        "method": "qrf_proximity"
+    }, f)
+print(f"QRF proximity matrix saved to {args.output.replace('.pkl', '_qrf.pkl')}")
+
+# -------------------- Save XGBoost proximity distance --------------------
+xgb_dist = compute_proximity_matrix(fps, method="xgboost")
+with open(args.output.replace(".pkl", "_xgb.pkl"), "wb") as f:
+    pickle.dump({
+        "smiles": smiles_list,
+        "distance_matrix": xgb_dist,
+        "indices": all_indices,
+        "seed": args.seed,
+        "target": args.target,
+        "method": "xgb_proximity"
+    }, f)
+print(f"XGBoost proximity matrix saved to {args.output.replace('.pkl', '_xgb.pkl')}")
