@@ -10,6 +10,9 @@ from rdkit.DataStructs import BulkTanimotoSimilarity
 from tqdm import tqdm
 import pickle
 from process_and_train import load_qm9
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import pairwise_distances
+from sklearn.utils import shuffle
 
 # -------------------- Constants --------------------
 parser = argparse.ArgumentParser()
@@ -65,15 +68,68 @@ for i in tqdm(range(N), desc="Computing distances"):
     for j in range(N):
         distance_matrix[i, j] = 1 - sims[j]  # similarity → distance
 
+# -------------------- Compute pairwise proximity matrcies --------------------
+
+def compute_rf_proximity_matrix(fingerprints, n_estimators=100, max_depth=20, seed=42):
+    """
+    Computes a proximity matrix from a trained Random Forest.
+    Proximity(i,j) = fraction of trees where i and j fall in the same leaf.
+    """
+    print("Training Random Forest for proximity matrix...")
+
+    # Convert ECFP4 bit vectors to numpy array
+    X = np.array([np.asarray(fp) for fp in fingerprints])
+    y = np.random.rand(X.shape[0])  # dummy labels
+
+    rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, random_state=seed, n_jobs=-1)
+    rf.fit(X, y)
+
+    print("Collecting leaf indices...")
+    leaf_indices = rf.apply(X)  # shape: (n_samples, n_trees)
+
+    print("Computing proximity matrix...")
+    N = X.shape[0]
+    proximity = np.zeros((N, N), dtype=np.float32)
+
+    for tree_idx in range(leaf_indices.shape[1]):
+        leaf = leaf_indices[:, tree_idx]
+        leaf_to_indices = {}
+        for i, node in enumerate(leaf):
+            leaf_to_indices.setdefault(node, []).append(i)
+        for indices in leaf_to_indices.values():
+            for i in indices:
+                for j in indices:
+                    proximity[i, j] += 1
+
+    proximity /= rf.n_estimators
+    distance_matrix = 1.0 - np.round(proximity, 3)
+
+    print("Finished computing RF distance matrix.")
+    return distance_matrix
+
+
 # -------------------- Save result --------------------
-distance_matrix = np.round(distance_matrix, 3)
-with open(args.output, "wb") as f:
+# distance_matrix = np.round(distance_matrix, 3)
+# with open(args.output, "wb") as f:
+#     pickle.dump({
+#         "smiles": smiles_list,
+#         "distance_matrix": distance_matrix,
+#         "indices": all_indices,
+#         "seed": args.seed,
+#         "target": args.target
+#     }, f)
+
+# print(f"Tanimoto distance matrix saved to {args.output}")
+
+rf_distance_matrix = compute_rf_proximity_matrix(fps)
+
+with open(args.output.replace(".pkl", "_rf.pkl"), "wb") as f:
     pickle.dump({
         "smiles": smiles_list,
-        "distance_matrix": distance_matrix,
+        "distance_matrix": rf_distance_matrix,
         "indices": all_indices,
         "seed": args.seed,
-        "target": args.target
+        "target": args.target,
+        "method": "rf_proximity"
     }, f)
 
-print(f"Tanimoto distance matrix saved to {args.output}")
