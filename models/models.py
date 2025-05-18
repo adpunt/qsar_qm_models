@@ -1030,13 +1030,13 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
         params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
         params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
 
-    if model == 'rf':
+    if model_type == 'rf':
         if args.dataset == 'QM9':
             model = RandomForestRegressor(random_state=iteration_seed, **params)
         else:
             params['criterion'] = trial.suggest_categorical('criterion', ['gini', 'entropy'])  # Classification
             model = RandomForestClassifier(random_state=iteration_seed, **params)
-    elif model == 'qrf':
+    elif model_type == 'qrf':
         quantile = trial.suggest_float('quantile', 0.1, 0.9) if args.tuning else 0.5
         model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
         if trial is not None:
