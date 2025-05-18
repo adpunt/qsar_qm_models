@@ -864,9 +864,9 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
     print(f"Rust stdout: {stdout}")
 
     files = {
-        "train": open('train_' + str(iteration_seed) + '.mmap', 'rb'),
-        "test": open('test_' + str(iteration_seed) + '.mmap', 'rb'),
-        "val": open('val_' + str(iteration_seed) + '.mmap', 'rb'),
+        "train": open('train_' + str(file_no) + '.mmap', 'rb'),
+        "test": open('test_' + str(file_no) + '.mmap', 'rb'),
+        "val": open('val_' + str(file_no) + '.mmap', 'rb'),
     }
 
     # Read mmap files and train/test models for all molecular representations
