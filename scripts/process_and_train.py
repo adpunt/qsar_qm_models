@@ -627,7 +627,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
 
     def model_selector(trial=None):
         if model_type in ['rf', 'qrf']:
-            return train_rf_model(model_type, x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial)
 
         elif model_type == 'svm':
             return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)

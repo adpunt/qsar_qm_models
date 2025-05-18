@@ -1014,7 +1014,7 @@ class FlexibleDNNRegressionModel(nn.Module):
     def forward(self, x):
         return self.network(x)
 
-def train_rf_model(model, x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial=None):
     params = {}
 
     if args.tuning:
@@ -1054,7 +1054,7 @@ def train_rf_model(model, x_train, y_train, x_test, y_test, x_val, y_val, args, 
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, model, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
