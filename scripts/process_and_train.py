@@ -833,7 +833,7 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         'test_count': len(test_idx),
         'val_count': len(val_idx),
         'max_vocab': args.max_vocab,
-        'file_no': iteration_seed,
+        'file_no': file_no,
         'molecular_representations': args.molecular_representations,
         'k_domains': args.k_domains,
         'logging': args.logging,
