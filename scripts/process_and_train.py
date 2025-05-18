@@ -815,7 +815,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
             # TODO: iteration is broken!!!
             save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
 
-def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
+def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     graph_only = True
     for model in args.models:
         if model not in graph_models:
@@ -823,8 +823,6 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
 
     train_count = len(train_idx)
     test_count = len(test_idx)
-
-    file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
 
     config = {
         'sample_size': args.sample_size,
@@ -940,13 +938,13 @@ def main():
             random.seed(iteration_seed)
             np.random.seed(iteration_seed)
             torch.manual_seed(iteration_seed)
+            file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
 
             files = {
-                "train": open('train_' + str(iteration_seed) + '.mmap', 'wb+'),
-                "test": open('test_' + str(iteration_seed) + '.mmap', 'wb+'),
-                "val": open('val_' + str(iteration_seed) + '.mmap', 'wb+'),
+                "train": open('train_' + str(file_no) + '.mmap', 'wb+'),
+                "test": open('test_' + str(file_no) + '.mmap', 'wb+'),
+                "val": open('val_' + str(file_no) + '.mmap', 'wb+'),
             }
-
 
             train_size = int(args.sample_size * 0.8)
             test_size = int(args.sample_size * 0.1)
@@ -961,7 +959,7 @@ def main():
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
-            process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=qm9)
+            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=qm9)
 
 if __name__ == "__main__":
     main()
