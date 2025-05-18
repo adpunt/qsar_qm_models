@@ -50,7 +50,7 @@ struct Config {
     test_count: usize,
     val_count: usize,
     max_vocab: usize,
-    iteration_seed: usize,
+    file_no: usize,
     molecular_representations: Vec<String>,
     k_domains: usize, 
     logging: bool,
@@ -462,7 +462,7 @@ fn generate_aggregate_stats(
     let mut y_values: Vec<f32> = Vec::new();
     let mut max_sequence_length = 0usize;
 
-    let files_to_process = vec![File::open(format!("train_{}.mmap", config.iteration_seed))?];
+    let files_to_process = vec![File::open(format!("train_{}.mmap", config.file_no))?];
 
     for file in files_to_process {
         let mut reader = BufReader::new(file);
@@ -528,12 +528,12 @@ fn preprocess_data(
 ) -> io::Result<()> {
     let tokenizer = SmilesTokenizer::new();
 
-    let train_file_path = format!("train_{}.mmap", config.iteration_seed);
-    let train_file_new_path = format!("train_{}_new.mmap", config.iteration_seed);
-    let test_file_path = format!("test_{}.mmap", config.iteration_seed);
-    let test_file_new_path = format!("test_{}_new.mmap", config.iteration_seed);
-    let val_file_path = format!("val_{}.mmap", config.iteration_seed);
-    let val_file_new_path = format!("val_{}_new.mmap", config.iteration_seed);
+    let train_file_path = format!("train_{}.mmap", config.file_no);
+    let train_file_new_path = format!("train_{}_new.mmap", config.file_no);
+    let test_file_path = format!("test_{}.mmap", config.file_no);
+    let test_file_new_path = format!("test_{}_new.mmap", config.file_no);
+    let val_file_path = format!("val_{}.mmap", config.file_no);
+    let val_file_new_path = format!("val_{}_new.mmap", config.file_no);
 
     let train_file = File::open(&train_file_path)?;
     let test_file = File::open(&test_file_path)?;

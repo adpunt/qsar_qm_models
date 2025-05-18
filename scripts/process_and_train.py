@@ -29,7 +29,7 @@ import sqlite3
 import pickle
 from torch_geometric.utils import to_networkx
 import uuid
-
+import time
 
 import sys
 sys.path.append('../models/')
@@ -824,6 +824,8 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
     train_count = len(train_idx)
     test_count = len(test_idx)
 
+    file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
+
     config = {
         'sample_size': args.sample_size,
         'noise': s > 0,
@@ -831,7 +833,7 @@ def process_and_run(args, iteration, iteration_seed, train_idx, test_idx, val_id
         'test_count': len(test_idx),
         'val_count': len(val_idx),
         'max_vocab': args.max_vocab,
-        'iteration_seed': iteration_seed,
+        'file_no': iteration_seed,
         'molecular_representations': args.molecular_representations,
         'k_domains': args.k_domains,
         'logging': args.logging,
