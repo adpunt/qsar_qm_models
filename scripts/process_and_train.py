@@ -204,9 +204,9 @@ def write_to_mmap(
 
     if "pdv" in molecular_representations:
         if pdv is not None:
-            pdv = np.nan_to_num(pdv).astype(np.float32)
-            pdv_binary = struct.pack('200f', *pdv) + DELIMITER
-            entry += pdv_binary
+            pdv_binary = (pdv > 0).astype(np.uint8)  # or any threshold rule
+            pdv_packed = np.packbits(pdv_binary, bitorder='little')
+            entry += pdv_packed.tobytes()
         else:
             return
 
@@ -602,14 +602,16 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     feature_vector.append(sns_fp)
                     if logging:
                         print(f"[{entry}] sns_fp: {sns_fp}")
-
+            
+            # --- pdv ---
             pdv = None
             if "pdv" in molecular_representations:
+                pdv_bytes = mmap_file.read(25)
                 if "pdv" == rep:
-                    pdv = np.frombuffer(fields[field_idx], dtype=np.float32)
+                    pdv = np.unpackbits(np.frombuffer(pdv_bytes, dtype=np.uint8), bitorder="little")
+                    feature_vector.append(pdv)
                     if logging: 
                         print(f"pdv: {pdv}")
-                field_idx += 1
 
             # --- processed target ---
             processed_bytes = mmap_file.read(4)
@@ -624,7 +626,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep == "sns":
+            if rep == "sns" or rep == "pdv":
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
 
@@ -944,6 +946,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         for model in args.models:
             if model not in graph_models:
                 print(f"model: {model}")
+                print(f"rep: {rep}")
                 run_model(
                     x_train, 
                     y_train, 
