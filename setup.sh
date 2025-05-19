@@ -50,10 +50,20 @@ fi
 echo "Setting shared library paths..."
 if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
+    echo "Ensuring RDKit .so symlinks exist..."
+    for full in "$CONDA_PREFIX"/lib/libRDKit*.so.1.2024.*; do
+        base="${full%%.so.*}.so"
+        if [ ! -e "$base" ]; then
+            ln -s "$full" "$base"
+        fi
+    done
+
 elif [[ "$OSTYPE" == darwin* ]]; then
     unset DYLD_LIBRARY_PATH
     export DYLD_FALLBACK_LIBRARY_PATH="$CONDA_PREFIX/lib"
 fi
+
 
 
 # --- Isolate from Homebrew ---
