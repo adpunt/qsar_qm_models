@@ -1090,7 +1090,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                     [f'feature_{i}' for i in range(x_test.shape[1])],
                     x_test[:100] if rep == "smiles" else x_test,
                     args.filepath,
-                    'rf', iteration_seed, rep, s
+                    model_type, iteration_seed, rep, s
                 )
 
         except Exception as e:
