@@ -980,6 +980,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     gc.collect()
 
 def main():
+    start_time = time.time()
     args = parse_arguments()
 
     # Prepare for communication with Rust
@@ -993,6 +994,7 @@ def main():
         qm9 = load_qm9(args.target)
         print("QM9 loaded")
 
+    sigma_time = time.time()
     for s in args.sigma:
         s = float(s)
         print(f"Sigma: {s}")
@@ -1025,6 +1027,12 @@ def main():
             
             target_domain = 1 # TODO: change, this is just a placeholder
             process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=qm9)
+
+        current_time = time.time()
+        print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")
+        sigma_time = current_time
+
+    print(f"Time for total run: {time.time() - start_time}")
 
 if __name__ == "__main__":
     main()
