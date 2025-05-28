@@ -392,11 +392,6 @@ def split_qm9(qm9, args, files):
     else:
         raise ValueError("Invalid split type")
 
-    # Normalize the data
-    data_mean = qm9.data.y[train_idx].mean()
-    data_std = qm9.data.y[train_idx].std()
-    qm9.data.y = (qm9.data.y - data_mean) / data_std
-
     mols_train = deque()
 
     ecfp_featuriser = None
@@ -803,6 +798,7 @@ def qm9_to_networkx(data):
     
     return G
 
+# TODO: normalise
 def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
     for model_type in args.models:
         if model_type == "graph_gp":
