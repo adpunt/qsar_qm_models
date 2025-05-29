@@ -55,6 +55,7 @@ struct Config {
     k_domains: usize, 
     logging: bool,
     regression: bool,
+    normalize: bool,
 }
 
 #[derive(Debug)]
@@ -283,8 +284,9 @@ fn write_data(
                 }
             }
 
-            // Normalize and write property value
+            // Add noise to label
             // TODO: add noise differently for classification
+            // Add noise
             let mut property_value = smiles_data.target_value;
             if config.noise {
                 if let Some(&artificial_noise) = noise_map.get(&index) {
@@ -292,8 +294,10 @@ fn write_data(
                 }
             }
 
-            if config.regression {
+            // Normalize and write
+            if config.regression && config.normalize {
                 property_value = (property_value - mean) / std_dev;
+                println!("normalised, config.normalise: {:?}", config.normalize);
             }
 
             let processed_bytes = property_value.to_le_bytes();

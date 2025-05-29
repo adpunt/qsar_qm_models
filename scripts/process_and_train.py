@@ -128,6 +128,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # TODO: reformat import statements
 
 # TODO: add argument for classification/regression, then dataset source 
+def str2bool(v):
+    return v.lower() in ("yes", "true", "t", "1")
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Framework for running QSAR/QSPR prediction models")
     parser.add_argument("-d", "--dataset", type=str, default='QM9', help="Dataset to run experiments on (default is QM9)")
@@ -139,7 +142,7 @@ def parse_arguments():
     parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
     parser.add_argument("--sigma", nargs='*', default=[0.0], help="Standard deviation(s) of artificially added Gaussian noise (default is None)")
     parser.add_argument("--distribution", type=str, default='gaussian', help="Distribution of artificial noise (default is Gaussian)")
-    parser.add_argument("--tuning", type=bool, default=False, help="Hyperparameter tuning (default is False)")
+    parser.add_argument("--tuning", type=str2bool, default=False, help="Hyperparameter tuning (default is False)")
     parser.add_argument("--kernel", type=str, default="tanimoto", help="Specify the kernel for certain models (Gaussian Process)")
     parser.add_argument("-k", "--k_domains", type=int, default=1, help="Number of domains for clustering (default is 1)")
     parser.add_argument("-s", "--split", type=str, default="random", help="Method for splitting data (default is random)")
@@ -148,12 +151,13 @@ def parse_arguments():
     parser.add_argument("--custom_model", type=str, default=None, help="Filepath to custom PyTorch model in .pt file")
     parser.add_argument("--metadata_file", type=str, default=None, help="Filepath to custom model's metadata ie. hyperparameters")
     parser.add_argument("-f", "--filepath", type=str, default='../results/test.csv', help="Filepath to save raw results in csv (default is None)")
-    parser.add_argument("--logging", type=bool, default=False, help="Extra logging to check individual entries in mmap files (default is False)")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training grpah-based models (default is 100)")
-    parser.add_argument("--clean-smiles", type=bool, default=False, help="Clean the SMILES string (default is False)")
+    parser.add_argument("--logging", type=str2bool, default=False, help="Extra logging to check individual entries in mmap files (default is False)")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs for training graph-based models (default is 100)")
+    parser.add_argument("--clean-smiles", type=str2bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
-    parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
+    parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
+    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -214,7 +218,6 @@ def write_to_mmap(
     files[category].flush()
 
 # targets: BDR4, HSA, sEH
-# TODO: need to normalize data
 def load_and_split_polaris(args, files):
     dataset_name = "BELKA"
 
@@ -884,6 +887,8 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     train_count = len(train_idx)
     test_count = len(test_idx)
 
+    print(f"normalising: {args.normalize}")
+
     config = {
         'sample_size': args.sample_size,
         'noise': s > 0,
@@ -896,6 +901,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         'k_domains': args.k_domains,
         'logging': args.logging,
         'regression': args.dataset == 'QM9',
+        'normalize': args.normalize,
     }
 
     with open('config.json', 'w') as f:
