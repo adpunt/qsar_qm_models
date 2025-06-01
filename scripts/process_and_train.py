@@ -91,7 +91,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv']
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d', 'gtat']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -801,89 +801,108 @@ def qm9_to_networkx(data):
     
     return G
 
-# TODO: normalise
 def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
     for model_type in args.models:
-        if model_type == "graph_gp":
-            # CASE 2: GraphGP (SIGP subclass over graphs)
-            # This is what YOU focus on
-            train_set = qm9[train_idx]
-            test_set = qm9[test_idx]
-            val_set = qm9[val_idx]
+        try: 
+            if model_type == "graph_gp":
+                # CASE 2: GraphGP (SIGP subclass over graphs)
+                # This is what YOU focus on
+                train_set = qm9[train_idx]
+                test_set = qm9[test_idx]
+                val_set = qm9[val_idx]
 
-            if s > 0:
-                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                train_set.data.y = train_set.data.y + noise
-                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
+                if s > 0:
+                    noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                    train_set.data.y = train_set.data.y + noise
+                    train_set.data.y = train_set.data.y.to(dtype=torch.float32)
 
-            # 1. Convert PyG to NetworkX graphs
-            train_graphs = [qm9_to_networkx(g) for g in train_set]
-            test_graphs = [qm9_to_networkx(g) for g in test_set]
-            val_graphs = [qm9_to_networkx(g) for g in val_set]
+                # Convert PyG to NetworkX graphs
+                train_graphs = [qm9_to_networkx(g) for g in train_set]
+                test_graphs = [qm9_to_networkx(g) for g in test_set]
+                val_graphs = [qm9_to_networkx(g) for g in val_set]
 
-            # 2. Get labels
-            y_train = torch.stack([g.y for g in train_set])
-            y_test = torch.stack([g.y for g in test_set])
-            y_val = torch.stack([g.y for g in val_set])
+                # Get labels
+                y_train = torch.stack([g.y for g in train_set])
+                y_test = torch.stack([g.y for g in test_set])
+                y_val = torch.stack([g.y for g in val_set])
 
-            # 3. Train GraphGP model
-            train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=None)
-        else:
-            if model_type == "gin" or model_type == "gin2d":
-                model = GIN(dim_h=64)
-            elif model_type == "gcn":
-                model = GCN(dim_h=128)
-            elif model_type == "gin_co_teaching":
-                model = GINCoTeaching(dim_h=64)
+                # Normalize
+                if args.normalize:
+                    mean = y_train.mean()
+                    std = y_train.std()
+                    y_train = (y_train - mean) / std
+                    y_test = (y_test - mean) / std
+                    y_val = (y_val - mean) / std
 
-            # Add label noise
-            train_set = qm9[train_idx]
-            if s > 0:
-                # Generate Gaussian noise with mean 0 and standard deviation s
-                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                
-                # Add noise to the original labels
-                train_set.data.y = train_set.data.y + noise
+                # Train GraphGP model
+                train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=None)
+            else:
+                if model_type == "gin" or model_type == "gin2d":
+                    model = GIN(dim_h=64)
+                elif model_type == "gcn":
+                    model = GCN(dim_h=128)
+                elif model_type == "gin_co_teaching":
+                    model = GINCoTeaching(dim_h=64)
+                else:
+                    continue
 
-                # Ensure the tensor is properly formatted
-                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
+                # Add label noise
+                train_set = qm9[train_idx]
+                if s > 0:
+                    # Generate Gaussian noise with mean 0 and standard deviation s
+                    noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                    
+                    # Add noise to the original labels
+                    train_set.data.y = train_set.data.y + noise
 
-            # datasets into DataLoader
-            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
-            test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
-            val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
+                    # Ensure the tensor is properly formatted
+                    train_set.data.y = train_set.data.y.to(dtype=torch.float32)
 
-            test_loss = test_target = test_y = None
-            if model_type != "gin_co_teaching":
-                train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-                    args.epochs, model, train_loader, test_loader, "GIN_model.pt"
-                )
+                # Normalize
+                if args.normalize:
+                    mean = train_set.data.y.mean()
+                    std = train_set.data.y.std()
+                    train_set.data.y = (train_set.data.y - mean) / std
+                    for i in test_idx:
+                        qm9[i].y = (qm9[i].y - mean) / std
+                    for i in val_idx:
+                        qm9[i].y = (qm9[i].y - mean) / std
 
-                test_loss, test_target, test_y = testing(test_loader, trained_model)
-            # else:
+                # datasets into DataLoader
+                train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+                test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
+                val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
 
-            #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
-            #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
-            #     )
+                test_loss = test_target = test_y = None
+                if model_type != "gin_co_teaching":
+                    train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
+                        args.epochs, model, train_loader, test_loader, "GIN_model.pt"
+                    )
 
-            #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
+                    test_loss, test_target, test_y = testing(test_loader, trained_model)
+                # else:
 
-            logging = True
-            if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
-                calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
-                logging = False
+                #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
+                #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
+                #     )
 
-            metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
+                #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
 
-            # TODO: iteration is broken!!!
-            save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
+                logging = True
+                if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
+                    calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
+                    logging = False
+
+                metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
+
+                print(f"model: {model_type}")
+                print("rep: graph")
+                save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
+        
+        except Exception as e:
+            print(f"Error with {rep} and {model}; more details: {e}")
 
 def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
-    graph_only = True
-    for model in args.models:
-        if model not in graph_models:
-            graph_only = False 
-
     train_count = len(train_idx)
     test_count = len(test_idx)
 
@@ -933,44 +952,30 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         "val": open('val_' + str(file_no) + '.mmap', 'rb'),
     }
 
+    if 'graph' in args.molecular_representations:
+        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
+
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
-        try: 
-            if not graph_only:
-                # Reset pointed for each mmap file
-                for file in files.values():
-                    file.seek(0)
+        if rep != "graph":
+            try: 
+                for model in args.models:
+                    # Reset mmap pointers
+                    for file in files.values():
+                        file.seek(0)
 
-                x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
 
-            for model in args.models:
-                if model not in graph_models:
                     print(f"model: {model}")
                     print(f"rep: {rep}")
                     run_model(
-                        x_train, 
-                        y_train, 
-                        x_test, 
-                        y_test, 
-                        x_val,
-                        y_val,
-                        model, 
-                        args, 
-                        iteration_seed,
-                        rep,
-                        iteration,
-                        s,
+                        x_train, y_train, x_test, y_test, x_val, y_val,
+                        model, args, iteration_seed, rep, iteration, s,
                     )
-                else:
-                    if args.dataset == 'QM9':
-                        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
-                    else:
-                        # TODO: need to convert polaris molecules to 3D and 2D
-                        return 
-        except Exception as e:
-             print(f"Error with {rep} and {model}; more details: {e}")
+            except Exception as e:
+                print(f"Error with {rep} and {model}; more details: {e}")
 
     for file in files.values():
         # Distinction between direct refcount of the mmap object itself, and the number of "view" objects that are pointing to it
