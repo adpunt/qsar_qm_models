@@ -1837,8 +1837,6 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
             iteration=iteration
         )
 
-
-    # Metrics
     metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
 
     print("model: graph_gp")
