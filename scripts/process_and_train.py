@@ -974,20 +974,21 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         if rep != "graph":
             try: 
                 for model in args.models:
-                    # Reset mmap pointers
-                    for file in files.values():
-                        file.seek(0)
+                    if model not in graph_models:
+                        # Reset mmap pointers
+                        for file in files.values():
+                            file.seek(0)
 
-                    x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                    x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                    x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                        x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                        x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                        x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
 
-                    print(f"model: {model}")
-                    print(f"rep: {rep}")
-                    run_model(
-                        x_train, y_train, x_test, y_test, x_val, y_val,
-                        model, args, iteration_seed, rep, iteration, s,
-                    )
+                        print(f"model: {model}")
+                        print(f"rep: {rep}")
+                        run_model(
+                            x_train, y_train, x_test, y_test, x_val, y_val,
+                            model, args, iteration_seed, rep, iteration, s,
+                        )
             except Exception as e:
                 print(f"Error with {rep} and {model}; more details: {e}")
 
