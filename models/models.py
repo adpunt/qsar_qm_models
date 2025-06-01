@@ -1188,17 +1188,29 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     model.fit(x_train, y_train)
 
-    if isinstance(model, RandomForestRegressor) or isinstance(model, RandomForestClassifier):
+    if model_type == 'qrf':
+        q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
+        y_pred = q50
+        if args.uncertainty:
+            std_est = 0.5 * (q84 - q16)
+            save_uncertainty_values(
+                y_pred_mean=q50,
+                y_pred_std=std_est,
+                y_true=y_test,
+                filepath=args.filepath,
+                model_name="qrf",
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration
+            )
+    else:
         y_pred = model.predict(x_test)
-    else:  # QuantileRegressor from quantile-forest
-        y_pred = model.predict(x_test, quantiles=[quantile]).squeeze()
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
-
 
 def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1262,12 +1274,24 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     y_pred = model.predict(x_test)
     y_dist = model.pred_dist(x_test)
 
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_dist.scale,
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name="ngboost",
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration
+        )
+
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     nll = -y_dist.logpdf(y_test).mean()
 
     save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
 
-    return metrics[3]  # or return nll if that's your target
+    return metrics[3]
 
 def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
@@ -1773,28 +1797,26 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
         train_graphs = train_graphs + val_graphs
         train_y = torch.cat((train_y, val_y), dim=0)
 
-    # 1. Wrap graphs into NonTensorialInputs
+    # Wrap graphs into NonTensorialInputs and setup labels
     X_train = NonTensorialInputs(train_graphs)
     X_test = NonTensorialInputs(test_graphs)
-
-    # 2. Setup labels
     y_train = train_y.flatten().float()
     y_test = test_y.flatten().float()
 
-    # 3. Setup Likelihood and Kernel
+    # Setup Likelihood and Kernel
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
 
     kernel_class = kernel_map[params['kernel_name']]
     kernel = kernel_class(node_label='label')  # 'label' is what qm9_to_networkx() puts on nodes
 
-    # 4. Define GraphGP model
+    # Define GraphGP model
     model = GraphGP(X_train, y_train, likelihood, kernel)
 
-    # 5. Fit GP model
+    # Fit GP model
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
 
-    # 6. Evaluate
+    # Evaluate
     model.eval()
     likelihood.eval()
     with torch.no_grad():
@@ -1815,15 +1837,14 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
             iteration=iteration
         )
 
-
-    # 7. Metrics
     metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
 
-    # 8. Save
+    print("model: graph_gp")
+    print("rep: graph")
+
     save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics[3], metrics[0], metrics[4])
 
     return metrics[3]  # Return R^2 for Optuna if tuning
-
 
 # TODO: actually need to call
 def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):

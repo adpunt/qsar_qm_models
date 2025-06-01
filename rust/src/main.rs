@@ -297,7 +297,6 @@ fn write_data(
             // Normalize and write
             if config.regression && config.normalize {
                 property_value = (property_value - mean) / std_dev;
-                println!("normalised, config.normalise: {:?}", config.normalize);
             }
 
             let processed_bytes = property_value.to_le_bytes();
