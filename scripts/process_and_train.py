@@ -992,13 +992,12 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             except Exception as e:
                 print(f"Error with {rep} and {model}; more details: {e}")
 
-    for file in files.values():
-        # Distinction between direct refcount of the mmap object itself, and the number of "view" objects that are pointing to it
-        # TODO: check if this is properly closing the mmap file (https://github.com/numpy/numpy/issues/13510)
-        # mv = memoryview(file)
-        # del mv
-        file.close()
-        del file
+    for key in list(files.keys()):
+        filename = f"{key}_{file_no}.mmap"
+        files[key].close()
+        os.remove(filename)  # <-- deletes the actual file
+        del files[key]
+    files.clear()
     gc.collect()
 
 def main():
