@@ -92,7 +92,7 @@ properties = {
 }
 
 bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv']
-graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d', 'gtat']
+graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
 smiles_db_path = "../data/smiles_db.sqlite"
@@ -851,15 +851,6 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
                 # Train GraphGP model
                 train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=None)
             else:
-                if model_type == "gin" or model_type == "gin2d":
-                    model = GIN(dim_h=64)
-                elif model_type == "gcn":
-                    model = GCN(dim_h=128)
-                elif model_type == "gin_co_teaching":
-                    model = GINCoTeaching(dim_h=64)
-                else:
-                    continue
-
                 # Add label noise
                 train_set = qm9[train_idx]
                 if s > 0:
@@ -887,34 +878,11 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
                 test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
                 val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
 
-                test_loss = test_target = test_y = None
-                if model_type != "gin_co_teaching":
-                    train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-                        args.epochs, model, train_loader, test_loader, "GIN_model.pt"
-                    )
+                train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration)
 
-                    test_loss, test_target, test_y = testing(test_loader, trained_model)
-                # else:
-
-                #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
-                #         args.epochs, model, train_loader, test_loader, "GIN_co_teching_model.pt", optimal_co_teaching_hyperparameters['ratio'], optimal_co_teaching_hyperparameters['tolerance'], optimal_co_teaching_hyperparameters['forget_rate']
-                #     )
-
-                #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
-
-                logging = True
-                if args.distribution == "domain_mpnn" or args.distribution == "domain_tanimoto":
-                    calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
-                    logging = False
-
-                metrics = calculate_regression_metrics(test_target, test_y, logging=logging)
-
-                print(f"model: {model_type}")
-                print("rep: graph")
-                save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
         
         except Exception as e:
-            print(f"Error with {rep} and {model}; more details: {e}")
+            print(f"Error with graph and {model_type}; more details: {e}")
 
 def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     train_count = len(train_idx)

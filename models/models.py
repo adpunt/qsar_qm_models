@@ -1772,6 +1772,49 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     return metrics[3] if args.dataset == 'QM9' else metrics[0]
 
+def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration):
+    if model_type == "gin" or model_type == "gin2d":
+        model = GIN(dim_h=64)
+    elif model_type == "gcn":
+        model = GCN(dim_h=128)
+    elif model_type == "ginct":
+        model = GINCoTeaching(dim_h=64)
+
+    if args.bayesian_transformation == "full":
+        model = apply_bayesian_transformation(model)
+    elif args.bayesian_transformation == "last_layer":
+        model = apply_bayesian_transformation_last_layer(model)
+    elif args.bayesian_transformation == "variational":
+        model = apply_bayesian_transformation_last_layer_variational(model)
+
+    model.to(device)
+
+    if model_type != "ginct":
+        train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
+            args.epochs, model, train_loader, val_loader, f"{model_type}_model.pt"
+        )
+        test_loss, test_target, test_y = testing(test_loader, trained_model)
+    # else:
+    #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
+    #         args.epochs, model, train_loader, val_loader,
+    #         f"{model_type}_model.pt",
+    #         optimal_co_teaching_hyperparameters['ratio'],
+    #         optimal_co_teaching_hyperparameters['tolerance'],
+    #         optimal_co_teaching_hyperparameters['forget_rate']
+    #     )
+    #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
+
+    logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
+    if not logging_flag:
+        calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
+
+    metrics = calculate_regression_metrics(test_target, test_y, logging=logging_flag)
+
+    print(f"model: {model_type}")
+    print("rep: graph")
+
+    save_results( args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
+
 def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y, args, s, iteration, trial=None):
     params = {}
 
