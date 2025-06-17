@@ -84,8 +84,6 @@ DEFAULT_DESCRIPTOR_LIST = [
             'fr_thiophene', 'fr_unbrch_alkane', 'fr_urea', 'qed'
         ]
 
-# TODO: figure out tuning for GINs
-
 properties = {
     'homo_lumo_gap': 4, 'alpha': 1, 'G': 10, 'H': 9, 'U': 8,
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
@@ -158,7 +156,9 @@ def parse_arguments():
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
     parser.add_argument("-u", "--uncertainty", type=bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
-    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")    
+    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
+    parser.add_argument("--noise-strategy", type=str, default="legacy", help="Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic (default is legacy)")
+    parser.add_argument("--strategy-params", type=str, default="noise_strategy_params.json", help="JSON file path with strategy-specific parameters (default is noise_strategy_params.json)")
     parser.add_argument(
         "--bayesian-transformation",
         type=str,
@@ -171,7 +171,7 @@ def parse_arguments():
             "  variational - Use variational Bayes for uncertainty (sampling-based, not deterministic).\n"
             "Default is None (no transformation)."
         )
-)
+    )
     return parser.parse_args()
 
 def write_to_mmap(
@@ -382,7 +382,7 @@ def load_qm9(target):
 
     return qm9
 
-def split_qm9(qm9, args, files):
+def split_qm9(qm9, args, files, iteration_seed):
 
     # Shuffle with random seed
     indices = torch.randperm(len(qm9))
@@ -398,13 +398,29 @@ def split_qm9(qm9, args, files):
         test_idx = list(range(test_index, val_index))
 
     elif args.split == 'scaffold':
-        qm9_smiles = [data.smiles for data in qm9[:args.sample_size]]
-        Xs = np.zeros(len(qm9_smiles))  # Dummy features just for splitting
-        dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=qm9_smiles)
-
+        N = args.sample_size
+        smiles_arr = np.empty(N, dtype="U128")
+        target_arr = np.zeros(N, dtype=np.float32)
+        Xs = np.array(target_arr).reshape(-1, 1)
+        dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=smiles_arr)
         splitter = dc.splits.ScaffoldSplitter()
-        split = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
-        train_idx, val_idx, test_idx = split
+        
+        train_idx, val_idx, test_idx = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+        
+        # Get scaffold assignments for each molecule
+        scaffold_groups = splitter.generate_scaffolds(dataset)
+        
+        # Create a mapping: molecule_index -> scaffold_id
+        molecule_to_scaffold = {}
+        for scaffold_id, indices in enumerate(scaffold_groups):
+            for idx in indices:
+                molecule_to_scaffold[idx] = scaffold_id
+        
+        # Save to JSON file
+        import json
+        with open(f'scaffold_assignments_{iteration_seed}.json', 'w') as f:
+            json.dump(molecule_to_scaffold, f)
+        del smiles_arr, target_arr
 
     else:
         raise ValueError("Invalid split type")
@@ -484,6 +500,9 @@ def split_qm9(qm9, args, files):
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
     mol = Chem.MolFromSmiles(smiles_string)
+    if mol is None:
+        # Return zeros for invalid molecules
+        return np.zeros(len(DEFAULT_DESCRIPTOR_LIST))
     descriptor_vals = mol_descriptor_calculator.CalcDescriptors(mol)
     return np.array(descriptor_vals)
 
@@ -989,6 +1008,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             '--model', "rf",
             '--sigma', str(s),
             '--noise_distribution', args.distribution,
+            '--noise_strategy', args.noise_strategy,
         ],
         env=env,
         stdout=subprocess.PIPE,
@@ -1012,25 +1032,25 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
         if rep != "graph":
-            try: 
-                for model in args.models:
-                    if model not in graph_models:
-                        # Reset mmap pointers
-                        for file in files.values():
-                            file.seek(0)
+            # try: 
+            for model in args.models:
+                if model not in graph_models:
+                    # Reset mmap pointers
+                    for file in files.values():
+                        file.seek(0)
 
-                        x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                        x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                        x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
 
-                        print(f"model: {model}")
-                        print(f"rep: {rep}")
-                        run_model(
-                            x_train, y_train, x_test, y_test, x_val, y_val,
-                            model, args, iteration_seed, rep, iteration, s,
-                        )
-            except Exception as e:
-                print(f"Error with {rep} and {model}; more details: {e}")
+                    print(f"model: {model}")
+                    print(f"rep: {rep}")
+                    run_model(
+                        x_train, y_train, x_test, y_test, x_val, y_val,
+                        model, args, iteration_seed, rep, iteration, s,
+                    )
+            # except Exception as e:
+            #     print(f"Error with {rep} and {model}; more details: {e}")
 
     for key in list(files.keys()):
         filename = f"{key}_{file_no}.mmap"
@@ -1079,7 +1099,7 @@ def main():
             val_size = int(args.sample_size * 0.1)
 
             if args.dataset == 'QM9':
-                train_idx, test_idx, val_idx = split_qm9(qm9, args, files)
+                train_idx, test_idx, val_idx = split_qm9(qm9, args, files, iteration_seed)
 
             else:
                 train_idx, test_idx, val_idx = load_and_split_polaris(args, files)
