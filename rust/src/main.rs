@@ -96,37 +96,78 @@ fn generate_noise_by_indices(
 
     for &idx in indices {
         let noise = match distribution {
-            NoiseDistribution::Gaussian | NoiseDistribution::DomainMpnn | NoiseDistribution::DomainTanimoto => {
-                let normal = Normal::new(0.0, target_sigma).unwrap();
-                normal.sample(&mut rng)
+            NoiseDistribution::Gaussian 
+            | NoiseDistribution::DomainMpnn 
+            | NoiseDistribution::DomainTanimoto => {
+                let normal = Normal::new(0.0, target_sigma as f64).unwrap();
+                normal.sample(&mut rng) as f32
             }
+            
             NoiseDistribution::LeftTailed => {
-                let alpha = 5.0; // fixed skew strength
-                let skew_normal = SkewNormal::new(-alpha, 0.0, target_sigma).unwrap();
-                skew_normal.sample(&mut rng)
+                // Create left-skewed distribution using Box-Cox-like transformation
+                let normal = Normal::new(0.0, target_sigma as f64).unwrap();
+                let sample = normal.sample(&mut rng);
+                
+                // Left skew: compress positive tail, stretch negative tail
+                let skewed = if sample >= 0.0 {
+                    let compressed = sample.powf(0.5);
+                    -compressed.min(10.0) // Cap at reasonable value
+                } else {
+                    let stretched = sample * 1.5;
+                    stretched.max(-10.0) // Cap at reasonable value
+                };
+                
+                // Ensure no NaN or infinity
+                if skewed.is_finite() {
+                    skewed as f32
+                } else {
+                    0.0 // Fallback to zero for invalid values
+                }
             }
+            
             NoiseDistribution::RightTailed => {
-                let alpha = 5.0; // fixed skew strength
-                let skew_normal = SkewNormal::new(alpha, 0.0, target_sigma).unwrap();
-                skew_normal.sample(&mut rng)
+                // Create right-skewed distribution using Box-Cox-like transformation
+                let normal = Normal::new(0.0, target_sigma as f64).unwrap();
+                let sample = normal.sample(&mut rng);
+                
+                // Right skew: stretch positive tail, compress negative tail
+                let skewed = if sample >= 0.0 {
+                    let stretched = sample.powf(1.5);
+                    stretched.min(10.0) // Cap at reasonable value
+                } else {
+                    let compressed = (-sample).powf(0.5);
+                    -compressed.min(10.0) // Cap at reasonable value
+                };
+                
+                // Ensure no NaN or infinity
+                if skewed.is_finite() {
+                    skewed as f32
+                } else {
+                    0.0 // Fallback to zero for invalid values
+                }
             }
+            
             NoiseDistribution::UShaped => {
-                // Beta(0.5, 0.5) is U-shaped; rescale to [-1,1]
-                let beta = Beta::new(1.5, 1.5).unwrap();
+                // Beta(0.5, 0.5) creates U-shape
+                let beta = Beta::new(0.5, 0.5).unwrap();
                 let sample = beta.sample(&mut rng);
-                let scaling_factor = target_sigma / 0.70710678118;
-                (sample - 0.5) * 2.0 * scaling_factor
+                
+                // Transform [0,1] to [-k, k] where k = target_sigma * 2√3
+                // This ensures variance = target_sigma²
+                let k = target_sigma * 2.0 * 3_f32.sqrt(); // 2√3 ≈ 3.464
+                ((sample - 0.5) * 2.0 * k as f64) as f32
             }
+            
             NoiseDistribution::Uniform => {
-                // Uniform between [-a, a], variance = a² / 3
-                // Solve a²/3 = target_sigma²
-                let a = (3.0 * target_sigma.powi(2)).sqrt();
-                let uniform = Uniform::new_inclusive(-a, a).unwrap();
-                uniform.sample(&mut rng)
+                // For uniform [-a, a], variance = a²/3
+                // So a = √(3 * target_sigma²) = target_sigma * √3
+                let a = target_sigma * 3_f32.sqrt();
+                let uniform = Uniform::new_inclusive(-a as f64, a as f64).unwrap();
+                uniform.sample(&mut rng) as f32
             }
         };
 
-        noise_map.insert(idx, noise as f32);
+        noise_map.insert(idx, noise);
     }
 
     noise_map

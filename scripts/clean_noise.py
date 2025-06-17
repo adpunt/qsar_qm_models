@@ -13,6 +13,13 @@ from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator, AllChem
 from sklearn.neighbors import NearestNeighbors
 from itertools import product
+from ngboost import NGBRegressor
+from ngboost.distns import Normal
+from ngboost.scores import MLE
+from quantile_forest import RandomForestQuantileRegressor
+from torch.nn.utils.rnn import pad_sequence
+from collections import Counter
+import regex as re
 
 sys.path.append('../models/')
 sys.path.append('../results/')
@@ -35,6 +42,111 @@ label_smoothings = ['hard_replacement_neighbor', 'hard_replacement_model', 'soft
 # Create the grid
 experiment_grid = []
 
+class QRFWrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        # Draw from quantiles with some noise to mimic stochasticity
+        q16, q50, q84 = self.model.predict(x, quantiles=[0.16, 0.5, 0.84]).T
+        noise = np.random.normal(loc=0.0, scale=0.5 * (q84 - q16))
+        return torch.tensor(q50 + noise, dtype=torch.float32).unsqueeze(-1)
+
+
+class NGBoostWrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.dist = None
+
+    def forward(self, x):
+        if self.dist is None:
+            self.dist = self.model.pred_dist(x)
+        mean = self.dist.loc
+        std = self.dist.scale
+        noise = np.random.normal(loc=0.0, scale=std)
+        return torch.tensor(mean + noise, dtype=torch.float32).unsqueeze(-1)
+
+
+class SmilesTokenizer(object):
+    """
+    A simple regex-based tokenizer adapted from the deepchem smiles_tokenizer package.
+    SMILES regex pattern for the tokenization is designed by Schwaller et. al., ACS Cent. Sci 5 (2019)
+    """
+
+    def __init__(self):
+        self.regex_pattern = (
+            r"(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\."
+            r"|=|#|-|\+|\\|\/|:|~|@|\?|>>?|\*|\$|\%[0-9]{2}|[0-9])"
+        )
+        self.regex = re.compile(self.regex_pattern)
+
+    def tokenize(self, smiles):
+        """
+        Tokenizes SMILES string.
+
+        Parameters
+        ----------
+        smiles : str
+            Input SMILES string.
+
+        Returns
+        -------
+        List[str]
+            A list of tokens.
+        """
+        tokens = [token for token in self.regex.findall(smiles)]
+        return tokens
+
+def build_vocab(smiles_list, tokenizer, max_vocab_size):
+    """
+    Builds a vocabulary of N=max_vocab_size most common tokens from list of SMILES strings.
+
+    Parameters
+    ----------
+    smiles_list : List[str]
+        List of SMILES strings.
+    tokenizer : SmilesTokenizer
+    max_vocab_size : int
+        Maximum size of vocabulary.
+
+    Returns
+    -------
+    Dict[str, int]
+        A dictionary that defines mapping of a token to its index in the vocabulary.
+    """
+    tokenized_smiles = [tokenizer.tokenize(s) for s in smiles_list]
+    token_counter = Counter(c for s in tokenized_smiles for c in s)
+    tokens = [token for token, _ in token_counter.most_common(max_vocab_size)]
+    vocab = {token: idx for idx, token in enumerate(tokens)}
+    return vocab
+
+
+def smiles_to_ohe(smiles, tokenizer, vocab):
+    """
+    Transforms SMILES string to one-hot encoding representation.
+
+    Parameters
+    ----------
+    smiles : str
+        Input SMILES string.
+    tokenizer : SmilesTokenizer
+    vocab : Dict[str, int]
+        A dictionary that defines mapping of a token to its index in the vocabulary.
+
+    Returns
+    -------
+    Tensor
+        A pytorch Tensor with shape (n_tokens, vocab_size), where n_tokens is the
+        length of tokenized input string, vocab_size is the number of tokens in
+        the vocabulary
+    """
+    unknown_token_id = len(vocab) - 1
+    token_ids = [vocab.get(token, unknown_token_id) for token in tokenizer.tokenize(smiles)]
+    ohe = torch.eye(len(vocab))[token_ids]
+    return ohe
+
 for model_type, bayesian_transform, noise_identification, label_smoothing in product(
     model_types, bayesian_transforms, noise_identifications, label_smoothings
 ):
@@ -46,7 +158,7 @@ for model_type, bayesian_transform, noise_identification, label_smoothing in pro
     }
     experiment_grid.append(config)
 
-def load_qm9_data(target="homo_lumo_gap", sample_size=15000):
+def load_qm9_data(target="homo_lumo_gap", sample_size=500):
     qm9 = QM9(root=os.path.join("..", "data", "QM9"))
     valid_indices = torch.load(os.path.join("..", "data", "valid_qm9_indices.pth"))
     qm9 = qm9.index_select(valid_indices)
@@ -320,7 +432,6 @@ def variational_em_label_denoising(x_train, y_train_noisy, model, num_em_steps=5
         model.eval()
         preds_samples = []
 
-        # E-step: Sample from the predictive distribution
         with torch.no_grad():
             for _ in range(num_samples):
                 preds = model(x_tensor).squeeze(-1)
@@ -329,11 +440,13 @@ def variational_em_label_denoising(x_train, y_train_noisy, model, num_em_steps=5
         preds_samples = torch.stack(preds_samples)  # (num_samples, N)
         posterior_mean = preds_samples.mean(dim=0)
         posterior_var = preds_samples.var(dim=0)
-
-        # Update "cleaned" labels for next M-step
         y_denoised = posterior_mean.detach()
 
-        # M-step: retrain model on cleaned labels
+        # Check if model is trainable (i.e., has parameters)
+        if not any(p.requires_grad for p in model.parameters()):
+            continue  # Skip M-step entirely for non-trainable models
+
+        # M-step
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         criterion = nn.MSELoss()
@@ -341,7 +454,7 @@ def variational_em_label_denoising(x_train, y_train_noisy, model, num_em_steps=5
         dataset = TensorDataset(x_tensor, y_denoised.unsqueeze(1))
         train_loader = TorchDataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-        for epoch in range(5):  # You can adjust this
+        for epoch in range(5):
             for xb, yb in train_loader:
                 optimizer.zero_grad()
                 output = model(xb)
@@ -352,14 +465,58 @@ def variational_em_label_denoising(x_train, y_train_noisy, model, num_em_steps=5
     return y_denoised.cpu(), posterior_var.cpu()
 
 if __name__ == "__main__":
-    # Step 1: Load
-    smiles_list, y = load_qm9_data(target="homo_lumo_gap", sample_size=10000)
+    representation_types = ["pdv", "smiles"]
+    tokenizer = SmilesTokenizer()
+    max_vocab_size = 30
 
-    # Step 2: Featurize
-    x, y = smiles_to_ecfp4(smiles_list, y)
+    # Step 1: Load QM9
+    smiles_list, y = load_qm9_data(target="homo_lumo_gap", sample_size=500)
+
+    for rep in representation_types:
+        if rep == "ecfp4":
+            x, y_used = smiles_to_ecfp4(smiles_list, y)
+
+        elif rep == "pdv":
+            x = []
+            valid_indices = []
+            for idx, smi in enumerate(smiles_list):
+                mol = Chem.MolFromSmiles(smi)
+                if mol is None:
+                    continue
+                canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                try:
+                    desc = rdkit_mol_descriptors_from_smiles(canonical)
+                    x.append(desc)
+                    valid_indices.append(idx)
+                except:
+                    continue
+            x = np.array(x)
+            y_used = y[valid_indices]
+
+        elif rep == "smiles":
+            vocab = build_vocab(smiles_list, tokenizer, max_vocab_size)
+            vocab_size = len(vocab)
+
+            ohe_list = []
+            valid_indices = []
+            for idx, smi in enumerate(smiles_list):
+                try:
+                    ohe = smiles_to_ohe(smi, tokenizer, vocab)
+                    ohe_list.append(ohe)
+                    valid_indices.append(idx)
+                except:
+                    continue
+
+            x = pad_sequence(ohe_list, batch_first=True, padding_value=0)
+            x = x.view(x.size(0), -1)  # Flatten for DNN compatibility
+            y_used = y[valid_indices]
+
+        else:
+            raise ValueError(f"Unknown representation: {rep}")
+
 
     # Step 3: Split
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    x_train, x_test, y_train, y_test = train_test_split(x, y_used, test_size=0.2, random_state=42)
 
     # Step 4: Define noise levels
     sigma_values = [0.1, 0.3, 0.5]
@@ -378,32 +535,74 @@ if __name__ == "__main__":
     # Run EM experiments
     for sigma in sigma_values:
         print(f"\n=== Sigma = {sigma} ===")
+
+        # Add noise
         y_train_noisy = add_regression_noise(y_train, sigma=sigma)
 
-        # Try different Bayesian model types if desired
-        for transform_type in ["full", "last_layer", "variational"]:
-            print(f"--- Using Bayesian transform: {transform_type} ---")
+        # Normalize using clean training stats
+        y_mean = y_train.mean()
+        y_std = y_train.std()
 
-            model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=128, hidden_size2=64)
-            if transform_type == "full":
-                model = apply_bayesian_transformation(model)
-            elif transform_type == "last_layer":
-                model = apply_bayesian_transformation_last_layer(model)
-            elif transform_type == "variational":
-                model = apply_bayesian_transformation_last_layer_variational(model)
-            else:
-                raise ValueError(f"Unknown transform: {transform_type}")
+        y_train_normalized = (y_train - y_mean) / y_std
+        y_train_noisy_normalized = (y_train_noisy - y_mean) / y_std
+        y_test_normalized = (y_test - y_mean) / y_std
 
-            # Run Variational EM label denoising (still works for any stochastic model)
-            y_denoised, y_var = variational_em_label_denoising(
-                x_train=x_train,
-                y_train_noisy=y_train_noisy,
-                model=model,
-                num_em_steps=5,
-                num_samples=30
-            )
+        print("Clean (normalized):", y_train_normalized[:5])
+        print("Noisy (normalized):", y_train_noisy_normalized[:5])
 
-            # Compare RF trained on noisy vs denoised
+        for model_type in ["qrf", "ngboost"]:
+            print(f"--- Using model: {model_type} ---")
+
+            if model_type in ["full", "last_layer", "variational"]:
+                model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=128, hidden_size2=64)
+                if model_type == "full":
+                    model = apply_bayesian_transformation(model)
+                elif model_type == "last_layer":
+                    model = apply_bayesian_transformation_last_layer(model)
+                elif model_type == "variational":
+                    model = apply_bayesian_transformation_last_layer_variational(model)
+
+                # Run EM denoising
+                y_denoised, _ = variational_em_label_denoising(
+                    x_train=x_train,
+                    y_train_noisy=y_train_noisy,
+                    model=model,
+                    num_em_steps=5,
+                    num_samples=30
+                )
+
+            elif model_type == "qrf":
+                qrf = RandomForestQuantileRegressor(n_estimators=500)
+                qrf.fit(x_train, y_train_noisy.numpy())
+                model = QRFWrapper(qrf)
+                y_denoised, _ = variational_em_label_denoising(
+                    x_train=x_train,
+                    y_train_noisy=y_train_noisy,
+                    model=model,
+                    num_em_steps=5,
+                    num_samples=30
+                )
+
+            elif model_type == "ngboost":
+                ngb = NGBRegressor(
+                    Dist=Normal,
+                    Score=MLE,
+                    n_estimators=500,
+                    learning_rate=0.01,
+                    natural_gradient=True,
+                    verbose=False
+                )
+                ngb.fit(x_train, y_train_noisy.numpy())
+                model = NGBoostWrapper(ngb)
+                y_denoised, _ = variational_em_label_denoising(
+                    x_train=x_train,
+                    y_train_noisy=y_train_noisy,
+                    model=model,
+                    num_em_steps=5,
+                    num_samples=30
+                )
+
+            # Compare RF on noisy vs cleaned labels
             rf = RandomForestRegressor()
             rf.fit(x_train, y_train_noisy.numpy())
             r2_noisy = r2_score(y_test.numpy(), rf.predict(x_test))
