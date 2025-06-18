@@ -1,0 +1,29 @@
+{
+  "value_proportional": {
+    "base_sigma": 0.1,
+    "proportionality_factor": 0.05
+  },
+  "quantile": {
+    "high_quantile_threshold": 0.9,
+    "low_quantile_threshold": 0.1,
+    "high_sigma_multiplier": 2.0,
+    "low_sigma_multiplier": 2.0,
+    "mid_sigma_multiplier": 0.1
+  },
+  "threshold": {
+    "high_threshold": 1.0,
+    "low_threshold": -1.0,
+    "high_sigma_multiplier": 2.0,
+    "low_sigma_multiplier": 2.0,
+    "mid_sigma_multiplier": 0.1
+  },
+  "outlier": {
+    "outlier_z_threshold": 2.0,
+    "outlier_sigma_multiplier": 3.0,
+    "normal_sigma_multiplier": 0.1
+  },
+  "heteroscedastic": {
+    "alpha_multiplier": 0.1,
+    "beta_multiplier": 0.05
+  }
+}
