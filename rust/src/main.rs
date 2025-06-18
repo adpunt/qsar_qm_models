@@ -142,24 +142,27 @@ pub enum NoiseStrategy {
 }
 
 fn generate_value_based_noise_map(
-    config: &Config,
-    noise_indices: &[usize],
-    strategy: NoiseStrategy,
-    seed: u64,
+   config: &Config,
+   noise_indices: &[usize],
+   strategy: NoiseStrategy,
+   seed: u64,
 ) -> io::Result<HashMap<usize, f32>> {
-    match strategy {
-        NoiseStrategy::Legacy { sigma, distribution } => {
-            // Use your existing function for backwards compatibility
-            Ok(generate_noise_by_indices(noise_indices, sigma, distribution, seed))
-        }
-        
-        _ => {
-            let target_values = read_all_target_values(config)?;
-            generate_adaptive_noise(&target_values, noise_indices, strategy, seed) // Remove Ok() wrapper
-        }
-    }
+   // If no noise indices, return empty map regardless of strategy
+   if noise_indices.is_empty() {
+       return Ok(HashMap::new());
+   }
+   
+   match strategy {
+       NoiseStrategy::Legacy { sigma, distribution } => {
+           Ok(generate_noise_by_indices(noise_indices, sigma, distribution, seed))
+       }
+       
+       _ => {
+           let target_values = read_all_target_values(config)?;
+           generate_adaptive_noise(&target_values, noise_indices, strategy, seed)
+       }
+   }
 }
-
 fn read_all_target_values(config: &Config) -> io::Result<Vec<f32>> {
     let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
     let mut reader = BufReader::new(train_file);
@@ -673,7 +676,9 @@ fn write_data(
 
             // Normalize and write
             if config.regression && config.normalize {
+                println!("Before normalization: property_value={}, mean={}, std_dev={}", property_value, mean, std_dev);
                 property_value = (property_value - mean) / std_dev;
+                println!("After normalization: {}", property_value);
             }
 
             let processed_bytes = property_value.to_le_bytes();
@@ -860,48 +865,29 @@ fn generate_aggregate_stats(
     let mut y_values: Vec<f32> = Vec::new();
     let mut max_sequence_length = 0usize;
 
-    let files_to_process = vec![File::open(format!("train_{}.mmap", config.file_no))?];
+    let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
+    let mut reader = BufReader::new(train_file);
+    reader.seek(SeekFrom::Start(0))?;
 
-    for file in files_to_process {
-        let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(0))?;
-
-        for index in 0..config.train_count {
-            if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
-                if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
-                    smiles_list.push(smiles_data.canonical_smiles.clone());
-                    let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
-                    max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
-                }
-
-                let mut property_value = smiles_data.target_value;
-                if config.noise {
-                    // TODO: add logic back in when you have domain labels again
-                    // if matches!(config.noise_distribution, NoiseDistribution::DomainMpnn | NoiseDistribution::DomainTanimoto) {
-                    //     if smiles_data.domain_label == config.target_domain as i32 {
-                    //         // Apply noise only if the domain matches the target domain
-                    //         if let Some(&artificial_noise) = noise_map.get(&index) {
-                    //             property_value += artificial_noise;
-                    //         }
-                    //     }
-                    // } else {
-                    //     // Apply noise from the noise map for other distributions
-                    //     if let Some(&artificial_noise) = noise_map.get(&index) {
-                    //         property_value += artificial_noise;
-                    //     }
-                    // }
-                    // And then delete this:
-                    if let Some(&artificial_noise) = noise_map.get(&index) {
-                        property_value += artificial_noise;
-                    }
-                }
-                y_values.push(property_value);
+    for index in 0..config.train_count {
+        if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
+            if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
+                smiles_list.push(smiles_data.canonical_smiles.clone());
+                let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
+                max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
             }
+
+            let mut property_value = smiles_data.target_value;
+            if config.noise {
+                if let Some(&artificial_noise) = noise_map.get(&index) {
+                    property_value += artificial_noise;
+                }
+            }
+            y_values.push(property_value);
         }
     }
 
     let token_counts = count_token_frequencies(&smiles_list, &tokenizer);
-
     let trimmed_vocab = trim_vocab(token_counts, config.max_vocab);
     let vocab_size = trimmed_vocab.len();
 
@@ -912,7 +898,7 @@ fn generate_aggregate_stats(
     }).sum::<f32>() / y_values.len() as f32;
     let std_deviation: f32 = variance.sqrt();
 
-    Ok((mean, variance, vocab_size, trimmed_vocab, max_sequence_length))
+    Ok((mean, std_deviation, vocab_size, trimmed_vocab, max_sequence_length))
 }
 
 fn preprocess_data(
@@ -1065,7 +1051,7 @@ fn main() -> io::Result<()> {
         _ => panic!("Invalid noise distribution specified"),
     };
 
-    let sampling_proportion: f32 = 1.0;
+    println!("Parsed sigma value: {}", sigma);
 
     // Reading the configuration file
     let config_file = File::open("config.json")?;
@@ -1074,12 +1060,13 @@ fn main() -> io::Result<()> {
                           .expect("JSON was not well-formatted or did not match the expected structure");
 
     let noise_indices: Vec<usize> = if config.noise {
-        (0..config.train_count)
-            .filter(|_| rand::random::<f32>() < sampling_proportion)
-            .collect()
+        (0..config.train_count).collect()
     } else {
         Vec::new()
     };
+
+    println!("noise_indices: {:?}", noise_indices);
+    println!("noise_indices length: {}", noise_indices.len());
 
     // Load strategy parameters from JSON file
     let strategy_params = if let Some(params_file) = matches.get_one::<String>("strategy_params") {
@@ -1100,6 +1087,12 @@ fn main() -> io::Result<()> {
             },
             "value_proportional" => {
                 let params = &strategy_params["value_proportional"];
+                println!(
+                    "Scaffold multipliers: train = {:?}, test = {:?}, val = {:?}",
+                    params.get("train_sigma_multiplier"),
+                    params.get("test_sigma_multiplier"),
+                    params.get("val_sigma_multiplier")
+                );
                 NoiseStrategy::ValueProportional {
                     base_sigma: params.get("base_sigma").and_then(|v| v.as_f64()).unwrap_or(sigma as f64) as f32,
                     proportionality_factor: params.get("proportionality_factor").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,

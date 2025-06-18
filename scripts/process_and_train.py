@@ -1009,6 +1009,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             '--sigma', str(s),
             '--noise_distribution', args.distribution,
             '--noise_strategy', args.noise_strategy,
+            '--strategy_params', args.strategy_params
         ],
         env=env,
         stdout=subprocess.PIPE,
