@@ -46,6 +46,16 @@ from utils import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+rf_params = {
+    "n_estimators": 100,
+    "max_depth": None,
+    "min_samples_leaf": 1,
+    "min_samples_split": 2,
+    "max_features": "sqrt",
+    "bootstrap": True,
+    "random_state": 42,
+}
+
 class RNNRegressionModel(nn.Module):
     """Vanilla RNN with one recurrent layer"""
 
@@ -1156,7 +1166,7 @@ def apply_bayesian_transformation_last_layer_variational(model):
     return model
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial=None):
-    params = {}
+    params = rf_params
 
     if args.tuning:
         use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
