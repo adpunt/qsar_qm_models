@@ -815,74 +815,146 @@ def qm9_to_networkx(data):
     
     return G
 
-def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
-    for model_type in args.models:
-        try: 
-            if model_type == "graph_gp":
-                # CASE 2: GraphGP (SIGP subclass over graphs)
-                # This is what YOU focus on
-                train_set = qm9[train_idx]
-                test_set = qm9[test_idx]
-                val_set = qm9[val_idx]
+def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):    
+    def _black_box_function(trial, model_type):
+        print(f"Running Optuna trial {trial.number} for {model_type}")
+        return model_selector(trial, model_type)
 
-                if s > 0:
-                    noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                    train_set.data.y = train_set.data.y + noise
-                    train_set.data.y = train_set.data.y.to(dtype=torch.float32)
-
-                # Convert PyG to NetworkX graphs
-                train_graphs = [qm9_to_networkx(g) for g in train_set]
-                test_graphs = [qm9_to_networkx(g) for g in test_set]
-                val_graphs = [qm9_to_networkx(g) for g in val_set]
-
-                # Get labels
-                y_train = torch.stack([g.y for g in train_set])
-                y_test = torch.stack([g.y for g in test_set])
-                y_val = torch.stack([g.y for g in val_set])
-
-                # Normalize
-                if args.normalize:
-                    mean = y_train.mean()
-                    std = y_train.std()
-                    y_train = (y_train - mean) / std
-                    y_test = (y_test - mean) / std
-                    y_val = (y_val - mean) / std
-
-                # Train GraphGP model
-                train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=None)
-            else:
-                # Add label noise
-                train_set = qm9[train_idx]
-                if s > 0:
-                    # Generate Gaussian noise with mean 0 and standard deviation s
-                    noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                    
-                    # Add noise to the original labels
-                    train_set.data.y = train_set.data.y + noise
-
-                    # Ensure the tensor is properly formatted
-                    train_set.data.y = train_set.data.y.to(dtype=torch.float32)
-
-                # Normalize
-                if args.normalize:
-                    mean = train_set.data.y.mean()
-                    std = train_set.data.y.std()
-                    train_set.data.y = (train_set.data.y - mean) / std
-                    for i in test_idx:
-                        qm9[i].y = (qm9[i].y - mean) / std
-                    for i in val_idx:
-                        qm9[i].y = (qm9[i].y - mean) / std
-
-                # datasets into DataLoader
-                train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
-                test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
-                val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
-
-                train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration)
-
+    def model_selector(trial, model_type):
+        # try: 
+        if model_type == "graph_gp":
+            # CASE 2: GraphGP (SIGP subclass over graphs)
+            train_set = qm9[train_idx]
+            test_set = qm9[test_idx]
+            val_set = qm9[val_idx]
+            if s > 0:
+                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                train_set.data.y = train_set.data.y + noise
+                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
+            # Convert PyG to NetworkX graphs
+            train_graphs = [qm9_to_networkx(g) for g in train_set]
+            test_graphs = [qm9_to_networkx(g) for g in test_set]
+            val_graphs = [qm9_to_networkx(g) for g in val_set]
+            # Get labels
+            y_train = torch.stack([g.y for g in train_set])
+            y_test = torch.stack([g.y for g in test_set])
+            y_val = torch.stack([g.y for g in val_set])
+            # Normalize
+            if args.normalize:
+                mean = y_train.mean()
+                std = y_train.std()
+                y_train = (y_train - mean) / std
+                y_test = (y_test - mean) / std
+                y_val = (y_val - mean) / std
+            # Train GraphGP model
+            return train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=trial)
+        else:
+            # Add label noise
+            train_set = qm9[train_idx]
+            if s > 0:
+                # Generate Gaussian noise with mean 0 and standard deviation s
+                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
+                
+                # Add noise to the original labels
+                train_set.data.y = train_set.data.y + noise
+                # Ensure the tensor is properly formatted
+                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
+            # Normalize
+            if args.normalize:
+                mean = train_set.data.y.mean()
+                std = train_set.data.y.std()
+                train_set.data.y = (train_set.data.y - mean) / std
+                for i in test_idx:
+                    qm9[i].y = (qm9[i].y - mean) / std
+                for i in val_idx:
+                    qm9[i].y = (qm9[i].y - mean) / std
+            # datasets into DataLoader
+            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+            test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
+            val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
+            return train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration, trial)
         
-        except Exception as e:
-            print(f"Error with graph and {model_type}; more details: {e}")
+        # except Exception as e:
+        #     print(f"Error with graph and {model_type}; more details: {e}")
+        #     return None
+
+    # Main execution loop
+    for model_type in args.models:
+        if args.tuning:
+            temp_study_name = f"temp_qspr_graph_{uuid.uuid4().hex}"
+            study = optuna.create_study(
+                direction="maximize",
+                storage="sqlite:///optuna_study.db",
+                study_name=temp_study_name,
+                load_if_exists=False,
+            )
+
+            # Create a wrapper function for this specific model_type
+            def objective(trial):
+                return _black_box_function(trial, model_type)
+
+            study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
+
+            # Check if we have any successful trials
+            if len(study.trials) == 0 or all(trial.state != optuna.trial.TrialState.COMPLETE for trial in study.trials):
+                print(f"No successful trials for {model_type}. Running with default parameters.")
+                res = model_selector(None, model_type)
+            else:
+                best_params = study.best_params
+                print(f"Best params for {model_type} with sigma {s}: {best_params}")
+
+                # Save the best params as JSON next to the CSV
+                if args.filepath:
+                    json_path = os.path.splitext(args.filepath)[0] + ".json"
+                    dir_path = os.path.dirname(json_path)
+                    if dir_path:
+                        os.makedirs(dir_path, exist_ok=True)
+
+                    # Load existing params if file exists
+                    if os.path.exists(json_path):
+                        with open(json_path, 'r') as f:
+                            all_params = json.load(f)
+                    else:
+                        all_params = {}
+
+                    # Create nested structure if missing
+                    if model_type not in all_params:
+                        all_params[model_type] = {}
+                    all_params[model_type]['graph'] = best_params  # Using 'graph' as the representation type
+
+                    # Save updated structure
+                    with open(json_path, 'w') as f:
+                        json.dump(all_params, f, indent=4)
+
+                # Run with best params
+                res = _black_box_function(optuna.trial.FixedTrial(best_params), model_type)
+            
+            optuna.delete_study(study_name=study.study_name, storage="sqlite:///optuna_study.db")
+
+        elif args.params:
+            with open(args.params, 'r') as f:
+                all_params = json.load(f)
+
+            # PATCHED VERSION
+            if model_type in all_params and 'graph' in all_params[model_type]:
+                best_params = all_params[model_type]['graph']
+
+                # Reconstruct use_default flags
+                fixed_params = {}
+                for key, value in best_params.items():
+                    if value is None:
+                        fixed_params[f"use_default_{key}"] = True
+                    else:
+                        fixed_params[f"use_default_{key}"] = False
+                        fixed_params[key] = value
+
+                res = _black_box_function(optuna.trial.FixedTrial(fixed_params), model_type)
+            else:
+                print(f"No saved parameters for model_type '{model_type}' and rep 'graph'. Using default settings.")
+                res = model_selector(None, model_type)
+
+        else:
+            res = model_selector(None, model_type)
 
 def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
     train_count = len(train_idx)
