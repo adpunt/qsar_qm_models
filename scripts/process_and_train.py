@@ -158,7 +158,9 @@ def parse_arguments():
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
     parser.add_argument("-u", "--uncertainty", type=bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
     parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
-    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")    
+    parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
+    parser.add_argument("--noise-strategy", type=str, default="legacy", help="Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic (default is legacy)")
+    parser.add_argument("--strategy-params", type=str, default="noise_strategy_params.json", help="JSON file path with strategy-specific parameters (default is noise_strategy_params.json)")
     parser.add_argument(
         "--bayesian-transformation",
         type=str,
@@ -171,7 +173,7 @@ def parse_arguments():
             "  variational - Use variational Bayes for uncertainty (sampling-based, not deterministic).\n"
             "Default is None (no transformation)."
         )
-)
+    )
     return parser.parse_args()
 
 def write_to_mmap(
@@ -989,6 +991,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             '--model', "rf",
             '--sigma', str(s),
             '--noise_distribution', args.distribution,
+            '--noise_strategy', args.noise_strategy,
         ],
         env=env,
         stdout=subprocess.PIPE,

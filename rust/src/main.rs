@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize};
 use clap::{Arg, Command, ArgAction};
 use num_traits::{Float, FromPrimitive};
 use std::iter::Sum;
-use rand_distr::{Distribution, Normal, Uniform, Beta, SkewNormal};
+use rand_distr::{Distribution, Normal, Uniform, Beta};
 use std::io::Write;
 use std::cmp::Reverse;
 use std::io::BufWriter;
 use std::fs::{OpenOptions, remove_file, rename};
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 extern crate rdkit_sys;
 
@@ -83,6 +84,103 @@ enum NoiseDistribution {
     Uniform,
     DomainMpnn,
     DomainTanimoto,
+}
+
+#[derive(Debug, Clone)]
+pub enum NoiseStrategy {
+    // Original approach - just passes through to your existing function
+    Legacy { 
+        sigma: f32,
+        distribution: NoiseDistribution 
+    },
+    
+    // Value-based strategies
+    ValueProportional { 
+        base_sigma: f32,
+        proportionality_factor: f32,
+        distribution: NoiseDistribution 
+    },
+    
+    Quantile { 
+        high_quantile_threshold: f32,
+        low_quantile_threshold: f32, 
+        high_sigma: f32,
+        low_sigma: f32,
+        mid_sigma: f32,
+        distribution: NoiseDistribution 
+    },
+    
+    Threshold { 
+        high_threshold: f32,
+        low_threshold: f32,
+        high_sigma: f32,
+        low_sigma: f32,
+        mid_sigma: f32,
+        distribution: NoiseDistribution 
+    },
+    
+    OutlierFocused {
+        outlier_z_threshold: f32,
+        outlier_sigma: f32,
+        normal_sigma: f32,
+        distribution: NoiseDistribution
+    },
+    
+    Heteroscedastic {
+        alpha: f32,
+        beta: f32,
+        distribution: NoiseDistribution
+    },
+
+    ScaffoldBased {
+        train_sigma: f32,
+        test_sigma: f32, 
+        val_sigma: f32,
+        distribution: NoiseDistribution,
+        scaffold_file: String,
+    }
+}
+
+fn generate_value_based_noise_map(
+   config: &Config,
+   noise_indices: &[usize],
+   strategy: NoiseStrategy,
+   seed: u64,
+) -> io::Result<HashMap<usize, f32>> {
+   // If no noise indices, return empty map regardless of strategy
+   if noise_indices.is_empty() {
+       return Ok(HashMap::new());
+   }
+   
+   match strategy {
+       NoiseStrategy::Legacy { sigma, distribution } => {
+           Ok(generate_noise_by_indices(noise_indices, sigma, distribution, seed))
+       }
+       
+       _ => {
+           let target_values = read_all_target_values(config)?;
+           generate_adaptive_noise(&target_values, noise_indices, strategy, seed)
+       }
+   }
+}
+fn read_all_target_values(config: &Config) -> io::Result<Vec<f32>> {
+    let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
+    let mut reader = BufReader::new(train_file);
+    let mut target_values = Vec::with_capacity(config.train_count);
+    
+    reader.seek(SeekFrom::Start(0))?;
+    
+    for _index in 0..config.train_count {
+        if let Some(smiles_data) = read_smiles_data(
+            &mut reader, 
+            config.molecular_representations.clone(), 
+            config.k_domains
+        ) {
+            target_values.push(smiles_data.target_value);
+        }
+    }
+    
+    Ok(target_values)
 }
 
 fn generate_noise_by_indices(
@@ -173,6 +271,238 @@ fn generate_noise_by_indices(
     noise_map
 }
 
+fn load_scaffold_assignments(file_path: &str) -> io::Result<HashMap<usize, u32>> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+    let data: HashMap<String, u32> = serde_json::from_reader(reader)?;
+    
+    // Convert string keys to usize
+    let result = data.iter()
+        .map(|(k, v)| (k.parse::<usize>().unwrap(), *v))
+        .collect();
+    
+    Ok(result)
+}
+
+fn generate_adaptive_noise(
+    target_values: &[f32],
+    indices: &[usize], 
+    strategy: NoiseStrategy,
+    seed: u64,
+) -> io::Result<HashMap<usize, f32>> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut noise_map = HashMap::new();
+    
+    match strategy {
+        NoiseStrategy::Legacy { .. } => {
+            // This case is handled above
+            unreachable!()
+        }
+        
+        NoiseStrategy::ValueProportional { base_sigma, proportionality_factor, distribution } => {
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let value = target_values[idx];
+                    let adaptive_sigma = base_sigma * (1.0 + proportionality_factor * value.abs());
+                    let noise = sample_from_distribution(&distribution, adaptive_sigma, &mut rng);
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+        
+        NoiseStrategy::Quantile { 
+            high_quantile_threshold, 
+            low_quantile_threshold, 
+            high_sigma, 
+            low_sigma, 
+            mid_sigma, 
+            distribution 
+        } => {
+            let mut sorted_values: Vec<f32> = target_values.iter().copied().collect();
+            sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            
+            let high_idx = ((sorted_values.len() as f32 * high_quantile_threshold) as usize)
+                .min(sorted_values.len() - 1);
+            let low_idx = ((sorted_values.len() as f32 * low_quantile_threshold) as usize)
+                .min(sorted_values.len() - 1);
+                
+            let high_threshold_value = sorted_values[high_idx];
+            let low_threshold_value = sorted_values[low_idx];
+            
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let value = target_values[idx];
+                    let sigma = if value >= high_threshold_value {
+                        high_sigma
+                    } else if value <= low_threshold_value {
+                        low_sigma
+                    } else {
+                        mid_sigma
+                    };
+                    
+                    let noise = sample_from_distribution(&distribution, sigma, &mut rng);
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+        
+        NoiseStrategy::Threshold { 
+            high_threshold, 
+            low_threshold, 
+            high_sigma, 
+            low_sigma, 
+            mid_sigma, 
+            distribution 
+        } => {
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let value = target_values[idx];
+                    let sigma = if value >= high_threshold {
+                        high_sigma
+                    } else if value <= low_threshold {
+                        low_sigma
+                    } else {
+                        mid_sigma
+                    };
+                    
+                    let noise = sample_from_distribution(&distribution, sigma, &mut rng);
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+        
+        NoiseStrategy::OutlierFocused { 
+            outlier_z_threshold, 
+            outlier_sigma, 
+            normal_sigma, 
+            distribution 
+        } => {
+            let mean: f32 = target_values.iter().sum::<f32>() / target_values.len() as f32;
+            let variance: f32 = target_values.iter()
+                .map(|x| (x - mean).powi(2))
+                .sum::<f32>() / target_values.len() as f32;
+            let std_dev = variance.sqrt();
+            
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let value = target_values[idx];
+                    let z_score = (value - mean).abs() / std_dev;
+                    let sigma = if z_score > outlier_z_threshold {
+                        outlier_sigma
+                    } else {
+                        normal_sigma
+                    };
+                    
+                    let noise = sample_from_distribution(&distribution, sigma, &mut rng);
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+        
+        NoiseStrategy::Heteroscedastic { alpha, beta, distribution } => {
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let value = target_values[idx];
+                    let sigma = (alpha + beta * value.abs()).sqrt();
+                    let noise = sample_from_distribution(&distribution, sigma, &mut rng);
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+
+        NoiseStrategy::ScaffoldBased { train_sigma, test_sigma, val_sigma, distribution, scaffold_file } => {
+            println!("ScaffoldBased strategy: train_sigma={}", train_sigma);
+            
+            // Try to load scaffold assignments, but don't fail if it doesn't work
+            match load_scaffold_assignments(&scaffold_file) {
+                Ok(_) => println!("Loaded scaffold assignments successfully"),
+                Err(e) => println!("Failed to load scaffold assignments: {}", e),
+            }
+            
+            for &idx in indices {
+                if idx < target_values.len() {
+                    let noise = sample_from_distribution(&distribution, train_sigma, &mut rng);
+                    println!("Index {}: generated noise = {}", idx, noise);
+                    if noise.is_nan() {
+                        println!("ERROR: Generated NaN noise for index {}", idx);
+                    }
+                    noise_map.insert(idx, noise);
+                }
+            }
+        }
+    }
+    
+    Ok(noise_map)
+}
+
+fn sample_from_distribution(
+    distribution: &NoiseDistribution,
+    sigma: f32,
+    rng: &mut StdRng,
+) -> f32 {    
+    if sigma <= 0.0 || sigma.is_nan() || sigma.is_infinite() {
+        println!("ERROR: Invalid sigma value: {}", sigma);
+        return 0.0;  // Return 0 instead of NaN
+    }
+    
+    let result = match distribution {
+        NoiseDistribution::Gaussian => {
+            let normal = Normal::new(0.0, sigma as f64).unwrap();
+            normal.sample(rng) as f32
+        }
+        
+        NoiseDistribution::LeftTailed => {
+            let normal = Normal::new(0.0, sigma as f64).unwrap();
+            let sample = normal.sample(rng);
+            
+            let skewed = if sample >= 0.0 {
+                let compressed = sample.powf(0.5);
+                -compressed.min(10.0)
+            } else {
+                let stretched = sample * 1.5;
+                stretched.max(-10.0)
+            };
+            
+            if skewed.is_finite() { skewed as f32 } else { 0.0 }
+        }
+        
+        NoiseDistribution::RightTailed => {
+            let normal = Normal::new(0.0, sigma as f64).unwrap();
+            let sample = normal.sample(rng);
+            
+            let skewed = if sample >= 0.0 {
+                let stretched = sample.powf(1.5);
+                stretched.min(10.0)
+            } else {
+                let compressed = (-sample).powf(0.5);
+                -compressed.min(10.0)
+            };
+            
+            if skewed.is_finite() { skewed as f32 } else { 0.0 }
+        }
+        
+        NoiseDistribution::UShaped => {
+            let beta = Beta::new(0.5, 0.5).unwrap();
+            let sample = beta.sample(rng);
+            let k = sigma * 2.0 * 3_f32.sqrt();
+            ((sample - 0.5) * 2.0 * k as f64) as f32
+        }
+        
+        NoiseDistribution::Uniform => {
+            let a = sigma * 3_f32.sqrt();
+            let uniform = Uniform::new_inclusive(-a as f64, a as f64).unwrap();
+            uniform.sample(rng) as f32
+        }
+        
+        // Handle your domain-specific distributions
+        NoiseDistribution::DomainMpnn | NoiseDistribution::DomainTanimoto => {
+            let normal = Normal::new(0.0, sigma as f64).unwrap();
+            normal.sample(rng) as f32
+        }
+    };
+    
+    result  // Return the result
+}
 fn read_smiles_data(
     reader: &mut BufReader<File>,
     molecular_representations: Vec<String>,
@@ -332,6 +662,8 @@ fn write_data(
             if config.noise {
                 if let Some(&artificial_noise) = noise_map.get(&index) {
                     property_value += artificial_noise;
+                } else {
+                    println!("No noise found for index {}", index);
                 }
             }
 
@@ -524,48 +856,29 @@ fn generate_aggregate_stats(
     let mut y_values: Vec<f32> = Vec::new();
     let mut max_sequence_length = 0usize;
 
-    let files_to_process = vec![File::open(format!("train_{}.mmap", config.file_no))?];
+    let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
+    let mut reader = BufReader::new(train_file);
+    reader.seek(SeekFrom::Start(0))?;
 
-    for file in files_to_process {
-        let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(0))?;
-
-        for index in 0..config.train_count {
-            if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
-                if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
-                    smiles_list.push(smiles_data.canonical_smiles.clone());
-                    let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
-                    max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
-                }
-
-                let mut property_value = smiles_data.target_value;
-                if config.noise {
-                    // TODO: add logic back in when you have domain labels again
-                    // if matches!(config.noise_distribution, NoiseDistribution::DomainMpnn | NoiseDistribution::DomainTanimoto) {
-                    //     if smiles_data.domain_label == config.target_domain as i32 {
-                    //         // Apply noise only if the domain matches the target domain
-                    //         if let Some(&artificial_noise) = noise_map.get(&index) {
-                    //             property_value += artificial_noise;
-                    //         }
-                    //     }
-                    // } else {
-                    //     // Apply noise from the noise map for other distributions
-                    //     if let Some(&artificial_noise) = noise_map.get(&index) {
-                    //         property_value += artificial_noise;
-                    //     }
-                    // }
-                    // And then delete this:
-                    if let Some(&artificial_noise) = noise_map.get(&index) {
-                        property_value += artificial_noise;
-                    }
-                }
-                y_values.push(property_value);
+    for index in 0..config.train_count {
+        if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
+            if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
+                smiles_list.push(smiles_data.canonical_smiles.clone());
+                let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
+                max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
             }
+
+            let mut property_value = smiles_data.target_value;
+            if config.noise {
+                if let Some(&artificial_noise) = noise_map.get(&index) {
+                    property_value += artificial_noise;
+                }
+            }
+            y_values.push(property_value);
         }
     }
 
     let token_counts = count_token_frequencies(&smiles_list, &tokenizer);
-
     let trimmed_vocab = trim_vocab(token_counts, config.max_vocab);
     let vocab_size = trimmed_vocab.len();
 
@@ -576,7 +889,7 @@ fn generate_aggregate_stats(
     }).sum::<f32>() / y_values.len() as f32;
     let std_deviation: f32 = variance.sqrt();
 
-    Ok((mean, variance, vocab_size, trimmed_vocab, max_sequence_length))
+    Ok((mean, std_deviation, vocab_size, trimmed_vocab, max_sequence_length))
 }
 
 fn preprocess_data(
@@ -683,10 +996,7 @@ fn preprocess_data(
     Ok(())
 }
 
-// TODO: re-introduce params for other distributions
 fn main() -> io::Result<()> {
-    // env::set_var("DYLD_LIBRARY_PATH", "/usr/local/Cellar/libtensorflow/2.15.0");
-
     let app = Command::new("My Rust Processor")
         .arg(Arg::new("seed")
              .long("seed")
@@ -700,14 +1010,18 @@ fn main() -> io::Result<()> {
              .long("sigma")
              .action(ArgAction::Set)
              .help("Sigma for artificial noise addition"))
-        // .arg(Arg::new("sampling_proportion")
-        //      .long("sampling_proportion")
-        //      .action(ArgAction::Set)
-        //      .help("Sampling proportion for artificial noise addition"))
         .arg(Arg::new("noise_distribution")
              .long("noise_distribution")
              .action(ArgAction::Set)
-             .help("Distribution type for noise"));
+             .help("Distribution type for noise"))
+        .arg(Arg::new("noise_strategy")
+             .long("noise_strategy")
+             .action(ArgAction::Set)
+             .help("Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic, scaffold"))
+        .arg(Arg::new("strategy_params")
+             .long("strategy_params")
+             .action(ArgAction::Set)
+             .help("JSON file path with strategy-specific parameters"));
 
     let matches = app.get_matches();
 
@@ -715,10 +1029,8 @@ fn main() -> io::Result<()> {
                            .unwrap()
                            .parse()
                            .expect("Seed must be a valid integer");
-    let model = matches.get_one::<String>("model").unwrap();
+    let _model = matches.get_one::<String>("model").unwrap();
     let sigma: f32 = matches.get_one::<String>("sigma").unwrap().parse().expect("Sigma must be a valid float");
-    // let sampling_proportion: f32 = matches.get_one::<String>("sampling_proportion").unwrap().parse().expect("Sampling proportion must be a valid float");
-    // let noise_mu: f32 = matches.get_one::<String>("noise_mu").unwrap().parse().expect("Noise mu must be a valid float");
     let noise_distribution: NoiseDistribution = match matches.get_one::<String>("noise_distribution").unwrap().as_str() {
         "gaussian" => NoiseDistribution::Gaussian,
         "left-tailed" => NoiseDistribution::LeftTailed,
@@ -729,8 +1041,8 @@ fn main() -> io::Result<()> {
         "domain_tanimoto" => NoiseDistribution::DomainTanimoto,
         _ => panic!("Invalid noise distribution specified"),
     };
-    // TODO: potentially change this
-    let sampling_proportion: f32 = 1.0;
+
+    println!("Parsed sigma value: {}", sigma);
 
     // Reading the configuration file
     let config_file = File::open("config.json")?;
@@ -739,19 +1051,112 @@ fn main() -> io::Result<()> {
                           .expect("JSON was not well-formatted or did not match the expected structure");
 
     let noise_indices: Vec<usize> = if config.noise {
-        (0..config.train_count)
-            .filter(|_| rand::random::<f32>() < sampling_proportion)
-            .collect()
+        (0..config.train_count).collect()
     } else {
         Vec::new()
     };
 
-    let noise_map: HashMap<usize, f32> = generate_noise_by_indices(
+    println!("noise_indices: {:?}", noise_indices);
+    println!("noise_indices length: {}", noise_indices.len());
+
+    // Load strategy parameters from JSON file
+    let strategy_params = if let Some(params_file) = matches.get_one::<String>("strategy_params") {
+        let file = File::open(params_file)?;
+        let reader = BufReader::new(file);
+        serde_json::from_reader(reader)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    };
+
+    // Parse noise strategy with parameters from JSON
+    let noise_strategy = if let Some(strategy_name) = matches.get_one::<String>("noise_strategy") {
+        match strategy_name.as_str() {
+            "legacy" => NoiseStrategy::Legacy {
+                sigma,
+                distribution: noise_distribution.clone(),
+            },
+            "value_proportional" => {
+                let params = &strategy_params["value_proportional"];
+                println!(
+                    "Scaffold multipliers: train = {:?}, test = {:?}, val = {:?}",
+                    params.get("train_sigma_multiplier"),
+                    params.get("test_sigma_multiplier"),
+                    params.get("val_sigma_multiplier")
+                );
+                NoiseStrategy::ValueProportional {
+                    base_sigma: params.get("base_sigma").and_then(|v| v.as_f64()).unwrap_or(sigma as f64) as f32,
+                    proportionality_factor: params.get("proportionality_factor").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    distribution: noise_distribution.clone(),
+                }
+            },
+            "quantile" => {
+                let params = &strategy_params["quantile"];
+                NoiseStrategy::Quantile {
+                    high_quantile_threshold: params.get("high_quantile_threshold").and_then(|v| v.as_f64()).unwrap_or(0.9) as f32,
+                    low_quantile_threshold: params.get("low_quantile_threshold").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    high_sigma: sigma * params.get("high_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    low_sigma: sigma * params.get("low_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    mid_sigma: sigma * params.get("mid_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    distribution: noise_distribution.clone(),
+                }
+            },
+            "threshold" => {
+                let params = &strategy_params["threshold"];
+                NoiseStrategy::Threshold {
+                    high_threshold: params.get("high_threshold").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    low_threshold: params.get("low_threshold").and_then(|v| v.as_f64()).unwrap_or(-1.0) as f32,
+                    high_sigma: sigma * params.get("high_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    low_sigma: sigma * params.get("low_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    mid_sigma: sigma * params.get("mid_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    distribution: noise_distribution.clone(),
+                }
+            },
+            "outlier" => {
+                let params = &strategy_params["outlier"];
+                NoiseStrategy::OutlierFocused {
+                    outlier_z_threshold: params.get("outlier_z_threshold").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    outlier_sigma: sigma * params.get("outlier_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(3.0) as f32,
+                    normal_sigma: sigma * params.get("normal_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    distribution: noise_distribution.clone(),
+                }
+            },
+            "heteroscedastic" => {
+                let params = &strategy_params["heteroscedastic"];
+                NoiseStrategy::Heteroscedastic {
+                    alpha: sigma * sigma * params.get("alpha_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    beta: sigma * sigma * params.get("beta_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.05) as f32,
+                    distribution: noise_distribution.clone(),
+                }
+            },
+            "scaffold" => {
+                let params = &strategy_params["scaffold"];
+                NoiseStrategy::ScaffoldBased {
+                    train_sigma: sigma * params.get("train_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(0.1) as f32,
+                    test_sigma: sigma * params.get("test_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(2.0) as f32,
+                    val_sigma: sigma * params.get("val_sigma_multiplier").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    distribution: noise_distribution.clone(),
+                    scaffold_file: params.get("scaffold_file").and_then(|v| v.as_str()).unwrap_or(&format!("scaffold_assignments_{}.json", seed)).to_string(),
+                }
+            },
+            _ => panic!("Invalid noise strategy specified"),
+        }
+    } else {
+        println!("Using default noise strategy");
+        // Default to legacy for backwards compatibility
+        NoiseStrategy::Legacy {
+            sigma,
+            distribution: noise_distribution.clone(),
+        }
+    };
+
+    // Generate noise map using the new strategy-aware function
+    let noise_map: HashMap<usize, f32> = generate_value_based_noise_map(
+        &config,
         &noise_indices,
-        sigma,
-        noise_distribution.clone(),
+        noise_strategy,
         seed,
-    );
+    )?;
 
     let (mean, std_dev, vocab_size, vocab, max_sequence_length) =
         generate_aggregate_stats(&config, &noise_map)?;
@@ -768,5 +1173,3 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
-
-// TODO: americanize code
