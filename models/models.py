@@ -4,11 +4,10 @@ from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_geometric.nn import GCNConv, GINConv, GATv2Conv, global_mean_pool, global_add_pool
 import numpy as np
 import math
-
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
+from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
-from torch_geometric.datasets import QM9
 from torch_geometric.nn import GCNConv, GINConv, MessagePassing
 from torch_geometric.loader import DataLoader
 from torch_geometric.typing import Adj, OptTensor, PairTensor, Size
@@ -17,14 +16,12 @@ from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 from torch_geometric.nn.inits import glorot, zeros
 import gpytorch
 from typing import Union
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor
 from quantile_forest import RandomForestQuantileRegressor
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from sklearn.svm import SVR, SVC
-from xgboost import XGBRegressor, XGBClassifier
-from torch.utils.data import TensorDataset
-from torch.utils.data import DataLoader as TorchDataLoader
+from xgboost import XGBRegressor
 from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_parameters as Vec2Params
 import matplotlib.pyplot as plt
 import torchbnn as bnn
@@ -38,23 +35,14 @@ from gauche import SIGP, NonTensorialInputs
 from gauche.dataloader import MolPropLoader
 from gauche.dataloader.data_utils import transform_data
 from gauche.kernels.graph_kernels import WeisfeilerLehmanKernel, VertexHistogramKernel
-
+import torchcp
+from torchcp.regression.predictor import SplitPredictor, ACIPredictor
 
 from utils import * 
 
 # TODO: reorder imports
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-rf_params = {
-    "n_estimators": 100,
-    "max_depth": None,
-    "min_samples_leaf": 1,
-    "min_samples_split": 2,
-    "max_features": "sqrt",
-    "bootstrap": True,
-    "random_state": 42,
-}
 
 class RNNRegressionModel(nn.Module):
     """Vanilla RNN with one recurrent layer"""
@@ -116,44 +104,6 @@ class GRURegressionModel(nn.Module):
         out = self.dropout(out)
         out = self.fc(out)
         return out
-
-class RNNClassificationModel(nn.Module):
-    """Vanilla RNN for classification with one recurrent layer"""
-
-    def __init__(self, input_size, hidden_size=32, num_layers=1, num_classes=2):
-        super(RNNClassificationModel, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, num_classes)  # Multi-class output
-        self.dropout = nn.Dropout(p=0.2)
-
-    def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-        out, _ = self.rnn(x, h0)
-        out = out[:, -1]  # Take last time step
-        out = self.dropout(out)
-        out = self.fc(out)
-        return out  # No activation (CrossEntropyLoss expects raw logits)
-
-class GRUClassificationModel(nn.Module):
-    """GRU for classification with one recurrent layer"""
-
-    def __init__(self, input_size, hidden_size=32, num_layers=1, num_classes=2):
-        super(GRUClassificationModel, self).__init__()
-        self.hidden_size = hidden_size
-        self.num_layers = num_layers
-        self.gru = nn.GRU(input_size, hidden_size, num_layers=num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, num_classes)  # Multi-class output
-        self.dropout = nn.Dropout(p=0.2)
-
-    def forward(self, x):
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
-        out, _ = self.gru(x, h0)
-        out = out[:, -1]  # Take last time step
-        out = self.dropout(out)
-        out = self.fc(out)
-        return out  # No activation (CrossEntropyLoss expects raw logits)
 
 class ModelTrainer(object):
     """A class that provides training and validation infrastructure for the model and keeps track of training and validation metrics."""
@@ -219,20 +169,8 @@ class ModelTrainer(object):
         targets = np.concatenate(targets).flatten()
         return val_loss / len(loader), predictions, targets
 
-    def train(self, train_loader, val_loader, n_epochs, print_every=10):
-        """
-        Train the model
-
-        Parameters
-        ----------
-        train_loader :
-            a dataloader with training data
-        val_loader :
-            a dataloader with training data
-        n_epochs :
-            number of epochs to train for
-        """
-        for e in range(n_epochs):
+    def train(self, train_loader, val_loader, args, s, iteration, file_no, model_name, rep, print_every=10):
+        for e in range(args.epochs):
             train_loss, train_loss_batches = self._train_epoch(train_loader)
             val_loss, _, _ = self._eval_epoch(val_loader)
             self.batch_loss += train_loss_batches
@@ -240,6 +178,19 @@ class ModelTrainer(object):
             self.val_loss.append(val_loss)
             if e % print_every == 0:
                 print(f"Epoch {e+0:03} | train_loss: {train_loss:.5f} | val_loss: {val_loss:.5f}")
+        
+        # Save per-epoch metrics if requested
+        if args and hasattr(args, 'save_per_epoch_metrics') and args.save_per_epoch_metrics:
+            save_per_epoch_metrics(
+                train_losses=self.train_loss,
+                val_losses=self.val_loss,
+                filepath=args.filepath,
+                model_name=model_name,
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration,
+                file_no=file_no
+            )
 
     def validate(self, val_loader):
         """
@@ -413,28 +364,6 @@ class MLPRegressor(nn.Module):
         x = self.dropout(x)
         x = self.output_layer(x)
         return x
-
-class MLPClassifier(nn.Module):
-    """Multi-Layer Perceptron for classification on non-sequential data."""
-
-    def __init__(self, input_size, hidden_size=32, num_hidden_layers=2, num_classes=2, dropout_rate=0.2):
-        super(MLPClassifier, self).__init__()
-        self.input_layer = nn.Linear(input_size, hidden_size)
-        self.hidden_layers = nn.ModuleList()
-        for _ in range(num_hidden_layers - 1):
-            self.hidden_layers.append(nn.Linear(hidden_size, hidden_size))
-        self.output_layer = nn.Linear(hidden_size, num_classes)
-        self.dropout = nn.Dropout(dropout_rate)
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)  # Softmax for classification
-
-    def forward(self, x):
-        x = self.relu(self.input_layer(x))
-        for layer in self.hidden_layers:
-            x = self.relu(layer(x))
-        x = self.dropout(x)
-        x = self.output_layer(x)
-        return self.softmax(x)  # Final activation for classification
 
 class Gauche(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood, kernel_class):
@@ -632,7 +561,7 @@ def testing(loader, model):
 
     return test_loss, test_target, test_y_target
 
-def train_epochs(epochs, model, train_loader, val_loader, path):
+def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name):
     """Training over all epochs
 
     Args:
@@ -640,7 +569,12 @@ def train_epochs(epochs, model, train_loader, val_loader, path):
         model (nn.Module): the current model
         train_loader (DataLoader): training data in batches
         val_loader (DataLoader): validation data in batches
-        path (string): path to save the best model
+        args: arguments object containing save_per_epoch_metrics flag and filepath
+        s: sigma noise level
+        iteration: current iteration number
+        file_no: file number identifier
+        model_name: name of the model
+        rep: representation type
 
     Returns:
         array: returning train and validation losses over all epochs, prediction and ground truth values for training data in the last epoch
@@ -652,13 +586,10 @@ def train_epochs(epochs, model, train_loader, val_loader, path):
     train_y_target = np.empty((0))
     train_loss = np.empty(epochs)
     val_loss = np.empty(epochs)
-    best_loss = math.inf
 
     for epoch in range(epochs):
         epoch_loss, model = training(train_loader, model, loss, optimizer)
         v_loss = validation(val_loader, model, loss)
-        if v_loss < best_loss:
-            torch.save(model.state_dict(), path)
         for d in train_loader:
             out = model(d)
             if epoch == epochs - 1:
@@ -679,6 +610,20 @@ def train_epochs(epochs, model, train_loader, val_loader, path):
                 + ", Val loss: "
                 + str(v_loss.item())
             )
+    
+    # Save per-epoch metrics if requested
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_loss,
+            val_losses=val_loss,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep='graph',
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
     return train_loss, val_loss, train_target, train_y_target, model
 
 class GINCoTeaching:
@@ -971,40 +916,6 @@ class DNNRegressionModel(nn.Module):
         x = self.fc3(x)  # No activation for regression output
         return x
 
-class DNNClassificationModel(nn.Module):
-    """Densely-connected neural network for classification tasks"""
-
-    def __init__(self, input_size, hidden_size1=32, hidden_size2=32, num_classes=2):
-        """
-        Fully-connected neural network for classification
-
-        Parameters
-        ----------
-        input_size : int
-            Number of features in the input vector
-        hidden_size1 : int
-            Number of neurons in the first hidden layer
-        hidden_size2 : int
-            Number of neurons in the second hidden layer
-        num_classes : int
-            Number of output classes (2 for binary, >2 for multi-class)
-        """
-        super(DNNClassificationModel, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size1)
-        self.fc2 = nn.Linear(hidden_size1, hidden_size2)
-        self.fc3 = nn.Linear(hidden_size2, num_classes)
-        self.activation = nn.ReLU()  # Default activation (will be tuned)
-        self.dropout = nn.Dropout(p=0.2)
-        self.num_classes = num_classes
-
-    def forward(self, x):
-        x = self.activation(self.fc1(x))
-        x = self.dropout(x)
-        x = self.activation(self.fc2(x))
-        x = self.dropout(x)
-        x = self.fc3(x)  # No activation here, handled externally based on task
-        return x
-
 class FlexibleDNNRegressionModel(nn.Module):
     def __init__(self, input_size, hidden_sizes, activation_fn=nn.ReLU(), dropout=0.2):
         super(FlexibleDNNRegressionModel, self).__init__()
@@ -1109,7 +1020,6 @@ def apply_bayesian_transformation_last_layer(model):
 
     return model
 
-
 def apply_bayesian_transformation_last_layer_variational(model):
     """
     Converts the last Linear layer of a PyTorch model to a Bayesian Linear layer
@@ -1165,28 +1075,42 @@ def apply_bayesian_transformation_last_layer_variational(model):
 
     return model
 
-def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial=None):
-    params = rf_params
+def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None):
+    params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
-        if use_default_max_depth:
-            params['max_depth'] = None
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('rf', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for rf-{rep}")
+    
+    if not params:
+        if args.tuning:
+            use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
+            if use_default_max_depth:
+                params['max_depth'] = None
+            else:
+                params['max_depth'] = trial.suggest_int('max_depth', 10, 200)
+
+            params['max_features'] = trial.suggest_categorical('max_features', ['sqrt', 1.0, None])
+            params['min_samples_leaf'] = trial.suggest_int('min_samples_leaf', 1, 50)
+            params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
+            params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
+            params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
+            params_source = 'tuning_trial'
         else:
-            params['max_depth'] = trial.suggest_int('max_depth', 10, 200)
-
-        params['max_features'] = trial.suggest_categorical('max_features', ['sqrt', 1.0, None])
-        params['min_samples_leaf'] = trial.suggest_int('min_samples_leaf', 1, 50)
-        params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
-        params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-        params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
+            params['max_depth'] = None
+            params['max_features'] = 'sqrt'
+            params['min_samples_leaf'] = 1
+            params['min_samples_split'] = 2
+            params['n_estimators'] = 100
+            params['bootstrap'] = True
+            params_source = 'default'
 
     if model_type == 'rf':
-        if args.dataset == 'QM9':
-            model = RandomForestRegressor(random_state=iteration_seed, **params)
-        else:
-            params['criterion'] = trial.suggest_categorical('criterion', ['gini', 'entropy'])  # Classification
-            model = RandomForestClassifier(random_state=iteration_seed, **params)
+        model = RandomForestRegressor(random_state=iteration_seed, **params)
     elif model_type == 'qrf':
         quantile = trial.suggest_float('quantile', 0.1, 0.9) if args.tuning else 0.5
         model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
@@ -1201,165 +1125,219 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
     if model_type == 'qrf':
         q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
         y_pred = q50
+        y_pred_mean = q50
+        std_est = (q84 - q16) / 2
+        
         if args.uncertainty:
-            std_est = 0.5 * (q84 - q16)
             save_uncertainty_values(
-                y_pred_mean=q50,
+                y_pred_mean=y_pred_mean,
                 y_pred_std=std_est,
-                y_true=y_test,
+                y_true_original=y_test_original,
+                y_true_noisy=y_test,
                 filepath=args.filepath,
-                model_name="qrf",
+                model_name=model_type,
                 rep=rep,
                 sigma_noise=s,
-                iteration=iteration
+                iteration=iteration,
+                file_no=file_no,
             )
     else:
         y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics, params_source)
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
 def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        params['C'] = trial.suggest_int('C', 0, 100)
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('svm', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for svm-{rep}")
 
-        params['gamma'] = trial.suggest_categorical('gamma', ['scale', 'auto'])
-        params['kernel'] = trial.suggest_categorical('kernel', ['rbf', 'poly', 'sigmoid'])
+    if not params:
+        if args.tuning:
+            params['C'] = trial.suggest_float('C', 0, 100)
+            params['gamma'] = trial.suggest_categorical('gamma', ['scale', 'auto'])
+            params['kernel'] = trial.suggest_categorical('kernel', ['rbf', 'poly', 'sigmoid'])
 
-        if params['kernel'] == 'poly':
-            params['degree'] = trial.suggest_int('degree', 2, 5)
-            params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
+            if params['kernel'] == 'poly':
+                params['degree'] = trial.suggest_int('degree', 2, 5)
+                params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
 
-        if params['kernel'] == 'sigmoid':
-            params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
-
+            if params['kernel'] == 'sigmoid':
+                params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
+            params_source = 'tuning_trial'
+        else:
+            params['C'] = 1.0
+            params['gamma'] = 'scale'
+            params['kernel'] = 'rbf'
+            params_source = 'default'
 
     x_train = np.vstack((x_train, x_val))
     y_train = np.hstack((y_train, y_val))
 
-    model = SVR(**params) if args.dataset == 'QM9' else SVC(**params)
+    model = SVR(**params)
 
     model.fit(x_train, y_train)
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics)
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
-def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     from ngboost import NGBRegressor
     from ngboost.distns import Normal
     from ngboost.scores import MLE
-
-    if args.tuning:
-        learning_rate = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
-        n_estimators = trial.suggest_int('n_estimators', 10, 2000)
-        natural_gradient = trial.suggest_categorical('natural_gradient', [True, False])
-    else:
-        learning_rate = 0.01
-        n_estimators = 500
-        natural_gradient = True
-
+    
+    params = {}
+    params_source = 'default'
+    
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('ngboost', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for ngboost-{rep}")
+    
+    if not params:
+        if args.tuning:
+            params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+            params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
+            params['natural_gradient'] = trial.suggest_categorical('natural_gradient', [True, False])
+            params_source = 'tuning_trial'
+        else:
+            params['learning_rate'] = 0.01
+            params['n_estimators'] = 500
+            params['natural_gradient'] = True
+            params_source = 'default'
+    
     x_train = np.vstack((x_train, x_val))
     y_train = np.hstack((y_train, y_val))
-
     model = NGBRegressor(
         Dist=Normal,
         Score=MLE,
-        natural_gradient=natural_gradient,
-        n_estimators=n_estimators,
-        learning_rate=learning_rate,
+        natural_gradient=params['natural_gradient'],
+        n_estimators=params['n_estimators'],
+        learning_rate=params['learning_rate'],
         verbose=False,
         random_state=iteration_seed,
     )
-
     model.fit(x_train, y_train)
     y_pred = model.predict(x_test)
     y_dist = model.pred_dist(x_test)
-
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=y_dist.scale,
-            y_true=y_test,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
             filepath=args.filepath,
             model_name="ngboost",
             rep=rep,
             sigma_noise=s,
-            iteration=iteration
+            iteration=iteration,
+            file_no=file_no,
         )
-
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     nll = -y_dist.logpdf(y_test).mean()
-
-    save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
+    save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics, params_source)
     return metrics[3]
-
 def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
-        if use_default_max_depth:
-            params['max_depth'] = None
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('xgboost', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for xgboost-{rep}")
+
+    if not params:
+        if args.tuning:
+            use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
+            if use_default_max_depth:
+                params['max_depth'] = None
+            else:
+                params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
+
+            use_default_learning_rate = trial.suggest_categorical('use_default_learning_rate', [True, False])
+            if use_default_learning_rate:
+                params['learning_rate'] = None
+            else:
+                params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
+
+            params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
+            params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
+            params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
+            params['colsample_bylevel'] = trial.suggest_float('colsample_bylevel', 0.5, 1.0)
+            params['min_child_weight'] = trial.suggest_int('min_child_weight', 1, 10)
+            params['gamma'] = trial.suggest_float('gamma', 0, 5.0)
+            params['reg_alpha'] = trial.suggest_float('reg_alpha', 0.0, 1.0)
+            params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)
+            params_source = 'tuning_trial'
         else:
-            params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-
-        use_default_learning_rate = trial.suggest_categorical('use_default_learning_rate', [True, False])
-        if use_default_learning_rate:
-            params['learning_rate'] = None
-        else:
-            params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
-
-        params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
-        params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-        params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
-        params['colsample_bylevel'] = trial.suggest_float('colsample_bylevel', 0.5, 1.0)
-        params['min_child_weight'] = trial.suggest_int('min_child_weight', 1, 10)
-        params['gamma'] = trial.suggest_float('gamma', 0, 5.0)
-        params['reg_alpha'] = trial.suggest_float('reg_alpha', 0.0, 1.0)
-        params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)
+            params['max_depth'] = 6
+            params['learning_rate'] = 0.1
+            params['subsample'] = 1.0
+            params['n_estimators'] = 100
+            params['colsample_bytree'] = 1.0
+            params['colsample_bylevel'] = 1.0
+            params['min_child_weight'] = 1
+            params['gamma'] = 0.0
+            params['reg_alpha'] = 0.0
+            params['reg_lambda'] = 1.0
+            params_source = 'default'
 
     if x_val is not None and y_val is not None:
         x_train = np.vstack((x_train, x_val))
         y_train = np.hstack((y_train, y_val))
 
-    model = XGBRegressor(random_state=iteration_seed, **params) if args.dataset == 'QM9' else XGBClassifier(random_state=iteration_seed, **params)
-
+    model = XGBRegressor(random_state=iteration_seed, **params)
     model.fit(x_train, y_train)
     y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics)
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
-# TODO: classification
-def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     params = {}
-
-    if args.tuning:
-        params['kernel_name'] = trial.suggest_categorical('kernel', [
-            'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
-            'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
-            'Rand', 'RogersTanimoto', 'Sorgenfrei', 'SokalSneath'
-        ])
-        params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
-        params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
-    else:
-        params['kernel_name'] = 'Tanimoto'
-        params['outputscale'] = 1.0
-        params['likelihood_noise'] = 1e-3
-
+    params_source = 'default'
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('gauche', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for gauche-{rep}")
+    if not params:
+        if args.tuning:
+            # Note: a few kernels had to be removed
+            params['kernel_name'] = trial.suggest_categorical('kernel', [
+                'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
+                'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
+                'Rand',
+            ])
+            params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
+            params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+            params_source = 'tuning_trial'
+        else:
+            params['kernel_name'] = 'Tanimoto'
+            params['outputscale'] = 1.0
+            params['likelihood_noise'] = 1e-3
+            params_source = 'default'
     kernel_map = {
         'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
         'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
@@ -1403,26 +1381,31 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=np.sqrt(pred_vars),
-            y_true=y_test,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
             filepath=args.filepath,
             model_name="gauche",
             rep=rep,
             sigma_noise=s,
-            iteration=iteration
+            iteration=iteration,
+            file_no=file_no,
         )
 
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=True)
-
-    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics)
 
     return metrics[3]
 
-def train_nn(model, train_loader, val_loader, criterion, optimizer, device, epochs, patience=20, tolerance=0.01):
+def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep, patience=20, tolerance=0.01):
     model.to(device)
     best_loss = float('inf')
     epochs_no_improve = 0
+    
+    # Track losses for per-epoch saving
+    train_losses = []
+    val_losses = []
 
-    for epoch in range(100):  # Max epochs
+    for epoch in range(args.epochs):
         model.train()
         train_loss = 0
         for X_batch, y_batch in train_loader:
@@ -1444,6 +1427,10 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, epoc
                 loss = criterion(val_outputs, y_val)
                 val_loss += loss.item()
 
+        # Store losses
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+
         # Early stopping check
         if val_loss < best_loss - tolerance:
             best_loss = val_loss
@@ -1455,17 +1442,41 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, epoc
                 break
         if epoch % 5 == 0:
             print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+    
+    # Save per-epoch metrics if requested
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
 
-def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [32, 64, 128, 256, 512, 1024, 2048, 4096])
-        params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128, 256, 512, 1024, 2048, 4096])
-        params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh', 'softmax'])
-    else:
-        params['hidden_size1'], params['hidden_size2'] = 128, 64
-        params['activation'] = 'relu'
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('dnn', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for dnn-{rep}")
+
+    if not params:
+        if args.tuning:
+            params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [32, 64, 128, 256, 512, 1024, 2048, 4096])
+            params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128, 256, 512, 1024, 2048, 4096])
+            params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh', 'softmax'])
+            params_source = 'tuning_trial'
+        else:
+            params['hidden_size1'], params['hidden_size2'] = 128, 64
+            params['activation'] = 'relu'
+            params_source = 'default'
 
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh(), 'softmax': nn.Softmax(dim=1)}
     activation = activation_map[params['activation']]
@@ -1481,14 +1492,18 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
 
-    model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2']) if args.dataset == 'QM9' else DNNClassificationModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
+    model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
 
+    model_name = "dnn"
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
+        model_name = "bnn_full"
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
+        model_name = "bnn_last"
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
+        model_name = "bnn_variational"
 
     model.activation = activation
     model.to(device)
@@ -1496,7 +1511,111 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args.epochs)
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
+    model.eval()
+
+    # Check if the model was Bayesian-transformed
+    is_bayesian = args.bayesian_transformation is not None
+
+    if is_bayesian:
+        num_samples = 100  # or however many stochastic passes you want
+        preds = []
+
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds.append(model(x_test_tensor).cpu().numpy())
+
+        preds = np.stack(preds, axis=0)  # shape (num_samples, batch_size, 1)
+        y_pred_mean = preds.mean(axis=0).flatten()
+        y_pred_std = preds.std(axis=0).flatten()
+
+        y_pred = y_pred_mean  # for calculating standard metrics
+
+    else:
+        with torch.no_grad():
+            y_pred_tensor = model(x_test_tensor).cpu().numpy()
+        y_pred = y_pred_tensor.flatten()
+        y_pred_std = np.zeros_like(y_pred)  # no uncertainty if non-Bayesian
+
+    # Calculate metrics normally
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+
+    # Save standard results
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+
+    if args.uncertainty and is_bayesian:
+        # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+
+    return metrics[3]
+
+def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, y_test_original, trial=None):
+    params = {}
+    params_source = 'default'
+
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('flexible_dnn', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for flexible_dnn-{rep}")
+
+    if not params:
+        if args.tuning:
+            num_layers = trial.suggest_int("num_layers", 1, 4)
+            hidden_sizes = []
+            for i in range(num_layers):
+                hidden_size = trial.suggest_categorical(f"hidden_size_{i}", [32, 64, 128, 256, 512, 1024])
+                hidden_sizes.append(hidden_size)
+            params['hidden_sizes'] = hidden_sizes
+            params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh'])
+            params_source = 'tuning_trial'
+        else:
+            params['hidden_sizes'] = [128, 64]
+            params['activation'] = 'relu'
+            params_source = 'default'
+
+    activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh()}
+    activation = activation_map[params['activation']]
+
+    x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+
+    model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
+
+    model_name = "flexible_dnn"
+    if args.bayesian_transformation == "full":
+        model = apply_bayesian_transformation(model)
+        model_name = "flexible_bnn_full"
+    elif args.bayesian_transformation == "last_layer":
+        model = apply_bayesian_transformation_last_layer(model)
+        model_name = "flexible_bnn_last"
+    elif args.bayesian_transformation == "variational":
+        model = apply_bayesian_transformation_last_layer_variational(model)
+        model_name = "flexible_bnn_variational"
+
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
 
     model.eval()
 
@@ -1527,127 +1646,46 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
     # Save standard results
-    save_results(args.filepath, s, iteration, "dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
 
-    if args.uncertainty:
+    if args.uncertainty and is_bayesian:
         # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=y_pred_std,
-            y_true=y_test,
+            y_test_original=y_test_original,
+            y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name="dnn",
+            model_name=model_name,
             rep=rep,
             sigma_noise=s,
-            iteration=iteration
+            iteration=iteration,
+            file_no=file_no,
         )
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
-
-# TODO: add bayesian here
-def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        num_layers = trial.suggest_int("num_layers", 1, 4)
-        hidden_sizes = []
-        for i in range(num_layers):
-            hidden_size = trial.suggest_categorical(f"hidden_size_{i}", [32, 64, 128, 256, 512, 1024])
-            hidden_sizes.append(hidden_size)
-        params['hidden_sizes'] = hidden_sizes
-        params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh'])
-    else:
-        params['hidden_sizes'] = [128, 64]
-        params['activation'] = 'relu'
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters(model_type, rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for {model_type}-{rep}")
 
-    activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh()}
-    activation = activation_map[params['activation']]
-
-    x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-    x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-
-    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
-
-    model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
-
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args.epochs)
-
-    model.eval()
-    with torch.no_grad():
-        y_pred_tensor = model(x_test_tensor).cpu().numpy()
-    y_pred = y_pred_tensor.flatten()
-
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, "flexible_dnn", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
-
-
-def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
-    params = {}
-
-    if args.tuning:
-        params['num_leaves'] = trial.suggest_int('num_leaves', 10, 200)
-
-        use_default_max_depth = trial.suggest_categorical('use_default_max_depth', [True, False])
-        if use_default_max_depth:
-            params['max_depth'] = None
+    if not params:
+        if args.tuning:
+            params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256, 512, 1024])
+            params['num_hidden_layers'] = trial.suggest_int('num_hidden_layers', 1, 5)
+            params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
+            params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+            params_source = 'tuning_trial'
         else:
-            params['max_depth'] = trial.suggest_int('max_depth', 2, 20)
-
-        use_default_learning_rate = trial.suggest_categorical('use_default_learning_rate', [True, False])
-        if use_default_learning_rate:
-            params['learning_rate'] = None
-        else:
-            params['learning_rate'] = trial.suggest_float('learning_rate', 0.001, 0.2, log=True)
-
-        params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
-        params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
-        params['n_estimators'] = trial.suggest_int('n_estimators', 10, 2000)
-        params['min_child_samples'] = trial.suggest_int('min_child_samples', 1, 50)
-
-    param_dict = {
-        'objective': 'regression' if args.dataset == 'QM9' else 'binary',
-        'metric': 'r2' if args.dataset == 'QM9' else 'binary_logloss',
-        'random_state': iteration_seed
-    }
-    param_dict.update(params)
-
-    if x_val is not None and y_val is not None:
-        x_train = np.vstack((x_train, x_val))
-        y_train = np.hstack((y_train, y_val))
-
-    train_data = lgb.Dataset(x_train, label=y_train)
-
-    model = lgb.train(param_dict, train_data, num_boost_round=100)
-
-    y_pred = model.predict(x_test)
-
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-
-    save_results(args.filepath, s, iteration, "lgb", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
-
-def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
-    params = {}
-
-    if args.tuning:
-        params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256, 512, 1024])
-        params['num_hidden_layers'] = trial.suggest_int('num_hidden_layers', 1, 5)
-        params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
-        params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-    else:
-        params['hidden_size'], params['num_hidden_layers'], params['dropout_rate'], params['lr'] = 128, 2, 0.2, 0.001
+            params['hidden_size'], params['num_hidden_layers'], params['dropout_rate'], params['lr'] = 128, 2, 0.2, 0.001
+            params_source = 'default'
 
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
@@ -1665,12 +1703,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     if model_type == "mlp":
         model = MLPRegressor(input_size=x_train.shape[1], hidden_size=params['hidden_size'],
-                             num_hidden_layers=params['num_hidden_layers'], dropout_rate=params['dropout_rate']) \
-            if args.dataset == 'QM9' else \
-            MLPClassifier(input_size=x_train.shape[1], hidden_size=params['hidden_size'],
-                          num_hidden_layers=params['num_hidden_layers'], num_classes=len(set(y_train)),
-                          dropout_rate=params['dropout_rate'])
-        criterion = nn.MSELoss() if args.dataset == 'QM9' else nn.CrossEntropyLoss()
+                             num_hidden_layers=params['num_hidden_layers'], dropout_rate=params['dropout_rate']) 
+        criterion = nn.MSELoss()
 
     elif model_type == "residual_mlp":
         model = ResidualMLP(input_size=x_train.shape[1], hidden_size=128, num_layers=3)
@@ -1686,54 +1720,97 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
+        model_name = f"{model_type}_full"
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
+        model_name = f"{model_type}_last"
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
+        model_name = f"{model_type}_variational"
+    else:
+        model_name = model_type
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
-    train_nn(model, train_loader, val_loader or train_loader, criterion, optimizer, device, args.epochs)
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
+
+    is_bayesian = args.bayesian_transformation is not None
 
     model.eval()
-    with torch.no_grad():
-        y_pred_tensor = model(x_test_tensor).cpu().numpy()
-    y_pred = y_pred_tensor.flatten() if args.dataset == 'QM9' else np.argmax(y_pred_tensor, axis=1)
-
+        
+    if is_bayesian:
+        # For Bayesian models, do multiple forward passes for uncertainty
+        num_samples = 100
+        preds = []
+        
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds.append(model(x_test_tensor).cpu().numpy())
+        
+        preds = np.stack(preds, axis=0)
+        y_pred_mean = preds.mean(axis=0).flatten()
+        y_pred_std = preds.std(axis=0).flatten()
+        y_pred = y_pred_mean  # for standard metrics
+            
+        if args.uncertainty:
+            save_uncertainty_values(
+                y_pred_mean=y_pred_mean,
+                y_pred_std=y_pred_std,
+                y_true_original=y_test_original,
+                y_true_noisy=y_test,
+                filepath=args.filepath,
+                model_name=model_name,
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration,
+                file_no=file_no,
+            )
+    else:
+        # Non-Bayesian: single forward pass, no uncertainty
+        with torch.no_grad():
+            y_pred_tensor = model(x_test_tensor).cpu().numpy()
+        y_pred = y_pred_tensor.flatten()
+     
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+        
+    return metrics[3]
 
-    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
-
-def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial=None):
+def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial=None):
     if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles']:
         raise ValueError("Invalid model type or representation for RNN/GRU training")
 
     params = {}
+    params_source = 'default'
 
-    if args.tuning:
-        params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
-        params['num_layers'] = trial.suggest_int('num_layers', 1, 3)
-        params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
-        params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-    else:
-        params['hidden_size'], params['num_layers'], params['dropout_rate'], params['lr'] = 128, 1, 0.2, 0.001
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters(model_type, rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for {model_type}-{rep}")
 
-    if args.dataset == 'QM9':
-        y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-        y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-    else:
-        y_train_tensor = torch.tensor(y_train, dtype=torch.long).to(device)
-        y_test_tensor = torch.tensor(y_test, dtype=torch.long).to(device)
+    if not params:
+        if args.tuning:
+            params['hidden_size'] = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+            params['num_layers'] = trial.suggest_int('num_layers', 1, 3)
+            params['dropout_rate'] = trial.suggest_float('dropout_rate', 0.1, 0.5)
+            params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+            params_source = 'tuning_trial'
+        else:
+            params['hidden_size'], params['num_layers'], params['dropout_rate'], params['lr'] = 128, 1, 0.2, 0.001
+            params_source = 'default'
+
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
 
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).unsqueeze(1).to(device)
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).unsqueeze(1).to(device)
 
     if x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).unsqueeze(1).to(device)
-        y_val_tensor = torch.tensor(y_val, dtype=torch.float32 if args.dataset == 'QM9' else torch.long).view(-1, 1).to(device)
+        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
     else:
         val_loader = None
@@ -1741,48 +1818,39 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
     test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=32, shuffle=False)
 
-    if args.dataset == 'QM9':
-        model = RNNRegressionModel(
-            input_size=x_train.shape[1],
-            hidden_size=params['hidden_size'],
-            num_layers=params['num_layers']
-        ) if model_type == "rnn" else GRURegressionModel(
-            input_size=x_train.shape[1],
-            hidden_size=params['hidden_size'],
-            num_layers=params['num_layers']
-        )
-        criterion = nn.MSELoss()
-    else:
-        model = RNNClassificationModel(
-            input_size=x_train.shape[1],
-            hidden_size=params['hidden_size'],
-            num_layers=params['num_layers'],
-            num_classes=len(set(y_train))
-        ) if model_type == "rnn" else GRUClassificationModel(
-            input_size=x_train.shape[1],
-            hidden_size=params['hidden_size'],
-            num_layers=params['num_layers'],
-            num_classes=len(set(y_train))
-        )
-        criterion = nn.CrossEntropyLoss()
+    model = RNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size=params['hidden_size'],
+        num_layers=params['num_layers']
+    ) if model_type == "rnn" else GRURegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size=params['hidden_size'],
+        num_layers=params['num_layers']
+    )
+    criterion = nn.MSELoss()
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
     trainer = ModelTrainer(model, lr=params['lr'])
-    trainer.train(train_loader, val_loader or train_loader, n_epochs=args.epochs)
+    trainer.train(train_loader, val_loader, args, s, iteration, file_no, 'rnn', rep)
 
     y_pred_tensor = trainer.validate(test_loader)[1] 
 
-    y_pred = np.argmax(y_pred_tensor, axis=1) if args.dataset != 'QM9' else np.array(y_pred_tensor).flatten()
+    y_pred = np.argmax(y_pred_tensor, axis=1)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics)
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
-def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration, trial=None):
+def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration, file_no, y_test_original, trial=None, 
+              y_train_noisy=None, y_test_noisy=None, y_val_noisy=None):
+    """
+    Note: y_train_noisy, y_test_noisy, y_val_noisy are the noisy+normalized targets from Rust.
+    These should be used instead of batch.y from the dataloaders.
+    """
     # Hyperparameter suggestions
     if trial is not None:
         dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
@@ -1797,18 +1865,32 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
         model = GCN(dim_h=dim_h)
     elif model_type == "ginct":
         model = GINCoTeaching(dim_h=dim_h)
+
+    print(f"model: {model} and model_type: {model_type}")
+
+    model_name = model_type
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
+        model_name = f"{model_type}_bnn_full"
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
+        model_name = f"{model_type}_bnn_last"
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
+        model_name = f"{model_type}_bnn_variational"
+
+    print(f"model: {model} and model_type: {model_type}")
+
     model.to(device)
     if model_type != "ginct":
+        # Pass the noisy y values to train_epochs and testing
+        # NOTE: train_epochs and testing functions need to be modified to accept and use these parameters
         train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-            epochs, model, train_loader, val_loader, f"{model_type}_model.pt"
+            epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name,
+            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy
         )
-        test_loss, test_target, test_y = testing(test_loader, trained_model)
+        test_loss, test_target, test_y = testing(test_loader, trained_model, y_test_noisy=y_test_noisy)
+
     # else:
     #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
     #         epochs, model, train_loader, val_loader,
@@ -1818,60 +1900,101 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
     #         optimal_co_teaching_hyperparameters['forget_rate']
     #     )
     #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
+    
     logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
     if not logging_flag:
         calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
     metrics = calculate_regression_metrics(test_target, test_y, logging=logging_flag)
     print(f"model: {model_type}")
     print("rep: graph")
-    save_results( args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics[3], metrics[0], metrics[4])
-    return metrics[3]  # Return R^2 for Optuna
 
-def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y, args, s, iteration, trial=None):
-    params = {}
-
-    if args.tuning and trial is not None:
-        params['kernel_name'] = trial.suggest_categorical('kernel', [
-            'WeisfeilerLehman', 'VertexHistogram', 'EdgeHistogram', 'NeighborhoodHash'
-        ])
-        params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
-        params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+    # Check if Bayesian transformation was applied
+    is_bayesian = hasattr(args, 'bayesian_transformation') and args.bayesian_transformation is not None
+    
+    if is_bayesian and args.uncertainty:
+        # For Bayesian graph models, do sampling for uncertainty
+        trained_model.eval()
+        num_samples = 100
+        all_preds = []
+        
+        with torch.no_grad():
+            for _ in range(num_samples):
+                batch_preds = []
+                for data in test_loader:
+                    data = data.to(device)  # Make sure data is on correct device
+                    pred = trained_model(data).cpu().numpy().flatten()
+                    batch_preds.extend(pred)  # Use extend instead of append
+                all_preds.append(np.array(batch_preds))
+        
+        all_preds = np.stack(all_preds, axis=0)  # Shape: (num_samples, num_test_points)
+        y_pred_mean = all_preds.mean(axis=0)
+        y_pred_std = all_preds.std(axis=0)
+        
+        save_uncertainty_values(
+            y_pred_mean=y_pred_mean,
+            y_pred_std=y_pred_std,
+            y_true_original=y_test_original.cpu().numpy().flatten(),
+            y_true_noisy=test_y,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep='graph',
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+        
+        save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics)
     else:
-        params['kernel_name'] = 'WeisfeilerLehman'
-        params['outputscale'] = 1.0
-        params['likelihood_noise'] = 1e-3
+        # Non-Bayesian: use existing results
+        save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics)
+    
+    return metrics[3]
 
+def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y, args, s, iteration, file_no, y_test_original, trial=None):
+    """
+    This function already receives y values as parameters (train_y, test_y, val_y),
+    so it's already compatible with the noisy values from Rust. No changes needed.
+    """
+    params = {}
+    params_source = 'default'
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('graph_gp', 'graph')
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for graph_gp-graph")
+    if not params:
+        if args.tuning and trial is not None:
+            params['kernel_name'] = trial.suggest_categorical('kernel', [
+                'WeisfeilerLehman', 'VertexHistogram', 'EdgeHistogram', 'NeighborhoodHash'
+            ])
+            params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
+            params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+            params_source = 'tuning_trial'
+        else:
+            params['kernel_name'] = 'WeisfeilerLehman'
+            params['outputscale'] = 1.0
+            params['likelihood_noise'] = 1e-3
+            params_source = 'default'
     kernel_map = {
         'WeisfeilerLehman': WeisfeilerLehmanKernel,
         'VertexHistogram': VertexHistogramKernel,
         'EdgeHistogram': EdgeHistogramKernel,
         'NeighborhoodHash': NeighborhoodHashKernel
     }
-
     if val_graphs is not None and val_y is not None:
         train_graphs = train_graphs + val_graphs
         train_y = torch.cat((train_y, val_y), dim=0)
-
-    # Wrap graphs into NonTensorialInputs and setup labels
     X_train = NonTensorialInputs(train_graphs)
     X_test = NonTensorialInputs(test_graphs)
     y_train = train_y.flatten().float()
     y_test = test_y.flatten().float()
-
-    # Setup Likelihood and Kernel
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
-
     kernel_class = kernel_map[params['kernel_name']]
-    kernel = kernel_class(node_label='label')  # 'label' is what qm9_to_networkx() puts on nodes
-
-    # Define GraphGP model
+    kernel = kernel_class(node_label='label')  
     model = GraphGP(X_train, y_train, likelihood, kernel)
-
-    # Fit GP model
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
-
-    # Evaluate
     model.eval()
     likelihood.eval()
     with torch.no_grad():
@@ -1879,29 +2002,26 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
         y_pred = preds.mean.numpy()
         y_pred_var = preds.variance.numpy()
         y_pred_std = np.sqrt(y_pred_var)
-
+    
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=y_pred_std,
-            y_true=y_test.numpy(),
+            y_true_original=y_test_original.cpu().numpy().flatten(),
+            y_true_noisy=y_test.numpy(),
             filepath=args.filepath,
             model_name="graph_gp",
-            rep="graph",  # graph-based model
+            rep="graph",
             sigma_noise=s,
-            iteration=iteration
+            iteration=iteration,
+            file_no=file_no,
         )
-
     metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
-
     print("model: graph_gp")
     print("rep: graph")
+    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics, params_source)
+    return metrics[3]
 
-    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics[3], metrics[0], metrics[4])
-
-    return metrics[3]  # Return R^2 for Optuna if tuning
-
-# TODO: actually need to call
 def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     model = load_custom_model(args.model_path)
 
@@ -1920,7 +2040,7 @@ def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     learning_rate = hyperparams.get("learning_rate", [0.001, 0.001])[0]
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = torch.nn.MSELoss() if args.dataset == 'QM9' else torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.MSELoss()
 
     model.to(device)
     model.train()
@@ -1942,11 +2062,11 @@ def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     else:
         logging = True
 
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=logging) if args.dataset == 'QM9' else calculate_classification_metrics(y_test, y_pred, logging=logging)
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=logging)
 
-    save_results(args.filepath, s, iteration, "custom", rep, args.sample_size, metrics[3], metrics[0], metrics[4])
+    save_results(args.filepath, s, iteration, "custom", rep, args.sample_size, metrics)
 
-    return metrics[3] if args.dataset == 'QM9' else metrics[0]
+    return metrics[3]
 
 # Sample hyperparameter file
 # {
@@ -1968,7 +2088,327 @@ def get_custom_hyperparameter_bounds(metadata_path):
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON format in metadata file.")
 
-# TODO: test different loss functions
+def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, y_test_original, trial=None):
+    params = {}
+    params_source = 'default'
+
+    conformal_model_name = f'conformal_{base_model_type}'
+    
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters(conformal_model_name, rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for {conformal_model_name}-{rep}")
+
+    if not params:
+        if args.tuning and trial is not None:
+            alpha = trial.suggest_float('alpha', 0.05, 0.2)
+            predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
+            params['alpha'] = alpha
+            params['predictor_type'] = predictor_type
+            
+            if base_model_type == 'rf':
+                params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
+                params['max_depth'] = trial.suggest_int('max_depth', 5, 20)
+            elif base_model_type == 'dnn':
+                params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+                params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+            elif base_model_type == 'xgboost':
+                params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
+                params['max_depth'] = trial.suggest_int('max_depth', 3, 10)
+            elif base_model_type == 'qrf':
+                params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
+                params['max_depth'] = trial.suggest_int('max_depth', 5, 20)
+            elif base_model_type == 'gauche':
+                params['kernel_name'] = trial.suggest_categorical('kernel', [
+                    'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
+                    'InnerProduct', 'Intersection', 'MinMax', 'Otsuka'
+                ])
+                params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
+                params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
+            params_source = 'tuning_trial'
+        else:
+            alpha = 0.1
+            predictor_type = 'split'
+            params['alpha'] = alpha
+            params['predictor_type'] = predictor_type
+            params_source = 'default'
+
+    alpha = params.pop('alpha', 0.1)
+    predictor_type = params.pop('predictor_type', 'split')
+
+    if base_model_type in ['rf', 'xgboost']:
+        if base_model_type == 'rf':
+            base_model = RandomForestRegressor(random_state=iteration_seed, **params)
+        else:
+            base_model = XGBRegressor(random_state=iteration_seed, **params)
+        base_model.fit(x_train, y_train)
+        y_pred = base_model.predict(x_test)
+        
+    elif base_model_type == 'qrf':
+        base_model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
+        base_model.fit(x_train, y_train)
+        q16, q50, q84 = base_model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
+        y_pred = q50
+        
+    elif base_model_type == 'gauche':
+        kernel_map = {
+            'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
+            'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
+            'Dice': gauche.kernels.fingerprint_kernels.dice_kernel.DiceKernel,
+            'Faith': gauche.kernels.fingerprint_kernels.faith_kernel.FaithKernel,
+            'Forbes': gauche.kernels.fingerprint_kernels.forbes_kernel.ForbesKernel,
+            'InnerProduct': gauche.kernels.fingerprint_kernels.inner_product_kernel.InnerProductKernel,
+            'Intersection': gauche.kernels.fingerprint_kernels.intersection_kernel.IntersectionKernel,
+            'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
+            'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
+        }
+        
+        x_full = np.vstack((x_train, x_val))
+        y_full = np.hstack((y_train, y_val))
+        
+        x_train_tensor = torch.from_numpy(x_full).double()
+        x_test_tensor = torch.from_numpy(x_test).double()
+        y_train_tensor = torch.from_numpy(y_full).double()
+        
+        likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params.get('likelihood_noise', 1e-3))
+        kernel_class = kernel_map[params.get('kernel_name', 'Tanimoto')]
+        base_model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
+        
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, base_model)
+        fit_gpytorch_model(mll)
+        
+        base_model.eval()
+        likelihood.eval()
+        with torch.no_grad():
+            preds = base_model(x_test_tensor)
+            y_pred = preds.mean.numpy()
+            pred_vars = preds.variance.numpy()
+            
+    elif base_model_type == 'dnn':
+        base_model = DNNRegressionModel(input_size=x_train.shape[1], 
+                     hidden_size1=params.get('hidden_size1', 128), 
+                     hidden_size2=params.get('hidden_size2', 64))
+
+        x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
+        y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+        x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+        
+        train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        val_dataset = TensorDataset(x_val_tensor, y_val_tensor)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+        
+        train_nn(base_model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, f'conformal_dnn', rep)
+        
+        base_model.eval()
+        with torch.no_grad():
+            y_pred_tensor = base_model(x_test_tensor).cpu().numpy()
+        y_pred = y_pred_tensor.flatten()
+
+    if base_model_type in ['rf', 'xgboost', 'qrf']:
+        y_val_pred = base_model.predict(x_val)
+    elif base_model_type == 'gauche':
+        x_val_tensor = torch.from_numpy(x_val).double()
+        with torch.no_grad():
+            val_preds = base_model(x_val_tensor)
+            y_val_pred = val_preds.mean.numpy()
+    elif base_model_type == 'dnn':
+        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+        with torch.no_grad():
+            y_val_pred = base_model(x_val_tensor).cpu().numpy().flatten()
+    
+    conformity_scores = np.abs(y_val - y_val_pred)
+    
+    n_cal = len(conformity_scores)
+    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+    q_level = min(q_level, 1.0) 
+    quantile = np.quantile(conformity_scores, q_level)
+    
+    y_lower = y_pred - quantile
+    y_upper = y_pred + quantile
+
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    model_name = f'conformal_{base_model_type}_{predictor_type}'
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
+    
+    if args.uncertainty:
+        interval_width = y_upper - y_lower
+        y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
+        
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+        
+        save_conformal_intervals(
+            y_pred=y_pred,
+            y_lower=y_lower,
+            y_upper=y_upper,
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+            alpha=alpha
+        )
+    
+    return metrics[3]
+
+def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, y_test_original, trial=None,
+                                y_train_noisy=None, y_test_noisy=None, y_val_noisy=None):
+    """
+    Note: y_train_noisy, y_test_noisy, y_val_noisy are the noisy+normalized targets from Rust.
+    These should be used instead of batch.y from the dataloaders.
+    """
+    params = {}
+    params_source = 'default'
+    conformal_model_name = f'conformal_{base_model_type}'
+    
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters(conformal_model_name, 'graph')
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for {conformal_model_name}-graph")
+    if not params:
+        if trial is not None:
+            dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
+            alpha = trial.suggest_float('alpha', 0.05, 0.2)
+            predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
+            params['dim_h'] = dim_h
+            params['alpha'] = alpha
+            params['predictor_type'] = predictor_type
+            params_source = 'tuning_trial'
+        else:
+            dim_h = 64
+            alpha = 0.1
+            predictor_type = 'split'
+            params['dim_h'] = dim_h
+            params['alpha'] = alpha
+            params['predictor_type'] = predictor_type
+            params_source = 'default'
+    
+    dim_h = params.pop('dim_h', 64)
+    alpha = params.pop('alpha', 0.1)
+    predictor_type = params.pop('predictor_type', 'split')
+    
+    if base_model_type == 'gin':
+        base_model = GIN(dim_h=dim_h)
+    else:
+        base_model = GCN(dim_h=dim_h)
+    
+    base_model.to(device)
+    
+    # Pass noisy y values to train_epochs
+    # NOTE: train_epochs function needs to be modified to accept and use these parameters
+    train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
+        args.epochs, base_model, train_loader, val_loader, f"conformal_{base_model_type}_model.pt", 
+        args, s, iteration, file_no, f'conformal_{base_model_type}',
+        y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy
+    )
+    
+    if predictor_type == 'split':
+        predictor = SplitPredictor(score_function=ABS(), model=trained_model)
+    else:
+        predictor = ACIPredictor(score_function=CQR(), model=trained_model, gamma=0.01)
+    predictor.calibrate(val_loader, alpha=alpha)
+    
+    results = predictor.evaluate(test_loader)
+    y_pred = results['predictions'].cpu().numpy().flatten()
+    y_lower = results['lower_bounds'].cpu().numpy().flatten()
+    y_upper = results['upper_bounds'].cpu().numpy().flatten()
+    
+    # Use y_test_noisy if provided, otherwise extract from loader
+    if y_test_noisy is not None:
+        y_test = y_test_noisy.cpu().numpy().flatten()
+    else:
+        y_test = []
+        for data in test_loader:
+            y_test.extend(data.y.cpu().numpy())
+        y_test = np.array(y_test)
+    
+    logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
+    if not logging_flag:
+        calculate_domain_metrics(y_pred, y_test, domain_labels_subset, target_domain)
+    metrics = calculate_regression_metrics(y_pred, y_test, logging=logging_flag)
+    
+    model_name = f'conformal_{base_model_type}_{predictor_type}'
+    save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics, params_source)
+    
+    if args.uncertainty:
+        interval_width = y_upper - y_lower
+        y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
+        
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true_original=y_test_original.cpu().numpy().flatten(),
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep='graph',
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+        
+        save_conformal_intervals(
+            y_pred=y_pred,
+            y_lower=y_lower,
+            y_upper=y_upper,
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep='graph',
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+            alpha=alpha
+        )
+    
+    return metrics[3]
+
+def load_best_hyperparameters(model_type, rep, results_dir='results'):
+    """
+    Load best hyperparameters from master config if available
+    Returns: dict of hyperparameters or None if not found
+    """
+    master_file = os.path.join(results_dir, 'master_tuned_hyperparameters.json')
+    decisions_file = os.path.join(results_dir, 'hyperparameter_decisions.json')
+    
+    if not os.path.exists(master_file) or not os.path.exists(decisions_file):
+        return None
+    
+    with open(decisions_file, 'r') as f:
+        decisions = json.load(f)
+    
+    if model_type not in decisions or decisions[model_type] != "USE_TUNED":
+        return None
+    
+    with open(master_file, 'r') as f:
+        master_params = json.load(f)
+    
+    if model_type in master_params and rep in master_params[model_type]:
+        return master_params[model_type][rep]
+    
+    return None
+
+# TODO: testing different loss functions:
 # dnn, mlp, mtl, residual_mlp, factorization_mlp, rnn, gru, custom
 # You can customize or swap loss functions (e.g., use nn.L1Loss() instead of MSELoss) depending on your use case.
 # TODO: add NGBoost and QRF to environment files

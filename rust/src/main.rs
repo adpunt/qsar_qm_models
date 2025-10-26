@@ -57,6 +57,7 @@ struct Config {
     logging: bool,
     regression: bool,
     normalize: bool,
+    uncertainty: bool,
 }
 
 #[derive(Debug)]
@@ -163,6 +164,7 @@ fn generate_value_based_noise_map(
        }
    }
 }
+
 fn read_all_target_values(config: &Config) -> io::Result<Vec<f32>> {
     let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
     let mut reader = BufReader::new(train_file);
@@ -1055,9 +1057,6 @@ fn main() -> io::Result<()> {
     } else {
         Vec::new()
     };
-
-    println!("noise_indices: {:?}", noise_indices);
-    println!("noise_indices length: {}", noise_indices.len());
 
     // Load strategy parameters from JSON file
     let strategy_params = if let Some(params_file) = matches.get_one::<String>("strategy_params") {

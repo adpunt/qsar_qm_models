@@ -47,9 +47,6 @@ valid_indices_path = os.path.join(data_dir, 'valid_qm9_indices.pth')
 warnings.filterwarnings("ignore")
 RDLogger.DisableLog('rdApp.*')
 
-DELIMITER = b"\x1F"  # ASCII 31 (Unit Separator)
-NEWLINE = b"\n"
-
 DEFAULT_DESCRIPTOR_LIST = [
             'BalabanJ', 'BertzCT', 'Chi0', 'Chi0n', 'Chi0v', 'Chi1', 'Chi1n', 'Chi1v',
             'Chi2n', 'Chi2v', 'Chi3n', 'Chi3v', 'Chi4n', 'Chi4v', 'EState_VSA1', 'EState_VSA10',
@@ -123,11 +120,6 @@ except Exception as e:
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# TODO: make sure everything above function definitions is properly formatted
-# TODO: make sure val is working for hyperparameter tuning
-# TODO: reformat import statements
-
-# TODO: add argument for classification/regression, then dataset source 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
@@ -156,11 +148,14 @@ def parse_arguments():
     parser.add_argument("--clean-smiles", type=str2bool, default=False, help="Clean the SMILES string (default is False)")
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
-    parser.add_argument("-u", "--uncertainty", type=bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
-    parser.add_argument("--shap", type=bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
+    parser.add_argument("-u", "--uncertainty", type=str2bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
+    parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--noise-strategy", type=str, default="legacy", help="Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic (default is legacy)")
     parser.add_argument("--strategy-params", type=str, default="noise_strategy_params.json", help="JSON file path with strategy-specific parameters (default is noise_strategy_params.json)")
+    parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
+    parser.add_argument("--cp-base-model", type=str, default='rf', help="Base model for conformal prediction (default is RF)")
+    parser.add_argument('--use-best-params', action='store_true')
     parser.add_argument(
         "--bayesian-transformation",
         type=str,
@@ -233,19 +228,8 @@ def write_to_mmap(
     files[category].write(entry)
     files[category].flush()
 
-# targets: BDR4, HSA, sEH
 def load_and_split_polaris(args, files):
-    dataset_name = "BELKA"
-
-    if dataset_name != "BELKA":
-        raise ValueError("Invalid dataset name")
-
-    # Define the binding target
-    proteins = {'BDR4': 'binds_BRD4', 'HSA': 'binds_HSA', 'sEH': 'binds_sEH'}
-    binding_target = proteins[args.target]
-
-    # Load dataset from PolarisHub
-    dataset = po.load_dataset("leash-bio/BELKA-v1")
+    po.load_dataset("biogen/adme-fang-v1")
     dataset_size = dataset.size()[0]
 
     # Select `args.sample_size` random indices
@@ -259,6 +243,7 @@ def load_and_split_polaris(args, files):
     # Load SMILES & binding data into NumPy arrays
     for i, idx in enumerate(random_indices):
         smiles_str = dataset.get_data(idx, "molecule_smiles")
+        # TODO: need to test if this is still right, do a basic test
         if args.clean_smiles:
             smiles_arr[i] = smiles_arr[i].replace("[Dy]", "")
         target_arr[i] = dataset.get_data(idx, binding_target)
@@ -301,6 +286,8 @@ def load_and_split_polaris(args, files):
 
     for index, smiles_isomeric in enumerate(smiles_arr[:args.sample_size]):
         smiles_canonical = None
+        smiles_randomized = None
+        mol = None
 
         category = "excluded"
         if index in train_idx:
@@ -310,58 +297,43 @@ def load_and_split_polaris(args, files):
         elif index in val_idx:
             category = "val"
 
-        smiles_randomized = None
         smiles_canonical = None
-        mol = None
-
-        if 'randomized_smiles' not in args.molecular_representations:
+        if 'smiles' in args.molecular_representations:
             cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
             result = cursor.fetchone()
-
-            print(f"smiles db result: {result}")
-
             if result:
                 smiles_canonical = result[0]
-                mol = Chem.MolFromSmiles(smiles_canonical)
-            else:
-                mol = Chem.MolFromSmiles(smiles_isomeric)
-        else:
+
+        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
             mol = Chem.MolFromSmiles(smiles_isomeric)
+            if not mol:
+                continue
 
-        if not mol:
-            cursor.execute(
-                "INSERT OR REPLACE INTO smiles_db (isomeric, canonical) VALUES (?, ?)",
-                (smiles_isomeric, None)
-            )
-            conn.commit()
-            continue
+            if not smiles_canonical:
+                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                if smiles_canonical is None:
+                    continue
 
-        if 'randomized_smiles' in args.molecular_representations:
-            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
-
-        smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-        cursor.execute(
-            "INSERT OR REPLACE INTO smiles_db (isomeric, canonical) VALUES (?, ?)",
-            (smiles_isomeric, smiles_canonical)
-        )
-        conn.commit()
+            if 'randomized_smiles' in args.molecular_representations:
+                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
 
         sns_fp = None
-        # TODO: need to define protein by pdb 
-        if 'sns' in args.molecular_representations or 'plec' in args.molecular_representations:
+        if 'sns' in args.molecular_representations:
             if index in train_idx:
                 mol = mols_train.popleft()
             if not mol: 
                 mol = Chem.MolFromSmiles(smiles_isomeric)
-            if 'sns' in args.molecular_representations:
-                sns_fp = ecfp_featuriser(mol)
-            # if 'plec' in args.molecular_representations:
-            #     od_mol = oddt.toolkit.Molecule(rd_mol)
-            #     plec = PLEC(od_mol,protein) 
-        
+            sns_fp = ecfp_featuriser(mol)
+
+        pdv = None
+        if 'pdv' in args.molecular_representations:
+            pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
+
         if smiles_canonical and not (category == "excluded"):
-            # TODO: don't call for graphs
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, target_arr[index], category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
+                continue
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+
     if 'sns' in args.molecular_representations:
         del mols_train
 
@@ -564,10 +536,10 @@ def load_custom_model(model_path):
     model.eval()
     return model
 
-# TODO: refactor this, only do the processing if it's that rep 
-def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, logging):
+def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, s, logging):
     x_data = []
     y_data = []
+    y_data_original = []
 
     for entry in range(entry_count):
         try:
@@ -643,6 +615,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             if rep == "sns" or rep == "pdv":
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
+                y_data_original.append(target_value)
 
             # --- SMILES OHE ---
             if "smiles" in molecular_representations:
@@ -653,6 +626,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     smiles_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
                     x_data.append(smiles_ohe)
                     y_data.append(processed_target)
+                    y_data_original.append(target_value)
                     if logging:
                         print(f"[{entry}] smiles_ohe: {smiles_ohe}")
 
@@ -665,6 +639,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     rand_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
                     x_data.append(rand_ohe)
                     y_data.append(processed_target)
+                    y_data_original.append(target_value)
                     if logging:
                         print(f"[{entry}] randomized_ohe: {rand_ohe}")
 
@@ -677,6 +652,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     feature_vector.append(ecfp4)
                     x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                     y_data.append(processed_target)
+                    y_data_original.append(target_value)
                     if logging:
                         print(f"[{entry}] ecfp4: {ecfp4}")
 
@@ -684,6 +660,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             if rep == "graph":
                 x_data.append(entry)
                 y_data.append(processed_target)
+                y_data_original.append(target_value)
                 continue
 
         except Exception as e:
@@ -694,18 +671,18 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     if rep != "graph":
         x_data = np.vstack(x_data).astype(np.uint8)
     y_data = np.array(y_data, dtype=np.float32)
+    y_data_original = np.array(y_data_original, dtype=np.float32)
 
-    return x_data, y_data
+    return x_data, y_data, y_data_original
 
-# TODO: pdv
-def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s):
+def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original):
     def _black_box_function(trial):
         print(f"Running Optuna trial {trial.number}")
         return model_selector(trial)
 
     def model_selector(trial=None):
         if model_type in ['rf', 'qrf']:
-            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, trial)
+            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial)
 
         elif model_type == 'svm':
             return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
@@ -714,25 +691,28 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
         
         elif model_type == 'ngboost':
-            return train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == 'gauche':
-            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == "dnn":
-            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == "flexible_dnn":
-            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, y_test_original, trial)
 
         elif model_type == "lgb":
             return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
-            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
+            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
-            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, trial)
+            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial)
+
+        elif model_type == 'conformal':
+            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, y_test_original, trial)
 
     if args.tuning:
         temp_study_name = f"temp_qspr_{uuid.uuid4().hex}"
@@ -817,7 +797,36 @@ def qm9_to_networkx(data):
     
     return G
 
-def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):    
+def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, file_no):
+    # Read the noisy targets that Rust already generated
+    train_file = open(f'train_{file_no}.mmap', 'rb')
+    test_file = open(f'test_{file_no}.mmap', 'rb')
+    val_file = open(f'val_{file_no}.mmap', 'rb')
+    
+    # parse_mmap with rep="graph" extracts the processed targets (with noise + normalization from Rust)
+    _, y_train_noisy, y_train_original = parse_mmap(
+        train_file, len(train_idx), "graph", 
+        args.molecular_representations, args.k_domains, s, args.logging
+    )
+    _, y_test_noisy, y_test_original = parse_mmap(
+        test_file, len(test_idx), "graph",
+        args.molecular_representations, args.k_domains, s, args.logging
+    )
+    _, y_val_noisy, y_val_original = parse_mmap(
+        val_file, len(val_idx), "graph",
+        args.molecular_representations, args.k_domains, s, args.logging
+    )
+    
+    train_file.close()
+    test_file.close()
+    val_file.close()
+    
+    # Convert to tensors
+    y_train_noisy = torch.tensor(y_train_noisy, dtype=torch.float32)
+    y_test_noisy = torch.tensor(y_test_noisy, dtype=torch.float32)
+    y_val_noisy = torch.tensor(y_val_noisy, dtype=torch.float32)
+    y_test_original_tensor = torch.tensor(y_test_original, dtype=torch.float32)
+    
     def _black_box_function(trial, model_type):
         print(f"Running Optuna trial {trial.number} for {model_type}")
         return model_selector(trial, model_type)
@@ -829,53 +838,46 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration):
             train_set = qm9[train_idx]
             test_set = qm9[test_idx]
             val_set = qm9[val_idx]
-            if s > 0:
-                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                train_set.data.y = train_set.data.y + noise
-                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
-            # Convert PyG to NetworkX graphs
+            
+            # Don't modify the dataset - just convert to NetworkX
             train_graphs = [qm9_to_networkx(g) for g in train_set]
             test_graphs = [qm9_to_networkx(g) for g in test_set]
             val_graphs = [qm9_to_networkx(g) for g in val_set]
-            # Get labels
-            y_train = torch.stack([g.y for g in train_set])
-            y_test = torch.stack([g.y for g in test_set])
-            y_val = torch.stack([g.y for g in val_set])
-            # Normalize
-            if args.normalize:
-                mean = y_train.mean()
-                std = y_train.std()
-                y_train = (y_train - mean) / std
-                y_test = (y_test - mean) / std
-                y_val = (y_val - mean) / std
+            
+            # Use the noisy labels from Rust (already normalized)
+            # These are passed directly, no need to extract from dataset
+            y_train = y_train_noisy.clone()
+            y_test = y_test_noisy.clone()
+            y_val = y_val_noisy.clone()
+            
             # Train GraphGP model
-            return train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, trial=trial)
-        else:
-            # Add label noise
-            train_set = qm9[train_idx]
-            if s > 0:
-                # Generate Gaussian noise with mean 0 and standard deviation s
-                noise = torch.normal(mean=0, std=s, size=train_set.data.y.shape)
-                
-                # Add noise to the original labels
-                train_set.data.y = train_set.data.y + noise
-                # Ensure the tensor is properly formatted
-                train_set.data.y = train_set.data.y.to(dtype=torch.float32)
-            # Normalize
-            if args.normalize:
-                mean = train_set.data.y.mean()
-                std = train_set.data.y.std()
-                train_set.data.y = (train_set.data.y - mean) / std
-                for i in test_idx:
-                    qm9[i].y = (qm9[i].y - mean) / std
-                for i in val_idx:
-                    qm9[i].y = (qm9[i].y - mean) / std
-            # datasets into DataLoader
-            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
-            test_loader = DataLoader(qm9[test_idx], batch_size=64, shuffle=True)
-            val_loader = DataLoader(qm9[val_idx], batch_size=64, shuffle=True)
-            return train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration, trial)
+            return train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, file_no, y_test_original_tensor, trial=trial)
         
+        else:
+            # Don't modify the dataset - just create loaders with original structure
+            train_set = qm9[train_idx]
+            test_set = qm9[test_idx]
+            val_set = qm9[val_idx]
+            
+            # Create DataLoaders WITHOUT modifying the data
+            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+            test_loader = DataLoader(test_set, batch_size=64, shuffle=False)
+            val_loader = DataLoader(val_set, batch_size=64, shuffle=False)
+
+            # Pass the noisy y values separately to the training function
+            if model_type == "conformal":
+                return train_conformal_graph_model(
+                    train_loader, test_loader, val_loader, args, s, iteration, 
+                    file_no, args.cp_base_model, y_test_original_tensor, trial,
+                    y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
+                )
+            else:
+                return train_gnn(
+                    model_type, train_loader, test_loader, val_loader, args, s, 
+                    iteration, file_no, y_test_original_tensor, trial=trial,
+                    y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
+                )
+
         # except Exception as e:
         #     print(f"Error with graph and {model_type}; more details: {e}")
         #     return None
@@ -977,6 +979,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         'logging': args.logging,
         'regression': args.dataset == 'QM9',
         'normalize': args.normalize,
+        'uncertainty': args.uncertainty
     }
 
     with open('config.json', 'w') as f:
@@ -1010,30 +1013,32 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     }
 
     if 'graph' in args.molecular_representations:
-        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration)
+        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
         if rep != "graph":
-            try: 
-                for model in args.models:
-                    if model not in graph_models:
-                        # Reset mmap pointers
-                        for file in files.values():
-                            file.seek(0)
+            # TODO: add back in try catch block when done debugging!!!
+            # try: 
+            for model in args.models:
+                if model not in graph_models:
+                    # Reset mmap pointers
+                    for file in files.values():
+                        file.seek(0)
 
-                        x_train, y_train = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                        x_test, y_test = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
-                        x_val, y_val = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, logging=args.logging)
+                    x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                    x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                    x_val, y_val, y_val_original = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
 
-                        print(f"model: {model}")
-                        print(f"rep: {rep}")
-                        run_model(
-                            x_train, y_train, x_test, y_test, x_val, y_val,
-                            model, args, iteration_seed, rep, iteration, s,
-                        )
-            except Exception as e:
-                print(f"Error with {rep} and {model}; more details: {e}")
+                    print(f"model: {model}")
+                    print(f"rep: {rep}")
+                    run_model(
+                        x_train, y_train, x_test, y_test, x_val, y_val,
+                        model, args, iteration_seed, rep, iteration, s,
+                        file_no, y_test_original
+                    )
+            # except Exception as e:
+            #     print(f"Error with {rep} and {model}; more details: {e}")
 
     for key in list(files.keys()):
         filename = f"{key}_{file_no}.mmap"
@@ -1102,8 +1107,3 @@ if __name__ == "__main__":
     main()
 
 # TODO: add polaris login to README
-# TODO: sanity check to see if val set/epochs can be used for any others
-# What's the best practice - if RF doesn't use a val set should the val be merged with training? 
-# TODO: properly format all print statements
-# TODO: check if things in Cargo.toml are necessary
-# TODO: address numerous server warnings 
