@@ -487,7 +487,8 @@ class GraphGP(SIGP):
         covariance += torch.eye(len(x)) * jitter
         return gpytorch.distributions.MultivariateNormal(mean, covariance)
 
-def training(loader, model, loss, optimizer):
+
+def training(loader, model, loss, optimizer, y_train_noisy=None):
     """Training one epoch
 
     Args:
@@ -495,6 +496,7 @@ def training(loader, model, loss, optimizer):
         model (nn.Module): GNN model to train on
         loss (nn.functional): loss function to use during training
         optimizer (torch.optim): optimizer during training
+        y_train_noisy (Tensor, optional): noisy training targets from Rust. If None, uses d.y from loader.
 
     Returns:
         float: training loss
@@ -502,44 +504,72 @@ def training(loader, model, loss, optimizer):
     model.train()
 
     current_loss = 0
+    current_idx = 0
+    
     for d in loader:
         optimizer.zero_grad()
         d.x = d.x.float()
 
         out = model(d)
 
-        l = loss(out, torch.reshape(d.y, (len(d.y), 1)))
+        # Use noisy targets if provided, otherwise use d.y
+        if y_train_noisy is not None:
+            batch_size = len(d.y)
+            y_batch = y_train_noisy[current_idx:current_idx + batch_size].to(d.y.device)
+            current_idx += batch_size
+        else:
+            y_batch = d.y
+
+        l = loss(out, torch.reshape(y_batch, (len(y_batch), 1)))
         current_loss += l / len(loader)
         l.backward()
         optimizer.step()
+    
     return current_loss, model
 
-def validation(loader, model, loss):
+
+def validation(loader, model, loss, y_val_noisy=None):
     """Validation
 
     Args:
         loader (DataLoader): validation set in batches
         model (nn.Module): current trained model
         loss (nn.functional): loss function
+        y_val_noisy (Tensor, optional): noisy validation targets from Rust. If None, uses d.y from loader.
 
     Returns:
         float: validation loss
     """
     model.eval()
     val_loss = 0
-    for d in loader:
-        out = model(d)
-        l = loss(out, torch.reshape(d.y, (len(d.y), 1)))
-        val_loss += l / len(loader)
+    current_idx = 0
+    
+    with torch.no_grad():
+        for d in loader:
+            out = model(d)
+            
+            # Use noisy targets if provided, otherwise use d.y
+            if y_val_noisy is not None:
+                batch_size = len(d.y)
+                y_batch = y_val_noisy[current_idx:current_idx + batch_size].to(d.y.device)
+                current_idx += batch_size
+            else:
+                y_batch = d.y
+            
+            l = loss(out, torch.reshape(y_batch, (len(y_batch), 1)))
+            val_loss += l / len(loader)
+    
     return val_loss
 
+
 @torch.no_grad()
-def testing(loader, model):
+def testing(loader, model, y_test_noisy=None):
     """Testing
 
     Args:
         loader (DataLoader): test dataset
         model (nn.Module): trained model
+        y_test_noisy (Tensor, optional): noisy test targets from Rust. If None, uses d.y from loader.
 
     Returns:
         float: test loss
@@ -548,20 +578,31 @@ def testing(loader, model):
     test_loss = 0
     test_target = np.empty((0))
     test_y_target = np.empty((0))
+    current_idx = 0
+    
     for d in loader:
         out = model(d)
-        # NOTE
-        # out = out.view(d.y.size())
-        l = loss(out, torch.reshape(d.y, (len(d.y), 1)))
+        
+        # Use noisy targets if provided, otherwise use d.y
+        if y_test_noisy is not None:
+            batch_size = len(d.y)
+            y_batch = y_test_noisy[current_idx:current_idx + batch_size].to(d.y.device)
+            current_idx += batch_size
+        else:
+            y_batch = d.y
+        
+        l = loss(out, torch.reshape(y_batch, (len(y_batch), 1)))
         test_loss += l / len(loader)
 
         # save prediction vs ground truth values for plotting
-        test_target = np.concatenate((test_target, out.detach().numpy()[:, 0]))
-        test_y_target = np.concatenate((test_y_target, d.y.detach().numpy()))
+        test_target = np.concatenate((test_target, out.detach().cpu().numpy()[:, 0]))
+        test_y_target = np.concatenate((test_y_target, y_batch.detach().cpu().numpy()))
 
     return test_loss, test_target, test_y_target
 
-def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name):
+
+def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name,
+                 y_train_noisy=None, y_val_noisy=None):
     """Training over all epochs
 
     Args:
@@ -574,7 +615,8 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
         iteration: current iteration number
         file_no: file number identifier
         model_name: name of the model
-        rep: representation type
+        y_train_noisy (Tensor, optional): noisy training targets from Rust
+        y_val_noisy (Tensor, optional): noisy validation targets from Rust
 
     Returns:
         array: returning train and validation losses over all epochs, prediction and ground truth values for training data in the last epoch
@@ -588,17 +630,28 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
     val_loss = np.empty(epochs)
 
     for epoch in range(epochs):
-        epoch_loss, model = training(train_loader, model, loss, optimizer)
-        v_loss = validation(val_loader, model, loss)
-        for d in train_loader:
-            out = model(d)
-            if epoch == epochs - 1:
-                # record truly vs predicted values for training data from last epoch
-                train_target = np.concatenate((train_target, out.detach().numpy()[:, 0]))
-                train_y_target = np.concatenate((train_y_target, d.y.detach().numpy()))
+        epoch_loss, model = training(train_loader, model, loss, optimizer, y_train_noisy=y_train_noisy)
+        v_loss = validation(val_loader, model, loss, y_val_noisy=y_val_noisy)
+        
+        # Record predictions vs actual values for training data from last epoch
+        if epoch == epochs - 1:
+            current_idx = 0
+            for d in train_loader:
+                out = model(d)
+                
+                # Use noisy targets if provided, otherwise use d.y
+                if y_train_noisy is not None:
+                    batch_size = len(d.y)
+                    y_batch = y_train_noisy[current_idx:current_idx + batch_size]
+                    current_idx += batch_size
+                else:
+                    y_batch = d.y
+                
+                train_target = np.concatenate((train_target, out.detach().cpu().numpy()[:, 0]))
+                train_y_target = np.concatenate((train_y_target, y_batch.detach().cpu().numpy()))
 
-        train_loss[epoch] = epoch_loss.detach().numpy()
-        val_loss[epoch] = v_loss.detach().numpy()
+        train_loss[epoch] = epoch_loss.detach().cpu().numpy()
+        val_loss[epoch] = v_loss.detach().cpu().numpy()
 
         # print current train and val loss
         if epoch % 2 == 0:
