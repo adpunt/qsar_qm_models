@@ -2044,7 +2044,7 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
     y_test = test_y.flatten().float()
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
     kernel_class = kernel_map[params['kernel_name']]
-    kernel = kernel_class(node_label='label')  
+    kernel = kernel_class(edge_label='label') if params['kernel_name'] == 'EdgeHistogram' else kernel_class(node_label='label')
     model = GraphGP(X_train, y_train, likelihood, kernel)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
