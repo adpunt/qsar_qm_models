@@ -154,7 +154,9 @@ def parse_arguments():
     parser.add_argument("--noise-strategy", type=str, default="legacy", help="Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic (default is legacy)")
     parser.add_argument("--strategy-params", type=str, default="noise_strategy_params.json", help="JSON file path with strategy-specific parameters (default is noise_strategy_params.json)")
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
-    parser.add_argument("--cp-base-model", type=str, default='rf', help="Base model for conformal prediction (default is RF)")
+    parser.add_argument('--cp-base-model', type=str, default='rf',
+                    choices=['rf', 'xgboost', 'dnn', 'qrf', 'gauche', 'gin', 'gcn'],
+                    help='Base model for conformal prediction')
     parser.add_argument('--use-best-params', action='store_true')
     parser.add_argument(
         "--bayesian-transformation",

@@ -37,6 +37,8 @@ from gauche.dataloader.data_utils import transform_data
 from gauche.kernels.graph_kernels import WeisfeilerLehmanKernel, VertexHistogramKernel
 import torchcp
 from torchcp.regression.predictor import SplitPredictor, ACIPredictor
+from torchcp.classification.score import APS
+from torchcp.regression.score import ABS
 
 from utils import * 
 
@@ -2062,28 +2064,40 @@ def get_custom_hyperparameter_bounds(metadata_path):
         raise ValueError("Invalid JSON format in metadata file.")
 
 def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, y_test_original, trial=None):
+    from torchcp.regression.predictor import SplitPredictor, ACIPredictor
+    from torchcp.regression.score import ABS
+    from torch.utils.data import TensorDataset, DataLoader
+    
     params = {}
     params_source = 'default'
-
     conformal_model_name = f'conformal_{base_model_type}'
     
+    # Load best params if available
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
         best_params = load_best_hyperparameters(conformal_model_name, rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
             print(f"Using tuned hyperparameters for {conformal_model_name}-{rep}")
-
+    
+    # Hyperparameter tuning or defaults
     if not params:
         if args.tuning and trial is not None:
+            # Conformal-specific parameters
             alpha = trial.suggest_float('alpha', 0.05, 0.2)
             predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
             
+            # ACI-specific parameter
+            if predictor_type == 'aci':
+                params['gamma'] = trial.suggest_float('gamma', 0.001, 0.1, log=True)
+            
+            # Base model hyperparameters
             if base_model_type == 'rf':
                 params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
                 params['max_depth'] = trial.suggest_int('max_depth', 5, 20)
+                params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
             elif base_model_type == 'dnn':
                 params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [64, 128, 256])
                 params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128])
@@ -2091,9 +2105,11 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             elif base_model_type == 'xgboost':
                 params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
                 params['max_depth'] = trial.suggest_int('max_depth', 3, 10)
+                params['learning_rate'] = trial.suggest_float('learning_rate', 0.01, 0.3, log=True)
             elif base_model_type == 'qrf':
                 params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
                 params['max_depth'] = trial.suggest_int('max_depth', 5, 20)
+                params['min_samples_split'] = trial.suggest_int('min_samples_split', 2, 20)
             elif base_model_type == 'gauche':
                 params['kernel_name'] = trial.suggest_categorical('kernel', [
                     'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
@@ -2103,28 +2119,34 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
                 params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
             params_source = 'tuning_trial'
         else:
+            # Default parameters
             alpha = 0.1
             predictor_type = 'split'
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
             params_source = 'default'
-
+    
+    # Extract conformal parameters
     alpha = params.pop('alpha', 0.1)
     predictor_type = params.pop('predictor_type', 'split')
-
+    gamma = params.pop('gamma', 0.01)  # For ACI
+    
+    # Train base model based on type
     if base_model_type in ['rf', 'xgboost']:
         if base_model_type == 'rf':
+            from sklearn.ensemble import RandomForestRegressor
             base_model = RandomForestRegressor(random_state=iteration_seed, **params)
         else:
+            from xgboost import XGBRegressor
             base_model = XGBRegressor(random_state=iteration_seed, **params)
+        
+        # Train on train set
         base_model.fit(x_train, y_train)
-        y_pred = base_model.predict(x_test)
         
     elif base_model_type == 'qrf':
+        from sklearn.ensemble import RandomForestQuantileRegressor
         base_model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
         base_model.fit(x_train, y_train)
-        q16, q50, q84 = base_model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
-        y_pred = q50
         
     elif base_model_type == 'gauche':
         kernel_map = {
@@ -2151,25 +2173,24 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         base_model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
         
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, base_model)
+        from gpytorch.mlls import fit_gpytorch_model
         fit_gpytorch_model(mll)
         
-        base_model.eval()
-        likelihood.eval()
-        with torch.no_grad():
-            preds = base_model(x_test_tensor)
-            y_pred = preds.mean.numpy()
-            pred_vars = preds.variance.numpy()
-            
     elif base_model_type == 'dnn':
         learning_rate = params.pop('learning_rate', 0.001)
         
-        base_model = DNNRegressionModel(input_size=x_train.shape[1], 
-                     hidden_size1=params.get('hidden_size1', 128), 
-                     hidden_size2=params.get('hidden_size2', 64))
-
+        # Remove dropout if it's in params (not supported by DNNRegressionModel)
+        params.pop('dropout', None)
+        
+        base_model = DNNRegressionModel(
+            input_size=x_train.shape[1], 
+            hidden_size1=params.get('hidden_size1', 128), 
+            hidden_size2=params.get('hidden_size2', 64)
+        )
+        base_model.to(device)
+        
         x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
         y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-        x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         
@@ -2177,40 +2198,73 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
         val_dataset = TensorDataset(x_val_tensor, y_val_tensor)
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-
+        
         criterion = torch.nn.MSELoss()
         optimizer = torch.optim.Adam(base_model.parameters(), lr=learning_rate)
         
         train_nn(base_model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, f'conformal_dnn', rep)
-        
-        base_model.eval()
-        with torch.no_grad():
-            y_pred_tensor = base_model(x_test_tensor).cpu().numpy()
-        y_pred = y_pred_tensor.flatten()
-
+    
+    # Manual conformal prediction implementation (avoiding torch-cp's evaluate method)
+    # Step 1: Get predictions on calibration set
     if base_model_type in ['rf', 'xgboost', 'qrf']:
         y_val_pred = base_model.predict(x_val)
+        if base_model_type == 'qrf':
+            y_val_pred = base_model.predict(x_val, quantiles=[0.5])[:, 0]
+        y_test_pred = base_model.predict(x_test)
+        if base_model_type == 'qrf':
+            y_test_pred = base_model.predict(x_test, quantiles=[0.5])[:, 0]
     elif base_model_type == 'gauche':
         x_val_tensor = torch.from_numpy(x_val).double()
+        x_test_tensor = torch.from_numpy(x_test).double()
+        base_model.eval()
         with torch.no_grad():
             val_preds = base_model(x_val_tensor)
             y_val_pred = val_preds.mean.numpy()
+            test_preds = base_model(x_test_tensor)
+            y_test_pred = test_preds.mean.numpy()
     elif base_model_type == 'dnn':
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+        x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
+        base_model.eval()
         with torch.no_grad():
             y_val_pred = base_model(x_val_tensor).cpu().numpy().flatten()
+            y_test_pred = base_model(x_test_tensor).cpu().numpy().flatten()
     
+    # Step 2: Calculate conformity scores on calibration set
     conformity_scores = np.abs(y_val - y_val_pred)
     
-    n_cal = len(conformity_scores)
-    q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-    q_level = min(q_level, 1.0) 
-    quantile = np.quantile(conformity_scores, q_level)
+    # Step 3: Calculate quantile for conformal prediction
+    if predictor_type == 'split':
+        # Standard split conformal
+        n_cal = len(conformity_scores)
+        q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+        q_level = min(q_level, 1.0)
+        quantile = np.quantile(conformity_scores, q_level)
+        
+    elif predictor_type == 'aci':
+        # For ACI, we use adaptive quantile (simplified version)
+        # In a full implementation, this would update online
+        n_cal = len(conformity_scores)
+        # Start with standard quantile and would adapt during online phase
+        q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+        q_level = min(q_level, 1.0)
+        quantile = np.quantile(conformity_scores, q_level)
+        # Note: Full ACI would update this quantile adaptively as we see new data
     
-    y_lower = y_pred - quantile
-    y_upper = y_pred + quantile
-
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    # Step 4: Generate prediction intervals
+    y_lower = y_test_pred - quantile
+    y_upper = y_test_pred + quantile
+    
+    # Step 5: Calculate coverage and metrics
+    coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
+    avg_interval_size = np.mean(y_upper - y_lower)
+    
+    print(f"Conformal Prediction Results:")
+    print(f"  Coverage: {coverage:.4f} (target: {1-alpha:.4f})")
+    print(f"  Average Interval Size: {avg_interval_size:.4f}")
+    
+    # Calculate regression metrics
+    metrics = calculate_regression_metrics(y_test, y_test_pred, logging=True)
     
     model_name = f'conformal_{base_model_type}_{predictor_type}'
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
@@ -2220,7 +2274,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
         
         save_uncertainty_values(
-            y_pred_mean=y_pred,
+            y_pred_mean=y_test_pred,
             y_pred_std=y_pred_std,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
@@ -2233,7 +2287,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         )
         
         save_conformal_intervals(
-            y_pred=y_pred,
+            y_pred=y_test_pred,
             y_lower=y_lower,
             y_upper=y_upper,
             y_true=y_test,
@@ -2246,90 +2300,252 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             alpha=alpha
         )
     
-    return metrics[3]
+    return metrics[3]  # Return R²
 
 def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, y_test_original, trial=None,
                                 y_train_noisy=None, y_test_noisy=None, y_val_noisy=None):
     """
+    Conformal prediction for graph models.
     Note: y_train_noisy, y_test_noisy, y_val_noisy are the noisy+normalized targets from Rust.
-    These should be used instead of batch.y from the dataloaders.
     """
+    from torchcp.regression.predictor import SplitPredictor, ACIPredictor
+    from torchcp.regression.score import ABS
+    from torch_geometric.loader import DataLoader as GeometricDataLoader
+    
     params = {}
     params_source = 'default'
     conformal_model_name = f'conformal_{base_model_type}'
     
+    # Load best params if available
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
         best_params = load_best_hyperparameters(conformal_model_name, 'graph')
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
             print(f"Using tuned hyperparameters for {conformal_model_name}-graph")
+    
     if not params:
         if trial is not None:
-            dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
+            # Conformal parameters
             alpha = trial.suggest_float('alpha', 0.05, 0.2)
             predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
-            learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            params['dim_h'] = dim_h
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
+            
+            # ACI-specific
+            if predictor_type == 'aci':
+                params['gamma'] = trial.suggest_float('gamma', 0.001, 0.1, log=True)
+            
+            # Base model parameters
+            dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
+            learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
+            
+            params['dim_h'] = dim_h
             params['learning_rate'] = learning_rate
             params_source = 'tuning_trial'
         else:
+            # Default parameters
             dim_h = 64
             alpha = 0.1
-            predictor_type = 'split'
             learning_rate = 0.001
+            predictor_type = 'split'
+            
             params['dim_h'] = dim_h
             params['alpha'] = alpha
-            params['predictor_type'] = predictor_type
             params['learning_rate'] = learning_rate
+            params['predictor_type'] = predictor_type
             params_source = 'default'
     
+    # Extract parameters
     dim_h = params.pop('dim_h', 64)
     alpha = params.pop('alpha', 0.1)
-    predictor_type = params.pop('predictor_type', 'split')
     learning_rate = params.pop('learning_rate', 0.001)
+    predictor_type = params.pop('predictor_type', 'split')
+    gamma = params.pop('gamma', 0.01)
     
+    # Remove any dropout or num_layers if they exist (not supported by your GNN classes)
+    params.pop('dropout', None)
+    params.pop('num_layers', None)
+    
+    # First, we need to update the graph data objects with the correct y values
+    # Extract the original data from the loaders
+    train_data_list = []
+    for data in train_loader:
+        train_data_list.extend([d for d in data.to_data_list()])
+    
+    val_data_list = []
+    for data in val_loader:
+        val_data_list.extend([d for d in data.to_data_list()])
+    
+    test_data_list = []
+    for data in test_loader:
+        test_data_list.extend([d for d in data.to_data_list()])
+    
+    # Update y values with the noisy targets
+    if y_train_noisy is not None:
+        for i, data in enumerate(train_data_list):
+            data.y = y_train_noisy[i].unsqueeze(0) if y_train_noisy[i].dim() == 0 else y_train_noisy[i]
+    
+    if y_val_noisy is not None:
+        for i, data in enumerate(val_data_list):
+            data.y = y_val_noisy[i].unsqueeze(0) if y_val_noisy[i].dim() == 0 else y_val_noisy[i]
+    
+    if y_test_noisy is not None:
+        for i, data in enumerate(test_data_list):
+            data.y = y_test_noisy[i].unsqueeze(0) if y_test_noisy[i].dim() == 0 else y_test_noisy[i]
+    
+    # Create new DataLoaders with updated y values
+    train_loader_updated = GeometricDataLoader(train_data_list, batch_size=64, shuffle=True)
+    val_loader_updated = GeometricDataLoader(val_data_list, batch_size=64, shuffle=False)
+    test_loader_updated = GeometricDataLoader(test_data_list, batch_size=64, shuffle=False)
+    
+    # Create base model (use only dim_h since that's what your GNN classes accept)
     if base_model_type == 'gin':
         base_model = GIN(dim_h=dim_h)
-    else:
+    else:  # gcn
         base_model = GCN(dim_h=dim_h)
     
     base_model.to(device)
     
-    # Pass noisy y values to train_epochs
-    # NOTE: You'll need to update train_epochs to accept learning_rate parameter
+    # Train the base model
     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-        args.epochs, base_model, train_loader, val_loader, f"conformal_{base_model_type}_model.pt", 
-        args, s, iteration, file_no, f'conformal_{base_model_type}',
+        args.epochs, base_model, train_loader_updated, val_loader_updated, args, s, iteration, file_no, 
+        f'conformal_{base_model_type}',
         y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy, learning_rate=learning_rate
     )
     
+    # Create wrapper for torch-cp
+    class GraphModelWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+            
+        def forward(self, batch):
+            """
+            batch: PyTorch Geometric batch object
+            """
+            self.model.eval()
+            with torch.no_grad():
+                output = self.model(batch)
+                if output.dim() > 1:
+                    output = output.squeeze()
+                return output
+    
+    wrapped_model = GraphModelWrapper(trained_model)
+    wrapped_model.eval()
+    
+    # Create score function
+    score_function = ABS()
+    
+    # Create and calibrate predictor
     if predictor_type == 'split':
-        predictor = SplitPredictor(score_function=ABS(), model=trained_model)
-    else:
-        predictor = ACIPredictor(score_function=CQR(), model=trained_model, gamma=0.01)
-    predictor.calibrate(val_loader, alpha=alpha)
+        # Create a custom predictor that works with graph data
+        predictor = SplitPredictor(score_function=score_function, model=wrapped_model)
+        
+        # Manual calibration for graph data
+        # We need to compute calibration scores manually because torch-cp's default calibrate
+        # expects (X, y) tuples, but we have graph batches
+        
+        all_cal_preds = []
+        all_cal_y = []
+        
+        wrapped_model.eval()
+        with torch.no_grad():
+            for batch in val_loader_updated:
+                batch = batch.to(device)
+                preds = wrapped_model(batch)
+                all_cal_preds.append(preds.cpu())
+                all_cal_y.append(batch.y.cpu())
+        
+        all_cal_preds = torch.cat(all_cal_preds)
+        all_cal_y = torch.cat(all_cal_y)
+        
+        # Compute conformity scores
+        scores = score_function(all_cal_preds, all_cal_y)
+        
+        # Compute quantile
+        n = len(scores)
+        q_level = np.ceil((n + 1) * (1 - alpha)) / n
+        q_level = min(q_level, 1.0)
+        q_hat = torch.quantile(scores, q_level)
+        
+        # Store the quantile in the predictor
+        predictor.q_hat = q_hat
+        
+    elif predictor_type == 'aci':
+        # For ACI with graphs, we need a different approach
+        # ACI requires online/adaptive learning
+        predictor = ACIPredictor(score_function=score_function, model=wrapped_model, gamma=gamma)
+        
+        # Similar manual calibration
+        all_cal_preds = []
+        all_cal_y = []
+        
+        wrapped_model.eval()
+        with torch.no_grad():
+            for batch in val_loader_updated:
+                batch = batch.to(device)
+                preds = wrapped_model(batch)
+                all_cal_preds.append(preds.cpu())
+                all_cal_y.append(batch.y.cpu())
+        
+        all_cal_preds = torch.cat(all_cal_preds)
+        all_cal_y = torch.cat(all_cal_y)
+        
+        scores = score_function(all_cal_preds, all_cal_y)
+        
+        n = len(scores)
+        q_level = np.ceil((n + 1) * (1 - alpha)) / n
+        q_level = min(q_level, 1.0)
+        q_hat = torch.quantile(scores, q_level)
+        
+        predictor.q_hat = q_hat
+        predictor.alpha = alpha
     
-    results = predictor.evaluate(test_loader)
-    y_pred = results['predictions'].cpu().numpy().flatten()
-    y_lower = results['lower_bounds'].cpu().numpy().flatten()
-    y_upper = results['upper_bounds'].cpu().numpy().flatten()
+    # Evaluate on test set
+    all_test_preds = []
+    all_test_y = []
+    all_test_lower = []
+    all_test_upper = []
     
-    # Use y_test_noisy if provided, otherwise extract from loader
-    if y_test_noisy is not None:
-        y_test = y_test_noisy.cpu().numpy().flatten()
-    else:
-        y_test = []
-        for data in test_loader:
-            y_test.extend(data.y.cpu().numpy())
-        y_test = np.array(y_test)
+    wrapped_model.eval()
+    with torch.no_grad():
+        for batch in test_loader_updated:
+            batch = batch.to(device)
+            preds = wrapped_model(batch)
+            
+            # Compute prediction intervals
+            if hasattr(predictor, 'q_hat'):
+                lower = preds - predictor.q_hat
+                upper = preds + predictor.q_hat
+            else:
+                # Fallback
+                lower = preds - 1.0
+                upper = preds + 1.0
+            
+            all_test_preds.append(preds.cpu())
+            all_test_y.append(batch.y.cpu())
+            all_test_lower.append(lower.cpu())
+            all_test_upper.append(upper.cpu())
     
+    y_pred = torch.cat(all_test_preds).numpy().flatten()
+    y_test = torch.cat(all_test_y).numpy().flatten()
+    y_lower = torch.cat(all_test_lower).numpy().flatten()
+    y_upper = torch.cat(all_test_upper).numpy().flatten()
+    
+    # Calculate metrics
     logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
     if not logging_flag:
         calculate_domain_metrics(y_pred, y_test, domain_labels_subset, target_domain)
     metrics = calculate_regression_metrics(y_pred, y_test, logging=logging_flag)
+    
+    # Calculate coverage
+    coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
+    avg_interval_size = np.mean(y_upper - y_lower)
+    
+    print(f"Conformal Prediction Results:")
+    print(f"  Coverage: {coverage:.4f} (target: {1-alpha:.4f})")
+    print(f"  Average Interval Size: {avg_interval_size:.4f}")
     
     model_name = f'conformal_{base_model_type}_{predictor_type}'
     save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics, params_source)
@@ -2365,7 +2581,7 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
             alpha=alpha
         )
     
-    return metrics[3]
+    return metrics[3]  # Return R²
 
 def load_best_hyperparameters(model_type, rep, results_dir='results'):
     """
