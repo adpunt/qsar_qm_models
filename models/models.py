@@ -600,11 +600,9 @@ def testing(loader, model, y_test_noisy=None):
 
     return test_loss, test_target, test_y_target
 
-
 def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name,
-                 y_train_noisy=None, y_val_noisy=None):
+                 y_train_noisy=None, y_val_noisy=None, learning_rate=0.001):
     """Training over all epochs
-
     Args:
         epochs (int): number of epochs to train for
         model (nn.Module): the current model
@@ -617,18 +615,16 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
         model_name: name of the model
         y_train_noisy (Tensor, optional): noisy training targets from Rust
         y_val_noisy (Tensor, optional): noisy validation targets from Rust
-
+        learning_rate (float, optional): learning rate for optimizer. Default: 0.001
     Returns:
         array: returning train and validation losses over all epochs, prediction and ground truth values for training data in the last epoch
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=5e-4)
     loss = torch.nn.MSELoss()
-
     train_target = np.empty((0))
     train_y_target = np.empty((0))
     train_loss = np.empty(epochs)
     val_loss = np.empty(epochs)
-
     for epoch in range(epochs):
         epoch_loss, model = training(train_loader, model, loss, optimizer, y_train_noisy=y_train_noisy)
         v_loss = validation(val_loader, model, loss, y_val_noisy=y_val_noisy)
@@ -649,10 +645,8 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
                 
                 train_target = np.concatenate((train_target, out.detach().cpu().numpy()[:, 0]))
                 train_y_target = np.concatenate((train_y_target, y_batch.detach().cpu().numpy()))
-
         train_loss[epoch] = epoch_loss.detach().cpu().numpy()
         val_loss[epoch] = v_loss.detach().cpu().numpy()
-
         # print current train and val loss
         if epoch % 2 == 0:
             print(
@@ -678,81 +672,6 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
         )
     
     return train_loss, val_loss, train_target, train_y_target, model
-
-class GINCoTeaching:
-    def __init__(self, dim_h, learning_rate=0.001, dropout_rate=0.5):
-        self.model_f = GIN(dim_h, dropout_rate)
-        self.model_g = GIN(dim_h, dropout_rate)
-        self.optimizer_f = torch.optim.Adam(self.model_f.parameters(), lr=learning_rate)
-        self.optimizer_g = torch.optim.Adam(self.model_g.parameters(), lr=learning_rate)
-        self.criterion = torch.nn.MSELoss()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model_f.to(self.device)
-        self.model_g.to(self.device)
-
-    def train_epoch(self, loader, epoch, tau, R):
-        self.model_f.train()
-        self.model_g.train()
-
-        for data in loader:
-            data = data.to(self.device)
-            self.optimizer_f.zero_grad()
-            self.optimizer_g.zero_grad()
-
-            output_f = self.model_f(data)
-            output_g = self.model_g(data)
-
-            loss_f = self.criterion(output_f, data.y.view(-1, 1))
-            loss_g = self.criterion(output_g, data.y.view(-1, 1))
-
-            # Select small-loss instances
-            _, indices_f = torch.topk(loss_f, int(R * len(loss_f)), largest=False)
-            _, indices_g = torch.topk(loss_g, int(R * len(loss_g)), largest=False)
-
-            small_loss_data_f = data.x[indices_f], data.edge_index[:, indices_f], data.batch[indices_f], data.y[indices_f]
-            small_loss_data_g = data.x[indices_g], data.edge_index[:, indices_g], data.batch[indices_g], data.y[indices_g]
-
-            # Update networks with peer network's small-loss instances
-            self.optimizer_f.zero_grad()
-            peer_output_f = self.model_f(Data(*small_loss_data_g))
-            peer_loss_f = self.criterion(peer_output_f, small_loss_data_g[-1].view(-1, 1))
-            peer_loss_f.backward()
-            self.optimizer_f.step()
-
-            self.optimizer_g.zero_grad()
-            peer_output_g = self.model_g(Data(*small_loss_data_f))
-            peer_loss_g = self.criterion(peer_output_g, small_loss_data_f[-1].view(-1, 1))
-            peer_loss_g.backward()
-            self.optimizer_g.step()
-
-        # Adjust R
-        R = 1 - min(epoch / tau, tau)
-        return R
-
-    def train(self, loader, epochs, tau):
-        R = 1.0
-        for epoch in range(epochs):
-            R = self.train_epoch(loader, epoch, tau, R)
-            print(f'Epoch {epoch+1}/{epochs} completed. R: {R:.4f}')
-
-    def evaluate(self, loader):
-        self.model_f.eval()
-        self.model_g.eval()
-        loss_f = 0
-        loss_g = 0
-
-        with torch.no_grad():
-            for data in loader:
-                data = data.to(self.device)
-                output_f = self.model_f(data)
-                output_g = self.model_g(data)
-                loss_f += self.criterion(output_f, data.y.view(-1, 1)).item()
-                loss_g += self.criterion(output_g, data.y.view(-1, 1)).item()
-
-        loss_f /= len(loader)
-        loss_g /= len(loader)
-
-        return loss_f, loss_g
 
 @torch.no_grad()
 def testing_co_teaching(loader, model):
@@ -1908,9 +1827,11 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
     if trial is not None:
         dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
         epochs = trial.suggest_int('epochs', 50, 300, step=50)
+        learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
     else:
         dim_h = 64 if model_type in ["gin", "gin2d", "ginct"] else 128
         epochs = args.epochs
+        learning_rate = 0.001
     
     if model_type == "gin" or model_type == "gin2d":
         model = GIN(dim_h=dim_h)
@@ -1936,11 +1857,10 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
 
     model.to(device)
     if model_type != "ginct":
-        # Pass the noisy y values to train_epochs and testing
-        # NOTE: train_epochs and testing functions need to be modified to accept and use these parameters
+        # Pass the noisy y values AND learning_rate to train_epochs
         train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
             epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name,
-            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy
+            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy, learning_rate=learning_rate
         )
         test_loss, test_target, test_y = testing(test_loader, trained_model, y_test_noisy=y_test_noisy)
 
@@ -2167,6 +2087,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             elif base_model_type == 'dnn':
                 params['hidden_size1'] = trial.suggest_categorical('hidden_size1', [64, 128, 256])
                 params['hidden_size2'] = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+                params['learning_rate'] = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
             elif base_model_type == 'xgboost':
                 params['n_estimators'] = trial.suggest_int('n_estimators', 50, 500)
                 params['max_depth'] = trial.suggest_int('max_depth', 3, 10)
@@ -2240,6 +2161,8 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             pred_vars = preds.variance.numpy()
             
     elif base_model_type == 'dnn':
+        learning_rate = params.pop('learning_rate', 0.001)
+        
         base_model = DNNRegressionModel(input_size=x_train.shape[1], 
                      hidden_size1=params.get('hidden_size1', 128), 
                      hidden_size2=params.get('hidden_size2', 64))
@@ -2254,6 +2177,9 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
         val_dataset = TensorDataset(x_val_tensor, y_val_tensor)
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+        criterion = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam(base_model.parameters(), lr=learning_rate)
         
         train_nn(base_model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, f'conformal_dnn', rep)
         
@@ -2343,22 +2269,27 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
             dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
             alpha = trial.suggest_float('alpha', 0.05, 0.2)
             predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
+            learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
             params['dim_h'] = dim_h
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
+            params['learning_rate'] = learning_rate
             params_source = 'tuning_trial'
         else:
             dim_h = 64
             alpha = 0.1
             predictor_type = 'split'
+            learning_rate = 0.001
             params['dim_h'] = dim_h
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
+            params['learning_rate'] = learning_rate
             params_source = 'default'
     
     dim_h = params.pop('dim_h', 64)
     alpha = params.pop('alpha', 0.1)
     predictor_type = params.pop('predictor_type', 'split')
+    learning_rate = params.pop('learning_rate', 0.001)
     
     if base_model_type == 'gin':
         base_model = GIN(dim_h=dim_h)
@@ -2368,11 +2299,11 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
     base_model.to(device)
     
     # Pass noisy y values to train_epochs
-    # NOTE: train_epochs function needs to be modified to accept and use these parameters
+    # NOTE: You'll need to update train_epochs to accept learning_rate parameter
     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
         args.epochs, base_model, train_loader, val_loader, f"conformal_{base_model_type}_model.pt", 
         args, s, iteration, file_no, f'conformal_{base_model_type}',
-        y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy
+        y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy, learning_rate=learning_rate
     )
     
     if predictor_type == 'split':
