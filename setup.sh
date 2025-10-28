@@ -77,5 +77,6 @@ pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
 
 # --- Other pip packages ---
 pip install tf-keras
+pip install torchcp
 
 echo "Environment '$ENV_NAME' setup complete!"
