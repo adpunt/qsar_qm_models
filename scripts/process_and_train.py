@@ -1030,7 +1030,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
                     x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
                     x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                    x_val, y_val, y_val_original = parse_mmap(files["val"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                    x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
 
                     print(f"model: {model}")
                     print(f"rep: {rep}")

@@ -2144,7 +2144,6 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         base_model.fit(x_train, y_train)
         
     elif base_model_type == 'qrf':
-        from sklearn.ensemble import RandomForestQuantileRegressor
         base_model = RandomForestQuantileRegressor(random_state=iteration_seed, **params)
         base_model.fit(x_train, y_train)
         
@@ -2173,7 +2172,6 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         base_model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
         
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, base_model)
-        from gpytorch.mlls import fit_gpytorch_model
         fit_gpytorch_model(mll)
         
     elif base_model_type == 'dnn':
@@ -2204,34 +2202,49 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         
         train_nn(base_model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, f'conformal_dnn', rep)
     
-    # Manual conformal prediction implementation (avoiding torch-cp's evaluate method)
-    # Step 1: Get predictions on calibration set
-    if base_model_type in ['rf', 'xgboost', 'qrf']:
-        y_val_pred = base_model.predict(x_val)
-        if base_model_type == 'qrf':
-            y_val_pred = base_model.predict(x_val, quantiles=[0.5])[:, 0]
-        y_test_pred = base_model.predict(x_test)
-        if base_model_type == 'qrf':
-            y_test_pred = base_model.predict(x_test, quantiles=[0.5])[:, 0]
+    # --- Step 1: Get predictions on calibration and test sets (point estimates) ---
+    if base_model_type in ['rf', 'xgboost']:
+        # Standard regressors: mean prediction
+        y_val_pred  = np.asarray(base_model.predict(x_val)).reshape(-1)
+        y_test_pred = np.asarray(base_model.predict(x_test)).reshape(-1)
+
+    elif base_model_type == 'qrf':
+        # Request median; handle 1D vs 2D outputs robustly
+        _val = base_model.predict(x_val, quantiles=[0.5])
+        _test = base_model.predict(x_test, quantiles=[0.5])
+        _val = np.asarray(_val)
+        _test = np.asarray(_test)
+        y_val_pred  = (_val[:, 0]  if _val.ndim  == 2 else _val).reshape(-1)
+        y_test_pred = (_test[:, 0] if _test.ndim == 2 else _test).reshape(-1)
+
     elif base_model_type == 'gauche':
         x_val_tensor = torch.from_numpy(x_val).double()
         x_test_tensor = torch.from_numpy(x_test).double()
         base_model.eval()
         with torch.no_grad():
             val_preds = base_model(x_val_tensor)
-            y_val_pred = val_preds.mean.numpy()
             test_preds = base_model(x_test_tensor)
-            y_test_pred = test_preds.mean.numpy()
+            y_val_pred  = np.asarray(val_preds.mean.numpy()).reshape(-1)
+            y_test_pred = np.asarray(test_preds.mean.numpy()).reshape(-1)
+
     elif base_model_type == 'dnn':
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
         base_model.eval()
         with torch.no_grad():
-            y_val_pred = base_model(x_val_tensor).cpu().numpy().flatten()
-            y_test_pred = base_model(x_test_tensor).cpu().numpy().flatten()
+            y_val_pred  = base_model(x_val_tensor).cpu().numpy().reshape(-1)
+            y_test_pred = base_model(x_test_tensor).cpu().numpy().reshape(-1)
+
+    else:
+        raise ValueError(f"Unsupported base_model_type: {base_model_type}")
     
     # Step 2: Calculate conformity scores on calibration set
     conformity_scores = np.abs(y_val - y_val_pred)
+
+    y_val  = np.asarray(y_val).reshape(-1)
+    y_test = np.asarray(y_test).reshape(-1)
+    assert y_val_pred.shape  == y_val.shape,  (y_val_pred.shape,  y_val.shape)
+    assert y_test_pred.shape == y_test.shape, (y_test_pred.shape, y_test.shape)
     
     # Step 3: Calculate quantile for conformal prediction
     if predictor_type == 'split':
