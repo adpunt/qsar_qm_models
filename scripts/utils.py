@@ -149,3 +149,72 @@ def save_per_epoch_metrics(train_losses, val_losses, filepath, model_name, rep, 
            for epoch, (train_loss, val_loss) in enumerate(zip(train_losses, val_losses)):
                writer.writerow([sigma_noise, iteration, model_name, rep, file_no, epoch, train_loss, val_loss])
 
+# Add these to your utils.py or models.py
+
+def calibrate_uncertainty_simple(y_pred_mean, y_pred_std, y_true):
+    """
+    Find optimal temperature T for variance scaling.
+    Works for any model that outputs mean and std.
+    
+    Args:
+        y_pred_mean: predicted means (numpy array)
+        y_pred_std: predicted stds (numpy array)
+        y_true: true values (numpy array)
+    
+    Returns:
+        float: optimal temperature T
+    """
+    from scipy.optimize import minimize_scalar
+    
+    def nll(T):
+        scaled_std = np.maximum(y_pred_std * T, 1e-6)
+        return (0.5 * np.log(2 * np.pi * scaled_std**2) + 
+                0.5 * ((y_true - y_pred_mean)**2 / scaled_std**2)).mean()
+    
+    result = minimize_scalar(nll, bounds=(0.1, 10.0), method='bounded')
+    return result.x
+
+
+def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy, 
+                           filepath, model_name, rep, sigma_noise, iteration, file_no,
+                           y_pred_std_calibrated=None, temperature=None):
+    """
+    Save uncertainty values with optional calibration.
+    
+    UPDATED to handle both calibrated and uncalibrated uncertainties.
+    """
+    uncertainty_file = filepath.replace('.csv', '_uncertainty_values.csv')
+    
+    rows = []
+    for i in range(len(y_pred_mean)):
+        row = {
+            'model': model_name,
+            'representation': rep,
+            'sigma': sigma_noise,
+            'iteration': iteration,
+            'file_no': file_no,
+            'sample_idx': i,
+            'y_pred_mean': y_pred_mean[i],
+            'y_pred_std_uncalibrated': y_pred_std[i],
+            'y_true_original': y_true_original[i],
+            'y_true_noisy': y_true_noisy[i],
+            'injected_noise': y_true_noisy[i] - y_true_original[i]
+        }
+        
+        # Add calibrated values if provided
+        if y_pred_std_calibrated is not None:
+            row['y_pred_std_calibrated'] = y_pred_std_calibrated[i]
+            row['temperature'] = temperature
+        else:
+            # No calibration - set calibrated = uncalibrated
+            row['y_pred_std_calibrated'] = y_pred_std[i]
+            row['temperature'] = 1.0
+        
+        rows.append(row)
+    
+    df = pd.DataFrame(rows)
+    
+    if os.path.exists(uncertainty_file):
+        df.to_csv(uncertainty_file, mode='a', header=False, index=False)
+    else:
+        df.to_csv(uncertainty_file, mode='w', header=True, index=False)

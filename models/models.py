@@ -39,6 +39,7 @@ import torchcp
 from torchcp.regression.predictor import SplitPredictor, ACIPredictor
 from torchcp.classification.score import APS
 from torchcp.regression.score import ABS
+from sklearn.isotonic import IsotonicRegression
 
 from utils import * 
 
@@ -1195,8 +1196,17 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             params['natural_gradient'] = True
             params_source = 'default'
     
-    x_train = np.vstack((x_train, x_val))
-    y_train = np.hstack((y_train, y_val))
+    # STEP 1: Split validation for calibration
+    if args.uncertainty:
+        split_idx = len(x_val) // 2
+        x_val_train = np.vstack((x_train, x_val[:split_idx]))
+        y_val_train = np.hstack((y_train, y_val[:split_idx]))
+        x_val_cal = x_val[split_idx:]
+        y_val_cal = y_val[split_idx:]
+    else:
+        x_val_train = np.vstack((x_train, x_val))
+        y_val_train = np.hstack((y_train, y_val))
+    
     model = NGBRegressor(
         Dist=Normal,
         Score=MLE,
@@ -1206,13 +1216,34 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         verbose=False,
         random_state=iteration_seed,
     )
-    model.fit(x_train, y_train)
+    model.fit(x_val_train, y_val_train)
+    
+    # STEP 2: Get predictions and calibrate
     y_pred = model.predict(x_test)
     y_dist = model.pred_dist(x_test)
+    y_pred_std_uncalibrated = y_dist.scale
+    
+    if args.uncertainty:
+        # Get calibration predictions
+        y_cal_pred = model.predict(x_val_cal)
+        y_cal_dist = model.pred_dist(x_val_cal)
+        y_cal_pred_std = y_cal_dist.scale
+        
+        # Find temperature
+        temperature = calibrate_uncertainty_simple(y_cal_pred, y_cal_pred_std, y_val_cal)
+        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+    else:
+        temperature = None
+        y_pred_std_calibrated = None
+    
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics, params_source)
+    
+    # STEP 3: Save with calibration
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
-            y_pred_std=y_dist.scale,
+            y_pred_std=y_pred_std_uncalibrated,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -1221,11 +1252,12 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    nll = -y_dist.logpdf(y_test).mean()
-    save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics, params_source)
+    
     return metrics[3]
+
 def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
     params = {}
     params_source = 'default'
@@ -1296,9 +1328,9 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             params = best_params
             params_source = 'tuned'
             print(f"Using tuned hyperparameters for gauche-{rep}")
+    
     if not params:
         if args.tuning:
-            # Note: a few kernels had to be removed
             params['kernel_name'] = trial.suggest_categorical('kernel', [
                 'Tanimoto', 'BraunBlanquet', 'Dice', 'Faith', 'Forbes',
                 'InnerProduct', 'Intersection', 'MinMax', 'Otsuka',
@@ -1312,6 +1344,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             params['outputscale'] = 1.0
             params['likelihood_noise'] = 1e-3
             params_source = 'default'
+    
     kernel_map = {
         'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
         'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
@@ -1323,21 +1356,24 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
         'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
         'Rand': gauche.kernels.fingerprint_kernels.rand_kernel.RandKernel,
-        'RogersTanimoto': gauche.kernels.fingerprint_kernels.rogers_tanimoto_kernel.RogersTanimotoKernel,
-        'RussellRao': gauche.kernels.fingerprint_kernels.russell_rao_kernel.RussellRaoKernel,
-        'SokalSneath': gauche.kernels.fingerprint_kernels.sokal_sneath_kernel.SokalSneathKernel
     }
 
-    if x_val is not None and y_val is not None:
-        x_train = np.vstack((x_train, x_val))
-        y_train = np.hstack((y_train, y_val))
+    # STEP 1: Split validation for calibration
+    if args.uncertainty:
+        split_idx = len(x_val) // 2
+        x_train_full = np.vstack((x_train, x_val[:split_idx]))
+        y_train_full = np.hstack((y_train, y_val[:split_idx]))
+        x_val_cal = x_val[split_idx:]
+        y_val_cal = y_val[split_idx:]
+    else:
+        x_train_full = np.vstack((x_train, x_val))
+        y_train_full = np.hstack((y_train, y_val))
 
-    x_train_tensor = torch.from_numpy(x_train).double()
+    x_train_tensor = torch.from_numpy(x_train_full).double()
     x_test_tensor = torch.from_numpy(x_test).double()
-    y_train_tensor = torch.from_numpy(y_train).double()
+    y_train_tensor = torch.from_numpy(y_train_full).double()
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
-
     kernel_class = kernel_map[params['kernel_name']]
     model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
 
@@ -1346,15 +1382,37 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     model.eval()
     likelihood.eval()
+    
+    # STEP 2: Get predictions and calibrate
     with torch.no_grad():
-        preds = model(x_test_tensor)
-        y_pred = preds.mean.numpy()
-        pred_vars = preds.variance.numpy()
+        # Test predictions
+        test_preds = model(x_test_tensor)
+        y_pred = test_preds.mean.numpy()
+        pred_vars = test_preds.variance.numpy()
+        y_pred_std_uncalibrated = np.sqrt(pred_vars)
+        
+        if args.uncertainty:
+            # Calibration predictions
+            x_val_cal_tensor = torch.from_numpy(x_val_cal).double()
+            cal_preds = model(x_val_cal_tensor)
+            y_cal_pred_mean = cal_preds.mean.numpy()
+            y_cal_pred_std = np.sqrt(cal_preds.variance.numpy())
+            
+            # Find temperature
+            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
+            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        else:
+            temperature = None
+            y_pred_std_calibrated = None
 
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics)
+
+    # STEP 3: Save with calibration
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
-            y_pred_std=np.sqrt(pred_vars),
+            y_pred_std=y_pred_std_uncalibrated,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -1363,10 +1421,9 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
-
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics)
 
     return metrics[3]
 
@@ -1460,10 +1517,24 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
 
-    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+    # STEP 1: Split validation data if Bayesian
+    is_bayesian = args.bayesian_transformation is not None
+    
+    if is_bayesian and args.uncertainty:
+        # Split val: first half for early stopping, second half for calibration
+        split_idx = len(x_val) // 2
+        x_val_train = x_val[:split_idx]
+        y_val_train = y_val[:split_idx]
+        x_val_cal = x_val[split_idx:]
+        y_val_cal = y_val[split_idx:]
+        
+        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+    else:
+        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
 
+    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
 
     model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
@@ -1488,40 +1559,57 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
     model.eval()
 
-    # Check if the model was Bayesian-transformed
-    is_bayesian = args.bayesian_transformation is not None
-
+    # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian:
-        num_samples = 100  # or however many stochastic passes you want
+        torch.manual_seed(iteration_seed)
+        np.random.seed(iteration_seed)
+        
+        num_samples = 100
+        
+        # Get calibration predictions
+        x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
+        preds_cal = []
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+        
+        preds_cal = np.stack(preds_cal, axis=0)
+        y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
+        y_cal_pred_std = preds_cal.std(axis=0).flatten()
+        
+        # Find optimal temperature
+        temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
+        
+        # Get test predictions
         preds = []
-
         with torch.no_grad():
             for _ in range(num_samples):
                 preds.append(model(x_test_tensor).cpu().numpy())
 
-        preds = np.stack(preds, axis=0)  # shape (num_samples, batch_size, 1)
+        preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std = preds.std(axis=0).flatten()
-
-        y_pred = y_pred_mean  # for calculating standard metrics
+        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
+        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        
+        y_pred = y_pred_mean
 
     else:
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
         y_pred = y_pred_tensor.flatten()
-        y_pred_std = np.zeros_like(y_pred)  # no uncertainty if non-Bayesian
+        y_pred_std_uncalibrated = None
+        y_pred_std_calibrated = None
+        temperature = None
 
     # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-
-    # Save standard results
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
 
+    # STEP 3: Save uncertainty with calibration
     if args.uncertainty and is_bayesian:
-        # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
         save_uncertainty_values(
             y_pred_mean=y_pred,
-            y_pred_std=y_pred_std,
+            y_pred_std=y_pred_std_uncalibrated,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -1530,11 +1618,13 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
 
     return metrics[3]
 
-def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, y_test_original, trial=None):
+def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     params = {}
     params_source = 'default'
 
@@ -1567,8 +1657,22 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
-    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    
+    # STEP 1: Split validation data if Bayesian
+    is_bayesian = args.bayesian_transformation is not None
+    
+    if is_bayesian and args.uncertainty:
+        split_idx = len(x_val) // 2
+        x_val_train = x_val[:split_idx]
+        y_val_train = y_val[:split_idx]
+        x_val_cal = x_val[split_idx:]
+        y_val_cal = y_val[split_idx:]
+        
+        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+    else:
+        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
 
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
     val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
@@ -1590,44 +1694,65 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
-
     model.eval()
 
-    # Check if the model was Bayesian-transformed
-    is_bayesian = args.bayesian_transformation is not None
-
+    # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian:
-        num_samples = 100  # or however many stochastic passes you want
+        torch.manual_seed(iteration_seed)
+        np.random.seed(iteration_seed)
+        
+        num_samples = 100
+        
+        if args.uncertainty:
+            # Get calibration predictions
+            x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
+            preds_cal = []
+            with torch.no_grad():
+                for _ in range(num_samples):
+                    preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+            
+            preds_cal = np.stack(preds_cal, axis=0)
+            y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
+            y_cal_pred_std = preds_cal.std(axis=0).flatten()
+            
+            # Find optimal temperature
+            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
+        
+        # Get test predictions
         preds = []
-
         with torch.no_grad():
             for _ in range(num_samples):
                 preds.append(model(x_test_tensor).cpu().numpy())
 
-        preds = np.stack(preds, axis=0)  # shape (num_samples, batch_size, 1)
+        preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std = preds.std(axis=0).flatten()
-
-        y_pred = y_pred_mean  # for calculating standard metrics
+        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
+        
+        if args.uncertainty:
+            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        else:
+            y_pred_std_calibrated = None
+            temperature = None
+        
+        y_pred = y_pred_mean
 
     else:
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
         y_pred = y_pred_tensor.flatten()
-        y_pred_std = np.zeros_like(y_pred)  # no uncertainty if non-Bayesian
+        y_pred_std_uncalibrated = None
+        y_pred_std_calibrated = None
+        temperature = None
 
-    # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-
-    # Save standard results
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
 
+    # STEP 3: Save uncertainty with calibration
     if args.uncertainty and is_bayesian:
-        # Save uncertainty values (only makes sense if Bayesian OR you treat std = 0 for standard DNNs)
         save_uncertainty_values(
             y_pred_mean=y_pred,
-            y_pred_std=y_pred_std,
-            y_test_original=y_test_original,
+            y_pred_std=y_pred_std_uncalibrated,
+            y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
             model_name=model_name,
@@ -1635,6 +1760,8 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
 
     return metrics[3]
@@ -1666,7 +1793,20 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
 
-    if x_val is not None and y_val is not None:
+    # STEP 1: Split validation data if Bayesian
+    is_bayesian = args.bayesian_transformation is not None
+    
+    if is_bayesian and args.uncertainty and x_val is not None and y_val is not None:
+        split_idx = len(x_val) // 2
+        x_val_train = x_val[:split_idx]
+        y_val_train = y_val[:split_idx]
+        x_val_cal = x_val[split_idx:]
+        y_val_cal = y_val[split_idx:]
+        
+        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
+        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+    elif x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
@@ -1694,13 +1834,13 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
-        model_name = f"{model_type}_full"
+        model_name = f"{model_type}_bnn_full"
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
-        model_name = f"{model_type}_last"
+        model_name = f"{model_type}_bnn_last"
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
-        model_name = f"{model_type}_variational"
+        model_name = f"{model_type}_bnn_variational"
     else:
         model_name = model_type
 
@@ -1708,46 +1848,74 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
-
-    is_bayesian = args.bayesian_transformation is not None
-
     model.eval()
-        
+
+    # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian:
-        # For Bayesian models, do multiple forward passes for uncertainty
-        num_samples = 100
-        preds = []
+        torch.manual_seed(iteration_seed)
+        np.random.seed(iteration_seed)
         
+        num_samples = 100
+        
+        if args.uncertainty:
+            # Get calibration predictions
+            x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
+            preds_cal = []
+            with torch.no_grad():
+                for _ in range(num_samples):
+                    preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+            
+            preds_cal = np.stack(preds_cal, axis=0)
+            y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
+            y_cal_pred_std = preds_cal.std(axis=0).flatten()
+            
+            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
+        
+        # Get test predictions
+        preds = []
         with torch.no_grad():
             for _ in range(num_samples):
                 preds.append(model(x_test_tensor).cpu().numpy())
         
         preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std = preds.std(axis=0).flatten()
-        y_pred = y_pred_mean  # for standard metrics
-            
+        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
+        
         if args.uncertainty:
-            save_uncertainty_values(
-                y_pred_mean=y_pred_mean,
-                y_pred_std=y_pred_std,
-                y_true_original=y_test_original,
-                y_true_noisy=y_test,
-                filepath=args.filepath,
-                model_name=model_name,
-                rep=rep,
-                sigma_noise=s,
-                iteration=iteration,
-                file_no=file_no,
-            )
+            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        else:
+            y_pred_std_calibrated = None
+            temperature = None
+        
+        y_pred = y_pred_mean
+
     else:
-        # Non-Bayesian: single forward pass, no uncertainty
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
         y_pred = y_pred_tensor.flatten()
+        y_pred_std_uncalibrated = None
+        y_pred_std_calibrated = None
+        temperature = None
      
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+
+    # STEP 3: Save uncertainty with calibration
+    if args.uncertainty and is_bayesian:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std_uncalibrated,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
+        )
         
     return metrics[3]
 
@@ -1845,6 +2013,8 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
     print(f"model: {model} and model_type: {model_type}")
 
     model_name = model_type
+    is_bayesian = args.bayesian_transformation is not None
+    
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
         model_name = f"{model_type}_bnn_full"
@@ -1858,23 +2028,35 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
     print(f"model: {model} and model_type: {model_type}")
 
     model.to(device)
+    
+    # STEP 1: Split val loader for calibration if Bayesian
+    if is_bayesian and args.uncertainty:
+        # Convert val_loader to list and split
+        val_data_list = []
+        for data in val_loader:
+            val_data_list.extend([d for d in data.to_data_list()])
+        
+        split_idx = len(val_data_list) // 2
+        val_train_list = val_data_list[:split_idx]
+        val_cal_list = val_data_list[split_idx:]
+        
+        from torch_geometric.loader import DataLoader as GeometricDataLoader
+        val_loader_train = GeometricDataLoader(val_train_list, batch_size=64, shuffle=False)
+        val_loader_cal = GeometricDataLoader(val_cal_list, batch_size=64, shuffle=False)
+        
+        # Split y_val_noisy accordingly
+        y_val_noisy_train = y_val_noisy[:split_idx] if y_val_noisy is not None else None
+        y_val_noisy_cal = y_val_noisy[split_idx:] if y_val_noisy is not None else None
+    else:
+        val_loader_train = val_loader
+        y_val_noisy_train = y_val_noisy
+    
     if model_type != "ginct":
-        # Pass the noisy y values AND learning_rate to train_epochs
         train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-            epochs, model, train_loader, val_loader, args, s, iteration, file_no, model_name,
-            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy, learning_rate=learning_rate
+            epochs, model, train_loader, val_loader_train, args, s, iteration, file_no, model_name,
+            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy_train, learning_rate=learning_rate
         )
         test_loss, test_target, test_y = testing(test_loader, trained_model, y_test_noisy=y_test_noisy)
-
-    # else:
-    #     train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs_co_teaching(
-    #         epochs, model, train_loader, val_loader,
-    #         f"{model_type}_model.pt",
-    #         optimal_co_teaching_hyperparameters['ratio'],
-    #         optimal_co_teaching_hyperparameters['tolerance'],
-    #         optimal_co_teaching_hyperparameters['forget_rate']
-    #     )
-    #     test_loss, test_target, test_y = testing_co_teaching(test_loader, trained_model)
     
     logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
     if not logging_flag:
@@ -1883,31 +2065,54 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
     print(f"model: {model_type}")
     print("rep: graph")
 
-    # Check if Bayesian transformation was applied
-    is_bayesian = hasattr(args, 'bayesian_transformation') and args.bayesian_transformation is not None
-    
+    # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian and args.uncertainty:
-        # For Bayesian graph models, do sampling for uncertainty
+        torch.manual_seed(args.random_seed)  # Use appropriate seed
+        np.random.seed(args.random_seed)
+        
         trained_model.eval()
         num_samples = 100
-        all_preds = []
         
+        # Get calibration predictions
+        all_cal_preds = []
+        with torch.no_grad():
+            for _ in range(num_samples):
+                batch_preds = []
+                for data in val_loader_cal:
+                    data = data.to(device)
+                    pred = trained_model(data).cpu().numpy().flatten()
+                    batch_preds.extend(pred)
+                all_cal_preds.append(np.array(batch_preds))
+        
+        all_cal_preds = np.stack(all_cal_preds, axis=0)
+        y_cal_pred_mean = all_cal_preds.mean(axis=0)
+        y_cal_pred_std = all_cal_preds.std(axis=0)
+        
+        # Get true calibration values
+        y_cal_true = y_val_noisy_cal.cpu().numpy() if isinstance(y_val_noisy_cal, torch.Tensor) else y_val_noisy_cal
+        
+        temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_cal_true)
+        
+        # Get test predictions
+        all_test_preds = []
         with torch.no_grad():
             for _ in range(num_samples):
                 batch_preds = []
                 for data in test_loader:
-                    data = data.to(device)  # Make sure data is on correct device
+                    data = data.to(device)
                     pred = trained_model(data).cpu().numpy().flatten()
-                    batch_preds.extend(pred)  # Use extend instead of append
-                all_preds.append(np.array(batch_preds))
+                    batch_preds.extend(pred)
+                all_test_preds.append(np.array(batch_preds))
         
-        all_preds = np.stack(all_preds, axis=0)  # Shape: (num_samples, num_test_points)
-        y_pred_mean = all_preds.mean(axis=0)
-        y_pred_std = all_preds.std(axis=0)
+        all_test_preds = np.stack(all_test_preds, axis=0)
+        y_pred_mean = all_test_preds.mean(axis=0)
+        y_pred_std_uncalibrated = all_test_preds.std(axis=0)
+        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
         
+        # STEP 3: Save with calibration
         save_uncertainty_values(
             y_pred_mean=y_pred_mean,
-            y_pred_std=y_pred_std,
+            y_pred_std=y_pred_std_uncalibrated,
             y_true_original=y_test_original.cpu().numpy().flatten(),
             y_true_noisy=test_y,
             filepath=args.filepath,
@@ -1916,11 +2121,12 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iterat
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
         
         save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics)
     else:
-        # Non-Bayesian: use existing results
         save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics)
     
     return metrics[3]
@@ -1951,37 +2157,73 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
             params['outputscale'] = 1.0
             params['likelihood_noise'] = 1e-3
             params_source = 'default'
+    
     kernel_map = {
         'WeisfeilerLehman': WeisfeilerLehmanKernel,
         'VertexHistogram': VertexHistogramKernel,
         'EdgeHistogram': EdgeHistogramKernel,
         'NeighborhoodHash': NeighborhoodHashKernel
     }
-    if val_graphs is not None and val_y is not None:
-        train_graphs = train_graphs + val_graphs
-        train_y = torch.cat((train_y, val_y), dim=0)
-    X_train = NonTensorialInputs(train_graphs)
+    
+    # STEP 1: Split validation for calibration
+    if args.uncertainty and val_graphs is not None and val_y is not None:
+        split_idx = len(val_graphs) // 2
+        train_graphs_full = train_graphs + val_graphs[:split_idx]
+        train_y_full = torch.cat((train_y, val_y[:split_idx]), dim=0)
+        val_graphs_cal = val_graphs[split_idx:]
+        val_y_cal = val_y[split_idx:]
+    elif val_graphs is not None and val_y is not None:
+        train_graphs_full = train_graphs + val_graphs
+        train_y_full = torch.cat((train_y, val_y), dim=0)
+    else:
+        train_graphs_full = train_graphs
+        train_y_full = train_y
+    
+    X_train = NonTensorialInputs(train_graphs_full)
     X_test = NonTensorialInputs(test_graphs)
-    y_train = train_y.flatten().float()
+    y_train = train_y_full.flatten().float()
     y_test = test_y.flatten().float()
+    
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
     kernel_class = kernel_map[params['kernel_name']]
     kernel = kernel_class(edge_label='label') if params['kernel_name'] == 'EdgeHistogram' else kernel_class(node_label='label')
     model = GraphGP(X_train, y_train, likelihood, kernel)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     fit_gpytorch_model(mll)
+    
     model.eval()
     likelihood.eval()
-    with torch.no_grad():
-        preds = model(X_test)
-        y_pred = preds.mean.numpy()
-        y_pred_var = preds.variance.numpy()
-        y_pred_std = np.sqrt(y_pred_var)
     
+    # STEP 2: Get predictions and calibrate
+    with torch.no_grad():
+        # Test predictions
+        test_preds = model(X_test)
+        y_pred = test_preds.mean.numpy()
+        pred_vars = test_preds.variance.numpy()
+        y_pred_std_uncalibrated = np.sqrt(pred_vars)
+        
+        if args.uncertainty:
+            # Calibration predictions
+            X_val_cal = NonTensorialInputs(val_graphs_cal)
+            cal_preds = model(X_val_cal)
+            y_cal_pred_mean = cal_preds.mean.numpy()
+            y_cal_pred_std = np.sqrt(cal_preds.variance.numpy())
+            y_cal_true = val_y_cal.cpu().numpy()
+            
+            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_cal_true)
+            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        else:
+            temperature = None
+            y_pred_std_calibrated = None
+    
+    metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
+    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics, params_source)
+    
+    # STEP 3: Save with calibration
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
-            y_pred_std=y_pred_std,
+            y_pred_std=y_pred_std_uncalibrated,
             y_true_original=y_test_original.cpu().numpy().flatten(),
             y_true_noisy=y_test.numpy(),
             filepath=args.filepath,
@@ -1990,11 +2232,10 @@ def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            y_pred_std_calibrated=y_pred_std_calibrated,
+            temperature=temperature
         )
-    metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
-    print("model: graph_gp")
-    print("rep: graph")
-    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics, params_source)
+    
     return metrics[3]
 
 def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
@@ -2063,7 +2304,7 @@ def get_custom_hyperparameter_bounds(metadata_path):
     except json.JSONDecodeError:
         raise ValueError("Invalid JSON format in metadata file.")
 
-def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, y_test_original, trial=None):
+def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None):
     from torchcp.regression.predictor import SplitPredictor, ACIPredictor
     from torchcp.regression.score import ABS
     from torch.utils.data import TensorDataset, DataLoader
@@ -2315,7 +2556,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
     
     return metrics[3]  # Return R²
 
-def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, y_test_original, trial=None,
+def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, calibration_size, y_test_original, trial=None,
                                 y_train_noisy=None, y_test_noisy=None, y_val_noisy=None):
     """
     Conformal prediction for graph models.
@@ -2621,6 +2862,112 @@ def load_best_hyperparameters(model_type, rep, results_dir='results'):
     
     return None
 
+def calibrate_bayesian_uncertainty(model, cal_loader, device, num_samples=100):
+    """
+    Calibrate BNN uncertainty estimates using variance scaling.
+    Returns optimal scaling factor T.
+    """
+    model.eval()
+    all_means = []
+    all_stds = []
+    all_targets = []
+    
+    # Collect predictions on calibration set
+    for X_batch, y_batch in cal_loader:
+        X_batch = X_batch.to(device)
+        preds = []
+        with torch.no_grad():
+            for _ in range(num_samples):
+                preds.append(model(X_batch).cpu().numpy())
+        
+        preds = np.array(preds)
+        all_means.append(preds.mean(axis=0).flatten())
+        all_stds.append(preds.std(axis=0).flatten())
+        all_targets.append(y_batch.numpy().flatten())
+    
+    y_mean = np.concatenate(all_means)
+    y_std = np.concatenate(all_stds)
+    y_true = np.concatenate(all_targets)
+    
+    # Find optimal temperature T by minimizing negative log-likelihood
+    def nll(T):
+        scaled_std = y_std * T
+        # Avoid log(0)
+        scaled_std = np.maximum(scaled_std, 1e-6)
+        nll = 0.5 * np.log(2 * np.pi * scaled_std**2) + 0.5 * ((y_true - y_mean)**2 / scaled_std**2)
+        return nll.mean()
+    
+    from scipy.optimize import minimize_scalar
+    result = minimize_scalar(nll, bounds=(0.1, 10.0), method='bounded')
+    optimal_T = result.x
+    
+    print(f"Optimal temperature for variance scaling: {optimal_T:.4f}")
+    return optimal_T
+
+def compute_calibration_metrics(y_true, y_pred_mean, y_pred_std):
+    """
+    Compute comprehensive calibration metrics.
+    """
+    metrics = {}
+    
+    # 1. Negative Log-Likelihood (lower is better)
+    y_pred_std = np.maximum(y_pred_std, 1e-6)  # Avoid log(0)
+    nll = 0.5 * np.log(2 * np.pi * y_pred_std**2) + 0.5 * ((y_true - y_pred_mean)**2 / y_pred_std**2)
+    metrics['nll'] = nll.mean()
+    
+    # 2. Check if standardized errors follow N(0,1)
+    z_scores = (y_true - y_pred_mean) / y_pred_std
+    metrics['z_mean'] = z_scores.mean()  # Should be ~0
+    metrics['z_std'] = z_scores.std()    # Should be ~1
+    
+    # 3. Expected Calibration Error (ECE) - binned approach
+    n_bins = 10
+    percentiles = np.linspace(0, 100, n_bins + 1)
+    
+    bin_edges = []
+    for p_low, p_high in zip(percentiles[:-1], percentiles[1:]):
+        # Get prediction intervals for this percentile
+        z_low = -np.percentile(np.abs(z_scores), p_high)
+        z_high = np.percentile(np.abs(z_scores), p_high)
+        
+        # Expected vs actual coverage
+        expected_coverage = (p_high - p_low) / 100
+        in_interval = np.abs(z_scores) <= np.percentile(np.abs(z_scores), p_high)
+        actual_coverage = in_interval.mean()
+        
+        bin_edges.append({
+            'expected': expected_coverage,
+            'actual': actual_coverage,
+            'count': len(z_scores)
+        })
+    
+    # ECE is weighted average of |expected - actual|
+    ece = sum(abs(b['expected'] - b['actual']) * b['count'] for b in bin_edges) / len(z_scores)
+    metrics['ece'] = ece
+    
+    # 4. Coverage at standard confidence levels
+    for confidence in [0.68, 0.95, 0.99]:
+        z_threshold = {0.68: 1.0, 0.95: 1.96, 0.99: 2.576}[confidence]
+        within_interval = np.abs(z_scores) <= z_threshold
+        metrics[f'coverage_{int(confidence*100)}'] = within_interval.mean()
+    
+    # 5. Sharpness (average uncertainty)
+    metrics['sharpness'] = y_pred_std.mean()
+    
+    return metrics
+
+def calibrate_quantile_predictions(y_cal_true, y_cal_pred_lower, y_cal_pred_upper):
+    """
+    Calibrate prediction intervals using isotonic regression.
+    """
+    # Fit isotonic regression to lower and upper bounds
+    iso_lower = IsotonicRegression(out_of_bounds='clip')
+    iso_upper = IsotonicRegression(out_of_bounds='clip')
+    
+    iso_lower.fit(y_cal_pred_lower, y_cal_true)
+    iso_upper.fit(y_cal_pred_upper, y_cal_true)
+    
+    return iso_lower, iso_upper
 # TODO: testing different loss functions:
 # dnn, mlp, mtl, residual_mlp, factorization_mlp, rnn, gru, custom
 # You can customize or swap loss functions (e.g., use nn.L1Loss() instead of MSELoss) depending on your use case.
