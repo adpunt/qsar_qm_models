@@ -171,6 +171,8 @@ def parse_arguments():
             "Default is None (no transformation)."
         )
     )
+    parser.add_argument("--calibration-size", type=int, default=20, 
+                       help="Percentage of validation set for conformal calibration (default is 20)")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -714,7 +716,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial)
 
         elif model_type == 'conformal':
-            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, y_test_original, trial)
+            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, args.calibration_size, y_test_original, trial)
 
     if args.tuning:
         temp_study_name = f"temp_qspr_{uuid.uuid4().hex}"
@@ -870,7 +872,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
             if model_type == "conformal":
                 return train_conformal_graph_model(
                     train_loader, test_loader, val_loader, args, s, iteration, 
-                    file_no, args.cp_base_model, y_test_original_tensor, trial,
+                    file_no, args.cp_base_model, args.calibration_size, y_test_original_tensor, trial,
                     y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
                 )
             else:
