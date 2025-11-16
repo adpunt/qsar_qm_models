@@ -1,4 +1,4 @@
-import argparse
+gitimport argparse
 import os
 import os.path as osp
 import random
@@ -38,6 +38,7 @@ sys.path.append('../preprocessing/')
 sys.path.append('../results/')
 
 from models import *
+from extract_and_cluster_for_domains import extract_and_cluster_for_domains
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -207,6 +208,13 @@ def parse_arguments():
     )
     parser.add_argument("--calibration-size", type=int, default=20, 
                        help="Percentage of validation set for conformal calibration (default is 20)")
+    parser.add_argument("--domain-method", type=str, default='none',
+                        choices=['none', 'random', 'fingerprint_kmeans', 'descriptor', 
+                                 'butina', 'splito', 'scaffold', 'molecular_weight'],
+                        help="Method for domain clustering")
+    parser.add_argument("--domain-representation", type=str, default='ecfp4',
+                        choices=['ecfp4', 'sns', 'pdv'],
+                        help="Representation for domain clustering")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -1006,8 +1014,12 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
         else:
             res = model_selector(None, model_type)
 
-def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset):
-    print(f"Normalising: {args.normalize}")
+def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset,):
+    rust_molecular_representations = args.molecular_representations.copy()
+    if args.domain_representation and args.domain_representation not in rust_molecular_representations:
+        rust_molecular_representations.append(args.domain_representation)
+    
+    print(f"normalising: {args.normalize}")
 
     config = {
         'sample_size': args.sample_size,
@@ -1067,6 +1079,15 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             else:
                 run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
+        domain_labels = extract_and_cluster_for_domains(
+            args=args,
+            file_no=file_no,
+            train_idx=train_idx,
+            test_idx=test_idx,
+            val_idx=val_idx,
+            parse_mmap=parse_mmap
+        )
+        
         # Read mmap files and train/test models for all molecular representations
         for rep in args.molecular_representations:
             if rep != "graph":
