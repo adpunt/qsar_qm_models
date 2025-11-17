@@ -42,6 +42,7 @@ from torchcp.regression.score import ABS
 from sklearn.isotonic import IsotonicRegression
 
 from utils import * 
+from loss_functions import *
 
 # TODO: reorder imports
 
@@ -1429,38 +1430,63 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     return metrics[3]
 
-def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep, patience=20, tolerance=0.01):
+def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep, 
+             patience=20, tolerance=0.01, domain_labels_train=None, domain_labels_val=None):
+    """
+    Added domain_labels parameters for domain-aware losses
+    """
     model.to(device)
     best_loss = float('inf')
     epochs_no_improve = 0
     
-    # Track losses for per-epoch saving
     train_losses = []
     val_losses = []
+    
+    # Check if loss needs domain labels
+    needs_domains = isinstance(criterion, (DomainWeightedLoss, DomainBalancedLoss, HeteroscedasticPerDomainLoss))
 
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
+        batch_idx = 0
+        
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
             outputs = model(X_batch)
-            loss = criterion(outputs, y_batch)
+            
+            # Pass domain labels if needed
+            if needs_domains and domain_labels_train is not None:
+                batch_domains = domain_labels_train[batch_idx:batch_idx+len(X_batch)]
+                batch_domains = torch.tensor(batch_domains, dtype=torch.long).to(device)
+                loss = criterion(outputs, y_batch, batch_domains)
+            else:
+                loss = criterion(outputs, y_batch)
+            
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
+            batch_idx += len(X_batch)
 
         # Validation
         model.eval()
         val_loss = 0
+        batch_idx = 0
         with torch.no_grad():
             for X_val, y_val in val_loader:
                 X_val, y_val = X_val.to(device), y_val.to(device)
                 val_outputs = model(X_val)
-                loss = criterion(val_outputs, y_val)
+                
+                if needs_domains and domain_labels_val is not None:
+                    batch_domains = domain_labels_val[batch_idx:batch_idx+len(X_val)]
+                    batch_domains = torch.tensor(batch_domains, dtype=torch.long).to(device)
+                    loss = criterion(val_outputs, y_val, batch_domains)
+                else:
+                    loss = criterion(val_outputs, y_val)
+                
                 val_loss += loss.item()
+                batch_idx += len(X_val)
 
-        # Store losses
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
@@ -1476,7 +1502,6 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
         if epoch % 5 == 0:
             print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
     
-    # Save per-epoch metrics if requested
     if args.save_per_epoch_metrics:
         save_per_epoch_metrics(
             train_losses=train_losses,
@@ -1489,7 +1514,8 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
             file_no=file_no
         )
 
-def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
+def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None, 
+                   domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
     params = {}
     params_source = 'default'
 
@@ -1514,6 +1540,50 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh(), 'softmax': nn.Softmax(dim=1)}
     activation = activation_map[params['activation']]
 
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    loss_kwargs = {}
+    
+    if args.tuning and trial is not None:
+        # Tune loss-specific hyperparameters
+        if loss_name == 'huber':
+            loss_kwargs['delta'] = trial.suggest_float('loss_delta', 0.1, 5.0)
+        elif loss_name == 'cauchy':
+            loss_kwargs['c'] = trial.suggest_float('loss_c', 0.1, 5.0)
+        elif loss_name == 'focal':
+            loss_kwargs['gamma'] = trial.suggest_float('loss_gamma', 0.5, 5.0)
+            loss_kwargs['alpha'] = trial.suggest_float('loss_alpha', 0.1, 0.9)
+        elif loss_name == 'truncated':
+            loss_kwargs['quantile'] = trial.suggest_float('loss_quantile', 0.7, 0.99)
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae'])
+        elif loss_name == 'barron':
+            loss_kwargs['alpha_init'] = trial.suggest_float('loss_alpha_init', 0.5, 4.0)
+            loss_kwargs['scale_init'] = trial.suggest_float('loss_scale_init', 0.1, 5.0)
+        elif loss_name == 'evidential':
+            loss_kwargs['coeff'] = trial.suggest_float('loss_coeff', 0.001, 1.0, log=True)
+        elif loss_name in ['domain_weighted', 'domain_balanced', 'adaptive_domain']:
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae', 'huber'])
+            if loss_name == 'adaptive_domain':
+                loss_kwargs['adaptation_rate'] = trial.suggest_float('loss_adapt_rate', 0.001, 0.1, log=True)
+    
+    # Parse additional loss parameters from command line if provided
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        cli_loss_kwargs = json.loads(args.loss_params)
+        loss_kwargs.update(cli_loss_kwargs)
+    
+    # Check if this loss needs domain labels
+    needs_domains = loss_name in ['domain_weighted', 'domain_balanced', 'het_per_domain', 'adaptive_domain', 'mixture_domain']
+    
+    # Validate domain clustering is enabled for domain-aware losses
+    if needs_domains and (domain_labels_train is None or args.k_domains <= 1):
+        print(f"Warning: {loss_name} requires domain clustering but k_domains={args.k_domains}. Falling back to MSE.")
+        loss_name = 'mse'
+        needs_domains = False
+    
+    # Add num_domains for domain-aware losses
+    if needs_domains:
+        loss_kwargs['num_domains'] = args.k_domains
+
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
@@ -1523,7 +1593,6 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     is_bayesian = args.bayesian_transformation is not None
     
     if is_bayesian and args.uncertainty:
-        # Split val: first half for early stopping, second half for calibration
         split_idx = len(x_val) // 2
         x_val_train = x_val[:split_idx]
         y_val_train = y_val[:split_idx]
@@ -1532,15 +1601,70 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         
         x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+        
+        # Split domain labels too if they exist
+        if domain_labels_val is not None:
+            domain_labels_val_train = domain_labels_val[:split_idx]
+            domain_labels_val_cal = domain_labels_val[split_idx:]
+        else:
+            domain_labels_val_train = None
+            domain_labels_val_cal = None
     else:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+        domain_labels_val_train = domain_labels_val
 
     val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
 
-    model = DNNRegressionModel(input_size=x_train.shape[1], hidden_size1=params['hidden_size1'], hidden_size2=params['hidden_size2'])
+    # STEP 2: Get loss function
+    from loss_functions import get_loss_function
+    
+    # Determine if we need domain-aware loss
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    needs_domains = loss_name in ['domain_weighted', 'domain_balanced', 'het_per_domain']
+    
+    # Check if domain clustering is actually enabled
+    if needs_domains and (domain_labels_train is None or args.k_domains <= 1):
+        print(f"Warning: {loss_name} requires domain clustering but k_domains={args.k_domains}. Falling back to MSE.")
+        loss_name = 'mse'
+        needs_domains = False
+    
+    # Parse loss parameters if provided
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Add num_domains for domain-aware losses
+    if needs_domains:
+        loss_kwargs['num_domains'] = args.k_domains
+    
+    # STEP 3: Create model with appropriate output size
+    if loss_name == 'heteroscedastic':
+        # Heteroscedastic needs 2 outputs: mean and log_variance
+        model = DNNRegressionModel(
+            input_size=x_train.shape[1], 
+            hidden_size1=params['hidden_size1'], 
+            hidden_size2=params['hidden_size2']
+        )
+        # Modify final layer to output 2 values
+        model.fc3 = nn.Linear(params['hidden_size2'], 2)
+        model.activation = activation
+        model.to(device)
+        criterion = get_loss_function(loss_name)
+    else:
+        # Standard model with 1 output
+        model = DNNRegressionModel(
+            input_size=x_train.shape[1], 
+            hidden_size1=params['hidden_size1'], 
+            hidden_size2=params['hidden_size2']
+        )
+        model.activation = activation
+        model.to(device)
+        criterion = get_loss_function(loss_name, **loss_kwargs)
 
+    # STEP 4: Apply Bayesian transformation if requested
     model_name = "dnn"
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
@@ -1552,17 +1676,15 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = "bnn_variational"
 
-    model.activation = activation
-    model.to(device)
-
-    criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
+    # STEP 5: Train with appropriate domain labels
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
+             domain_labels_train=domain_labels_train if needs_domains else None, 
+             domain_labels_val=domain_labels_val_train if needs_domains else None)
+    
     model.eval()
 
-    # TODO: if uncertainty isn't checked this creates an issue
-    # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian:
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
@@ -1574,7 +1696,11 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         preds_cal = []
         with torch.no_grad():
             for _ in range(num_samples):
-                preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+                output = model(x_val_cal_tensor).cpu().numpy()
+                # For heteroscedastic, only use mean predictions
+                if loss_name == 'heteroscedastic':
+                    output = output[:, 0:1]
+                preds_cal.append(output)
         
         preds_cal = np.stack(preds_cal, axis=0)
         y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
@@ -1587,7 +1713,11 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         preds = []
         with torch.no_grad():
             for _ in range(num_samples):
-                preds.append(model(x_test_tensor).cpu().numpy())
+                output = model(x_test_tensor).cpu().numpy()
+                # For heteroscedastic, only use mean predictions
+                if loss_name == 'heteroscedastic':
+                    output = output[:, 0:1]
+                preds.append(output)
 
         preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
@@ -1597,18 +1727,28 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred = y_pred_mean
 
     else:
+        # Non-Bayesian prediction
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
-        y_pred = y_pred_tensor.flatten()
+            # For heteroscedastic, extract mean predictions
+            if loss_name == 'heteroscedastic':
+                y_pred = y_pred_tensor[:, 0].flatten()
+            else:
+                y_pred = y_pred_tensor.flatten()
+        
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
 
     # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+    
+    # Create full model name with loss function
+    full_model_name = f"{model_name}_{loss_name}" if loss_name != 'mse' else model_name
+    
+    save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
-    # STEP 3: Save uncertainty with calibration
+    # STEP 7: Save uncertainty with calibration
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -1616,7 +1756,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name=model_name,
+            model_name=full_model_name,
             rep=rep,
             sigma_noise=s,
             iteration=iteration,
@@ -1627,17 +1767,16 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     return metrics[3]
 
-def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
+def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
+                            domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
     params = {}
     params_source = 'default'
-
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
         best_params = load_best_hyperparameters('flexible_dnn', rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
             print(f"Using tuned hyperparameters for flexible_dnn-{rep}")
-
     if not params:
         if args.tuning:
             num_layers = trial.suggest_int("num_layers", 1, 4)
@@ -1652,16 +1791,55 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             params['hidden_sizes'] = [128, 64]
             params['activation'] = 'relu'
             params_source = 'default'
-
+    
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh()}
     activation = activation_map[params['activation']]
-
+    
+    # Loss function setup
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    loss_kwargs = {}
+    
+    if args.tuning and trial is not None:
+        if loss_name == 'huber':
+            loss_kwargs['delta'] = trial.suggest_float('loss_delta', 0.1, 5.0)
+        elif loss_name == 'cauchy':
+            loss_kwargs['c'] = trial.suggest_float('loss_c', 0.1, 5.0)
+        elif loss_name == 'focal':
+            loss_kwargs['gamma'] = trial.suggest_float('loss_gamma', 0.5, 5.0)
+            loss_kwargs['alpha'] = trial.suggest_float('loss_alpha', 0.1, 0.9)
+        elif loss_name == 'truncated':
+            loss_kwargs['quantile'] = trial.suggest_float('loss_quantile', 0.7, 0.99)
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae'])
+        elif loss_name == 'barron':
+            loss_kwargs['alpha_init'] = trial.suggest_float('loss_alpha_init', 0.5, 4.0)
+            loss_kwargs['scale_init'] = trial.suggest_float('loss_scale_init', 0.1, 5.0)
+        elif loss_name == 'evidential':
+            loss_kwargs['coeff'] = trial.suggest_float('loss_coeff', 0.001, 1.0, log=True)
+        elif loss_name in ['domain_weighted', 'domain_balanced', 'adaptive_domain']:
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae', 'huber'])
+            if loss_name == 'adaptive_domain':
+                loss_kwargs['adaptation_rate'] = trial.suggest_float('loss_adapt_rate', 0.001, 0.1, log=True)
+    
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        cli_loss_kwargs = json.loads(args.loss_params)
+        loss_kwargs.update(cli_loss_kwargs)
+    
+    needs_domains = loss_name in ['domain_weighted', 'domain_balanced', 'het_per_domain', 'adaptive_domain', 'mixture_domain']
+    
+    if needs_domains and (domain_labels_train is None or args.k_domains <= 1):
+        print(f"Warning: {loss_name} requires domain clustering but k_domains={args.k_domains}. Falling back to MSE.")
+        loss_name = 'mse'
+        needs_domains = False
+    
+    if needs_domains:
+        loss_kwargs['num_domains'] = args.k_domains
+    
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
     y_test_tensor = torch.tensor(y_test, dtype=torch.float32).view(-1, 1).to(device)
     
-    # STEP 1: Split validation data if Bayesian
     is_bayesian = args.bayesian_transformation is not None
     
     if is_bayesian and args.uncertainty:
@@ -1673,15 +1851,30 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         
         x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+        
+        if domain_labels_val is not None:
+            domain_labels_val_train = domain_labels_val[:split_idx]
+            domain_labels_val_cal = domain_labels_val[split_idx:]
+        else:
+            domain_labels_val_train = None
+            domain_labels_val_cal = None
     else:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-
+        domain_labels_val_train = domain_labels_val
+    
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
     val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
-
-    model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
-
+    
+    if loss_name == 'heteroscedastic':
+        model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
+        model.network[-1] = nn.Linear(params['hidden_sizes'][-1], 2)
+    elif loss_name == 'evidential':
+        model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
+        model.network[-1] = nn.Linear(params['hidden_sizes'][-1], 4)
+    else:
+        model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
+    
     model_name = "flexible_dnn"
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
@@ -1692,14 +1885,17 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = "flexible_bnn_variational"
-
-    criterion = nn.MSELoss()
+    
+    from loss_functions import get_loss_function
+    criterion = get_loss_function(loss_name, **loss_kwargs)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
+    
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
+             domain_labels_train=domain_labels_train if needs_domains else None,
+             domain_labels_val=domain_labels_val_train if needs_domains else None)
+    
     model.eval()
-
-    # STEP 2: Get predictions and calibrate if Bayesian
+    
     if is_bayesian:
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
@@ -1707,26 +1903,33 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         num_samples = 100
         
         if args.uncertainty:
-            # Get calibration predictions
             x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
             preds_cal = []
             with torch.no_grad():
                 for _ in range(num_samples):
-                    preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+                    output = model(x_val_cal_tensor).cpu().numpy()
+                    if loss_name == 'heteroscedastic':
+                        output = output[:, 0:1]
+                    elif loss_name == 'evidential':
+                        output = output[:, 0:1]
+                    preds_cal.append(output)
             
             preds_cal = np.stack(preds_cal, axis=0)
             y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
             y_cal_pred_std = preds_cal.std(axis=0).flatten()
             
-            # Find optimal temperature
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
         
-        # Get test predictions
         preds = []
         with torch.no_grad():
             for _ in range(num_samples):
-                preds.append(model(x_test_tensor).cpu().numpy())
-
+                output = model(x_test_tensor).cpu().numpy()
+                if loss_name == 'heteroscedastic':
+                    output = output[:, 0:1]
+                elif loss_name == 'evidential':
+                    output = output[:, 0:1]
+                preds.append(output)
+        
         preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
         y_pred_std_uncalibrated = preds.std(axis=0).flatten()
@@ -1738,19 +1941,25 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             temperature = None
         
         y_pred = y_pred_mean
-
     else:
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
-        y_pred = y_pred_tensor.flatten()
+            if loss_name == 'heteroscedastic':
+                y_pred = y_pred_tensor[:, 0].flatten()
+            elif loss_name == 'evidential':
+                y_pred = y_pred_tensor[:, 0].flatten()
+            else:
+                y_pred = y_pred_tensor.flatten()
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
-
+    
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
-
-    # STEP 3: Save uncertainty with calibration
+    
+    full_model_name = f"{model_name}_{loss_name}" if loss_name != 'mse' else model_name
+    
+    save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
+    
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -1758,7 +1967,7 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name=model_name,
+            model_name=full_model_name,
             rep=rep,
             sigma_noise=s,
             iteration=iteration,
@@ -1766,7 +1975,7 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature
         )
-
+    
     return metrics[3]
 
 def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):

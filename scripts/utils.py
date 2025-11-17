@@ -16,9 +16,9 @@ import csv
 import shap
 import pandas as pd
 
-def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default'):
+def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default', loss_function='mse'):
     """
-    Save results to a CSV file with hyperparameter source tracking
+    Save results to a CSV file with loss function tracking
     """
     if filepath:
         file_exists = os.path.isfile(filepath)
@@ -28,11 +28,10 @@ def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='
             
             # Write header if the file is new
             if not file_exists:
-                writer.writerow(["sigma", "iteration", "model", "rep", "sample_size", "mae", "mse", "rmse", "r2", "pearson_corr", "params_source"])
+                writer.writerow(["sigma", "iteration", "model", "rep", "sample_size", "mae", "mse", "rmse", "r2", "pearson_corr", "params_source", "loss_function"])
             
             # Save the results
-            writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1], metrics[2], metrics[3], metrics[4], params_source])
-
+            writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1], metrics[2], metrics[3], metrics[4], params_source, loss_function])
 # TODO: add kendall's tau
 def calculate_regression_metrics(y_test, prediction, logging=False):
     mae = mean_absolute_error(y_test, prediction)

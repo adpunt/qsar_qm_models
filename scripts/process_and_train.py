@@ -1,4 +1,4 @@
-gitimport argparse
+import argparse
 import os
 import os.path as osp
 import random
@@ -215,6 +215,14 @@ def parse_arguments():
     parser.add_argument("--domain-representation", type=str, default='ecfp4',
                         choices=['ecfp4', 'sns', 'pdv'],
                         help="Representation for domain clustering")
+    parser.add_argument("--loss", type=str, default='mse',
+                   choices=['mse', 'mae', 'smooth_l1', 'huber', 'cauchy', 'log_cosh',
+                           'focal', 'truncated',
+                           'quantile_0.1', 'quantile_0.5', 'quantile_0.9',
+                           'heteroscedastic', 'evidential', 'barron', 
+                           'domain_weighted', 'domain_balanced', 'het_per_domain',
+                           'adaptive_domain', 'mixture_domain'],
+                   help="Loss function to use (default is mse)")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -729,12 +737,17 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
     return x_data, y_data, y_data_original
 
-def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original):
+def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original, domain_labels=None):
     def _black_box_function(trial):
         print(f"Running Optuna trial {trial.number}")
         return model_selector(trial)
 
     def model_selector(trial=None):
+        # Extract domain labels for each split
+        domain_labels_train = domain_labels.get('train', None) if domain_labels else None
+        domain_labels_val = domain_labels.get('val', None) if domain_labels else None
+        domain_labels_test = domain_labels.get('test', None) if domain_labels else None
+        
         if model_type in ['rf', 'qrf']:
             return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial)
 
@@ -751,16 +764,19 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == "dnn":
-            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
+            return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial, 
+                                 domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
 
         elif model_type == "flexible_dnn":
-            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
+            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial,
+                                          domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
 
         elif model_type == "lgb":
             return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
-            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
+            return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial,
+                                         domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
 
         elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial)
@@ -1079,14 +1095,16 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             else:
                 run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
-        domain_labels = extract_and_cluster_for_domains(
-            args=args,
-            file_no=file_no,
-            train_idx=train_idx,
-            test_idx=test_idx,
-            val_idx=val_idx,
-            parse_mmap=parse_mmap
-        )
+        domain_labels = None
+        if args.k_domains > 1 and args.domain_method != 'none':
+            domain_labels = extract_and_cluster_for_domains(
+                args=args,
+                file_no=file_no,
+                train_idx=train_idx,
+                test_idx=test_idx,
+                val_idx=val_idx,
+                parse_mmap=parse_mmap
+            )
         
         # Read mmap files and train/test models for all molecular representations
         for rep in args.molecular_representations:
