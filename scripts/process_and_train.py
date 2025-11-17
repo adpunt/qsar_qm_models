@@ -704,7 +704,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == "flexible_dnn":
-            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, y_test_original, trial)
+            return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
 
         elif model_type == "lgb":
             return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
