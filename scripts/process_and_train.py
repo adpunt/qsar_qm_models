@@ -1023,26 +1023,26 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     for rep in args.molecular_representations:
         if rep != "graph":
             # TODO: add back in try catch block when done debugging!!!
-            # try: 
-            for model in args.models:
-                if model not in graph_models:
-                    # Reset mmap pointers
-                    for file in files.values():
-                        file.seek(0)
+            try: 
+                for model in args.models:
+                    if model not in graph_models:
+                        # Reset mmap pointers
+                        for file in files.values():
+                            file.seek(0)
 
-                    x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                    x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                    x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                        x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                        x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                        x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
 
-                    print(f"model: {model}")
-                    print(f"rep: {rep}")
-                    run_model(
-                        x_train, y_train, x_test, y_test, x_val, y_val,
-                        model, args, iteration_seed, rep, iteration, s,
-                        file_no, y_test_original
-                    )
-            # except Exception as e:
-            #     print(f"Error with {rep} and {model}; more details: {e}")
+                        print(f"model: {model}")
+                        print(f"rep: {rep}")
+                        run_model(
+                            x_train, y_train, x_test, y_test, x_val, y_val,
+                            model, args, iteration_seed, rep, iteration, s,
+                            file_no, y_test_original
+                        )
+            except Exception as e:
+                print(f"Error with {rep} and {model}; more details: {e}")
 
     for key in list(files.keys()):
         filename = f"{key}_{file_no}.mmap"
