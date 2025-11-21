@@ -1978,7 +1978,8 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     
     return metrics[3]
 
-def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
+def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
+                           domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
     params = {}
     params_source = 'default'
 
@@ -2000,6 +2001,46 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             params['hidden_size'], params['num_hidden_layers'], params['dropout_rate'], params['lr'] = 128, 2, 0.2, 0.001
             params_source = 'default'
 
+    # Loss function setup
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    loss_kwargs = {}
+    
+    if args.tuning and trial is not None:
+        if loss_name == 'huber':
+            loss_kwargs['delta'] = trial.suggest_float('loss_delta', 0.1, 5.0)
+        elif loss_name == 'cauchy':
+            loss_kwargs['c'] = trial.suggest_float('loss_c', 0.1, 5.0)
+        elif loss_name == 'focal':
+            loss_kwargs['gamma'] = trial.suggest_float('loss_gamma', 0.5, 5.0)
+            loss_kwargs['alpha'] = trial.suggest_float('loss_alpha', 0.1, 0.9)
+        elif loss_name == 'truncated':
+            loss_kwargs['quantile'] = trial.suggest_float('loss_quantile', 0.7, 0.99)
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae'])
+        elif loss_name == 'barron':
+            loss_kwargs['alpha_init'] = trial.suggest_float('loss_alpha_init', 0.5, 4.0)
+            loss_kwargs['scale_init'] = trial.suggest_float('loss_scale_init', 0.1, 5.0)
+        elif loss_name == 'evidential':
+            loss_kwargs['coeff'] = trial.suggest_float('loss_coeff', 0.001, 1.0, log=True)
+        elif loss_name in ['domain_weighted', 'domain_balanced', 'adaptive_domain']:
+            loss_kwargs['base_loss'] = trial.suggest_categorical('loss_base', ['mse', 'mae', 'huber'])
+            if loss_name == 'adaptive_domain':
+                loss_kwargs['adaptation_rate'] = trial.suggest_float('loss_adapt_rate', 0.001, 0.1, log=True)
+    
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        cli_loss_kwargs = json.loads(args.loss_params)
+        loss_kwargs.update(cli_loss_kwargs)
+    
+    needs_domains = loss_name in ['domain_weighted', 'domain_balanced', 'het_per_domain', 'adaptive_domain', 'mixture_domain']
+    
+    if needs_domains and (domain_labels_train is None or args.k_domains <= 1):
+        print(f"Warning: {loss_name} requires domain clustering but k_domains={args.k_domains}. Falling back to MSE.")
+        loss_name = 'mse'
+        needs_domains = False
+    
+    if needs_domains:
+        loss_kwargs['num_domains'] = args.k_domains
+
     x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
     x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
@@ -2017,33 +2058,52 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         
         x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
+        
+        if domain_labels_val is not None:
+            domain_labels_val_train = domain_labels_val[:split_idx]
+            domain_labels_val_cal = domain_labels_val[split_idx:]
+        else:
+            domain_labels_val_train = None
+            domain_labels_val_cal = None
+            
         val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
     elif x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+        domain_labels_val_train = domain_labels_val
         val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
     else:
+        domain_labels_val_train = None
         val_loader = None
 
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
 
+    # Model setup with special output layers for certain losses
     if model_type == "mlp":
         model = MLPRegressor(input_size=x_train.shape[1], hidden_size=params['hidden_size'],
-                             num_hidden_layers=params['num_hidden_layers'], dropout_rate=params['dropout_rate']) 
-        criterion = nn.MSELoss()
-
+                             num_hidden_layers=params['num_hidden_layers'], dropout_rate=params['dropout_rate'])
     elif model_type == "residual_mlp":
         model = ResidualMLP(input_size=x_train.shape[1], hidden_size=128, num_layers=3)
-        criterion = nn.MSELoss()
-
     elif model_type == "factorization_mlp":
         model = FactorizationMLP(input_size=x_train.shape[1], hidden_size=128, factor_size=16)
-        criterion = nn.MSELoss()
-
     elif model_type == "mtl":
         model = MTLRegressionModel(input_size=x_train.shape[1], hidden_size=128, num_tasks=1)
-        criterion = nn.MSELoss()
+    
+    # Modify output layer for heteroscedastic or evidential losses if needed
+    if loss_name == 'heteroscedastic':
+        # Need to modify the last layer to output 2 values (mean and variance)
+        if hasattr(model, 'fc_out'):
+            model.fc_out = nn.Linear(model.fc_out.in_features, 2)
+        elif hasattr(model, 'output_layer'):
+            model.output_layer = nn.Linear(model.output_layer.in_features, 2)
+    elif loss_name == 'evidential':
+        # Need to modify the last layer to output 4 values
+        if hasattr(model, 'fc_out'):
+            model.fc_out = nn.Linear(model.fc_out.in_features, 4)
+        elif hasattr(model, 'output_layer'):
+            model.output_layer = nn.Linear(model.output_layer.in_features, 4)
 
+    # Apply Bayesian transformation before moving to device
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
         model_name = f"{model_type}_bnn_full"
@@ -2057,9 +2117,18 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         model_name = model_type
 
     model.to(device)
+    
+    # Get loss function
+    from loss_functions import get_loss_function
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
-    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
+    # Train with domain labels if needed
+    train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
+             domain_labels_train=domain_labels_train if needs_domains else None,
+             domain_labels_val=domain_labels_val_train if needs_domains else None)
+    
     model.eval()
 
     # STEP 2: Get predictions and calibrate if Bayesian
@@ -2075,7 +2144,12 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             preds_cal = []
             with torch.no_grad():
                 for _ in range(num_samples):
-                    preds_cal.append(model(x_val_cal_tensor).cpu().numpy())
+                    output = model(x_val_cal_tensor).cpu().numpy()
+                    if loss_name == 'heteroscedastic':
+                        output = output[:, 0:1]
+                    elif loss_name == 'evidential':
+                        output = output[:, 0:1]
+                    preds_cal.append(output)
             
             preds_cal = np.stack(preds_cal, axis=0)
             y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
@@ -2087,7 +2161,12 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         preds = []
         with torch.no_grad():
             for _ in range(num_samples):
-                preds.append(model(x_test_tensor).cpu().numpy())
+                output = model(x_test_tensor).cpu().numpy()
+                if loss_name == 'heteroscedastic':
+                    output = output[:, 0:1]
+                elif loss_name == 'evidential':
+                    output = output[:, 0:1]
+                preds.append(output)
         
         preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
@@ -2104,13 +2183,22 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     else:
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
-        y_pred = y_pred_tensor.flatten()
+            if loss_name == 'heteroscedastic':
+                y_pred = y_pred_tensor[:, 0].flatten()
+            elif loss_name == 'evidential':
+                y_pred = y_pred_tensor[:, 0].flatten()
+            else:
+                y_pred = y_pred_tensor.flatten()
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
      
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+    
+    # Update model name with loss function if not MSE
+    full_model_name = f"{model_name}_{loss_name}" if loss_name != 'mse' else model_name
+    
+    save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
     # STEP 3: Save uncertainty with calibration
     if args.uncertainty and is_bayesian:
@@ -2120,7 +2208,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name=model_name,
+            model_name=full_model_name,
             rep=rep,
             sigma_noise=s,
             iteration=iteration,
