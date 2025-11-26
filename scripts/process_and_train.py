@@ -360,105 +360,6 @@ def load_qm9(target):
 
     return qm9
 
-def split_qm9(qm9, args, files):
-
-    # Shuffle with random seed
-    indices = torch.randperm(len(qm9))
-    qm9 = qm9.index_select(indices)
-
-    if args.split == 'random':
-        qm9 = qm9.shuffle()
-        train_index = int(args.sample_size * 0.8)
-        test_index = train_index + int(args.sample_size * 0.1)
-        val_index = test_index + int(args.sample_size * 0.1)
-        train_idx = list(range(train_index))
-        val_idx = list(range(train_index, test_index))
-        test_idx = list(range(test_index, val_index))
-
-    elif args.split == 'scaffold':
-        qm9_smiles = [data.smiles for data in qm9[:args.sample_size]]
-        Xs = np.zeros(len(qm9_smiles))  # Dummy features just for splitting
-        dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=qm9_smiles)
-
-        splitter = dc.splits.ScaffoldSplitter()
-        split = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
-        train_idx, val_idx, test_idx = split
-
-    else:
-        raise ValueError("Invalid split type")
-
-    mols_train = deque()
-
-    ecfp_featuriser = None
-    if 'sns' in args.molecular_representations:
-        for index, data in enumerate(qm9[:args.sample_size]):
-            if index in train_idx:
-                mols_train.append(Chem.MolFromSmiles(data.smiles))
-        ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
-                                                               max_radius = 2, 
-                                                               pharm_atom_invs = False, 
-                                                               bond_invs = True, 
-                                                               chirality = False, 
-                                                               sub_counts = True, 
-                                                               vec_dimension = 1024, 
-                                                               print_train_set_info = args.logging)
-
-    for index, data in enumerate(qm9[:args.sample_size]):
-        smiles_isomeric = data.smiles
-        smiles_canonical = None
-        smiles_randomized = None
-        mol = None
-
-        category = "excluded"
-        if index in train_idx:
-            category = "train"
-        elif index in test_idx:
-            category = "test"
-        elif index in val_idx:
-            category = "val"
-
-        smiles_canonical = None
-        if 'smiles' in args.molecular_representations:
-            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
-            result = cursor.fetchone()
-            if result:
-                smiles_canonical = result[0]
-
-        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
-            mol = Chem.MolFromSmiles(smiles_isomeric)
-            if not mol:
-                continue
-
-            if not smiles_canonical:
-                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-                if smiles_canonical is None:
-                    continue
-
-            if 'randomized_smiles' in args.molecular_representations:
-                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
-
-        sns_fp = None
-        if 'sns' in args.molecular_representations:
-            if index in train_idx:
-                mol = mols_train.popleft()
-            if not mol: 
-                mol = Chem.MolFromSmiles(smiles_isomeric)
-            sns_fp = ecfp_featuriser(mol)
-
-        pdv = None
-        if 'pdv' in args.molecular_representations:
-            pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-
-        if smiles_canonical and not (category == "excluded"):
-            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
-                continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
-
-    if 'sns' in args.molecular_representations:
-        del mols_train
-
-    return train_idx, test_idx, val_idx
-
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
     mol = Chem.MolFromSmiles(smiles_string)
@@ -1010,12 +911,6 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
 
-    files = {
-        "train": open('train_' + str(file_no) + '.mmap', 'rb'),
-        "test": open('test_' + str(file_no) + '.mmap', 'rb'),
-        "val": open('val_' + str(file_no) + '.mmap', 'rb'),
-    }
-
     if 'graph' in args.molecular_representations:
         run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
@@ -1044,13 +939,122 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             except Exception as e:
                 print(f"Error with {rep} and {model}; more details: {e}")
 
+def bootstrapping_iteration(args, dataset, train_source, test_idx, val_idx, iteration, env, rust_executable_path, s):
+    # Set seeds
+    iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
+    random.seed(iteration_seed)
+    np.random.seed(iteration_seed)
+    torch.manual_seed(iteration_seed)
+    file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
+
+    files = {
+        "train": open('train_' + str(file_no) + '.mmap', 'wb+'),
+        "test": open('test_' + str(file_no) + '.mmap', 'wb+'),
+        "val": open('val_' + str(file_no) + '.mmap', 'wb+'),
+    }
+
+    bootstrap_train_idx = 0
+    rng = np.random.default_rng(iteration_seed)
+    if args.split == 'random':
+        bootstrap_train_idx = rng.choice(
+            train_source,  # This is the parameter
+            size=len(train_source),
+            replace=True
+        )
+
+    elif args.split == 'scaffold':
+        # Use random.choices instead of numpy for list of lists
+        bootstrap_scaffolds = random.choices(
+            train_source,  # list of scaffold groups
+            k=len(train_source)
+        )
+        bootstrap_train_idx = sorted(
+            [i for group in bootstrap_scaffolds for i in group]
+        )
+
+    mols_train = deque()
+
+    ecfp_featuriser = None
+    if 'sns' in args.molecular_representations:
+        for index, data in enumerate(dataset[:args.sample_size]):
+            if index in bootstrap_train_idx:
+                mols_train.append(Chem.MolFromSmiles(data.smiles))
+        ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
+                                                               max_radius = 2, 
+                                                               pharm_atom_invs = False, 
+                                                               bond_invs = True, 
+                                                               chirality = False, 
+                                                               sub_counts = True, 
+                                                               vec_dimension = 1024, 
+                                                               print_train_set_info = args.logging)
+
+    for index, data in enumerate(dataset[:args.sample_size]):
+        smiles_isomeric = data.smiles
+        smiles_canonical = None
+        smiles_randomized = None
+        mol = None
+
+        category = "excluded"
+        if index in bootstrap_train_idx:
+            category = "train"
+        elif index in test_idx:
+            category = "test"
+        elif index in val_idx:
+            category = "val"
+
+        smiles_canonical = None
+        if 'smiles' in args.molecular_representations:
+            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
+            result = cursor.fetchone()
+            if result:
+                smiles_canonical = result[0]
+
+        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
+            mol = Chem.MolFromSmiles(smiles_isomeric)
+            if not mol:
+                continue
+
+            if not smiles_canonical:
+                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                if smiles_canonical is None:
+                    continue
+
+            if 'randomized_smiles' in args.molecular_representations:
+                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+
+        sns_fp = None
+        if 'sns' in args.molecular_representations:
+            if index in bootstrap_train_idx:
+                mol = mols_train.popleft()
+            if not mol: 
+                mol = Chem.MolFromSmiles(smiles_isomeric)
+            sns_fp = ecfp_featuriser(mol)
+
+        pdv = None
+        if 'pdv' in args.molecular_representations:
+            pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
+
+        if smiles_canonical and not (category == "excluded"):
+            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
+                continue
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+
+    if 'sns' in args.molecular_representations:
+        del mols_train   
+
+    gc.collect()
+        
+    target_domain = 1 # TODO: change, this is just a placeholder
+    process_and_run(args, iteration, iteration_seed, file_no, bootstrap_train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=dataset)
+ 
     for key in list(files.keys()):
         filename = f"{key}_{file_no}.mmap"
         files[key].close()
-        os.remove(filename)  # <-- deletes the actual file
+        os.remove(filename) 
         del files[key]
     files.clear()
     gc.collect()
+
 
 def main():
     start_time = time.time()
@@ -1072,34 +1076,56 @@ def main():
         s = float(s)
         print(f"Sigma: {s}")
 
-        for iteration in range(args.bootstrapping):
-            # Set seeds
-            iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
-            random.seed(iteration_seed)
-            np.random.seed(iteration_seed)
-            torch.manual_seed(iteration_seed)
-            file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
+        if args.dataset == 'QM9':
+            # Shuffle once
+            qm9 = qm9.shuffle()
 
-            files = {
-                "train": open('train_' + str(file_no) + '.mmap', 'wb+'),
-                "test": open('test_' + str(file_no) + '.mmap', 'wb+'),
-                "val": open('val_' + str(file_no) + '.mmap', 'wb+'),
-            }
+        if args.split == 'random':
+            n = args.sample_size
+            train_end = int(0.8 * n)
+            val_end   = int(0.9 * n)
+            global_train_idx = list(range(0, train_end))
+            val_idx   = list(range(train_end, val_end))
+            test_idx  = list(range(val_end, n))
 
-            train_size = int(args.sample_size * 0.8)
-            test_size = int(args.sample_size * 0.1)
-            val_size = int(args.sample_size * 0.1)
+        elif args.split == 'scaffold':
 
-            if args.dataset == 'QM9':
-                train_idx, test_idx, val_idx = split_qm9(qm9, args, files)
+            smiles = [data.smiles for data in qm9[:args.sample_size]]
+            splitter = dc.splits.ScaffoldSplitter()
 
-            else:
-                train_idx, test_idx, val_idx = load_and_split_polaris(args, files)
-
-            gc.collect()
+            # DeepChem expects an object with .ids attribute, not a raw list
+            class SMILESDataset:
+                def __init__(self, smiles_list):
+                    self.ids = smiles_list
+                
+                def __len__(self):
+                    return len(self.ids)
             
-            target_domain = 1 # TODO: change, this is just a placeholder
-            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=qm9)
+            scaffold_sets = splitter.generate_scaffolds(SMILESDataset(smiles))
+
+            # shuffle scaffold groups once
+            rng = np.random.default_rng(args.random_seed)
+            rng.shuffle(scaffold_sets)
+
+            # split scaffold groups 80/10/10
+            n_scaff = len(scaffold_sets)
+            train_end = int(0.8 * n_scaff)
+            val_end   = int(0.9 * n_scaff)
+
+            train_scaffolds = scaffold_sets[:train_end]
+            val_scaffolds   = scaffold_sets[train_end:val_end]
+            test_scaffolds  = scaffold_sets[val_end:]
+
+            # flatten scaffold groups into index lists
+            global_train_idx = sorted([i for group in train_scaffolds for i in group])
+            val_idx          = sorted([i for group in val_scaffolds   for i in group])
+            test_idx         = sorted([i for group in test_scaffolds  for i in group])
+
+        for iteration in range(args.bootstrapping):
+            if args.split == 'scaffold':
+                bootstrapping_iteration(args, qm9, train_scaffolds, test_idx, val_idx, iteration, env, rust_executable_path, s)
+            else:
+                bootstrapping_iteration(args, qm9, global_train_idx, test_idx, val_idx, iteration, env, rust_executable_path, s)
 
         current_time = time.time()
         print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")
