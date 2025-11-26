@@ -81,8 +81,6 @@ DEFAULT_DESCRIPTOR_LIST = [
             'fr_thiophene', 'fr_unbrch_alkane', 'fr_urea', 'qed'
         ]
 
-# TODO: figure out tuning for GINs
-
 properties = {
     'homo_lumo_gap': 4, 'alpha': 1, 'G': 10, 'H': 9, 'U': 8,
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
@@ -119,6 +117,42 @@ except Exception as e:
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+ADME_TARGETS = {
+    'hlm': 'LOG_HLM_CLint',
+    'rlm': 'LOG_RLM_CLint',
+    'solubility': 'LOG_SOLUBILITY',
+    'mdr1': 'LOG_MDR1-MDCK_ER',
+    'hppb': 'LOG_HPPB',
+    'rppb': 'LOG_RPPB'
+}
+
+def load_adme(target):
+    """Load ADME dataset from Polaris Hub"""
+    import polaris as po
+    
+    if target not in ADME_TARGETS:
+        raise ValueError(f"Unknown ADME target: {target}. Valid targets: {list(ADME_TARGETS.keys())}")
+    
+    target_column = ADME_TARGETS[target]
+    
+    print(f"Loading ADME dataset with target: {target_column}")
+    dataset = po.load_dataset("biogen/adme-fang-v1")
+    
+    # Find SMILES column
+    smiles_col = None
+    for col in dataset.columns:
+        if 'smiles' in col.lower():
+            smiles_col = col
+            break
+    
+    if smiles_col is None:
+        raise ValueError(f"No SMILES column found. Available: {dataset.columns}")
+    
+    print(f"SMILES column: {smiles_col}")
+    print(f"Dataset size: {dataset.n_rows}")
+    
+    return dataset, smiles_col, target_column
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -232,118 +266,115 @@ def write_to_mmap(
     files[category].write(entry)
     files[category].flush()
 
-def load_and_split_polaris(args, files):
-    po.load_dataset("biogen/adme-fang-v1")
-    dataset_size = dataset.size()[0]
-
-    # Select `args.sample_size` random indices
-    N = args.sample_size
-    random_indices = np.random.choice(dataset_size, N, replace=False)
-
-    # Allocate space-efficient storage for molecules & labels
-    smiles_arr = np.empty(N, dtype="U128")
-    target_arr = np.zeros(N, dtype=np.float32)
-
-    # Load SMILES & binding data into NumPy arrays
-    for i, idx in enumerate(random_indices):
-        smiles_str = dataset.get_data(idx, "molecule_smiles")
-        # TODO: need to test if this is still right, do a basic test
-        if args.clean_smiles:
-            smiles_arr[i] = smiles_arr[i].replace("[Dy]", "")
-        target_arr[i] = dataset.get_data(idx, binding_target)
-
-    if args.split == 'random':
-        train_index = int(args.sample_size * 0.8)
-        test_index = train_index + int(args.sample_size * 0.1)
-        val_index = test_index + int(args.sample_size * 0.1)
-        train_idx = list(range(train_index))
-        val_idx = list(range(train_index, test_index))
-        test_idx = list(range(test_index, val_index))
-
-    elif args.split == 'scaffold':
-        Xs = np.array(target_arr).reshape(-1, 1)
-        dataset = dc.data.DiskDataset.from_numpy(X=Xs,ids=smiles_arr)
-
-        splitter = dc.splits.ScaffoldSplitter()
+def load_and_split_polaris(dataset_tuple, args, files):
+    dataset, smiles_col, target_col = dataset_tuple
+    
+    # Access table directly
+    table = dataset.table
+    
+    # DEBUG: Print available columns
+    print(f"Available columns in table: {table.columns.tolist()}")
+    print(f"Looking for SMILES column: {smiles_col}")
+    print(f"Looking for target column: {target_col}")
+    
+    n_total = min(args.sample_size, len(table))
+    
+    smiles_list = []
+    target_list = []
+    
+    for i in range(n_total):
+        try:
+            smiles = table[smiles_col][i]
+            target = table[target_col][i]
             
-        train_idx, val_idx, test_idx = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
-
-    else:
-        raise ValueError("Invalid split type")
-
-    mols_train = deque()
-
-    if 'sns' in args.molecular_representations:
-        for index, smiles in enumerate(smiles_arr[:args.sample_size]):
-            if index in train_idx:
-                mol = Chem.MolFromSmiles(smiles)
-                if mol:
-                    mols_train.append(mol)
-        ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
-                                                               max_radius = 2, 
-                                                               pharm_atom_invs = False, 
-                                                               bond_invs = True, 
-                                                               chirality = False, 
-                                                               sub_counts = True, 
-                                                               vec_dimension = 1024,
-                                                               print_train_set_info = args.logging)
-
-    for index, smiles_isomeric in enumerate(smiles_arr[:args.sample_size]):
-        smiles_canonical = None
-        smiles_randomized = None
-        mol = None
-
-        category = "excluded"
-        if index in train_idx:
-            category = "train"
-        elif index in test_idx:
-            category = "test"
-        elif index in val_idx:
-            category = "val"
-
-        smiles_canonical = None
-        if 'smiles' in args.molecular_representations:
-            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
-            result = cursor.fetchone()
-            if result:
-                smiles_canonical = result[0]
-
-        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
-            mol = Chem.MolFromSmiles(smiles_isomeric)
-            if not mol:
+            if smiles is None or target is None:
                 continue
-
-            if not smiles_canonical:
-                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-                if smiles_canonical is None:
-                    continue
-
-            if 'randomized_smiles' in args.molecular_representations:
-                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
-
+            if isinstance(target, (float, np.floating)) and np.isnan(target):
+                continue
+            
+            smiles_list.append(str(smiles))
+            target_list.append(float(target))
+        except Exception as e:
+            print(f"Row {i} error: {e}")
+            continue
+    
+    print(f"Total valid molecules: {len(smiles_list)}")
+    
+    # Split into train/test/val
+    n_valid = len(smiles_list)
+    
+    if args.split == 'random':
+        train_end = int(n_valid * 0.8)
+        val_end = int(n_valid * 0.9)
+        train_idx = list(range(train_end))
+        val_idx = list(range(train_end, val_end))
+        test_idx = list(range(val_end, n_valid))
+    
+    elif args.split == 'scaffold':
+        Xs = np.zeros(n_valid).reshape(-1, 1)
+        dc_dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=smiles_list)
+        splitter = dc.splits.ScaffoldSplitter()
+        train_idx, val_idx, test_idx = splitter.split(dc_dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+    
+    # Prepare SNS if needed
+    mols_train = deque()
+    ecfp_featuriser = None
+    
+    if 'sns' in args.molecular_representations:
+        for idx in train_idx:
+            mol = Chem.MolFromSmiles(smiles_list[idx])
+            if mol:
+                mols_train.append(mol)
+        ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(
+            mols_train=mols_train, max_radius=2, pharm_atom_invs=False,
+            bond_invs=True, chirality=False, sub_counts=True,
+            vec_dimension=1024, print_train_set_info=args.logging
+        )
+    
+    # Write to mmap
+    for local_idx in range(n_valid):
+        category = "excluded"
+        if local_idx in train_idx:
+            category = "train"
+        elif local_idx in test_idx:
+            category = "test"
+        elif local_idx in val_idx:
+            category = "val"
+        
+        if category == "excluded":
+            continue
+        
+        smiles_isomeric = smiles_list[local_idx]
+        mol = Chem.MolFromSmiles(smiles_isomeric)
+        if not mol:
+            continue
+        
+        smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+        if not smiles_canonical:
+            continue
+        
+        smiles_randomized = None
+        if 'randomized_smiles' in args.molecular_representations:
+            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+        
         sns_fp = None
         if 'sns' in args.molecular_representations:
-            if index in train_idx:
+            if local_idx in train_idx and mols_train:
                 mol = mols_train.popleft()
-            if not mol: 
-                mol = Chem.MolFromSmiles(smiles_isomeric)
             sns_fp = ecfp_featuriser(mol)
-
+        
         pdv = None
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-
-        if smiles_canonical and not (category == "excluded"):
-            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
-                continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
-
+        
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
+                     target_list[local_idx], category, files,
+                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+    
     if 'sns' in args.molecular_representations:
         del mols_train
-
-    del smiles_arr, target_arr
+    
     gc.collect()
-
     return train_idx, test_idx, val_idx
 
 def load_qm9(target):
@@ -975,7 +1006,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
         else:
             res = model_selector(None, model_type)
 
-def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=None):
+def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset):
     train_count = len(train_idx)
     test_count = len(test_idx)
 
@@ -992,7 +1023,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         'molecular_representations': args.molecular_representations,
         'k_domains': args.k_domains,
         'logging': args.logging,
-        'regression': args.dataset == 'QM9',
+        'regression': args.dataset in ['QM9', 'ADME'],
         'normalize': args.normalize,
         'uncertainty': args.uncertainty
     }
@@ -1028,7 +1059,10 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     }
 
     if 'graph' in args.molecular_representations:
-        run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
+        if args.dataset == 'ADME':
+            print("WARNING: ADME dataset has no graph structure, skipping graph models")
+        else:
+            run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
     # Read mmap files and train/test models for all molecular representations
     for rep in args.molecular_representations:
@@ -1073,10 +1107,15 @@ def main():
 
     rust_executable_path = os.path.join(base_dir, '../rust/target/release/rust_processor')
 
-    qm9 = None
+    dataset = None
     if args.dataset == 'QM9':
-        qm9 = load_qm9(args.target)
+        dataset = load_qm9(args.target)
         print("QM9 loaded")
+    elif args.dataset == 'ADME':
+        dataset = load_adme(args.target)
+        print("ADME loaded")
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
 
     sigma_time = time.time()
     for s in args.sigma:
@@ -1105,12 +1144,12 @@ def main():
                 train_idx, test_idx, val_idx = split_qm9(qm9, args, files)
 
             else:
-                train_idx, test_idx, val_idx = load_and_split_polaris(args, files)
+                train_idx, test_idx, val_idx = load_and_split_polaris(dataset, args, files)
 
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
-            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset=qm9)
+            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
 
         current_time = time.time()
         print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")
