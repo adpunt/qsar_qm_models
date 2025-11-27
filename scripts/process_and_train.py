@@ -403,6 +403,10 @@ def split_qm9(qm9, args, files):
                                                                vec_dimension = 1024, 
                                                                print_train_set_info = args.logging)
 
+    successful_train_idx = []
+    successful_test_idx = []
+    successful_val_idx = []
+
     for index, data in enumerate(qm9[:args.sample_size]):
         smiles_isomeric = data.smiles
         smiles_canonical = None
@@ -454,10 +458,17 @@ def split_qm9(qm9, args, files):
                 continue
             write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
+            if category == "train":
+                successful_train_idx.append(index)
+            elif category == "test":
+                successful_test_idx.append(index)
+            elif category == "val":
+                successful_val_idx.append(index)
+
     if 'sns' in args.molecular_representations:
         del mols_train
 
-    return train_idx, test_idx, val_idx
+    return successful_train_idx, successful_test_idx, successful_val_idx
 
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
