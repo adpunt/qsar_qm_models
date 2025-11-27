@@ -1052,12 +1052,6 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
 
-    files = {
-        "train": open('train_' + str(file_no) + '.mmap', 'rb'),
-        "test": open('test_' + str(file_no) + '.mmap', 'rb'),
-        "val": open('val_' + str(file_no) + '.mmap', 'rb'),
-    }
-
     if 'graph' in args.molecular_representations:
         if args.dataset == 'ADME':
             print("WARNING: ADME dataset has no graph structure, skipping graph models")
