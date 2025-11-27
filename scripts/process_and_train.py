@@ -1141,7 +1141,7 @@ def main():
             val_size = int(args.sample_size * 0.1)
 
             if args.dataset == 'QM9':
-                train_idx, test_idx, val_idx = split_qm9(qm9, args, files)
+                train_idx, test_idx, val_idx = split_qm9(dataset, args, files)
 
             else:
                 train_idx, test_idx, val_idx = load_and_split_polaris(dataset, args, files)
