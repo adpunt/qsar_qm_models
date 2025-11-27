@@ -1007,10 +1007,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
             res = model_selector(None, model_type)
 
 def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset):
-    train_count = len(train_idx)
-    test_count = len(test_idx)
-
-    print(f"normalising: {args.normalize}")
+    print(f"Normalising: {args.normalize}")
 
     config = {
         'sample_size': args.sample_size,
@@ -1052,44 +1049,65 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
 
-    if 'graph' in args.molecular_representations:
-        if args.dataset == 'ADME':
-            print("WARNING: ADME dataset has no graph structure, skipping graph models")
-        else:
-            run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
+    # Close the write-mode files before reopening in read mode
+    for f in files.values():
+        f.close()
+    
+    # Now reopen in read mode
+    files = {
+        "train": open('train_' + str(file_no) + '.mmap', 'rb'),
+        "test": open('test_' + str(file_no) + '.mmap', 'rb'),
+        "val": open('val_' + str(file_no) + '.mmap', 'rb'),
+    }
 
-    # Read mmap files and train/test models for all molecular representations
-    for rep in args.molecular_representations:
-        if rep != "graph":
-            # TODO: add back in try catch block when done debugging!!!
-            try: 
-                for model in args.models:
-                    if model not in graph_models:
-                        # Reset mmap pointers
-                        for file in files.values():
-                            file.seek(0)
+    try:
+        if 'graph' in args.molecular_representations:
+            if args.dataset == 'ADME':
+                print("WARNING: ADME dataset has no graph structure, skipping graph models")
+            else:
+                run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
-                        x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                        x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                        x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+        # Read mmap files and train/test models for all molecular representations
+        for rep in args.molecular_representations:
+            if rep != "graph":
+                try: 
+                    for model in args.models:
+                        if model not in graph_models:
+                            # Reset mmap pointers
+                            for file in files.values():
+                                file.seek(0)
 
-                        print(f"model: {model}")
-                        print(f"rep: {rep}")
-                        run_model(
-                            x_train, y_train, x_test, y_test, x_val, y_val,
-                            model, args, iteration_seed, rep, iteration, s,
-                            file_no, y_test_original
-                        )
+                            x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                            x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                            x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+
+                            print(f"model: {model}")
+                            print(f"rep: {rep}")
+                            run_model(
+                                x_train, y_train, x_test, y_test, x_val, y_val,
+                                model, args, iteration_seed, rep, iteration, s,
+                                file_no, y_test_original
+                            )
+                except Exception as e:
+                    print(f"Error with {rep} and {model}; more details: {e}")
+    finally:
+        # Always close and delete files, even if an error occurred
+        for key in list(files.keys()):
+            filename = f"{key}_{file_no}.mmap"
+            try:
+                files[key].close()
+            except:
+                pass  # File might already be closed
+            
+            try:
+                os.remove(filename)
+            except FileNotFoundError:
+                print(f"Warning: {filename} not found for deletion")
             except Exception as e:
-                print(f"Error with {rep} and {model}; more details: {e}")
-
-    for key in list(files.keys()):
-        filename = f"{key}_{file_no}.mmap"
-        files[key].close()
-        os.remove(filename)  # <-- deletes the actual file
-        del files[key]
-    files.clear()
-    gc.collect()
+                print(f"Error deleting {filename}: {e}")
+        
+        files.clear()
+        gc.collect()
 
 def main():
     start_time = time.time()
