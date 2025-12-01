@@ -1080,7 +1080,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             params['max_features'] = 'sqrt'
             params['min_samples_leaf'] = 1
             params['min_samples_split'] = 2
-            params['n_estimators'] = 100
+            params['n_estimators'] = 300 if model_type == 'qrf' else 100
             params['bootstrap'] = True
             params_source = 'default'
 
@@ -1096,6 +1096,8 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
     y_train = np.hstack((y_train, y_val))
 
     model.fit(x_train, y_train)
+
+
 
     if model_type == 'qrf':
         q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
@@ -1559,13 +1561,14 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep)
     model.eval()
 
+    # TODO: if uncertainty isn't checked this creates an issue
     # STEP 2: Get predictions and calibrate if Bayesian
     if is_bayesian:
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
         
         num_samples = 100
-        
+
         # Get calibration predictions
         x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
         preds_cal = []
