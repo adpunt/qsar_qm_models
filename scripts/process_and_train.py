@@ -1161,7 +1161,12 @@ def main():
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
-            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
+            try: 
+                process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
+            except Exception as e:
+                if logging:
+                    print(f"Error with sigma {s}: {e}")
+                continue
 
         current_time = time.time()
         print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")
