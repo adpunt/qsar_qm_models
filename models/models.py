@@ -2626,10 +2626,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         if args.tuning and trial is not None:
             # Conformal-specific parameters
             alpha = trial.suggest_float('alpha', 0.05, 0.2)
-            predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])
-            params['alpha'] = alpha
-            params['predictor_type'] = predictor_type
-            
+            predictor_type = trial.suggest_categorical('predictor_type', ['split', 'aci'])            
             # ACI-specific parameter
             if predictor_type == 'aci':
                 params['gamma'] = trial.suggest_float('gamma', 0.001, 0.1, log=True)
@@ -2661,10 +2658,7 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             params_source = 'tuning_trial'
         else:
             # Default parameters
-            alpha_list = args.alpha if hasattr(args, 'alpha') else [0.1]
             predictor_type = 'split'
-            params['alpha'] = alpha
-            params['predictor_type'] = predictor_type
             params_source = 'default'
     
     # Extract conformal parameters
@@ -2742,6 +2736,21 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         optimizer = torch.optim.Adam(base_model.parameters(), lr=learning_rate)
         
         train_nn(base_model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, f'conformal_dnn', rep)
+
+        # Save calibration metadata
+        alpha_list = args.alpha if hasattr(args, 'alpha') and args.alpha else [0.1]
+        save_calibration_metadata(
+            filepath=args.filepath,
+            model_name=f'conformal_{base_model_type}_split',
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            n_train=len(x_train),
+            n_cal=len(x_val),
+            n_val=0,
+            n_test=len(x_test),
+            alpha_list=alpha_list
+        )
     
     # --- Step 1: Get predictions on calibration and test sets (point estimates) ---
     if base_model_type in ['rf', 'xgboost']:
@@ -2823,17 +2832,13 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         metrics = calculate_regression_metrics(y_test, y_test_pred, logging=True)
         
         model_name = f'conformal_{base_model_type}_{predictor_type}'
-        save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
         
         if args.uncertainty:
-            interval_width = y_upper - y_lower
-            y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
-            
-            save_uncertainty_values(
-                y_pred_mean=y_test_pred,
-                y_pred_std=y_pred_std,
-                y_true_original=y_test_original,
-                y_true_noisy=y_test,
+            save_conformal_intervals(
+                y_pred=y_test_pred,
+                y_lower=y_lower,
+                y_upper=y_upper,
+                y_true=y_test,
                 filepath=args.filepath,
                 model_name=model_name,
                 rep=rep,
@@ -2857,6 +2862,9 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
                 alpha=alpha
             )
         
+    # Save metrics once (outside alpha loop) using first iteration's metrics
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
+    
     return metrics[3]  # Return R²
 
 def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, calibration_size, y_test_original, trial=None,

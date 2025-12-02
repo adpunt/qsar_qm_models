@@ -207,7 +207,7 @@ def parse_arguments():
             "Default is None (no transformation)."
         )
     )
-    parser.add_argument("--calibration-size", type=int, default=20, 
+    parser.add_argument("--calibration-size", type=int, default=20,
                        help="Percentage of validation set for conformal calibration (default is 20)")
     parser.add_argument("--domain-method", type=str, default='none',
                         choices=['none', 'random', 'fingerprint_kmeans', 'descriptor', 
@@ -234,8 +234,8 @@ def parse_arguments():
 
     parser.add_argument("--use-distance", type=str2bool, default=False,
                        help="Use distance metrics in sample selection (default: False)")
-    parser.add_argument("--alpha", nargs='*', default=[0.1], type=float,
-                   help="Confidence levels for conformal prediction (default is [0.1])")
+    parser.add_argument("--alpha", nargs='*', type=float, default=[0.1],
+                       help="Confidence levels for conformal prediction (default is [0.1])")
     return parser.parse_args()
 
 def write_to_mmap(

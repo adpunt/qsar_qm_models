@@ -148,8 +148,6 @@ def save_per_epoch_metrics(train_losses, val_losses, filepath, model_name, rep, 
            for epoch, (train_loss, val_loss) in enumerate(zip(train_losses, val_losses)):
                writer.writerow([sigma_noise, iteration, model_name, rep, file_no, epoch, train_loss, val_loss])
 
-# Add these to your utils.py or models.py
-
 def calibrate_uncertainty_simple(y_pred_mean, y_pred_std, y_true):
     """
     Find optimal temperature T for variance scaling.
@@ -217,3 +215,26 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
         df.to_csv(uncertainty_file, mode='a', header=False, index=False)
     else:
         df.to_csv(uncertainty_file, mode='w', header=True, index=False)
+
+def save_calibration_metadata(filepath, model_name, rep, sigma_noise, iteration, 
+                              n_train, n_cal, n_val, n_test, alpha_list):
+    """Save calibration set size and split information"""
+    metadata_dir = os.path.join(os.path.dirname(filepath), "conformal_metadata")
+    os.makedirs(metadata_dir, exist_ok=True)
+    
+    metadata_df = pd.DataFrame({
+        'model_name': [model_name],
+        'rep': [rep],
+        'sigma_noise': [sigma_noise],
+        'iteration': [iteration],
+        'n_train': [n_train],
+        'n_calibration': [n_cal],
+        'n_validation': [n_val],
+        'n_test': [n_test],
+        'cal_pct_of_total': [n_cal / (n_train + n_cal + n_val + n_test) * 100],
+        'alphas_tested': [str(alpha_list)]
+    })
+    
+    filename = f"calibration_metadata_{model_name}_{rep}_sigma{sigma_noise}_iter{iteration}.csv"
+    filepath_full = os.path.join(metadata_dir, filename)
+    metadata_df.to_csv(filepath_full, index=False)
