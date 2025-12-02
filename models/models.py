@@ -2661,14 +2661,14 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             params_source = 'tuning_trial'
         else:
             # Default parameters
-            alpha = 0.1
+            alpha_list = args.alpha if hasattr(args, 'alpha') else [0.1]
             predictor_type = 'split'
             params['alpha'] = alpha
             params['predictor_type'] = predictor_type
             params_source = 'default'
     
     # Extract conformal parameters
-    alpha = params.pop('alpha', 0.1)
+    alpha_list = args.alpha if hasattr(args, 'alpha') else [0.1]
     predictor_type = params.pop('predictor_type', 'split')
     gamma = params.pop('gamma', 0.01)  # For ACI
     
@@ -2787,73 +2787,76 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
     assert y_val_pred.shape  == y_val.shape,  (y_val_pred.shape,  y_val.shape)
     assert y_test_pred.shape == y_test.shape, (y_test_pred.shape, y_test.shape)
     
-    # Step 3: Calculate quantile for conformal prediction
-    if predictor_type == 'split':
-        # Standard split conformal
-        n_cal = len(conformity_scores)
-        q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-        q_level = min(q_level, 1.0)
-        quantile = np.quantile(conformity_scores, q_level)
+    all_results = []
+    for alpha in alpha_list:
+        # Step 3: Calculate quantile for conformal prediction
+        if predictor_type == 'split':
+            # Standard split conformal
+            n_cal = len(conformity_scores)
+            q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+            q_level = min(q_level, 1.0)
+            quantile = np.quantile(conformity_scores, q_level)
+            
+        elif predictor_type == 'aci':
+            # For ACI, we use adaptive quantile (simplified version)
+            # In a full implementation, this would update online
+            n_cal = len(conformity_scores)
+            # Start with standard quantile and would adapt during online phase
+            q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+            q_level = min(q_level, 1.0)
+            quantile = np.quantile(conformity_scores, q_level)
+            # Note: Full ACI would update this quantile adaptively as we see new data
         
-    elif predictor_type == 'aci':
-        # For ACI, we use adaptive quantile (simplified version)
-        # In a full implementation, this would update online
-        n_cal = len(conformity_scores)
-        # Start with standard quantile and would adapt during online phase
-        q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
-        q_level = min(q_level, 1.0)
-        quantile = np.quantile(conformity_scores, q_level)
-        # Note: Full ACI would update this quantile adaptively as we see new data
-    
-    # Step 4: Generate prediction intervals
-    y_lower = y_test_pred - quantile
-    y_upper = y_test_pred + quantile
-    
-    # Step 5: Calculate coverage and metrics
-    coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
-    avg_interval_size = np.mean(y_upper - y_lower)
-    
-    print(f"Conformal Prediction Results:")
-    print(f"  Coverage: {coverage:.4f} (target: {1-alpha:.4f})")
-    print(f"  Average Interval Size: {avg_interval_size:.4f}")
-    
-    # Calculate regression metrics
-    metrics = calculate_regression_metrics(y_test, y_test_pred, logging=True)
-    
-    model_name = f'conformal_{base_model_type}_{predictor_type}'
-    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
-    
-    if args.uncertainty:
-        interval_width = y_upper - y_lower
-        y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
+        # Step 4: Generate prediction intervals
+        y_lower = y_test_pred - quantile
+        y_upper = y_test_pred + quantile
         
-        save_uncertainty_values(
-            y_pred_mean=y_test_pred,
-            y_pred_std=y_pred_std,
-            y_true_original=y_test_original,
-            y_true_noisy=y_test,
-            filepath=args.filepath,
-            model_name=model_name,
-            rep=rep,
-            sigma_noise=s,
-            iteration=iteration,
-            file_no=file_no,
-        )
+        # Step 5: Calculate coverage and metrics
+        coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
+        avg_interval_size = np.mean(y_upper - y_lower)
         
-        save_conformal_intervals(
-            y_pred=y_test_pred,
-            y_lower=y_lower,
-            y_upper=y_upper,
-            y_true=y_test,
-            filepath=args.filepath,
-            model_name=model_name,
-            rep=rep,
-            sigma_noise=s,
-            iteration=iteration,
-            file_no=file_no,
-            alpha=alpha
-        )
-    
+        print(f"Conformal Prediction Results:")
+        print(f"  Coverage: {coverage:.4f} (target: {1-alpha:.4f})")
+        print(f"  Average Interval Size: {avg_interval_size:.4f}")
+        
+        # Calculate regression metrics
+        metrics = calculate_regression_metrics(y_test, y_test_pred, logging=True)
+        
+        model_name = f'conformal_{base_model_type}_{predictor_type}'
+        save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics, params_source)
+        
+        if args.uncertainty:
+            interval_width = y_upper - y_lower
+            y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
+            
+            save_uncertainty_values(
+                y_pred_mean=y_test_pred,
+                y_pred_std=y_pred_std,
+                y_true_original=y_test_original,
+                y_true_noisy=y_test,
+                filepath=args.filepath,
+                model_name=model_name,
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration,
+                file_no=file_no,
+                alpha=alpha
+            )
+            
+            save_conformal_intervals(
+                y_pred=y_test_pred,
+                y_lower=y_lower,
+                y_upper=y_upper,
+                y_true=y_test,
+                filepath=args.filepath,
+                model_name=model_name,
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration,
+                file_no=file_no,
+                alpha=alpha
+            )
+        
     return metrics[3]  # Return R²
 
 def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, iteration, file_no, base_model_type, calibration_size, y_test_original, trial=None,
@@ -3268,7 +3271,3847 @@ def calibrate_quantile_predictions(y_cal_true, y_cal_pred_lower, y_cal_pred_uppe
     iso_upper.fit(y_cal_pred_upper, y_cal_true)
     
     return iso_lower, iso_upper
-# TODO: testing different loss functions:
-# dnn, mlp, mtl, residual_mlp, factorization_mlp, rnn, gru, custom
-# You can customize or swap loss functions (e.g., use nn.L1Loss() instead of MSELoss) depending on your use case.
-# TODO: add NGBoost and QRF to environment files
+
+class MetaWeightNet(nn.Module):
+    """
+    Small network that predicts sample weights based on loss values.
+    Takes loss as input, outputs weight in [0,1].
+    """
+    def __init__(self, hidden_size=100):
+        super().__init__()
+        self.fc1 = nn.Linear(1, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, 1)
+    
+    def forward(self, loss):
+        """
+        Args:
+            loss: (batch_size, 1) - loss values for each sample
+        Returns:
+            weights: (batch_size, 1) - weights in [0,1]
+        """
+        x = torch.relu(self.fc1(loss))
+        x = torch.sigmoid(self.fc2(x))  # Weight between 0 and 1
+        return x
+
+def train_meta_weight_net(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Train DNN with Meta-Weight-Net for sample reweighting.
+    
+    Optional: Use uncertainty alongside loss for weighting.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Check if we should use uncertainty
+    use_uncertainty = getattr(args, 'use_uncertainty_weighting', False)
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # If using uncertainty, need a loss that outputs it
+    if use_uncertainty and loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                                              'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: use_uncertainty=True but {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        meta_lr = trial.suggest_float('meta_lr', 1e-5, 1e-3, log=True)
+        meta_hidden = trial.suggest_int('meta_hidden', 50, 200)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        meta_lr = 1e-4
+        meta_hidden = 100
+    
+    # Determine output size
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Create main model
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    # Create meta-weight network
+    # Input: loss (+ uncertainty if enabled)
+    meta_input_size = 2 if use_uncertainty else 1
+    meta_net = nn.Sequential(
+        nn.Linear(meta_input_size, meta_hidden),
+        nn.ReLU(),
+        nn.Linear(meta_hidden, 1),
+        nn.Sigmoid()  # Weight in [0,1]
+    ).to(device)
+    
+    # Optimizers
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    meta_optimizer = torch.optim.Adam(meta_net.parameters(), lr=meta_lr)
+    
+    # Loss functions
+    from loss_functions import get_loss_function
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    criterion_for_weighting = nn.MSELoss(reduction='none')
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    train_dataset = TensorDataset(x_train_t, y_train_t)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    
+    train_losses = []
+    val_losses = []
+    
+    # Training loop
+    for epoch in range(args.epochs):
+        model.train()
+        meta_net.train()
+        epoch_loss = 0
+        
+        for X_batch, y_batch in train_loader:
+            # Forward pass
+            y_pred = model(X_batch)
+            
+            # Extract mean prediction for loss calculation
+            if output_size > 1:
+                y_pred_mean = y_pred[:, 0:1]
+            else:
+                y_pred_mean = y_pred
+            
+            loss_per_sample = criterion_for_weighting(y_pred_mean, y_batch)
+            
+            # Get weights from meta-net
+            if use_uncertainty:
+                # Extract uncertainty
+                if loss_name == 'heteroscedastic':
+                    log_var = y_pred[:, 1:2]
+                    uncertainty = torch.sqrt(torch.exp(log_var))
+                
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    v = F.softplus(y_pred[:, 1:2]) + 1.0
+                    alpha = F.softplus(y_pred[:, 2:3]) + 1.0
+                    beta = F.softplus(y_pred[:, 3:4])
+                    epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
+                    aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    uncertainty = torch.sqrt(epistemic + aleatoric)
+                
+                elif loss_name == 'sample_adaptive_barron':
+                    alpha_raw = y_pred[:, 1:2]
+                    alpha = torch.sigmoid(alpha_raw) * 3.9 + 0.1
+                    uncertainty = 1.0 / (alpha + 1e-6)
+                
+                elif loss_name == 'stratified':
+                    uncertainty_logit = y_pred[:, 1:2]
+                    uncertainty = torch.sigmoid(uncertainty_logit)
+                
+                # Combine loss and uncertainty for meta-net
+                meta_input = torch.cat([loss_per_sample.detach(), uncertainty.detach()], dim=1)
+            else:
+                meta_input = loss_per_sample.detach()
+            
+            weights = meta_net(meta_input)
+            
+            # Weighted loss
+            weighted_loss = (weights * loss_per_sample).mean()
+            
+            # Update main model
+            optimizer.zero_grad()
+            weighted_loss.backward()
+            optimizer.step()
+            
+            # Meta-update every 5 epochs
+            if epoch % 5 == 0:
+                model.eval()
+                y_val_pred = model(x_val_t)
+                if output_size > 1:
+                    y_val_pred_mean = y_val_pred[:, 0:1]
+                else:
+                    y_val_pred_mean = y_val_pred
+                val_loss_for_meta = criterion_for_weighting(y_val_pred_mean, y_val_t).mean()
+                model.train()
+                
+                meta_optimizer.zero_grad()
+                val_loss_for_meta.backward()
+                meta_optimizer.step()
+            
+            epoch_loss += weighted_loss.item()
+        
+        avg_train_loss = epoch_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+        
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            y_val_pred = model(x_val_t)
+            val_loss = criterion(y_val_pred, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            unc_str = "+unc" if use_uncertainty else ""
+            print(f"Epoch {epoch}: Train={avg_train_loss:.4f}, Val={val_loss.item():.4f} {unc_str}")
+    
+    # Get predictions
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+        
+        # Get sample weights for analysis
+        train_pred = model(x_train_t)
+        if output_size > 1:
+            train_pred_mean = train_pred[:, 0:1]
+        else:
+            train_pred_mean = train_pred
+        
+        train_losses_final = criterion_for_weighting(train_pred_mean, y_train_t)
+        
+        if use_uncertainty:
+            if loss_name == 'heteroscedastic':
+                log_var = train_pred[:, 1:2]
+                train_unc = torch.sqrt(torch.exp(log_var))
+            # ... other uncertainty extractions ...
+            else:
+                train_unc = torch.zeros_like(train_losses_final)
+            
+            meta_input = torch.cat([train_losses_final, train_unc], dim=1)
+        else:
+            meta_input = train_losses_final
+        
+        sample_weights = meta_net(meta_input).cpu().numpy().flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"meta_weight_net_{loss_name}" if loss_name != 'mse' else "meta_weight_net"
+    if use_uncertainty:
+        model_name += "_withunc"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save sample weights
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        weights_dir = os.path.dirname(args.filepath.replace('.csv', '_sample_weights/'))
+        os.makedirs(weights_dir, exist_ok=True)
+        
+        weights_df = pd.DataFrame({
+            'sample_idx': np.arange(len(sample_weights)),
+            'weight': sample_weights,
+            'loss': train_losses_final.cpu().numpy().flatten(),
+            'y_true': y_train,
+            'y_pred': train_pred_mean.cpu().numpy().flatten()
+        })
+        
+        weights_file = os.path.join(
+            weights_dir,
+            f"weights_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        weights_df.to_csv(weights_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_dividemix_dnn(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    DivideMix for regression with DNNs.
+    Two networks co-teach each other, using GMM to separate clean/noisy samples.
+    
+    Optional: Use uncertainty to enhance clean/noisy separation.
+    """
+    from sklearn.mixture import GaussianMixture
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Check if we should use uncertainty
+    use_uncertainty = getattr(args, 'use_uncertainty_weighting', False)
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    if use_uncertainty and loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                                              'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: use_uncertainty=True but {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        warmup_epochs = trial.suggest_int('warmup_epochs', 10, 30)
+        forget_rate = trial.suggest_float('forget_rate', 0.1, 0.4)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        warmup_epochs = 20
+        forget_rate = 0.25
+    
+    # Get loss function
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Determine output size based on loss
+    output_size_map = {
+        'heteroscedastic': 2,
+        'evidential': 4,
+        'evidential_cauchy': 4,
+        'evidential_laplace': 4,
+        'sample_adaptive_barron': 2,
+        'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Create two networks
+    model_f = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model_f.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    model_g = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model_g.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer_f = torch.optim.Adam(model_f.parameters(), lr=0.001)
+    optimizer_g = torch.optim.Adam(model_g.parameters(), lr=0.001)
+    
+    # Get loss function
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
+    # For sample selection, we need per-sample losses (MSE with reduction='none')
+    selection_criterion = nn.MSELoss(reduction='none')
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Phase 1: Warmup - train both networks normally
+    print(f"Warmup phase with {loss_name} loss...")
+    for epoch in range(warmup_epochs):
+        model_f.train()
+        model_g.train()
+        
+        # Train F
+        optimizer_f.zero_grad()
+        pred_f = model_f(x_train_t)
+        loss_f = criterion(pred_f, y_train_t)
+        loss_f.backward()
+        optimizer_f.step()
+        
+        # Train G
+        optimizer_g.zero_grad()
+        pred_g = model_g(x_train_t)
+        loss_g = criterion(pred_g, y_train_t)
+        loss_g.backward()
+        optimizer_g.step()
+        
+        if epoch % 5 == 0:
+            print(f"Warmup epoch {epoch}: Loss_F={loss_f.item():.4f}, Loss_G={loss_g.item():.4f}")
+    
+    # Phase 2: Co-teaching with sample selection
+    print("Co-teaching phase...")
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - warmup_epochs):
+        model_f.eval()
+        model_g.eval()
+        
+        # Get losses from both networks (use MSE for sample selection)
+        with torch.no_grad():
+            pred_f = model_f(x_train_t)
+            pred_g = model_g(x_train_t)
+            
+            # Extract mean predictions for sample selection
+            if output_size > 1:
+                pred_f_mean = pred_f[:, 0:1]
+                pred_g_mean = pred_g[:, 0:1]
+            else:
+                pred_f_mean = pred_f
+                pred_g_mean = pred_g
+            
+            loss_f = selection_criterion(pred_f_mean, y_train_t).squeeze().cpu().numpy()
+            loss_g = selection_criterion(pred_g_mean, y_train_t).squeeze().cpu().numpy()
+            
+            # Extract uncertainty if enabled
+            if use_uncertainty:
+                if loss_name == 'heteroscedastic':
+                    log_var_f = pred_f[:, 1]
+                    log_var_g = pred_g[:, 1]
+                    unc_f = torch.sqrt(torch.exp(log_var_f)).cpu().numpy()
+                    unc_g = torch.sqrt(torch.exp(log_var_g)).cpu().numpy()
+                
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    # Extract from F
+                    v_f = torch.clamp(F.softplus(pred_f[:, 1]) + 1.0, min=1.0).cpu().numpy()
+                    alpha_f = torch.clamp(F.softplus(pred_f[:, 2]) + 1.0, min=1.0).cpu().numpy()
+                    beta_f = torch.clamp(F.softplus(pred_f[:, 3]), min=1e-6).cpu().numpy()
+                    epistemic_f = beta_f / np.maximum(alpha_f - 1, 1e-6)
+                    aleatoric_f = beta_f / (v_f * np.maximum(alpha_f - 1, 1e-6))
+                    unc_f = np.sqrt(epistemic_f + aleatoric_f)
+                    
+                    # Extract from G
+                    v_g = torch.clamp(F.softplus(pred_g[:, 1]) + 1.0, min=1.0).cpu().numpy()
+                    alpha_g = torch.clamp(F.softplus(pred_g[:, 2]) + 1.0, min=1.0).cpu().numpy()
+                    beta_g = torch.clamp(F.softplus(pred_g[:, 3]), min=1e-6).cpu().numpy()
+                    epistemic_g = beta_g / np.maximum(alpha_g - 1, 1e-6)
+                    aleatoric_g = beta_g / (v_g * np.maximum(alpha_g - 1, 1e-6))
+                    unc_g = np.sqrt(epistemic_g + aleatoric_g)
+                
+                elif loss_name == 'sample_adaptive_barron':
+                    alpha_f = torch.sigmoid(pred_f[:, 1]) * 3.9 + 0.1
+                    alpha_g = torch.sigmoid(pred_g[:, 1]) * 3.9 + 0.1
+                    unc_f = (1.0 / (alpha_f + 1e-6)).cpu().numpy()
+                    unc_g = (1.0 / (alpha_g + 1e-6)).cpu().numpy()
+                
+                elif loss_name == 'stratified':
+                    unc_f = torch.sigmoid(pred_f[:, 1]).cpu().numpy()
+                    unc_g = torch.sigmoid(pred_g[:, 1]).cpu().numpy()
+                
+                # Combine loss with uncertainty for better separation
+                # High uncertainty samples are more likely noisy
+                avg_uncertainty = (unc_f + unc_g) / 2
+                # Normalize uncertainty
+                unc_norm = (avg_uncertainty - avg_uncertainty.min()) / (avg_uncertainty.max() - avg_uncertainty.min() + 1e-8)
+                
+                # Weight loss by uncertainty (higher uncertainty = treat as noisier)
+                loss_f = loss_f * (1 + unc_norm)
+                loss_g = loss_g * (1 + unc_norm)
+        
+        # Fit GMM to losses to separate clean/noisy
+        avg_loss = (loss_f + loss_g) / 2
+        gmm = GaussianMixture(n_components=2, random_state=iteration_seed)
+        gmm.fit(avg_loss.reshape(-1, 1))
+        
+        # Predict clean vs noisy (component with lower mean is "clean")
+        prob_clean = gmm.predict_proba(avg_loss.reshape(-1, 1))
+        clean_component = np.argmin(gmm.means_)
+        clean_prob = prob_clean[:, clean_component]
+        
+        # Select top (1 - forget_rate) samples as clean
+        num_clean = int(len(x_train) * (1 - forget_rate))
+        clean_indices = np.argsort(clean_prob)[-num_clean:]
+        
+        # Co-teaching: F selects samples for G, G selects for F
+        split = len(clean_indices) // 2
+        indices_for_f = clean_indices[:split]
+        indices_for_g = clean_indices[split:]
+        
+        # Train F on samples selected by G (using the actual loss function)
+        model_f.train()
+        optimizer_f.zero_grad()
+        pred_f = model_f(x_train_t[indices_for_g])
+        loss_f = criterion(pred_f, y_train_t[indices_for_g])
+        loss_f.backward()
+        optimizer_f.step()
+        
+        # Train G on samples selected by F
+        model_g.train()
+        optimizer_g.zero_grad()
+        pred_g = model_g(x_train_t[indices_for_f])
+        loss_g = criterion(pred_g, y_train_t[indices_for_f])
+        loss_g.backward()
+        optimizer_g.step()
+        
+        avg_train_loss = (loss_f.item() + loss_g.item()) / 2
+        train_losses.append(avg_train_loss)
+        
+        # Validation
+        model_f.eval()
+        model_g.eval()
+        with torch.no_grad():
+            pred_f_val = model_f(x_val_t)
+            pred_g_val = model_g(x_val_t)
+            val_loss_f = criterion(pred_f_val, y_val_t)
+            val_loss_g = criterion(pred_g_val, y_val_t)
+            val_loss = (val_loss_f + val_loss_g) / 2
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            unc_str = "+unc" if use_uncertainty else ""
+            print(f"Epoch {epoch}: Train={avg_train_loss:.4f}, Val={val_loss.item():.4f}, "
+                  f"Clean={num_clean}/{len(x_train)} {unc_str}")
+    
+    # Test: average predictions from both networks
+    model_f.eval()
+    model_g.eval()
+    with torch.no_grad():
+        pred_f_test = model_f(x_test_t).cpu().numpy()
+        pred_g_test = model_g(x_test_t).cpu().numpy()
+        
+        # Extract mean predictions
+        if output_size > 1:
+            pred_f_test = pred_f_test[:, 0]
+            pred_g_test = pred_g_test[:, 0]
+        else:
+            pred_f_test = pred_f_test.flatten()
+            pred_g_test = pred_g_test.flatten()
+        
+        y_pred = (pred_f_test + pred_g_test) / 2
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"dividemix_dnn_{loss_name}" if loss_name != 'mse' else "dividemix_dnn"
+    if use_uncertainty:
+        model_name += "_withunc"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save per-epoch metrics if requested
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_early_learning_regularization(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Early Learning Regularization: weight samples by how consistently 
+    they had low loss in early training epochs.
+    
+    Optional: Combine early learning with uncertainty estimates.
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Check if we should use uncertainty
+    use_uncertainty = getattr(args, 'use_uncertainty_weighting', False)
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    if use_uncertainty and loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                                              'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: use_uncertainty=True but {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        early_epochs = trial.suggest_int('early_epochs', 5, 20)
+        weight_decay_rate = trial.suggest_float('weight_decay_rate', 0.9, 0.99)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        early_epochs = 10
+        weight_decay_rate = 0.95
+    
+    # Get loss function
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Determine output size
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Create model
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    
+    # Loss functions
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    tracking_criterion = nn.MSELoss(reduction='none')  # For tracking per-sample loss
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Track early learning: store per-sample losses for first few epochs
+    early_losses = []
+    early_uncertainties = [] if use_uncertainty else None
+    
+    # Phase 1: Track early learning (no weighting yet)
+    print(f"Phase 1: Tracking early learning for {early_epochs} epochs...")
+    for epoch in range(early_epochs):
+        model.train()
+        optimizer.zero_grad()
+        
+        pred = model(x_train_t)
+        loss = criterion(pred, y_train_t)
+        loss.backward()
+        optimizer.step()
+        
+        # Track per-sample losses and uncertainties
+        model.eval()
+        with torch.no_grad():
+            pred_tracking = model(x_train_t)
+            
+            if output_size > 1:
+                pred_mean = pred_tracking[:, 0:1]
+            else:
+                pred_mean = pred_tracking
+            
+            sample_losses = tracking_criterion(pred_mean, y_train_t).squeeze().cpu().numpy()
+            early_losses.append(sample_losses)
+            
+            # Track uncertainty if enabled
+            if use_uncertainty:
+                if loss_name == 'heteroscedastic':
+                    log_var = pred_tracking[:, 1]
+                    unc = torch.sqrt(torch.exp(log_var)).cpu().numpy()
+                
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    v = torch.clamp(F.softplus(pred_tracking[:, 1]) + 1.0, min=1.0).cpu().numpy()
+                    alpha = torch.clamp(F.softplus(pred_tracking[:, 2]) + 1.0, min=1.0).cpu().numpy()
+                    beta = torch.clamp(F.softplus(pred_tracking[:, 3]), min=1e-6).cpu().numpy()
+                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
+                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    unc = np.sqrt(epistemic + aleatoric)
+                
+                elif loss_name == 'sample_adaptive_barron':
+                    alpha = torch.sigmoid(pred_tracking[:, 1]) * 3.9 + 0.1
+                    unc = (1.0 / (alpha + 1e-6)).cpu().numpy()
+                
+                elif loss_name == 'stratified':
+                    unc = torch.sigmoid(pred_tracking[:, 1]).cpu().numpy()
+                
+                early_uncertainties.append(unc)
+        
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch}: Loss={loss.item():.4f}")
+    
+    # Compute sample weights based on early learning
+    early_losses = np.array(early_losses)  # shape: (early_epochs, n_samples)
+    
+    # Average loss in early epochs
+    avg_early_loss = early_losses.mean(axis=0)
+    
+    # Convert to weights: lower early loss = higher weight
+    weights = np.exp(-avg_early_loss / avg_early_loss.mean())
+    
+    # Combine with uncertainty if enabled
+    if use_uncertainty:
+        early_uncertainties = np.array(early_uncertainties)
+        avg_early_unc = early_uncertainties.mean(axis=0)
+        
+        # Lower uncertainty = higher weight
+        unc_weights = np.exp(-avg_early_unc / avg_early_unc.mean())
+        
+        # Combine: samples that are both low-loss AND low-uncertainty in early epochs get highest weight
+        weights = weights * unc_weights
+        print(f"Combined early loss + uncertainty weights")
+    
+    # Normalize
+    weights = weights / weights.sum() * len(weights)
+    weights = torch.tensor(weights, dtype=torch.float32).to(device)
+    
+    print(f"Sample weights - Min: {weights.min():.3f}, Max: {weights.max():.3f}, Mean: {weights.mean():.3f}")
+    
+    # Phase 2: Train with weighted loss
+    print(f"Phase 2: Training with early learning weights...")
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - early_epochs):
+        model.train()
+        optimizer.zero_grad()
+        
+        pred = model(x_train_t)
+        
+        # Compute per-sample loss
+        if output_size > 1:
+            pred_mean = pred[:, 0:1]
+        else:
+            pred_mean = pred
+        
+        sample_loss = tracking_criterion(pred_mean, y_train_t).squeeze()
+        
+        # Apply weights
+        weighted_loss = (weights * sample_loss).mean()
+        
+        weighted_loss.backward()
+        optimizer.step()
+        
+        train_losses.append(weighted_loss.item())
+        
+        # Decay weights over time (trust early learning less as training progresses)
+        weights = weights * weight_decay_rate
+        
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            pred_val = model(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}: Train={weighted_loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Test
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"early_learning_{loss_name}" if loss_name != 'mse' else "early_learning"
+    if use_uncertainty:
+        model_name += "_withunc"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save per-epoch metrics
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_multistage_cleaning(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Multi-stage cleaning: iteratively remove high-loss + high-uncertainty samples.
+    
+    Stage 1: Train with all data
+    Stage 2: Remove worst 10% (high loss + high uncertainty)
+    Stage 3: Retrain on cleaned data
+    Repeat n_stages times
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        n_stages = trial.suggest_int('n_stages', 2, 5)
+        removal_rate = trial.suggest_float('removal_rate', 0.05, 0.2)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        n_stages = 3
+        removal_rate = 0.1  # Remove 10% worst samples per stage
+    
+    # Get loss function (must support uncertainty)
+    loss_name = args.loss if hasattr(args, 'loss') else 'heteroscedastic'
+    if loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                         'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Determine output size
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map[loss_name]
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Keep track of which samples to keep
+    keep_mask = np.ones(len(x_train), dtype=bool)
+    
+    tracking_criterion = nn.MSELoss(reduction='none')
+    
+    # Multi-stage cleaning
+    for stage in range(n_stages):
+        print(f"\n=== Stage {stage+1}/{n_stages} ===")
+        print(f"Training on {keep_mask.sum()}/{len(x_train)} samples")
+        
+        # Get current clean data
+        x_current = x_train_t[keep_mask]
+        y_current = y_train_t[keep_mask]
+        
+        # Create model
+        model = DNNRegressionModel(
+            input_size=x_train.shape[1],
+            hidden_size1=hidden_size1,
+            hidden_size2=hidden_size2
+        ).to(device)
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        criterion = get_loss_function(loss_name, **loss_kwargs)
+        
+        # Train on current clean set
+        epochs_per_stage = args.epochs // n_stages
+        for epoch in range(epochs_per_stage):
+            model.train()
+            optimizer.zero_grad()
+            
+            pred = model(x_current)
+            loss = criterion(pred, y_current)
+            loss.backward()
+            optimizer.step()
+            
+            if epoch % 20 == 0:
+                print(f"  Epoch {epoch}: Loss={loss.item():.4f}")
+        
+        # Evaluate on ALL training data to identify noisy samples
+        if stage < n_stages - 1:  # Don't clean on last stage
+            model.eval()
+            with torch.no_grad():
+                pred_all = model(x_train_t).cpu().numpy()
+                
+                # Extract mean and uncertainty
+                if loss_name == 'heteroscedastic':
+                    pred_mean = pred_all[:, 0]
+                    log_var = pred_all[:, 1]
+                    uncertainty = np.sqrt(np.exp(log_var))
+                
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    gamma = pred_all[:, 0]
+                    v = np.maximum(pred_all[:, 1], 1.0)
+                    alpha = np.maximum(pred_all[:, 2], 1.0)
+                    beta = np.maximum(pred_all[:, 3], 1e-6)
+                    pred_mean = gamma
+                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
+                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    uncertainty = np.sqrt(epistemic + aleatoric)
+                
+                elif loss_name == 'sample_adaptive_barron':
+                    pred_mean = pred_all[:, 0]
+                    alpha = pred_all[:, 1]
+                    alpha = 1 / (1 + np.exp(-alpha)) * 3.9 + 0.1  # Sigmoid to [0.1, 4.0]
+                    uncertainty = 1.0 / (alpha + 1e-6)
+                
+                elif loss_name == 'stratified':
+                    pred_mean = pred_all[:, 0]
+                    uncertainty_logit = pred_all[:, 1]
+                    uncertainty = 1 / (1 + np.exp(-uncertainty_logit))
+                
+                # Compute loss on kept samples only
+                pred_mean_t = torch.tensor(pred_mean[keep_mask], dtype=torch.float32).to(device)
+                y_current_np = y_current.cpu().numpy().flatten()
+                sample_loss = np.abs(pred_mean[keep_mask] - y_current_np)
+            
+            # Score: high loss + high uncertainty = likely noisy
+            # Only score samples we're currently keeping
+            current_indices = np.where(keep_mask)[0]
+            uncertainty_current = uncertainty[keep_mask]
+            
+            # Normalize
+            loss_norm = (sample_loss - sample_loss.min()) / (sample_loss.max() - sample_loss.min() + 1e-8)
+            unc_norm = (uncertainty_current - uncertainty_current.min()) / (uncertainty_current.max() - uncertainty_current.min() + 1e-8)
+            
+            # Combined score
+            noise_score = loss_norm + unc_norm
+            
+            # Remove worst samples
+            n_remove = int(len(current_indices) * removal_rate)
+            worst_idx_in_current = np.argsort(noise_score)[-n_remove:]
+            worst_idx_global = current_indices[worst_idx_in_current]
+            
+            keep_mask[worst_idx_global] = False
+            
+            print(f"  Removed {n_remove} samples. Remaining: {keep_mask.sum()}/{len(x_train)}")
+    
+    # Final test
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        y_pred = pred_test[:, 0]  # Extract mean
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"multistage_{loss_name}"
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save cleaning info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        cleaning_dir = os.path.dirname(args.filepath.replace('.csv', '_cleaning/'))
+        os.makedirs(cleaning_dir, exist_ok=True)
+        
+        cleaning_df = pd.DataFrame({
+            'sample_idx': np.arange(len(keep_mask)),
+            'kept': keep_mask.astype(int),
+            'y_true': y_train
+        })
+        
+        cleaning_file = os.path.join(
+            cleaning_dir,
+            f"cleaning_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        cleaning_df.to_csv(cleaning_file, index=False)
+        print(f"Saved cleaning info to {cleaning_file}")
+    
+    return metrics[3]
+
+def train_uncertainty_curriculum(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Uncertainty Curriculum: Start training on certain samples,
+    gradually add uncertain ones.
+    
+    Phase 1: Train on low-uncertainty samples (top 50%)
+    Phase 2: Gradually add medium uncertainty samples
+    Phase 3: Train on all samples
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Must use a loss that outputs uncertainty
+    loss_name = args.loss if hasattr(args, 'loss') else 'heteroscedastic'
+    if loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                         'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        warmup_epochs = trial.suggest_int('warmup_epochs', 10, 30)
+        n_stages = trial.suggest_int('n_stages', 3, 5)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        warmup_epochs = 20
+        n_stages = 4
+    
+    # Get loss function
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Determine output size
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map[loss_name]
+    
+    # Create model
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Phase 0: Warmup to get initial uncertainty estimates
+    print(f"Warmup phase to estimate uncertainties...")
+    for epoch in range(warmup_epochs):
+        model.train()
+        optimizer.zero_grad()
+        pred = model(x_train_t)
+        loss = criterion(pred, y_train_t)
+        loss.backward()
+        optimizer.step()
+        
+        if epoch % 5 == 0:
+            print(f"Warmup epoch {epoch}: Loss={loss.item():.4f}")
+    
+    # Get uncertainty estimates for all training samples
+    model.eval()
+    with torch.no_grad():
+        pred_all = model(x_train_t).cpu().numpy()
+        
+        # Extract uncertainty
+        if loss_name == 'heteroscedastic':
+            log_var = pred_all[:, 1]
+            uncertainty = np.sqrt(np.exp(log_var))
+        
+        elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+            v = np.maximum(pred_all[:, 1], 1.0)
+            alpha = np.maximum(pred_all[:, 2], 1.0)
+            beta = np.maximum(pred_all[:, 3], 1e-6)
+            epistemic = beta / np.maximum(alpha - 1, 1e-6)
+            aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+            uncertainty = np.sqrt(epistemic + aleatoric)
+        
+        elif loss_name == 'sample_adaptive_barron':
+            alpha = 1 / (1 + np.exp(-pred_all[:, 1])) * 3.9 + 0.1
+            uncertainty = 1.0 / (alpha + 1e-6)
+        
+        elif loss_name == 'stratified':
+            uncertainty = 1 / (1 + np.exp(-pred_all[:, 1]))
+    
+    # Sort samples by uncertainty (low to high)
+    sorted_indices = np.argsort(uncertainty)
+    
+    print(f"Uncertainty range: {uncertainty.min():.4f} to {uncertainty.max():.4f}")
+    
+    # Curriculum: gradually add samples from low to high uncertainty
+    train_losses = []
+    val_losses = []
+    
+    epochs_per_stage = (args.epochs - warmup_epochs) // n_stages
+    
+    for stage in range(n_stages):
+        # Determine how many samples to include
+        fraction = (stage + 1) / n_stages
+        n_samples = int(len(x_train) * fraction)
+        
+        # Include lowest-uncertainty samples up to this fraction
+        current_indices = sorted_indices[:n_samples]
+        
+        print(f"\n=== Stage {stage+1}/{n_stages}: Training on {n_samples}/{len(x_train)} samples ===")
+        
+        # Get current training set
+        x_current = x_train_t[current_indices]
+        y_current = y_train_t[current_indices]
+        
+        # Train on current subset
+        for epoch in range(epochs_per_stage):
+            model.train()
+            optimizer.zero_grad()
+            
+            pred = model(x_current)
+            loss = criterion(pred, y_current)
+            loss.backward()
+            optimizer.step()
+            
+            train_losses.append(loss.item())
+            
+            # Validation
+            if epoch % 5 == 0:
+                model.eval()
+                with torch.no_grad():
+                    pred_val = model(x_val_t)
+                    val_loss = criterion(pred_val, y_val_t)
+                val_losses.append(val_loss.item())
+                
+                print(f"  Epoch {epoch}: Train={loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Final test
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        y_pred = pred_test[:, 0]  # Extract mean
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"uncertainty_curriculum_{loss_name}"
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save curriculum info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        curriculum_dir = os.path.dirname(args.filepath.replace('.csv', '_curriculum/'))
+        os.makedirs(curriculum_dir, exist_ok=True)
+        
+        curriculum_df = pd.DataFrame({
+            'sample_idx': np.arange(len(uncertainty)),
+            'uncertainty': uncertainty,
+            'order_added': np.argsort(sorted_indices),  # When was this sample added to training
+            'y_true': y_train
+        })
+        
+        curriculum_file = os.path.join(
+            curriculum_dir,
+            f"curriculum_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        curriculum_df.to_csv(curriculum_file, index=False)
+        print(f"Saved curriculum info to {curriculum_file}")
+    
+    # Save per-epoch metrics
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_confident_learning(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Confident Learning (Northcupt et al. 2021) adapted for regression.
+    
+    Identifies likely mislabeled samples as those with:
+    - High prediction error
+    - Low model uncertainty (confident mistakes)
+    
+    Optional: Use distance metrics to identify outliers
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Must use uncertainty-producing loss
+    loss_name = args.loss if hasattr(args, 'loss') else 'heteroscedastic'
+    if loss_name not in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                         'evidential_laplace', 'sample_adaptive_barron', 'stratified']:
+        print(f"Warning: {loss_name} doesn't output uncertainty. Using heteroscedastic.")
+        loss_name = 'heteroscedastic'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        warmup_epochs = trial.suggest_int('warmup_epochs', 20, 50)
+        error_percentile = trial.suggest_float('error_percentile', 70, 95)
+        unc_percentile = trial.suggest_float('unc_percentile', 10, 40)
+        use_distance = trial.suggest_categorical('use_distance', [True, False]) if hasattr(args, 'use_distance') else args.use_distance
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        warmup_epochs = 30
+        error_percentile = 85  # Top 15% errors
+        unc_percentile = 25    # Bottom 25% uncertainty (most confident)
+        use_distance = getattr(args, 'use_distance', False)
+    
+    # Loss setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map[loss_name]
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Phase 1: Train initial model to identify noisy samples
+    print(f"Phase 1: Training initial model for {warmup_epochs} epochs...")
+    
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
+    # Train initial model
+    for epoch in range(warmup_epochs):
+        model.train()
+        optimizer.zero_grad()
+        pred = model(x_train_t)
+        loss = criterion(pred, y_train_t)
+        loss.backward()
+        optimizer.step()
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Loss={loss.item():.4f}")
+    
+    # Phase 2: Identify likely mislabeled samples
+    print("Phase 2: Identifying likely mislabeled samples...")
+    
+    model.eval()
+    with torch.no_grad():
+        pred_all = model(x_train_t).cpu().numpy()
+        
+        # Extract mean and uncertainty
+        if loss_name == 'heteroscedastic':
+            pred_mean = pred_all[:, 0]
+            log_var = pred_all[:, 1]
+            uncertainty = np.sqrt(np.exp(log_var))
+        
+        elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+            gamma = pred_all[:, 0]
+            v = np.maximum(pred_all[:, 1], 1.0)
+            alpha = np.maximum(pred_all[:, 2], 1.0)
+            beta = np.maximum(pred_all[:, 3], 1e-6)
+            pred_mean = gamma
+            epistemic = beta / np.maximum(alpha - 1, 1e-6)
+            aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+            uncertainty = np.sqrt(epistemic + aleatoric)
+        
+        elif loss_name == 'sample_adaptive_barron':
+            pred_mean = pred_all[:, 0]
+            alpha = 1 / (1 + np.exp(-pred_all[:, 1])) * 3.9 + 0.1
+            uncertainty = 1.0 / (alpha + 1e-6)
+        
+        elif loss_name == 'stratified':
+            pred_mean = pred_all[:, 0]
+            uncertainty = 1 / (1 + np.exp(-pred_all[:, 1]))
+    
+    # Calculate errors
+    errors = np.abs(pred_mean - y_train)
+    
+    # Identify "confident errors":
+    # - High error (above threshold)
+    # - Low uncertainty (below threshold)
+    error_threshold = np.percentile(errors, error_percentile)
+    unc_threshold = np.percentile(uncertainty, unc_percentile)
+    
+    high_error = errors > error_threshold
+    low_uncertainty = uncertainty < unc_threshold
+    
+    confident_errors = high_error & low_uncertainty
+    
+    print(f"  High error samples: {high_error.sum()}/{len(y_train)}")
+    print(f"  Low uncertainty samples: {low_uncertainty.sum()}/{len(y_train)}")
+    print(f"  Confident errors (likely mislabeled): {confident_errors.sum()}/{len(y_train)}")
+    
+    # Optional: Refine with distance metrics
+    if use_distance:
+        from distance_metrics import identify_outliers_by_distance
+        
+        distance_method = getattr(args, 'distance_metric', 'tanimoto')
+        outlier_mask, avg_distances = identify_outliers_by_distance(
+            x_train, rep, method=distance_method, threshold_percentile=80
+        )
+        
+        # Samples that are BOTH confident errors AND distance outliers are most suspect
+        refined_noisy = confident_errors & outlier_mask
+        
+        print(f"  Distance outliers: {outlier_mask.sum()}/{len(y_train)}")
+        print(f"  Refined noisy (error + unc + distance): {refined_noisy.sum()}/{len(y_train)}")
+        
+        noisy_mask = refined_noisy
+    else:
+        noisy_mask = confident_errors
+    
+    # Keep clean samples
+    clean_mask = ~noisy_mask
+    
+    print(f"  Final: Keeping {clean_mask.sum()}/{len(y_train)} samples")
+    
+    # Phase 3: Retrain on cleaned data
+    print("Phase 3: Retraining on cleaned data...")
+    
+    x_clean = x_train_t[clean_mask]
+    y_clean = y_train_t[clean_mask]
+    
+    # Create fresh model
+    model2 = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    model2.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001)
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - warmup_epochs):
+        model2.train()
+        optimizer2.zero_grad()
+        pred = model2(x_clean)
+        loss = criterion(pred, y_clean)
+        loss.backward()
+        optimizer2.step()
+        
+        train_losses.append(loss.item())
+        
+        # Validation
+        model2.eval()
+        with torch.no_grad():
+            pred_val = model2(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Test
+    model2.eval()
+    with torch.no_grad():
+        pred_test = model2(x_test_t).cpu().numpy()
+        y_pred = pred_test[:, 0]  # Extract mean
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"confident_learning_{loss_name}"
+    if use_distance:
+        model_name += "_dist"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save cleaning info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        cleaning_dir = os.path.dirname(args.filepath.replace('.csv', '_cleaning/'))
+        os.makedirs(cleaning_dir, exist_ok=True)
+        
+        cleaning_df = pd.DataFrame({
+            'sample_idx': np.arange(len(noisy_mask)),
+            'kept': (~noisy_mask).astype(int),
+            'y_true': y_train,
+            'pred_mean': pred_mean,
+            'error': errors,
+            'uncertainty': uncertainty,
+            'confident_error': confident_errors.astype(int),
+        })
+        
+        if use_distance:
+            cleaning_df['outlier'] = outlier_mask.astype(int)
+        
+        cleaning_file = os.path.join(
+            cleaning_dir,
+            f"cleaning_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        cleaning_df.to_csv(cleaning_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_small_loss_trick(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Small-Loss Trick (Han et al. 2018) with molecular distance filtering.
+    
+    Strategy:
+    1. Train model for warmup period
+    2. Select samples with smallest losses (most likely clean)
+    3. Optional: Filter out isolated small-loss samples using distance
+    4. Retrain on selected samples
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Loss setup
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        warmup_epochs = trial.suggest_int('warmup_epochs', 20, 50)
+        keep_fraction = trial.suggest_float('keep_fraction', 0.5, 0.9)
+        use_distance = trial.suggest_categorical('use_distance', [True, False]) if hasattr(args, 'use_distance') else args.use_distance
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        warmup_epochs = 30
+        keep_fraction = 0.7  # Keep 70% with smallest losses
+        use_distance = getattr(args, 'use_distance', False)
+    
+    # Loss function setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    # Determine output size
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Phase 1: Warmup training
+    print(f"Phase 1: Warmup training for {warmup_epochs} epochs...")
+    
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    tracking_criterion = nn.MSELoss(reduction='none')  # For sample selection
+    
+    # Train
+    for epoch in range(warmup_epochs):
+        model.train()
+        optimizer.zero_grad()
+        pred = model(x_train_t)
+        loss = criterion(pred, y_train_t)
+        loss.backward()
+        optimizer.step()
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Loss={loss.item():.4f}")
+    
+    # Phase 2: Select small-loss samples
+    print("Phase 2: Selecting small-loss samples...")
+    
+    model.eval()
+    with torch.no_grad():
+        pred_all = model(x_train_t).cpu().numpy()
+        
+        # Extract mean predictions for loss calculation
+        if output_size > 1:
+            pred_mean = pred_all[:, 0]
+        else:
+            pred_mean = pred_all.flatten()
+        
+        # Calculate per-sample losses
+        pred_mean_t = torch.tensor(pred_mean, dtype=torch.float32).view(-1, 1).to(device)
+        sample_losses = tracking_criterion(pred_mean_t, y_train_t).squeeze().cpu().numpy()
+    
+    # Select samples with smallest losses
+    n_keep = int(len(y_train) * keep_fraction)
+    loss_sorted_indices = np.argsort(sample_losses)
+    small_loss_indices = loss_sorted_indices[:n_keep]
+    
+    print(f"  Selected {n_keep}/{len(y_train)} samples with smallest losses")
+    print(f"  Loss threshold: {sample_losses[small_loss_indices[-1]]:.4f}")
+    
+    # Optional: Refine with distance filtering
+    if use_distance:
+        from distance_metrics import compute_molecular_distances
+        
+        distance_method = getattr(args, 'distance_metric', 'tanimoto')
+        
+        print(f"  Applying distance filtering with {distance_method}...")
+        
+        # Compute distances among small-loss samples
+        x_small_loss = x_train[small_loss_indices]
+        
+        if len(small_loss_indices) > 1:
+            distance_matrix = compute_molecular_distances(
+                x_train, rep, method=distance_method,
+                subset_indices=small_loss_indices
+            )
+            
+            # For each small-loss sample, compute average distance to other small-loss samples
+            avg_distances = np.zeros(len(small_loss_indices))
+            for i in range(len(small_loss_indices)):
+                distances_i = np.concatenate([
+                    distance_matrix[i, :i],
+                    distance_matrix[i, i+1:]
+                ])
+                avg_distances[i] = distances_i.mean()
+            
+            # Keep samples that are close to other small-loss samples
+            # (isolated small-loss samples might be lucky outliers)
+            distance_threshold = np.percentile(avg_distances, 75)  # Keep 75% closest
+            close_to_cluster = avg_distances < distance_threshold
+            
+            # Final selection: small loss + close to others
+            refined_indices = small_loss_indices[close_to_cluster]
+            
+            print(f"  Distance-filtered: {len(refined_indices)}/{n_keep} samples")
+            print(f"  Removed {n_keep - len(refined_indices)} isolated samples")
+            
+            keep_indices = refined_indices
+        else:
+            keep_indices = small_loss_indices
+    else:
+        keep_indices = small_loss_indices
+    
+    # Create clean dataset
+    x_clean = x_train_t[keep_indices]
+    y_clean = y_train_t[keep_indices]
+    
+    # Phase 3: Retrain on clean data
+    print(f"Phase 3: Retraining on {len(keep_indices)} clean samples...")
+    
+    # Create fresh model
+    model2 = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model2.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001)
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - warmup_epochs):
+        model2.train()
+        optimizer2.zero_grad()
+        pred = model2(x_clean)
+        loss = criterion(pred, y_clean)
+        loss.backward()
+        optimizer2.step()
+        
+        train_losses.append(loss.item())
+        
+        # Validation
+        model2.eval()
+        with torch.no_grad():
+            pred_val = model2(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Test
+    model2.eval()
+    with torch.no_grad():
+        pred_test = model2(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"small_loss_{loss_name}" if loss_name != 'mse' else "small_loss"
+    if use_distance:
+        model_name += "_dist"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save selection info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        selection_dir = os.path.dirname(args.filepath.replace('.csv', '_selection/'))
+        os.makedirs(selection_dir, exist_ok=True)
+        
+        keep_mask = np.zeros(len(y_train), dtype=bool)
+        keep_mask[keep_indices] = True
+        
+        selection_df = pd.DataFrame({
+            'sample_idx': np.arange(len(y_train)),
+            'kept': keep_mask.astype(int),
+            'loss': sample_losses,
+            'y_true': y_train,
+            'y_pred': pred_mean,
+        })
+        
+        selection_file = os.path.join(
+            selection_dir,
+            f"selection_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        selection_df.to_csv(selection_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_mentornet(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    MentorNet (Jiang et al. 2018) adapted for molecular regression.
+    
+    A mentor network learns to weight training samples for a student network.
+    The mentor observes loss history and optionally uncertainty/distance features.
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Check for distance and uncertainty features
+    use_distance = getattr(args, 'use_distance', False)
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # If using advanced loss, mentor can use uncertainty
+    use_uncertainty = loss_name in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                                      'evidential_laplace', 'sample_adaptive_barron', 'stratified']
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        mentor_hidden = trial.suggest_int('mentor_hidden', 50, 200)
+        mentor_lr = trial.suggest_float('mentor_lr', 1e-5, 1e-3, log=True)
+        history_length = trial.suggest_int('history_length', 3, 10)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        mentor_hidden = 100
+        mentor_lr = 1e-4
+        history_length = 5  # Track last 5 epochs of losses
+    
+    # Loss function setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Compute distance features if needed
+    distance_features = None
+    if use_distance:
+        from distance_metrics import compute_molecular_distances
+        
+        distance_method = getattr(args, 'distance_metric', 'tanimoto')
+        print(f"Computing {distance_method} distances for mentor features...")
+        
+        distance_matrix = compute_molecular_distances(x_train, rep, method=distance_method)
+        
+        # Features: average distance to nearest k neighbors
+        k = min(10, len(x_train) - 1)
+        nearest_k_distances = np.partition(distance_matrix, k, axis=1)[:, 1:k+1]  # Exclude self
+        distance_features = torch.tensor(
+            nearest_k_distances.mean(axis=1), dtype=torch.float32
+        ).view(-1, 1).to(device)
+    
+    # Create student model
+    student = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        student.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    student_optimizer = torch.optim.Adam(student.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    tracking_criterion = nn.MSELoss(reduction='none')
+    
+    # Create mentor network
+    # Input: current loss + loss history + optional (uncertainty + distance)
+    mentor_input_size = 1 + history_length  # current loss + history
+    if use_uncertainty:
+        mentor_input_size += 1  # add uncertainty
+    if use_distance:
+        mentor_input_size += 1  # add distance feature
+    
+    mentor = nn.Sequential(
+        nn.Linear(mentor_input_size, mentor_hidden),
+        nn.ReLU(),
+        nn.Linear(mentor_hidden, mentor_hidden),
+        nn.ReLU(),
+        nn.Linear(mentor_hidden, 1),
+        nn.Sigmoid()  # Weight in [0, 1]
+    ).to(device)
+    
+    mentor_optimizer = torch.optim.Adam(mentor.parameters(), lr=mentor_lr)
+    
+    # Track loss history for each sample
+    loss_history = torch.zeros(len(y_train), history_length).to(device)
+    
+    train_losses = []
+    val_losses = []
+    
+    print("Training with MentorNet...")
+    
+    # Training loop
+    for epoch in range(args.epochs):
+        student.train()
+        mentor.train()
+        
+        # Forward pass through student
+        student_optimizer.zero_grad()
+        pred = student(x_train_t)
+        
+        # Extract mean for loss calculation
+        if output_size > 1:
+            pred_mean = pred[:, 0:1]
+        else:
+            pred_mean = pred
+        
+        # Calculate per-sample losses
+        sample_losses = tracking_criterion(pred_mean, y_train_t).squeeze()
+        
+        # Update loss history (shift and add current)
+        loss_history = torch.roll(loss_history, -1, dims=1)
+        loss_history[:, -1] = sample_losses.detach()
+        
+        # Prepare mentor input
+        mentor_input = [
+            sample_losses.detach().view(-1, 1),
+            loss_history
+        ]
+        
+        # Add uncertainty if available
+        if use_uncertainty:
+            if loss_name == 'heteroscedastic':
+                log_var = pred[:, 1].detach()
+                uncertainty = torch.sqrt(torch.exp(log_var))
+            elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                v = torch.clamp(F.softplus(pred[:, 1]) + 1.0, min=1.0)
+                alpha = torch.clamp(F.softplus(pred[:, 2]) + 1.0, min=1.0)
+                beta = torch.clamp(F.softplus(pred[:, 3]), min=1e-6)
+                epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
+                aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                uncertainty = torch.sqrt(epistemic + aleatoric)
+            elif loss_name == 'sample_adaptive_barron':
+                alpha = torch.sigmoid(pred[:, 1]) * 3.9 + 0.1
+                uncertainty = 1.0 / (alpha + 1e-6)
+            elif loss_name == 'stratified':
+                uncertainty = torch.sigmoid(pred[:, 1])
+            
+            mentor_input.append(uncertainty.detach().view(-1, 1))
+        
+        # Add distance features
+        if use_distance:
+            mentor_input.append(distance_features)
+        
+        # Concatenate mentor inputs
+        mentor_input = torch.cat(mentor_input, dim=1)
+        
+        # Get weights from mentor
+        sample_weights = mentor(mentor_input).squeeze()
+        
+        # Weighted loss for student
+        weighted_loss = (sample_weights * sample_losses).mean()
+        
+        # Update student
+        weighted_loss.backward()
+        student_optimizer.step()
+        
+        train_losses.append(weighted_loss.item())
+        
+        # Update mentor every 5 epochs based on validation performance
+        if epoch % 5 == 0 and epoch > 0:
+            student.eval()
+            with torch.no_grad():
+                pred_val = student(x_val_t)
+                val_loss = criterion(pred_val, y_val_t)
+            student.train()
+            
+            # Mentor objective: minimize validation loss
+            # This encourages mentor to weight samples that improve generalization
+            mentor_optimizer.zero_grad()
+            val_loss.backward()
+            mentor_optimizer.step()
+            
+            val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            avg_weight = sample_weights.mean().item()
+            print(f"Epoch {epoch}: Train={weighted_loss.item():.4f}, "
+                  f"Avg Weight={avg_weight:.3f}")
+    
+    # Test
+    student.eval()
+    with torch.no_grad():
+        pred_test = student(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"mentornet_{loss_name}" if loss_name != 'mse' else "mentornet"
+    if use_uncertainty:
+        model_name += "_unc"
+    if use_distance:
+        model_name += "_dist"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save sample weights
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        
+        # Get final weights
+        student.eval()
+        with torch.no_grad():
+            pred_final = student(x_train_t)
+            if output_size > 1:
+                pred_mean_final = pred_final[:, 0:1]
+            else:
+                pred_mean_final = pred_final
+            
+            final_losses = tracking_criterion(pred_mean_final, y_train_t).squeeze()
+            
+            # Prepare mentor input
+            mentor_input_final = [
+                final_losses.view(-1, 1),
+                loss_history
+            ]
+            
+            if use_uncertainty:
+                if loss_name == 'heteroscedastic':
+                    log_var = pred_final[:, 1]
+                    uncertainty = torch.sqrt(torch.exp(log_var))
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    v = torch.clamp(F.softplus(pred_final[:, 1]) + 1.0, min=1.0)
+                    alpha = torch.clamp(F.softplus(pred_final[:, 2]) + 1.0, min=1.0)
+                    beta = torch.clamp(F.softplus(pred_final[:, 3]), min=1e-6)
+                    epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
+                    aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    uncertainty = torch.sqrt(epistemic + aleatoric)
+                elif loss_name == 'sample_adaptive_barron':
+                    alpha = torch.sigmoid(pred_final[:, 1]) * 3.9 + 0.1
+                    uncertainty = 1.0 / (alpha + 1e-6)
+                elif loss_name == 'stratified':
+                    uncertainty = torch.sigmoid(pred_final[:, 1])
+                
+                mentor_input_final.append(uncertainty.view(-1, 1))
+            
+            if use_distance:
+                mentor_input_final.append(distance_features)
+            
+            mentor_input_final = torch.cat(mentor_input_final, dim=1)
+            final_weights = mentor(mentor_input_final).squeeze().cpu().numpy()
+        
+        weights_dir = os.path.dirname(args.filepath.replace('.csv', '_sample_weights/'))
+        os.makedirs(weights_dir, exist_ok=True)
+        
+        weights_df = pd.DataFrame({
+            'sample_idx': np.arange(len(final_weights)),
+            'weight': final_weights,
+            'loss': final_losses.cpu().numpy(),
+            'y_true': y_train,
+            'y_pred': pred_mean_final.cpu().numpy().flatten()
+        })
+        
+        weights_file = os.path.join(
+            weights_dir,
+            f"weights_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        weights_df.to_csv(weights_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_contrast_to_divide(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Contrast-to-Divide (Yao et al. 2020) adapted for molecular regression.
+    
+    Uses contrastive learning to separate clean from noisy samples:
+    1. Similar molecules should have similar predictions (consistency)
+    2. Samples with high prediction variance across augmentations are noisy
+    3. Optional: Use distance metrics to define molecular similarity
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    use_distance = getattr(args, 'use_distance', False)
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        contrast_epochs = trial.suggest_int('contrast_epochs', 20, 50)
+        consistency_weight = trial.suggest_float('consistency_weight', 0.1, 1.0)
+        clean_threshold = trial.suggest_float('clean_threshold', 0.6, 0.9)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        contrast_epochs = 30
+        consistency_weight = 0.5  # Balance between prediction loss and consistency
+        clean_threshold = 0.75  # Top 75% consistent samples are "clean"
+    
+    # Loss function setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Compute molecular similarity if using distance
+    similarity_matrix = None
+    if use_distance:
+        from distance_metrics import compute_molecular_distances
+        
+        distance_method = getattr(args, 'distance_metric', 'tanimoto')
+        print(f"Computing {distance_method} distances for contrastive learning...")
+        
+        distance_matrix = compute_molecular_distances(x_train, rep, method=distance_method)
+        
+        # Convert distance to similarity (higher similarity = lower distance)
+        max_dist = distance_matrix.max()
+        similarity_matrix = 1.0 - (distance_matrix / (max_dist + 1e-8))
+        similarity_matrix = torch.tensor(similarity_matrix, dtype=torch.float32).to(device)
+    
+    # Create model
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    tracking_criterion = nn.MSELoss(reduction='none')
+    
+    # Phase 1: Contrastive learning with consistency regularization
+    print(f"Phase 1: Contrastive learning for {contrast_epochs} epochs...")
+    
+    consistency_scores = []
+    
+    for epoch in range(contrast_epochs):
+        model.train()
+        
+        # Create augmented views by adding small noise to inputs
+        # (molecular augmentation via noise in feature space)
+        noise_scale = 0.01
+        x_aug1 = x_train_t + torch.randn_like(x_train_t) * noise_scale
+        x_aug2 = x_train_t + torch.randn_like(x_train_t) * noise_scale
+        
+        optimizer.zero_grad()
+        
+        # Predictions on original and augmented views
+        pred_orig = model(x_train_t)
+        pred_aug1 = model(x_aug1)
+        pred_aug2 = model(x_aug2)
+        
+        # Extract mean predictions
+        if output_size > 1:
+            pred_orig_mean = pred_orig[:, 0:1]
+            pred_aug1_mean = pred_aug1[:, 0:1]
+            pred_aug2_mean = pred_aug2[:, 0:1]
+        else:
+            pred_orig_mean = pred_orig
+            pred_aug1_mean = pred_aug1
+            pred_aug2_mean = pred_aug2
+        
+        # Prediction loss
+        pred_loss = criterion(pred_orig, y_train_t)
+        
+        # Consistency loss: predictions should be similar across augmentations
+        consistency_loss = F.mse_loss(pred_orig_mean, pred_aug1_mean) + \
+                          F.mse_loss(pred_orig_mean, pred_aug2_mean)
+        
+        # Optional: Distance-based consistency
+        # Similar molecules should have similar predictions
+        if use_distance:
+            # For each sample, compute consistency with similar molecules
+            # Sample a batch to avoid O(n^2) computation
+            batch_size = min(128, len(x_train))
+            batch_idx = torch.randperm(len(x_train))[:batch_size]
+            
+            pred_batch = pred_orig_mean[batch_idx]
+            sim_batch = similarity_matrix[batch_idx]
+            
+            # Pairwise prediction differences
+            pred_diff = torch.abs(pred_batch.unsqueeze(1) - pred_batch.unsqueeze(0))
+            
+            # Weight by similarity (high similarity = should have small difference)
+            dist_consistency = (sim_batch * pred_diff).mean()
+            
+            consistency_loss = consistency_loss + dist_consistency
+        
+        # Combined loss
+        total_loss = pred_loss + consistency_weight * consistency_loss
+        
+        total_loss.backward()
+        optimizer.step()
+        
+        # Track consistency scores (low = more consistent = likely clean)
+        if epoch >= contrast_epochs - 5:  # Last 5 epochs
+            model.eval()
+            with torch.no_grad():
+                pred1 = model(x_train_t)
+                pred2 = model(x_train_t + torch.randn_like(x_train_t) * noise_scale)
+                pred3 = model(x_train_t + torch.randn_like(x_train_t) * noise_scale)
+                
+                if output_size > 1:
+                    pred1_mean = pred1[:, 0:1]
+                    pred2_mean = pred2[:, 0:1]
+                    pred3_mean = pred3[:, 0:1]
+                else:
+                    pred1_mean = pred1
+                    pred2_mean = pred2
+                    pred3_mean = pred3
+                
+                # Variance across predictions
+                pred_stack = torch.cat([pred1_mean, pred2_mean, pred3_mean], dim=1)
+                consistency = pred_stack.std(dim=1).cpu().numpy()
+                consistency_scores.append(consistency)
+            model.train()
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Pred Loss={pred_loss.item():.4f}, "
+                  f"Consistency={consistency_loss.item():.4f}")
+    
+    # Phase 2: Divide into clean/noisy based on consistency
+    print("Phase 2: Dividing dataset into clean/noisy...")
+    
+    # Average consistency scores from last 5 epochs
+    avg_consistency = np.mean(consistency_scores, axis=0)
+    
+    # Lower consistency = more stable = likely clean
+    consistency_threshold = np.percentile(avg_consistency, clean_threshold * 100)
+    clean_mask = avg_consistency < consistency_threshold
+    
+    print(f"  Identified {clean_mask.sum()}/{len(y_train)} clean samples")
+    print(f"  Consistency threshold: {consistency_threshold:.4f}")
+    
+    # Optional: Refine with distance
+    if use_distance:
+        # Check if "clean" samples form a coherent cluster
+        from distance_metrics import compute_molecular_distances
+        
+        clean_indices = np.where(clean_mask)[0]
+        
+        if len(clean_indices) > 10:
+            # Compute distances among clean samples
+            distance_matrix_clean = compute_molecular_distances(
+                x_train, rep, method=distance_method,
+                subset_indices=clean_indices
+            )
+            
+            # Average distance to other clean samples
+            avg_distances = np.zeros(len(clean_indices))
+            for i in range(len(clean_indices)):
+                distances_i = np.concatenate([
+                    distance_matrix_clean[i, :i],
+                    distance_matrix_clean[i, i+1:]
+                ])
+                avg_distances[i] = distances_i.mean()
+            
+            # Remove isolated "clean" samples (might be false positives)
+            distance_threshold = np.percentile(avg_distances, 75)
+            close_to_cluster = avg_distances < distance_threshold
+            
+            refined_clean_indices = clean_indices[close_to_cluster]
+            
+            refined_clean_mask = np.zeros(len(y_train), dtype=bool)
+            refined_clean_mask[refined_clean_indices] = True
+            
+            print(f"  Distance-refined: {refined_clean_mask.sum()}/{clean_mask.sum()} clean samples")
+            
+            clean_mask = refined_clean_mask
+    
+    # Phase 3: Retrain on clean samples
+    print(f"Phase 3: Retraining on {clean_mask.sum()} clean samples...")
+    
+    x_clean = x_train_t[clean_mask]
+    y_clean = y_train_t[clean_mask]
+    
+    # Fresh model
+    model2 = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model2.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer2 = torch.optim.Adam(model2.parameters(), lr=0.001)
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - contrast_epochs):
+        model2.train()
+        optimizer2.zero_grad()
+        pred = model2(x_clean)
+        loss = criterion(pred, y_clean)
+        loss.backward()
+        optimizer2.step()
+        
+        train_losses.append(loss.item())
+        
+        # Validation
+        model2.eval()
+        with torch.no_grad():
+            pred_val = model2(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Test
+    model2.eval()
+    with torch.no_grad():
+        pred_test = model2(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"contrast_divide_{loss_name}" if loss_name != 'mse' else "contrast_divide"
+    if use_distance:
+        model_name += "_dist"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save division info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        division_dir = os.path.dirname(args.filepath.replace('.csv', '_division/'))
+        os.makedirs(division_dir, exist_ok=True)
+        
+        division_df = pd.DataFrame({
+            'sample_idx': np.arange(len(clean_mask)),
+            'clean': clean_mask.astype(int),
+            'consistency_score': avg_consistency,
+            'y_true': y_train,
+        })
+        
+        division_file = os.path.join(
+            division_dir,
+            f"division_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        division_df.to_csv(division_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+
+def train_distance_based_selection(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Distance-Based Selection - pure molecular distance approach.
+    
+    Strategy:
+    1. Identify outlier molecules (far from distribution)
+    2. Optional: Train initial model and combine distance with loss/uncertainty
+    3. Remove outliers and retrain
+    
+    Rationale: Noisy labels often occur on atypical/outlier molecules
+    """
+    from loss_functions import get_loss_function
+    from distance_metrics import (
+        identify_outliers_by_distance,
+        distance_weighted_sample_selection
+    )
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    distance_method = getattr(args, 'distance_metric', 'tanimoto')
+    
+    # Check if we should use loss/uncertainty in addition to distance
+    use_loss_unc = loss_name in ['heteroscedastic', 'evidential', 'evidential_cauchy', 
+                                   'evidential_laplace', 'sample_adaptive_barron', 'stratified']
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        outlier_percentile = trial.suggest_float('outlier_percentile', 75, 95)
+        warmup_epochs = trial.suggest_int('warmup_epochs', 10, 30) if use_loss_unc else 0
+        combine_strategy = trial.suggest_categorical('combine_strategy', 
+                                                     ['distance_only', 'distance_loss', 'distance_loss_unc']) if use_loss_unc else 'distance_only'
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        outlier_percentile = 85  # Remove top 15% most distant
+        warmup_epochs = 20 if use_loss_unc else 0
+        combine_strategy = 'distance_loss_unc' if use_loss_unc else 'distance_only'
+    
+    # Loss function setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Phase 1: Identify distance-based outliers
+    print(f"Phase 1: Identifying molecular outliers using {distance_method} distance...")
+    
+    outlier_mask, avg_distances = identify_outliers_by_distance(
+        x_train, rep, method=distance_method,
+        threshold_percentile=outlier_percentile
+    )
+    
+    print(f"  Distance-based outliers: {outlier_mask.sum()}/{len(y_train)}")
+    print(f"  Distance range: {avg_distances.min():.4f} to {avg_distances.max():.4f}")
+    
+    # Phase 2: Optionally refine with loss/uncertainty
+    if combine_strategy != 'distance_only' and use_loss_unc:
+        print(f"Phase 2: Training initial model for {warmup_epochs} epochs...")
+        
+        # Train initial model
+        model = DNNRegressionModel(
+            input_size=x_train.shape[1],
+            hidden_size1=hidden_size1,
+            hidden_size2=hidden_size2
+        ).to(device)
+        if output_size > 1:
+            model.fc3 = nn.Linear(hidden_size2, output_size)
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        criterion = get_loss_function(loss_name, **loss_kwargs)
+        tracking_criterion = nn.MSELoss(reduction='none')
+        
+        for epoch in range(warmup_epochs):
+            model.train()
+            optimizer.zero_grad()
+            pred = model(x_train_t)
+            loss = criterion(pred, y_train_t)
+            loss.backward()
+            optimizer.step()
+            
+            if epoch % 10 == 0:
+                print(f"  Epoch {epoch}: Loss={loss.item():.4f}")
+        
+        # Get predictions and uncertainties
+        model.eval()
+        with torch.no_grad():
+            pred_all = model(x_train_t).cpu().numpy()
+            
+            # Extract mean and uncertainty
+            if output_size > 1:
+                pred_mean = pred_all[:, 0]
+            else:
+                pred_mean = pred_all.flatten()
+            
+            # Calculate losses
+            pred_mean_t = torch.tensor(pred_mean, dtype=torch.float32).view(-1, 1).to(device)
+            losses = tracking_criterion(pred_mean_t, y_train_t).squeeze().cpu().numpy()
+            
+            # Extract uncertainty if available
+            if use_loss_unc:
+                if loss_name == 'heteroscedastic':
+                    log_var = pred_all[:, 1]
+                    uncertainties = np.sqrt(np.exp(log_var))
+                
+                elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                    v = np.maximum(pred_all[:, 1], 1.0)
+                    alpha = np.maximum(pred_all[:, 2], 1.0)
+                    beta = np.maximum(pred_all[:, 3], 1e-6)
+                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
+                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    uncertainties = np.sqrt(epistemic + aleatoric)
+                
+                elif loss_name == 'sample_adaptive_barron':
+                    alpha = 1 / (1 + np.exp(-pred_all[:, 1])) * 3.9 + 0.1
+                    uncertainties = 1.0 / (alpha + 1e-6)
+                
+                elif loss_name == 'stratified':
+                    uncertainties = 1 / (1 + np.exp(-pred_all[:, 1]))
+            else:
+                uncertainties = None
+        
+        # Combine distance with loss/uncertainty
+        print("  Combining distance with model predictions...")
+        
+        if combine_strategy == 'distance_loss':
+            # Use distance-weighted sample selection
+            keep_mask, scores = distance_weighted_sample_selection(
+                x_train, losses, None, rep,
+                method=distance_method,
+                keep_fraction=1.0 - (outlier_percentile / 100.0)
+            )
+        
+        elif combine_strategy == 'distance_loss_unc':
+            # Use all three: distance, loss, uncertainty
+            keep_mask, scores = distance_weighted_sample_selection(
+                x_train, losses, uncertainties, rep,
+                method=distance_method,
+                keep_fraction=1.0 - (outlier_percentile / 100.0)
+            )
+        
+        noisy_mask = ~keep_mask
+        
+        print(f"  Combined selection: Keeping {keep_mask.sum()}/{len(y_train)} samples")
+        print(f"  Removed {noisy_mask.sum()} samples (distance + loss + unc)")
+    
+    else:
+        # Pure distance-based selection
+        noisy_mask = outlier_mask
+        keep_mask = ~noisy_mask
+    
+    # Phase 3: Train on cleaned data
+    print(f"Phase 3: Training on {keep_mask.sum()} selected samples...")
+    
+    x_clean = x_train_t[keep_mask]
+    y_clean = y_train_t[keep_mask]
+    
+    # Create fresh model
+    model_final = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model_final.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer_final = torch.optim.Adam(model_final.parameters(), lr=0.001)
+    criterion_final = get_loss_function(loss_name, **loss_kwargs)
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs - warmup_epochs):
+        model_final.train()
+        optimizer_final.zero_grad()
+        pred = model_final(x_clean)
+        loss = criterion_final(pred, y_clean)
+        loss.backward()
+        optimizer_final.step()
+        
+        train_losses.append(loss.item())
+        
+        # Validation
+        model_final.eval()
+        with torch.no_grad():
+            pred_val = model_final(x_val_t)
+            val_loss = criterion_final(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={loss.item():.4f}, Val={val_loss.item():.4f}")
+    
+    # Test
+    model_final.eval()
+    with torch.no_grad():
+        pred_test = model_final(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"distance_select_{distance_method}"
+    if combine_strategy != 'distance_only':
+        model_name += f"_{combine_strategy}"
+    if loss_name != 'mse':
+        model_name += f"_{loss_name}"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save selection info
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        selection_dir = os.path.dirname(args.filepath.replace('.csv', '_selection/'))
+        os.makedirs(selection_dir, exist_ok=True)
+        
+        selection_df = pd.DataFrame({
+            'sample_idx': np.arange(len(keep_mask)),
+            'kept': keep_mask.astype(int),
+            'avg_distance': avg_distances,
+            'outlier': outlier_mask.astype(int),
+            'y_true': y_train,
+        })
+        
+        if combine_strategy != 'distance_only' and use_loss_unc:
+            selection_df['loss'] = losses
+            if uncertainties is not None:
+                selection_df['uncertainty'] = uncertainties
+        
+        selection_file = os.path.join(
+            selection_dir,
+            f"selection_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        selection_df.to_csv(selection_file, index=False)
+    
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_heteroscedastic_gp(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """Heteroscedastic Gaussian Process with learned noise variance"""
+    import gpytorch
+    from gpytorch.models import ExactGP
+    from gpytorch.likelihoods import GaussianLikelihood
+    from gpytorch.distributions import MultivariateNormal
+    import torch.nn as nn
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Get kernel
+    kernel_type = args.kernel if hasattr(args, 'kernel') else 'tanimoto'
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Two-model approach: GP for mean + NN for noise
+    class HeteroscedasticGPModel(ExactGP):
+        def __init__(self, train_x, train_y, likelihood, kernel_type='tanimoto'):
+            super().__init__(train_x, train_y, likelihood)
+            self.mean_module = gpytorch.means.ConstantMean()
+            
+            if kernel_type == 'tanimoto':
+                self.covar_module = gpytorch.kernels.ScaleKernel(
+                    TanimotoKernel()
+                )
+            elif kernel_type == 'rbf':
+                self.covar_module = gpytorch.kernels.ScaleKernel(
+                    gpytorch.kernels.RBFKernel()
+                )
+            elif kernel_type == 'matern':
+                self.covar_module = gpytorch.kernels.ScaleKernel(
+                    gpytorch.kernels.MaternKernel(nu=2.5)
+                )
+        
+        def forward(self, x):
+            mean_x = self.mean_module(x)
+            covar_x = self.covar_module(x)
+            return MultivariateNormal(mean_x, covar_x)
+    
+    # Separate neural network for noise prediction
+    class NoiseModel(nn.Module):
+        def __init__(self, input_dim):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, 64),
+                nn.ReLU(),
+                nn.Linear(64, 64),
+                nn.ReLU(),
+                nn.Linear(64, 1),
+                nn.Softplus()  # Ensure positive output
+            )
+        
+        def forward(self, x):
+            return self.net(x).squeeze(-1) + 1e-4  # Add small epsilon
+    
+    # Create models
+    likelihood = GaussianLikelihood().to(device)
+    gp_model = HeteroscedasticGPModel(
+        x_train_t, y_train_t, likelihood, kernel_type
+    ).to(device)
+    noise_model = NoiseModel(x_train.shape[1]).to(device)
+
+    # Training
+    gp_model.train()
+    likelihood.train()
+    noise_model.train()
+
+    optimizer = torch.optim.Adam([
+        {'params': gp_model.parameters(), 'lr': 0.1},
+        {'params': noise_model.parameters(), 'lr': 0.001}
+    ], lr=0.1)
+
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, gp_model)
+
+    print(f"Training Heteroscedastic GP with {kernel_type} kernel...")
+
+    for epoch in range(args.epochs):
+        # Train GP
+        optimizer.zero_grad()
+        output = gp_model(x_train_t)
+        gp_loss = -mll(output, y_train_t)
+        
+        # Train noise model
+        with torch.no_grad():
+            gp_pred = gp_model(x_train_t).mean
+        residuals = (y_train_t - gp_pred) ** 2
+        pred_var = noise_model(x_train_t)
+        
+        # Negative log-likelihood for noise model
+        noise_loss = torch.mean(0.5 * torch.log(pred_var) + residuals / (2 * pred_var))
+        
+        # Combined loss
+        total_loss = gp_loss + noise_loss
+        total_loss.backward()
+        optimizer.step()
+        
+        if epoch % 20 == 0:
+            print(f"  Epoch {epoch}: GP Loss = {gp_loss.item():.4f}, Noise Loss = {noise_loss.item():.4f}")
+    
+    # Test
+    gp_model.eval()
+    likelihood.eval()
+    noise_model.eval()
+    
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        # GP predictions
+        pred_dist = gp_model(x_test_t)
+        pred_mean = pred_dist.mean.cpu().numpy()
+        
+        # Epistemic uncertainty (from GP)
+        epistemic_var = pred_dist.variance.cpu().numpy()
+        epistemic_std = np.sqrt(epistemic_var)
+        
+        # Aleatoric uncertainty (learned noise)
+        aleatoric_var = noise_model(x_test_t).cpu().numpy()
+        aleatoric_std = np.sqrt(aleatoric_var)
+        
+        # Total uncertainty
+        total_std = np.sqrt(epistemic_var + aleatoric_var)
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, pred_mean, logging=True)
+    
+    # Save results
+    model_name = f"het_gp_{kernel_type}"
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', 'het_gp')
+    
+    # Save uncertainty (total std as uncalibrated)
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=pred_mean,
+            y_pred_std=total_std,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+
+    
+    return metrics[3]
+
+def train_evidential_kernel(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """Evidential Kernel: GP predicting evidential parameters"""
+    import gpytorch
+    from gpytorch.models import ExactGP
+    from gpytorch.likelihoods import MultitaskGaussianLikelihood
+    from gpytorch.distributions import MultitaskMultivariateNormal
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Get kernel
+    kernel_type = args.kernel if hasattr(args, 'kernel') else 'tanimoto'
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Evidential GP Model (outputs 4 parameters)
+    class EvidentialGPModel(ExactGP):
+        def __init__(self, train_x, train_y, likelihood, kernel_type='tanimoto'):
+            super().__init__(train_x, train_y, likelihood)
+            self.mean_module = gpytorch.means.MultitaskMean(
+                gpytorch.means.ConstantMean(), num_tasks=4
+            )
+            
+            if kernel_type == 'tanimoto':
+                base_kernel = TanimotoKernel()
+            elif kernel_type == 'rbf':
+                base_kernel = gpytorch.kernels.RBFKernel()
+            elif kernel_type == 'matern':
+                base_kernel = gpytorch.kernels.MaternKernel(nu=2.5)
+            
+            self.covar_module = gpytorch.kernels.MultitaskKernel(
+                gpytorch.kernels.ScaleKernel(base_kernel),
+                num_tasks=4,
+                rank=1
+            )
+        
+        def forward(self, x):
+            mean_x = self.mean_module(x)
+            covar_x = self.covar_module(x)
+            return MultitaskMultivariateNormal(mean_x, covar_x)
+    
+    # Create synthetic targets for evidential parameters
+    # Initialize with reasonable values
+    gamma_init = y_train_t.clone()
+    v_init = torch.ones_like(y_train_t) * 5.0
+    alpha_init = torch.ones_like(y_train_t) * 2.0
+    beta_init = torch.ones_like(y_train_t) * 0.1
+    
+    y_train_multi = torch.stack([gamma_init, v_init, alpha_init, beta_init], dim=-1)
+    
+    # Create model
+    likelihood = MultitaskGaussianLikelihood(num_tasks=4).to(device)
+    model = EvidentialGPModel(x_train_t, y_train_multi, likelihood, kernel_type).to(device)
+    
+    # Training
+    model.train()
+    likelihood.train()
+    
+    # FIX: Use a single parameter group
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    # Don't add likelihood parameters separately - they're already in model.parameters()
+    
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+    
+    print(f"Training Evidential Kernel with {kernel_type} kernel...")
+    
+    for epoch in range(args.epochs):
+        optimizer.zero_grad()
+        output = model(x_train_t)
+        loss = -mll(output, y_train_multi)
+        loss.backward()
+        optimizer.step()
+        
+        if epoch % 20 == 0:
+            print(f"  Epoch {epoch}: Loss = {loss.item():.4f}")
+    
+    # Test
+    model.eval()
+    likelihood.eval()
+    
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        pred_dist = likelihood(model(x_test_t))
+        pred_params = pred_dist.mean.cpu().numpy()
+        
+        gamma = pred_params[:, 0]
+        v = np.maximum(pred_params[:, 1], 1.0)
+        alpha = np.maximum(pred_params[:, 2], 1.0)
+        beta = np.maximum(pred_params[:, 3], 1e-6)
+        
+        # Compute uncertainties
+        epistemic_std = np.sqrt(beta / (alpha - 1))
+        aleatoric_std = np.sqrt(beta / (v * (alpha - 1)))
+        total_std = np.sqrt(epistemic_std**2 + aleatoric_std**2)
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, gamma, logging=True)
+    
+    # Save results
+    model_name = f"evidential_kernel_{kernel_type}"
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', 'evidential_kernel')
+    
+    # Save uncertainty (total std as uncalibrated)
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=gamma,
+            y_pred_std=total_std,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+
+    
+    return metrics[3]
+
+def train_ntk_gnn(
+    train_loader, test_loader, val_loader, args, s, iteration, file_no,
+    y_test_original, trial,
+    y_train_noisy=None, y_test_noisy=None, y_val_noisy=None
+):
+    """Neural Tangent Kernel of GNN for molecular graphs"""
+    import torch
+    import torch.nn as nn
+    from torch_geometric.nn import GINConv, global_mean_pool
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Hyperparameters
+    if trial is not None:
+        dim_h = trial.suggest_categorical('dim_h', [32, 64, 128])
+        n_layers = trial.suggest_int('n_layers', 2, 4)
+        ridge_lambda = trial.suggest_float('ridge_lambda', 1e-4, 1e-2, log=True)
+    else:
+        dim_h = 64
+        n_layers = 3
+        ridge_lambda = 1e-3
+    
+    # GNN Model
+    class GNNModel(nn.Module):
+        def __init__(self, input_dim, hidden_dim, n_layers):
+            super().__init__()
+            self.convs = nn.ModuleList()
+            self.bns = nn.ModuleList()
+            
+            # First layer
+            mlp = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim)
+            )
+            self.convs.append(GINConv(mlp))
+            self.bns.append(nn.BatchNorm1d(hidden_dim))
+            
+            # Hidden layers
+            for _ in range(n_layers - 1):
+                mlp = nn.Sequential(
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, hidden_dim)
+                )
+                self.convs.append(GINConv(mlp))
+                self.bns.append(nn.BatchNorm1d(hidden_dim))
+            
+            # Output layer
+            self.fc = nn.Linear(hidden_dim, 1)
+        
+        def forward(self, data):
+            x, edge_index, batch = data.x, data.edge_index, data.batch
+            
+            for conv, bn in zip(self.convs, self.bns):
+                x = conv(x, edge_index)
+                x = bn(x)
+                x = torch.relu(x)
+            
+            x = global_mean_pool(x, batch)
+            return self.fc(x)
+    
+    # Get input dimension and initialize model FIRST
+    input_dim = None
+    model = None
+    
+    for batch in train_loader:
+        input_dim = batch.x.size(1)
+        break
+    
+    if input_dim is None:
+        print("Error: Empty train_loader, cannot determine input dimension")
+        return 0.0
+    
+    # NOW initialize model (after we know input_dim)
+    model = GNNModel(input_dim, dim_h, n_layers).to(device)
+    
+    print(f"Computing Neural Tangent Kernel for GNN...")
+    print(f"  Architecture: {input_dim} → {dim_h} (×{n_layers}) → 1")
+    print(f"  Warning: This is computationally expensive!")
+    
+    # Collect training data
+    X_train, y_train = [], []
+    for data in train_loader:
+        X_train.append(data.to(device))
+        y_train.append(data.y.to(device))
+    y_train = torch.cat(y_train, dim=0)
+    
+    n_train = len(X_train)
+    
+    if n_train > 1000:
+        print(f"  WARNING: n_train = {n_train} is large. This may take a very long time.")
+        print(f"  Consider reducing sample size for NTK-GNN.")
+    
+    # Compute NTK matrix
+    print("  Computing NTK matrix...")
+    K = torch.zeros(n_train, n_train, device=device)
+    
+    for i in range(n_train):
+        model.zero_grad()
+        output_i = model(X_train[i])
+        
+        # Get gradients
+        grads_i = torch.autograd.grad(
+            output_i, model.parameters(),
+            create_graph=False, retain_graph=False
+        )
+        grads_i_flat = torch.cat([g.flatten() for g in grads_i])
+        
+        for j in range(i, n_train):
+            model.zero_grad()
+            output_j = model(X_train[j])
+            
+            grads_j = torch.autograd.grad(
+                output_j, model.parameters(),
+                create_graph=False, retain_graph=False
+            )
+            grads_j_flat = torch.cat([g.flatten() for g in grads_j])
+            
+            # NTK: inner product of gradients
+            K[i, j] = torch.dot(grads_i_flat, grads_j_flat)
+            K[j, i] = K[i, j]
+        
+        if (i + 1) % 100 == 0:
+            print(f"    Processed {i+1}/{n_train} samples")
+    
+    # Kernel ridge regression
+    print("  Solving kernel ridge regression...")
+    K_reg = K + ridge_lambda * torch.eye(n_train, device=device)
+    alpha = torch.linalg.solve(K_reg, y_train)
+    
+    # Test predictions
+    print("  Computing test predictions...")
+    X_test, y_test = [], []
+    for data in test_loader:
+        X_test.append(data.to(device))
+        y_test.append(data.y.to(device))
+    y_test = torch.cat(y_test, dim=0).cpu().numpy()
+    
+    n_test = len(X_test)
+    predictions = torch.zeros(n_test, device=device)
+    variances = torch.zeros(n_test, device=device)
+    
+    for i in range(n_test):
+        model.zero_grad()
+        output_i = model(X_test[i])
+        
+        grads_i = torch.autograd.grad(
+            output_i, model.parameters(),
+            create_graph=False, retain_graph=False
+        )
+        grads_i_flat = torch.cat([g.flatten() for g in grads_i])
+        
+        # Compute kernel vector k(x_test, X_train)
+        k_vec = torch.zeros(n_train, device=device)
+        for j in range(n_train):
+            model.zero_grad()
+            output_j = model(X_train[j])
+            
+            grads_j = torch.autograd.grad(
+                output_j, model.parameters(),
+                create_graph=False, retain_graph=False
+            )
+            grads_j_flat = torch.cat([g.flatten() for g in grads_j])
+            
+            k_vec[j] = torch.dot(grads_i_flat, grads_j_flat)
+        
+        # Prediction
+        predictions[i] = torch.dot(k_vec, alpha)
+        
+        # Variance: k(x*,x*) - k(x*,X)(K+λI)^{-1}k(X,x*)
+        k_star_star = torch.dot(grads_i_flat, grads_i_flat)
+        variances[i] = k_star_star - torch.dot(k_vec, torch.linalg.solve(K_reg, k_vec))
+        
+        if (i + 1) % 100 == 0:
+            print(f"    Processed {i+1}/{n_test} test samples")
+    
+    y_pred = predictions.cpu().numpy()
+    uncertainty = torch.sqrt(torch.clamp(variances, min=0)).cpu().numpy()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"ntk_gnn_layers{n_layers}"
+    save_results(args.filepath, s, iteration, model_name, 'graph',
+                args.sample_size, metrics, 'default', 'ntk_gnn')
+    
+    # Save uncertainty (NTK variance as uncalibrated std)
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=uncertainty,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep='graph',
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+        )
+    
+    return metrics[3]
+
+def train_conformal_heteroscedastic(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Conformal Prediction + Heteroscedastic Neural Network (Romano et al. 2019 + novel).
+    
+    Combines:
+    1. Learned input-dependent uncertainty (heteroscedastic NLL)
+    2. Distribution-free conformal prediction intervals
+    
+    Provides both model uncertainty and calibrated prediction intervals.
+    Can compare learned vs. conformal uncertainty.
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        alpha = trial.suggest_float('alpha', 0.05, 0.2)
+        calibration_method = trial.suggest_categorical('calibration_method', 
+                                                       ['split', 'cv', 'jackknife'])
+        combine_method = trial.suggest_categorical('combine_method',
+                                                   ['separate', 'uncertainty_weighted', 'adaptive'])
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        alpha = 0.1  # 90% coverage
+        calibration_method = 'split'
+        combine_method = 'uncertainty_weighted'  # Weight conformal by learned uncertainty
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    # Split validation into calibration and validation
+    cal_size = int(len(x_val) * (args.calibration_size / 100.0))
+    x_val_cal = x_val_t[:cal_size]
+    y_val_cal = y_val_t[:cal_size]
+    x_val_proper = x_val_t[cal_size:]
+    y_val_proper = y_val_t[cal_size:]
+    
+    print(f"Train: {len(x_train)}, Cal: {cal_size}, Val: {len(x_val_proper)}, Test: {len(x_test)}")
+    
+    # Create heteroscedastic model (outputs mean and log variance)
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    model.fc3 = nn.Linear(hidden_size2, 2)  # mean + log_var
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function('heteroscedastic')
+    
+    # Phase 1: Train heteroscedastic model
+    print("Phase 1: Training heteroscedastic model...")
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs):
+        model.train()
+        optimizer.zero_grad()
+        pred = model(x_train_t)
+        loss = criterion(pred, y_train_t)
+        loss.backward()
+        optimizer.step()
+        
+        train_losses.append(loss.item())
+        
+        # Validation
+        if len(x_val_proper) > 0:
+            model.eval()
+            with torch.no_grad():
+                pred_val = model(x_val_proper)
+                val_loss = criterion(pred_val, y_val_proper)
+            val_losses.append(val_loss.item())
+        
+        if epoch % 20 == 0:
+            print(f"  Epoch {epoch}: Train Loss={loss.item():.4f}")
+    
+    # Phase 2: Conformal calibration
+    print("Phase 2: Conformal calibration...")
+    
+    model.eval()
+    with torch.no_grad():
+        # Get calibration predictions
+        pred_cal = model(x_val_cal).cpu().numpy()
+        mean_cal = pred_cal[:, 0]
+        log_var_cal = pred_cal[:, 1]
+        std_cal = np.sqrt(np.exp(log_var_cal))
+        
+        y_cal_np = y_val_cal.cpu().numpy().flatten()
+    
+    if calibration_method == 'split':
+        # Standard conformal: compute non-conformity scores
+        if combine_method == 'separate':
+            # Simple absolute residuals
+            scores_cal = np.abs(y_cal_np - mean_cal)
+        
+        elif combine_method == 'uncertainty_weighted':
+            # Normalize residuals by learned uncertainty
+            # Score = |y - mean| / std
+            scores_cal = np.abs(y_cal_np - mean_cal) / (std_cal + 1e-6)
+        
+        elif combine_method == 'adaptive':
+            # Adaptive score that combines both
+            # Use CQR-style (Conformalized Quantile Regression) approach
+            # Score = max(lower_err, upper_err) where bounds come from learned std
+            lower_bound = mean_cal - std_cal
+            upper_bound = mean_cal + std_cal
+            scores_cal = np.maximum(lower_bound - y_cal_np, y_cal_np - upper_bound)
+        
+        # Compute quantile
+        n_cal = len(scores_cal)
+        q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal
+        q_level = min(q_level, 1.0)
+        quantile = np.quantile(scores_cal, q_level)
+        
+        print(f"  Conformal quantile (α={alpha}): {quantile:.4f}")
+    
+    # Phase 3: Test predictions with combined uncertainty
+    print("Phase 3: Computing predictions and intervals...")
+    
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        mean_test = pred_test[:, 0]
+        log_var_test = pred_test[:, 1]
+        std_test = np.sqrt(np.exp(log_var_test))
+    
+    # Construct prediction intervals based on combine method
+    if combine_method == 'separate':
+        # Conformal intervals (ignore learned uncertainty)
+        y_lower_conformal = mean_test - quantile
+        y_upper_conformal = mean_test + quantile
+        
+        # Learned uncertainty intervals (1.645 for 90% coverage under Gaussian)
+        z_score = 1.645 if alpha == 0.1 else 1.96
+        y_lower_learned = mean_test - z_score * std_test
+        y_upper_learned = mean_test + z_score * std_test
+        
+        # Use conformal for final predictions
+        y_lower = y_lower_conformal
+        y_upper = y_upper_conformal
+    
+    elif combine_method == 'uncertainty_weighted':
+        # Conformal with uncertainty weighting
+        # Interval width adapts to learned uncertainty
+        y_lower = mean_test - quantile * std_test
+        y_upper = mean_test + quantile * std_test
+    
+    elif combine_method == 'adaptive':
+        # CQR-style adaptive intervals
+        y_lower = mean_test - std_test - quantile
+        y_upper = mean_test + std_test + quantile
+    
+    # Calculate coverage and metrics
+    coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
+    avg_interval_width = np.mean(y_upper - y_lower)
+    
+    print(f"Results:")
+    print(f"  Coverage: {coverage:.4f} (target: {1-alpha:.4f})")
+    print(f"  Avg interval width: {avg_interval_width:.4f}")
+    print(f"  Avg learned std: {std_test.mean():.4f}")
+    
+    # Point predictions
+    y_pred = mean_test
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"conformal_hetero_{combine_method}"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', 'conformal_heteroscedastic')
+    
+    # Save detailed uncertainty information
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        
+        uncertainty_dir = os.path.dirname(args.filepath.replace('.csv', '_uncertainty/'))
+        os.makedirs(uncertainty_dir, exist_ok=True)
+        
+        uncertainty_df = pd.DataFrame({
+            'sample_idx': np.arange(len(y_pred)),
+            'y_pred_mean': y_pred,
+            'y_pred_std_learned': std_test,
+            'y_lower_conformal': y_lower,
+            'y_upper_conformal': y_upper,
+            'interval_width': y_upper - y_lower,
+            'coverage': ((y_test >= y_lower) & (y_test <= y_upper)).astype(int),
+            'y_true_noisy': y_test,
+            'y_true_original': y_test_original,
+        })
+        
+        # Add separate intervals if using 'separate' method
+        if combine_method == 'separate':
+            uncertainty_df['y_lower_learned'] = y_lower_learned
+            uncertainty_df['y_upper_learned'] = y_upper_learned
+            uncertainty_df['interval_width_learned'] = y_upper_learned - y_lower_learned
+        
+        uncertainty_file = os.path.join(
+            uncertainty_dir,
+            f"uncertainty_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        uncertainty_df.to_csv(uncertainty_file, index=False)
+        
+        print(f"Saved combined uncertainty to {uncertainty_file}")
+        
+        # Additional analysis
+        if combine_method == 'separate':
+            coverage_learned = np.mean((y_test >= y_lower_learned) & (y_test <= y_upper_learned))
+            print(f"  Learned intervals coverage: {coverage_learned:.4f}")
+            print(f"  Conformal interval width: {(y_upper_conformal - y_lower_conformal).mean():.4f}")
+            print(f"  Learned interval width: {(y_upper_learned - y_lower_learned).mean():.4f}")
+    
+    # Save conformal intervals in standard format
+    if args.uncertainty:
+        save_conformal_intervals(
+            y_pred=y_pred,
+            y_lower=y_lower,
+            y_upper=y_upper,
+            y_true=y_test,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+            alpha=alpha
+        )
+    
+    # Save per-epoch metrics
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_mixup(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Mixup for Molecular Regression (Zhang et al. 2018).
+    
+    Trains on linear interpolations of molecular representations:
+        x_mixed = λ*x_i + (1-λ)*x_j
+        y_mixed = λ*y_i + (1-λ)*y_j
+    
+    Modes:
+    - 'input': Mix at input level (for fingerprints/descriptors)
+    - 'manifold': Mix at hidden layer (Manifold Mixup)
+    - 'uncertainty_aware': Use model uncertainty to weight mixing
+    """
+    from loss_functions import get_loss_function
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        alpha = trial.suggest_float('alpha', 0.1, 2.0)  # Beta distribution parameter
+        mixup_mode = trial.suggest_categorical('mixup_mode', 
+                                               ['input', 'manifold', 'uncertainty_aware'])
+        mix_prob = trial.suggest_float('mix_prob', 0.5, 1.0)
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        alpha = 1.0  # α=1 gives uniform mixing, α>1 prefers edges, α<1 prefers extremes
+        mixup_mode = 'input'
+        mix_prob = 0.8  # Probability of applying mixup to a batch
+    
+    # Loss setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    train_dataset = TensorDataset(x_train_t, y_train_t)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    
+    # Create model
+    if mixup_mode == 'manifold':
+        # For manifold mixup, we need access to intermediate layers
+        class ManifoldMixupModel(nn.Module):
+            def __init__(self, input_size, hidden_size1, hidden_size2, output_size):
+                super().__init__()
+                self.fc1 = nn.Linear(input_size, hidden_size1)
+                self.fc2 = nn.Linear(hidden_size1, hidden_size2)
+                self.fc3 = nn.Linear(hidden_size2, output_size)
+                self.activation = nn.ReLU()
+                self.dropout = nn.Dropout(0.2)
+            
+            def forward(self, x, mixup_layer=None, mixup_lambda=None, mixup_index=None):
+                """
+                Forward with optional mixup at specified layer
+                mixup_layer: None, 0, 1, or 2 (which layer to mix at)
+                """
+                # Layer 0: after fc1
+                x = self.activation(self.fc1(x))
+                
+                if mixup_layer == 0 and mixup_lambda is not None:
+                    x = mixup_lambda * x + (1 - mixup_lambda) * x[mixup_index]
+                
+                x = self.dropout(x)
+                
+                # Layer 1: after fc2
+                x = self.activation(self.fc2(x))
+                
+                if mixup_layer == 1 and mixup_lambda is not None:
+                    x = mixup_lambda * x + (1 - mixup_lambda) * x[mixup_index]
+                
+                x = self.dropout(x)
+                
+                # Output
+                x = self.fc3(x)
+                return x
+        
+        model = ManifoldMixupModel(
+            input_size=x_train.shape[1],
+            hidden_size1=hidden_size1,
+            hidden_size2=hidden_size2,
+            output_size=output_size
+        ).to(device)
+    else:
+        model = DNNRegressionModel(
+            input_size=x_train.shape[1],
+            hidden_size1=hidden_size1,
+            hidden_size2=hidden_size2
+        ).to(device)
+        if output_size > 1:
+            model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
+    # For uncertainty-aware mixup, we need initial model
+    if mixup_mode == 'uncertainty_aware':
+        print("Pre-training for uncertainty estimates...")
+        for epoch in range(20):
+            model.train()
+            for X_batch, y_batch in train_loader:
+                optimizer.zero_grad()
+                pred = model(X_batch)
+                loss = criterion(pred, y_batch)
+                loss.backward()
+                optimizer.step()
+    
+    # Training with Mixup
+    print(f"Training with Mixup (mode={mixup_mode}, alpha={alpha})...")
+    
+    train_losses = []
+    val_losses = []
+    
+    for epoch in range(args.epochs):
+        model.train()
+        epoch_loss = 0
+        
+        for X_batch, y_batch in train_loader:
+            # Decide whether to apply mixup
+            if np.random.rand() > mix_prob:
+                # No mixup, regular training
+                optimizer.zero_grad()
+                pred = model(X_batch)
+                loss = criterion(pred, y_batch)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                continue
+            
+            # Sample mixing coefficient
+            if alpha > 0:
+                lam = np.random.beta(alpha, alpha)
+            else:
+                lam = 1.0
+            
+            batch_size = X_batch.size(0)
+            index = torch.randperm(batch_size).to(device)
+            
+            if mixup_mode == 'input':
+                # Standard input mixup
+                X_mixed = lam * X_batch + (1 - lam) * X_batch[index]
+                y_mixed = lam * y_batch + (1 - lam) * y_batch[index]
+                
+                optimizer.zero_grad()
+                pred = model(X_mixed)
+                loss = criterion(pred, y_mixed)
+            
+            elif mixup_mode == 'manifold':
+                # Manifold mixup: randomly choose which layer to mix at
+                mixup_layer = np.random.choice([None, 0, 1])  # None = input, 0/1 = hidden layers
+                
+                if mixup_layer is None:
+                    # Input mixup
+                    X_mixed = lam * X_batch + (1 - lam) * X_batch[index]
+                    y_mixed = lam * y_batch + (1 - lam) * y_batch[index]
+                    
+                    optimizer.zero_grad()
+                    pred = model(X_mixed)
+                    loss = criterion(pred, y_mixed)
+                else:
+                    # Hidden layer mixup
+                    y_mixed = lam * y_batch + (1 - lam) * y_batch[index]
+                    
+                    optimizer.zero_grad()
+                    pred = model(X_batch, mixup_layer=mixup_layer, 
+                               mixup_lambda=lam, mixup_index=index)
+                    loss = criterion(pred, y_mixed)
+            
+            elif mixup_mode == 'uncertainty_aware':
+                # Use model uncertainty to weight mixing
+                # High uncertainty samples get mixed more
+                model.eval()
+                with torch.no_grad():
+                    pred_unc = model(X_batch)
+                    
+                    # Extract uncertainty
+                    if loss_name == 'heteroscedastic':
+                        log_var = pred_unc[:, 1]
+                        uncertainty = torch.sqrt(torch.exp(log_var))
+                    elif loss_name in ['evidential', 'evidential_cauchy', 'evidential_laplace']:
+                        v = F.softplus(pred_unc[:, 1]) + 1.0
+                        alpha_param = F.softplus(pred_unc[:, 2]) + 1.0
+                        beta = F.softplus(pred_unc[:, 3])
+                        epistemic = beta / torch.clamp(alpha_param - 1, min=1e-6)
+                        aleatoric = beta / (v * torch.clamp(alpha_param - 1, min=1e-6))
+                        uncertainty = torch.sqrt(epistemic + aleatoric)
+                    else:
+                        uncertainty = torch.ones(batch_size).to(device)
+                
+                model.train()
+                
+                # Adjust lambda based on uncertainty
+                # High uncertainty pairs get more mixing (lambda closer to 0.5)
+                # Low uncertainty pairs use original lambda
+                uncertainty_norm = (uncertainty + uncertainty[index]) / 2
+                uncertainty_norm = uncertainty_norm / (uncertainty_norm.max() + 1e-8)
+                
+                # Interpolate lambda towards 0.5 based on uncertainty
+                lam_adjusted = lam + (0.5 - lam) * uncertainty_norm
+                
+                X_mixed = lam_adjusted.view(-1, 1) * X_batch + (1 - lam_adjusted.view(-1, 1)) * X_batch[index]
+                y_mixed = lam_adjusted.view(-1, 1) * y_batch + (1 - lam_adjusted.view(-1, 1)) * y_batch[index]
+                
+                optimizer.zero_grad()
+                pred = model(X_mixed)
+                loss = criterion(pred, y_mixed)
+            
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        
+        avg_train_loss = epoch_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+        
+        # Validation (no mixup)
+        model.eval()
+        with torch.no_grad():
+            pred_val = model(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={avg_train_loss:.4f}, Val={val_loss.item():.4f}")
+    
+    # Test (no mixup)
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"mixup_{mixup_mode}"
+    if loss_name != 'mse':
+        model_name += f"_{loss_name}"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save per-epoch metrics
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]
+
+def train_sam(
+    x_train, y_train, x_test, y_test, x_val, y_val,
+    args, s, rep, iteration, iteration_seed, file_no, y_test_original,
+    trial=None
+):
+    """
+    Sharpness-Aware Minimization (Foret et al. 2021).
+    
+    Seeks parameters in flat minima by minimizing loss in a neighborhood:
+        min_w max_{||ε||≤ρ} L(w + ε)
+    
+    This improves robustness to noisy labels by avoiding sharp minima
+    that overfit to individual noisy samples.
+    
+    Can be combined with any loss function.
+    """
+    from loss_functions import get_loss_function
+    import torch.nn.functional as F
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    loss_name = args.loss if hasattr(args, 'loss') else 'mse'
+    
+    # Hyperparameters
+    if trial is not None:
+        hidden_size1 = trial.suggest_categorical('hidden_size1', [64, 128, 256])
+        hidden_size2 = trial.suggest_categorical('hidden_size2', [32, 64, 128])
+        rho = trial.suggest_float('rho', 0.01, 0.2)  # Neighborhood size
+        adaptive = trial.suggest_categorical('adaptive', [True, False])
+    else:
+        hidden_size1, hidden_size2 = 128, 64
+        rho = 0.05  # Standard value from paper
+        adaptive = True  # Adaptive SAM (better for varied scales)
+    
+    # Loss setup
+    loss_kwargs = {}
+    if hasattr(args, 'loss_params') and args.loss_params:
+        import json
+        loss_kwargs = json.loads(args.loss_params)
+    
+    output_size_map = {
+        'heteroscedastic': 2, 'evidential': 4, 'evidential_cauchy': 4,
+        'evidential_laplace': 4, 'sample_adaptive_barron': 2, 'stratified': 2,
+    }
+    output_size = output_size_map.get(loss_name, 1)
+    
+    # Prepare data
+    x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
+    y_train_t = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    x_val_t = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_t = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
+    
+    train_dataset = TensorDataset(x_train_t, y_train_t)
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    
+    # Create model
+    model = DNNRegressionModel(
+        input_size=x_train.shape[1],
+        hidden_size1=hidden_size1,
+        hidden_size2=hidden_size2
+    ).to(device)
+    if output_size > 1:
+        model.fc3 = nn.Linear(hidden_size2, output_size)
+    
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+    
+    # SAM optimizer
+    class SAM(torch.optim.Optimizer):
+        """Sharpness-Aware Minimization optimizer"""
+        def __init__(self, params, base_optimizer, rho=0.05, adaptive=False, **kwargs):
+            assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
+            
+            defaults = dict(rho=rho, adaptive=adaptive, **kwargs)
+            super(SAM, self).__init__(params, defaults)
+            
+            self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
+            self.param_groups = self.base_optimizer.param_groups
+            self.defaults.update(self.base_optimizer.defaults)
+        
+        @torch.no_grad()
+        def first_step(self, zero_grad=False):
+            """
+            First step: compute and apply adversarial perturbation
+            """
+            grad_norm = self._grad_norm()
+            for group in self.param_groups:
+                scale = group["rho"] / (grad_norm + 1e-12)
+                
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    
+                    # Save current parameters
+                    self.state[p]["old_p"] = p.data.clone()
+                    
+                    # Compute perturbation
+                    if group["adaptive"]:
+                        # Adaptive SAM: scale by parameter magnitude
+                        e_w = (torch.pow(p, 2) if group["adaptive"] else 1.0) * p.grad * scale.to(p)
+                    else:
+                        e_w = p.grad * scale.to(p)
+                    
+                    # Apply perturbation
+                    p.add_(e_w)
+            
+            if zero_grad:
+                self.zero_grad()
+        
+        @torch.no_grad()
+        def second_step(self, zero_grad=False):
+            """
+            Second step: restore parameters and apply gradient from perturbed point
+            """
+            for group in self.param_groups:
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    
+                    # Restore original parameters
+                    p.data = self.state[p]["old_p"]
+            
+            # Update with base optimizer
+            self.base_optimizer.step()
+            
+            if zero_grad:
+                self.zero_grad()
+        
+        def step(self, closure=None):
+            """Not used in SAM - use first_step and second_step instead"""
+            raise NotImplementedError("SAM doesn't work like standard optimizers. Use first_step and second_step.")
+        
+        def _grad_norm(self):
+            """Compute gradient norm"""
+            shared_device = self.param_groups[0]["params"][0].device
+            norm = torch.norm(
+                torch.stack([
+                    ((torch.abs(p) if group["adaptive"] else 1.0) * p.grad).norm(p=2).to(shared_device)
+                    for group in self.param_groups for p in group["params"]
+                    if p.grad is not None
+                ]),
+                p=2
+            )
+            return norm
+        
+        def load_state_dict(self, state_dict):
+            super().load_state_dict(state_dict)
+            self.base_optimizer.param_groups = self.param_groups
+    
+    # Create SAM optimizer
+    optimizer = SAM(
+        model.parameters(),
+        base_optimizer=torch.optim.Adam,
+        rho=rho,
+        adaptive=adaptive,
+        lr=0.001
+    )
+    
+    print(f"Training with SAM (rho={rho}, adaptive={adaptive})...")
+    
+    train_losses = []
+    val_losses = []
+    sharpness_values = []
+    
+    for epoch in range(args.epochs):
+        model.train()
+        epoch_loss = 0
+        epoch_sharpness = 0
+        
+        for X_batch, y_batch in train_loader:
+            # First forward-backward pass (compute gradient)
+            pred = model(X_batch)
+            loss = criterion(pred, y_batch)
+            loss.backward()
+            
+            # First step: apply perturbation
+            optimizer.first_step(zero_grad=True)
+            
+            # Second forward-backward pass at perturbed point
+            pred_perturbed = model(X_batch)
+            loss_perturbed = criterion(pred_perturbed, y_batch)
+            
+            # Track sharpness (difference between perturbed and original loss)
+            sharpness = (loss_perturbed - loss).item()
+            epoch_sharpness += sharpness
+            
+            loss_perturbed.backward()
+            
+            # Second step: restore parameters and update with gradient from perturbed point
+            optimizer.second_step(zero_grad=True)
+            
+            epoch_loss += loss.item()
+        
+        avg_train_loss = epoch_loss / len(train_loader)
+        avg_sharpness = epoch_sharpness / len(train_loader)
+        
+        train_losses.append(avg_train_loss)
+        sharpness_values.append(avg_sharpness)
+        
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            pred_val = model(x_val_t)
+            val_loss = criterion(pred_val, y_val_t)
+        val_losses.append(val_loss.item())
+        
+        if epoch % 10 == 0:
+            print(f"  Epoch {epoch}: Train={avg_train_loss:.4f}, Val={val_loss.item():.4f}, "
+                  f"Sharpness={avg_sharpness:.4f}")
+    
+    # Test
+    model.eval()
+    with torch.no_grad():
+        pred_test = model(x_test_t).cpu().numpy()
+        if output_size > 1:
+            y_pred = pred_test[:, 0]
+        else:
+            y_pred = pred_test.flatten()
+    
+    # Calculate metrics
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    # Save results
+    model_name = f"sam_{'adaptive' if adaptive else 'standard'}"
+    if loss_name != 'mse':
+        model_name += f"_{loss_name}"
+    
+    save_results(args.filepath, s, iteration, model_name, rep,
+                args.sample_size, metrics, 'default', loss_name)
+    
+    # Save sharpness tracking
+    if args.uncertainty:
+        import pandas as pd
+        import os
+        
+        sharpness_dir = os.path.dirname(args.filepath.replace('.csv', '_sharpness/'))
+        os.makedirs(sharpness_dir, exist_ok=True)
+        
+        sharpness_df = pd.DataFrame({
+            'epoch': np.arange(len(sharpness_values)),
+            'train_loss': train_losses,
+            'val_loss': val_losses,
+            'sharpness': sharpness_values,
+        })
+        
+        sharpness_file = os.path.join(
+            sharpness_dir,
+            f"sharpness_{model_name}_{rep}_sigma{s}_iter{iteration}_file{file_no}.csv"
+        )
+        sharpness_df.to_csv(sharpness_file, index=False)
+        
+        print(f"Saved sharpness tracking to {sharpness_file}")
+        print(f"  Initial sharpness: {sharpness_values[0]:.4f}")
+        print(f"  Final sharpness: {sharpness_values[-1]:.4f}")
+        print(f"  Avg sharpness reduction: {(sharpness_values[0] - sharpness_values[-1]):.4f}")
+    
+    # Save per-epoch metrics
+    if args.save_per_epoch_metrics:
+        save_per_epoch_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            filepath=args.filepath,
+            model_name=model_name,
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no
+        )
+    
+    return metrics[3]

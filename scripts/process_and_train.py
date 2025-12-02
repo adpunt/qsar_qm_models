@@ -38,6 +38,7 @@ sys.path.append('../preprocessing/')
 sys.path.append('../results/')
 
 from models import *
+from distance_metrics import *
 from extract_and_cluster_for_domains import extract_and_cluster_for_domains
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -221,8 +222,20 @@ def parse_arguments():
                            'quantile_0.1', 'quantile_0.5', 'quantile_0.9',
                            'heteroscedastic', 'evidential', 'barron', 
                            'domain_weighted', 'domain_balanced', 'het_per_domain',
-                           'adaptive_domain', 'mixture_domain'],
+                           'adaptive_domain', 'mixture_domain', 'evidential_cauchy', 
+                           'evidential_laplace', 'sample_adaptive_barron', 
+                           'stratified'],
                    help="Loss function to use (default is mse)")
+    parser.add_argument("--use-uncertainty-weighting", type=str2bool, default=False,
+                   help="Use uncertainty in addition to loss for sample weighting (default: False)")
+    parser.add_argument("--distance-metric", type=str, default='tanimoto',
+                   choices=['tanimoto', 'euclidean', 'cosine', 'mahalanobis', 'mmd', 'optimal_transport'],
+                   help="Distance metric for molecular similarity (default: tanimoto)")
+
+    parser.add_argument("--use-distance", type=str2bool, default=False,
+                       help="Use distance metrics in sample selection (default: False)")
+    parser.add_argument("--alpha", nargs='*', default=[0.1], type=float,
+                   help="Confidence levels for conformal prediction (default is [0.1])")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -783,6 +796,87 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
 
         elif model_type == 'conformal':
             return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, args.calibration_size, y_test_original, trial)
+
+        elif model_type == 'meta_weight_net':
+            return train_meta_weight_net(x_train, y_train, x_test, y_test, x_val, y_val,
+                                          args, s, rep, iteration, iteration_seed, file_no,
+                                          y_test_original, trial)
+
+        elif model_type == 'dividemix_dnn':
+            return train_dividemix_dnn(x_train, y_train, x_test, y_test, x_val, y_val,
+                                       args, s, rep, iteration, iteration_seed, file_no,
+                                       y_test_original, trial)
+
+        elif model_type == 'early_learning':
+            return train_early_learning_regularization(x_train, y_train, x_test, y_test, x_val, y_val,
+                                                       args, s, rep, iteration, iteration_seed, file_no,
+                                                       y_test_original, trial)
+
+        elif model_type == 'multistage_cleaning':
+            return train_multistage_cleaning(x_train, y_train, x_test, y_test, x_val, y_val,
+                                             args, s, rep, iteration, iteration_seed, file_no,
+                                             y_test_original, trial)
+
+        elif model_type == 'uncertainty_curriculum':
+            return train_uncertainty_curriculum(x_train, y_train, x_test, y_test, x_val, y_val,
+                                               args, s, rep, iteration, iteration_seed, file_no,
+                                               y_test_original, trial)
+
+        elif model_type == 'confident_learning':
+            return train_confident_learning(x_train, y_train, x_test, y_test, x_val, y_val,
+                                           args, s, rep, iteration, iteration_seed, file_no,
+                                           y_test_original, trial)
+
+        elif model_type == 'small_loss':
+            return train_small_loss_trick(x_train, y_train, x_test, y_test, x_val, y_val,
+                                          args, s, rep, iteration, iteration_seed, file_no,
+                                          y_test_original, trial)
+
+        elif model_type == 'mentornet':
+            return train_mentornet(x_train, y_train, x_test, y_test, x_val, y_val,
+                                  args, s, rep, iteration, iteration_seed, file_no,
+                                  y_test_original, trial)
+
+        elif model_type == 'contrast_divide':
+            return train_contrast_to_divide(x_train, y_train, x_test, y_test, x_val, y_val,
+                                            args, s, rep, iteration, iteration_seed, file_no,
+                                            y_test_original, trial)
+
+        elif model_type == 'distance_select':
+            return train_distance_based_selection(x_train, y_train, x_test, y_test, x_val, y_val,
+                                                 args, s, rep, iteration, iteration_seed, file_no,
+                                                 y_test_original, trial)
+
+        elif model_type == 'het_gp':
+            return train_heteroscedastic_gp(x_train, y_train, x_test, y_test, x_val, y_val,
+                                           args, s, rep, iteration, iteration_seed, file_no,
+                                           y_test_original, trial)
+
+        elif model_type == 'evidential_kernel':
+            return train_evidential_kernel(x_train, y_train, x_test, y_test, x_val, y_val,
+                                           args, s, rep, iteration, iteration_seed, file_no,
+                                           y_test_original, trial)
+
+        elif model_type == 'ntk_gnn':
+            return train_ntk_gnn(train_loader, test_loader, val_loader, args, s, iteration, 
+                                file_no, y_test_original, trial,
+                                y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, 
+                                y_val_noisy=y_val_noisy)
+
+        elif model_type == 'conformal_hetero':
+            return train_conformal_heteroscedastic(x_train, y_train, x_test, y_test, x_val, y_val,
+                                                  args, s, rep, iteration, iteration_seed, file_no,
+                                                  y_test_original, trial)
+
+        elif model_type == 'mixup':
+            return train_mixup(x_train, y_train, x_test, y_test, x_val, y_val,
+                              args, s, rep, iteration, iteration_seed, file_no,
+                              y_test_original, trial)
+
+        elif model_type == 'sam':
+            return train_sam(x_train, y_train, x_test, y_test, x_val, y_val,
+                            args, s, rep, iteration, iteration_seed, file_no,
+                            y_test_original, trial)
 
     if args.tuning:
         temp_study_name = f"temp_qspr_{uuid.uuid4().hex}"

@@ -372,6 +372,82 @@ class MixtureDomainLoss(nn.Module):
         
         return torch.stack(losses).mean() if losses else torch.tensor(0.0)
 
+class EvidentialCauchyLoss(nn.Module):
+    """Evidential regression with Cauchy likelihood - robust to extreme outliers"""
+    def __init__(self, coeff=1.0):
+        super().__init__()
+        self.coeff = coeff
+    
+    def forward(self, outputs, y_true):
+        gamma = outputs[:, 0:1]
+        lambda_param = F.softplus(outputs[:, 1:2]) + 1e-6
+        alpha = F.softplus(outputs[:, 2:3]) + 1.0
+        beta = F.softplus(outputs[:, 3:4])
+        
+        diff = y_true - gamma
+        cauchy_ll = -torch.log(lambda_param) - torch.log(1 + (diff / lambda_param) ** 2)
+        prior_reg = -alpha * torch.log(beta) + torch.lgamma(alpha)
+        evidence_reg = (diff ** 2) * (2 * alpha / beta)
+        
+        return (-cauchy_ll + prior_reg + self.coeff * evidence_reg).mean()
+
+class EvidentialLaplaceLoss(nn.Module):
+    """Evidential regression with Laplace likelihood - middle ground"""
+    def __init__(self, coeff=1.0):
+        super().__init__()
+        self.coeff = coeff
+    
+    def forward(self, outputs, y_true):
+        gamma = outputs[:, 0:1]
+        b = F.softplus(outputs[:, 1:2]) + 1e-6
+        alpha = F.softplus(outputs[:, 2:3]) + 1.0
+        beta = F.softplus(outputs[:, 3:4])
+        
+        diff = torch.abs(y_true - gamma)
+        laplace_ll = -torch.log(2 * b) - diff / b
+        prior_reg = -alpha * torch.log(beta) + torch.lgamma(alpha)
+        evidence_reg = diff * (2 * alpha / beta)
+        
+        return (-laplace_ll + prior_reg + self.coeff * evidence_reg).mean()
+
+class SampleAdaptiveBarronLoss(nn.Module):
+    """Barron loss where model learns per-sample robustness"""
+    def __init__(self, scale_init=1.0, alpha_min=0.1, alpha_max=4.0):
+        super().__init__()
+        self.scale = nn.Parameter(torch.tensor(scale_init))
+        self.alpha_min = alpha_min
+        self.alpha_max = alpha_max
+    
+    def forward(self, outputs, y_true):
+        y_pred = outputs[:, 0:1]
+        alpha_raw = outputs[:, 1:2]
+        alpha = torch.sigmoid(alpha_raw) * (self.alpha_max - self.alpha_min) + self.alpha_min
+        
+        diff = (y_true - y_pred) / self.scale
+        eps = 1e-3
+        loss = torch.where(
+            torch.abs(alpha - 2.0) < eps,
+            diff ** 2,
+            (torch.abs(alpha - 2.0) / alpha) * 
+            ((diff ** 2 / torch.abs(alpha - 2.0) + 1) ** (alpha / 2.0) - 1)
+        )
+        return loss.mean()
+
+class StratifiedLoss(nn.Module):
+    """Blend MSE for certain samples, Cauchy for uncertain"""
+    def __init__(self, cauchy_scale=1.0):
+        super().__init__()
+        self.cauchy_scale = cauchy_scale
+    
+    def forward(self, outputs, y_true):
+        y_pred = outputs[:, 0:1]
+        uncertainty_logit = outputs[:, 1:2]
+        uncertainty_prob = torch.sigmoid(uncertainty_logit)
+        
+        mse_loss = (y_true - y_pred) ** 2
+        cauchy_loss = torch.log(1 + (y_true - y_pred) ** 2 / self.cauchy_scale)
+        
+        return ((1 - uncertainty_prob) * mse_loss + uncertainty_prob * cauchy_loss).mean()
 
 # Update get_loss_function
 def get_loss_function(loss_name, **kwargs):
@@ -424,6 +500,15 @@ def get_loss_function(loss_name, **kwargs):
         'mixture_domain': MixtureDomainLoss(
             num_domains=kwargs.get('num_domains', 1)
         ),
+
+        'evidential_cauchy': EvidentialCauchyLoss(coeff=kwargs.get('coeff', 1.0)),
+        'evidential_laplace': EvidentialLaplaceLoss(coeff=kwargs.get('coeff', 1.0)),
+        'sample_adaptive_barron': SampleAdaptiveBarronLoss(
+            scale_init=kwargs.get('scale_init', 1.0),
+            alpha_min=kwargs.get('alpha_min', 0.1),
+            alpha_max=kwargs.get('alpha_max', 4.0)
+        ),
+        'stratified': StratifiedLoss(cauchy_scale=kwargs.get('cauchy_scale', 1.0)),
     }
     
     if loss_name not in loss_map:
