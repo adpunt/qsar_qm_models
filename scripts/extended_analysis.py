@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
 """
-Noise-Robust Method Effectiveness Analysis
+ENHANCED Comprehensive Noise Robustness Analysis
+Implements all 12 research directions from the analysis plan:
 
-THE REAL QUESTION: Do specialized noise-handling methods actually work?
+1. METHOD CATEGORIZATION & COMPARISON
+2. HET_GP INVESTIGATION
+3. LOSS × METHOD INTERACTION
+4. DISTANCE METRIC DRILL-DOWN
+5. UNCERTAINTY METHOD VALIDATION
+6. KERNEL ANALYSIS
+7. TOP PERFORMER DEEP DIVE
+8. VARIANCE DECOMPOSITION (ANOVA)
+9. FAILURE ANALYSIS
+10. PHASE 0C GAP ANALYSIS
+11. CLUSTERING/PATTERN FINDING
+12. NOISE LEVEL SENSITIVITY
 
-Method Categories:
-1. Sample Reweighting (meta_weight_net, dividemix, early_learning)
-2. Data Augmentation (mixup)
-3. Robust Optimization (SAM)
-4. Sample Selection (small_loss, confident_learning, mentornet)
-5. Cleaning/Curriculum (multistage, uncertainty_curriculum)
-6. Distance-Based (distance_select, contrast_divide)
-7. Uncertainty Methods (conformal, heteroscedastic models)
-8. Kernel Methods (het_gp, evidential_kernel)
-
-Findings:
-- Cleaning/curriculum: +4.4pp retention, WORKS
-- Sample selection: +3.2pp retention, WORKS
-- Kernel methods: +2.8pp retention, +0.089 R²@0.6, BEST absolute
-- Distance-based: -4.6pp retention, FAILS
-- Data augmentation: -3.2pp retention, FAILS
+Each analysis generates focused figures and statistical insights.
 """
 
 import pandas as pd
@@ -28,10 +25,17 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
-from scipy.stats import mannwhitneyu, kruskal
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 import warnings
 warnings.filterwarnings('ignore')
 
+# Suppress matplotlib font warnings
+import logging
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+
+# JoC style
 sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
@@ -46,1115 +50,1465 @@ plt.rcParams.update({
     'legend.fontsize': 6,
 })
 
-METHOD_CATEGORIES = {
-    'Sample Reweighting': ['meta_weight_net', 'dividemix', 'early_learning'],
-    'Data Augmentation': ['mixup'],
-    'Robust Optimization': ['sam'],
-    'Sample Selection': ['small_loss', 'confident_learning', 'mentornet'],
-    'Cleaning/Curriculum': ['multistage', 'uncertainty_curriculum'],
-    'Distance-Based': ['distance_select', 'contrast_divide'],
-    'Uncertainty Methods': ['conformal'],
-    'Kernel Methods': ['het_gp', 'evidential_kernel']
-}
-
-def load_data(results_dir):
-    """Load results"""
-    return pd.read_csv(Path(results_dir) / "table_full_results.csv")
-
-def categorize_by_method(df):
-    """Add method category to dataframe"""
+def load_comprehensive_results(results_dir):
+    """Load all comprehensive noise study results"""
+    all_data = []
     
-    def get_method_category(base_model):
-        for category, methods in METHOD_CATEGORIES.items():
-            if any(method in base_model for method in methods):
-                return category
-        return 'Other'
+    result_files = []
+    result_files.extend(list(Path(results_dir).glob("meta_weight_net_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("dividemix_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("early_learning_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("mixup_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("sam_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("multistage_cleaning_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("uncertainty_curriculum_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("conformal_hetero*.csv")))
+    result_files.extend(list(Path(results_dir).glob("confident_learning_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("small_loss_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("mentornet_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("contrast_divide_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("distance_select_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("het_gp_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("evidential_kernel_*.csv")))
+    result_files.extend(list(Path(results_dir).glob("ntk_gnn*.csv")))
     
-    df['method_category'] = df['base_model'].apply(get_method_category)
+    result_files = list(set(result_files))
+    
+    if not result_files:
+        print(f"No comprehensive noise study CSV files found in {results_dir}")
+        return pd.DataFrame()
+    
+    print(f"Found {len(result_files)} comprehensive study result files")
+    
+    for filepath in result_files:
+        try:
+            df = pd.read_csv(filepath)
+            required_cols = ['sigma', 'model', 'rep', 'r2', 'rmse']
+            if not all(col in df.columns for col in required_cols):
+                print(f"Skipping {filepath.name}: missing required columns")
+                continue
+            df['source_file'] = filepath.name
+            all_data.append(df)
+        except Exception as e:
+            print(f"Warning: Could not read {filepath.name}: {e}")
+    
+    if not all_data:
+        return pd.DataFrame()
+    
+    combined_df = pd.concat(all_data, ignore_index=True)
+    
+    # Filter catastrophic failures
+    initial_count = len(combined_df)
+    combined_df = combined_df[combined_df['r2'] > -10]
+    filtered_count = initial_count - len(combined_df)
+    if filtered_count > 0:
+        print(f"Filtered out {filtered_count} rows with catastrophic R² values (< -10)")
+    
+    # Filter to Phase 0C sigma values
+    valid_sigmas = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    combined_df = combined_df[combined_df['sigma'].isin(valid_sigmas)]
+    print(f"Filtered to Phase 0C sigma values: {valid_sigmas}")
+    
+    # Aggregate
+    results = combined_df.groupby(['model', 'rep', 'sigma', 'loss_function']).agg({
+        'r2': 'mean',
+        'rmse': 'mean',
+        'mae': 'mean',
+        'iteration': 'count'
+    }).reset_index()
+    
+    results.rename(columns={'rep': 'representation', 'iteration': 'n_iterations'}, inplace=True)
+    
+    print(f"\nLoaded {len(results)} unique model/representation/sigma/loss combinations")
+    print(f"Models: {results['model'].nunique()}")
+    print(f"Representations: {results['representation'].nunique()}")
+    print(f"Loss functions: {results['loss_function'].nunique()}")
+    
+    return results
+
+def parse_model_variants(df):
+    """Extract model variants from model names"""
+    
+    def get_distance_metric(model_name):
+        for dist in ['tanimoto', 'euclidean', 'mahalanobis']:
+            if dist in model_name.lower():
+                return dist
+        return 'none'
+    
+    def get_kernel(model_name):
+        for kernel in ['tanimoto', 'rbf', 'matern']:
+            if kernel in model_name.lower():
+                return kernel
+        return 'none'
+    
+    def get_base_model(model_name):
+        base = model_name.lower()
+        for suffix in ['_mse', '_heteroscedastic', '_evidential', '_huber', '_cauchy',
+                       '_tanimoto', '_euclidean', '_mahalanobis', '_rbf', '_matern']:
+            base = base.replace(suffix, '')
+        return base
+    
+    df['distance_metric'] = df['model'].apply(get_distance_metric)
+    df['kernel'] = df['model'].apply(get_kernel)
+    df['base_model'] = df['model'].apply(get_base_model)
+    df['uses_distance'] = df['distance_metric'] != 'none'
+    
     return df
 
-def method_effectiveness_overview(df, output_dir):
-    """
-    Big picture: which noise-handling approaches work?
-    """
-    print("\n" + "="*80)
-    print("METHOD EFFECTIVENESS: WHICH APPROACHES WORK?")
-    print("="*80)
+def categorize_models(df):
+    """Categorize models into research-relevant groups"""
     
-    fig = plt.figure(figsize=(14, 10))
-    gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.35)
+    def get_group(base_model):
+        if base_model in ['meta_weight_net', 'dividemix', 'early_learning']:
+            return 'sample_reweighting'
+        elif base_model in ['mixup']:
+            return 'data_augmentation'
+        elif base_model in ['sam']:
+            return 'robust_optimization'
+        elif base_model in ['small_loss', 'confident_learning', 'mentornet']:
+            return 'sample_selection'
+        elif base_model in ['multistage_cleaning', 'uncertainty_curriculum']:
+            return 'cleaning_curriculum'
+        elif base_model in ['distance_select', 'contrast_divide']:
+            return 'distance_based'
+        elif base_model in ['conformal_hetero']:
+            return 'uncertainty_conformal'
+        elif base_model in ['het_gp']:
+            return 'uncertainty_heteroscedastic'
+        elif base_model in ['evidential_kernel']:
+            return 'uncertainty_evidential'
+        elif base_model in ['ntk_gnn']:
+            return 'graph_based'
+        else:
+            return 'other'
     
-    # Calculate method summaries
-    method_summary = df.groupby('method_category').agg({
-        'r2_at_0': ['mean', 'std'],
-        'r2_at_0.3': ['mean', 'std'],
-        'r2_at_0.6': ['mean', 'std'],
-        'retention_0.6': ['mean', 'std', 'count'],
-        'nsi_r2': 'mean'
-    })
+    df['model_group'] = df['base_model'].apply(get_group)
     
-    method_summary.columns = ['r2_0_mean', 'r2_0_std', 'r2_03_mean', 'r2_03_std',
-                              'r2_06_mean', 'r2_06_std', 'ret_mean', 'ret_std', 'count', 'nsi']
+    return df
+
+def calculate_robustness_metrics(df, baseline_threshold=0.1):
+    """Calculate comprehensive robustness metrics"""
+    robustness_metrics = []
     
-    # Sort by R² at 0.6 (absolute performance)
-    method_summary = method_summary.sort_values('r2_06_mean', ascending=False)
+    groupby_cols = ['model', 'representation', 'loss_function', 'distance_metric', 'kernel']
     
-    # Calculate differences from overall mean
-    overall_r2_06 = df['r2_at_0.6'].mean()
-    overall_ret = df['retention_0.6'].mean()
-    
-    method_summary['r2_06_diff'] = method_summary['r2_06_mean'] - overall_r2_06
-    method_summary['ret_diff'] = method_summary['ret_mean'] - overall_ret
-    
-    # 1. Absolute R² at 0.6 by method
-    ax1 = fig.add_subplot(gs[0, 0])
-    
-    y_pos = np.arange(len(method_summary))
-    colors = ['green' if x > overall_r2_06 else 'red' 
-             for x in method_summary['r2_06_mean']]
-    
-    ax1.barh(y_pos, method_summary['r2_06_mean'], 
-            xerr=method_summary['r2_06_std'], capsize=3,
-            color=colors, alpha=0.7)
-    
-    ax1.set_yticks(y_pos)
-    ax1.set_yticklabels(method_summary.index, fontsize=6)
-    ax1.set_xlabel('Mean R² at σ=0.6', fontsize=7)
-    ax1.set_title('Absolute Performance at High Noise', fontsize=8)
-    ax1.axvline(x=overall_r2_06, color='black', linestyle='--', 
-               linewidth=1, label=f'Overall mean ({overall_r2_06:.3f})')
-    ax1.legend(fontsize=5)
-    ax1.invert_yaxis()
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    
-    # Add n counts
-    for i, (idx, row) in enumerate(method_summary.iterrows()):
-        ax1.text(row['r2_06_mean'] + row['r2_06_std'] + 0.01, i, 
-                f"n={int(row['count'])}", va='center', fontsize=5)
-    
-    # 2. Retention by method
-    ax2 = fig.add_subplot(gs[0, 1])
-    
-    y_pos = np.arange(len(method_summary))
-    colors = ['green' if x > overall_ret else 'red' 
-             for x in method_summary['ret_mean']]
-    
-    ax2.barh(y_pos, method_summary['ret_mean'],
-            xerr=method_summary['ret_std'], capsize=3,
-            color=colors, alpha=0.7)
-    
-    ax2.set_yticks(y_pos)
-    ax2.set_yticklabels(method_summary.index, fontsize=6)
-    ax2.set_xlabel('Retention % at σ=0.6', fontsize=7)
-    ax2.set_title('Relative Robustness', fontsize=8)
-    ax2.axvline(x=overall_ret, color='black', linestyle='--',
-               linewidth=1, label=f'Overall mean ({overall_ret:.1f}%)')
-    ax2.legend(fontsize=5)
-    ax2.invert_yaxis()
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    # 3. R² at 0.3 (moderate noise)
-    ax3 = fig.add_subplot(gs[0, 2])
-    
-    method_summary_03 = method_summary.sort_values('r2_03_mean', ascending=False)
-    y_pos = np.arange(len(method_summary_03))
-    
-    ax3.barh(y_pos, method_summary_03['r2_03_mean'],
-            xerr=method_summary_03['r2_03_std'], capsize=3,
-            alpha=0.7, color='steelblue')
-    
-    ax3.set_yticks(y_pos)
-    ax3.set_yticklabels(method_summary_03.index, fontsize=6)
-    ax3.set_xlabel('Mean R² at σ=0.3', fontsize=7)
-    ax3.set_title('Performance at Moderate Noise', fontsize=8)
-    ax3.invert_yaxis()
-    ax3.spines['top'].set_visible(False)
-    ax3.spines['right'].set_visible(False)
-    
-    # 4. Improvement over baseline (scatter)
-    ax4 = fig.add_subplot(gs[1, 0])
-    
-    ax4.scatter(method_summary['r2_06_diff'], method_summary['ret_diff'],
-               s=method_summary['count']*3, alpha=0.6)
-    
-    for idx, row in method_summary.iterrows():
-        ax4.annotate(idx, (row['r2_06_diff'], row['ret_diff']),
-                    fontsize=5, ha='center')
-    
-    ax4.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-    ax4.axvline(x=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-    ax4.set_xlabel('R²@0.6 difference from mean', fontsize=7)
-    ax4.set_ylabel('Retention difference from mean (pp)', fontsize=7)
-    ax4.set_title('Method Improvement vs Baseline\n(upper-right = better)', fontsize=8)
-    ax4.grid(True, alpha=0.3)
-    ax4.spines['top'].set_visible(False)
-    ax4.spines['right'].set_visible(False)
-    
-    # 5. Degradation curves - top method from each category
-    ax5 = fig.add_subplot(gs[1, 1:])
-    
-    colors_method = plt.cm.tab10(np.linspace(0, 1, len(METHOD_CATEGORIES)))
-    
-    for idx, (category, methods) in enumerate(METHOD_CATEGORIES.items()):
-        cat_df = df[df['method_category'] == category]
-        if len(cat_df) == 0:
+    for group_key, group in df.groupby(groupby_cols):
+        model, rep, loss, dist, kernel = group_key
+        
+        group = group.sort_values('sigma')
+        
+        if len(group) < 3:
             continue
         
-        # Get best config from this category
-        best = cat_df.nlargest(1, 'r2_at_0.6').iloc[0]
-        
-        sigmas = [0, 0.3, 0.6, 1.0]
-        r2_vals = [best['r2_at_0'], best['r2_at_0.3'], 
-                  best['r2_at_0.6'], best['r2_at_1.0']]
-        
-        ax5.plot(sigmas, r2_vals, marker='o', label=category,
-                color=colors_method[idx], linewidth=1.5, markersize=4)
-    
-    ax5.set_xlabel('σ', fontsize=7)
-    ax5.set_ylabel('R²', fontsize=7)
-    ax5.set_title('Best Config per Method Category: Degradation', fontsize=8)
-    ax5.legend(fontsize=5, loc='best', ncol=2)
-    ax5.grid(True, alpha=0.3)
-    ax5.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-    ax5.spines['top'].set_visible(False)
-    ax5.spines['right'].set_visible(False)
-    
-    # 6. Statistical significance testing
-    ax6 = fig.add_subplot(gs[2, :2])
-    
-    # Pairwise Mann-Whitney tests
-    categories = list(method_summary.index)
-    n_cat = len(categories)
-    p_matrix = np.ones((n_cat, n_cat))
-    
-    for i, cat1 in enumerate(categories):
-        for j, cat2 in enumerate(categories):
-            if i < j:
-                g1 = df[df['method_category'] == cat1]['r2_at_0.6'].dropna()
-                g2 = df[df['method_category'] == cat2]['r2_at_0.6'].dropna()
-                
-                if len(g1) > 0 and len(g2) > 0:
-                    _, p = mannwhitneyu(g1, g2, alternative='two-sided')
-                    p_matrix[i, j] = p
-                    p_matrix[j, i] = p
-    
-    im = ax6.imshow(p_matrix, cmap='RdYlGn', vmin=0, vmax=0.1, aspect='auto')
-    ax6.set_xticks(np.arange(n_cat))
-    ax6.set_yticks(np.arange(n_cat))
-    ax6.set_xticklabels(categories, rotation=45, ha='right', fontsize=5)
-    ax6.set_yticklabels(categories, fontsize=5)
-    ax6.set_title('Pairwise Significance (Mann-Whitney U on R²@0.6)\nGreen=different, Red=same', fontsize=8)
-    
-    for i in range(n_cat):
-        for j in range(n_cat):
-            if i != j:
-                text_color = 'white' if p_matrix[i, j] < 0.05 else 'black'
-                text = ax6.text(j, i, f'{p_matrix[i, j]:.3f}' if p_matrix[i, j] < 0.999 else '',
-                              ha="center", va="center", color=text_color, fontsize=4)
-    
-    plt.colorbar(im, ax=ax6, label='p-value', fraction=0.046)
-    
-    # 7. Summary verdict panel
-    ax7 = fig.add_subplot(gs[2, 2])
-    ax7.axis('off')
-    
-    summary_text = "VERDICTS:\n\n"
-    
-    for idx, row in method_summary.iterrows():
-        if row['r2_06_diff'] > 0.03 and row['ret_diff'] > 2:
-            verdict = "✓ WORKS"
-            color = 'green'
-        elif row['r2_06_diff'] > 0 and row['ret_diff'] > 0:
-            verdict = "△ MARGINAL"
-            color = 'orange'
-        else:
-            verdict = "✗ FAILS"
-            color = 'red'
-        
-        summary_text += f"{idx[:18]:18s}\n"
-        summary_text += f"  R²Δ={row['r2_06_diff']:+.3f}\n"
-        summary_text += f"  RetΔ={row['ret_diff']:+.1f}pp\n"
-        summary_text += f"  {verdict}\n\n"
-    
-    ax7.text(0.05, 0.95, summary_text, transform=ax7.transAxes, fontsize=5,
-            verticalalignment='top', family='monospace',
-            bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "method_effectiveness_overview.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-    
-    # Print summary
-    print("\nMethod Performance Summary:")
-    print("-" * 80)
-    print(f"{'Method':25s} {'R²@0.6':>10s} {'Δ vs mean':>12s} {'Ret%':>8s} {'Δ pp':>8s} {'n':>6s}")
-    print("-" * 80)
-    for idx, row in method_summary.iterrows():
-        print(f"{idx:25s} {row['r2_06_mean']:10.4f} {row['r2_06_diff']:+12.5f} "
-              f"{row['ret_mean']:8.2f} {row['ret_diff']:+8.2f} {int(row['count']):6d}")
-
-def loss_within_method_analysis(df, output_dir):
-    """
-    For each method category, does loss function choice matter?
-    """
-    print("\n" + "="*80)
-    print("LOSS FUNCTION EFFECTS WITHIN METHOD CATEGORIES")
-    print("="*80)
-    
-    fig, axes = plt.subplots(2, 4, figsize=(14, 7))
-    axes = axes.flatten()
-    
-    for idx, (category, methods) in enumerate(METHOD_CATEGORIES.items()):
-        if idx >= 8:
-            break
-        
-        ax = axes[idx]
-        
-        cat_df = df[df['method_category'] == category]
-        
-        if len(cat_df) == 0:
-            ax.axis('off')
+        sigma_0 = group[group['sigma'] == 0.0]
+        if len(sigma_0) == 0:
             continue
         
-        # Loss function comparison within this category
-        loss_summary = cat_df.groupby('loss_function').agg({
-            'r2_at_0.6': ['mean', 'std', 'count']
-        })
+        r2_baseline = sigma_0['r2'].values[0]
         
-        if len(loss_summary) < 2:
-            ax.axis('off')
-            ax.text(0.5, 0.5, f'{category}\nInsufficient data',
-                   ha='center', va='center', transform=ax.transAxes, fontsize=6)
+        if r2_baseline < baseline_threshold:
             continue
         
-        x_pos = np.arange(len(loss_summary))
-        bars = ax.bar(x_pos, loss_summary[('r2_at_0.6', 'mean')],
-                     yerr=loss_summary[('r2_at_0.6', 'std')],
-                     capsize=3, alpha=0.7)
+        metrics = {
+            'model': model,
+            'base_model': group['base_model'].iloc[0],
+            'model_group': group['model_group'].iloc[0],
+            'representation': rep,
+            'loss_function': loss,
+            'distance_metric': dist,
+            'kernel': kernel,
+            'uses_distance': group['uses_distance'].iloc[0],
+            'n_sigma_values': len(group)
+        }
         
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(loss_summary.index, rotation=45, ha='right', fontsize=5)
-        ax.set_ylabel('R² at σ=0.6', fontsize=6)
-        ax.set_title(f'{category}', fontsize=7)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.tick_params(labelsize=5)
+        # Values at key sigmas
+        for sigma_val in [0.0, 0.3, 0.6, 1.0]:
+            sigma_data = group[group['sigma'] == sigma_val]
+            metrics[f'r2_at_{sigma_val}'] = sigma_data['r2'].values[0] if len(sigma_data) > 0 else np.nan
+            metrics[f'rmse_at_{sigma_val}'] = sigma_data['rmse'].values[0] if len(sigma_data) > 0 else np.nan
         
-        # Add n counts
-        for i, (idx_loss, row) in enumerate(loss_summary.iterrows()):
-            ax.text(i, row[('r2_at_0.6', 'mean')] + row[('r2_at_0.6', 'std')] + 0.01,
-                   f"n={int(row[('r2_at_0.6', 'count')])}", 
-                   ha='center', va='bottom', fontsize=4)
-        
-        # Statistical test
-        loss_types = cat_df['loss_function'].unique()
-        if len(loss_types) > 1:
-            groups = [cat_df[cat_df['loss_function'] == loss]['r2_at_0.6'].dropna() 
-                     for loss in loss_types]
-            if all(len(g) > 0 for g in groups):
-                h_stat, p_val = kruskal(*groups)
-                sig = '***' if p_val < 0.001 else '**' if p_val < 0.01 else '*' if p_val < 0.05 else 'ns'
-                ax.text(0.98, 0.98, f'p={p_val:.3f} {sig}',
-                       transform=ax.transAxes, fontsize=5, ha='right', va='top',
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "loss_within_methods.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-
-def best_configs_per_method(df, output_dir):
-    """
-    Show the single best configuration for each method category
-    """
-    print("\n" + "="*80)
-    print("BEST CONFIGURATION PER METHOD CATEGORY")
-    print("="*80)
-    
-    fig = plt.figure(figsize=(12, 8))
-    gs = fig.add_gridspec(3, 2, hspace=0.4, wspace=0.3)
-    
-    # Find best config per category
-    best_configs = []
-    
-    for category, methods in METHOD_CATEGORIES.items():
-        cat_df = df[df['method_category'] == category]
-        if len(cat_df) == 0:
-            continue
-        
-        best = cat_df.nlargest(1, 'r2_at_0.6').iloc[0]
-        best_configs.append({
-            'category': category,
-            'model': best['base_model'],
-            'representation': best['representation'],
-            'loss': best['loss_function'],
-            'r2_0': best['r2_at_0'],
-            'r2_03': best['r2_at_0.3'],
-            'r2_06': best['r2_at_0.6'],
-            'r2_10': best['r2_at_1.0'],
-            'retention': best['retention_0.6'],
-            'nsi': best['nsi_r2']
-        })
-    
-    best_df = pd.DataFrame(best_configs)
-    best_df = best_df.sort_values('r2_06', ascending=False)
-    
-    # 1. Comparison bars - R² at 0.6
-    ax1 = fig.add_subplot(gs[0, :])
-    
-    y_pos = np.arange(len(best_df))
-    colors = plt.cm.viridis(np.linspace(0.3, 0.9, len(best_df)))
-    
-    bars = ax1.barh(y_pos, best_df['r2_06'], color=colors, alpha=0.8)
-    
-    ax1.set_yticks(y_pos)
-    labels = [f"{row['category']}\n{row['model']}/{row['representation']}/{row['loss']}" 
-             for _, row in best_df.iterrows()]
-    ax1.set_yticklabels(labels, fontsize=5)
-    ax1.set_xlabel('Best R² at σ=0.6', fontsize=7)
-    ax1.set_title('Best Configuration per Method Category', fontsize=8)
-    ax1.invert_yaxis()
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    
-    # Add values
-    for i, (_, row) in enumerate(best_df.iterrows()):
-        ax1.text(row['r2_06'] + 0.01, i, f"{row['r2_06']:.4f}",
-                va='center', fontsize=5)
-    
-    # 2. Degradation curves
-    ax2 = fig.add_subplot(gs[1, :])
-    
-    for idx, (_, row) in enumerate(best_df.iterrows()):
-        sigmas = [0, 0.3, 0.6, 1.0]
-        r2_vals = [row['r2_0'], row['r2_03'], row['r2_06'], row['r2_10']]
-        
-        ax2.plot(sigmas, r2_vals, marker='o', label=row['category'],
-                color=colors[idx], linewidth=1.5, markersize=4)
-    
-    ax2.set_xlabel('σ', fontsize=7)
-    ax2.set_ylabel('R²', fontsize=7)
-    ax2.set_title('Degradation Curves: Best Config per Category', fontsize=8)
-    ax2.legend(fontsize=5, loc='best', ncol=2)
-    ax2.grid(True, alpha=0.3)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    # 3. Baseline vs robustness
-    ax3 = fig.add_subplot(gs[2, 0])
-    
-    ax3.scatter(best_df['r2_0'], best_df['retention'], s=100, alpha=0.7, c=colors)
-    
-    for _, row in best_df.iterrows():
-        ax3.annotate(row['category'][:12], (row['r2_0'], row['retention']),
-                    fontsize=4, ha='center')
-    
-    ax3.set_xlabel('Baseline R² (σ=0)', fontsize=7)
-    ax3.set_ylabel('Retention % at σ=0.6', fontsize=7)
-    ax3.set_title('Baseline vs Robustness\n(Best configs)', fontsize=8)
-    ax3.grid(True, alpha=0.3)
-    ax3.spines['top'].set_visible(False)
-    ax3.spines['right'].set_visible(False)
-    
-    # 4. Summary table
-    ax4 = fig.add_subplot(gs[2, 1])
-    ax4.axis('off')
-    
-    table_text = "BEST CONFIGURATIONS:\n\n"
-    for _, row in best_df.iterrows():
-        table_text += f"{row['category'][:18]:18s}\n"
-        table_text += f"  {row['model'][:15]:15s}\n"
-        table_text += f"  {row['representation']}/{row['loss'][:8]}\n"
-        table_text += f"  R²@0.6={row['r2_06']:.4f}\n"
-        table_text += f"  Ret={row['retention']:.1f}%\n\n"
-    
-    ax4.text(0.05, 0.95, table_text, transform=ax4.transAxes, fontsize=5,
-            verticalalignment='top', family='monospace',
-            bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "best_configs_per_method.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-    
-    # Print table
-    print("\nBest Configuration per Method Category:")
-    print("-" * 100)
-    print(f"{'Category':20s} {'Model':20s} {'Rep':8s} {'Loss':15s} {'R²@0.6':>8s} {'Ret%':>8s}")
-    print("-" * 100)
-    for _, row in best_df.iterrows():
-        print(f"{row['category']:20s} {row['model'][:20]:20s} {row['representation']:8s} "
-              f"{row['loss'][:15]:15s} {row['r2_06']:8.4f} {row['retention']:8.2f}")
-
-def uncertainty_methods_deep_dive(df, output_dir):
-    """
-    Special analysis for uncertainty quantification methods
-    """
-    print("\n" + "="*80)
-    print("UNCERTAINTY QUANTIFICATION METHODS")
-    print("="*80)
-    
-    # Methods that provide uncertainty
-    uncertainty_methods = {
-        'Heteroscedastic GP': 'het_gp',
-        'Conformal': 'conformal',
-        'Evidential': 'evidential',
-        'Heteroscedastic Loss': 'heteroscedastic'
-    }
-    
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
-    
-    # 1. Performance comparison
-    ax = axes[0, 0]
-    
-    unc_data = []
-    for name, pattern in uncertainty_methods.items():
-        if pattern == 'heteroscedastic':
-            # Special case - it's a loss function
-            matching = df[df['loss_function'] == pattern]
+        # NSI (Noise Sensitivity Index)
+        if len(group) >= 2:
+            slope_r2, intercept_r2, r_val_r2, p_val_r2, _ = stats.linregress(group['sigma'], group['r2'])
+            metrics['nsi_r2'] = slope_r2
+            metrics['nsi_r2_intercept'] = intercept_r2
+            metrics['nsi_r2_r'] = r_val_r2
+            metrics['nsi_r2_pval'] = p_val_r2
+            
+            if metrics['r2_at_0.0'] != 0 and not np.isnan(metrics['r2_at_0.0']):
+                metrics['nsi_r2_relative'] = slope_r2 / abs(metrics['r2_at_0.0'])
+            else:
+                metrics['nsi_r2_relative'] = np.nan
+            
+            slope_rmse, _, _, _, _ = stats.linregress(group['sigma'], group['rmse'])
+            metrics['nsi_rmse'] = slope_rmse
         else:
-            matching = df[df['base_model'].str.contains(pattern, case=False, na=False)]
+            metrics['nsi_r2'] = np.nan
+            metrics['nsi_r2_relative'] = np.nan
+            metrics['nsi_rmse'] = np.nan
         
-        if len(matching) > 0:
-            unc_data.append({
-                'method': name,
-                'r2_06_mean': matching['r2_at_0.6'].mean(),
-                'r2_06_std': matching['r2_at_0.6'].std(),
-                'count': len(matching)
-            })
-    
-    unc_df = pd.DataFrame(unc_data)
-    unc_df = unc_df.sort_values('r2_06_mean', ascending=False)
-    
-    x_pos = np.arange(len(unc_df))
-    ax.bar(x_pos, unc_df['r2_06_mean'], yerr=unc_df['r2_06_std'],
-          capsize=5, alpha=0.7)
-    
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(unc_df['method'], rotation=45, ha='right', fontsize=6)
-    ax.set_ylabel('Mean R² at σ=0.6', fontsize=7)
-    ax.set_title('Uncertainty Method Performance', fontsize=8)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    
-    for i, row in unc_df.iterrows():
-        ax.text(x_pos[i], row['r2_06_mean'] + row['r2_06_std'] + 0.01,
-               f"n={int(row['count'])}", ha='center', va='bottom', fontsize=5)
-    
-    # 2. Best from each
-    ax = axes[0, 1]
-    
-    best_unc = []
-    for name, pattern in uncertainty_methods.items():
-        if pattern == 'heteroscedastic':
-            matching = df[df['loss_function'] == pattern]
-        else:
-            matching = df[df['base_model'].str.contains(pattern, case=False, na=False)]
-        
-        if len(matching) > 0:
-            best = matching.nlargest(1, 'r2_at_0.6').iloc[0]
-            best_unc.append({
-                'method': name,
-                'r2_0': best['r2_at_0'],
-                'r2_03': best['r2_at_0.3'],
-                'r2_06': best['r2_at_0.6'],
-                'r2_10': best['r2_at_1.0']
-            })
-    
-    for config in best_unc:
-        sigmas = [0, 0.3, 0.6, 1.0]
-        r2_vals = [config['r2_0'], config['r2_03'], config['r2_06'], config['r2_10']]
-        ax.plot(sigmas, r2_vals, marker='o', label=config['method'],
-               linewidth=1.5, markersize=4)
-    
-    ax.set_xlabel('σ', fontsize=7)
-    ax.set_ylabel('R²', fontsize=7)
-    ax.set_title('Best Config per UQ Method', fontsize=8)
-    ax.legend(fontsize=5)
-    ax.grid(True, alpha=0.3)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    
-    # 3 & 4: Summary text
-    for ax in [axes[1, 0], axes[1, 1]]:
-        ax.axis('off')
-    
-    summary_text = """
-UNCERTAINTY QUANTIFICATION FINDINGS:
-
-These methods provide uncertainty estimates
-in addition to predictions.
-
-Performance Ranking (by best R²@0.6):
-"""
-    
-    best_unc_df = pd.DataFrame(best_unc).sort_values('r2_06', ascending=False)
-    for _, row in best_unc_df.iterrows():
-        summary_text += f"\n{row['method']:20s}: {row['r2_06']:.4f}"
-    
-    summary_text += "\n\nRECOMMENDATION:\nHeteroscedastic GP provides both\ngood performance AND uncertainty."
-    
-    axes[1, 0].text(0.05, 0.95, summary_text, transform=axes[1, 0].transAxes,
-                   fontsize=6, verticalalignment='top', family='monospace',
-                   bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "uncertainty_methods.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-
-def distance_metric_deep_dive(df, output_dir):
-    """
-    Analyze which distance metrics (if any) help robustness
-    """
-    print("\n" + "="*80)
-    print("DISTANCE METRIC ANALYSIS: DO THEY HELP ROBUSTNESS?")
-    print("="*80)
-    
-    fig = plt.figure(figsize=(12, 8))
-    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.35)
-    
-    # Separate by distance metric presence and type
-    no_dist = df[df['distance_metric'] == 'none']
-    yes_dist = df[df['distance_metric'] != 'none']
-    
-    # 1. With vs without distance metrics
-    ax1 = fig.add_subplot(gs[0, 0])
-    
-    data_to_plot = [no_dist['r2_at_0.6'].dropna(), yes_dist['r2_at_0.6'].dropna()]
-    bp = ax1.boxplot(data_to_plot, labels=['No Distance', 'With Distance'],
-                     patch_artist=True)
-    bp['boxes'][0].set_facecolor('lightgreen')
-    bp['boxes'][1].set_facecolor('lightcoral')
-    
-    ax1.set_ylabel('R² at σ=0.6', fontsize=7)
-    ax1.set_title('Distance Metrics HURT Performance', fontsize=8)
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    
-    # Stats
-    u_stat, p_val = mannwhitneyu(data_to_plot[0], data_to_plot[1])
-    mean_diff = data_to_plot[0].mean() - data_to_plot[1].mean()
-    ax1.text(0.5, 0.95, f'Without: {data_to_plot[0].mean():.4f}\nWith: {data_to_plot[1].mean():.4f}\nΔ = {mean_diff:.4f}\np = {p_val:.4f}',
-            transform=ax1.transAxes, fontsize=5, va='top', ha='center',
-            bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-    
-    # 2. By distance metric type
-    ax2 = fig.add_subplot(gs[0, 1])
-    
-    dist_types = yes_dist['distance_metric'].unique()
-    dist_summary = yes_dist.groupby('distance_metric').agg({
-        'r2_at_0.6': ['mean', 'std', 'count'],
-        'retention_0.6': 'mean'
-    })
-    
-    dist_summary = dist_summary.sort_values(('r2_at_0.6', 'mean'), ascending=False)
-    
-    x_pos = np.arange(len(dist_summary))
-    bars = ax2.bar(x_pos, dist_summary[('r2_at_0.6', 'mean')],
-                   yerr=dist_summary[('r2_at_0.6', 'std')],
-                   capsize=4, alpha=0.7)
-    
-    # Color by performance relative to no-distance baseline
-    no_dist_mean = no_dist['r2_at_0.6'].mean()
-    for i, bar in enumerate(bars):
-        if dist_summary[('r2_at_0.6', 'mean')].iloc[i] > no_dist_mean:
-            bar.set_color('green')
-        else:
-            bar.set_color('red')
-    
-    ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(dist_summary.index, rotation=45, ha='right', fontsize=6)
-    ax2.set_ylabel('Mean R² at σ=0.6', fontsize=7)
-    ax2.set_title('Performance by Distance Metric Type', fontsize=8)
-    ax2.axhline(y=no_dist_mean, color='black', linestyle='--', linewidth=1,
-                label=f'No distance ({no_dist_mean:.3f})')
-    ax2.legend(fontsize=5)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    for i, (idx, row) in enumerate(dist_summary.iterrows()):
-        ax2.text(i, row[('r2_at_0.6', 'mean')] + row[('r2_at_0.6', 'std')] + 0.01,
-                f"n={int(row[('r2_at_0.6', 'count')])}", ha='center', va='bottom', fontsize=5)
-    
-    # 3. Retention comparison
-    ax3 = fig.add_subplot(gs[0, 2])
-    
-    retention_data = [no_dist['retention_0.6'].dropna(), yes_dist['retention_0.6'].dropna()]
-    bp = ax3.boxplot(retention_data, labels=['No Distance', 'With Distance'],
-                     patch_artist=True)
-    bp['boxes'][0].set_facecolor('lightgreen')
-    bp['boxes'][1].set_facecolor('lightcoral')
-    
-    ax3.set_ylabel('Retention % at σ=0.6', fontsize=7)
-    ax3.set_title('Retention Also Worse', fontsize=8)
-    ax3.spines['top'].set_visible(False)
-    ax3.spines['right'].set_visible(False)
-    
-    ret_diff = retention_data[0].mean() - retention_data[1].mean()
-    ax3.text(0.5, 0.05, f'Δ = {ret_diff:.2f} pp',
-            transform=ax3.transAxes, fontsize=6, ha='center',
-            bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
-    
-    # 4. Degradation curves - best with each distance type
-    ax4 = fig.add_subplot(gs[1, :2])
-    
-    # Best without distance
-    best_no_dist = no_dist.nlargest(1, 'r2_at_0.6').iloc[0]
-    sigmas = [0, 0.3, 0.6, 1.0]
-    r2_vals = [best_no_dist['r2_at_0'], best_no_dist['r2_at_0.3'],
-               best_no_dist['r2_at_0.6'], best_no_dist['r2_at_1.0']]
-    ax4.plot(sigmas, r2_vals, marker='o', label='No Distance (best)',
-            linewidth=2, markersize=5, color='green')
-    
-    # Best with each distance type
-    colors_dist = plt.cm.Set1(np.linspace(0, 1, len(dist_types)))
-    for idx, dist_type in enumerate(dist_types):
-        dist_df = yes_dist[yes_dist['distance_metric'] == dist_type]
-        if len(dist_df) > 0:
-            best = dist_df.nlargest(1, 'r2_at_0.6').iloc[0]
-            r2_vals = [best['r2_at_0'], best['r2_at_0.3'],
-                      best['r2_at_0.6'], best['r2_at_1.0']]
-            ax4.plot(sigmas, r2_vals, marker='s', label=f'{dist_type} (best)',
-                    linewidth=1.5, markersize=4, color=colors_dist[idx], alpha=0.7)
-    
-    ax4.set_xlabel('σ', fontsize=7)
-    ax4.set_ylabel('R²', fontsize=7)
-    ax4.set_title('Best Config with Each Distance Metric', fontsize=8)
-    ax4.legend(fontsize=6, loc='best')
-    ax4.grid(True, alpha=0.3)
-    ax4.spines['top'].set_visible(False)
-    ax4.spines['right'].set_visible(False)
-    
-    # 5. Summary verdict
-    ax5 = fig.add_subplot(gs[1, 2])
-    ax5.axis('off')
-    
-    summary_text = f"""
-DISTANCE METRIC FINDINGS:
-
-WITHOUT distance metrics:
-  R²@0.6: {no_dist['r2_at_0.6'].mean():.4f}
-  Retention: {no_dist['retention_0.6'].mean():.2f}%
-  N configs: {len(no_dist)}
-
-WITH distance metrics:
-  R²@0.6: {yes_dist['r2_at_0.6'].mean():.4f}
-  Retention: {yes_dist['retention_0.6'].mean():.2f}%
-  N configs: {len(yes_dist)}
-
-DIFFERENCE:
-  ΔR²: {mean_diff:.4f}
-  ΔRetention: {ret_diff:.2f} pp
-  p-value: {p_val:.4f}
-
-BY TYPE (R²@0.6):
-"""
-    
-    for idx, row in dist_summary.iterrows():
-        summary_text += f"  {idx:12s}: {row[('r2_at_0.6', 'mean')]:.4f}\n"
-    
-    summary_text += f"\nVERDICT: ✗ AVOID\nAll distance metrics hurt\nperformance significantly."
-    
-    ax5.text(0.05, 0.95, summary_text, transform=ax5.transAxes, fontsize=6,
-            verticalalignment='top', family='monospace',
-            bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.8))
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "distance_metric_analysis.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-    
-    print(f"\nDistance metric analysis:")
-    print(f"  Without: R²@0.6 = {no_dist['r2_at_0.6'].mean():.4f}")
-    print(f"  With: R²@0.6 = {yes_dist['r2_at_0.6'].mean():.4f}")
-    print(f"  Difference: {mean_diff:.4f} (p={p_val:.4f})")
-
-def loss_function_trends(df, output_dir):
-    """
-    Which loss functions help noise robustness?
-    """
-    print("\n" + "="*80)
-    print("LOSS FUNCTION TRENDS: WHICH HELP ROBUSTNESS?")
-    print("="*80)
-    
-    fig = plt.figure(figsize=(12, 8))
-    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.35)
-    
-    loss_summary = df.groupby('loss_function').agg({
-        'r2_at_0': ['mean', 'std'],
-        'r2_at_0.3': ['mean', 'std'],
-        'r2_at_0.6': ['mean', 'std'],
-        'retention_0.6': ['mean', 'std', 'count'],
-        'nsi_r2': 'mean'
-    })
-    
-    loss_summary.columns = ['r2_0_mean', 'r2_0_std', 'r2_03_mean', 'r2_03_std',
-                            'r2_06_mean', 'r2_06_std', 'ret_mean', 'ret_std', 'count', 'nsi']
-    
-    loss_summary = loss_summary.sort_values('r2_06_mean', ascending=False)
-    
-    # 1. R² at different noise levels
-    ax1 = fig.add_subplot(gs[0, :2])
-    
-    x = np.arange(len(loss_summary))
-    width = 0.25
-    
-    bars1 = ax1.bar(x - width, loss_summary['r2_0_mean'], width, 
-                    label='σ=0', alpha=0.8, color='skyblue')
-    bars2 = ax1.bar(x, loss_summary['r2_03_mean'], width,
-                    label='σ=0.3', alpha=0.8, color='orange')
-    bars3 = ax1.bar(x + width, loss_summary['r2_06_mean'], width,
-                    label='σ=0.6', alpha=0.8, color='green')
-    
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(loss_summary.index, rotation=45, ha='right', fontsize=6)
-    ax1.set_ylabel('Mean R²', fontsize=7)
-    ax1.set_title('Loss Function Performance Across Noise Levels', fontsize=8)
-    ax1.legend(fontsize=6, loc='best')
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    
-    # 2. Retention comparison
-    ax2 = fig.add_subplot(gs[0, 2])
-    
-    x_pos = np.arange(len(loss_summary))
-    bars = ax2.bar(x_pos, loss_summary['ret_mean'],
-                   yerr=loss_summary['ret_std'], capsize=4, alpha=0.7)
-    
-    # Highlight MSE if present
-    if 'mse' in loss_summary.index:
-        mse_idx = list(loss_summary.index).index('mse')
-        bars[mse_idx].set_edgecolor('red')
-        bars[mse_idx].set_linewidth(2)
-    
-    ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(loss_summary.index, rotation=45, ha='right', fontsize=6)
-    ax2.set_ylabel('Retention % at σ=0.6', fontsize=7)
-    ax2.set_title('Retention by Loss Function', fontsize=8)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    for i, (idx, row) in enumerate(loss_summary.iterrows()):
-        ax2.text(i, row['ret_mean'] + row['ret_std'] + 1,
-                f"n={int(row['count'])}", ha='center', va='bottom', fontsize=5)
-    
-    # 3. Baseline vs high noise performance
-    ax3 = fig.add_subplot(gs[1, 0])
-    
-    ax3.scatter(loss_summary['r2_0_mean'], loss_summary['r2_06_mean'],
-               s=loss_summary['count']*2, alpha=0.6)
-    
-    for idx, row in loss_summary.iterrows():
-        ax3.annotate(idx, (row['r2_0_mean'], row['r2_06_mean']),
-                    fontsize=5, ha='center')
-    
-    ax3.plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1)
-    ax3.set_xlabel('Mean R² at σ=0', fontsize=7)
-    ax3.set_ylabel('Mean R² at σ=0.6', fontsize=7)
-    ax3.set_title('Baseline vs High Noise', fontsize=8)
-    ax3.grid(True, alpha=0.3)
-    ax3.spines['top'].set_visible(False)
-    ax3.spines['right'].set_visible(False)
-    
-    # 4. ANOVA test
-    ax4 = fig.add_subplot(gs[1, 1])
-    
-    loss_groups = [df[df['loss_function'] == loss]['r2_at_0.6'].dropna()
-                  for loss in df['loss_function'].unique()]
-    
-    h_stat, p_val = kruskal(*loss_groups)
-    
-    # Effect size (eta-squared approximation)
-    grand_mean = df['r2_at_0.6'].mean()
-    ss_between = sum(len(g) * (np.mean(g) - grand_mean)**2 for g in loss_groups)
-    ss_total = np.sum((df['r2_at_0.6'] - grand_mean)**2)
-    eta_sq = ss_between / ss_total if ss_total > 0 else 0
-    
-    ax4.axis('off')
-    
-    anova_text = f"""
-STATISTICAL TEST:
-
-Kruskal-Wallis H-test
-(on R²@0.6):
-
-H-statistic: {h_stat:.2f}
-p-value: {p_val:.6f}
-{'***' if p_val < 0.001 else '**' if p_val < 0.01 else '*' if p_val < 0.05 else 'ns'}
-
-Effect size (η²): {eta_sq:.4f}
-({eta_sq*100:.1f}% variance explained)
-
-INTERPRETATION:
-Loss function choice
-{'DOES' if p_val < 0.05 else 'DOES NOT'}
-significantly affect
-noise robustness.
-"""
-    
-    ax4.text(0.05, 0.95, anova_text, transform=ax4.transAxes, fontsize=6,
-            verticalalignment='top', family='monospace',
-            bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
-    
-    # 5. Comparison to MSE
-    ax5 = fig.add_subplot(gs[1, 2])
-    ax5.axis('off')
-    
-    if 'mse' in loss_summary.index:
-        mse_ret = loss_summary.loc['mse', 'ret_mean']
-        mse_r2 = loss_summary.loc['mse', 'r2_06_mean']
-        
-        comparison_text = f"COMPARISON TO MSE:\n\n"
-        comparison_text += f"MSE (baseline):\n"
-        comparison_text += f"  R²@0.6: {mse_r2:.4f}\n"
-        comparison_text += f"  Retention: {mse_ret:.2f}%\n\n"
-        
-        for idx, row in loss_summary.iterrows():
-            if idx != 'mse':
-                r2_diff = row['r2_06_mean'] - mse_r2
-                ret_diff = row['ret_mean'] - mse_ret
-                
-                comparison_text += f"{idx}:\n"
-                comparison_text += f"  ΔR²: {r2_diff:+.4f}\n"
-                comparison_text += f"  ΔRet: {ret_diff:+.2f}pp\n"
-                
-                if abs(r2_diff) < 0.01 and abs(ret_diff) < 2:
-                    verdict = "~SAME"
-                elif r2_diff > 0.02 or ret_diff > 2:
-                    verdict = "✓BETTER"
+        # Performance retention
+        if not np.isnan(metrics['r2_at_0.0']) and metrics['r2_at_0.0'] != 0:
+            for sigma_val in [0.3, 0.6, 1.0]:
+                if not np.isnan(metrics[f'r2_at_{sigma_val}']):
+                    metrics[f'retention_{sigma_val}'] = (metrics[f'r2_at_{sigma_val}'] / metrics['r2_at_0.0']) * 100
                 else:
-                    verdict = "✗WORSE"
-                comparison_text += f"  {verdict}\n\n"
+                    metrics[f'retention_{sigma_val}'] = np.nan
+        else:
+            for sigma_val in [0.3, 0.6, 1.0]:
+                metrics[f'retention_{sigma_val}'] = np.nan
         
-        ax5.text(0.05, 0.95, comparison_text, transform=ax5.transAxes, fontsize=5,
-                verticalalignment='top', family='monospace',
-                bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
+        # Absolute drops
+        if not np.isnan(metrics['r2_at_0.0']):
+            metrics['r2_drop_0_to_0.6'] = metrics['r2_at_0.0'] - metrics['r2_at_0.6'] if not np.isnan(metrics['r2_at_0.6']) else np.nan
+            metrics['r2_drop_0_to_1.0'] = metrics['r2_at_0.0'] - metrics['r2_at_1.0'] if not np.isnan(metrics['r2_at_1.0']) else np.nan
+        
+        robustness_metrics.append(metrics)
     
-    plt.tight_layout()
-    output_path = Path(output_dir) / "loss_function_trends.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
-    plt.close()
-    
-    print(f"\nLoss function ANOVA: H={h_stat:.2f}, p={p_val:.6f}, η²={eta_sq:.4f}")
+    return pd.DataFrame(robustness_metrics)
 
-def kernel_analysis(df, output_dir):
-    """
-    For kernel methods, which kernels work best?
-    """
+
+# ============================================================================
+# ANALYSIS 1: METHOD CATEGORIZATION & COMPARISON
+# ============================================================================
+
+def analysis_1_method_categorization(robustness_df, output_dir):
+    """Compare R² at 0.3 across method categories"""
     print("\n" + "="*80)
-    print("KERNEL ANALYSIS: WHICH KERNELS FOR NOISE ROBUSTNESS?")
+    print("ANALYSIS 1: METHOD CATEGORIZATION & COMPARISON")
     print("="*80)
     
-    # Filter to kernel methods
-    kernel_df = df[df['kernel'] != 'none']
+    # Group by category and get summary stats
+    category_summary = robustness_df.groupby('model_group').agg({
+        'r2_at_0.3': ['mean', 'std', 'max', 'count'],
+        'retention_0.6': ['mean', 'std'],
+        'nsi_r2': ['mean', 'std']
+    }).round(4)
     
-    if len(kernel_df) == 0:
-        print("No kernel-based methods found")
+    print("\nCategory Performance Summary (R² at σ=0.3):")
+    print(category_summary)
+    
+    # Statistical test
+    categories = robustness_df['model_group'].unique()
+    if len(categories) > 2:
+        groups = [robustness_df[robustness_df['model_group'] == cat]['r2_at_0.3'].dropna() 
+                  for cat in categories]
+        f_stat, p_val = stats.f_oneway(*groups)
+        print(f"\nANOVA: F={f_stat:.2f}, p={p_val:.4f}")
+        if p_val < 0.05:
+            print("SIGNIFICANT differences between categories!")
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 3))
+    
+    # Box plot
+    robustness_df.boxplot(column='r2_at_0.3', by='model_group', ax=ax1)
+    ax1.set_title('R² at σ=0.3 by Method Category', fontsize=8)
+    ax1.set_xlabel('Method Category', fontsize=7)
+    ax1.set_ylabel('R² at σ=0.3', fontsize=7)
+    ax1.tick_params(axis='x', rotation=45, labelsize=5)
+    plt.suptitle('')
+    
+    # Mean with error bars
+    means = robustness_df.groupby('model_group')['r2_at_0.3'].mean().sort_values(ascending=False)
+    stds = robustness_df.groupby('model_group')['r2_at_0.3'].std()
+    
+    ax2.barh(range(len(means)), means.values, xerr=stds[means.index].values, 
+             capsize=3, alpha=0.7, color='steelblue')
+    ax2.set_yticks(range(len(means)))
+    ax2.set_yticklabels(means.index, fontsize=6)
+    ax2.set_xlabel('Mean R² at σ=0.3', fontsize=7)
+    ax2.set_title('Category Ranking', fontsize=8)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis1_method_categorization.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis1_method_categorization.png'}")
+    plt.close()
+    
+    # Find most promising category
+    best_category = means.idxmax()
+    print(f"\n🎯 MOST PROMISING CATEGORY: {best_category}")
+    print(f"   Mean R² at σ=0.3: {means[best_category]:.4f}")
+
+
+# ============================================================================
+# ANALYSIS 2: HET_GP INVESTIGATION
+# ============================================================================
+
+def analysis_2_het_gp_investigation(df, robustness_df, output_dir):
+    """Deep dive into het_gp performance vs other losses"""
+    print("\n" + "="*80)
+    print("ANALYSIS 2: HET_GP INVESTIGATION")
+    print("="*80)
+    
+    # Get het_gp configs
+    het_gp_data = robustness_df[robustness_df['base_model'] == 'het_gp']
+    
+    if len(het_gp_data) == 0:
+        print("No het_gp data found!")
         return
     
-    fig = plt.figure(figsize=(10, 6))
-    gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.35)
+    print(f"\nFound {len(het_gp_data)} het_gp configurations")
     
-    kernel_summary = kernel_df.groupby('kernel').agg({
-        'r2_at_0': ['mean', 'std'],
-        'r2_at_0.3': ['mean', 'std'],
-        'r2_at_0.6': ['mean', 'std'],
-        'retention_0.6': ['mean', 'std', 'count']
-    })
+    # Compare het_gp loss to MSE within same models
+    # For models that have both het_gp and mse variants
+    comparison_results = []
     
-    kernel_summary.columns = ['r2_0_mean', 'r2_0_std', 'r2_03_mean', 'r2_03_std',
-                              'r2_06_mean', 'r2_06_std', 'ret_mean', 'ret_std', 'count']
+    for rep in het_gp_data['representation'].unique():
+        het_gp_rep = het_gp_data[het_gp_data['representation'] == rep]
+        
+        # Find corresponding non-het_gp configs (ideally same base model with MSE)
+        other_losses = robustness_df[
+            (robustness_df['representation'] == rep) &
+            (robustness_df['base_model'] != 'het_gp') &
+            (robustness_df['loss_function'] == 'mse')
+        ]
+        
+        if len(other_losses) > 0:
+            for _, het_config in het_gp_rep.iterrows():
+                for _, mse_config in other_losses.iterrows():
+                    comparison_results.append({
+                        'representation': rep,
+                        'het_gp_r2_0.3': het_config['r2_at_0.3'],
+                        'mse_r2_0.3': mse_config['r2_at_0.3'],
+                        'het_gp_retention': het_config['retention_0.6'],
+                        'mse_retention': mse_config['retention_0.6'],
+                        'het_gp_nsi': het_config['nsi_r2'],
+                        'mse_nsi': mse_config['nsi_r2']
+                    })
     
-    kernel_summary = kernel_summary.sort_values('r2_06_mean', ascending=False)
+    if comparison_results:
+        comp_df = pd.DataFrame(comparison_results)
+        print("\nHet_GP vs MSE Comparison:")
+        print(f"  Mean het_gp R² at 0.3: {comp_df['het_gp_r2_0.3'].mean():.4f}")
+        print(f"  Mean MSE R² at 0.3: {comp_df['mse_r2_0.3'].mean():.4f}")
+        print(f"  Improvement: {(comp_df['het_gp_r2_0.3'].mean() - comp_df['mse_r2_0.3'].mean()):.4f}")
+        
+        # Statistical significance
+        t_stat, p_val = stats.ttest_rel(comp_df['het_gp_r2_0.3'], comp_df['mse_r2_0.3'])
+        print(f"  Paired t-test: t={t_stat:.2f}, p={p_val:.4f}")
+        if p_val < 0.05:
+            print("  ✓ SIGNIFICANT improvement!")
     
-    # 1. Performance by kernel
-    ax1 = fig.add_subplot(gs[0, 0])
+    # Plot degradation curves
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 3))
     
-    x_pos = np.arange(len(kernel_summary))
-    bars = ax1.bar(x_pos, kernel_summary['r2_06_mean'],
-                   yerr=kernel_summary['r2_06_std'], capsize=4, alpha=0.7)
+    colors = plt.cm.tab10(np.linspace(0, 1, len(het_gp_data)))
     
-    ax1.set_xticks(x_pos)
-    ax1.set_xticklabels(kernel_summary.index, rotation=45, ha='right', fontsize=6)
-    ax1.set_ylabel('Mean R² at σ=0.6', fontsize=7)
-    ax1.set_title('Kernel Performance at High Noise', fontsize=8)
+    for idx, (_, config) in enumerate(het_gp_data.iterrows()):
+        config_df = df[
+            (df['model'] == config['model']) &
+            (df['representation'] == config['representation']) &
+            (df['loss_function'] == config['loss_function'])
+        ].sort_values('sigma')
+        
+        if len(config_df) > 0:
+            label = f"{config['representation']}/{config['kernel']} (ret={config['retention_0.6']:.0f}%)"
+            ax1.plot(config_df['sigma'], config_df['r2'],
+                    marker='o', label=label, color=colors[idx],
+                    linewidth=1.5, markersize=3)
+            ax2.plot(config_df['sigma'], config_df['rmse'],
+                    marker='o', color=colors[idx],
+                    linewidth=1.5, markersize=3)
+    
+    ax1.set_xlabel('σ', fontsize=7)
+    ax1.set_ylabel('R²', fontsize=7)
+    ax1.set_title('HET_GP: R² Degradation', fontsize=8)
+    ax1.legend(fontsize=5, loc='best')
+    ax1.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
     ax1.spines['top'].set_visible(False)
     ax1.spines['right'].set_visible(False)
+    ax1.grid(True, alpha=0.2)
     
-    for i, (idx, row) in enumerate(kernel_summary.iterrows()):
-        ax1.text(i, row['r2_06_mean'] + row['r2_06_std'] + 0.01,
-                f"n={int(row['count'])}", ha='center', va='bottom', fontsize=5)
-    
-    # 2. Retention by kernel
-    ax2 = fig.add_subplot(gs[0, 1])
-    
-    x_pos = np.arange(len(kernel_summary))
-    ax2.bar(x_pos, kernel_summary['ret_mean'],
-           yerr=kernel_summary['ret_std'], capsize=4, alpha=0.7, color='orange')
-    
-    ax2.set_xticks(x_pos)
-    ax2.set_xticklabels(kernel_summary.index, rotation=45, ha='right', fontsize=6)
-    ax2.set_ylabel('Retention % at σ=0.6', fontsize=7)
-    ax2.set_title('Retention by Kernel', fontsize=8)
+    ax2.set_xlabel('σ', fontsize=7)
+    ax2.set_ylabel('RMSE', fontsize=7)
+    ax2.set_title('HET_GP: RMSE vs σ', fontsize=8)
     ax2.spines['top'].set_visible(False)
     ax2.spines['right'].set_visible(False)
+    ax2.grid(True, alpha=0.2)
     
-    # 3. Degradation curves
-    ax3 = fig.add_subplot(gs[1, :])
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis2_het_gp_investigation.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis2_het_gp_investigation.png'}")
+    plt.close()
     
-    colors_kernel = plt.cm.Set2(np.linspace(0, 1, len(kernel_summary)))
+    # Verdict
+    best_het_gp = het_gp_data.loc[het_gp_data['r2_at_0.3'].idxmax()]
+    print(f"\n🎯 BEST HET_GP CONFIG: {best_het_gp['representation']}/{best_het_gp['kernel']}")
+    print(f"   R² at σ=0.3: {best_het_gp['r2_at_0.3']:.4f}")
+    print(f"   Retention at σ=0.6: {best_het_gp['retention_0.6']:.1f}%")
+    if best_het_gp['r2_at_0.3'] > 0.6:
+        print("   ✓ PAPER-WORTHY!")
+
+
+# ============================================================================
+# ANALYSIS 3: LOSS × METHOD INTERACTION
+# ============================================================================
+
+def analysis_3_loss_method_interaction(robustness_df, output_dir):
+    """Heatmap: method category × loss function"""
+    print("\n" + "="*80)
+    print("ANALYSIS 3: LOSS × METHOD INTERACTION")
+    print("="*80)
     
-    for idx, (kernel, color) in enumerate(zip(kernel_summary.index, colors_kernel)):
-        k_df = kernel_df[kernel_df['kernel'] == kernel]
+    # Create pivot table
+    pivot = robustness_df.pivot_table(
+        values='r2_at_0.3',
+        index='model_group',
+        columns='loss_function',
+        aggfunc='mean'
+    )
+    
+    print("\nMean R² at σ=0.3 by Category × Loss:")
+    print(pivot.round(4))
+    
+    # ANOVA within each category
+    print("\nANOVA within each category:")
+    for category in robustness_df['model_group'].unique():
+        cat_data = robustness_df[robustness_df['model_group'] == category]
+        losses = cat_data['loss_function'].unique()
         
-        # Get best config with this kernel
-        best = k_df.nlargest(1, 'r2_at_0.6').iloc[0]
+        if len(losses) > 1:
+            groups = [cat_data[cat_data['loss_function'] == loss]['r2_at_0.3'].dropna() 
+                      for loss in losses]
+            groups = [g for g in groups if len(g) > 0]
+            
+            if len(groups) > 1:
+                f_stat, p_val = stats.f_oneway(*groups)
+                sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
+                print(f"  {category}: F={f_stat:.2f}, p={p_val:.4f} {sig}")
+    
+    # Heatmap
+    fig, ax = plt.subplots(figsize=(6, 4))
+    
+    sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', 
+                center=pivot.values.mean(), ax=ax, cbar_kws={'label': 'R² at σ=0.3'})
+    ax.set_title('Loss × Method Interaction (R² at σ=0.3)', fontsize=8)
+    ax.set_xlabel('Loss Function', fontsize=7)
+    ax.set_ylabel('Method Category', fontsize=7)
+    ax.tick_params(axis='both', labelsize=6)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis3_loss_method_interaction.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis3_loss_method_interaction.png'}")
+    plt.close()
+    
+    # Find where loss matters most
+    loss_variance = pivot.var(axis=1).sort_values(ascending=False)
+    print(f"\n🎯 LOSS MATTERS MOST FOR: {loss_variance.idxmax()}")
+    print(f"   Variance across losses: {loss_variance.max():.4f}")
+
+
+# ============================================================================
+# ANALYSIS 4: DISTANCE METRIC DRILL-DOWN
+# ============================================================================
+
+def analysis_4_distance_drill_down(df, robustness_df, output_dir):
+    """Understand when and why distance metrics hurt/help"""
+    print("\n" + "="*80)
+    print("ANALYSIS 4: DISTANCE METRIC DRILL-DOWN")
+    print("="*80)
+    
+    # Compare configs with/without distance
+    with_dist = robustness_df[robustness_df['uses_distance'] == True]
+    without_dist = robustness_df[robustness_df['uses_distance'] == False]
+    
+    print(f"\nConfigs with distance: {len(with_dist)}")
+    print(f"Configs without distance: {len(without_dist)}")
+    
+    if len(with_dist) > 0:
+        print(f"\nWith distance - Mean R² at σ=0.3: {with_dist['r2_at_0.3'].mean():.4f}")
+        print(f"Without distance - Mean R² at σ=0.3: {without_dist['r2_at_0.3'].mean():.4f}")
         
-        sigmas = [0, 0.3, 0.6, 1.0]
-        r2_vals = [best['r2_at_0'], best['r2_at_0.3'],
-                  best['r2_at_0.6'], best['r2_at_1.0']]
+        # Statistical test
+        t_stat, p_val = stats.ttest_ind(with_dist['r2_at_0.3'].dropna(), 
+                                        without_dist['r2_at_0.3'].dropna())
+        print(f"T-test: t={t_stat:.2f}, p={p_val:.4f}")
         
-        ax3.plot(sigmas, r2_vals, marker='o', label=f'{kernel} (best)',
-                linewidth=1.5, markersize=4, color=color)
+        # By distance type
+        print("\nPerformance by distance metric:")
+        for dist in ['tanimoto', 'euclidean', 'mahalanobis']:
+            dist_data = robustness_df[robustness_df['distance_metric'] == dist]
+            if len(dist_data) > 0:
+                print(f"  {dist}: mean R² at 0.3 = {dist_data['r2_at_0.3'].mean():.4f} (n={len(dist_data)})")
+        
+        # By representation
+        print("\nDistance × Representation interaction:")
+        for rep in robustness_df['representation'].unique():
+            rep_with = with_dist[with_dist['representation'] == rep]
+            rep_without = without_dist[without_dist['representation'] == rep]
+            
+            if len(rep_with) > 0 and len(rep_without) > 0:
+                diff = rep_with['r2_at_0.3'].mean() - rep_without['r2_at_0.3'].mean()
+                print(f"  {rep}: Δ = {diff:+.4f} (with={rep_with['r2_at_0.3'].mean():.4f}, without={rep_without['r2_at_0.3'].mean():.4f})")
+    
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(7, 5))
+    
+    # Box plot comparison
+    ax1 = axes[0, 0]
+    data_for_box = []
+    labels_for_box = []
+    if len(with_dist) > 0:
+        data_for_box.append(with_dist['r2_at_0.3'].dropna())
+        labels_for_box.append('With Distance')
+    if len(without_dist) > 0:
+        data_for_box.append(without_dist['r2_at_0.3'].dropna())
+        labels_for_box.append('Without Distance')
+    
+    if len(data_for_box) > 0:
+        ax1.boxplot(data_for_box, labels=labels_for_box)
+        ax1.set_ylabel('R² at σ=0.3', fontsize=7)
+        ax1.set_title('Distance Impact on Performance', fontsize=8)
+        ax1.tick_params(labelsize=6)
+    
+    # By distance type
+    ax2 = axes[0, 1]
+    if len(with_dist) > 0:
+        dist_means = with_dist.groupby('distance_metric')['r2_at_0.3'].mean().sort_values()
+        ax2.barh(range(len(dist_means)), dist_means.values, color='coral')
+        ax2.set_yticks(range(len(dist_means)))
+        ax2.set_yticklabels(dist_means.index, fontsize=6)
+        ax2.set_xlabel('Mean R² at σ=0.3', fontsize=7)
+        ax2.set_title('By Distance Type', fontsize=8)
+    
+    # Degradation curves with vs without
+    ax3 = axes[1, 0]
+    if len(with_dist) > 0:
+        for _, config in with_dist.head(5).iterrows():
+            config_df = df[
+                (df['model'] == config['model']) &
+                (df['representation'] == config['representation'])
+            ].sort_values('sigma')
+            if len(config_df) > 0:
+                ax3.plot(config_df['sigma'], config_df['r2'], 
+                        marker='o', linewidth=1, markersize=2, alpha=0.6, color='red')
+    
+    if len(without_dist) > 0:
+        for _, config in without_dist.head(5).iterrows():
+            config_df = df[
+                (df['model'] == config['model']) &
+                (df['representation'] == config['representation'])
+            ].sort_values('sigma')
+            if len(config_df) > 0:
+                ax3.plot(config_df['sigma'], config_df['r2'],
+                        marker='o', linewidth=1, markersize=2, alpha=0.6, color='blue')
     
     ax3.set_xlabel('σ', fontsize=7)
     ax3.set_ylabel('R²', fontsize=7)
-    ax3.set_title('Best Config per Kernel: Degradation', fontsize=8)
-    ax3.legend(fontsize=6, loc='best')
-    ax3.grid(True, alpha=0.3)
-    ax3.spines['top'].set_visible(False)
-    ax3.spines['right'].set_visible(False)
+    ax3.set_title('Degradation Curves (red=with, blue=without)', fontsize=8)
+    ax3.grid(True, alpha=0.2)
+    
+    # Retention comparison
+    ax4 = axes[1, 1]
+    if len(with_dist) > 0 and len(without_dist) > 0:
+        ax4.scatter(with_dist['retention_0.6'], with_dist['r2_at_0.3'],
+                   alpha=0.5, s=30, label='With Distance', color='red')
+        ax4.scatter(without_dist['retention_0.6'], without_dist['r2_at_0.3'],
+                   alpha=0.5, s=30, label='Without Distance', color='blue')
+        ax4.set_xlabel('Retention % at σ=0.6', fontsize=7)
+        ax4.set_ylabel('R² at σ=0.3', fontsize=7)
+        ax4.set_title('Performance vs Retention', fontsize=8)
+        ax4.legend(fontsize=5)
+    
+    for ax in axes.flat:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    output_path = Path(output_dir) / "kernel_analysis.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Saved {output_path}")
+    plt.savefig(output_dir / "analysis4_distance_drill_down.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis4_distance_drill_down.png'}")
     plt.close()
     
-    print("\nKernel performance:")
-    for kernel, row in kernel_summary.iterrows():
-        print(f"  {kernel:15s}: R²@0.6={row['r2_06_mean']:.4f}, Ret={row['ret_mean']:.2f}%")
+    # Verdict
+    if len(with_dist) > 0 and len(without_dist) > 0:
+        if with_dist['r2_at_0.3'].mean() < without_dist['r2_at_0.3'].mean():
+            print("\n🎯 VERDICT: Distance metrics generally HURT performance")
+        else:
+            print("\n🎯 VERDICT: Distance metrics can HELP in specific cases")
 
-def create_summary_report(df, output_dir):
-    """
-    Write text summary
-    """
-    report_path = Path(output_dir) / "METHOD_ANALYSIS_SUMMARY.txt"
-    
-    with open(report_path, 'w') as f:
-        f.write("="*80 + "\n")
-        f.write("NOISE-ROBUST METHOD EFFECTIVENESS ANALYSIS\n")
-        f.write("="*80 + "\n\n")
-        
-        f.write("QUESTION: Do specialized noise-handling methods actually work?\n\n")
-        
-        # Overall stats
-        f.write(f"Total configurations: {len(df)}\n")
-        f.write(f"Overall mean R²@0.6: {df['r2_at_0.6'].mean():.4f}\n")
-        f.write(f"Overall mean retention: {df['retention_0.6'].mean():.2f}%\n\n")
-        
-        # Method category summary
-        f.write("METHOD CATEGORY PERFORMANCE:\n")
-        f.write("-" * 80 + "\n")
-        
-        method_summary = df.groupby('method_category').agg({
-            'r2_at_0.6': 'mean',
-            'retention_0.6': 'mean'
-        }).sort_values('r2_at_0.6', ascending=False)
-        
-        overall_r2 = df['r2_at_0.6'].mean()
-        overall_ret = df['retention_0.6'].mean()
-        
-        for category, row in method_summary.iterrows():
-            r2_diff = row['r2_at_0.6'] - overall_r2
-            ret_diff = row['retention_0.6'] - overall_ret
-            
-            if r2_diff > 0.03 and ret_diff > 2:
-                verdict = "WORKS"
-            elif r2_diff > 0:
-                verdict = "MARGINAL"
-            else:
-                verdict = "FAILS"
-            
-            f.write(f"\n{category}:\n")
-            f.write(f"  R²@0.6: {row['r2_at_0.6']:.4f} ({r2_diff:+.5f})\n")
-            f.write(f"  Retention: {row['retention_0.6']:.2f}% ({ret_diff:+.2f}pp)\n")
-            f.write(f"  VERDICT: {verdict}\n")
-        
-        f.write("\n" + "="*80 + "\n")
-        f.write("CONCLUSIONS:\n")
-        f.write("="*80 + "\n\n")
-        
-        f.write("METHODS THAT WORK:\n")
-        f.write("  • Cleaning/Curriculum: +4.4pp retention, +0.058 R²@0.6\n")
-        f.write("  • Sample Selection: +3.2pp retention, +0.036 R²@0.6\n")
-        f.write("  • Kernel Methods: +2.8pp retention, +0.089 R²@0.6 (BEST absolute)\n\n")
-        
-        f.write("METHODS THAT FAIL:\n")
-        f.write("  • Distance-Based: -4.6pp retention, -0.119 R²@0.6 (WORST)\n")
-        f.write("  • Data Augmentation: -3.2pp retention\n")
-        f.write("  • Robust Optimization: -2.2pp retention\n\n")
-        
-        f.write("RECOMMENDATIONS:\n")
-        f.write("  1. Use cleaning/curriculum methods for best robustness\n")
-        f.write("  2. Kernel methods (het_gp) provide best absolute performance\n")
-        f.write("  3. AVOID distance-based methods - they significantly hurt\n")
-        f.write("  4. Data augmentation and SAM do not help with label noise\n")
-    
-    print(f"\nSaved summary report to {report_path}")
 
-def main(results_dir):
-    """Main pipeline"""
-    
-    print("="*80)
-    print("NOISE-ROBUST METHOD EFFECTIVENESS ANALYSIS")
-    print("="*80)
-    
-    df = load_data(results_dir)
-    df = categorize_by_method(df)
-    
-    print(f"\nLoaded {len(df)} configurations")
-    print(f"Method categories: {df['method_category'].nunique()}")
-    
-    output_dir = Path(results_dir) / "method_analysis"
-    output_dir.mkdir(exist_ok=True, parents=True)
-    
+# ============================================================================
+# ANALYSIS 5: UNCERTAINTY METHOD VALIDATION
+# ============================================================================
+
+def analysis_5_uncertainty_validation(df, robustness_df, output_dir):
+    """Compare uncertainty quantification approaches"""
     print("\n" + "="*80)
-    print("RUNNING METHOD-FOCUSED ANALYSES")
+    print("ANALYSIS 5: UNCERTAINTY METHOD VALIDATION")
     print("="*80)
     
-    method_effectiveness_overview(df, output_dir)
-    loss_within_method_analysis(df, output_dir)
-    best_configs_per_method(df, output_dir)
-    uncertainty_methods_deep_dive(df, output_dir)
+    # Define UQ categories
+    uq_categories = {
+        'conformal': 'uncertainty_conformal',
+        'heteroscedastic': 'uncertainty_heteroscedastic',
+        'evidential': 'uncertainty_evidential',
+    }
     
-    # NEW: Add distance, loss, and kernel analyses
-    distance_metric_deep_dive(df, output_dir)
-    loss_function_trends(df, output_dir)
-    kernel_analysis(df, output_dir)
+    uq_data = robustness_df[robustness_df['model_group'].isin(uq_categories.values())]
     
-    create_summary_report(df, output_dir)
+    if len(uq_data) == 0:
+        print("No UQ methods found!")
+        return
     
-    print(f"\n{'='*80}")
-    print(f"ANALYSIS COMPLETE")
-    print(f"{'='*80}")
-    print(f"Outputs saved to: {output_dir}")
+    print(f"\nFound {len(uq_data)} UQ configurations:")
+    for cat_name, cat_group in uq_categories.items():
+        n = len(uq_data[uq_data['model_group'] == cat_group])
+        if n > 0:
+            mean_r2 = uq_data[uq_data['model_group'] == cat_group]['r2_at_0.3'].mean()
+            print(f"  {cat_name}: n={n}, mean R² at 0.3 = {mean_r2:.4f}")
+    
+    # Compare UQ approaches
+    fig, axes = plt.subplots(2, 2, figsize=(7, 5))
+    
+    # Performance comparison
+    ax1 = axes[0, 0]
+    uq_data.boxplot(column='r2_at_0.3', by='model_group', ax=ax1)
+    ax1.set_title('UQ Methods: R² at σ=0.3', fontsize=8)
+    ax1.set_xlabel('UQ Approach', fontsize=7)
+    ax1.set_ylabel('R² at σ=0.3', fontsize=7)
+    ax1.tick_params(axis='x', rotation=45, labelsize=5)
+    plt.suptitle('')
+    
+    # Retention comparison
+    ax2 = axes[0, 1]
+    uq_data.boxplot(column='retention_0.6', by='model_group', ax=ax2)
+    ax2.set_title('UQ Methods: Retention at σ=0.6', fontsize=8)
+    ax2.set_xlabel('UQ Approach', fontsize=7)
+    ax2.set_ylabel('Retention %', fontsize=7)
+    ax2.tick_params(axis='x', rotation=45, labelsize=5)
+    plt.suptitle('')
+    
+    # Degradation curves
+    ax3 = axes[1, 0]
+    colors = {'uncertainty_conformal': 'red', 
+              'uncertainty_heteroscedastic': 'blue',
+              'uncertainty_evidential': 'green'}
+    
+    for _, config in uq_data.iterrows():
+        config_df = df[
+            (df['model'] == config['model']) &
+            (df['representation'] == config['representation'])
+        ].sort_values('sigma')
+        
+        if len(config_df) > 0:
+            color = colors.get(config['model_group'], 'gray')
+            ax3.plot(config_df['sigma'], config_df['r2'],
+                    marker='o', linewidth=1, markersize=2, 
+                    alpha=0.6, color=color)
+    
+    ax3.set_xlabel('σ', fontsize=7)
+    ax3.set_ylabel('R²', fontsize=7)
+    ax3.set_title('UQ Degradation Curves', fontsize=8)
+    ax3.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    ax3.grid(True, alpha=0.2)
+    
+    # NSI comparison
+    ax4 = axes[1, 1]
+    uq_data.boxplot(column='nsi_r2', by='model_group', ax=ax4)
+    ax4.set_title('UQ Methods: NSI (lower=better)', fontsize=8)
+    ax4.set_xlabel('UQ Approach', fontsize=7)
+    ax4.set_ylabel('NSI', fontsize=7)
+    ax4.tick_params(axis='x', rotation=45, labelsize=5)
+    ax4.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    plt.suptitle('')
+    
+    for ax in axes.flat:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis5_uncertainty_validation.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis5_uncertainty_validation.png'}")
+    plt.close()
+    
+    # Best UQ approach
+    best_uq = uq_data.loc[uq_data['r2_at_0.3'].idxmax()]
+    print(f"\n🎯 BEST UQ APPROACH: {best_uq['model_group']}")
+    print(f"   Config: {best_uq['base_model']}/{best_uq['representation']}")
+    print(f"   R² at σ=0.3: {best_uq['r2_at_0.3']:.4f}")
+
+
+# ============================================================================
+# ANALYSIS 6: KERNEL ANALYSIS
+# ============================================================================
+
+def analysis_6_kernel_analysis(df, robustness_df, output_dir):
+    """Compare kernels for GP methods"""
+    print("\n" + "="*80)
+    print("ANALYSIS 6: KERNEL ANALYSIS (GP METHODS ONLY)")
+    print("="*80)
+    
+    kernel_data = robustness_df[robustness_df['kernel'] != 'none']
+    
+    if len(kernel_data) == 0:
+        print("No kernel-based methods found!")
+        return
+    
+    print(f"\nFound {len(kernel_data)} kernel configurations")
+    
+    # Summary by kernel
+    print("\nPerformance by kernel:")
+    for kernel in kernel_data['kernel'].unique():
+        k_data = kernel_data[kernel_data['kernel'] == kernel]
+        print(f"  {kernel}: mean R² at 0.3 = {k_data['r2_at_0.3'].mean():.4f} (n={len(k_data)})")
+    
+    # ANOVA
+    kernels = kernel_data['kernel'].unique()
+    if len(kernels) > 1:
+        groups = [kernel_data[kernel_data['kernel'] == k]['r2_at_0.3'].dropna() for k in kernels]
+        f_stat, p_val = stats.f_oneway(*groups)
+        print(f"\nANOVA: F={f_stat:.2f}, p={p_val:.4f}")
+    
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(7, 5))
+    
+    # Box plot
+    ax1 = axes[0, 0]
+    kernel_data.boxplot(column='r2_at_0.3', by='kernel', ax=ax1)
+    ax1.set_title('Kernel Comparison: R² at σ=0.3', fontsize=8)
+    ax1.set_xlabel('Kernel', fontsize=7)
+    ax1.set_ylabel('R² at σ=0.3', fontsize=7)
+    ax1.tick_params(labelsize=6)
+    plt.suptitle('')
+    
+    # NSI
+    ax2 = axes[0, 1]
+    kernel_data.boxplot(column='nsi_r2', by='kernel', ax=ax2)
+    ax2.set_title('Kernel Comparison: NSI', fontsize=8)
+    ax2.set_xlabel('Kernel', fontsize=7)
+    ax2.set_ylabel('NSI', fontsize=7)
+    ax2.tick_params(labelsize=6)
+    ax2.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    plt.suptitle('')
+    
+    # Degradation curves
+    ax3 = axes[1, 0]
+    colors = {'tanimoto': 'red', 'rbf': 'blue', 'matern': 'green'}
+    
+    for _, config in kernel_data.iterrows():
+        config_df = df[
+            (df['model'] == config['model']) &
+            (df['representation'] == config['representation']) &
+            (df['kernel'] == config['kernel'])
+        ].sort_values('sigma')
+        
+        if len(config_df) > 0:
+            color = colors.get(config['kernel'], 'gray')
+            ax3.plot(config_df['sigma'], config_df['r2'],
+                    marker='o', linewidth=1, markersize=2,
+                    alpha=0.6, color=color)
+    
+    ax3.set_xlabel('σ', fontsize=7)
+    ax3.set_ylabel('R²', fontsize=7)
+    ax3.set_title('Degradation by Kernel', fontsize=8)
+    ax3.grid(True, alpha=0.2)
+    
+    # Retention
+    ax4 = axes[1, 1]
+    kernel_data.boxplot(column='retention_0.6', by='kernel', ax=ax4)
+    ax4.set_title('Retention % at σ=0.6', fontsize=8)
+    ax4.set_xlabel('Kernel', fontsize=7)
+    ax4.set_ylabel('Retention %', fontsize=7)
+    ax4.tick_params(labelsize=6)
+    plt.suptitle('')
+    
+    for ax in axes.flat:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis6_kernel_analysis.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis6_kernel_analysis.png'}")
+    plt.close()
+    
+    # Best kernel
+    best_kernel = kernel_data.loc[kernel_data['r2_at_0.3'].idxmax()]
+    print(f"\n🎯 BEST KERNEL: {best_kernel['kernel']}")
+    print(f"   R² at σ=0.3: {best_kernel['r2_at_0.3']:.4f}")
+
+
+# ============================================================================
+# ANALYSIS 7: TOP PERFORMER DEEP DIVE
+# ============================================================================
+
+def analysis_7_top_performer_deep_dive(robustness_df, output_dir):
+    """Understand what makes top performers special"""
+    print("\n" + "="*80)
+    print("ANALYSIS 7: TOP PERFORMER DEEP DIVE")
+    print("="*80)
+    
+    top_n = 20
+    top_configs = robustness_df.nlargest(top_n, 'r2_at_0.3')
+    
+    print(f"\nTop {top_n} configurations:")
+    for idx, (_, row) in enumerate(top_configs.iterrows(), 1):
+        print(f"{idx:2d}. {row['base_model']}/{row['representation']}/{row['loss_function']} "
+              f"- R²@0.3={row['r2_at_0.3']:.4f}, ret={row['retention_0.6']:.1f}%")
+    
+    # Pattern analysis
+    print("\nPatterns in top performers:")
+    print(f"  Most common category: {top_configs['model_group'].mode().values[0]}")
+    print(f"  Most common representation: {top_configs['representation'].mode().values[0]}")
+    print(f"  Most common loss: {top_configs['loss_function'].mode().values[0]}")
+    print(f"  Use distance? {(top_configs['uses_distance'].sum() / len(top_configs) * 100):.0f}%")
+    
+    # Distribution visualization
+    fig, axes = plt.subplots(2, 2, figsize=(7, 5))
+    
+    # Category distribution
+    ax1 = axes[0, 0]
+    top_configs['model_group'].value_counts().plot(kind='barh', ax=ax1, color='steelblue')
+    ax1.set_xlabel('Count', fontsize=7)
+    ax1.set_title('Top 20: Category Distribution', fontsize=8)
+    ax1.tick_params(labelsize=6)
+    
+    # Representation distribution
+    ax2 = axes[0, 1]
+    top_configs['representation'].value_counts().plot(kind='barh', ax=ax2, color='coral')
+    ax2.set_xlabel('Count', fontsize=7)
+    ax2.set_title('Top 20: Representation Distribution', fontsize=8)
+    ax2.tick_params(labelsize=6)
+    
+    # Loss distribution
+    ax3 = axes[1, 0]
+    top_configs['loss_function'].value_counts().plot(kind='barh', ax=ax3, color='lightgreen')
+    ax3.set_xlabel('Count', fontsize=7)
+    ax3.set_title('Top 20: Loss Distribution', fontsize=8)
+    ax3.tick_params(labelsize=6)
+    
+    # Distance usage
+    ax4 = axes[1, 1]
+    dist_counts = top_configs['uses_distance'].value_counts()
+    ax4.pie(dist_counts.values, labels=['No Distance', 'Uses Distance'], 
+            autopct='%1.0f%%', startangle=90)
+    ax4.set_title('Top 20: Distance Usage', fontsize=8)
+    
+    for ax in axes.flat[:3]:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis7_top_performer_deep_dive.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis7_top_performer_deep_dive.png'}")
+    plt.close()
+    
+    # Statistical comparison: top vs rest
+    rest_configs = robustness_df[~robustness_df.index.isin(top_configs.index)]
+    
+    print("\nTop 20 vs Rest:")
+    print(f"  Top 20 mean R² at 0: {top_configs['r2_at_0.0'].mean():.4f}")
+    print(f"  Rest mean R² at 0: {rest_configs['r2_at_0.0'].mean():.4f}")
+    print(f"  Top 20 mean retention: {top_configs['retention_0.6'].mean():.1f}%")
+    print(f"  Rest mean retention: {rest_configs['retention_0.6'].mean():.1f}%")
+    
+    print("\n🎯 WINNING FORMULA:")
+    print(f"   Category: {top_configs['model_group'].mode().values[0]}")
+    print(f"   Representation: {top_configs['representation'].mode().values[0]}")
+    print(f"   Loss: {top_configs['loss_function'].mode().values[0]}")
+
+
+# ============================================================================
+# ANALYSIS 8: VARIANCE DECOMPOSITION (ANOVA)
+# ============================================================================
+
+def analysis_8_variance_decomposition(robustness_df, output_dir):
+    """ANOVA: what factors matter most?"""
+    print("\n" + "="*80)
+    print("ANALYSIS 8: VARIANCE DECOMPOSITION (ANOVA)")
+    print("="*80)
+    
+    # Prepare data
+    data = robustness_df.dropna(subset=['r2_at_0.3'])
+    
+    # One-way ANOVA for each factor
+    factors = {
+        'model_group': 'Method Category',
+        'loss_function': 'Loss Function',
+        'uses_distance': 'Uses Distance',
+        'representation': 'Representation',
+        'kernel': 'Kernel'
+    }
+    
+    results = []
+    
+    print("\nOne-way ANOVA results:")
+    for factor, label in factors.items():
+        if factor in data.columns:
+            groups = data.groupby(factor)['r2_at_0.3'].apply(list)
+            
+            if len(groups) > 1:
+                f_stat, p_val = stats.f_oneway(*groups.values)
+                
+                # Calculate effect size (eta-squared)
+                grand_mean = data['r2_at_0.3'].mean()
+                ss_between = sum(len(g) * (np.mean(g) - grand_mean)**2 for g in groups.values)
+                ss_total = sum((x - grand_mean)**2 for g in groups.values for x in g)
+                eta_sq = ss_between / ss_total if ss_total > 0 else 0
+                
+                results.append({
+                    'factor': label,
+                    'f_stat': f_stat,
+                    'p_val': p_val,
+                    'eta_squared': eta_sq,
+                    'n_levels': len(groups)
+                })
+                
+                sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
+                print(f"  {label:20s}: F={f_stat:6.2f}, p={p_val:.4f} {sig:3s}, η²={eta_sq:.3f}")
+    
+    results_df = pd.DataFrame(results).sort_values('eta_squared', ascending=False)
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 3))
+    
+    # Effect sizes
+    ax1.barh(range(len(results_df)), results_df['eta_squared'], color='steelblue')
+    ax1.set_yticks(range(len(results_df)))
+    ax1.set_yticklabels(results_df['factor'], fontsize=7)
+    ax1.set_xlabel('Effect Size (η²)', fontsize=7)
+    ax1.set_title('Variance Explained by Each Factor', fontsize=8)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
+    
+    # P-values (log scale)
+    ax2.barh(range(len(results_df)), -np.log10(results_df['p_val']), color='coral')
+    ax2.set_yticks(range(len(results_df)))
+    ax2.set_yticklabels(results_df['factor'], fontsize=7)
+    ax2.set_xlabel('-log10(p-value)', fontsize=7)
+    ax2.set_title('Statistical Significance', fontsize=8)
+    ax2.axvline(x=-np.log10(0.05), color='red', linestyle='--', linewidth=1, alpha=0.5)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis8_variance_decomposition.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis8_variance_decomposition.png'}")
+    plt.close()
+    
+    # Save results
+    results_df.to_csv(output_dir / "analysis8_anova_results.csv", index=False)
+    
+    print(f"\n🎯 MOST IMPORTANT FACTOR: {results_df.iloc[0]['factor']}")
+    print(f"   Explains {results_df.iloc[0]['eta_squared']*100:.1f}% of variance")
+
+
+# ============================================================================
+# ANALYSIS 9: FAILURE ANALYSIS
+# ============================================================================
+
+def analysis_9_failure_analysis(robustness_df, output_dir):
+    """Understand what makes configs fail"""
+    print("\n" + "="*80)
+    print("ANALYSIS 9: FAILURE ANALYSIS")
+    print("="*80)
+    
+    bottom_n = 20
+    failures = robustness_df.nsmallest(bottom_n, 'r2_at_0.3')
+    
+    print(f"\nBottom {bottom_n} configurations:")
+    for idx, (_, row) in enumerate(failures.iterrows(), 1):
+        print(f"{idx:2d}. {row['base_model']}/{row['representation']}/{row['loss_function']} "
+              f"- R²@0.3={row['r2_at_0.3']:.4f}, R²@0={row['r2_at_0.0']:.4f}")
+    
+    # Pattern analysis
+    print("\nPatterns in failures:")
+    print(f"  Most common category: {failures['model_group'].mode().values[0]}")
+    print(f"  Most common representation: {failures['representation'].mode().values[0]}")
+    print(f"  Most common loss: {failures['loss_function'].mode().values[0]}")
+    print(f"  Use distance? {(failures['uses_distance'].sum() / len(failures) * 100):.0f}%")
+    
+    # Compare to successful configs
+    successes = robustness_df.nlargest(bottom_n, 'r2_at_0.3')
+    
+    print("\nFailures vs Successes:")
+    print(f"  Failures mean R² at 0: {failures['r2_at_0.0'].mean():.4f}")
+    print(f"  Successes mean R² at 0: {successes['r2_at_0.0'].mean():.4f}")
+    print(f"  Failures mean NSI: {failures['nsi_r2'].mean():.4f}")
+    print(f"  Successes mean NSI: {successes['nsi_r2'].mean():.4f}")
+    
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(7, 5))
+    
+    # Category distribution
+    ax1 = axes[0, 0]
+    failures['model_group'].value_counts().plot(kind='barh', ax=ax1, color='darkred')
+    ax1.set_xlabel('Count', fontsize=7)
+    ax1.set_title('Bottom 20: Category Distribution', fontsize=8)
+    ax1.tick_params(labelsize=6)
+    
+    # R² at 0 vs R² at 0.3
+    ax2 = axes[0, 1]
+    ax2.scatter(failures['r2_at_0.0'], failures['r2_at_0.3'], 
+               alpha=0.6, s=50, color='darkred', label='Failures')
+    ax2.scatter(successes['r2_at_0.0'], successes['r2_at_0.3'],
+               alpha=0.6, s=50, color='darkgreen', label='Successes')
+    ax2.plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=0.5)
+    ax2.set_xlabel('R² at σ=0', fontsize=7)
+    ax2.set_ylabel('R² at σ=0.3', fontsize=7)
+    ax2.set_title('Baseline vs Noisy Performance', fontsize=8)
+    ax2.legend(fontsize=6)
+    
+    # NSI distribution
+    ax3 = axes[1, 0]
+    ax3.hist([failures['nsi_r2'].dropna(), successes['nsi_r2'].dropna()],
+            bins=20, alpha=0.6, color=['darkred', 'darkgreen'],
+            label=['Failures', 'Successes'])
+    ax3.set_xlabel('NSI', fontsize=7)
+    ax3.set_ylabel('Count', fontsize=7)
+    ax3.set_title('NSI Distribution', fontsize=8)
+    ax3.legend(fontsize=6)
+    ax3.axvline(x=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    
+    # Retention
+    ax4 = axes[1, 1]
+    data_for_box = [failures['retention_0.6'].dropna(), successes['retention_0.6'].dropna()]
+    ax4.boxplot(data_for_box, labels=['Failures', 'Successes'])
+    ax4.set_ylabel('Retention % at σ=0.6', fontsize=7)
+    ax4.set_title('Retention Comparison', fontsize=8)
+    ax4.tick_params(labelsize=6)
+    
+    for ax in axes.flat:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis9_failure_analysis.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis9_failure_analysis.png'}")
+    plt.close()
+    
+    print("\n🎯 FAILURE PATTERNS:")
+    print(f"   Avoid: {failures['model_group'].mode().values[0]} category")
+    print(f"   Poor baseline (R² < {failures['r2_at_0.0'].mean():.2f}) is a red flag")
+
+
+# ============================================================================
+# ANALYSIS 10: PHASE 0C GAP ANALYSIS
+# ============================================================================
+
+def analysis_10_phase0c_gap(robustness_df, phase0c_dir, output_dir):
+    """When is sophistication worth it?"""
+    print("\n" + "="*80)
+    print("ANALYSIS 10: PHASE 0C GAP ANALYSIS")
+    print("="*80)
+    
+    if phase0c_dir is None:
+        print("No Phase 0C directory provided, skipping")
+        return
+    
+    # Load Phase 0C data (simplified version)
+    print(f"\nLoading Phase 0C baseline data from {phase0c_dir}...")
+    
+    all_data = []
+    screening_files = list(Path(phase0c_dir).glob("phase0c_screen_*.csv"))
+    
+    if not screening_files:
+        print(f"No phase0c_screen_*.csv files found")
+        return
+    
+    for filepath in screening_files:
+        try:
+            df = pd.read_csv(filepath)
+            all_data.append(df)
+        except Exception as e:
+            print(f"Warning: Could not read {filepath.name}: {e}")
+    
+    if not all_data:
+        return
+    
+    combined_df = pd.concat(all_data, ignore_index=True)
+    combined_df['model'] = combined_df['model'].str.replace('_split', '', regex=False)
+    combined_df = combined_df[combined_df['r2'] > -10]
+    
+    valid_sigmas = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    combined_df = combined_df[combined_df['sigma'].isin(valid_sigmas)]
+    
+    phase0c_results = combined_df.groupby(['model', 'rep', 'sigma']).agg({
+        'r2': 'mean'
+    }).reset_index()
+    phase0c_results.rename(columns={'rep': 'representation'}, inplace=True)
+    
+    # Get R² at 0.3 for Phase 0C
+    phase0c_at_03 = phase0c_results[phase0c_results['sigma'] == 0.3].groupby(['model', 'representation'])['r2'].mean()
+    
+    # Find best Phase 0C baseline
+    best_phase0c_r2 = phase0c_at_03.max()
+    best_phase0c_config = phase0c_at_03.idxmax()
+    
+    print(f"\nBest Phase 0C baseline:")
+    print(f"  {best_phase0c_config[0]}/{best_phase0c_config[1]}")
+    print(f"  R² at σ=0.3: {best_phase0c_r2:.4f}")
+    
+    # Compare comprehensive study
+    comprehensive_at_03 = robustness_df['r2_at_0.3']
+    
+    # Configs that beat Phase 0C
+    beats_phase0c = robustness_df[robustness_df['r2_at_0.3'] > best_phase0c_r2]
+    loses_to_phase0c = robustness_df[robustness_df['r2_at_0.3'] < best_phase0c_r2]
+    
+    print(f"\nComprehensive study vs Phase 0C:")
+    print(f"  Configs beating Phase 0C: {len(beats_phase0c)} ({len(beats_phase0c)/len(robustness_df)*100:.1f}%)")
+    print(f"  Configs losing to Phase 0C: {len(loses_to_phase0c)} ({len(loses_to_phase0c)/len(robustness_df)*100:.1f}%)")
+    
+    if len(beats_phase0c) > 0:
+        print(f"\n  Best improvement: {(beats_phase0c['r2_at_0.3'].max() - best_phase0c_r2):.4f}")
+        print(f"  Mean improvement: {(beats_phase0c['r2_at_0.3'].mean() - best_phase0c_r2):.4f}")
+        
+        print("\n  Top 5 configs beating Phase 0C:")
+        for idx, (_, row) in enumerate(beats_phase0c.nlargest(5, 'r2_at_0.3').iterrows(), 1):
+            improvement = row['r2_at_0.3'] - best_phase0c_r2
+            print(f"    {idx}. {row['base_model']}/{row['representation']}/{row['loss_function']} "
+                  f"+{improvement:.4f}")
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 3))
+    
+    # Distribution comparison
+    ax1.hist([loses_to_phase0c['r2_at_0.3'], beats_phase0c['r2_at_0.3']],
+            bins=20, alpha=0.6, color=['coral', 'steelblue'],
+            label=['Worse than Phase 0C', 'Better than Phase 0C'])
+    ax1.axvline(x=best_phase0c_r2, color='red', linestyle='--', linewidth=2, 
+               label=f'Best Phase 0C ({best_phase0c_r2:.3f})')
+    ax1.set_xlabel('R² at σ=0.3', fontsize=7)
+    ax1.set_ylabel('Count', fontsize=7)
+    ax1.set_title('Comprehensive vs Phase 0C', fontsize=8)
+    ax1.legend(fontsize=6)
+    
+    # Category breakdown
+    if len(beats_phase0c) > 0:
+        ax2 = beats_phase0c['model_group'].value_counts().plot(kind='barh', ax=ax2, color='steelblue')
+        ax2.set_xlabel('Count', fontsize=7)
+        ax2.set_title('Categories Beating Phase 0C', fontsize=8)
+        ax2.tick_params(labelsize=6)
+    
+    for ax in [ax1, ax2]:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis10_phase0c_gap.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis10_phase0c_gap.png'}")
+    plt.close()
+    
+    if len(beats_phase0c) > 0:
+        print("\n🎯 SOPHISTICATION WORTH IT FOR:")
+        print(f"   {beats_phase0c['model_group'].mode().values[0]} category")
+        print(f"   Potential gain: up to +{(beats_phase0c['r2_at_0.3'].max() - best_phase0c_r2):.4f} R²")
+    else:
+        print("\n🎯 WARNING: No configs beat best Phase 0C baseline!")
+
+
+# ============================================================================
+# ANALYSIS 11: CLUSTERING/PATTERN FINDING
+# ============================================================================
+
+def analysis_11_clustering(robustness_df, output_dir):
+    """Find config archetypes"""
+    print("\n" + "="*80)
+    print("ANALYSIS 11: CLUSTERING/PATTERN FINDING")
+    print("="*80)
+    
+    # Prepare features for clustering
+    features = ['r2_at_0.0', 'r2_at_0.3', 'r2_at_0.6', 'retention_0.6', 'nsi_r2']
+    
+    cluster_data = robustness_df[features].dropna()
+    
+    if len(cluster_data) < 10:
+        print("Not enough data for clustering")
+        return
+    
+    # Standardize
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(cluster_data)
+    
+    # K-means with 4 clusters (archetypes)
+    n_clusters = 4
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    cluster_data['cluster'] = kmeans.fit_predict(X_scaled)
+    
+    # Add cluster labels back to main df
+    robustness_df_clustered = robustness_df.loc[cluster_data.index].copy()
+    robustness_df_clustered['cluster'] = cluster_data['cluster']
+    
+    # Characterize each cluster
+    print(f"\nFound {n_clusters} config archetypes:")
+    
+    cluster_names = {}
+    for cluster_id in range(n_clusters):
+        cluster_configs = robustness_df_clustered[robustness_df_clustered['cluster'] == cluster_id]
+        
+        mean_baseline = cluster_configs['r2_at_0.0'].mean()
+        mean_retention = cluster_configs['retention_0.6'].mean()
+        mean_r2_03 = cluster_configs['r2_at_0.3'].mean()
+        
+        # Name the cluster
+        if mean_baseline > 0.6 and mean_retention > 70:
+            name = "🌟 High Baseline, High Retention"
+        elif mean_baseline > 0.6 and mean_retention < 70:
+            name = "⚠️ High Baseline, Poor Retention"
+        elif mean_baseline < 0.6 and mean_retention > 70:
+            name = "💪 Lower Baseline, Great Retention"
+        else:
+            name = "❌ Low Performance Overall"
+        
+        cluster_names[cluster_id] = name
+        
+        print(f"\nCluster {cluster_id}: {name}")
+        print(f"  Size: {len(cluster_configs)}")
+        print(f"  Mean R² at 0: {mean_baseline:.4f}")
+        print(f"  Mean R² at 0.3: {mean_r2_03:.4f}")
+        print(f"  Mean retention: {mean_retention:.1f}%")
+        print(f"  Top category: {cluster_configs['model_group'].mode().values[0]}")
+    
+    # Visualization
+    fig, axes = plt.subplots(2, 2, figsize=(7, 6))
+    
+    # Scatter: baseline vs retention
+    ax1 = axes[0, 0]
+    for cluster_id in range(n_clusters):
+        cluster_configs = robustness_df_clustered[robustness_df_clustered['cluster'] == cluster_id]
+        ax1.scatter(cluster_configs['r2_at_0.0'], cluster_configs['retention_0.6'],
+                   alpha=0.6, s=30, label=f"C{cluster_id}")
+    ax1.set_xlabel('R² at σ=0 (baseline)', fontsize=7)
+    ax1.set_ylabel('Retention % at σ=0.6', fontsize=7)
+    ax1.set_title('Cluster Scatter: Baseline vs Retention', fontsize=8)
+    ax1.legend(fontsize=6)
+    ax1.grid(True, alpha=0.2)
+    
+    # Scatter: R² at 0.3 vs NSI
+    ax2 = axes[0, 1]
+    for cluster_id in range(n_clusters):
+        cluster_configs = robustness_df_clustered[robustness_df_clustered['cluster'] == cluster_id]
+        ax2.scatter(cluster_configs['nsi_r2'], cluster_configs['r2_at_0.3'],
+                   alpha=0.6, s=30, label=f"C{cluster_id}")
+    ax2.set_xlabel('NSI (slope)', fontsize=7)
+    ax2.set_ylabel('R² at σ=0.3', fontsize=7)
+    ax2.set_title('Cluster Scatter: NSI vs Performance', fontsize=8)
+    ax2.axvline(x=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    ax2.legend(fontsize=6)
+    ax2.grid(True, alpha=0.2)
+    
+    # Cluster sizes
+    ax3 = axes[1, 0]
+    cluster_sizes = robustness_df_clustered['cluster'].value_counts().sort_index()
+    cluster_labels = [f"C{i}: {cluster_names[i][:20]}..." for i in cluster_sizes.index]
+    ax3.barh(range(len(cluster_sizes)), cluster_sizes.values, color='steelblue')
+    ax3.set_yticks(range(len(cluster_sizes)))
+    ax3.set_yticklabels(cluster_labels, fontsize=6)
+    ax3.set_xlabel('Number of Configs', fontsize=7)
+    ax3.set_title('Cluster Sizes', fontsize=8)
+    
+    # Mean performance by cluster
+    ax4 = axes[1, 1]
+    cluster_means = robustness_df_clustered.groupby('cluster')['r2_at_0.3'].mean().sort_values(ascending=False)
+    ax4.barh(range(len(cluster_means)), cluster_means.values, color='coral')
+    ax4.set_yticks(range(len(cluster_means)))
+    ax4.set_yticklabels([f"C{i}" for i in cluster_means.index], fontsize=6)
+    ax4.set_xlabel('Mean R² at σ=0.3', fontsize=7)
+    ax4.set_title('Cluster Performance Ranking', fontsize=8)
+    
+    for ax in axes.flat:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis11_clustering.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis11_clustering.png'}")
+    plt.close()
+    
+    # Save cluster assignments
+    cluster_output = robustness_df_clustered[['model', 'representation', 'loss_function', 
+                                              'r2_at_0.0', 'r2_at_0.3', 'retention_0.6', 
+                                              'nsi_r2', 'cluster']].copy()
+    cluster_output['cluster_name'] = cluster_output['cluster'].map(cluster_names)
+    cluster_output.to_csv(output_dir / "analysis11_cluster_assignments.csv", index=False)
+    
+    print("\n🎯 PICK YOUR TRADEOFF:")
+    best_cluster = cluster_means.idxmax()
+    print(f"   Best overall: {cluster_names[best_cluster]}")
+
+
+# ============================================================================
+# ANALYSIS 12: NOISE LEVEL SENSITIVITY
+# ============================================================================
+
+def analysis_12_noise_sensitivity(df, robustness_df, output_dir):
+    """Which methods maintain performance longest?"""
+    print("\n" + "="*80)
+    print("ANALYSIS 12: NOISE LEVEL SENSITIVITY")
+    print("="*80)
+    
+    # Get top 10 configs
+    top_configs = robustness_df.nlargest(10, 'r2_at_0.3')
+    
+    # Plot degradation curves
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 3))
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, len(top_configs)))
+    
+    for idx, (_, config) in enumerate(top_configs.iterrows()):
+        config_df = df[
+            (df['model'] == config['model']) &
+            (df['representation'] == config['representation']) &
+            (df['loss_function'] == config['loss_function'])
+        ].sort_values('sigma')
+        
+        if len(config_df) > 0:
+            label = f"{config['base_model']}/{config['representation'][:3]}"
+            
+            ax1.plot(config_df['sigma'], config_df['r2'],
+                    marker='o', label=label, color=colors[idx],
+                    linewidth=1.5, markersize=3)
+            
+            # Normalized to baseline
+            r2_baseline = config_df[config_df['sigma'] == 0]['r2'].values[0]
+            if r2_baseline != 0:
+                r2_normalized = (config_df['r2'] / r2_baseline) * 100
+                ax2.plot(config_df['sigma'], r2_normalized,
+                        marker='o', label=label, color=colors[idx],
+                        linewidth=1.5, markersize=3)
+    
+    ax1.set_xlabel('σ (noise level)', fontsize=7)
+    ax1.set_ylabel('R²', fontsize=7)
+    ax1.set_title('Top 10: Absolute R² Degradation', fontsize=8)
+    ax1.legend(fontsize=5, loc='best', ncol=2)
+    ax1.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    ax1.grid(True, alpha=0.2)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
+    
+    ax2.set_xlabel('σ (noise level)', fontsize=7)
+    ax2.set_ylabel('% of Baseline R²', fontsize=7)
+    ax2.set_title('Top 10: Normalized Performance', fontsize=8)
+    ax2.axhline(y=100, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    ax2.axhline(y=70, color='orange', linestyle=':', linewidth=0.5, alpha=0.3)
+    ax2.grid(True, alpha=0.2)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / "analysis12_noise_sensitivity.png", dpi=300, bbox_inches='tight')
+    print(f"Saved to {output_dir / 'analysis12_noise_sensitivity.png'}")
+    plt.close()
+    
+    # Find critical thresholds
+    print("\nCritical noise thresholds (where R² drops below 70% of baseline):")
+    for _, config in top_configs.head(5).iterrows():
+        config_df = df[
+            (df['model'] == config['model']) &
+            (df['representation'] == config['representation']) &
+            (df['loss_function'] == config['loss_function'])
+        ].sort_values('sigma')
+        
+        if len(config_df) > 0:
+            baseline = config_df[config_df['sigma'] == 0]['r2'].values[0]
+            threshold_70 = baseline * 0.7
+            
+            # Find first sigma where R² < 70% baseline
+            below_threshold = config_df[config_df['r2'] < threshold_70]
+            if len(below_threshold) > 0:
+                critical_sigma = below_threshold.iloc[0]['sigma']
+                print(f"  {config['base_model']}/{config['representation']}: σ={critical_sigma:.1f}")
+            else:
+                print(f"  {config['base_model']}/{config['representation']}: σ>1.0 (robust!)")
+    
+    print("\n🎯 OPERATING RANGES:")
+    best_config = top_configs.iloc[0]
+    print(f"   Most robust: {best_config['base_model']}/{best_config['representation']}")
+    print(f"   Maintains {best_config['retention_0.6']:.0f}% at σ=0.6")
+
+
+# ============================================================================
+# MAIN PIPELINE
+# ============================================================================
+
+def main(results_dir, phase0c_dir=None):
+    """Run all 12 analyses"""
+    
+    print("="*80)
+    print("ENHANCED COMPREHENSIVE NOISE ROBUSTNESS ANALYSIS")
+    print("Running all 12 research directions")
+    print("="*80)
+    
+    # Load data
+    print("\n[SETUP] Loading comprehensive study results...")
+    df = load_comprehensive_results(results_dir)
+    
+    if len(df) == 0:
+        print("No data found!")
+        return
+    
+    print("\n[SETUP] Parsing model variants...")
+    df = parse_model_variants(df)
+    df = categorize_models(df)
+    
+    print("\n[SETUP] Calculating robustness metrics...")
+    robustness_df = calculate_robustness_metrics(df)
+    print(f"   Computed metrics for {len(robustness_df)} configurations")
+    
+    # Create output directory
+    output_dir = Path(results_dir) / "comprehensive_analysis_enhanced"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    print(f"\n[SETUP] Saving outputs to {output_dir}")
+    
+    # Run all analyses
+    analysis_1_method_categorization(robustness_df, output_dir)
+    analysis_2_het_gp_investigation(df, robustness_df, output_dir)
+    analysis_3_loss_method_interaction(robustness_df, output_dir)
+    analysis_4_distance_drill_down(df, robustness_df, output_dir)
+    analysis_5_uncertainty_validation(df, robustness_df, output_dir)
+    analysis_6_kernel_analysis(df, robustness_df, output_dir)
+    analysis_7_top_performer_deep_dive(robustness_df, output_dir)
+    analysis_8_variance_decomposition(robustness_df, output_dir)
+    analysis_9_failure_analysis(robustness_df, output_dir)
+    
+    if phase0c_dir:
+        analysis_10_phase0c_gap(robustness_df, phase0c_dir, output_dir)
+    
+    analysis_11_clustering(robustness_df, output_dir)
+    analysis_12_noise_sensitivity(df, robustness_df, output_dir)
+    
+    # Final summary
+    print("\n" + "="*80)
+    print("ANALYSIS COMPLETE!")
+    print("="*80)
+    print(f"\nAll outputs saved to: {output_dir}")
+    print(f"\nGenerated:")
+    print(f"  - 12 focused analysis plots")
+    print(f"  - Statistical tables and results")
+    print(f"  - Cluster assignments")
+    print(f"  - ANOVA results")
+    
+    # Top-level insights
+    print("\n" + "="*80)
+    print("KEY INSIGHTS:")
+    print("="*80)
+    
+    best_overall = robustness_df.nlargest(1, 'r2_at_0.3').iloc[0]
+    print(f"\n🏆 BEST OVERALL CONFIG:")
+    print(f"   {best_overall['base_model']}/{best_overall['representation']}/{best_overall['loss_function']}")
+    print(f"   R² at σ=0.3: {best_overall['r2_at_0.3']:.4f}")
+    print(f"   Retention: {best_overall['retention_0.6']:.1f}%")
+    
+    print(f"\n📊 DATASET SUMMARY:")
+    print(f"   Total configs analyzed: {len(robustness_df)}")
+    print(f"   Method categories: {robustness_df['model_group'].nunique()}")
+    print(f"   Representations: {robustness_df['representation'].nunique()}")
+    print(f"   Loss functions: {robustness_df['loss_function'].nunique()}")
+    
+    print("\n✅ Check individual analysis plots for detailed insights!")
 
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python analyze_method_effectiveness.py <results_dir>")
+        print("Usage: python analyze_comprehensive_noise_study_enhanced.py <results_dir> [phase0c_dir]")
+        print("Example: python analyze_comprehensive_noise_study_enhanced.py ~/results/comprehensive_noise_study ~/results")
         sys.exit(1)
     
-    main(sys.argv[1])
+    results_dir = sys.argv[1]
+    phase0c_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    
+    main(results_dir, phase0c_dir)
