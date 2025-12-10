@@ -68,6 +68,8 @@ struct SmilesData {
     target_value: f32,
     sns_buf: [u8; 128],
     pdv_buf: [u8; 25],
+    continuous_pdv_buf: [u8; 400],
+    mol2vec_buf: [u8; 300],
 }
 
 #[derive(Serialize, Clone)]
@@ -505,6 +507,7 @@ fn sample_from_distribution(
     
     result  // Return the result
 }
+
 fn read_smiles_data(
     reader: &mut BufReader<File>,
     molecular_representations: Vec<String>,
@@ -560,6 +563,16 @@ fn read_smiles_data(
         reader.read_exact(&mut pdv_buf).ok()?; 
     }
 
+    let mut continuous_pdv_buf = [0u8; 400];
+    if molecular_representations.contains(&"continuous_pdv".to_string()) {
+        reader.read_exact(&mut continuous_pdv_buf).ok()?; 
+    }
+
+    let mut mol2vec_buf = [0u8; 300];
+    if molecular_representations.contains(&"mol2vec".to_string()) {
+        reader.read_exact(&mut mol2vec_buf).ok()?; 
+    }
+
     // Store parsed data
     Some(SmilesData {
         isomeric_smiles,
@@ -568,6 +581,8 @@ fn read_smiles_data(
         target_value,
         sns_buf,
         pdv_buf,
+        continuous_pdv_buf,
+        mol2vec_buf,
     })
 }
 
@@ -657,9 +672,25 @@ fn write_data(
                 }
             }
 
+            // continuous_pdv (400 bytes)
+            if config.molecular_representations.contains(&"continuous_pdv".to_string()) {
+                let continuous_pdv = smiles_data.continuous_pdv_buf;
+                writer.write_all(&continuous_pdv)?;
+                if log_writes {
+                    println!("continuous_pdv: {:?}", continuous_pdv);
+                }
+            }
+
+            // mol2vec (300 bytes)
+            if config.molecular_representations.contains(&"mol2vec".to_string()) {
+                let mol2vec = smiles_data.mol2vec_buf;
+                writer.write_all(&mol2vec)?;
+                if log_writes {
+                    println!("mol2vec: {:?}", mol2vec);
+                }
+            }
+
             // Add noise to label
-            // TODO: add noise differently for classification
-            // Add noise
             let mut property_value = smiles_data.target_value;
             if config.noise {
                 if let Some(&artificial_noise) = noise_map.get(&index) {

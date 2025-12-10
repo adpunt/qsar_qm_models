@@ -31,6 +31,8 @@ import pickle
 from torch_geometric.utils import to_networkx
 import uuid
 import time
+from gensim.models import word2vec
+from mol2vec.features import mol2alt_sentence, MolSentence, sentences2vec
 
 import sys
 sys.path.append('../models/')
@@ -88,7 +90,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec']
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -214,7 +216,7 @@ def parse_arguments():
                                  'butina', 'splito', 'scaffold', 'molecular_weight'],
                         help="Method for domain clustering")
     parser.add_argument("--domain-representation", type=str, default='ecfp4',
-                        choices=['ecfp4', 'sns', 'pdv'],
+                        choices=['ecfp4', 'sns', 'pdv', 'mol2vec'],
                         help="Representation for domain clustering")
     parser.add_argument("--loss", type=str, default='mse',
                    choices=['mse', 'mae', 'smooth_l1', 'huber', 'cauchy', 'log_cosh',
@@ -236,6 +238,10 @@ def parse_arguments():
                        help="Use distance metrics in sample selection (default: False)")
     parser.add_argument("--alpha", nargs='*', type=float, default=[0.1],
                        help="Confidence levels for conformal prediction (default is [0.1])")
+    parser.add_argument("--mol2vec-dim", type=int, default=300,
+                       help="Dimensions for mol2vec embeddings (default is 300)")
+    parser.add_argument("--mol2vec-model", type=str, default=None,
+                       help="Path to pre-trained mol2vec model (default: data/model_300dim.pkl)")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -243,6 +249,8 @@ def write_to_mmap(
     smiles_canonical,
     randomized_smiles,
     pdv,
+    continuous_pdv,
+    mol2vec,
     property_value,
     category,
     files,
@@ -289,6 +297,20 @@ def write_to_mmap(
             pdv_binary = (pdv > 0).astype(np.uint8)  # or any threshold rule
             pdv_packed = np.packbits(pdv_binary, bitorder='little')
             entry += pdv_packed.tobytes()
+        else:
+            return
+
+    if "continuous_pdv" in molecular_representations:
+        if continuous_pdv is not None:
+            continuous_pdv_fp16 = continuous_pdv.astype(np.float16)
+            entry += continuous_pdv_fp16.tobytes()
+        else:
+            return
+
+    if "mol2vec" in molecular_representations:
+        if mol2vec is not None:
+            # Already quantized in mol2vec_fingerprint(), just write it
+            entry += mol2vec.tobytes()
         else:
             return
 
@@ -359,7 +381,15 @@ def load_and_split_polaris(dataset_tuple, args, files):
             bond_invs=True, chirality=False, sub_counts=True,
             vec_dimension=1024, print_train_set_info=args.logging
         )
+
+    # Load mol2vec model if needed
+    mol2vec_model = None
+    mol2vec_dimensions = args.mol2vec_dim
+    if 'mol2vec' in args.molecular_representations or 'mol2vec' in args.molecular_representations:
+        model_path = get_mol2vec_model_path(args)
+        mol2vec_model = load_mol2vec_model(model_path)
     
+    print("write to mmap")
     # Write to mmap
     for local_idx in range(n_valid):
         category = "excluded"
@@ -395,8 +425,21 @@ def load_and_split_polaris(dataset_tuple, args, files):
         pdv = None
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-        
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
+
+        continuous_pdv = None
+        if 'continuous_pdv' in args.molecular_representations:
+            if 'pdv' in args.molecular_representations:
+                continuous_pdv = pdv
+            else:
+                continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
+
+        mol2vec = None
+        if 'mol2vec' in args.molecular_representations:
+            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
+                                               dimensions=mol2vec_dimensions,
+                                               quantize=True)
+
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec,
                      target_list[local_idx], category, files,
                      args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
     
@@ -463,6 +506,13 @@ def split_qm9(qm9, args, files):
                                                                vec_dimension = 1024, 
                                                                print_train_set_info = args.logging)
 
+    # Load mol2vec model if needed
+    mol2vec_model = None
+    mol2vec_dimensions = args.mol2vec_dim
+    if 'mol2vec' in args.molecular_representations or 'mol2vec' in args.molecular_representations:
+        model_path = get_mol2vec_model_path(args)
+        mol2vec_model = load_mol2vec_model(model_path)
+
     successful_train_idx = []
     successful_test_idx = []
     successful_val_idx = []
@@ -513,10 +563,23 @@ def split_qm9(qm9, args, files):
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
 
+        continuous_pdv = None
+        if 'continuous_pdv' in args.molecular_representations:
+            if 'pdv' in args.molecular_representations:
+                continuous_pdv = pdv
+            else:
+                continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
+
+        mol2vec = None
+        if 'mol2vec' in args.molecular_representations:
+            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
+                                               dimensions=mol2vec_dimensions,
+                                               quantize=True)
+
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
             if category == "train":
                 successful_train_idx.append(index)
@@ -596,6 +659,87 @@ def create_sort_and_slice_ecfp_featuriser(mols_train,
 
     return ecfp_featuriser
 
+def get_mol2vec_model_path(args):
+    """Get mol2vec model path from args or default location"""
+    if args.mol2vec_model:
+        return args.mol2vec_model
+    return os.path.join(data_dir, 'model_300dim.pkl')
+
+def load_mol2vec_model(model_path):
+    """Load pre-trained mol2vec model"""
+    if not os.path.exists(model_path):
+        print(f"\n{'='*70}")
+        print(f"ERROR: mol2vec model not found at {model_path}")
+        print(f"{'='*70}")
+        print("\nPlease download the pre-trained model:")
+        print("1. Visit: https://github.com/samoturk/mol2vec")
+        print("2. Download 'model_300dim.pkl'")
+        print(f"3. Place it at: {model_path}")
+        print(f"{'='*70}\n")
+        raise FileNotFoundError(f"mol2vec model not found at {model_path}")
+    
+    print(f"Loading mol2vec model from {model_path}...")
+    model = word2vec.Word2Vec.load(model_path)
+    print("mol2vec model loaded successfully")
+    return model
+
+def mol2vec_fingerprint(mol, model, dimensions):
+    """
+    Generate mol2vec embedding for molecule.
+    Compatible with both Gensim 3.x and 4.x
+    
+    Args:
+        mol: RDKit molecule object
+        model: Pre-trained mol2vec word2vec model
+        dimensions: Embedding dimensions (typically 300)
+        quantize: If True, return uint8 [0-255], else float32
+    
+    Returns:
+        numpy array: mol2vec embedding as uint8 (quantized) or float32
+    """
+    try:
+        # Generate sentence from molecule
+        sentence = MolSentence(mol2alt_sentence(mol, radius=1))
+        
+        # FIXED: Manual implementation to work with Gensim 4.x
+        # Instead of using sentences2vec, we'll do it ourselves
+        vec = np.zeros(model.wv.vector_size)
+        count = 0
+        
+        for word in sentence:
+            if word in model.wv:  # Check if word is in vocabulary
+                vec += model.wv[word]  # Get vector for word
+                count += 1
+        
+        if count > 0:
+            vec = vec / count  # Average the vectors
+        else:
+            # If no words found, use a default vector or zeros
+            vec = np.zeros(model.wv.vector_size)
+        
+        # Ensure correct dimensions
+        if len(vec) != dimensions:
+            print(f"Warning: mol2vec returned {len(vec)} dims, expected {dimensions}")
+            if len(vec) < dimensions:
+                vec = np.pad(vec, (0, dimensions - len(vec)), mode='constant')
+            else:
+                vec = vec[:dimensions]
+        
+        # Quantize to uint8: scale to [0, 255]
+        vec_min, vec_max = vec.min(), vec.max()
+        if vec_max - vec_min > 1e-6:  # Avoid division by zero
+            vec_normalized = (vec - vec_min) / (vec_max - vec_min)
+            vec_uint8 = (vec_normalized * 255).astype(np.uint8)
+        else:
+            vec_uint8 = np.zeros(dimensions, dtype=np.uint8)
+        return vec_uint8
+            
+    except Exception as e:
+        print(f"Error generating mol2vec: {e}")
+        import traceback
+        traceback.print_exc()
+        return np.zeros(dimensions, dtype=np.uint8)
+
 def load_custom_model(model_path):
     """
     Loads a PyTorch model from a .pt file.
@@ -674,6 +818,26 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     if logging: 
                         print(f"pdv: {pdv}")
 
+            # --- continuous pdv ---
+            continuous_pdv = None
+            if "continuous_pdv" in molecular_representations:
+                continuous_pdv_bytes = mmap_file.read(400)
+                if "continuous_pdv" == rep:
+                    continuous_pdv = np.frombuffer(continuous_pdv_bytes, dtype=np.float16)
+                    feature_vector.append(continuous_pdv)
+                    if logging: 
+                        print(f"continuous_pdv: {continuous_pdv}")
+
+            # --- mol2vec ---
+            if "mol2vec" in molecular_representations:
+                mol2vec_bytes = mmap_file.read(300)
+                if "mol2vec" == rep:
+                    mol2vec = np.frombuffer(mol2vec_bytes, dtype=np.uint8)
+                    # Already per-molecule quantized, use as-is or scale back to [0,1] if needed
+                    feature_vector.append(mol2vec)
+                    if logging: 
+                        print(f"mol2vec: {mol2vec}")
+
             # --- processed target ---
             processed_bytes = mmap_file.read(4)
             processed_target = struct.unpack("f", processed_bytes)[0]
@@ -687,7 +851,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep == "sns" or rep == "pdv":
+            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec":
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -1309,5 +1473,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# TODO: add polaris login to README
