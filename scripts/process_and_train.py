@@ -436,8 +436,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         mol2vec = None
         if 'mol2vec' in args.molecular_representations:
             mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
-                                               dimensions=mol2vec_dimensions,
-                                               quantize=True)
+                                               dimensions=mol2vec_dimensions)
 
         write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec,
                      target_list[local_idx], category, files,
@@ -573,8 +572,7 @@ def split_qm9(qm9, args, files):
         mol2vec = None
         if 'mol2vec' in args.molecular_representations:
             mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
-                                               dimensions=mol2vec_dimensions,
-                                               quantize=True)
+                                               dimensions=mol2vec_dimensions)
 
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
@@ -692,10 +690,9 @@ def mol2vec_fingerprint(mol, model, dimensions):
         mol: RDKit molecule object
         model: Pre-trained mol2vec word2vec model
         dimensions: Embedding dimensions (typically 300)
-        quantize: If True, return uint8 [0-255], else float32
     
     Returns:
-        numpy array: mol2vec embedding as uint8 (quantized) or float32
+        numpy array: mol2vec embedding as uint8 
     """
     try:
         # Generate sentence from molecule
