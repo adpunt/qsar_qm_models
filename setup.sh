@@ -79,5 +79,6 @@ pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
 pip install tf-keras
 pip install torchcp
 pip install gensim
+pip install mol2vec
 
 echo "Environment '$ENV_NAME' setup complete!"
