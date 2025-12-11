@@ -42,6 +42,8 @@ sys.path.append('../results/')
 from models import *
 from distance_metrics import *
 from extract_and_cluster_for_domains import extract_and_cluster_for_domains
+from hybrid_representation import create_hybrid_representation
+from hybrid_diagnostics import *
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -242,6 +244,14 @@ def parse_arguments():
                        help="Dimensions for mol2vec embeddings (default is 300)")
     parser.add_argument("--mol2vec-model", type=str, default=None,
                        help="Path to pre-trained mol2vec model (default: data/model_300dim.pkl)")
+    parser.add_argument("--create-hybrid", type=str2bool, default=False)
+    parser.add_argument("--hybrid-n-per-rep", type=int, default=100)
+    parser.add_argument("--hybrid-importance", type=str, default="shap",
+                       choices=['shap', 'random_forest', 'mutual_info', 'correlation', 'lasso'])
+    parser.add_argument("--hybrid-normalize", type=str, default="standard",
+                       choices=['standard', 'minmax', 'none'])
+    parser.add_argument("--save-hybrid-analysis", type=str2bool, default=False,
+                   help="Save hybrid feature rankings and diagnostics")
     return parser.parse_args()
 
 def write_to_mmap(
@@ -1361,26 +1371,133 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 parse_mmap=parse_mmap
             )
         
+        # ========== NEW: Create hybrid representation ==========
+        parsed_reps = {}
+        
+        if args.create_hybrid:
+            print("\n" + "="*70)
+            print("CREATING HYBRID REPRESENTATION")
+            print("="*70)
+            
+            sources = ['continuous_pdv', 'ecfp4', 'mol2vec']
+            available = [r for r in sources if r in args.molecular_representations]
+            
+            if len(available) >= 2:
+                reps_dict = {}
+                
+                for rep in available:
+                    print(f"  Parsing {rep}...")
+                    for file in files.values():
+                        file.seek(0)
+                    
+                    x_train, y_train, _ = parse_mmap(
+                        files["train"], len(train_idx), rep,
+                        args.molecular_representations, args.k_domains, s, args.logging
+                    )
+                    x_test, y_test, y_test_orig = parse_mmap(
+                        files["test"], len(test_idx), rep,
+                        args.molecular_representations, args.k_domains, s, args.logging
+                    )
+                    x_val, y_val, _ = parse_mmap(
+                        files["val"], len(val_idx), rep,
+                        args.molecular_representations, args.k_domains, s, args.logging
+                    )
+                    
+                    reps_dict[rep] = {
+                        'x_train': x_train, 'y_train': y_train,
+                        'x_test': x_test, 'x_val': x_val
+                    }
+                    
+                    parsed_reps[rep] = {
+                        'x_train': x_train, 'y_train': y_train,
+                        'x_test': x_test, 'y_test': y_test,
+                        'x_val': x_val, 'y_val': y_val,
+                        'y_test_original': y_test_orig
+                    }
+                
+                print(f"  Combining {len(available)} representations...")
+                h_train, h_test, h_val, _ = create_hybrid_representation(
+                    reps_dict, 
+                    n_per_rep=args.hybrid_n_per_rep,
+                    importance_method=args.hybrid_importance,
+                    normalize_method=args.hybrid_normalize,
+                    verbose=True,
+                    random_state=iteration_seed
+                )
+                
+                parsed_reps['hybrid'] = {
+                    'x_train': h_train, 'y_train': y_train,
+                    'x_test': h_test, 'y_test': y_test,
+                    'x_val': h_val, 'y_val': y_val,
+                    'y_test_original': y_test_orig
+                }
+
+                if args.save_hybrid_analysis:
+                    from hybrid_diagnostics import save_feature_rankings, check_multicollinearity
+                    
+                    # Save feature rankings
+                    save_feature_rankings(feature_info, 
+                        f'feature_rankings_{iteration}_{s}_{args.hybrid_importance}.csv')
+                    
+                    # Check and save multicollinearity
+                    corr_pairs = check_multicollinearity(h_train, threshold=0.9)
+                    with open(f'multicollinearity_{iteration}_{s}.txt', 'w') as f:
+                        f.write(f"Highly correlated pairs (|r| > 0.9): {len(corr_pairs)}\n")
+                        for i, j, corr in corr_pairs[:20]:  # Top 20
+                            f.write(f"Feature {i} <-> Feature {j}: r = {corr:.3f}\n")
+                                
+                print(f"  ✓ Hybrid: {h_train.shape[1]} features")
+                print("="*70 + "\n")
+        # ========== END NEW ==========
+        
         # Read mmap files and train/test models for all molecular representations
-        for rep in args.molecular_representations:
+        # ========== MODIFIED: Add hybrid to list ==========
+        reps_to_process = list(args.molecular_representations)
+        if 'hybrid' in parsed_reps:
+            reps_to_process.append('hybrid')
+        
+        for rep in reps_to_process:
+        # ========== END MODIFIED ==========
             if rep != "graph":
                 try: 
                     for model in args.models:
                         if model not in graph_models:
-                            # Reset mmap pointers
-                            for file in files.values():
-                                file.seek(0)
+                            
+                            # ========== MODIFIED: Check cache first ==========
+                            if rep in parsed_reps:
+                                # Use cached data
+                                x_train = parsed_reps[rep]['x_train']
+                                y_train = parsed_reps[rep]['y_train']
+                                x_test = parsed_reps[rep]['x_test']
+                                y_test = parsed_reps[rep]['y_test']
+                                x_val = parsed_reps[rep]['x_val']
+                                y_val = parsed_reps[rep]['y_val']
+                                y_test_original = parsed_reps[rep]['y_test_original']
+                            else:
+                                # Parse from mmap as usual
+                                for file in files.values():
+                                    file.seek(0)
 
-                            x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                            x_test, y_test, y_test_original = parse_mmap(files["test"], len(test_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
-                            x_val, y_val, y_val_original = parse_mmap(files["val"], len(val_idx), rep, args.molecular_representations, args.k_domains, s, logging=args.logging)
+                                x_train, y_train, y_train_original = parse_mmap(
+                                    files["train"], len(train_idx), rep,
+                                    args.molecular_representations, args.k_domains, s, args.logging
+                                )
+                                x_test, y_test, y_test_original = parse_mmap(
+                                    files["test"], len(test_idx), rep,
+                                    args.molecular_representations, args.k_domains, s, args.logging
+                                )
+                                x_val, y_val, y_val_original = parse_mmap(
+                                    files["val"], len(val_idx), rep,
+                                    args.molecular_representations, args.k_domains, s, args.logging
+                                )
+                            # ========== END MODIFIED ==========
 
                             print(f"model: {model}")
                             print(f"rep: {rep}")
                             run_model(
                                 x_train, y_train, x_test, y_test, x_val, y_val,
                                 model, args, iteration_seed, rep, iteration, s,
-                                file_no, y_test_original
+                                file_no, y_test_original, domain_labels=domain_labels
                             )
                 except Exception as e:
                     print(f"Error with {rep} and {model}; more details: {e}")
