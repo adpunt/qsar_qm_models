@@ -6,6 +6,7 @@ import json
 import subprocess
 import struct
 import warnings
+import traceback
 import numpy as np
 import pandas as pd
 import csv
@@ -1375,78 +1376,84 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         parsed_reps = {}
         
         if args.create_hybrid:
-            print("\n" + "="*70)
-            print("CREATING HYBRID REPRESENTATION")
-            print("="*70)
-            
-            sources = ['continuous_pdv', 'ecfp4', 'mol2vec']
-            available = [r for r in sources if r in args.molecular_representations]
-            
-            if len(available) >= 2:
-                reps_dict = {}
+            try: 
+                print("\n" + "="*70)
+                print("CREATING HYBRID REPRESENTATION")
+                print("="*70)
                 
-                for rep in available:
-                    print(f"  Parsing {rep}...")
-                    for file in files.values():
-                        file.seek(0)
+                sources = ['continuous_pdv', 'ecfp4', 'mol2vec']
+                available = [r for r in sources if r in args.molecular_representations]
+                
+                if len(available) >= 2:
+                    reps_dict = {}
                     
-                    x_train, y_train, _ = parse_mmap(
-                        files["train"], len(train_idx), rep,
-                        args.molecular_representations, args.k_domains, s, args.logging
-                    )
-                    x_test, y_test, y_test_orig = parse_mmap(
-                        files["test"], len(test_idx), rep,
-                        args.molecular_representations, args.k_domains, s, args.logging
-                    )
-                    x_val, y_val, _ = parse_mmap(
-                        files["val"], len(val_idx), rep,
-                        args.molecular_representations, args.k_domains, s, args.logging
+                    for rep in available:
+                        print(f"  Parsing {rep}...")
+                        for file in files.values():
+                            file.seek(0)
+                        
+                        x_train, y_train, _ = parse_mmap(
+                            files["train"], len(train_idx), rep,
+                            args.molecular_representations, args.k_domains, s, args.logging
+                        )
+                        x_test, y_test, y_test_orig = parse_mmap(
+                            files["test"], len(test_idx), rep,
+                            args.molecular_representations, args.k_domains, s, args.logging
+                        )
+                        x_val, y_val, _ = parse_mmap(
+                            files["val"], len(val_idx), rep,
+                            args.molecular_representations, args.k_domains, s, args.logging
+                        )
+                        
+                        reps_dict[rep] = {
+                            'x_train': x_train, 'y_train': y_train,
+                            'x_test': x_test, 'x_val': x_val
+                        }
+                        
+                        parsed_reps[rep] = {
+                            'x_train': x_train, 'y_train': y_train,
+                            'x_test': x_test, 'y_test': y_test,
+                            'x_val': x_val, 'y_val': y_val,
+                            'y_test_original': y_test_orig
+                        }
+                    
+                    print(f"  Combining {len(available)} representations...")
+                    h_train, h_test, h_val, _ = create_hybrid_representation(
+                        reps_dict, 
+                        n_per_rep=args.hybrid_n_per_rep,
+                        importance_method=args.hybrid_importance,
+                        normalize_method=args.hybrid_normalize,
+                        verbose=True,
+                        random_state=iteration_seed
                     )
                     
-                    reps_dict[rep] = {
-                        'x_train': x_train, 'y_train': y_train,
-                        'x_test': x_test, 'x_val': x_val
-                    }
-                    
-                    parsed_reps[rep] = {
-                        'x_train': x_train, 'y_train': y_train,
-                        'x_test': x_test, 'y_test': y_test,
-                        'x_val': x_val, 'y_val': y_val,
+                    parsed_reps['hybrid'] = {
+                        'x_train': h_train, 'y_train': y_train,
+                        'x_test': h_test, 'y_test': y_test,
+                        'x_val': h_val, 'y_val': y_val,
                         'y_test_original': y_test_orig
                     }
-                
-                print(f"  Combining {len(available)} representations...")
-                h_train, h_test, h_val, _ = create_hybrid_representation(
-                    reps_dict, 
-                    n_per_rep=args.hybrid_n_per_rep,
-                    importance_method=args.hybrid_importance,
-                    normalize_method=args.hybrid_normalize,
-                    verbose=True,
-                    random_state=iteration_seed
-                )
-                
-                parsed_reps['hybrid'] = {
-                    'x_train': h_train, 'y_train': y_train,
-                    'x_test': h_test, 'y_test': y_test,
-                    'x_val': h_val, 'y_val': y_val,
-                    'y_test_original': y_test_orig
-                }
 
-                if args.save_hybrid_analysis:
-                    from hybrid_diagnostics import save_feature_rankings, check_multicollinearity
-                    
-                    # Save feature rankings
-                    save_feature_rankings(feature_info, 
-                        f'feature_rankings_{iteration}_{s}_{args.hybrid_importance}.csv')
-                    
-                    # Check and save multicollinearity
-                    corr_pairs = check_multicollinearity(h_train, threshold=0.9)
-                    with open(f'multicollinearity_{iteration}_{s}.txt', 'w') as f:
-                        f.write(f"Highly correlated pairs (|r| > 0.9): {len(corr_pairs)}\n")
-                        for i, j, corr in corr_pairs[:20]:  # Top 20
-                            f.write(f"Feature {i} <-> Feature {j}: r = {corr:.3f}\n")
-                                
-                print(f"  ✓ Hybrid: {h_train.shape[1]} features")
+                    if args.save_hybrid_analysis:
+                        from hybrid_diagnostics import save_feature_rankings, check_multicollinearity
+                        
+                        # Save feature rankings
+                        save_feature_rankings(feature_info, 
+                            f'feature_rankings_{iteration}_{s}_{args.hybrid_importance}.csv')
+                        
+                        # Check and save multicollinearity
+                        corr_pairs = check_multicollinearity(h_train, threshold=0.9)
+                        with open(f'multicollinearity_{iteration}_{s}.txt', 'w') as f:
+                            f.write(f"Highly correlated pairs (|r| > 0.9): {len(corr_pairs)}\n")
+                            for i, j, corr in corr_pairs[:20]:  # Top 20
+                                f.write(f"Feature {i} <-> Feature {j}: r = {corr:.3f}\n")
+                                    
+                    print(f"  ✓ Hybrid: {h_train.shape[1]} features")
+                    print("="*70 + "\n")
+            except Exception as e:  # ADD THIS - catches any hybrid creation errors
+                print(f"  ✗ ERROR creating hybrid at sigma={s}, iteration={iteration}: {e}")
+                print(f"  Continuing without hybrid for this run...")
+                traceback.print_exc()  # Show full error for debugging
                 print("="*70 + "\n")
         # ========== END NEW ==========
         
