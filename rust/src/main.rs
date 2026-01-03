@@ -70,6 +70,8 @@ struct SmilesData {
     pdv_buf: [u8; 25],
     continuous_pdv_buf: [u8; 400],
     mol2vec_buf: [u8; 300],
+    chemberta_buf: [u8; 768],
+    mhggnn_buf: [u8; 1024],
 }
 
 #[derive(Serialize, Clone)]
@@ -573,6 +575,16 @@ fn read_smiles_data(
         reader.read_exact(&mut mol2vec_buf).ok()?; 
     }
 
+    let mut chemberta_buf = [0u8; 768];
+    if molecular_representations.contains(&"chemberta".to_string()) {
+        reader.read_exact(&mut chemberta_buf).ok()?;
+    }
+
+    let mut mhggnn_buf = [0u8; 1024];
+    if molecular_representations.contains(&"mhggnn".to_string()) {
+        reader.read_exact(&mut mhggnn_buf).ok()?;
+    }
+
     // Store parsed data
     Some(SmilesData {
         isomeric_smiles,
@@ -583,6 +595,8 @@ fn read_smiles_data(
         pdv_buf,
         continuous_pdv_buf,
         mol2vec_buf,
+        chemberta_buf,
+        mhggnn_buf,
     })
 }
 
@@ -687,6 +701,24 @@ fn write_data(
                 writer.write_all(&mol2vec)?;
                 if log_writes {
                     println!("mol2vec: {:?}", mol2vec);
+                }
+            }
+
+            // chemberta (768 bytes)
+            if config.molecular_representations.contains(&"chemberta".to_string()) {
+                let chemberta = smiles_data.chemberta_buf;
+                writer.write_all(&chemberta)?;
+                if log_writes {
+                    println!("chemberta: {:?}", chemberta);
+                }
+            }
+
+            // mhggnn (1024 bytes)
+            if config.molecular_representations.contains(&"mhggnn".to_string()) {
+                let mhggnn = smiles_data.mhggnn_buf;
+                writer.write_all(&mhggnn)?;
+                if log_writes {
+                    println!("mhggnn: {:?}", mhggnn);
                 }
             }
 

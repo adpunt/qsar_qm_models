@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import csv
 from torch_geometric.datasets import QM9
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader as GeometricDataLoader
 from torch_geometric.data import Data
 from rdkit import Chem, RDLogger
 from rdkit.Chem import rdDepictor
@@ -54,6 +54,12 @@ valid_indices_path = os.path.join(data_dir, 'valid_qm9_indices.pth')
 warnings.filterwarnings("ignore")
 RDLogger.DisableLog('rdApp.*')
 
+# Global cache for ChemBERTa model (loaded once, reused)
+_CHEMBERTA_MODEL = None
+_CHEMBERTA_TOKENIZER = None
+_MHG_GNN_MODEL = None
+
+
 DEFAULT_DESCRIPTOR_LIST = [
             'BalabanJ', 'BertzCT', 'Chi0', 'Chi0n', 'Chi0v', 'Chi1', 'Chi1n', 'Chi1v',
             'Chi2n', 'Chi2v', 'Chi3n', 'Chi3v', 'Chi4n', 'Chi4v', 'EState_VSA1', 'EState_VSA10',
@@ -93,7 +99,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn']
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -160,6 +166,63 @@ def load_adme(target):
     print(f"Dataset size: {dataset.n_rows}")
     
     return dataset, smiles_col, target_column
+
+def load_moleculenet(task_name):
+    """
+    Load MoleculeNet dataset via DeepChem.
+    
+    Args:
+        task_name: One of: esol, freesolv, lipo, qm7, qm8, bace, bbbp, clintox, hiv
+    
+    Returns:
+        (dataset, smiles_col, target_col) - same as ADME loader
+    """
+    import deepchem as dc
+    
+    # Map task names to DeepChem loader functions
+    LOADERS = {
+        # Regression
+        'esol': dc.molnet.load_delaney,
+        'freesolv': dc.molnet.load_sampl,
+        'lipo': dc.molnet.load_lipo,
+        'qm7': dc.molnet.load_qm7,
+        'qm8': dc.molnet.load_qm8,
+        # Classification  
+        'bace': dc.molnet.load_bace_classification,
+        'bbbp': dc.molnet.load_bbbp,
+        'clintox': dc.molnet.load_clintox,
+        'hiv': dc.molnet.load_hiv,
+    }
+    
+    if task_name not in LOADERS:
+        raise ValueError(f"Unknown MoleculeNet task: {task_name}. "
+                        f"Available: {list(LOADERS.keys())}")
+    
+    print(f"Loading MoleculeNet: {task_name}...")
+    
+    # Load with default splitter first to get all data
+    loader = LOADERS[task_name]
+    tasks, datasets, transformers = loader(
+        featurizer='Raw',
+        splitter='scaffold',  # Use scaffold split to get 3-tuple
+        reload=False
+    )
+    
+    print(f"DEBUG: type(datasets) = {type(datasets)}")
+    print(f"DEBUG: len(datasets) = {len(datasets)}")
+    
+    # Now merge the splits into one dataset
+    if isinstance(datasets, tuple) and len(datasets) == 3:
+        full_dataset = dc.data.DiskDataset.merge([datasets[0], datasets[1], datasets[2]])
+    else:
+        # Fallback: if it's already a single dataset
+        full_dataset = datasets[0] if isinstance(datasets, tuple) else datasets
+    
+    print(f"Loaded {len(full_dataset)} molecules with tasks: {tasks}")
+    
+    # Return in same format as load_adme: (dataset, smiles_col, target_col)
+    # For DeepChem, SMILES are in .ids and we'll use first task
+    return (full_dataset, 'ids', tasks[0])
 
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
@@ -262,6 +325,8 @@ def write_to_mmap(
     pdv,
     continuous_pdv,
     mol2vec,
+    chemberta,
+    mhggnn,
     property_value,
     category,
     files,
@@ -325,44 +390,96 @@ def write_to_mmap(
         else:
             return
 
+    if "chemberta" in molecular_representations:
+        if chemberta is not None:
+            entry += chemberta.tobytes()
+        else:
+            return
+
+    if "mhggnn" in molecular_representations:
+        if mhggnn is not None:
+            entry += mhggnn.tobytes()
+        else:
+            return
+
     files[category].write(entry)
     files[category].flush()
 
 def load_and_split_polaris(dataset_tuple, args, files):
+    """
+    Now handles both ADME (Polaris) and MoleculeNet (DeepChem) datasets
+    """
     dataset, smiles_col, target_col = dataset_tuple
     
-    # Access table directly
-    table = dataset.table
+    # Check if this is DeepChem dataset (MoleculeNet) or Polaris dataset (ADME)
+    is_deepchem = hasattr(dataset, 'ids')  # DeepChem datasets have .ids attribute
     
-    # DEBUG: Print available columns
-    print(f"Available columns in table: {table.columns.tolist()}")
-    print(f"Looking for SMILES column: {smiles_col}")
-    print(f"Looking for target column: {target_col}")
-    
-    n_total = min(args.sample_size, len(table))
-    
-    smiles_list = []
-    target_list = []
-    
-    for i in range(n_total):
-        try:
-            smiles = table[smiles_col][i]
-            target = table[target_col][i]
+    if is_deepchem:
+        # MoleculeNet path
+        n_total = min(args.sample_size, len(dataset))
+        
+        smiles_list = dataset.ids[:n_total]
+        
+        # Handle single-task vs multi-task
+        if len(dataset.y.shape) == 1:
+            targets = dataset.y[:n_total]
+        else:
+            targets = dataset.y[:n_total, 0]  # Use first task
+        
+        # Filter valid
+        valid_smiles = []
+        valid_targets = []
+        for i in range(len(smiles_list)):
+            smi = smiles_list[i]
+            target = targets[i]
             
-            if smiles is None or target is None:
+            if smi is None or target is None:
                 continue
             if isinstance(target, (float, np.floating)) and np.isnan(target):
                 continue
             
-            smiles_list.append(str(smiles))
-            target_list.append(float(target))
-        except Exception as e:
-            print(f"Row {i} error: {e}")
-            continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+            
+            valid_smiles.append(str(smi))
+            valid_targets.append(float(target))
+        
+        smiles_list = valid_smiles
+        target_list = valid_targets
+        
+    else:
+        # ADME/Polaris path (your existing code)
+        table = dataset.table
+        
+        print(f"Available columns: {table.columns.tolist()}")
+        print(f"SMILES column: {smiles_col}")
+        print(f"Target column: {target_col}")
+        
+        n_total = min(args.sample_size, len(table))
+        
+        smiles_list = []
+        target_list = []
+        
+        for i in range(n_total):
+            try:
+                smiles = table[smiles_col][i]
+                target = table[target_col][i]
+                
+                if smiles is None or target is None:
+                    continue
+                if isinstance(target, (float, np.floating)) and np.isnan(target):
+                    continue
+                
+                smiles_list.append(str(smiles))
+                target_list.append(float(target))
+            except Exception as e:
+                print(f"Row {i} error: {e}")
+                continue
     
     print(f"Total valid molecules: {len(smiles_list)}")
     
-    # Split into train/test/val
+    # Split (same for both)
     n_valid = len(smiles_list)
     
     if args.split == 'random':
@@ -378,7 +495,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         splitter = dc.splits.ScaffoldSplitter()
         train_idx, val_idx, test_idx = splitter.split(dc_dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
     
-    # Prepare SNS if needed
+    # Prepare SNS
     mols_train = deque()
     ecfp_featuriser = None
     
@@ -392,15 +509,20 @@ def load_and_split_polaris(dataset_tuple, args, files):
             bond_invs=True, chirality=False, sub_counts=True,
             vec_dimension=1024, print_train_set_info=args.logging
         )
-
-    # Load mol2vec model if needed
+    
+    # Load mol2vec
     mol2vec_model = None
     mol2vec_dimensions = args.mol2vec_dim
-    if 'mol2vec' in args.molecular_representations or 'mol2vec' in args.molecular_representations:
+    if 'mol2vec' in args.molecular_representations:
         model_path = get_mol2vec_model_path(args)
         mol2vec_model = load_mol2vec_model(model_path)
+
+    # Load mhggnn
+    if 'mhggnn' in args.molecular_representations:
+        _ = get_mhg_gnn_model()  # Load once
     
-    print("write to mmap")
+    print("Writing to mmap...")
+    
     # Write to mmap
     for local_idx in range(n_valid):
         category = "excluded"
@@ -436,20 +558,27 @@ def load_and_split_polaris(dataset_tuple, args, files):
         pdv = None
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-
+        
         continuous_pdv = None
         if 'continuous_pdv' in args.molecular_representations:
             if 'pdv' in args.molecular_representations:
                 continuous_pdv = pdv
             else:
                 continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-
+        
         mol2vec = None
         if 'mol2vec' in args.molecular_representations:
-            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
-                                               dimensions=mol2vec_dimensions)
+            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, dimensions=mol2vec_dimensions)
+        
+        chemberta = None
+        if 'chemberta' in args.molecular_representations:
+            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
 
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec,
+        mhggnn = None
+        if 'mhggnn' in args.molecular_representations:
+            mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
+        
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn,
                      target_list[local_idx], category, files,
                      args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
     
@@ -523,6 +652,10 @@ def split_qm9(qm9, args, files):
         model_path = get_mol2vec_model_path(args)
         mol2vec_model = load_mol2vec_model(model_path)
 
+    # Load mhg-gnn
+    if 'mhggnn' in args.molecular_representations:
+        _ = get_mhg_gnn_model()  # Load once
+
     successful_train_idx = []
     successful_test_idx = []
     successful_val_idx = []
@@ -585,10 +718,18 @@ def split_qm9(qm9, args, files):
             mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
                                                dimensions=mol2vec_dimensions)
 
+        chemberta = None
+        if 'chemberta' in args.molecular_representations:
+            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
+
+        mhggnn = None
+        if 'mhggnn' in args.molecular_representations:
+            mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
+
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
             if category == "train":
                 successful_train_idx.append(index)
@@ -601,6 +742,95 @@ def split_qm9(qm9, args, files):
         del mols_train
 
     return successful_train_idx, successful_test_idx, successful_val_idx
+
+def get_chemberta_model():
+    """Load ChemBERTa model once and cache it globally"""
+    global _CHEMBERTA_MODEL, _CHEMBERTA_TOKENIZER
+    
+    if _CHEMBERTA_MODEL is None:
+        from transformers import AutoTokenizer, AutoModel
+        import torch
+        
+        print("Loading ChemBERTa model (one-time, ~30 seconds)...")
+        model_name = "seyonec/ChemBERTa-zinc-base-v1"
+        _CHEMBERTA_TOKENIZER = AutoTokenizer.from_pretrained(model_name)
+        _CHEMBERTA_MODEL = AutoModel.from_pretrained(model_name)
+        _CHEMBERTA_MODEL.eval()
+        
+        if torch.cuda.is_available():
+            _CHEMBERTA_MODEL = _CHEMBERTA_MODEL.cuda()
+            print("ChemBERTa loaded on GPU")
+        else:
+            print("ChemBERTa loaded on CPU")
+    
+    return _CHEMBERTA_TOKENIZER, _CHEMBERTA_MODEL
+
+def chemberta_fingerprint(smiles, dimensions=768):
+    """
+    Generate ChemBERTa embedding for SMILES string.
+    Uses globally cached model.
+    """
+    import torch
+    
+    try:
+        tokenizer, model = get_chemberta_model()
+        
+        # Tokenize
+        inputs = tokenizer(smiles, return_tensors="pt", padding=True,
+                          truncation=True, max_length=512)
+        
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            inputs = {k: v.cuda() for k, v in inputs.items()}
+        
+        # Generate embedding
+        with torch.no_grad():
+            outputs = model(**inputs)
+            embedding = outputs.last_hidden_state.mean(dim=1).squeeze()
+            
+            if torch.cuda.is_available():
+                embedding = embedding.cpu()
+            embedding = embedding.numpy()
+        
+        # Ensure 768 dimensions
+        if len(embedding) != dimensions:
+            if len(embedding) < dimensions:
+                embedding = np.pad(embedding, (0, dimensions - len(embedding)), mode='constant')
+            else:
+                embedding = embedding[:dimensions]
+        
+        # Quantize to uint8
+        vec_min, vec_max = embedding.min(), embedding.max()
+        if vec_max - vec_min > 1e-6:
+            vec_normalized = (embedding - vec_min) / (vec_max - vec_min)
+            return (vec_normalized * 255).astype(np.uint8)
+        else:
+            return np.zeros(dimensions, dtype=np.uint8)
+            
+    except Exception as e:
+        print(f"ChemBERTa error: {e}")
+        return np.zeros(dimensions, dtype=np.uint8)
+
+def mhggnn_fingerprint(smiles, dimensions=1024):
+    """Generate MHG-GNN embedding for SMILES string"""
+    try:
+        model = get_mhg_gnn_model()
+        
+        # Encode returns list of tensors
+        embedding = model.encode([smiles])[0]
+        embedding = embedding.cpu().detach().numpy()
+        
+        # Quantize to uint8
+        vec_min, vec_max = embedding.min(), embedding.max()
+        if vec_max - vec_min > 1e-6:
+            vec_normalized = (embedding - vec_min) / (vec_max - vec_min)
+            return (vec_normalized * 255).astype(np.uint8)
+        else:
+            return np.zeros(dimensions, dtype=np.uint8)
+            
+    except Exception as e:
+        print(f"MHG-GNN error: {e}")
+        return np.zeros(dimensions, dtype=np.uint8)
 
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
@@ -748,6 +978,61 @@ def mol2vec_fingerprint(mol, model, dimensions):
         traceback.print_exc()
         return np.zeros(dimensions, dtype=np.uint8)
 
+def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
+    """Load MHG-GNN model once and cache globally"""
+    global _MHG_GNN_MODEL
+    
+    if _MHG_GNN_MODEL is None:
+        import sys
+        import pickle
+        
+        print("Loading MHG-GNN model (one-time)...")
+        
+        # Find materials repo
+        if materials_repo_path is None:
+            search_paths = [
+                os.path.expanduser('~/repos/materials'),
+                os.path.join(data_dir, 'materials'),
+                '../materials',
+            ]
+            for path in search_paths:
+                if os.path.exists(os.path.join(path, 'models', 'mhg_model')):
+                    materials_repo_path = path
+                    break
+            
+            if materials_repo_path is None:
+                raise RuntimeError("MHG-GNN: materials repo not found. Clone from https://github.com/IBM/materials.git")
+        
+        # Add to path
+        models_path = os.path.join(materials_repo_path, 'models')
+        if models_path not in sys.path:
+            sys.path.insert(0, models_path)
+        
+        from mhg_model.load import PretrainedModelWrapper
+        
+        # Find pickle
+        if model_pickle_path is None:
+            search_paths = [
+                os.path.expanduser('~/repos/materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle'),
+                os.path.join(data_dir, 'mhggnn_pretrained_model_0724_2023.pickle'),
+            ]
+            for path in search_paths:
+                if os.path.exists(path):
+                    model_pickle_path = path
+                    break
+            
+            if model_pickle_path is None:
+                raise RuntimeError("MHG-GNN model pickle not found. Download from https://huggingface.co/ibm-research/materials.mhg-ged")
+        
+        with open(model_pickle_path, 'rb') as f:
+            model_dict = pickle.load(f)
+        
+        _MHG_GNN_MODEL = PretrainedModelWrapper(model_dict)
+        _MHG_GNN_MODEL.model.eval()
+        print("MHG-GNN loaded successfully")
+    
+    return _MHG_GNN_MODEL
+
 def load_custom_model(model_path):
     """
     Loads a PyTorch model from a .pt file.
@@ -846,6 +1131,24 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     if logging: 
                         print(f"mol2vec: {mol2vec}")
 
+            # --- chemberta ---
+            if "chemberta" in molecular_representations:
+                chemberta_bytes = mmap_file.read(768)
+                if "chemberta" == rep:
+                    chemberta = np.frombuffer(chemberta_bytes, dtype=np.uint8)
+                    feature_vector.append(chemberta)
+                    if logging: 
+                        print(f"chemberta: {chemberta}")
+
+            # --- mhg-gnn ---
+            if "mhggnn" in molecular_representations:
+                mhggnn_bytes = mmap_file.read(1024)
+                if "mhggnn" == rep:
+                    mhggnn = np.frombuffer(mhggnn_bytes, dtype=np.uint8)
+                    feature_vector.append(mhggnn)
+                    if logging: 
+                        print(f"mhggnn: {mhggnn}")
+
             # --- processed target ---
             processed_bytes = mmap_file.read(4)
             processed_target = struct.unpack("f", processed_bytes)[0]
@@ -859,7 +1162,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec":
+            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec" or rep =="chemberta":
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -1162,61 +1465,52 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
     y_test_noisy = torch.tensor(y_test_noisy, dtype=torch.float32)
     y_val_noisy = torch.tensor(y_val_noisy, dtype=torch.float32)
     y_test_original_tensor = torch.tensor(y_test_original, dtype=torch.float32)
+
+    # Attach noisy labels to Data objects so they travel with graphs through shuffling
+    for i, idx in enumerate(train_idx):
+        qm9[idx].y_noisy = y_train_noisy[i].item()
+    for i, idx in enumerate(test_idx):
+        qm9[idx].y_noisy = y_test_noisy[i].item()
+    for i, idx in enumerate(val_idx):
+        qm9[idx].y_noisy = y_val_noisy[i].item()
+    
+    # Create datasets and loaders BEFORE model_selector
+    train_set = qm9[train_idx]
+    test_set = qm9[test_idx]
+    val_set = qm9[val_idx]
+    
+    train_loader = GeometricDataLoader(train_set, batch_size=64, shuffle=True)
+    test_loader = GeometricDataLoader(test_set, batch_size=64, shuffle=False)
+    val_loader = GeometricDataLoader(val_set, batch_size=64, shuffle=False)
     
     def _black_box_function(trial, model_type):
         print(f"Running Optuna trial {trial.number} for {model_type}")
         return model_selector(trial, model_type)
 
     def model_selector(trial, model_type):
-        # try: 
         if model_type == "graph_gp":
-            # CASE 2: GraphGP (SIGP subclass over graphs)
-            train_set = qm9[train_idx]
-            test_set = qm9[test_idx]
-            val_set = qm9[val_idx]
+            # For Graph GP, use PyG Data objects directly
+            train_graphs = [qm9[i] for i in train_idx]
+            test_graphs = [qm9[i] for i in test_idx]
+            val_graphs = [qm9[i] for i in val_idx]
             
-            # Don't modify the dataset - just convert to NetworkX
-            train_graphs = [qm9_to_networkx(g) for g in train_set]
-            test_graphs = [qm9_to_networkx(g) for g in test_set]
-            val_graphs = [qm9_to_networkx(g) for g in val_set]
-            
-            # Use the noisy labels from Rust (already normalized)
-            # These are passed directly, no need to extract from dataset
-            y_train = y_train_noisy.clone()
-            y_test = y_test_noisy.clone()
-            y_val = y_val_noisy.clone()
-            
-            # Train GraphGP model
-            return train_graph_gp(train_graphs, y_train, test_graphs, y_test, val_graphs, y_val, args, s, iteration, file_no, y_test_original_tensor, trial=trial)
+            return train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy, 
+                                 val_graphs, y_val_noisy, args, s, iteration, file_no, 
+                                 y_test_original_tensor, trial=trial)
+        
+        elif model_type == "conformal":
+            return train_conformal_graph_model(
+                train_loader, test_loader, val_loader, args, s, iteration, 
+                file_no, args.cp_base_model, args.calibration_size, y_test_original_tensor, trial,
+                y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
+            )
         
         else:
-            # Don't modify the dataset - just create loaders with original structure
-            train_set = qm9[train_idx]
-            test_set = qm9[test_idx]
-            val_set = qm9[val_idx]
-            
-            # Create DataLoaders WITHOUT modifying the data
-            train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
-            test_loader = DataLoader(test_set, batch_size=64, shuffle=False)
-            val_loader = DataLoader(val_set, batch_size=64, shuffle=False)
-
-            # Pass the noisy y values separately to the training function
-            if model_type == "conformal":
-                return train_conformal_graph_model(
-                    train_loader, test_loader, val_loader, args, s, iteration, 
-                    file_no, args.cp_base_model, args.calibration_size, y_test_original_tensor, trial,
-                    y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
-                )
-            else:
-                return train_gnn(
-                    model_type, train_loader, test_loader, val_loader, args, s, 
-                    iteration, file_no, y_test_original_tensor, trial=trial,
-                    y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
-                )
-
-        # except Exception as e:
-        #     print(f"Error with graph and {model_type}; more details: {e}")
-        #     return None
+            return train_gnn(
+                model_type, train_loader, test_loader, val_loader, args, s, 
+                iteration, file_no, y_test_original_tensor, trial=trial,
+                y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
+            )
 
     # Main execution loop
     for model_type in args.models:
@@ -1229,13 +1523,11 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
                 load_if_exists=False,
             )
 
-            # Create a wrapper function for this specific model_type
             def objective(trial):
                 return _black_box_function(trial, model_type)
 
             study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
 
-            # Check if we have any successful trials
             if len(study.trials) == 0 or all(trial.state != optuna.trial.TrialState.COMPLETE for trial in study.trials):
                 print(f"No successful trials for {model_type}. Running with default parameters.")
                 res = model_selector(None, model_type)
@@ -1243,30 +1535,25 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
                 best_params = study.best_params
                 print(f"Best params for {model_type} with sigma {s}: {best_params}")
 
-                # Save the best params as JSON next to the CSV
                 if args.filepath:
                     json_path = os.path.splitext(args.filepath)[0] + ".json"
                     dir_path = os.path.dirname(json_path)
                     if dir_path:
                         os.makedirs(dir_path, exist_ok=True)
 
-                    # Load existing params if file exists
                     if os.path.exists(json_path):
                         with open(json_path, 'r') as f:
                             all_params = json.load(f)
                     else:
                         all_params = {}
 
-                    # Create nested structure if missing
                     if model_type not in all_params:
                         all_params[model_type] = {}
-                    all_params[model_type]['graph'] = best_params  # Using 'graph' as the representation type
+                    all_params[model_type]['graph'] = best_params
 
-                    # Save updated structure
                     with open(json_path, 'w') as f:
                         json.dump(all_params, f, indent=4)
 
-                # Run with best params
                 res = _black_box_function(optuna.trial.FixedTrial(best_params), model_type)
             
             optuna.delete_study(study_name=study.study_name, storage="sqlite:///optuna_study.db")
@@ -1275,11 +1562,9 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
             with open(args.params, 'r') as f:
                 all_params = json.load(f)
 
-            # PATCHED VERSION
             if model_type in all_params and 'graph' in all_params[model_type]:
                 best_params = all_params[model_type]['graph']
 
-                # Reconstruct use_default flags
                 fixed_params = {}
                 for key, value in best_params.items():
                     if value is None:
@@ -1356,8 +1641,8 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
     try:
         if 'graph' in args.molecular_representations:
-            if args.dataset == 'ADME':
-                print("WARNING: ADME dataset has no graph structure, skipping graph models")
+            if args.dataset != 'QM9':
+                print(f"WARNING: {args.dataset} has no graph structure, skipping graph models")
             else:
                 run_qm9_graph_model(args, dataset, train_idx, test_idx, val_idx, s, iteration, file_no)
 
@@ -1381,7 +1666,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 print("CREATING HYBRID REPRESENTATION")
                 print("="*70)
                 
-                sources = ['continuous_pdv', 'ecfp4', 'mol2vec']
+                sources = ['continuous_pdv', 'ecfp4', 'mol2vec', 'chemberta']
                 available = [r for r in sources if r in args.molecular_representations]
                 
                 if len(available) >= 2:
@@ -1544,6 +1829,9 @@ def main():
     elif args.dataset == 'ADME':
         dataset = load_adme(args.target)
         print("ADME loaded")
+    elif args.dataset == 'MoleculeNet':
+        dataset = load_moleculenet(args.target)
+        print(f"MoleculeNet {args.target} loaded")
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
@@ -1579,12 +1867,13 @@ def main():
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
-            try: 
-                process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
-            except Exception as e:
-                if logging:
-                    print(f"Error with sigma {s}: {e}")
-                continue
+            # TODO: uncomment this!!
+            # try: 
+            process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
+            # except Exception as e:
+            #     if logging:
+            #         print(f"Error with sigma {s}: {e}")
+            #     continue
 
         current_time = time.time()
         print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")

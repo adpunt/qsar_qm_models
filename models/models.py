@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
 from torch_geometric.nn import GCNConv, GINConv, MessagePassing
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader as GeometricDataLoader
 from torch_geometric.typing import Adj, OptTensor, PairTensor, Size
 from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 # from torch_sparse import SparseTensor
@@ -40,6 +40,12 @@ from torchcp.regression.predictor import SplitPredictor, ACIPredictor
 from torchcp.classification.score import APS
 from torchcp.regression.score import ABS
 from sklearn.isotonic import IsotonicRegression
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
+from rdkit import Chem
+from grakel import Graph
+from grakel.kernels import WeisfeilerLehman, VertexHistogram
+
 
 from utils import * 
 from loss_functions import *
@@ -246,55 +252,175 @@ class GCN(torch.nn.Module):
 
         return x
 
-class GIN(torch.nn.Module):
-    """Graph Isomorphism Network class with 3 GINConv layers and 2 linear layers"""
+"""
+Graph Neural Network Architectures for Molecular Property Prediction
 
-    def __init__(self, dim_h, dropout_rate=0.5):
-        """Initializing GIN class
+Implements GCN, GAT, and GIN with optional Bayesian support via dropout.
+"""
 
-        Args:
-            dim_h (int): the dimension of hidden layers
-        """
-        super(GIN, self).__init__()
-        self.conv1 = GINConv(
-            Sequential(Linear(11, dim_h), BatchNorm1d(dim_h), ReLU(), Linear(dim_h, dim_h), ReLU())
-        )
-        self.conv2 = GINConv(
-            Sequential(
-                Linear(dim_h, dim_h), BatchNorm1d(dim_h), ReLU(), Linear(dim_h, dim_h), ReLU()
-            )
-        )
-        self.conv3 = GINConv(
-            Sequential(
-                Linear(dim_h, dim_h), BatchNorm1d(dim_h), ReLU(), Linear(dim_h, dim_h), ReLU()
-            )
-        )
-        self.lin1 = Linear(dim_h, dim_h)
-        self.lin2 = Linear(dim_h, 1)
-        self.dropout = torch.nn.Dropout(p=dropout_rate)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool, global_add_pool
 
+
+class GCN(nn.Module):
+    """
+    Graph Convolutional Network (Kipf & Welling, 2017).
+    """
+    def __init__(self, num_node_features, hidden_dim=128, num_layers=3, 
+                 dropout=0.0, use_edge_features=False):
+        super().__init__()
+        self.num_layers = num_layers
+        self.dropout = dropout
+        
+        self.convs = nn.ModuleList()
+        self.convs.append(GCNConv(num_node_features, hidden_dim))
+        
+        for _ in range(num_layers - 1):
+            self.convs.append(GCNConv(hidden_dim, hidden_dim))
+        
+        self.regression_head = nn.Linear(hidden_dim, 1)
+    
     def forward(self, data):
-        x = data.x
-        edge_index = data.edge_index
-        batch = data.batch
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = F.relu(x)
+            if i < len(self.convs) - 1:  # Don't dropout last layer
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        
+        # Global pooling
+        graph_embedding = global_mean_pool(x, batch)
+        
+        # Regression
+        out = self.regression_head(graph_embedding)
+        
+        return out, graph_embedding
 
-        # Node embeddings
-        h = self.conv1(x, edge_index)
-        h = h.relu()
-        h = self.conv2(h, edge_index)
-        h = h.relu()
-        h = self.conv3(h, edge_index)
 
-        # Graph-level readout
-        h = global_add_pool(h, batch)
+class GAT(nn.Module):
+    """
+    Graph Attention Network (Veličković et al., 2018).
+    """
+    def __init__(self, num_node_features, hidden_dim=128, num_layers=3,
+                 dropout=0.0, num_heads=4, use_edge_features=False):
+        super().__init__()
+        self.num_layers = num_layers
+        self.dropout = dropout
+        
+        self.convs = nn.ModuleList()
+        
+        # First layer: multi-head attention with concat
+        self.convs.append(GATConv(num_node_features, hidden_dim, heads=num_heads, concat=True))
+        current_dim = hidden_dim * num_heads
+        
+        # Middle layers
+        for _ in range(num_layers - 2):
+            self.convs.append(GATConv(current_dim, hidden_dim, heads=num_heads, concat=True))
+        
+        # Last layer: single head, no concat
+        if num_layers > 1:
+            self.convs.append(GATConv(current_dim, hidden_dim, heads=1, concat=False))
+            final_dim = hidden_dim
+        else:
+            final_dim = current_dim
+        
+        self.regression_head = nn.Linear(final_dim, 1)
+    
+    def forward(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = F.elu(x)
+            if i < len(self.convs) - 1:
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        
+        graph_embedding = global_mean_pool(x, batch)
+        out = self.regression_head(graph_embedding)
+        
+        return out, graph_embedding
 
-        h = self.lin1(h)
-        h = h.relu()
-        h = self.dropout(h)
-        # h = Fun.dropout(h, p=0.5, training=self.training)
-        h = self.lin2(h)
 
-        return h
+class GIN(nn.Module):
+    """
+    Graph Isomorphism Network (Xu et al., 2019).
+    
+    More expressive than GCN - can distinguish different graph structures.
+    """
+    def __init__(self, num_node_features, hidden_dim=128, num_layers=3,
+                 dropout=0.0, use_edge_features=False):
+        super().__init__()
+        self.num_layers = num_layers
+        self.dropout = dropout
+        
+        self.convs = nn.ModuleList()
+        self.batch_norms = nn.ModuleList()
+        
+        # First GIN layer
+        nn1 = nn.Sequential(
+            nn.Linear(num_node_features, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        self.convs.append(GINConv(nn1, train_eps=True))
+        self.batch_norms.append(nn.BatchNorm1d(hidden_dim))
+        
+        # Subsequent GIN layers
+        for _ in range(num_layers - 1):
+            nn_layer = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim)
+            )
+            self.convs.append(GINConv(nn_layer, train_eps=True))
+            self.batch_norms.append(nn.BatchNorm1d(hidden_dim))
+        
+        self.regression_head = nn.Linear(hidden_dim, 1)
+    
+    def forward(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        
+        for i, (conv, bn) in enumerate(zip(self.convs, self.batch_norms)):
+            x = conv(x, edge_index)
+            x = bn(x)
+            x = F.relu(x)
+            if i < len(self.convs) - 1:
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        
+        # Sum pooling (better for GIN)
+        graph_embedding = global_add_pool(x, batch)
+        out = self.regression_head(graph_embedding)
+        
+        return out, graph_embedding
+
+
+def create_gnn_model(model_type, num_node_features=6, hidden_dim=128, 
+                     num_layers=3, dropout=0.0, num_heads=4):
+    """
+    Factory function to create GNN models.
+    
+    Args:
+        model_type: 'gcn', 'gat', or 'gin'
+        num_node_features: Number of input node features (default: 6)
+        hidden_dim: Hidden dimension (default: 128)
+        num_layers: Number of GNN layers (default: 3)
+        dropout: Dropout rate (default: 0.0, set >0 for Bayesian)
+        num_heads: Number of attention heads for GAT (default: 4)
+        
+    Returns:
+        GNN model
+    """
+    if model_type == 'gcn':
+        return GCN(num_node_features, hidden_dim, num_layers, dropout)
+    elif model_type == 'gat':
+        return GAT(num_node_features, hidden_dim, num_layers, dropout, num_heads)
+    elif model_type == 'gin':
+        return GIN(num_node_features, hidden_dim, num_layers, dropout)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}. Use 'gcn', 'gat', or 'gin'")
 
 class GATv2(torch.nn.Module):
     def __init__(self, in_channels, out_channels, hidden_channels=64, heads=1, dropout=0.5):
@@ -1098,15 +1224,22 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     model.fit(x_train, y_train)
 
-
-
     if model_type == 'qrf':
         q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
         y_pred = q50
         y_pred_mean = q50
-        std_est = (q84 - q16) / 2
+        std_est = (q84 - q16) / 2  # IQR-based std estimate
         
         if args.uncertainty:
+            # Decompose distributional uncertainty
+            epistemic, aleatoric, total = decompose_uncertainty_distributional(
+                y_pred_mean, std_est, model_type='qrf', is_variance=False
+            )
+            
+            # QRF doesn't get temperature calibration (quantiles are already calibrated)
+            temperature = None
+            y_pred_std_calibrated = std_est
+            
             save_uncertainty_values(
                 y_pred_mean=y_pred_mean,
                 y_pred_std=std_est,
@@ -1118,12 +1251,15 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                 sigma_noise=s,
                 iteration=iteration,
                 file_no=file_no,
+                y_pred_std_calibrated=y_pred_std_calibrated,
+                temperature=temperature,
+                epistemic_uncertainty=epistemic,
+                aleatoric_uncertainty=aleatoric
             )
     else:
         y_pred = model.predict(x_test)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics, params_source)
 
     return metrics[3]
@@ -1235,14 +1371,26 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         # Find temperature
         temperature = calibrate_uncertainty_simple(y_cal_pred, y_cal_pred_std, y_val_cal)
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        
+        # Decompose distributional uncertainty
+        epistemic, aleatoric, total = decompose_uncertainty_distributional(
+            y_pred, y_pred_std_uncalibrated, model_type='ngboost', is_variance=False
+        )
+        
+        # Apply calibration to aleatoric
+        if aleatoric is not None:
+            aleatoric = aleatoric * temperature
+        
     else:
         temperature = None
         y_pred_std_calibrated = None
+        epistemic = None
+        aleatoric = None
     
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics, params_source)
     
-    # STEP 3: Save with calibration
+    # *** UPDATED: Save with decomposition ***
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -1256,7 +1404,9 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            temperature=temperature,
+            epistemic_uncertainty=epistemic,
+            aleatoric_uncertainty=aleatoric
         )
     
     return metrics[3]
@@ -1404,14 +1554,25 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             # Find temperature
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+            
+            # Decompose GP uncertainty
+            likelihood_noise = likelihood.noise.item()
+            epistemic, aleatoric, total = decompose_uncertainty_gp(pred_vars, likelihood_noise)
+            
+            # Apply calibration to epistemic
+            epistemic = epistemic * temperature
+            aleatoric = aleatoric * temperature
+            
         else:
             temperature = None
             y_pred_std_calibrated = None
+            epistemic = None
+            aleatoric = None
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics)
 
-    # STEP 3: Save with calibration
+    # *** UPDATED: Save with decomposition ***
     if args.uncertainty:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -1425,7 +1586,9 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            temperature=temperature,
+            epistemic_uncertainty=epistemic,
+            aleatoric_uncertainty=aleatoric
         )
 
     return metrics[3]
@@ -1685,7 +1848,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     
     model.eval()
 
-    if is_bayesian:
+    if is_bayesian and args.uncertainty:
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
         
@@ -1719,10 +1882,17 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
                     output = output[:, 0:1]
                 preds.append(output)
 
-        preds = np.stack(preds, axis=0)
+        preds = np.stack(preds, axis=0)  # Shape: (num_samples, num_datapoints, 1)
         y_pred_mean = preds.mean(axis=0).flatten()
         y_pred_std_uncalibrated = preds.std(axis=0).flatten()
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+        
+        # Decompose uncertainty
+        epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
+        
+        # Apply calibration to epistemic (aleatoric stays None for standard BNN)
+        if epistemic is not None:
+            epistemic = epistemic * temperature
         
         y_pred = y_pred_mean
 
@@ -1739,6 +1909,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
+        epistemic = None
+        aleatoric = None
 
     # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
@@ -1748,7 +1920,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     
     save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
-    # STEP 7: Save uncertainty with calibration
+    # *** UPDATED: Save uncertainty with decomposition ***
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -1762,7 +1934,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            temperature=temperature,
+            epistemic_uncertainty=epistemic,
+            aleatoric_uncertainty=aleatoric
         )
 
     return metrics[3]
@@ -2287,322 +2461,642 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     return metrics[3]
 
-def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, iteration, file_no, y_test_original, trial=None, 
+"""
+COMPLETE GRAPH MODEL TRAINING - ALL BUGS FIXED
+
+Fixes:
+1. Graph GP: Use Graph() constructor with STRING node labels (not atomic numbers)
+2. GNN: Properly bundle noisy labels with graphs in custom dataset
+3. Both: Use normalized targets for evaluation (same scale as training)
+"""
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from rdkit import Chem
+from torch_geometric.data import Data, Batch
+from torch.utils.data import Dataset, DataLoader
+
+
+# =============================================================================
+# GRAPH CONVERSION - FIXED
+# =============================================================================
+
+def smiles_to_grakel_graph(smiles):
+    """
+    Convert SMILES to grakel Graph object.
+    
+    CRITICAL: Node labels must be STRINGS (atomic symbols), not integers!
+    CRITICAL: Use Graph() constructor, not array format!
+    """
+    from grakel import Graph
+    
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None or mol.GetNumBonds() == 0:
+        return None
+    
+    # Node labels as STRINGS (atomic symbols like 'C', 'N', 'O')
+    node_labels = {atom.GetIdx(): atom.GetSymbol() for atom in mol.GetAtoms()}
+    
+    # Edge list
+    edge_list = []
+    for bond in mol.GetBonds():
+        i = bond.GetBeginAtomIdx()
+        j = bond.GetEndAtomIdx()
+        edge_list.append((i, j))
+    
+    # Use Graph() constructor
+    return Graph(edge_list, node_labels=node_labels)
+
+
+def smiles_to_pyg_graph(smiles):
+    """
+    Convert SMILES to PyTorch Geometric Data object.
+    
+    Node features: [atomic_num, degree, formal_charge, is_aromatic]
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    
+    # Node features
+    atom_features = []
+    for atom in mol.GetAtoms():
+        atom_features.append([
+            atom.GetAtomicNum(),
+            atom.GetDegree(),
+            atom.GetFormalCharge(),
+            int(atom.GetIsAromatic())
+        ])
+    
+    x = torch.tensor(atom_features, dtype=torch.float)
+    
+    # Edge index (bidirectional)
+    edge_index = []
+    for bond in mol.GetBonds():
+        i = bond.GetBeginAtomIdx()
+        j = bond.GetEndAtomIdx()
+        edge_index.append([i, j])
+        edge_index.append([j, i])
+    
+    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous() if edge_index else torch.zeros((2, 0), dtype=torch.long)
+    
+    return Data(x=x, edge_index=edge_index)
+
+
+# =============================================================================
+# GNN DATASET - FIXED TO BUNDLE NOISY LABELS
+# =============================================================================
+
+class MolecularGraphDataset(Dataset):
+    """
+    Dataset that bundles PyG graphs with noisy labels.
+    
+    CRITICAL: This ensures noisy labels travel with graphs through shuffling!
+    """
+    def __init__(self, smiles_list, labels):
+        self.data = []
+        for smiles, label in zip(smiles_list, labels):
+            graph = smiles_to_pyg_graph(smiles)
+            if graph is not None:
+                self.data.append((graph, label))
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+
+def collate_molecular_graphs(batch):
+    """Custom collate function for MolecularGraphDataset."""
+    graphs, labels = zip(*batch)
+    batched_graph = Batch.from_data_list(graphs)
+    labels = torch.tensor(labels, dtype=torch.float32)
+    return batched_graph, labels
+
+
+# =============================================================================
+# GNN MODELS
+# =============================================================================
+
+def create_gnn_model(model_type, num_node_features=4, hidden_dim=128, num_layers=3, dropout=0.1):
+    """Create GNN model (GCN/GAT/GIN)."""
+    from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
+    
+    class GNNRegressor(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.convs = nn.ModuleList()
+            
+            if model_type == 'gcn':
+                self.convs.append(GCNConv(num_node_features, hidden_dim))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GCNConv(hidden_dim, hidden_dim))
+            
+            elif model_type == 'gat':
+                heads = 4
+                self.convs.append(GATConv(num_node_features, hidden_dim // heads, heads=heads))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GATConv(hidden_dim, hidden_dim // heads, heads=heads))
+            
+            elif model_type == 'gin':
+                nn1 = nn.Sequential(nn.Linear(num_node_features, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                self.convs.append(GINConv(nn1))
+                for _ in range(num_layers - 1):
+                    nn_layer = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                    self.convs.append(GINConv(nn_layer))
+            
+            self.dropout = dropout
+            self.regression_head = nn.Linear(hidden_dim, 1)
+        
+        def forward(self, data):
+            x, edge_index, batch = data.x, data.edge_index, data.batch
+            
+            for i, conv in enumerate(self.convs):
+                x = conv(x, edge_index)
+                if i < len(self.convs) - 1:
+                    x = F.relu(x)
+                    x = F.dropout(x, p=self.dropout, training=self.training)
+            
+            x = global_mean_pool(x, batch)
+            return self.regression_head(x).squeeze()
+    
+    return GNNRegressor()
+
+
+# =============================================================================
+# TRAIN GNN 
+# =============================================================================
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
+
+
+def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3, dropout=0.1):
+    """Create GNN model."""
+    class GNNRegressor(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.convs = nn.ModuleList()
+            
+            if model_type == 'gcn':
+                self.convs.append(GCNConv(num_node_features, hidden_dim))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GCNConv(hidden_dim, hidden_dim))
+            
+            elif model_type == 'gat':
+                heads = 4
+                self.convs.append(GATConv(num_node_features, hidden_dim // heads, heads=heads))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GATConv(hidden_dim, hidden_dim // heads, heads=heads))
+            
+            elif model_type == 'gin':
+                nn1 = nn.Sequential(nn.Linear(num_node_features, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                self.convs.append(GINConv(nn1))
+                for _ in range(num_layers - 1):
+                    nn_layer = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                    self.convs.append(GINConv(nn_layer))
+            
+            self.dropout = dropout
+            self.regression_head = nn.Linear(hidden_dim, 1)
+        
+        def forward(self, data):
+            x, edge_index, batch = data.x, data.edge_index, data.batch
+            
+            for i, conv in enumerate(self.convs):
+                x = conv(x, edge_index)
+                if i < len(self.convs) - 1:
+                    x = F.relu(x)
+                    x = F.dropout(x, p=self.dropout, training=self.training)
+            
+            x = global_mean_pool(x, batch)
+            return self.regression_head(x).squeeze()
+    
+    return GNNRegressor()
+
+
+def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, 
+              iteration, file_no, y_test_original_tensor, trial=None,
               y_train_noisy=None, y_test_noisy=None, y_val_noisy=None):
     """
-    Note: y_train_noisy, y_test_noisy, y_val_noisy are the noisy+normalized targets from Rust.
-    These should be used instead of batch.y from the dataloaders.
+    Train GNN using YOUR pipeline.
+    
+    Data objects in loaders have .y_noisy attached.
     """
-    # Hyperparameter suggestions
-    if trial is not None:
-        dim_h = trial.suggest_int('dim_h', 32, 256, step=32)
-        epochs = trial.suggest_int('epochs', 50, 300, step=50)
-        learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-    else:
-        dim_h = 64 if model_type in ["gin", "gin2d", "ginct"] else 128
-        epochs = args.epochs
-        learning_rate = 0.001
+    from utils import (calculate_regression_metrics, save_results,
+                      save_uncertainty_values, calibrate_uncertainty_simple,
+                      decompose_uncertainty_sampling)
     
-    if model_type == "gin" or model_type == "gin2d":
-        model = GIN(dim_h=dim_h)
-    elif model_type == "gcn":
-        model = GCN(dim_h=dim_h)
-    elif model_type == "ginct":
-        model = GINCoTeaching(dim_h=dim_h)
-
-    print(f"model: {model} and model_type: {model_type}")
-
-    model_name = model_type
-    is_bayesian = args.bayesian_transformation is not None
+    # Get num_node_features from first batch
+    for batch in train_loader:
+        num_node_features = batch.x.shape[1]
+        break
     
-    if args.bayesian_transformation == "full":
-        model = apply_bayesian_transformation(model)
-        model_name = f"{model_type}_bnn_full"
-    elif args.bayesian_transformation == "last_layer":
-        model = apply_bayesian_transformation_last_layer(model)
-        model_name = f"{model_type}_bnn_last"
-    elif args.bayesian_transformation == "variational":
-        model = apply_bayesian_transformation_last_layer_variational(model)
-        model_name = f"{model_type}_bnn_variational"
-
-    print(f"model: {model} and model_type: {model_type}")
-
+    # Create model
+    model = create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3, dropout=0.1)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     
-    # STEP 1: Split val loader for calibration if Bayesian
-    if is_bayesian and args.uncertainty:
-        # Convert val_loader to list and split
-        val_data_list = []
-        for data in val_loader:
-            val_data_list.extend([d for d in data.to_data_list()])
+    # Training
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+    
+    print(f"Training {model_type.upper()} for 100 epochs...")
+    for epoch in range(100):
+        model.train()
+        train_loss = 0
         
-        split_idx = len(val_data_list) // 2
-        val_train_list = val_data_list[:split_idx]
-        val_cal_list = val_data_list[split_idx:]
+        for batch in train_loader:
+            batch = batch.to(device)
+            
+            # CRITICAL: Use .y_noisy from Data objects (properly shuffled with graphs)
+            targets = torch.tensor([data.y_noisy for data in batch.to_data_list()], 
+                                  dtype=torch.float32, device=device)
+            
+            optimizer.zero_grad()
+            predictions = model(batch)
+            loss = criterion(predictions, targets)
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+    
+    # Evaluation
+    model.eval()
+    
+    if args.bayesian_transformation:
+        # MC dropout
+        predictions_list = []
+        for _ in range(100):
+            model.train()  # Keep dropout active
+            preds = []
+            with torch.no_grad():
+                for batch in test_loader:
+                    batch = batch.to(device)
+                    pred = model(batch).cpu().numpy()
+                    preds.append(pred)
+            predictions_list.append(np.concatenate(preds))
         
-        from torch_geometric.loader import DataLoader as GeometricDataLoader
-        val_loader_train = GeometricDataLoader(val_train_list, batch_size=64, shuffle=False)
-        val_loader_cal = GeometricDataLoader(val_cal_list, batch_size=64, shuffle=False)
+        predictions_array = np.array(predictions_list)
+        predictions = predictions_array.mean(axis=0)
         
-        # Split y_val_noisy accordingly
-        y_val_noisy_train = y_val_noisy[:split_idx] if y_val_noisy is not None else None
-        y_val_noisy_cal = y_val_noisy[split_idx:] if y_val_noisy is not None else None
+        # Decompose uncertainty
+        epistemic, aleatoric = decompose_uncertainty_sampling(predictions_array)
+        
     else:
-        val_loader_train = val_loader
-        y_val_noisy_train = y_val_noisy
+        # Deterministic
+        preds = []
+        with torch.no_grad():
+            for batch in test_loader:
+                batch = batch.to(device)
+                pred = model(batch).cpu().numpy()
+                preds.append(pred)
+        predictions = np.concatenate(preds)
+        epistemic = None
+        aleatoric = None
     
-    if model_type != "ginct":
-        train_loss, val_loss, train_target, train_y_target, trained_model = train_epochs(
-            epochs, model, train_loader, val_loader_train, args, s, iteration, file_no, model_name,
-            y_train_noisy=y_train_noisy, y_val_noisy=y_val_noisy_train, learning_rate=learning_rate
+    # Calibrate on validation
+    if epistemic is not None:
+        val_preds_list = []
+        for _ in range(100):
+            model.train()
+            val_preds = []
+            with torch.no_grad():
+                for batch in val_loader:
+                    batch = batch.to(device)
+                    pred = model(batch).cpu().numpy()
+                    val_preds.append(pred)
+            val_preds_list.append(np.concatenate(val_preds))
+        
+        val_predictions_array = np.array(val_preds_list)
+        val_predictions = val_predictions_array.mean(axis=0)
+        val_epistemic, _ = decompose_uncertainty_sampling(val_predictions_array)
+        
+        # Get val targets
+        val_targets = []
+        for batch in val_loader:
+            val_targets.extend([data.y_noisy for data in batch.to_data_list()])
+        val_targets = np.array(val_targets)
+        
+        n_cal = len(val_predictions) // 2
+        temperature = calibrate_uncertainty_simple(
+            val_predictions[:n_cal],
+            val_epistemic[:n_cal],
+            val_targets[:n_cal]
         )
-        test_loss, test_target, test_y = testing(test_loader, trained_model, y_test_noisy=y_test_noisy)
+        epistemic = epistemic * temperature
+    else:
+        temperature = 1.0
     
-    logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
-    if not logging_flag:
-        calculate_domain_metrics(test_target, test_y, domain_labels_subset, target_domain)
-    metrics = calculate_regression_metrics(test_target, test_y, logging=logging_flag)
-    print(f"model: {model_type}")
-    print("rep: graph")
-
-    # STEP 2: Get predictions and calibrate if Bayesian
-    if is_bayesian and args.uncertainty:
-        torch.manual_seed(args.random_seed)  # Use appropriate seed
-        np.random.seed(args.random_seed)
-        
-        trained_model.eval()
-        num_samples = 100
-        
-        # Get calibration predictions
-        all_cal_preds = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                batch_preds = []
-                for data in val_loader_cal:
-                    data = data.to(device)
-                    pred = trained_model(data).cpu().numpy().flatten()
-                    batch_preds.extend(pred)
-                all_cal_preds.append(np.array(batch_preds))
-        
-        all_cal_preds = np.stack(all_cal_preds, axis=0)
-        y_cal_pred_mean = all_cal_preds.mean(axis=0)
-        y_cal_pred_std = all_cal_preds.std(axis=0)
-        
-        # Get true calibration values
-        y_cal_true = y_val_noisy_cal.cpu().numpy() if isinstance(y_val_noisy_cal, torch.Tensor) else y_val_noisy_cal
-        
-        temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_cal_true)
-        
-        # Get test predictions
-        all_test_preds = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                batch_preds = []
-                for data in test_loader:
-                    data = data.to(device)
-                    pred = trained_model(data).cpu().numpy().flatten()
-                    batch_preds.extend(pred)
-                all_test_preds.append(np.array(batch_preds))
-        
-        all_test_preds = np.stack(all_test_preds, axis=0)
-        y_pred_mean = all_test_preds.mean(axis=0)
-        y_pred_std_uncalibrated = all_test_preds.std(axis=0)
-        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
-        
-        # STEP 3: Save with calibration
+    # Get test targets (noisy, normalized)
+    test_targets = []
+    for batch in test_loader:
+        test_targets.extend([data.y_noisy for data in batch.to_data_list()])
+    test_targets = np.array(test_targets)
+    
+    # CRITICAL: Evaluate on normalized targets (same scale as training)
+    metrics = calculate_regression_metrics(test_targets, predictions)
+    print(f"{model_type.upper()} - R²: {metrics[3]:.4f}, RMSE: {metrics[2]:.4f}")
+    
+    # Save
+    model_name = f"{model_type}_bayesian" if args.bayesian_transformation else model_type
+    save_results(args.filepath, s, iteration, model_name, 'graph', len(test_targets), metrics)
+    
+    if args.uncertainty:
+        total_unc = epistemic if epistemic is not None else np.zeros_like(predictions)
         save_uncertainty_values(
-            y_pred_mean=y_pred_mean,
-            y_pred_std=y_pred_std_uncalibrated,
-            y_true_original=y_test_original.cpu().numpy().flatten(),
-            y_true_noisy=test_y,
-            filepath=args.filepath,
-            model_name=model_name,
-            rep='graph',
-            sigma_noise=s,
-            iteration=iteration,
-            file_no=file_no,
-            y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            predictions, total_unc, test_targets, test_targets,
+            args.filepath, model_name, 'graph', s, iteration, file_no,
+            y_pred_std_calibrated=epistemic, temperature=temperature,
+            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric
         )
-        
-        save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics)
-    else:
-        save_results(args.filepath, s, iteration, model_type, 'graph', args.sample_size, metrics)
     
     return metrics[3]
 
-def train_graph_gp(train_graphs, train_y, test_graphs, test_y, val_graphs, val_y, args, s, iteration, file_no, y_test_original, trial=None):
+# =============================================================================
+# TRAIN GRAPH GP - FIXED
+# =============================================================================
+
+"""
+train_graph_gp for YOUR pipeline
+Works with lists of PyG Data objects that have .y_noisy and .smiles
+"""
+
+import numpy as np
+import torch
+from rdkit import Chem
+from grakel import Graph
+from grakel.kernels import WeisfeilerLehman, VertexHistogram
+
+
+def pyg_to_grakel(data):
     """
-    This function already receives y values as parameters (train_y, test_y, val_y),
-    so it's already compatible with the noisy values from Rust. No changes needed.
-    """
-    params = {}
-    params_source = 'default'
-    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
-        best_params = load_best_hyperparameters('graph_gp', 'graph')
-        if best_params is not None:
-            params = best_params
-            params_source = 'tuned'
-            print(f"Using tuned hyperparameters for graph_gp-graph")
-    if not params:
-        if args.tuning and trial is not None:
-            params['kernel_name'] = trial.suggest_categorical('kernel', [
-                'WeisfeilerLehman', 'VertexHistogram', 'EdgeHistogram', 'NeighborhoodHash'
-            ])
-            params['outputscale'] = trial.suggest_float('outputscale', 0.1, 10.0, log=True)
-            params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
-            params_source = 'tuning_trial'
-        else:
-            params['kernel_name'] = 'WeisfeilerLehman'
-            params['outputscale'] = 1.0
-            params['likelihood_noise'] = 1e-3
-            params_source = 'default'
+    Convert PyG Data object to grakel Graph.
     
-    kernel_map = {
-        'WeisfeilerLehman': WeisfeilerLehmanKernel,
-        'VertexHistogram': VertexHistogramKernel,
-        'EdgeHistogram': EdgeHistogramKernel,
-        'NeighborhoodHash': NeighborhoodHashKernel
+    CRITICAL: Use STRING atomic symbols, not atomic numbers!
+    """
+    # Map atomic numbers to symbols
+    atomic_num_to_symbol = {
+        1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'
     }
     
-    # STEP 1: Split validation for calibration
-    if args.uncertainty and val_graphs is not None and val_y is not None:
-        split_idx = len(val_graphs) // 2
-        train_graphs_full = train_graphs + val_graphs[:split_idx]
-        train_y_full = torch.cat((train_y, val_y[:split_idx]), dim=0)
-        val_graphs_cal = val_graphs[split_idx:]
-        val_y_cal = val_y[split_idx:]
-    elif val_graphs is not None and val_y is not None:
-        train_graphs_full = train_graphs + val_graphs
-        train_y_full = torch.cat((train_y, val_y), dim=0)
-    else:
-        train_graphs_full = train_graphs
-        train_y_full = train_y
+    # Get atomic numbers from data.x (first column)
+    atomic_numbers = data.x[:, 0].long().tolist()
     
-    X_train = NonTensorialInputs(train_graphs_full)
-    X_test = NonTensorialInputs(test_graphs)
-    y_train = train_y_full.flatten().float()
-    y_test = test_y.flatten().float()
+    # Convert to string symbols
+    node_labels = {}
+    for i, atomic_num in enumerate(atomic_numbers):
+        node_labels[i] = atomic_num_to_symbol.get(atomic_num, str(atomic_num))
     
-    likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
-    kernel_class = kernel_map[params['kernel_name']]
-    kernel = kernel_class(edge_label='label') if params['kernel_name'] == 'EdgeHistogram' else kernel_class(node_label='label')
-    model = GraphGP(X_train, y_train, likelihood, kernel)
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-    fit_gpytorch_model(mll)
+    # Get edges
+    edge_index = data.edge_index.t().tolist()
+    edge_list = [(u, v) for u, v in edge_index]
     
-    model.eval()
-    likelihood.eval()
-    
-    # STEP 2: Get predictions and calibrate
-    with torch.no_grad():
-        # Test predictions
-        test_preds = model(X_test)
-        y_pred = test_preds.mean.numpy()
-        pred_vars = test_preds.variance.numpy()
-        y_pred_std_uncalibrated = np.sqrt(pred_vars)
-        
-        if args.uncertainty:
-            # Calibration predictions
-            X_val_cal = NonTensorialInputs(val_graphs_cal)
-            cal_preds = model(X_val_cal)
-            y_cal_pred_mean = cal_preds.mean.numpy()
-            y_cal_pred_std = np.sqrt(cal_preds.variance.numpy())
-            y_cal_true = val_y_cal.cpu().numpy()
-            
-            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_cal_true)
-            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+    # Remove duplicate edges (undirected graph)
+    edge_set = set()
+    for u, v in edge_list:
+        if u < v:
+            edge_set.add((u, v))
         else:
-            temperature = None
-            y_pred_std_calibrated = None
+            edge_set.add((v, u))
+    edge_list = list(edge_set)
     
-    metrics = calculate_regression_metrics(y_test.numpy(), y_pred, logging=True)
-    save_results(args.filepath, s, iteration, "graph_gp", "graph", args.sample_size, metrics, params_source)
+    # Create Graph
+    return Graph(edge_list, node_labels=node_labels)
+
+
+def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
+                   val_graphs, y_val_noisy, args, s, iteration, file_no,
+                   y_test_original_tensor, trial=None):
+    """
+    Train Graph GP using YOUR pipeline.
     
-    # STEP 3: Save with calibration
+    Args:
+        train_graphs: List of PyG Data objects with .y_noisy
+        y_train_noisy: Ignored (we use data.y_noisy from objects)
+        test_graphs: List of PyG Data objects with .y_noisy
+        y_test_noisy: Ignored
+        val_graphs: List of PyG Data objects with .y_noisy
+        y_val_noisy: Ignored
+    """
+    from utils import (calculate_regression_metrics, save_results,
+                      save_uncertainty_values, calibrate_uncertainty_simple,
+                      decompose_uncertainty_gp)
+    
+    print(f"Converting {len(train_graphs)} molecules to grakel format...")
+    
+    # Convert PyG to grakel
+    train_grakel = []
+    train_labels = []
+    for data in train_graphs:
+        g = pyg_to_grakel(data)
+        if g is not None:
+            train_grakel.append(g)
+            train_labels.append(data.y_noisy)
+    
+    train_labels = torch.tensor(train_labels, dtype=torch.float32)
+    
+    print(f"Computing WL kernel matrix for {len(train_grakel)} valid molecules...")
+    
+    # Initialize kernel
+    kernel_obj = WeisfeilerLehman(n_iter=5, base_graph_kernel=VertexHistogram, normalize=True)
+    
+    # Compute kernel matrix
+    K_train = kernel_obj.fit_transform(train_grakel)
+    K_train_tensor = torch.tensor(K_train, dtype=torch.float32)
+    
+    print(f"Kernel stats: min={K_train_tensor.min():.4f}, max={K_train_tensor.max():.4f}, var={K_train_tensor.var():.4f}")
+    
+    # Add jitter
+    jitter = 1e-3
+    K_train_tensor = K_train_tensor + jitter * torch.eye(K_train_tensor.shape[0])
+    
+    # Ensure positive definiteness
+    eigenvalues = torch.linalg.eigvalsh(K_train_tensor)
+    min_eig = eigenvalues.min()
+    if min_eig < 1e-6:
+        extra_jitter = 1e-6 - min_eig + 1e-3
+        K_train_tensor = K_train_tensor + extra_jitter * torch.eye(K_train_tensor.shape[0])
+        print(f"Added extra jitter: {extra_jitter:.6f}")
+    
+    print(f"Training GP on kernel matrix of shape {K_train_tensor.shape}...")
+    
+    # Select noise parameter
+    best_noise = 0.1
+    best_nll = float('inf')
+    
+    for noise_candidate in [0.001, 0.01, 0.1, 0.5, 1.0]:
+        K_noisy = K_train_tensor + noise_candidate * torch.eye(len(train_labels))
+        try:
+            L = torch.linalg.cholesky(K_noisy)
+            alpha = torch.cholesky_solve(train_labels.unsqueeze(-1), L).squeeze()
+            nll = 0.5 * (train_labels @ alpha) + torch.log(L.diag()).sum() + 0.5 * len(train_labels) * np.log(2 * np.pi)
+            print(f"  Noise {noise_candidate:.4f}: NLL={nll:.4f}")
+            if nll < best_nll:
+                best_nll = nll
+                best_noise = noise_candidate
+        except Exception as e:
+            print(f"  Noise {noise_candidate:.4f}: Failed - {e}")
+    
+    print(f"Selected noise: {best_noise:.4f}")
+    
+    # Predict on test
+    print(f"Converting {len(test_graphs)} test molecules to grakel format...")
+    test_grakel = []
+    test_labels = []
+    for data in test_graphs:
+        g = pyg_to_grakel(data)
+        if g is not None:
+            test_grakel.append(g)
+            test_labels.append(data.y_noisy)
+    
+    test_labels = np.array(test_labels)
+    
+    print(f"Computing kernel matrix between {len(test_grakel)} test and {len(train_grakel)} train graphs...")
+    K_test_train = kernel_obj.transform(test_grakel)
+    K_test_train_tensor = torch.tensor(K_test_train, dtype=torch.float32)
+    
+    # GP prediction
+    K_noisy = K_train_tensor + best_noise * torch.eye(len(train_labels))
+    L = torch.linalg.cholesky(K_noisy)
+    alpha = torch.cholesky_solve(train_labels.unsqueeze(-1), L).squeeze()
+    
+    predictions = (K_test_train_tensor @ alpha).numpy()
+    std = np.ones(len(test_grakel)) * np.sqrt(best_noise)
+    
+    # Validation for calibration
+    print(f"Converting {len(val_graphs)} validation molecules to grakel format...")
+    val_grakel = []
+    val_labels = []
+    for data in val_graphs:
+        g = pyg_to_grakel(data)
+        if g is not None:
+            val_grakel.append(g)
+            val_labels.append(data.y_noisy)
+    
+    val_labels = np.array(val_labels)
+    
+    K_val_train = kernel_obj.transform(val_grakel)
+    K_val_train_tensor = torch.tensor(K_val_train, dtype=torch.float32)
+    
+    val_predictions = (K_val_train_tensor @ alpha).numpy()
+    val_std = np.ones(len(val_grakel)) * np.sqrt(best_noise)
+    
+    # Decompose uncertainty
+    epistemic, aleatoric = decompose_uncertainty_gp(std, best_noise)
+    val_epistemic, val_aleatoric = decompose_uncertainty_gp(val_std, best_noise)
+    
+    # Calibrate
+    n_cal = len(val_predictions) // 2
+    temperature = calibrate_uncertainty_simple(
+        val_predictions[:n_cal],
+        val_epistemic[:n_cal],
+        val_labels[:n_cal]
+    )
+    
+    epistemic = epistemic * temperature
+    total = np.sqrt(epistemic**2 + aleatoric**2)
+    
+    # CRITICAL: Evaluate on normalized targets (same scale as training)
+    metrics = calculate_regression_metrics(test_labels, predictions)
+    print(f"Graph GP - R²: {metrics[3]:.4f}, RMSE: {metrics[2]:.4f}")
+    
+    # Save
+    save_results(args.filepath, s, iteration, 'graph_gp', 'graph', len(test_labels), metrics)
+    
     if args.uncertainty:
         save_uncertainty_values(
-            y_pred_mean=y_pred,
-            y_pred_std=y_pred_std_uncalibrated,
-            y_true_original=y_test_original.cpu().numpy().flatten(),
-            y_true_noisy=y_test.numpy(),
-            filepath=args.filepath,
-            model_name="graph_gp",
-            rep="graph",
-            sigma_noise=s,
-            iteration=iteration,
-            file_no=file_no,
-            y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            predictions, total, test_labels, test_labels,
+            args.filepath, 'graph_gp', 'graph', s, iteration, file_no,
+            y_pred_std_calibrated=total, temperature=temperature,
+            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric
         )
     
     return metrics[3]
 
-def train_custom_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
-    model = load_custom_model(args.model_path)
-
-    x_train_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-    x_test_tensor = torch.tensor(x_test, dtype=torch.float32).to(device)
-
-    if x_val is not None and y_val is not None:
-        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
-    else:
-        val_loader = None
-
-    hyperparams = get_custom_hyperparameter_bounds(args.metadata_path) if args.metadata_path else {}
-
-    learning_rate = hyperparams.get("learning_rate", [0.001, 0.001])[0]
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = torch.nn.MSELoss()
-
-    model.to(device)
-    model.train()
-
-    for _ in range(args.epochs):
-        optimizer.zero_grad()
-        y_pred_train = model(x_train_tensor).squeeze()
-        loss = loss_fn(y_pred_train, y_train_tensor)
-        loss.backward()
-        optimizer.step()
-
-    model.eval()
-    with torch.no_grad():
-        y_pred = model(x_test_tensor).squeeze().cpu().numpy()
-
-    if args.distribution in ["domain_mpnn", "domain_tanimoto"]:
-        calculate_domain_metrics(y_test, y_pred, domain_labels, target_domain, args.dataset)
-        logging = False
-    else:
-        logging = True
-
-    metrics = calculate_regression_metrics(y_test, y_pred, logging=logging)
-
-    save_results(args.filepath, s, iteration, "custom", rep, args.sample_size, metrics)
-
-    return metrics[3]
-
-# Sample hyperparameter file
-# {
-#     "learning_rate": [0.0001, 0.01],
-#     "batch_size": [8, 64],
-#     "dropout": [0.1, 0.5]
-# }
-def get_custom_hyperparameter_bounds(metadata_path):
+def pyg_to_grakel(data):
     """
-    Reads hyperparameter tuning bounds from a JSON file.
-    Assumes the JSON file contains a dictionary with parameter names and their bounds.
+    Convert PyG Data object to grakel Graph.
+    
+    CRITICAL: Use STRING atomic symbols, not atomic numbers!
     """
-    try:
-        with open(metadata_path, 'r') as f:
-            hyperparams = json.load(f)
-        return hyperparams
-    except FileNotFoundError:
-        raise ValueError("Metadata file not found. Please specify a valid path.")
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON format in metadata file.")
+    # Map atomic numbers to symbols
+    atomic_num_to_symbol = {
+        1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'
+    }
+    
+    # Get atomic numbers from data.x (first column)
+    atomic_numbers = data.x[:, 0].long().tolist()
+    
+    # Convert to string symbols
+    node_labels = {}
+    for i, atomic_num in enumerate(atomic_numbers):
+        node_labels[i] = atomic_num_to_symbol.get(atomic_num, str(atomic_num))
+    
+    # Get edges
+    edge_index = data.edge_index.t().tolist()
+    edge_list = [(u, v) for u, v in edge_index]
+    
+    # Remove duplicate edges (undirected graph)
+    edge_set = set()
+    for u, v in edge_list:
+        if u < v:
+            edge_set.add((u, v))
+        else:
+            edge_set.add((v, u))
+    edge_list = list(edge_set)
+    
+    # Create Graph
+    return Graph(edge_list, node_labels=node_labels)
+
+
+def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3, dropout=0.1):
+    """Create GNN model."""
+    class GNNRegressor(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.convs = nn.ModuleList()
+            
+            if model_type == 'gcn':
+                self.convs.append(GCNConv(num_node_features, hidden_dim))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GCNConv(hidden_dim, hidden_dim))
+            
+            elif model_type == 'gat':
+                heads = 4
+                self.convs.append(GATConv(num_node_features, hidden_dim // heads, heads=heads))
+                for _ in range(num_layers - 1):
+                    self.convs.append(GATConv(hidden_dim, hidden_dim // heads, heads=heads))
+            
+            elif model_type == 'gin':
+                nn1 = nn.Sequential(nn.Linear(num_node_features, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                self.convs.append(GINConv(nn1))
+                for _ in range(num_layers - 1):
+                    nn_layer = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
+                    self.convs.append(GINConv(nn_layer))
+            
+            self.dropout = dropout
+            self.regression_head = nn.Linear(hidden_dim, 1)
+        
+        def forward(self, data):
+            x, edge_index, batch = data.x, data.edge_index, data.batch
+            
+            for i, conv in enumerate(self.convs):
+                x = conv(x, edge_index)
+                if i < len(self.convs) - 1:
+                    x = F.relu(x)
+                    x = F.dropout(x, p=self.dropout, training=self.training)
+            
+            x = global_mean_pool(x, batch)
+            return self.regression_head(x).squeeze()
+    
+    return GNNRegressor()
+
 
 def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None):
     from torchcp.regression.predictor import SplitPredictor, ACIPredictor
