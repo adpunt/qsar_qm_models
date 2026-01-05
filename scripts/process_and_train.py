@@ -1162,7 +1162,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec" or rep =="chemberta":
+            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec" or rep =="chemberta" or rep == "mhggnn":
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -1740,16 +1740,9 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 print(f"  Continuing without hybrid for this run...")
                 traceback.print_exc()  # Show full error for debugging
                 print("="*70 + "\n")
-        # ========== END NEW ==========
-        
-        # Read mmap files and train/test models for all molecular representations
-        # ========== MODIFIED: Add hybrid to list ==========
+
         reps_to_process = list(args.molecular_representations)
-        if 'hybrid' in parsed_reps:
-            reps_to_process.append('hybrid')
-        
         for rep in reps_to_process:
-        # ========== END MODIFIED ==========
             if rep != "graph":
                 try: 
                     for model in args.models:
@@ -1867,7 +1860,6 @@ def main():
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
-            # TODO: uncomment this!!
             try: 
                 process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
             except Exception as e:
