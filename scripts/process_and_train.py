@@ -1016,6 +1016,7 @@ def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
         if model_pickle_path is None:
             search_paths = [
                 os.path.expanduser('~/repos/materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle'),
+                '/data/stat-cadd/scat9264/materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle',  # Add this
                 os.path.join(data_dir, 'mhggnn_pretrained_model_0724_2023.pickle'),
                 os.path.join(data_dir, '../materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle')
             ]
