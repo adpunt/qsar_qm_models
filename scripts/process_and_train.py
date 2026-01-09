@@ -1017,6 +1017,7 @@ def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
             search_paths = [
                 os.path.expanduser('~/repos/materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle'),
                 os.path.join(data_dir, 'mhggnn_pretrained_model_0724_2023.pickle'),
+                os.path.join(data_dir, '../materials.mhg-ged/mhggnn_pretrained_model_0724_2023.pickle')
             ]
             for path in search_paths:
                 if os.path.exists(path):
