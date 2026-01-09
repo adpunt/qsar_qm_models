@@ -992,6 +992,7 @@ def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
         if materials_repo_path is None:
             search_paths = [
                 os.path.expanduser('~/repos/materials'),
+                '/data/stat-cadd/scat9264/materials',  # Add this
                 os.path.join(data_dir, 'materials'),
                 '../materials',
             ]
@@ -1005,6 +1006,7 @@ def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
         
         # Add to path
         models_path = os.path.join(materials_repo_path, 'models')
+        print(f'mhggnn path: {models_path}')
         if models_path not in sys.path:
             sys.path.insert(0, models_path)
         

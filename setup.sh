@@ -47,6 +47,16 @@ if [ -z "${CONDA_PREFIX:-}" ]; then
     exit 1
 fi
 
+# --- Ensure libstdc++ is new enough for RDKit ---
+echo "Ensuring libstdc++ compatibility..."
+if command -v micromamba &>/dev/null; then
+    micromamba install -c conda-forge 'libstdcxx-ng>=12' -y
+elif command -v mamba &>/dev/null; then
+    mamba install -c conda-forge 'libstdcxx-ng>=12' -y
+else
+    conda install -c conda-forge 'libstdcxx-ng>=12' -y
+fi
+
 echo "Setting shared library paths..."
 if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
