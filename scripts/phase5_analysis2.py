@@ -56,8 +56,14 @@ NOISE_STRATEGY_LABELS = {
     'heteroscedastic': 'Heteroscedastic',
     'legacy': 'Legacy',
     'valprop': 'Value-proportional',
+    'proportional': 'Proportional',
     'quantile': 'Quantile-based',
     'outlier': 'Outlier injection',
+    'conformal': 'Conformal',
+    'dnn': 'DNN-based',
+    'mlp': 'MLP-based',
+    'qrf': 'QRF-based',
+    'rf': 'RF-based',
 }
 
 NOISE_STRATEGY_COLORS = {
@@ -66,8 +72,14 @@ NOISE_STRATEGY_COLORS = {
     'heteroscedastic': '#e74c3c',
     'legacy': '#2ecc71',
     'valprop': '#9b59b6',
+    'proportional': '#9b59b6',
     'quantile': '#f39c12',
     'outlier': '#e67e22',
+    'conformal': '#1abc9c',
+    'dnn': '#e74c3c',
+    'mlp': '#3498db',
+    'qrf': '#27ae60',
+    'rf': '#f39c12',
 }
 
 MODEL_LABELS = {
@@ -91,8 +103,19 @@ REP_LABELS = {
 
 
 def get_clean_label(value, label_dict):
-    """Get clean display label from dictionary"""
-    return label_dict.get(value, value.upper() if value else 'Unknown')
+    """Get clean display label from dictionary (case-insensitive)"""
+    if value is None:
+        return 'Unknown'
+    value_lower = value.lower()
+    return label_dict.get(value_lower, value.upper())
+
+
+def get_color(value, color_dict, default='#888888'):
+    """Get color from dictionary (case-insensitive)"""
+    if value is None:
+        return default
+    value_lower = value.lower()
+    return color_dict.get(value_lower, default)
 
 
 # ============================================================================
@@ -114,10 +137,15 @@ def load_phase5_results(results_dir):
     phase5_files = list(results_dir.glob("phase5*.csv"))
     phase5_files = [f for f in phase5_files if '_uncertainty' not in f.name.lower()]
     
+    # Exclude size experiment files (contain n followed by digits like n500, n1000)
+    import re
+    size_pattern = re.compile(r'_n\d+[_.]')
+    phase5_files = [f for f in phase5_files if not size_pattern.search(f.name)]
+    
     if not phase5_files:
         raise FileNotFoundError(f"No phase5*.csv files found in {results_dir}")
     
-    print(f"Found {len(phase5_files)} Phase 5 result files")
+    print(f"Found {len(phase5_files)} Phase 5 result files (excluded size experiment files)")
     
     all_results = []
     for filepath in phase5_files:
@@ -142,53 +170,57 @@ def parse_phase5_filenames(df):
     """
     required_cols = ['model', 'representation', 'noise_strategy']
     
+    # Valid values for validation
+    VALID_MODELS = {'rf', 'qrf', 'xgboost', 'ngboost', 'dnn', 'bnn', 'gp', 'gauche', 'mlp', 'conformal'}
+    VALID_REPS = {'ecfp4', 'pdv', 'sns', 'smiles', 'graph', 'mordred', 'maccs'}
+    
     # Check if columns already exist in the data
     existing_cols = [col for col in required_cols if col in df.columns]
     
     if len(existing_cols) == len(required_cols):
         print("Using existing model/representation/noise_strategy columns from CSV")
-        # Just ensure they're not null
-        before = len(df)
-        df = df.dropna(subset=required_cols)
-        after = len(df)
-        if before != after:
-            print(f"Dropped {before - after} rows with missing metadata")
-        return df
-    
-    # Otherwise parse from filenames
-    print("Parsing model/representation/noise_strategy from filenames")
-    
-    def extract_info(filename):
-        name = filename.replace('.csv', '')
-        parts = name.split('_')
+    else:
+        # Parse from filenames
+        print("Parsing model/representation/noise_strategy from filenames")
         
-        # phase5_rep_model_noisestrategy
-        if len(parts) >= 4:
+        def extract_info(filename):
+            name = filename.replace('.csv', '')
+            parts = name.split('_')
+            
+            # phase5_rep_model_noisestrategy
+            if len(parts) >= 4:
+                return pd.Series({
+                    'representation': parts[1],
+                    'model': parts[2],
+                    'noise_strategy': parts[3],
+                })
+            
             return pd.Series({
-                'representation': parts[1],
-                'model': parts[2],
-                'noise_strategy': parts[3],
+                'representation': None,
+                'model': None,
+                'noise_strategy': None,
             })
         
-        return pd.Series({
-            'representation': None,
-            'model': None,
-            'noise_strategy': None,
-        })
-    
-    parsed = df['source_file'].apply(extract_info)
-    
-    # Drop existing columns if any (to avoid duplicates)
-    df = df.drop(columns=[c for c in existing_cols if c in df.columns], errors='ignore')
-    df = pd.concat([df, parsed], axis=1)
+        parsed = df['source_file'].apply(extract_info)
+        
+        # Drop existing columns if any (to avoid duplicates)
+        df = df.drop(columns=[c for c in existing_cols if c in df.columns], errors='ignore')
+        df = pd.concat([df, parsed], axis=1)
     
     # Drop rows with missing info
     before = len(df)
     df = df.dropna(subset=required_cols)
     after = len(df)
-    
     if before != after:
-        print(f"Dropped {before - after} rows with unparseable filenames")
+        print(f"Dropped {before - after} rows with missing metadata")
+    
+    # Filter to valid models and representations (exclude size experiment remnants)
+    before = len(df)
+    df = df[df['model'].str.lower().isin(VALID_MODELS)]
+    df = df[df['representation'].str.lower().isin(VALID_REPS)]
+    after = len(df)
+    if before != after:
+        print(f"Filtered out {before - after} rows with invalid model/representation values")
     
     return df
 
@@ -299,7 +331,7 @@ def create_figure8(df, metrics_df, output_dir):
         avg_curve = strategy_data.groupby('sigma')['r2'].mean().reset_index()
         
         if len(avg_curve) > 2:
-            color = NOISE_STRATEGY_COLORS.get(strategy, '#888888')
+            color = get_color(strategy, NOISE_STRATEGY_COLORS)
             label = get_clean_label(strategy, NOISE_STRATEGY_LABELS)
             
             ax_a.plot(avg_curve['sigma'], avg_curve['r2'],
@@ -327,7 +359,7 @@ def create_figure8(df, metrics_df, output_dir):
     strategy_stats = strategy_stats.sort_values('retention_mean', ascending=True)
     
     y_pos = np.arange(len(strategy_stats))
-    colors = [NOISE_STRATEGY_COLORS.get(s, '#888888') for s in strategy_stats['noise_strategy']]
+    colors = [get_color(s, NOISE_STRATEGY_COLORS) for s in strategy_stats['noise_strategy']]
     labels = [get_clean_label(s, NOISE_STRATEGY_LABELS) for s in strategy_stats['noise_strategy']]
     
     ax_b.barh(y_pos, strategy_stats['retention_mean'],
