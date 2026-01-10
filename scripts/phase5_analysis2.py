@@ -122,6 +122,8 @@ def load_phase5_results(results_dir):
     
     Phase 5 format: phase5_{model}_{noise_strategy}.csv
     Phase 0 format: phase0_{rep}_{model}.csv (standard Gaussian noise)
+    
+    Only includes Phase 0 data for model/rep combinations that exist in Phase 5.
     """
     print("\n" + "=" * 80)
     print("LOADING PHASE 5 NOISE STRATEGY DATA")
@@ -133,62 +135,86 @@ def load_phase5_results(results_dir):
     import re
     size_pattern = re.compile(r'_n\d+[_.]')
     
-    # Load Phase 5 files
+    # Load Phase 5 files first
     phase5_files = list(results_dir.glob("phase5*.csv"))
     phase5_files = [f for f in phase5_files if '_uncertainty' not in f.name.lower()]
-    original_count = len(phase5_files)
     phase5_files = [f for f in phase5_files if not size_pattern.search(f.name)]
     
-    print(f"Found {len(phase5_files)} Phase 5 result files (excluded {original_count - len(phase5_files)} size experiment files)")
+    print(f"Found {len(phase5_files)} Phase 5 result files")
     
-    # Load Phase 0 files as "legacy" noise strategy
-    phase0_files = list(results_dir.glob("phase0*.csv"))
-    phase0_files = [f for f in phase0_files if '_uncertainty' not in f.name.lower()]
-    print(f"Found {len(phase0_files)} Phase 0 files to include as 'legacy' strategy")
-    
-    all_results = []
-    
-    # Load Phase 5
+    phase5_dfs = []
     for filepath in phase5_files:
         df = pd.read_csv(filepath)
         df['source_file'] = filepath.name
         df['phase'] = 'phase5'
-        all_results.append(df)
+        phase5_dfs.append(df)
     
-    # Load Phase 0 as legacy
+    if not phase5_dfs:
+        raise FileNotFoundError(f"No phase5*.csv files found in {results_dir}")
+    
+    phase5_df = pd.concat(phase5_dfs, ignore_index=True)
+    
+    # Rename 'rep' to 'representation' for consistency
+    if 'rep' in phase5_df.columns:
+        phase5_df = phase5_df.rename(columns={'rep': 'representation'})
+    
+    # Get unique model/rep combinations from Phase 5
+    phase5_combos = set(zip(phase5_df['model'].str.lower(), phase5_df['representation'].str.lower()))
+    print(f"Phase 5 model/rep combinations: {phase5_combos}")
+    
+    # Load Phase 0 files as "legacy" noise strategy
+    phase0_files = list(results_dir.glob("phase0*.csv"))
+    phase0_files = [f for f in phase0_files if '_uncertainty' not in f.name.lower()]
+    print(f"Found {len(phase0_files)} Phase 0 files")
+    
+    phase0_dfs = []
     for filepath in phase0_files:
         df = pd.read_csv(filepath)
         df['source_file'] = filepath.name
         df['phase'] = 'phase0'
-        df['noise_strategy'] = 'legacy'  # Pre-assign noise strategy
-        all_results.append(df)
+        df['noise_strategy'] = 'legacy'
+        
+        # Rename 'rep' to 'representation'
+        if 'rep' in df.columns:
+            df = df.rename(columns={'rep': 'representation'})
+        
+        # Only keep rows matching Phase 5 combinations
+        if 'model' in df.columns and 'representation' in df.columns:
+            df['_combo'] = list(zip(df['model'].str.lower(), df['representation'].str.lower()))
+            df = df[df['_combo'].isin(phase5_combos)]
+            df = df.drop(columns=['_combo'])
+        
+        if len(df) > 0:
+            phase0_dfs.append(df)
     
-    if not all_results:
-        raise FileNotFoundError(f"No phase5*.csv or phase0*.csv files found in {results_dir}")
+    # Combine
+    all_dfs = phase5_dfs + phase0_dfs
+    results_df = pd.concat(all_dfs, ignore_index=True)
     
-    results_df = pd.concat(all_results, ignore_index=True)
+    # Rename again in case phase5 didn't have it
+    if 'rep' in results_df.columns:
+        results_df = results_df.rename(columns={'rep': 'representation'})
+    
+    phase0_rows = len(results_df[results_df['phase'] == 'phase0'])
+    print(f"Included {phase0_rows} Phase 0 rows matching Phase 5 configurations")
     print(f"Loaded {len(results_df)} total rows")
-    print(f"Columns in data: {list(results_df.columns)}")
     
     return results_df
 
 
 def parse_phase5_filenames(df):
     """
-    Parse experimental info from filenames and CSV columns.
+    Parse noise_strategy from filenames for Phase 5 data.
+    Phase 0 rows already have noise_strategy='legacy' assigned.
     
     Phase 5 filename format: phase5_{prefix}_{noise_strategy}.csv
-    Phase 0: Already has noise_strategy='legacy' assigned during loading
-    
-    CSV columns: model, rep (representation), sigma, r2, etc.
     """
-    # Rename 'rep' to 'representation' if it exists
+    # Rename 'rep' to 'representation' if still needed
     if 'rep' in df.columns and 'representation' not in df.columns:
         df = df.rename(columns={'rep': 'representation'})
         print("Renamed 'rep' column to 'representation'")
     
     # Parse noise_strategy from filename for Phase 5 rows only
-    # Phase 0 rows already have noise_strategy='legacy'
     def extract_noise_strategy(row):
         if pd.notna(row.get('noise_strategy')):
             return row['noise_strategy']  # Already set (e.g., phase0 legacy)
@@ -199,7 +225,6 @@ def parse_phase5_filenames(df):
         
         # phase5_prefix_noisestrategy or phase5_prefix_noise_strategy
         if len(parts) >= 3:
-            # Join everything after the second part as noise_strategy
             return '_'.join(parts[2:])
         return None
     
@@ -223,7 +248,6 @@ def parse_phase5_filenames(df):
         print(f"Dropped {before - after} rows with missing values")
     
     # Filter out rows with invalid R² values (failed runs)
-    # Valid R² should be <= 1, and realistically > -2 for any reasonable model
     before = len(df)
     df = df[(df['r2'] >= -2) & (df['r2'] <= 1.01)]
     after = len(df)
@@ -231,9 +255,8 @@ def parse_phase5_filenames(df):
         print(f"Filtered out {before - after} rows with invalid R² values (outside [-2, 1])")
     
     # Filter out GNN models, conformal methods, and graph representations
-    # These are experimental/problematic and not part of core analysis
     exclude_model_patterns = ['gin', 'gcn', 'conformal', 'graph']
-    exclude_reps = ['graph']
+    exclude_reps = ['graph', 'mhggnn']
     
     before = len(df)
     model_mask = ~df['model'].str.lower().str.contains('|'.join(exclude_model_patterns), regex=True)
