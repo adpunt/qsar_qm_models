@@ -184,18 +184,20 @@ def load_phase0_data(results_dir="../results"):
     
     results_dir = Path(results_dir)
     
-    # Load both file patterns (same as phase0_analysis.py)
+    # Load all Phase 0 file patterns
     screening_files = list(results_dir.glob("phase0c_screen_*.csv"))
     mhggnn_files = list(results_dir.glob("phase0_mhggnn_*.csv"))
+    continuous_pdv_files = list(results_dir.glob("phase0_continuous_pdv_*.csv"))
     
-    all_files = screening_files + mhggnn_files
+    all_files = screening_files + mhggnn_files + continuous_pdv_files
     
     if not all_files:
-        print("ERROR: No phase0c_screen_*.csv or phase0_mhggnn_*.csv files found!")
+        print("ERROR: No phase0 files found!")
         return pd.DataFrame()
     
     print(f"Found {len(screening_files)} standard screening files")
     print(f"Found {len(mhggnn_files)} MHGGNN files")
+    print(f"Found {len(continuous_pdv_files)} continuous PDV files")
     print(f"Total: {len(all_files)} files")
     
     all_data = []
@@ -212,6 +214,15 @@ def load_phase0_data(results_dir="../results"):
                     df['representation'] = 'mhggnn'
                 else:
                     df['rep'] = 'mhggnn'
+            
+            # For continuous PDV files, set representation to 'pdv'
+            if 'continuous_pdv' in filepath.name.lower():
+                if 'rep' in df.columns:
+                    df['rep'] = 'pdv'
+                elif 'representation' in df.columns:
+                    df['representation'] = 'pdv'
+                else:
+                    df['rep'] = 'pdv'
             
             # Ensure 'rep' column exists (standardize from 'representation' if needed)
             if 'representation' in df.columns and 'rep' not in df.columns:
@@ -425,15 +436,15 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     ax_b.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL C: DNN vs BNN variants
+    # PANEL C: MLP vs BNN variants
     # ========================================================================
     ax_c = fig.add_subplot(gs[0, 2])
     
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
-    colors_dnn = ['#34495e', '#e67e22', '#95a5a6', '#d35400']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
+    colors_mlp = ['#34495e', '#e67e22', '#95a5a6', '#d35400']
     styles = ['-', '--', '-.', ':']
     
-    for model, color, style in zip(dnn_variants, colors_dnn, styles):
+    for model, color, style in zip(mlp_variants, colors_mlp, styles):
         model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
         if len(model_data) > 0:
             avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
@@ -443,7 +454,7 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     
     ax_c.set_xlabel('Noise level (σ)', fontsize=9)
     ax_c.set_ylabel('R² score', fontsize=9)
-    ax_c.set_title(f'C. DNN vs BNN Variants ({format_representation(primary_rep)})', 
+    ax_c.set_title(f'C. MLP vs BNN Variants ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
     ax_c.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
     ax_c.spines['top'].set_visible(False)
@@ -564,7 +575,7 @@ def create_figure4_paired_comparisons(df, metrics_df, output_dir):
     pairs = [
         ('rf', 'qrf', 'RF vs QRF'),
         ('xgboost', 'ngboost', 'XGBoost vs NGBoost'),
-        ('dnn', 'gauche', 'DNN vs GP'),
+        ('mlp', 'gauche', 'MLP vs GP'),
     ]
     
     representations = sorted(df['representation'].unique())
@@ -666,7 +677,7 @@ def create_summary_tables(metrics_df, output_dir):
     print(f"✓ Saved full breakdown table")
     
     # Table 3: Paired comparisons
-    pairs = [('rf', 'qrf'), ('xgboost', 'ngboost'), ('dnn', 'gauche')]
+    pairs = [('rf', 'qrf'), ('xgboost', 'ngboost'), ('mlp', 'gauche')]
     pair_results = []
     
     for det, prob in pairs:
