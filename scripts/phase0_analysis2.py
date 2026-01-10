@@ -96,6 +96,9 @@ def format_representation(rep):
 
 def format_model(model):
     """Format model names for display"""
+    model_lower = model.lower()
+    
+    # Direct mappings
     model_map = {
         'rf': 'RF',
         'qrf': 'QRF',
@@ -104,18 +107,51 @@ def format_model(model):
         'dnn': 'DNN',
         'mlp': 'MLP',
         'gauche': 'GP',
+        'svm': 'SVM',
         'gcn': 'GCN',
         'gin': 'GIN',
         'gat': 'GAT',
-        'svm': 'SVM',
+        # BNN variants
         'dnn_bnn_full': 'DNN-BNN-Full',
         'dnn_bnn_last': 'DNN-BNN-Last',
         'dnn_bnn_variational': 'DNN-BNN-Var',
         'mlp_bnn_full': 'MLP-BNN-Full',
         'mlp_bnn_last': 'MLP-BNN-Last',
         'mlp_bnn_variational': 'MLP-BNN-Var',
+        # MTL variants
+        'mtl': 'MTL',
+        'mtl_bnn_full': 'MTL-BNN-Full',
+        'mtl_bnn_last': 'MTL-BNN-Last',
+        'mtl_bnn_variational': 'MTL-BNN-Var',
+        # Flexible variants
+        'flexible_dnn': 'Flex-DNN',
+        'flexible_bnn_full': 'Flex-BNN-Full',
+        'flexible_bnn_last': 'Flex-BNN-Last',
+        'flexible_bnn_variational': 'Flex-BNN-Var',
+        # Residual variants
+        'residual_mlp': 'Res-MLP',
+        'residual_mlp_bnn_full': 'Res-MLP-BNN-Full',
+        'residual_mlp_bnn_last': 'Res-MLP-BNN-Last',
+        'residual_mlp_bnn_variational': 'Res-MLP-BNN-Var',
+        # Conformal variants
+        'conformal_rf': 'Conf-RF',
+        'conformal_qrf': 'Conf-QRF',
+        'conformal_xgboost': 'Conf-XGB',
+        'conformal_gauche': 'Conf-GP',
+        'conformal_dnn': 'Conf-DNN',
     }
-    return model_map.get(model.lower(), model.capitalize())
+    
+    if model_lower in model_map:
+        return model_map[model_lower]
+    
+    # Handle any remaining patterns
+    result = model
+    result = result.replace('_', '-')
+    result = result.replace('bnn-full', 'BNN-Full')
+    result = result.replace('bnn-last', 'BNN-Last')
+    result = result.replace('bnn-variational', 'BNN-Var')
+    
+    return result
 
 # ============================================================================
 # DATA LOADING AND METRICS CALCULATION
@@ -196,6 +232,15 @@ def load_screening_results(results_dir="../results"):
     }).reset_index()
     
     results.rename(columns={'rep': 'representation', 'iteration': 'n_seeds'}, inplace=True)
+    
+    # Filter out problematic data
+    # - 'graph' representation: no actual data, just placeholder
+    # - 'gcn' model: rogue data from previous experiments
+    print("\nFiltering out problematic data...")
+    before_filter = len(results)
+    results = results[~results['representation'].isin(['graph'])]
+    results = results[~results['model'].str.lower().isin(['gcn', 'gin', 'gat'])]
+    print(f"  Removed {before_filter - len(results)} rows (graph rep, GNN models)")
     
     print(f"\nFinal aggregated data: {len(results)} rows")
     print(f"Unique models: {results['model'].nunique()}")
@@ -543,6 +588,80 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
     output_path = Path(output_dir) / "figure1_global_robustness_landscape.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"✓ Saved Figure 1 to {output_path}")
+    plt.close()
+
+
+def create_supplementary_degradation_curves(df, metrics_df, output_dir):
+    """
+    Supplementary figure: R² degradation curves for top 5 vs bottom 5
+    """
+    print("\n" + "="*80)
+    print("GENERATING SUPPLEMENTARY: DEGRADATION CURVES")
+    print("="*80)
+    
+    fig, ax = plt.subplots(1, 1, figsize=(10, 7))
+    
+    # Select top 5 and bottom 5 for visualization
+    top_5 = metrics_df.nlargest(5, 'robustness_score')
+    bottom_5 = metrics_df.nsmallest(5, 'robustness_score')
+    
+    # Plot top configurations (solid lines)
+    for idx, (_, row) in enumerate(top_5.iterrows()):
+        model, rep = row['model'], row['representation']
+        pair_data = df[(df['model'] == model) & (df['representation'] == rep)].sort_values('sigma')
+        
+        if len(pair_data) == 0:
+            continue
+        
+        color = REPRESENTATION_COLORS.get(rep, '#999999')
+        label = f"{format_model(model)}/{format_representation(rep)} (top #{idx+1})"
+        ax.plot(pair_data['sigma'], pair_data['r2'], 
+                marker='o', markersize=5, linewidth=2.5, alpha=0.9,
+                label=label, color=color, linestyle='-')
+        
+        # Annotate NSI on the line
+        mid_idx = len(pair_data) // 2
+        if mid_idx < len(pair_data):
+            ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] + 0.02, 
+                    f"NSI={row['nsi_r2']:.3f}", fontsize=7, color=color, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                              alpha=0.8, edgecolor=color, linewidth=1))
+    
+    # Plot bottom configurations (dashed lines)
+    for idx, (_, row) in enumerate(bottom_5.iterrows()):
+        model, rep = row['model'], row['representation']
+        pair_data = df[(df['model'] == model) & (df['representation'] == rep)].sort_values('sigma')
+        
+        if len(pair_data) == 0:
+            continue
+        
+        color = REPRESENTATION_COLORS.get(rep, '#999999')
+        label = f"{format_model(model)}/{format_representation(rep)} (bottom #{idx+1})"
+        ax.plot(pair_data['sigma'], pair_data['r2'], 
+                marker='s', markersize=5, linewidth=2, alpha=0.7,
+                label=label, color=color, linestyle='--')
+        
+        # Annotate NSI
+        mid_idx = len(pair_data) // 2
+        if mid_idx < len(pair_data):
+            ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] - 0.03, 
+                    f"NSI={row['nsi_r2']:.3f}", fontsize=7, color=color, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                              alpha=0.8, edgecolor=color, linewidth=1))
+    
+    ax.set_xlabel('Noise level (σ)', fontsize=10)
+    ax.set_ylabel('R² score', fontsize=10)
+    ax.set_title('R² Degradation Curves: Top 5 vs Bottom 5 Configurations\n(Ranked by robustness score)', 
+                 fontsize=11, fontweight='bold', pad=12)
+    ax.legend(fontsize=7, loc='lower left', ncol=2, frameon=True, framealpha=0.9)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax.set_ylim(bottom=0)
+    
+    output_path = Path(output_dir) / "supplementary_degradation_curves.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✓ Saved degradation curves to {output_path}")
     plt.close()
 
 
@@ -1013,6 +1132,7 @@ def main(results_dir="../results"):
     print("="*80)
     
     create_figure1_global_landscape(df, metrics_df, output_dir)
+    create_supplementary_degradation_curves(df, metrics_df, output_dir)
     create_figure2_representation_effects(df, metrics_df, output_dir)
     create_supplementary_s1(metrics_df, output_dir)
     create_supplementary_s2(metrics_df, output_dir)

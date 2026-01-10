@@ -1,16 +1,15 @@
 """
-Phase 1 Analysis - Deterministic vs Probabilistic Counterparts
-Generates Figure 3 and Supplementary S4
+Phase 1 Analysis - Deterministic vs Probabilistic Models
+=========================================================
 
-Based on the detailed outline:
-- Figure 3: Deterministic vs probabilistic models under noise (4 panels)
-- Supplementary S4: Pairwise difference plots
+Pulls data from Phase 0 screening results and analyzes:
+- Deterministic models: RF, XGBoost, DNN, MLP
+- Probabilistic models: QRF, NGBoost, GP/GAUCHE, BNN variants
 
-Key metrics used (NO AUC as primary robustness metric):
+Key metrics (NO AUC):
 - NSI (Noise Sensitivity Index): slope of R² vs σ
 - Retention percentage: (R²_high / R²_baseline) * 100
 - Baseline R² at σ=0
-- Trade-off between clean accuracy and robustness
 """
 
 import pandas as pd
@@ -30,7 +29,7 @@ sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Helvetica'],
+    'font.sans-serif': ['DejaVu Sans', 'Arial', 'Helvetica'],
     'font.size': 8,
     'axes.labelsize': 9,
     'axes.titlesize': 10,
@@ -45,188 +44,252 @@ plt.rcParams.update({
     'lines.markersize': 4,
 })
 
-# Color palettes
 COLORS = {
     'deterministic': '#0173B2',
     'probabilistic': '#DE8F05',
-    'full_bnn': '#e74c3c',
-    'last_layer': '#95a5a6',
-    'variational': '#d35400',
 }
 
 REPRESENTATION_COLORS = {
     'pdv': '#0173B2',
     'sns': '#029E73',
     'ecfp4': '#DE8F05',
+    'smiles': '#CA3542',
+    'mhggnn': '#CC79A7',
+    'graph': '#949494',
+}
+
+MODEL_COLORS = {
+    'rf': '#3498db',
+    'qrf': '#2ecc71',
+    'xgboost': '#e74c3c',
+    'ngboost': '#f39c12',
+    'dnn': '#34495e',
+    'mlp': '#2c3e50',
+    'gauche': '#9b59b6',
+    'dnn_bnn_full': '#e67e22',
+    'dnn_bnn_last': '#95a5a6',
+    'dnn_bnn_variational': '#d35400',
+    'mlp_bnn_full': '#8e44ad',
+    'mlp_bnn_last': '#7f8c8d',
+    'mlp_bnn_variational': '#c0392b',
 }
 
 # ============================================================================
-# DATA LOADING AND PARSING
+# FORMATTING
 # ============================================================================
 
-def load_phase1_results(results_dir="../results"):
-    """Load Phase 1 results files"""
+def format_representation(rep):
+    mapping = {
+        'pdv': 'PDV',
+        'sns': 'SNS',
+        'ecfp4': 'ECFP4',
+        'smiles': 'SMILES',
+        'mhggnn': 'MHGGNN',
+        'graph': 'Graph',
+    }
+    return mapping.get(rep.lower(), rep.upper())
+
+
+def format_model(model):
+    """Format model names for display"""
+    model_lower = model.lower()
+    
+    mapping = {
+        'rf': 'RF',
+        'qrf': 'QRF',
+        'xgboost': 'XGBoost',
+        'ngboost': 'NGBoost',
+        'dnn': 'DNN',
+        'mlp': 'MLP',
+        'gauche': 'GP',
+        'svm': 'SVM',
+        # BNN variants
+        'dnn_bnn_full': 'DNN-BNN-Full',
+        'dnn_bnn_last': 'DNN-BNN-Last',
+        'dnn_bnn_variational': 'DNN-BNN-Var',
+        'mlp_bnn_full': 'MLP-BNN-Full',
+        'mlp_bnn_last': 'MLP-BNN-Last',
+        'mlp_bnn_variational': 'MLP-BNN-Var',
+        # MTL variants
+        'mtl': 'MTL',
+        'mtl_bnn_full': 'MTL-BNN-Full',
+        'mtl_bnn_last': 'MTL-BNN-Last',
+        'mtl_bnn_variational': 'MTL-BNN-Var',
+        # Flexible variants
+        'flexible_dnn': 'Flex-DNN',
+        'flexible_bnn_full': 'Flex-BNN-Full',
+        'flexible_bnn_last': 'Flex-BNN-Last',
+        'flexible_bnn_variational': 'Flex-BNN-Var',
+        # Residual variants
+        'residual_mlp': 'Res-MLP',
+        'residual_mlp_bnn_full': 'Res-MLP-BNN-Full',
+        'residual_mlp_bnn_last': 'Res-MLP-BNN-Last',
+        'residual_mlp_bnn_variational': 'Res-MLP-BNN-Var',
+        # Conformal variants
+        'conformal_rf': 'Conf-RF',
+        'conformal_qrf': 'Conf-QRF',
+        'conformal_xgboost': 'Conf-XGB',
+        'conformal_gauche': 'Conf-GP',
+        'conformal_dnn': 'Conf-DNN',
+    }
+    
+    if model_lower in mapping:
+        return mapping[model_lower]
+    
+    # Handle any remaining patterns
+    result = model.replace('_', '-')
+    return result
+
+
+def get_model_type(model_name):
+    """Classify model as deterministic or probabilistic"""
+    model_lower = model_name.lower()
+    
+    # Probabilistic models
+    prob_keywords = ['qrf', 'ngboost', 'gauche', 'bnn', 'gp']
+    if any(kw in model_lower for kw in prob_keywords):
+        return 'probabilistic'
+    
+    return 'deterministic'
+
+
+def get_model_pair(model_name):
+    """Get the deterministic/probabilistic pair for a model"""
+    model_lower = model_name.lower()
+    
+    pairs = {
+        'rf': ('rf', 'qrf'),
+        'qrf': ('rf', 'qrf'),
+        'xgboost': ('xgboost', 'ngboost'),
+        'ngboost': ('xgboost', 'ngboost'),
+        'dnn': ('dnn', 'dnn_bnn'),
+        'mlp': ('mlp', 'mlp_bnn'),
+    }
+    
+    for key, pair in pairs.items():
+        if key in model_lower:
+            return pair
+    
+    return (model_name, None)
+
+# ============================================================================
+# DATA LOADING - FROM PHASE 0 DATA
+# ============================================================================
+
+def load_phase0_data(results_dir="../results"):
+    """Load Phase 0 screening data for Phase 1 analysis"""
     print("\n" + "="*80)
-    print("LOADING PHASE 1 DATA")
+    print("LOADING PHASE 0 DATA FOR PHASE 1 ANALYSIS")
     print("="*80)
     
     results_dir = Path(results_dir)
     
-    # Find all phase1 files
-    phase1_files = {
-        '1a': list(results_dir.glob("phase1a_*.csv")),
-        '1b': list(results_dir.glob("phase1b_*.csv")),
-        '1c': list(results_dir.glob("phase1c_*.csv"))
-    }
+    # Load both file patterns (same as phase0_analysis.py)
+    screening_files = list(results_dir.glob("phase0c_screen_*.csv"))
+    mhggnn_files = list(results_dir.glob("phase0_mhggnn_*.csv"))
     
-    print(f"Found files:")
-    for phase, files in phase1_files.items():
-        print(f"  Phase {phase}: {len(files)} files")
+    all_files = screening_files + mhggnn_files
     
-    all_results = []
-    
-    for phase, files in phase1_files.items():
-        for filepath in files:
-            # Skip per_epoch and uncertainty files for now
-            if 'per_epoch' in filepath.name or 'uncertainty' in filepath.name:
-                continue
-            
-            try:
-                df = pd.read_csv(filepath)
-                df['phase'] = phase
-                df['source_file'] = filepath.name
-                all_results.append(df)
-            except Exception as e:
-                print(f"Warning: Could not read {filepath.name}: {e}")
-    
-    if not all_results:
-        print("ERROR: No Phase 1 results files loaded!")
+    if not all_files:
+        print("ERROR: No phase0c_screen_*.csv or phase0_mhggnn_*.csv files found!")
         return pd.DataFrame()
     
-    results_df = pd.concat(all_results, ignore_index=True)
+    print(f"Found {len(screening_files)} standard screening files")
+    print(f"Found {len(mhggnn_files)} MHGGNN files")
+    print(f"Total: {len(all_files)} files")
     
-    print(f"\nLoaded {len(results_df)} result rows")
-    print(f"Phases: {results_df['phase'].unique()}")
+    all_data = []
+    for filepath in all_files:
+        try:
+            df = pd.read_csv(filepath)
+            df['source_file'] = filepath.name
+            
+            # For MHGGNN files, set representation
+            if 'mhggnn' in filepath.name.lower():
+                if 'rep' in df.columns:
+                    df['rep'] = 'mhggnn'
+                else:
+                    df['rep'] = 'mhggnn'
+            
+            all_data.append(df)
+        except Exception as e:
+            print(f"Warning: {filepath.name}: {e}")
     
-    return results_df
+    if not all_data:
+        return pd.DataFrame()
+    
+    combined_df = pd.concat(all_data, ignore_index=True)
+    combined_df['model'] = combined_df['model'].str.replace('_split', '', regex=False)
+    
+    print(f"\nRaw data loaded: {len(combined_df)} rows")
+    
+    # Filter catastrophic failures
+    combined_df = combined_df[combined_df['r2'] > -10]
+    print(f"After R² > -10 filter: {len(combined_df)} rows")
+    
+    # Add model_type classification
+    combined_df['model_type'] = combined_df['model'].apply(get_model_type)
+    
+    # Standardize column names
+    if 'rep' in combined_df.columns:
+        combined_df = combined_df.rename(columns={'rep': 'representation'})
+    
+    # Aggregate across iterations
+    results = combined_df.groupby(['model', 'representation', 'sigma', 'model_type']).agg({
+        'r2': 'mean',
+        'rmse': 'mean',
+        'mae': 'mean',
+        'iteration': 'count'
+    }).reset_index()
+    results.rename(columns={'iteration': 'n_seeds'}, inplace=True)
+    
+    # Filter out problematic data
+    print("\nFiltering out problematic data...")
+    before_filter = len(results)
+    results = results[~results['representation'].isin(['graph'])]
+    results = results[~results['model'].str.lower().isin(['gcn', 'gin', 'gat'])]
+    print(f"  Removed {before_filter - len(results)} rows (graph rep, GNN models)")
+    
+    print(f"\nFinal aggregated data: {len(results)} rows")
+    print(f"Unique models: {results['model'].nunique()}")
+    print(f"Unique representations: {results['representation'].nunique()}")
+    print(f"Representations: {sorted(results['representation'].unique())}")
+    
+    # Model type breakdown
+    det_count = len(results[results['model_type'] == 'deterministic']['model'].unique())
+    prob_count = len(results[results['model_type'] == 'probabilistic']['model'].unique())
+    print(f"\nModel types:")
+    print(f"  Deterministic: {det_count} models")
+    print(f"  Probabilistic: {prob_count} models")
+    
+    return results
 
-
-def parse_model_info(df):
-    """
-    Parse model information from filenames
-    
-    Expected filename format:
-    phase1X_REPRESENTATION_BASEMODEL_TRANSFORMATION.csv
-    
-    Examples:
-    - phase1a_pdv_rf_baseline.csv
-    - phase1a_pdv_rf.csv (deterministic, no transformation)
-    - phase1b_pdv_xgboost_baseline.csv
-    - phase1b_pdv_ngboost.csv (probabilistic counterpart)
-    - phase1c_pdv_dnn_full.csv (full BNN)
-    """
-    
-    def extract_info(row):
-        filename = row['source_file']
-        parts = filename.replace('.csv', '').replace('phase1a_', '').replace('phase1b_', '').replace('phase1c_', '').split('_')
-        
-        if len(parts) >= 2:
-            rep = parts[0]
-            
-            # Handle different formats
-            if len(parts) == 2:
-                # e.g., pdv_rf or pdv_qrf
-                base_model = parts[1]
-                transformation = 'deterministic'
-            elif len(parts) >= 3:
-                base_model = parts[1]
-                transformation = '_'.join(parts[2:])
-            else:
-                base_model = 'unknown'
-                transformation = 'unknown'
-            
-            # Normalize transformation names
-            if transformation in ['baseline', 'deterministic']:
-                transformation = 'deterministic'
-            elif transformation == 'full':
-                transformation = 'full_bnn'
-            elif transformation in ['lastlayer', 'last']:
-                transformation = 'last_layer'
-            elif transformation == 'variational':
-                transformation = 'variational'
-            
-            # Determine if probabilistic
-            probabilistic_models = ['qrf', 'ngboost', 'gauche']
-            probabilistic_transforms = ['full_bnn', 'last_layer', 'variational']
-            
-            if base_model in probabilistic_models or transformation in probabilistic_transforms:
-                model_type = 'probabilistic'
-            else:
-                model_type = 'deterministic'
-            
-            return pd.Series({
-                'representation': rep,
-                'base_model': base_model,
-                'transformation': transformation,
-                'model_type': model_type,
-                'model_full': f"{base_model}_{transformation}" if transformation != 'deterministic' else base_model
-            })
-        
-        return pd.Series({
-            'representation': None,
-            'base_model': None,
-            'transformation': None,
-            'model_type': None,
-            'model_full': None
-        })
-    
-    info = df.apply(extract_info, axis=1)
-    df[['representation', 'base_model', 'transformation', 'model_type', 'model_full']] = info
-    
-    return df
-
+# ============================================================================
+# METRICS CALCULATION
+# ============================================================================
 
 def calculate_robustness_metrics(df, sigma_high=0.6):
-    """
-    Calculate robustness metrics for each configuration
-    
-    Metrics:
-    - baseline_r2: R² at σ=0
-    - r2_high: R² at σ=sigma_high
-    - retention_pct: (r2_high / baseline_r2) * 100
-    - nsi_r2: slope of R² vs σ
-    """
+    """Calculate robustness metrics for each model-representation pair"""
     print("\n" + "="*80)
     print(f"CALCULATING ROBUSTNESS METRICS (σ_high = {sigma_high})")
     print("="*80)
     
-    df = parse_model_info(df)
-    
     metrics_list = []
     
-    for (base, rep, transform, phase), group in df.groupby(['base_model', 'representation', 'transformation', 'phase']):
+    for (model, rep, model_type), group in df.groupby(['model', 'representation', 'model_type']):
         group = group.sort_values('sigma')
         
         if len(group) < 3:
             continue
         
-        # Average across iterations
-        group_avg = group.groupby('sigma').agg({
-            'r2': 'mean',
-            'rmse': 'mean',
-            'mae': 'mean'
-        }).reset_index()
-        
         metrics = {
-            'base_model': base,
+            'model': model,
             'representation': rep,
-            'transformation': transform,
-            'phase': phase,
-            'model_type': group['model_type'].iloc[0],
+            'model_type': model_type,
         }
         
         # Baseline at σ=0
-        sigma_0 = group_avg[group_avg['sigma'] == 0.0]
+        sigma_0 = group[group['sigma'] == 0.0]
         if len(sigma_0) > 0:
             metrics['baseline_r2'] = sigma_0['r2'].values[0]
             metrics['baseline_rmse'] = sigma_0['rmse'].values[0]
@@ -234,8 +297,8 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
             metrics['baseline_r2'] = np.nan
             metrics['baseline_rmse'] = np.nan
         
-        # Performance at high noise
-        sigma_h = group_avg[np.abs(group_avg['sigma'] - sigma_high) < 0.05]
+        # High noise
+        sigma_h = group[np.abs(group['sigma'] - sigma_high) < 0.05]
         if len(sigma_h) > 0:
             metrics['r2_high'] = sigma_h['r2'].values[0]
             metrics['rmse_high'] = sigma_h['rmse'].values[0]
@@ -243,7 +306,7 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
             metrics['r2_high'] = np.nan
             metrics['rmse_high'] = np.nan
         
-        # Retention
+        # Retention percentage
         if not np.isnan(metrics['baseline_r2']) and not np.isnan(metrics['r2_high']):
             if metrics['baseline_r2'] != 0:
                 metrics['retention_pct'] = (metrics['r2_high'] / metrics['baseline_r2']) * 100
@@ -252,413 +315,324 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
         else:
             metrics['retention_pct'] = np.nan
         
-        # NSI
-        if len(group_avg) >= 3:
+        # NSI (slope)
+        if len(group) >= 3:
             try:
-                slope_r2, intercept_r2, r_val, p_val, _ = stats.linregress(
-                    group_avg['sigma'], group_avg['r2']
-                )
+                slope_r2, intercept, r_val, p_val, _ = stats.linregress(group['sigma'], group['r2'])
                 metrics['nsi_r2'] = slope_r2
                 metrics['nsi_r2_pval'] = p_val
+                metrics['nsi_r2_r'] = r_val
                 
-                if intercept_r2 != 0:
-                    metrics['nsi_r2_relative'] = slope_r2 / abs(intercept_r2)
-                else:
-                    metrics['nsi_r2_relative'] = np.nan
-                
+                slope_rmse, _, _, _, _ = stats.linregress(group['sigma'], group['rmse'])
+                metrics['nsi_rmse'] = slope_rmse
             except:
                 metrics['nsi_r2'] = np.nan
-                metrics['nsi_r2_relative'] = np.nan
+                metrics['nsi_rmse'] = np.nan
         else:
             metrics['nsi_r2'] = np.nan
-            metrics['nsi_r2_relative'] = np.nan
+            metrics['nsi_rmse'] = np.nan
         
         metrics_list.append(metrics)
     
     metrics_df = pd.DataFrame(metrics_list)
     
-    print(f"Calculated metrics for {len(metrics_df)} configurations")
+    # Filter outliers
+    print("\nFiltering outliers...")
+    before_count = len(metrics_df)
+    
+    metrics_df = metrics_df[
+        (metrics_df['baseline_r2'] >= 0.1) &
+        (metrics_df['retention_pct'] >= -50) &
+        (metrics_df['retention_pct'] <= 150)
+    ].copy()
+    
+    print(f"  Before: {before_count}, After: {len(metrics_df)}")
+    print(f"  Excluded: {before_count - len(metrics_df)} outliers")
     
     return metrics_df
 
-
 # ============================================================================
-# FIGURE 3: DETERMINISTIC VS PROBABILISTIC MODELS
+# FIGURE 3: DETERMINISTIC VS PROBABILISTIC
 # ============================================================================
 
 def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
-    """
-    Figure 3: Deterministic vs probabilistic models under noise
-    
-    Panel A: Degradation curves for paired deterministic vs probabilistic models
-    Panel B: Baseline vs Retention scatter (shows no systematic advantage)
-    Panel C: Full Bayesian vs approximate transformations in DNNs
-    """
+    """Figure 3: Deterministic vs probabilistic models comparison"""
     print("\n" + "="*80)
-    print("GENERATING FIGURE 3: DETERMINISTIC VS PROBABILISTIC (3-PANEL)")
+    print("GENERATING FIGURE 3: DETERMINISTIC VS PROBABILISTIC")
     print("="*80)
     
-    df = parse_model_info(df)
-    
-    fig = plt.figure(figsize=(15, 5))
-    gs = fig.add_gridspec(1, 3, hspace=0.25, wspace=0.30,
-                          left=0.06, right=0.98, top=0.88, bottom=0.12)
+    fig = plt.figure(figsize=(15, 10))
+    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.30,
+                          left=0.06, right=0.98, top=0.94, bottom=0.08)
     
     # ========================================================================
-    # PANEL A: Degradation curves for paired models
+    # PANEL A: Degradation curves - RF vs QRF
     # ========================================================================
-    
-    # Define pairs
-    pairs = [
-        ('rf', 'qrf', 'RF vs QRF'),
-        ('xgboost', 'ngboost', 'XGBoost vs NGBoost'),
-        ('gauche', 'gauche', 'GP (deterministic vs heteroscedastic)'),  # If available
-    ]
-    
-    # Check what representations are available
-    available_reps = df['representation'].unique()
-    if 'pdv' in available_reps:
-        primary_rep = 'pdv'
-    elif 'sns' in available_reps:
-        primary_rep = 'sns'
-    else:
-        primary_rep = available_reps[0]
-    
-    print(f"Using representation: {primary_rep.upper()}")
-    
     ax_a = fig.add_subplot(gs[0, 0])
     
-    for det_model, prob_model, label in pairs:
-        # Deterministic
-        det_data = df[(df['base_model'] == det_model) & 
-                      (df['representation'] == primary_rep) &
-                      (df['model_type'] == 'deterministic')]
-        
-        if len(det_data) > 0:
-            det_avg = det_data.groupby('sigma')['r2'].mean().reset_index()
-            ax_a.plot(det_avg['sigma'], det_avg['r2'],
-                     marker='o', linestyle='--', linewidth=2, alpha=0.7,
-                     label=f'{det_model} (det)', color=COLORS['deterministic'])
-        
-        # Probabilistic
-        prob_data = df[(df['base_model'] == prob_model) & 
-                       (df['representation'] == primary_rep) &
-                       (df['model_type'] == 'probabilistic')]
-        
-        if len(prob_data) > 0:
-            prob_avg = prob_data.groupby('sigma')['r2'].mean().reset_index()
-            ax_a.plot(prob_avg['sigma'], prob_avg['r2'],
-                     marker='s', linestyle='-', linewidth=2, alpha=0.9,
-                     label=f'{prob_model} (prob)', color=COLORS['probabilistic'])
+    # Find best representation for comparison
+    available_reps = df['representation'].unique()
+    primary_rep = 'pdv' if 'pdv' in available_reps else available_reps[0]
+    
+    # RF vs QRF
+    for model, color, style, marker in [('rf', COLORS['deterministic'], '--', 'o'),
+                                         ('qrf', COLORS['probabilistic'], '-', 's')]:
+        model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
+        if len(model_data) > 0:
+            avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
+            label = f"{format_model(model)} ({'det' if model == 'rf' else 'prob'})"
+            ax_a.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
+                     marker=marker, linestyle=style, linewidth=2, alpha=0.9,
+                     label=label, color=color, markersize=6)
     
     ax_a.set_xlabel('Noise level (σ)', fontsize=9)
     ax_a.set_ylabel('R² score', fontsize=9)
-    ax_a.set_title(f'A. Degradation Curves ({primary_rep.upper()})\nDeterministic vs Probabilistic', 
+    ax_a.set_title(f'A. RF vs QRF ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
-    ax_a.legend(fontsize=7, loc='best', ncol=2, frameon=True, framealpha=0.9)
+    ax_a.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
     ax_a.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_a.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL B: Baseline vs Retention scatter (shows no systematic advantage)
+    # PANEL B: XGBoost vs NGBoost
     # ========================================================================
-    
     ax_b = fig.add_subplot(gs[0, 1])
     
-    # Scatter: x = baseline R², y = retention %
-    for model_type in ['deterministic', 'probabilistic']:
-        subset = metrics_df[metrics_df['model_type'] == model_type]
-        
-        if len(subset) > 0:
-            color = COLORS[model_type]
-            marker = 'o' if model_type == 'deterministic' else 's'
-            
-            ax_b.scatter(subset['baseline_r2'], subset['retention_pct'],
-                        alpha=0.7, s=80, color=color, marker=marker,
-                        label=model_type.capitalize(),
-                        edgecolors='black', linewidth=0.8)
+    for model, color, style, marker in [('xgboost', COLORS['deterministic'], '--', 'o'),
+                                         ('ngboost', COLORS['probabilistic'], '-', 's')]:
+        model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
+        if len(model_data) > 0:
+            avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
+            label = f"{format_model(model)} ({'det' if model == 'xgboost' else 'prob'})"
+            ax_b.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
+                     marker=marker, linestyle=style, linewidth=2, alpha=0.9,
+                     label=label, color=color, markersize=6)
     
-    # Add reference line for no degradation
-    ax_b.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5,
-                label='No degradation')
-    
-    # Annotate a few key points
-    top_det = metrics_df[metrics_df['model_type'] == 'deterministic'].nlargest(2, 'retention_pct')
-    top_prob = metrics_df[metrics_df['model_type'] == 'probabilistic'].nlargest(2, 'retention_pct')
-    
-    for _, row in top_det.iterrows():
-        ax_b.annotate(f"{row['base_model']}/{row['representation']}", 
-                     (row['baseline_r2'], row['retention_pct']),
-                     fontsize=6, alpha=0.8,
-                     xytext=(5, 5), textcoords='offset points',
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                             alpha=0.7, edgecolor=COLORS['deterministic'], linewidth=0.5))
-    
-    for _, row in top_prob.iterrows():
-        ax_b.annotate(f"{row['base_model']}/{row['representation']}", 
-                     (row['baseline_r2'], row['retention_pct']),
-                     fontsize=6, alpha=0.8,
-                     xytext=(5, -15), textcoords='offset points',
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                             alpha=0.7, edgecolor=COLORS['probabilistic'], linewidth=0.5))
-    
-    ax_b.set_xlabel('Baseline R² (σ=0)', fontsize=9)
-    ax_b.set_ylabel('Retention at high noise (%)', fontsize=9)
-    ax_b.set_title('B. Baseline vs Robustness\nNo Systematic Advantage', 
+    ax_b.set_xlabel('Noise level (σ)', fontsize=9)
+    ax_b.set_ylabel('R² score', fontsize=9)
+    ax_b.set_title(f'B. XGBoost vs NGBoost ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
-    ax_b.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
+    ax_b.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_b.spines['top'].set_visible(False)
     ax_b.spines['right'].set_visible(False)
     ax_b.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_b.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL C: Full Bayesian vs approximate transformations (DNNs)
+    # PANEL C: DNN vs BNN variants
     # ========================================================================
-    
     ax_c = fig.add_subplot(gs[0, 2])
     
-    # Find DNN/MLP data with different transformations
-    dnn_data = metrics_df[metrics_df['base_model'].isin(['dnn', 'mlp'])]
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
+    colors_dnn = ['#34495e', '#e67e22', '#95a5a6', '#d35400']
+    styles = ['-', '--', '-.', ':']
     
-    if len(dnn_data) > 0:
-        # Group by transformation
-        transforms = ['deterministic', 'full_bnn', 'last_layer', 'variational']
-        transform_labels = ['Deterministic', 'Full BNN', 'Last-layer', 'Variational']
-        
-        metrics_to_plot = ['baseline_r2', 'r2_high', 'retention_pct']
-        metric_labels = ['Baseline R²', 'R² (high noise)', 'Retention (%)']
-        
-        x_pos = np.arange(len(transforms))
-        width = 0.25
-        
-        for i, (metric, label) in enumerate(zip(metrics_to_plot, metric_labels)):
-            values = []
-            for transform in transforms:
-                subset = dnn_data[dnn_data['transformation'] == transform]
-                if len(subset) > 0:
-                    if metric == 'retention_pct':
-                        values.append(subset[metric].mean())
-                    else:
-                        values.append(subset[metric].mean())
-                else:
-                    values.append(0)
-            
-            # Normalize retention to same scale as R²
-            if metric == 'retention_pct':
-                values = [v/100 for v in values]
-            
-            ax_c.bar(x_pos + i*width, values, width, label=label,
-                    alpha=0.8, edgecolor='black', linewidth=0.5)
-        
-        ax_c.set_xticks(x_pos + width)
-        ax_c.set_xticklabels(transform_labels, rotation=45, ha='right', fontsize=7)
-        ax_c.set_ylabel('Score (normalized)', fontsize=9)
-        ax_c.set_title('C. Full Bayesian vs Approximate\nTransforms (DNN)', 
-                      fontsize=10, fontweight='bold', pad=10)
-        ax_c.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
-        ax_c.spines['top'].set_visible(False)
-        ax_c.spines['right'].set_visible(False)
-        ax_c.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
-    else:
-        ax_c.text(0.5, 0.5, 'No DNN transformation data available',
-                 ha='center', va='center', transform=ax_c.transAxes,
-                 fontsize=10, style='italic')
-        ax_c.axis('off')
+    for model, color, style in zip(dnn_variants, colors_dnn, styles):
+        model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
+        if len(model_data) > 0:
+            avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
+            ax_c.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
+                     marker='o', linestyle=style, linewidth=2, alpha=0.9,
+                     label=format_model(model), color=color, markersize=5)
+    
+    ax_c.set_xlabel('Noise level (σ)', fontsize=9)
+    ax_c.set_ylabel('R² score', fontsize=9)
+    ax_c.set_title(f'C. DNN vs BNN Variants ({format_representation(primary_rep)})', 
+                   fontsize=10, fontweight='bold', pad=10)
+    ax_c.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
+    ax_c.spines['top'].set_visible(False)
+    ax_c.spines['right'].set_visible(False)
+    ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_c.set_ylim(bottom=0)
     
     # ========================================================================
-    # Save
+    # PANEL D: Baseline vs Retention scatter
     # ========================================================================
+    ax_d = fig.add_subplot(gs[1, 0])
+    
+    for model_type in ['deterministic', 'probabilistic']:
+        subset = metrics_df[metrics_df['model_type'] == model_type]
+        if len(subset) > 0:
+            color = COLORS[model_type]
+            marker = 'o' if model_type == 'deterministic' else 's'
+            ax_d.scatter(subset['baseline_r2'], subset['retention_pct'],
+                        alpha=0.7, s=60, color=color, marker=marker,
+                        label=model_type.capitalize(),
+                        edgecolors='black', linewidth=0.5)
+    
+    ax_d.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_d.set_xlabel('Baseline R² (σ=0)', fontsize=9)
+    ax_d.set_ylabel('Retention at high noise (%)', fontsize=9)
+    ax_d.set_title('D. Baseline vs Robustness', fontsize=10, fontweight='bold', pad=10)
+    ax_d.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+    ax_d.spines['top'].set_visible(False)
+    ax_d.spines['right'].set_visible(False)
+    ax_d.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # ========================================================================
+    # PANEL E: Retention by model type (box plot)
+    # ========================================================================
+    ax_e = fig.add_subplot(gs[1, 1])
+    
+    det_retention = metrics_df[metrics_df['model_type'] == 'deterministic']['retention_pct'].dropna()
+    prob_retention = metrics_df[metrics_df['model_type'] == 'probabilistic']['retention_pct'].dropna()
+    
+    if len(det_retention) > 0 and len(prob_retention) > 0:
+        bp = ax_e.boxplot([det_retention, prob_retention],
+                         labels=['Deterministic', 'Probabilistic'],
+                         patch_artist=True, widths=0.6)
+        
+        bp['boxes'][0].set_facecolor(COLORS['deterministic'])
+        bp['boxes'][1].set_facecolor(COLORS['probabilistic'])
+        for box in bp['boxes']:
+            box.set_alpha(0.7)
+        
+        # Add individual points
+        for i, (data, color) in enumerate([(det_retention, COLORS['deterministic']),
+                                            (prob_retention, COLORS['probabilistic'])]):
+            x = np.random.normal(i+1, 0.04, size=len(data))
+            ax_e.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
+        
+        # Statistical test
+        stat, p_val = stats.mannwhitneyu(det_retention, prob_retention, alternative='two-sided')
+        sig_text = f"p = {p_val:.4f}" + (" *" if p_val < 0.05 else "")
+        ax_e.text(0.5, 0.95, sig_text, transform=ax_e.transAxes, ha='center', fontsize=8)
+    
+    ax_e.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_e.set_ylabel('Retention at high noise (%)', fontsize=9)
+    ax_e.set_title('E. Retention Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
+    ax_e.spines['top'].set_visible(False)
+    ax_e.spines['right'].set_visible(False)
+    ax_e.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # ========================================================================
+    # PANEL F: NSI comparison
+    # ========================================================================
+    ax_f = fig.add_subplot(gs[1, 2])
+    
+    det_nsi = metrics_df[metrics_df['model_type'] == 'deterministic']['nsi_r2'].dropna()
+    prob_nsi = metrics_df[metrics_df['model_type'] == 'probabilistic']['nsi_r2'].dropna()
+    
+    if len(det_nsi) > 0 and len(prob_nsi) > 0:
+        bp = ax_f.boxplot([det_nsi, prob_nsi],
+                         labels=['Deterministic', 'Probabilistic'],
+                         patch_artist=True, widths=0.6)
+        
+        bp['boxes'][0].set_facecolor(COLORS['deterministic'])
+        bp['boxes'][1].set_facecolor(COLORS['probabilistic'])
+        for box in bp['boxes']:
+            box.set_alpha(0.7)
+        
+        for i, (data, color) in enumerate([(det_nsi, COLORS['deterministic']),
+                                            (prob_nsi, COLORS['probabilistic'])]):
+            x = np.random.normal(i+1, 0.04, size=len(data))
+            ax_f.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
+        
+        stat, p_val = stats.mannwhitneyu(det_nsi, prob_nsi, alternative='two-sided')
+        sig_text = f"p = {p_val:.4f}" + (" *" if p_val < 0.05 else "")
+        ax_f.text(0.5, 0.95, sig_text, transform=ax_f.transAxes, ha='center', fontsize=8)
+    
+    ax_f.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_f.set_ylabel('NSI (R²) - Degradation slope', fontsize=9)
+    ax_f.set_title('F. NSI Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
+    ax_f.spines['top'].set_visible(False)
+    ax_f.spines['right'].set_visible(False)
+    ax_f.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
     output_path = Path(output_dir) / "figure3_deterministic_vs_probabilistic.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Figure 3 (3-panel) to {output_path}")
+    print(f"✓ Saved Figure 3 to {output_path}")
     plt.close()
 
 
-# ============================================================================
-# SUPPLEMENTARY S4: PAIRWISE DIFFERENCE PLOTS
-# ============================================================================
-
-def create_supplementary_s4(metrics_df, output_dir):
-    """
-    Supplementary S4: Pairwise difference plots
-    Forest plot showing probabilistic gain per configuration
-    """
+def create_figure4_paired_comparisons(df, metrics_df, output_dir):
+    """Figure 4: Paired model comparisons across representations"""
     print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY S4: PAIRWISE DIFFERENCES")
+    print("GENERATING FIGURE 4: PAIRED COMPARISONS")
     print("="*80)
     
-    # Define pairs
+    fig = plt.figure(figsize=(15, 10))
+    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.30,
+                          left=0.06, right=0.98, top=0.94, bottom=0.08)
+    
     pairs = [
-        ('rf', 'qrf'),
-        ('xgboost', 'ngboost'),
+        ('rf', 'qrf', 'RF vs QRF'),
+        ('xgboost', 'ngboost', 'XGBoost vs NGBoost'),
+        ('dnn', 'gauche', 'DNN vs GP'),
     ]
     
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    representations = sorted(df['representation'].unique())
     
-    for idx, (ax, metric) in enumerate(zip(axes, ['retention_pct', 'nsi_r2'])):
+    # Row 1: Retention difference by representation
+    for idx, (det, prob, title) in enumerate(pairs):
+        ax = fig.add_subplot(gs[0, idx])
+        
         differences = []
-        labels = []
+        rep_labels = []
         colors_list = []
         
-        for det_model, prob_model in pairs:
-            for rep in metrics_df['representation'].unique():
-                # Deterministic
-                det = metrics_df[(metrics_df['base_model'] == det_model) &
-                                (metrics_df['representation'] == rep) &
-                                (metrics_df['model_type'] == 'deterministic')]
+        for rep in representations:
+            det_data = metrics_df[(metrics_df['model'] == det) & (metrics_df['representation'] == rep)]
+            prob_data = metrics_df[(metrics_df['model'] == prob) & (metrics_df['representation'] == rep)]
+            
+            if len(det_data) > 0 and len(prob_data) > 0:
+                det_ret = det_data['retention_pct'].mean()
+                prob_ret = prob_data['retention_pct'].mean()
+                diff = prob_ret - det_ret  # Positive = probabilistic better
                 
-                # Probabilistic
-                prob = metrics_df[(metrics_df['base_model'] == prob_model) &
-                                 (metrics_df['representation'] == rep) &
-                                 (metrics_df['model_type'] == 'probabilistic')]
-                
-                if len(det) > 0 and len(prob) > 0:
-                    det_val = det[metric].mean()
-                    prob_val = prob[metric].mean()
-                    
-                    if metric == 'nsi_r2':
-                        # For NSI, positive difference means probabilistic degrades slower (better)
-                        diff = det_val - prob_val  # More negative NSI = better for prob
-                    else:
-                        # For retention, positive difference means probabilistic retains more
-                        diff = prob_val - det_val
-                    
-                    differences.append(diff)
-                    labels.append(f'{det_model} vs {prob_model}\n{rep}')
-                    
-                    # Color by whether probabilistic is better
-                    if diff > 0:
-                        colors_list.append(COLORS['probabilistic'])
-                    else:
-                        colors_list.append(COLORS['deterministic'])
+                differences.append(diff)
+                rep_labels.append(format_representation(rep))
+                colors_list.append(COLORS['probabilistic'] if diff > 0 else COLORS['deterministic'])
         
         if differences:
             y_pos = np.arange(len(differences))
-            
             ax.barh(y_pos, differences, color=colors_list, alpha=0.8,
                    edgecolor='black', linewidth=0.5)
             ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
-            
             ax.set_yticks(y_pos)
-            ax.set_yticklabels(labels, fontsize=7)
-            
-            if metric == 'retention_pct':
-                ax.set_xlabel('Retention difference (% points)', fontsize=9)
-                ax.set_title('Retention % Gain\n(Probabilistic - Deterministic)', 
-                           fontsize=10, fontweight='bold')
-            else:
-                ax.set_xlabel('NSI difference (absolute)', fontsize=9)
-                ax.set_title('NSI Improvement\n(lower |NSI| = better)', 
-                           fontsize=10, fontweight='bold')
-            
+            ax.set_yticklabels(rep_labels, fontsize=8)
+            ax.set_xlabel('Retention difference (% points)', fontsize=9)
+            ax.set_title(f'A{idx+1}. {title}', fontsize=10, fontweight='bold', pad=10)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             ax.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    plt.tight_layout()
-    output_path = Path(output_dir) / "supplementary_s4_pairwise_differences.png"
+    # Row 2: Performance across noise levels for each pair
+    for idx, (det, prob, title) in enumerate(pairs):
+        ax = fig.add_subplot(gs[1, idx])
+        
+        # Average across all representations
+        det_data = df[df['model'] == det]
+        prob_data = df[df['model'] == prob]
+        
+        if len(det_data) > 0:
+            det_avg = det_data.groupby('sigma')['r2'].mean().reset_index()
+            ax.plot(det_avg['sigma'], det_avg['r2'],
+                   marker='o', linestyle='--', linewidth=2, alpha=0.9,
+                   label=format_model(det), color=COLORS['deterministic'], markersize=6)
+        
+        if len(prob_data) > 0:
+            prob_avg = prob_data.groupby('sigma')['r2'].mean().reset_index()
+            ax.plot(prob_avg['sigma'], prob_avg['r2'],
+                   marker='s', linestyle='-', linewidth=2, alpha=0.9,
+                   label=format_model(prob), color=COLORS['probabilistic'], markersize=6)
+        
+        ax.set_xlabel('Noise level (σ)', fontsize=9)
+        ax.set_ylabel('R² (avg across reps)', fontsize=9)
+        ax.set_title(f'B{idx+1}. {title} Degradation', fontsize=10, fontweight='bold', pad=10)
+        ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+        ax.set_ylim(bottom=0)
+    
+    output_path = Path(output_dir) / "figure4_paired_comparisons.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Supplementary S4 to {output_path}")
+    print(f"✓ Saved Figure 4 to {output_path}")
     plt.close()
 
-
-# ============================================================================
-# STATISTICAL COMPARISONS
-# ============================================================================
-
-def perform_statistical_comparisons(df, metrics_df, output_dir):
-    """
-    Statistical comparisons between deterministic and probabilistic variants
-    """
-    print("\n" + "="*80)
-    print("PERFORMING STATISTICAL COMPARISONS")
-    print("="*80)
-    
-    df = parse_model_info(df)
-    
-    results_text = []
-    results_text.append("STATISTICAL COMPARISONS - PHASE 1")
-    results_text.append("="*80)
-    results_text.append("")
-    results_text.append("Comparing deterministic vs probabilistic variants")
-    results_text.append("Tests: Wilcoxon signed-rank (paired samples across noise levels)")
-    results_text.append("")
-    
-    # Define pairs
-    pairs = [
-        ('rf', 'qrf', 'Random Forest'),
-        ('xgboost', 'ngboost', 'Gradient Boosting'),
-    ]
-    
-    for det_model, prob_model, desc in pairs:
-        results_text.append(f"\n{'='*80}")
-        results_text.append(f"{desc.upper()}: {det_model} vs {prob_model}")
-        results_text.append(f"{'='*80}")
-        
-        for rep in df['representation'].unique():
-            results_text.append(f"\nRepresentation: {rep.upper()}")
-            results_text.append("-"*80)
-            
-            # Get data for both
-            det_data = df[(df['base_model'] == det_model) &
-                         (df['representation'] == rep) &
-                         (df['model_type'] == 'deterministic')]
-            
-            prob_data = df[(df['base_model'] == prob_model) &
-                          (df['representation'] == rep) &
-                          (df['model_type'] == 'probabilistic')]
-            
-            if len(det_data) == 0 or len(prob_data) == 0:
-                results_text.append("  No data available for comparison")
-                continue
-            
-            # Align by sigma
-            det_avg = det_data.groupby('sigma')['r2'].mean()
-            prob_avg = prob_data.groupby('sigma')['r2'].mean()
-            
-            common_sigmas = set(det_avg.index) & set(prob_avg.index)
-            
-            if len(common_sigmas) < 3:
-                results_text.append("  Insufficient overlapping sigma values")
-                continue
-            
-            det_vals = [det_avg[s] for s in sorted(common_sigmas)]
-            prob_vals = [prob_avg[s] for s in sorted(common_sigmas)]
-            
-            # Wilcoxon signed-rank test
-            try:
-                stat, p_val = stats.wilcoxon(det_vals, prob_vals)
-                
-                mean_det = np.mean(det_vals)
-                mean_prob = np.mean(prob_vals)
-                
-                results_text.append(f"  Mean R² (deterministic): {mean_det:.4f}")
-                results_text.append(f"  Mean R² (probabilistic): {mean_prob:.4f}")
-                results_text.append(f"  Wilcoxon statistic: {stat:.2f}")
-                results_text.append(f"  p-value: {p_val:.6f}")
-                
-                if p_val < 0.05:
-                    winner = 'probabilistic' if mean_prob > mean_det else 'deterministic'
-                    results_text.append(f"  → Significant difference (p<0.05), {winner} superior")
-                else:
-                    results_text.append(f"  → No significant difference")
-                
-            except Exception as e:
-                results_text.append(f"  Error in statistical test: {e}")
-    
-    # Save
-    output_path = Path(output_dir) / "statistical_comparisons_phase1.txt"
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(results_text))
-    
-    print(f"✓ Saved statistical comparisons to {output_path}")
-
-
-# ============================================================================
-# SUMMARY TABLES
-# ============================================================================
 
 def create_summary_tables(metrics_df, output_dir):
     """Create summary tables"""
@@ -668,99 +642,156 @@ def create_summary_tables(metrics_df, output_dir):
     
     output_dir = Path(output_dir)
     
-    # Table 1: Deterministic vs Probabilistic comparison
-    table1 = metrics_df.groupby(['base_model', 'representation', 'model_type']).agg({
+    # Table 1: By model type
+    table1 = metrics_df.groupby('model_type').agg({
+        'baseline_r2': ['mean', 'std'],
+        'retention_pct': ['mean', 'std'],
+        'nsi_r2': lambda x: np.abs(x).mean(),
+    }).round(4)
+    table1.to_csv(output_dir / "table_phase1_by_model_type.csv")
+    print(f"✓ Saved model type summary")
+    
+    # Table 2: Full breakdown
+    table2 = metrics_df.groupby(['model', 'representation', 'model_type']).agg({
         'baseline_r2': 'mean',
         'r2_high': 'mean',
         'retention_pct': 'mean',
-        'nsi_r2': lambda x: np.abs(x).mean()
-    }).reset_index()
+        'nsi_r2': 'mean',
+    }).round(4)
+    table2.to_csv(output_dir / "table_phase1_full_breakdown.csv")
+    print(f"✓ Saved full breakdown table")
     
-    table1 = table1.round(4)
-    table1.to_csv(output_dir / "table_phase1_summary.csv", index=False)
+    # Table 3: Paired comparisons
+    pairs = [('rf', 'qrf'), ('xgboost', 'ngboost'), ('dnn', 'gauche')]
+    pair_results = []
     
-    with open(output_dir / "table_phase1_summary.tex", 'w') as f:
-        f.write(table1.to_latex(index=False, float_format="%.4f"))
+    for det, prob in pairs:
+        for rep in metrics_df['representation'].unique():
+            det_data = metrics_df[(metrics_df['model'] == det) & (metrics_df['representation'] == rep)]
+            prob_data = metrics_df[(metrics_df['model'] == prob) & (metrics_df['representation'] == rep)]
+            
+            if len(det_data) > 0 and len(prob_data) > 0:
+                pair_results.append({
+                    'pair': f"{det} vs {prob}",
+                    'representation': rep,
+                    'det_baseline': det_data['baseline_r2'].mean(),
+                    'prob_baseline': prob_data['baseline_r2'].mean(),
+                    'det_retention': det_data['retention_pct'].mean(),
+                    'prob_retention': prob_data['retention_pct'].mean(),
+                    'retention_diff': prob_data['retention_pct'].mean() - det_data['retention_pct'].mean(),
+                })
     
-    print(f"✓ Saved summary table")
-    
-    # Table 2: DNN transformations (if available)
-    dnn_data = metrics_df[metrics_df['base_model'].isin(['dnn', 'mlp'])]
-    
-    if len(dnn_data) > 0:
-        table2 = dnn_data.groupby(['base_model', 'representation', 'transformation']).agg({
-            'baseline_r2': 'mean',
-            'r2_high': 'mean',
-            'retention_pct': 'mean',
-            'nsi_r2': lambda x: np.abs(x).mean()
-        }).reset_index()
-        
-        table2 = table2.round(4)
-        table2.to_csv(output_dir / "table_phase1_dnn_transforms.csv", index=False)
-        
-        with open(output_dir / "table_phase1_dnn_transforms.tex", 'w') as f:
-            f.write(table2.to_latex(index=False, float_format="%.4f"))
-        
-        print(f"✓ Saved DNN transformation table")
+    if pair_results:
+        table3 = pd.DataFrame(pair_results).round(4)
+        table3.to_csv(output_dir / "table_phase1_paired_comparisons.csv", index=False)
+        print(f"✓ Saved paired comparisons table")
 
+
+def perform_statistical_tests(metrics_df, output_dir):
+    """Perform statistical tests"""
+    print("\n" + "="*80)
+    print("PERFORMING STATISTICAL TESTS")
+    print("="*80)
+    
+    output_dir = Path(output_dir)
+    results_text = ["STATISTICAL COMPARISONS - PHASE 1", "="*80, ""]
+    
+    # Overall comparison
+    results_text.append("OVERALL: DETERMINISTIC vs PROBABILISTIC")
+    results_text.append("-"*80)
+    
+    det_ret = metrics_df[metrics_df['model_type'] == 'deterministic']['retention_pct'].dropna()
+    prob_ret = metrics_df[metrics_df['model_type'] == 'probabilistic']['retention_pct'].dropna()
+    
+    if len(det_ret) >= 3 and len(prob_ret) >= 3:
+        stat, p_val = stats.mannwhitneyu(det_ret, prob_ret, alternative='two-sided')
+        results_text.append(f"Retention % comparison:")
+        results_text.append(f"  Deterministic: mean={det_ret.mean():.2f}%, n={len(det_ret)}")
+        results_text.append(f"  Probabilistic: mean={prob_ret.mean():.2f}%, n={len(prob_ret)}")
+        results_text.append(f"  Mann-Whitney U: stat={stat:.2f}, p={p_val:.6f}")
+        if p_val < 0.05:
+            winner = 'Probabilistic' if prob_ret.mean() > det_ret.mean() else 'Deterministic'
+            results_text.append(f"  → Significant (p<0.05): {winner} models show better retention")
+        else:
+            results_text.append(f"  → No significant difference")
+    
+    results_text.append("")
+    
+    # Paired comparisons
+    pairs = [('rf', 'qrf', 'Random Forest'), ('xgboost', 'ngboost', 'Gradient Boosting')]
+    
+    for det, prob, name in pairs:
+        results_text.append(f"\n{name.upper()}: {det} vs {prob}")
+        results_text.append("-"*80)
+        
+        det_data = metrics_df[metrics_df['model'] == det]['retention_pct'].dropna()
+        prob_data = metrics_df[metrics_df['model'] == prob]['retention_pct'].dropna()
+        
+        if len(det_data) >= 3 and len(prob_data) >= 3:
+            stat, p_val = stats.mannwhitneyu(det_data, prob_data, alternative='two-sided')
+            results_text.append(f"  {det}: mean={det_data.mean():.2f}%, n={len(det_data)}")
+            results_text.append(f"  {prob}: mean={prob_data.mean():.2f}%, n={len(prob_data)}")
+            results_text.append(f"  Mann-Whitney U: p={p_val:.6f}")
+            if p_val < 0.05:
+                winner = prob if prob_data.mean() > det_data.mean() else det
+                results_text.append(f"  → Significant: {winner} superior")
+            else:
+                results_text.append(f"  → No significant difference")
+    
+    output_path = output_dir / "statistical_tests_phase1.txt"
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(results_text))
+    print(f"✓ Saved statistical tests to {output_path}")
 
 # ============================================================================
 # MAIN
 # ============================================================================
 
 def main(results_dir="../results"):
-    """Main execution function"""
+    """Main execution"""
     print("="*80)
     print("PHASE 1 ANALYSIS - DETERMINISTIC VS PROBABILISTIC")
-    print("Journal of Cheminformatics Style")
     print("="*80)
     
-    # Load data
-    df = load_phase1_results(results_dir)
+    df = load_phase0_data(results_dir)
     if len(df) == 0:
         print("ERROR: No data loaded!")
         return
     
-    # Calculate metrics
     metrics_df = calculate_robustness_metrics(df, sigma_high=0.6)
     
-    # Create output directory
-    output_dir = Path(results_dir) / "phase1_figures_v2"
+    output_dir = Path(results_dir) / "phase1_figures"
     output_dir.mkdir(exist_ok=True, parents=True)
     
-    # Save metrics
     metrics_df.to_csv(output_dir / "phase1_robustness_metrics.csv", index=False)
     print(f"\n✓ Saved metrics to {output_dir / 'phase1_robustness_metrics.csv'}")
     
-    # Generate figures
     print("\n" + "="*80)
     print("GENERATING FIGURES")
     print("="*80)
     
     create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir)
-    create_supplementary_s4(metrics_df, output_dir)
-    
-    # Generate tables
+    create_figure4_paired_comparisons(df, metrics_df, output_dir)
     create_summary_tables(metrics_df, output_dir)
+    perform_statistical_tests(metrics_df, output_dir)
     
-    # Statistical tests
-    perform_statistical_comparisons(df, metrics_df, output_dir)
+    print("\n" + "="*80)
+    print("SUMMARY")
+    print("="*80)
     
-    # Summary
+    print("\nModel Type Comparison:")
+    for model_type in ['deterministic', 'probabilistic']:
+        subset = metrics_df[metrics_df['model_type'] == model_type]
+        if len(subset) > 0:
+            print(f"  {model_type.capitalize()}:")
+            print(f"    Models: {subset['model'].nunique()}")
+            print(f"    Mean retention: {subset['retention_pct'].mean():.1f}%")
+            print(f"    Mean |NSI|: {subset['nsi_r2'].abs().mean():.4f}")
+    
     print("\n" + "="*80)
     print("PHASE 1 ANALYSIS COMPLETE")
     print("="*80)
     print(f"\nAll outputs saved to: {output_dir}")
-    print("\nGenerated files:")
-    print("  Figures:")
-    print("    - figure3_deterministic_vs_probabilistic.png")
-    print("    - supplementary_s4_pairwise_differences.png")
-    print("  Tables:")
-    print("    - table_phase1_summary.csv/.tex")
-    print("    - table_phase1_dnn_transforms.csv/.tex (if applicable)")
-    print("  Data:")
-    print("    - phase1_robustness_metrics.csv")
-    print("    - statistical_comparisons_phase1.txt")
 
 
 if __name__ == "__main__":
