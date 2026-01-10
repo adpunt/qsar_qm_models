@@ -222,6 +222,27 @@ def parse_phase5_filenames(df):
     if before != after:
         print(f"Dropped {before - after} rows with missing values")
     
+    # Filter out rows with invalid R² values (failed runs)
+    # Valid R² should be <= 1, and realistically > -2 for any reasonable model
+    before = len(df)
+    df = df[(df['r2'] >= -2) & (df['r2'] <= 1.01)]
+    after = len(df)
+    if before != after:
+        print(f"Filtered out {before - after} rows with invalid R² values (outside [-2, 1])")
+    
+    # Filter out GNN models, conformal methods, and graph representations
+    # These are experimental/problematic and not part of core analysis
+    exclude_model_patterns = ['gin', 'gcn', 'conformal', 'graph']
+    exclude_reps = ['graph']
+    
+    before = len(df)
+    model_mask = ~df['model'].str.lower().str.contains('|'.join(exclude_model_patterns), regex=True)
+    rep_mask = ~df['representation'].str.lower().isin(exclude_reps)
+    df = df[model_mask & rep_mask]
+    after = len(df)
+    if before != after:
+        print(f"Filtered out {before - after} rows with GNN/conformal/graph models")
+    
     return df
 
 
@@ -587,51 +608,20 @@ def main(results_dir="../results"):
     
     if len(df) == 0:
         print("\nERROR: No valid data after parsing. Check file format.")
-        print("Expected filename format: phase5_rep_model_noisestrategy.csv")
-        print("Or CSV should contain columns: model, representation, noise_strategy, sigma, r2")
         return
     
-    # DEBUG: Show data summary
-    print("\n" + "=" * 80)
-    print("DATA DEBUGGING")
-    print("=" * 80)
-    print(f"\nDataFrame shape: {df.shape}")
-    print(f"\nColumns: {list(df.columns)}")
-    print(f"\nSample of data:")
-    print(df[['model', 'representation', 'noise_strategy', 'sigma', 'r2']].head(20).to_string())
-    
-    print(f"\n--- R² Statistics ---")
-    print(f"  Min: {df['r2'].min()}")
-    print(f"  Max: {df['r2'].max()}")
-    print(f"  Mean: {df['r2'].mean()}")
-    print(f"  Median: {df['r2'].median()}")
-    print(f"  NaN count: {df['r2'].isna().sum()}")
-    
-    # Check for outliers
-    r2_outliers = df[df['r2'].abs() > 10]
-    if len(r2_outliers) > 0:
-        print(f"\n⚠️  WARNING: {len(r2_outliers)} rows with |R²| > 10 (likely errors)")
-        print(r2_outliers[['model', 'representation', 'noise_strategy', 'sigma', 'r2']].head(10).to_string())
-    
-    print(f"\n--- Unique Values ---")
-    print(f"  Models ({len(df['model'].unique())}): {sorted(df['model'].unique())[:10]}...")
-    print(f"  Representations ({len(df['representation'].unique())}): {sorted(df['representation'].unique())[:10]}...")
-    print(f"  Noise strategies ({len(df['noise_strategy'].unique())}): {sorted(df['noise_strategy'].unique())}")
-    
-    print(f"\n--- Counts by noise_strategy ---")
-    print(df.groupby('noise_strategy').size().to_string())
-    
-    print(f"\n--- Sample model/rep combinations ---")
-    combos = df.groupby(['model', 'representation']).size().reset_index(name='count')
-    print(combos.head(15).to_string())
-    
-    print("=" * 80)
-    
     print(f"\nExperiment summary:")
-    print(f"  Models: {', '.join(sorted(df['model'].unique())[:5])}{'...' if len(df['model'].unique()) > 5 else ''}")
-    print(f"  Representations: {', '.join(sorted(df['representation'].unique())[:5])}{'...' if len(df['representation'].unique()) > 5 else ''}")
+    print(f"  Total rows: {len(df)}")
+    print(f"  Models: {len(df['model'].unique())} unique")
+    print(f"  Representations: {', '.join(sorted(df['representation'].unique()))}")
     print(f"  Noise strategies: {', '.join(sorted(df['noise_strategy'].unique()))}")
     print(f"  σ range: {df['sigma'].min()} - {df['sigma'].max()}")
+    print(f"  R² range: {df['r2'].min():.3f} - {df['r2'].max():.3f}")
+    
+    # Show counts per strategy
+    print(f"\n  Rows per strategy:")
+    for strat, count in df.groupby('noise_strategy').size().items():
+        print(f"    {strat}: {count}")
     
     # Calculate metrics
     metrics_df = calculate_robustness_metrics(df, sigma_high=0.5)
