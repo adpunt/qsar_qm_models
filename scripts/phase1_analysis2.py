@@ -29,7 +29,7 @@ sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
-    'font.sans-serif': ['DejaVu Sans', 'Arial', 'Helvetica'],
+    'font.sans-serif': ['DejaVu Sans'],
     'font.size': 8,
     'axes.labelsize': 9,
     'axes.titlesize': 10,
@@ -411,23 +411,23 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     ax_a.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL B: XGBoost vs NGBoost
+    # PANEL B: MLP vs GP (GAUCHE)
     # ========================================================================
     ax_b = fig.add_subplot(gs[0, 1])
     
-    for model, color, style, marker in [('xgboost', COLORS['deterministic'], '--', 'o'),
-                                         ('ngboost', COLORS['probabilistic'], '-', 's')]:
+    for model, color, style, marker in [('mlp', COLORS['deterministic'], '--', 'o'),
+                                         ('gauche', COLORS['probabilistic'], '-', 's')]:
         model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
         if len(model_data) > 0:
             avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
-            label = f"{format_model(model)} ({'det' if model == 'xgboost' else 'prob'})"
+            label = f"{format_model(model)} ({'det' if model == 'mlp' else 'prob'})"
             ax_b.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
                      marker=marker, linestyle=style, linewidth=2, alpha=0.9,
                      label=label, color=color, markersize=6)
     
     ax_b.set_xlabel('Noise level (σ)', fontsize=9)
     ax_b.set_ylabel('R² score', fontsize=9)
-    ax_b.set_title(f'B. XGBoost vs NGBoost ({format_representation(primary_rep)})', 
+    ax_b.set_title(f'B. MLP vs GP ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
     ax_b.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_b.spines['top'].set_visible(False)
@@ -562,88 +562,173 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     plt.close()
 
 
-def create_figure4_paired_comparisons(df, metrics_df, output_dir):
-    """Figure 4: Paired model comparisons across representations"""
+def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
+    """Figure 4: Bayesian transformation comparisons (architecturally valid pairs)"""
     print("\n" + "="*80)
-    print("GENERATING FIGURE 4: PAIRED COMPARISONS")
+    print("GENERATING FIGURE 4: BAYESIAN TRANSFORMATIONS")
     print("="*80)
     
-    fig = plt.figure(figsize=(15, 10))
-    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.30,
-                          left=0.06, right=0.98, top=0.94, bottom=0.08)
+    fig = plt.figure(figsize=(15, 12))
+    gs = fig.add_gridspec(3, 3, hspace=0.40, wspace=0.30,
+                          left=0.06, right=0.98, top=0.94, bottom=0.06)
     
-    pairs = [
-        ('rf', 'qrf', 'RF vs QRF'),
-        ('xgboost', 'ngboost', 'XGBoost vs NGBoost'),
-        ('mlp', 'gauche', 'MLP vs GP'),
+    # Define valid Bayesian transformation pairs
+    transformations = [
+        {
+            'base': 'rf',
+            'variants': ['qrf'],
+            'title': 'RF → QRF',
+            'description': 'Tree-based'
+        },
+        {
+            'base': 'dnn',
+            'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational'],
+            'title': 'DNN → BNN',
+            'description': 'Deep NN'
+        },
+        {
+            'base': 'mlp',
+            'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational'],
+            'title': 'MLP → BNN',
+            'description': 'MLP'
+        },
     ]
     
-    representations = sorted(df['representation'].unique())
+    available_reps = df['representation'].unique()
+    primary_rep = 'pdv' if 'pdv' in available_reps else available_reps[0]
     
-    # Row 1: Retention difference by representation
-    for idx, (det, prob, title) in enumerate(pairs):
+    # Row 1: Degradation curves for each transformation
+    for idx, trans in enumerate(transformations):
         ax = fig.add_subplot(gs[0, idx])
         
-        differences = []
-        rep_labels = []
-        colors_list = []
+        base = trans['base']
+        variants = trans['variants']
         
-        for rep in representations:
-            det_data = metrics_df[(metrics_df['model'] == det) & (metrics_df['representation'] == rep)]
-            prob_data = metrics_df[(metrics_df['model'] == prob) & (metrics_df['representation'] == rep)]
-            
-            if len(det_data) > 0 and len(prob_data) > 0:
-                det_ret = det_data['retention_pct'].mean()
-                prob_ret = prob_data['retention_pct'].mean()
-                diff = prob_ret - det_ret  # Positive = probabilistic better
-                
-                differences.append(diff)
-                rep_labels.append(format_representation(rep))
-                colors_list.append(COLORS['probabilistic'] if diff > 0 else COLORS['deterministic'])
+        # Plot base model
+        base_data = df[(df['model'] == base) & (df['representation'] == primary_rep)]
+        if len(base_data) > 0:
+            avg = base_data.groupby('sigma')['r2'].mean().reset_index()
+            ax.plot(avg['sigma'], avg['r2'],
+                   marker='o', linestyle='-', linewidth=2.5, alpha=0.9,
+                   label=format_model(base), color=COLORS['deterministic'], markersize=6)
         
-        if differences:
-            y_pos = np.arange(len(differences))
-            ax.barh(y_pos, differences, color=colors_list, alpha=0.8,
-                   edgecolor='black', linewidth=0.5)
-            ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
-            ax.set_yticks(y_pos)
-            ax.set_yticklabels(rep_labels, fontsize=8)
-            ax.set_xlabel('Retention difference (% points)', fontsize=9)
-            ax.set_title(f'A{idx+1}. {title}', fontsize=10, fontweight='bold', pad=10)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
-    
-    # Row 2: Performance across noise levels for each pair
-    for idx, (det, prob, title) in enumerate(pairs):
-        ax = fig.add_subplot(gs[1, idx])
+        # Plot variants
+        variant_colors = ['#e67e22', '#95a5a6', '#d35400']
+        variant_styles = ['--', '-.', ':']
         
-        # Average across all representations
-        det_data = df[df['model'] == det]
-        prob_data = df[df['model'] == prob]
-        
-        if len(det_data) > 0:
-            det_avg = det_data.groupby('sigma')['r2'].mean().reset_index()
-            ax.plot(det_avg['sigma'], det_avg['r2'],
-                   marker='o', linestyle='--', linewidth=2, alpha=0.9,
-                   label=format_model(det), color=COLORS['deterministic'], markersize=6)
-        
-        if len(prob_data) > 0:
-            prob_avg = prob_data.groupby('sigma')['r2'].mean().reset_index()
-            ax.plot(prob_avg['sigma'], prob_avg['r2'],
-                   marker='s', linestyle='-', linewidth=2, alpha=0.9,
-                   label=format_model(prob), color=COLORS['probabilistic'], markersize=6)
+        for i, variant in enumerate(variants):
+            var_data = df[(df['model'] == variant) & (df['representation'] == primary_rep)]
+            if len(var_data) > 0:
+                avg = var_data.groupby('sigma')['r2'].mean().reset_index()
+                ax.plot(avg['sigma'], avg['r2'],
+                       marker='s', linestyle=variant_styles[i % len(variant_styles)], 
+                       linewidth=2, alpha=0.8,
+                       label=format_model(variant), color=variant_colors[i % len(variant_colors)], 
+                       markersize=5)
         
         ax.set_xlabel('Noise level (σ)', fontsize=9)
-        ax.set_ylabel('R² (avg across reps)', fontsize=9)
-        ax.set_title(f'B{idx+1}. {title} Degradation', fontsize=10, fontweight='bold', pad=10)
-        ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+        ax.set_ylabel('R² score', fontsize=9)
+        ax.set_title(f'A{idx+1}. {trans["title"]} ({format_representation(primary_rep)})', 
+                     fontsize=10, fontweight='bold', pad=10)
+        ax.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
         ax.set_ylim(bottom=0)
     
-    output_path = Path(output_dir) / "figure4_paired_comparisons.png"
+    # Row 2: Retention comparison (base vs best variant) across representations
+    representations = sorted(df['representation'].unique())
+    
+    for idx, trans in enumerate(transformations):
+        ax = fig.add_subplot(gs[1, idx])
+        
+        base = trans['base']
+        variants = trans['variants']
+        
+        base_retentions = []
+        variant_retentions = []
+        rep_labels = []
+        
+        for rep in representations:
+            base_met = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
+            
+            # Get best variant for this representation
+            best_var_ret = None
+            for var in variants:
+                var_met = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+                if len(var_met) > 0:
+                    var_ret = var_met['retention_pct'].mean()
+                    if best_var_ret is None or var_ret > best_var_ret:
+                        best_var_ret = var_ret
+            
+            if len(base_met) > 0 and best_var_ret is not None:
+                base_retentions.append(base_met['retention_pct'].mean())
+                variant_retentions.append(best_var_ret)
+                rep_labels.append(format_representation(rep))
+        
+        if base_retentions:
+            x = np.arange(len(rep_labels))
+            width = 0.35
+            
+            ax.bar(x - width/2, base_retentions, width, label=format_model(base),
+                  color=COLORS['deterministic'], alpha=0.8, edgecolor='black', linewidth=0.5)
+            ax.bar(x + width/2, variant_retentions, width, label='Best BNN',
+                  color=COLORS['probabilistic'], alpha=0.8, edgecolor='black', linewidth=0.5)
+            
+            ax.set_xticks(x)
+            ax.set_xticklabels(rep_labels, rotation=45, ha='right', fontsize=8)
+            ax.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+        
+        ax.set_ylabel('Retention (%)', fontsize=9)
+        ax.set_title(f'B{idx+1}. {trans["title"]} Retention by Rep', fontsize=10, fontweight='bold', pad=10)
+        ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # Row 3: NSI improvement (base - variant, positive = variant better)
+    for idx, trans in enumerate(transformations):
+        ax = fig.add_subplot(gs[2, idx])
+        
+        base = trans['base']
+        variants = trans['variants']
+        
+        improvements = []
+        labels = []
+        colors_list = []
+        
+        for rep in representations:
+            base_met = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
+            
+            for var in variants:
+                var_met = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+                
+                if len(base_met) > 0 and len(var_met) > 0:
+                    # NSI improvement: less negative is better, so var - base
+                    # If var NSI is -0.3 and base NSI is -0.4, improvement is 0.1 (positive = good)
+                    base_nsi = base_met['nsi_r2'].mean()
+                    var_nsi = var_met['nsi_r2'].mean()
+                    improvement = var_nsi - base_nsi  # Less negative = positive improvement
+                    
+                    improvements.append(improvement)
+                    labels.append(f"{format_model(var)}\n{format_representation(rep)}")
+                    colors_list.append(COLORS['probabilistic'] if improvement > 0 else COLORS['deterministic'])
+        
+        if improvements:
+            y_pos = np.arange(len(improvements))
+            ax.barh(y_pos, improvements, color=colors_list, alpha=0.8,
+                   edgecolor='black', linewidth=0.5)
+            ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(labels, fontsize=6)
+            ax.set_xlabel('NSI improvement (less negative = better)', fontsize=9)
+        
+        ax.set_title(f'C{idx+1}. {trans["title"]} NSI Change', fontsize=10, fontweight='bold', pad=10)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    output_path = Path(output_dir) / "figure4_bayesian_transformations.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"✓ Saved Figure 4 to {output_path}")
     plt.close()
@@ -676,30 +761,39 @@ def create_summary_tables(metrics_df, output_dir):
     table2.to_csv(output_dir / "table_phase1_full_breakdown.csv")
     print(f"✓ Saved full breakdown table")
     
-    # Table 3: Paired comparisons
-    pairs = [('rf', 'qrf'), ('xgboost', 'ngboost'), ('mlp', 'gauche')]
+    # Table 3: Bayesian transformation comparisons
+    transformations = [
+        ('rf', ['qrf']),
+        ('dnn', ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']),
+        ('mlp', ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']),
+    ]
     pair_results = []
     
-    for det, prob in pairs:
-        for rep in metrics_df['representation'].unique():
-            det_data = metrics_df[(metrics_df['model'] == det) & (metrics_df['representation'] == rep)]
-            prob_data = metrics_df[(metrics_df['model'] == prob) & (metrics_df['representation'] == rep)]
-            
-            if len(det_data) > 0 and len(prob_data) > 0:
-                pair_results.append({
-                    'pair': f"{det} vs {prob}",
-                    'representation': rep,
-                    'det_baseline': det_data['baseline_r2'].mean(),
-                    'prob_baseline': prob_data['baseline_r2'].mean(),
-                    'det_retention': det_data['retention_pct'].mean(),
-                    'prob_retention': prob_data['retention_pct'].mean(),
-                    'retention_diff': prob_data['retention_pct'].mean() - det_data['retention_pct'].mean(),
-                })
+    for base, variants in transformations:
+        for var in variants:
+            for rep in metrics_df['representation'].unique():
+                base_data = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
+                var_data = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+                
+                if len(base_data) > 0 and len(var_data) > 0:
+                    pair_results.append({
+                        'base_model': base,
+                        'bayesian_variant': var,
+                        'representation': rep,
+                        'base_baseline': base_data['baseline_r2'].mean(),
+                        'var_baseline': var_data['baseline_r2'].mean(),
+                        'base_retention': base_data['retention_pct'].mean(),
+                        'var_retention': var_data['retention_pct'].mean(),
+                        'retention_diff': var_data['retention_pct'].mean() - base_data['retention_pct'].mean(),
+                        'base_nsi': base_data['nsi_r2'].mean(),
+                        'var_nsi': var_data['nsi_r2'].mean(),
+                        'nsi_improvement': var_data['nsi_r2'].mean() - base_data['nsi_r2'].mean(),
+                    })
     
     if pair_results:
         table3 = pd.DataFrame(pair_results).round(4)
-        table3.to_csv(output_dir / "table_phase1_paired_comparisons.csv", index=False)
-        print(f"✓ Saved paired comparisons table")
+        table3.to_csv(output_dir / "table_phase1_bayesian_transformations.csv", index=False)
+        print(f"✓ Saved Bayesian transformations table")
 
 
 def perform_statistical_tests(metrics_df, output_dir):
@@ -732,26 +826,33 @@ def perform_statistical_tests(metrics_df, output_dir):
     
     results_text.append("")
     
-    # Paired comparisons
-    pairs = [('rf', 'qrf', 'Random Forest'), ('xgboost', 'ngboost', 'Gradient Boosting')]
+    # Bayesian transformation comparisons
+    transformations = [
+        ('rf', 'qrf', 'Random Forest → QRF'),
+        ('mlp', 'mlp_bnn_full', 'MLP → MLP-BNN-Full'),
+        ('mlp', 'mlp_bnn_last', 'MLP → MLP-BNN-Last'),
+        ('mlp', 'mlp_bnn_variational', 'MLP → MLP-BNN-Var'),
+    ]
     
-    for det, prob, name in pairs:
-        results_text.append(f"\n{name.upper()}: {det} vs {prob}")
+    for base, var, name in transformations:
+        results_text.append(f"\n{name.upper()}")
         results_text.append("-"*80)
         
-        det_data = metrics_df[metrics_df['model'] == det]['retention_pct'].dropna()
-        prob_data = metrics_df[metrics_df['model'] == prob]['retention_pct'].dropna()
+        base_data = metrics_df[metrics_df['model'] == base]['retention_pct'].dropna()
+        var_data = metrics_df[metrics_df['model'] == var]['retention_pct'].dropna()
         
-        if len(det_data) >= 3 and len(prob_data) >= 3:
-            stat, p_val = stats.mannwhitneyu(det_data, prob_data, alternative='two-sided')
-            results_text.append(f"  {det}: mean={det_data.mean():.2f}%, n={len(det_data)}")
-            results_text.append(f"  {prob}: mean={prob_data.mean():.2f}%, n={len(prob_data)}")
+        if len(base_data) >= 3 and len(var_data) >= 3:
+            stat, p_val = stats.mannwhitneyu(base_data, var_data, alternative='two-sided')
+            results_text.append(f"  {base}: mean={base_data.mean():.2f}%, n={len(base_data)}")
+            results_text.append(f"  {var}: mean={var_data.mean():.2f}%, n={len(var_data)}")
             results_text.append(f"  Mann-Whitney U: p={p_val:.6f}")
             if p_val < 0.05:
-                winner = prob if prob_data.mean() > det_data.mean() else det
+                winner = var if var_data.mean() > base_data.mean() else base
                 results_text.append(f"  → Significant: {winner} superior")
             else:
                 results_text.append(f"  → No significant difference")
+        else:
+            results_text.append(f"  Insufficient data for comparison")
     
     output_path = output_dir / "statistical_tests_phase1.txt"
     with open(output_path, 'w') as f:
@@ -786,7 +887,7 @@ def main(results_dir="../results"):
     print("="*80)
     
     create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir)
-    create_figure4_paired_comparisons(df, metrics_df, output_dir)
+    create_figure4_bayesian_transformations(df, metrics_df, output_dir)
     create_summary_tables(metrics_df, output_dir)
     perform_statistical_tests(metrics_df, output_dir)
     

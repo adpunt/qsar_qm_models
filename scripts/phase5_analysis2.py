@@ -34,7 +34,7 @@ sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Helvetica'],
+    'font.sans-serif': ['DejaVu Sans'],
     'font.size': 8,
     'axes.labelsize': 9,
     'axes.titlesize': 10,
@@ -140,12 +140,14 @@ def load_phase5_results(results_dir):
     # Exclude size experiment files (contain n followed by digits like n500, n1000)
     import re
     size_pattern = re.compile(r'_n\d+[_.]')
+    original_count = len(phase5_files)
     phase5_files = [f for f in phase5_files if not size_pattern.search(f.name)]
     
     if not phase5_files:
         raise FileNotFoundError(f"No phase5*.csv files found in {results_dir}")
     
-    print(f"Found {len(phase5_files)} Phase 5 result files (excluded size experiment files)")
+    print(f"Found {len(phase5_files)} Phase 5 result files (excluded {original_count - len(phase5_files)} size experiment files)")
+    print(f"Files: {[f.name for f in phase5_files[:5]]}{'...' if len(phase5_files) > 5 else ''}")
     
     all_results = []
     for filepath in phase5_files:
@@ -155,6 +157,7 @@ def load_phase5_results(results_dir):
     
     results_df = pd.concat(all_results, ignore_index=True)
     print(f"Loaded {len(results_df)} total rows")
+    print(f"Columns in data: {list(results_df.columns)}")
     
     return results_df
 
@@ -176,12 +179,15 @@ def parse_phase5_filenames(df):
     
     # Check if columns already exist in the data
     existing_cols = [col for col in required_cols if col in df.columns]
+    print(f"Existing metadata columns: {existing_cols}")
     
     if len(existing_cols) == len(required_cols):
         print("Using existing model/representation/noise_strategy columns from CSV")
+        print(f"Sample values - model: {df['model'].unique()[:5]}, rep: {df['representation'].unique()[:5]}, noise: {df['noise_strategy'].unique()[:5]}")
     else:
         # Parse from filenames
         print("Parsing model/representation/noise_strategy from filenames")
+        print(f"Sample filenames: {df['source_file'].unique()[:3]}")
         
         def extract_info(filename):
             name = filename.replace('.csv', '')
@@ -202,6 +208,7 @@ def parse_phase5_filenames(df):
             })
         
         parsed = df['source_file'].apply(extract_info)
+        print(f"Parsed values - rep: {parsed['representation'].unique()}, model: {parsed['model'].unique()}, noise: {parsed['noise_strategy'].unique()}")
         
         # Drop existing columns if any (to avoid duplicates)
         df = df.drop(columns=[c for c in existing_cols if c in df.columns], errors='ignore')
@@ -214,13 +221,29 @@ def parse_phase5_filenames(df):
     if before != after:
         print(f"Dropped {before - after} rows with missing metadata")
     
-    # Filter to valid models and representations (exclude size experiment remnants)
-    before = len(df)
-    df = df[df['model'].str.lower().isin(VALID_MODELS)]
-    df = df[df['representation'].str.lower().isin(VALID_REPS)]
-    after = len(df)
-    if before != after:
-        print(f"Filtered out {before - after} rows with invalid model/representation values")
+    # Validate - but be more lenient, just warn
+    invalid_models = set(df['model'].str.lower().unique()) - VALID_MODELS
+    invalid_reps = set(df['representation'].str.lower().unique()) - VALID_REPS
+    
+    if invalid_models:
+        print(f"Warning: unexpected model values: {invalid_models}")
+    if invalid_reps:
+        print(f"Warning: unexpected representation values: {invalid_reps}")
+    
+    # Only filter if we have SOME valid data
+    df_valid_models = df[df['model'].str.lower().isin(VALID_MODELS)]
+    df_valid_reps = df[df['representation'].str.lower().isin(VALID_REPS)]
+    
+    if len(df_valid_models) > 0 and len(df_valid_reps) > 0:
+        before = len(df)
+        df = df[df['model'].str.lower().isin(VALID_MODELS)]
+        df = df[df['representation'].str.lower().isin(VALID_REPS)]
+        after = len(df)
+        if before != after:
+            print(f"Filtered out {before - after} rows with invalid model/representation values")
+    else:
+        print("Skipping validation filter - no valid data would remain")
+        print("Proceeding with all data as-is")
     
     return df
 
@@ -241,8 +264,20 @@ def calculate_robustness_metrics(df, sigma_high=0.5):
     """
     print(f"\nCalculating robustness metrics (σ_high = {sigma_high})")
     
-    available_sigmas = sorted(df['sigma'].unique())
+    if len(df) == 0:
+        print("ERROR: No data to calculate metrics from!")
+        return pd.DataFrame()
+    
+    if 'sigma' not in df.columns:
+        print(f"ERROR: 'sigma' column not found. Available columns: {list(df.columns)}")
+        return pd.DataFrame()
+    
+    available_sigmas = sorted(df['sigma'].dropna().unique())
     print(f"Available σ values: {available_sigmas}")
+    
+    if len(available_sigmas) == 0:
+        print("ERROR: No valid sigma values found!")
+        return pd.DataFrame()
     
     # Find closest sigma to requested high value
     if sigma_high not in available_sigmas:
@@ -573,6 +608,12 @@ def main(results_dir="../results"):
     df = load_phase5_results(results_dir)
     df = parse_phase5_filenames(df)
     
+    if len(df) == 0:
+        print("\nERROR: No valid data after parsing. Check file format.")
+        print("Expected filename format: phase5_rep_model_noisestrategy.csv")
+        print("Or CSV should contain columns: model, representation, noise_strategy, sigma, r2")
+        return
+    
     print(f"\nExperiment summary:")
     print(f"  Models: {', '.join(sorted(df['model'].unique()))}")
     print(f"  Representations: {', '.join(sorted(df['representation'].unique()))}")
@@ -581,6 +622,10 @@ def main(results_dir="../results"):
     
     # Calculate metrics
     metrics_df = calculate_robustness_metrics(df, sigma_high=0.5)
+    
+    if len(metrics_df) == 0:
+        print("\nERROR: No metrics could be calculated. Check data format.")
+        return
     
     # Create output directory
     output_dir = Path(results_dir) / "phase5_figures"
