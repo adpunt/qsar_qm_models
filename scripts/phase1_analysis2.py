@@ -29,7 +29,7 @@ sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
-    'font.sans-serif': ['DejaVu Sans'],
+    'font.sans-serif': ['DejaVu Sans', 'Arial', 'Helvetica'],
     'font.size': 8,
     'axes.labelsize': 9,
     'axes.titlesize': 10,
@@ -376,20 +376,19 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     print("GENERATING FIGURE 3: DETERMINISTIC VS PROBABILISTIC")
     print("="*80)
     
-    fig = plt.figure(figsize=(15, 10))
-    gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.30,
-                          left=0.06, right=0.98, top=0.94, bottom=0.08)
-    
-    # ========================================================================
-    # PANEL A: Degradation curves - RF vs QRF
-    # ========================================================================
-    ax_a = fig.add_subplot(gs[0, 0])
+    fig = plt.figure(figsize=(12, 10))
+    gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.30,
+                          left=0.08, right=0.98, top=0.94, bottom=0.08)
     
     # Find best representation for comparison
     available_reps = df['representation'].unique()
     primary_rep = 'pdv' if 'pdv' in available_reps else available_reps[0]
     
-    # RF vs QRF
+    # ========================================================================
+    # PANEL A: RF vs QRF
+    # ========================================================================
+    ax_a = fig.add_subplot(gs[0, 0])
+    
     for model, color, style, marker in [('rf', COLORS['deterministic'], '--', 'o'),
                                          ('qrf', COLORS['probabilistic'], '-', 's')]:
         model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
@@ -402,7 +401,7 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     
     ax_a.set_xlabel('Noise level (σ)', fontsize=9)
     ax_a.set_ylabel('R² score', fontsize=9)
-    ax_a.set_title(f'A. RF vs QRF ({format_representation(primary_rep)})', 
+    ax_a.set_title(f'A. RF → QRF ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
     ax_a.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_a.spines['top'].set_visible(False)
@@ -411,91 +410,66 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     ax_a.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL B: MLP vs GP (GAUCHE)
+    # PANEL B: MLP vs MLP-BNN variants
     # ========================================================================
     ax_b = fig.add_subplot(gs[0, 1])
     
-    for model, color, style, marker in [('mlp', COLORS['deterministic'], '--', 'o'),
-                                         ('gauche', COLORS['probabilistic'], '-', 's')]:
-        model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
-        if len(model_data) > 0:
-            avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
-            label = f"{format_model(model)} ({'det' if model == 'mlp' else 'prob'})"
-            ax_b.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
-                     marker=marker, linestyle=style, linewidth=2, alpha=0.9,
-                     label=label, color=color, markersize=6)
-    
-    ax_b.set_xlabel('Noise level (σ)', fontsize=9)
-    ax_b.set_ylabel('R² score', fontsize=9)
-    ax_b.set_title(f'B. MLP vs GP ({format_representation(primary_rep)})', 
-                   fontsize=10, fontweight='bold', pad=10)
-    ax_b.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
-    ax_b.spines['top'].set_visible(False)
-    ax_b.spines['right'].set_visible(False)
-    ax_b.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-    ax_b.set_ylim(bottom=0)
-    
-    # ========================================================================
-    # PANEL C: MLP vs BNN variants
-    # ========================================================================
-    ax_c = fig.add_subplot(gs[0, 2])
-    
     mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
-    colors_mlp = ['#34495e', '#e67e22', '#95a5a6', '#d35400']
+    colors_mlp = [COLORS['deterministic'], '#e67e22', '#27ae60', '#8e44ad']
     styles = ['-', '--', '-.', ':']
     
     for model, color, style in zip(mlp_variants, colors_mlp, styles):
         model_data = df[(df['model'] == model) & (df['representation'] == primary_rep)]
         if len(model_data) > 0:
             avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
-            ax_c.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
+            ax_b.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
                      marker='o', linestyle=style, linewidth=2, alpha=0.9,
                      label=format_model(model), color=color, markersize=5)
     
-    ax_c.set_xlabel('Noise level (σ)', fontsize=9)
-    ax_c.set_ylabel('R² score', fontsize=9)
-    ax_c.set_title(f'C. MLP vs BNN Variants ({format_representation(primary_rep)})', 
+    ax_b.set_xlabel('Noise level (σ)', fontsize=9)
+    ax_b.set_ylabel('R² score', fontsize=9)
+    ax_b.set_title(f'B. MLP → BNN Variants ({format_representation(primary_rep)})', 
                    fontsize=10, fontweight='bold', pad=10)
-    ax_c.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
-    ax_c.spines['top'].set_visible(False)
-    ax_c.spines['right'].set_visible(False)
-    ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-    ax_c.set_ylim(bottom=0)
+    ax_b.legend(fontsize=7, loc='best', frameon=True, framealpha=0.9)
+    ax_b.spines['top'].set_visible(False)
+    ax_b.spines['right'].set_visible(False)
+    ax_b.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_b.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL D: Baseline vs Retention scatter
+    # PANEL C: Baseline vs Retention scatter
     # ========================================================================
-    ax_d = fig.add_subplot(gs[1, 0])
+    ax_c = fig.add_subplot(gs[1, 0])
     
     for model_type in ['deterministic', 'probabilistic']:
         subset = metrics_df[metrics_df['model_type'] == model_type]
         if len(subset) > 0:
             color = COLORS[model_type]
             marker = 'o' if model_type == 'deterministic' else 's'
-            ax_d.scatter(subset['baseline_r2'], subset['retention_pct'],
+            ax_c.scatter(subset['baseline_r2'], subset['retention_pct'],
                         alpha=0.7, s=60, color=color, marker=marker,
                         label=model_type.capitalize(),
                         edgecolors='black', linewidth=0.5)
     
-    ax_d.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
-    ax_d.set_xlabel('Baseline R² (σ=0)', fontsize=9)
-    ax_d.set_ylabel('Retention at high noise (%)', fontsize=9)
-    ax_d.set_title('D. Baseline vs Robustness', fontsize=10, fontweight='bold', pad=10)
-    ax_d.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
-    ax_d.spines['top'].set_visible(False)
-    ax_d.spines['right'].set_visible(False)
-    ax_d.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_c.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_c.set_xlabel('Baseline R² (σ=0)', fontsize=9)
+    ax_c.set_ylabel('Retention at high noise (%)', fontsize=9)
+    ax_c.set_title('C. Baseline vs Robustness', fontsize=10, fontweight='bold', pad=10)
+    ax_c.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+    ax_c.spines['top'].set_visible(False)
+    ax_c.spines['right'].set_visible(False)
+    ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     
     # ========================================================================
-    # PANEL E: Retention by model type (box plot)
+    # PANEL D: Retention by model type (box plot)
     # ========================================================================
-    ax_e = fig.add_subplot(gs[1, 1])
+    ax_d = fig.add_subplot(gs[1, 1])
     
     det_retention = metrics_df[metrics_df['model_type'] == 'deterministic']['retention_pct'].dropna()
     prob_retention = metrics_df[metrics_df['model_type'] == 'probabilistic']['retention_pct'].dropna()
     
     if len(det_retention) > 0 and len(prob_retention) > 0:
-        bp = ax_e.boxplot([det_retention, prob_retention],
+        bp = ax_d.boxplot([det_retention, prob_retention],
                          labels=['Deterministic', 'Probabilistic'],
                          patch_artist=True, widths=0.6)
         
@@ -508,53 +482,19 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
         for i, (data, color) in enumerate([(det_retention, COLORS['deterministic']),
                                             (prob_retention, COLORS['probabilistic'])]):
             x = np.random.normal(i+1, 0.04, size=len(data))
-            ax_e.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
+            ax_d.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
         
         # Statistical test
         stat, p_val = stats.mannwhitneyu(det_retention, prob_retention, alternative='two-sided')
         sig_text = f"p = {p_val:.4f}" + (" *" if p_val < 0.05 else "")
-        ax_e.text(0.5, 0.95, sig_text, transform=ax_e.transAxes, ha='center', fontsize=8)
+        ax_d.text(0.5, 0.95, sig_text, transform=ax_d.transAxes, ha='center', fontsize=8)
     
-    ax_e.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
-    ax_e.set_ylabel('Retention at high noise (%)', fontsize=9)
-    ax_e.set_title('E. Retention Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
-    ax_e.spines['top'].set_visible(False)
-    ax_e.spines['right'].set_visible(False)
-    ax_e.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
-    
-    # ========================================================================
-    # PANEL F: NSI comparison
-    # ========================================================================
-    ax_f = fig.add_subplot(gs[1, 2])
-    
-    det_nsi = metrics_df[metrics_df['model_type'] == 'deterministic']['nsi_r2'].dropna()
-    prob_nsi = metrics_df[metrics_df['model_type'] == 'probabilistic']['nsi_r2'].dropna()
-    
-    if len(det_nsi) > 0 and len(prob_nsi) > 0:
-        bp = ax_f.boxplot([det_nsi, prob_nsi],
-                         labels=['Deterministic', 'Probabilistic'],
-                         patch_artist=True, widths=0.6)
-        
-        bp['boxes'][0].set_facecolor(COLORS['deterministic'])
-        bp['boxes'][1].set_facecolor(COLORS['probabilistic'])
-        for box in bp['boxes']:
-            box.set_alpha(0.7)
-        
-        for i, (data, color) in enumerate([(det_nsi, COLORS['deterministic']),
-                                            (prob_nsi, COLORS['probabilistic'])]):
-            x = np.random.normal(i+1, 0.04, size=len(data))
-            ax_f.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
-        
-        stat, p_val = stats.mannwhitneyu(det_nsi, prob_nsi, alternative='two-sided')
-        sig_text = f"p = {p_val:.4f}" + (" *" if p_val < 0.05 else "")
-        ax_f.text(0.5, 0.95, sig_text, transform=ax_f.transAxes, ha='center', fontsize=8)
-    
-    ax_f.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
-    ax_f.set_ylabel('NSI (R²) - Degradation slope', fontsize=9)
-    ax_f.set_title('F. NSI Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
-    ax_f.spines['top'].set_visible(False)
-    ax_f.spines['right'].set_visible(False)
-    ax_f.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_d.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_d.set_ylabel('Retention at high noise (%)', fontsize=9)
+    ax_d.set_title('D. Retention Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
+    ax_d.spines['top'].set_visible(False)
+    ax_d.spines['right'].set_visible(False)
+    ax_d.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
     output_path = Path(output_dir) / "figure3_deterministic_vs_probabilistic.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -568,23 +508,17 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
     print("GENERATING FIGURE 4: BAYESIAN TRANSFORMATIONS")
     print("="*80)
     
-    fig = plt.figure(figsize=(15, 12))
-    gs = fig.add_gridspec(3, 3, hspace=0.40, wspace=0.30,
-                          left=0.06, right=0.98, top=0.94, bottom=0.06)
+    fig = plt.figure(figsize=(12, 12))
+    gs = fig.add_gridspec(3, 2, hspace=0.40, wspace=0.30,
+                          left=0.08, right=0.98, top=0.94, bottom=0.06)
     
-    # Define valid Bayesian transformation pairs
+    # Define valid Bayesian transformation pairs (DNN didn't run, so only RF and MLP)
     transformations = [
         {
             'base': 'rf',
             'variants': ['qrf'],
             'title': 'RF → QRF',
             'description': 'Tree-based'
-        },
-        {
-            'base': 'dnn',
-            'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational'],
-            'title': 'DNN → BNN',
-            'description': 'Deep NN'
         },
         {
             'base': 'mlp',
@@ -761,10 +695,9 @@ def create_summary_tables(metrics_df, output_dir):
     table2.to_csv(output_dir / "table_phase1_full_breakdown.csv")
     print(f"✓ Saved full breakdown table")
     
-    # Table 3: Bayesian transformation comparisons
+    # Table 3: Bayesian transformation comparisons (DNN didn't run)
     transformations = [
         ('rf', ['qrf']),
-        ('dnn', ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']),
         ('mlp', ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']),
     ]
     pair_results = []

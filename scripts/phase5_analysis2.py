@@ -34,7 +34,7 @@ sns.set_style("ticks")
 plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
-    'font.sans-serif': ['DejaVu Sans'],
+    'font.sans-serif': ['Arial', 'Helvetica'],
     'font.size': 8,
     'axes.labelsize': 9,
     'axes.titlesize': 10,
@@ -54,32 +54,24 @@ NOISE_STRATEGY_LABELS = {
     'gaussian': 'Gaussian',
     'hetero': 'Heteroscedastic',
     'heteroscedastic': 'Heteroscedastic',
-    'legacy': 'Legacy',
-    'valprop': 'Value-proportional',
+    'value_proportional': 'Value-proportional',
     'proportional': 'Proportional',
     'quantile': 'Quantile-based',
-    'outlier': 'Outlier injection',
-    'conformal': 'Conformal',
-    'dnn': 'DNN-based',
-    'mlp': 'MLP-based',
-    'qrf': 'QRF-based',
-    'rf': 'RF-based',
+    'outlier': 'Outlier',
+    'threshold': 'Threshold',
+    'uniform': 'Uniform',
 }
 
 NOISE_STRATEGY_COLORS = {
     'gaussian': '#3498db',
     'hetero': '#e74c3c',
     'heteroscedastic': '#e74c3c',
-    'legacy': '#2ecc71',
-    'valprop': '#9b59b6',
+    'value_proportional': '#9b59b6',
     'proportional': '#9b59b6',
     'quantile': '#f39c12',
     'outlier': '#e67e22',
-    'conformal': '#1abc9c',
-    'dnn': '#e74c3c',
-    'mlp': '#3498db',
-    'qrf': '#27ae60',
-    'rf': '#f39c12',
+    'threshold': '#1abc9c',
+    'uniform': '#27ae60',
 }
 
 MODEL_LABELS = {
@@ -164,86 +156,49 @@ def load_phase5_results(results_dir):
 
 def parse_phase5_filenames(df):
     """
-    Parse experimental info from filenames.
+    Parse experimental info from filenames and CSV columns.
     
-    Format: phase5_rep_model_noisestrategy.csv
-    Example: phase5_pdv_rf_gaussian.csv
+    Filename format: phase5_{prefix}_{noise_strategy}.csv
+    Example: phase5_dnn_heteroscedastic.csv → noise_strategy = heteroscedastic
     
-    If columns already exist in the CSV, use those instead of parsing.
+    CSV columns: model, rep (representation), sigma, r2, etc.
     """
-    required_cols = ['model', 'representation', 'noise_strategy']
+    # Rename 'rep' to 'representation' if it exists
+    if 'rep' in df.columns and 'representation' not in df.columns:
+        df = df.rename(columns={'rep': 'representation'})
+        print("Renamed 'rep' column to 'representation'")
     
-    # Valid values for validation
-    VALID_MODELS = {'rf', 'qrf', 'xgboost', 'ngboost', 'dnn', 'bnn', 'gp', 'gauche', 'mlp', 'conformal'}
-    VALID_REPS = {'ecfp4', 'pdv', 'sns', 'smiles', 'graph', 'mordred', 'maccs'}
-    
-    # Check if columns already exist in the data
-    existing_cols = [col for col in required_cols if col in df.columns]
-    print(f"Existing metadata columns: {existing_cols}")
-    
-    if len(existing_cols) == len(required_cols):
-        print("Using existing model/representation/noise_strategy columns from CSV")
-        print(f"Sample values - model: {df['model'].unique()[:5]}, rep: {df['representation'].unique()[:5]}, noise: {df['noise_strategy'].unique()[:5]}")
-    else:
-        # Parse from filenames
-        print("Parsing model/representation/noise_strategy from filenames")
-        print(f"Sample filenames: {df['source_file'].unique()[:3]}")
+    # Parse noise_strategy from filename
+    # Format: phase5_{prefix}_{noise_strategy}.csv
+    def extract_noise_strategy(filename):
+        name = filename.replace('.csv', '')
+        parts = name.split('_')
         
-        def extract_info(filename):
-            name = filename.replace('.csv', '')
-            parts = name.split('_')
-            
-            # phase5_rep_model_noisestrategy
-            if len(parts) >= 4:
-                return pd.Series({
-                    'representation': parts[1],
-                    'model': parts[2],
-                    'noise_strategy': parts[3],
-                })
-            
-            return pd.Series({
-                'representation': None,
-                'model': None,
-                'noise_strategy': None,
-            })
-        
-        parsed = df['source_file'].apply(extract_info)
-        print(f"Parsed values - rep: {parsed['representation'].unique()}, model: {parsed['model'].unique()}, noise: {parsed['noise_strategy'].unique()}")
-        
-        # Drop existing columns if any (to avoid duplicates)
-        df = df.drop(columns=[c for c in existing_cols if c in df.columns], errors='ignore')
-        df = pd.concat([df, parsed], axis=1)
+        # phase5_prefix_noisestrategy or phase5_prefix_noise_strategy
+        if len(parts) >= 3:
+            # Join everything after the second part as noise_strategy
+            # e.g., phase5_dnn_value_proportional → value_proportional
+            return '_'.join(parts[2:])
+        return None
     
-    # Drop rows with missing info
+    df['noise_strategy'] = df['source_file'].apply(extract_noise_strategy)
+    
+    print(f"Parsed noise strategies: {df['noise_strategy'].unique()}")
+    print(f"Models in data: {df['model'].unique()}")
+    print(f"Representations in data: {df['representation'].unique()}")
+    
+    # Drop rows with missing required columns
+    required_cols = ['model', 'representation', 'noise_strategy', 'sigma', 'r2']
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        print(f"ERROR: Missing required columns: {missing}")
+        return pd.DataFrame()
+    
     before = len(df)
     df = df.dropna(subset=required_cols)
     after = len(df)
     if before != after:
-        print(f"Dropped {before - after} rows with missing metadata")
-    
-    # Validate - but be more lenient, just warn
-    invalid_models = set(df['model'].str.lower().unique()) - VALID_MODELS
-    invalid_reps = set(df['representation'].str.lower().unique()) - VALID_REPS
-    
-    if invalid_models:
-        print(f"Warning: unexpected model values: {invalid_models}")
-    if invalid_reps:
-        print(f"Warning: unexpected representation values: {invalid_reps}")
-    
-    # Only filter if we have SOME valid data
-    df_valid_models = df[df['model'].str.lower().isin(VALID_MODELS)]
-    df_valid_reps = df[df['representation'].str.lower().isin(VALID_REPS)]
-    
-    if len(df_valid_models) > 0 and len(df_valid_reps) > 0:
-        before = len(df)
-        df = df[df['model'].str.lower().isin(VALID_MODELS)]
-        df = df[df['representation'].str.lower().isin(VALID_REPS)]
-        after = len(df)
-        if before != after:
-            print(f"Filtered out {before - after} rows with invalid model/representation values")
-    else:
-        print("Skipping validation filter - no valid data would remain")
-        print("Proceeding with all data as-is")
+        print(f"Dropped {before - after} rows with missing values")
     
     return df
 
