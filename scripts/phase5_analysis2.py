@@ -137,7 +137,27 @@ def parse_phase5_filenames(df):
     
     Format: phase5_rep_model_noisestrategy.csv
     Example: phase5_pdv_rf_gaussian.csv
+    
+    If columns already exist in the CSV, use those instead of parsing.
     """
+    required_cols = ['model', 'representation', 'noise_strategy']
+    
+    # Check if columns already exist in the data
+    existing_cols = [col for col in required_cols if col in df.columns]
+    
+    if len(existing_cols) == len(required_cols):
+        print("Using existing model/representation/noise_strategy columns from CSV")
+        # Just ensure they're not null
+        before = len(df)
+        df = df.dropna(subset=required_cols)
+        after = len(df)
+        if before != after:
+            print(f"Dropped {before - after} rows with missing metadata")
+        return df
+    
+    # Otherwise parse from filenames
+    print("Parsing model/representation/noise_strategy from filenames")
+    
     def extract_info(filename):
         name = filename.replace('.csv', '')
         parts = name.split('_')
@@ -157,11 +177,14 @@ def parse_phase5_filenames(df):
         })
     
     parsed = df['source_file'].apply(extract_info)
+    
+    # Drop existing columns if any (to avoid duplicates)
+    df = df.drop(columns=[c for c in existing_cols if c in df.columns], errors='ignore')
     df = pd.concat([df, parsed], axis=1)
     
     # Drop rows with missing info
     before = len(df)
-    df = df.dropna(subset=['model', 'representation', 'noise_strategy'])
+    df = df.dropna(subset=required_cols)
     after = len(df)
     
     if before != after:
