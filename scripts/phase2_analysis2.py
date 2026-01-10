@@ -753,8 +753,6 @@ def create_figure6(metrics_df, output_dir):
             marker = MODEL_MARKERS.get(model, 'o')
             ax.plot(avg['sigma'], avg['mean'], marker=marker, linewidth=2,
                    markersize=5, label=get_display_name(model), color=color)
-            ax.fill_between(avg['sigma'], avg['mean'] - avg['std'],
-                           avg['mean'] + avg['std'], alpha=0.15, color=color)
     
     ax.set_xlabel('Noise Level (σ)')
     ax.set_ylabel('MAE (avg across representations)')
@@ -779,8 +777,6 @@ def create_figure6(metrics_df, output_dir):
             marker = MODEL_MARKERS.get(model, 'o')
             ax.plot(avg['sigma'], avg['mean'], marker=marker, linewidth=2,
                    markersize=5, label=get_display_name(model), color=color)
-            ax.fill_between(avg['sigma'], avg['mean'] - avg['std'],
-                           avg['mean'] + avg['std'], alpha=0.15, color=color)
     
     ax.axhline(0, color='gray', linestyle='-', linewidth=0.8, alpha=0.5)
     ax.set_xlabel('Noise Level (σ)')
