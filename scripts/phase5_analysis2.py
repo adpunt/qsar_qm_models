@@ -147,6 +147,9 @@ def load_phase5_results(results_dir):
         df = pd.read_csv(filepath)
         df['source_file'] = filepath.name
         df['phase'] = 'phase5'
+        # Standardize column name immediately
+        if 'rep' in df.columns and 'representation' not in df.columns:
+            df = df.rename(columns={'rep': 'representation'})
         phase5_dfs.append(df)
     
     if not phase5_dfs:
@@ -154,12 +157,12 @@ def load_phase5_results(results_dir):
     
     phase5_df = pd.concat(phase5_dfs, ignore_index=True)
     
-    # Rename 'rep' to 'representation' for consistency
-    if 'rep' in phase5_df.columns:
-        phase5_df = phase5_df.rename(columns={'rep': 'representation'})
+    # Filter out excluded representations before getting combos
+    exclude_reps = ['graph', 'mhggnn']
+    phase5_df_filtered = phase5_df[~phase5_df['representation'].str.lower().isin(exclude_reps)]
     
     # Get unique model/rep combinations from Phase 5
-    phase5_combos = set(zip(phase5_df['model'].str.lower(), phase5_df['representation'].str.lower()))
+    phase5_combos = set(zip(phase5_df_filtered['model'].str.lower(), phase5_df_filtered['representation'].str.lower()))
     print(f"Phase 5 model/rep combinations: {phase5_combos}")
     
     # Load Phase 0 files as "legacy" noise strategy
@@ -174,8 +177,8 @@ def load_phase5_results(results_dir):
         df['phase'] = 'phase0'
         df['noise_strategy'] = 'legacy'
         
-        # Rename 'rep' to 'representation'
-        if 'rep' in df.columns:
+        # Standardize column name immediately
+        if 'rep' in df.columns and 'representation' not in df.columns:
             df = df.rename(columns={'rep': 'representation'})
         
         # Only keep rows matching Phase 5 combinations
@@ -187,17 +190,15 @@ def load_phase5_results(results_dir):
         if len(df) > 0:
             phase0_dfs.append(df)
     
-    # Combine
+    # Combine all
     all_dfs = phase5_dfs + phase0_dfs
     results_df = pd.concat(all_dfs, ignore_index=True)
-    
-    # Rename again in case phase5 didn't have it
-    if 'rep' in results_df.columns:
-        results_df = results_df.rename(columns={'rep': 'representation'})
     
     phase0_rows = len(results_df[results_df['phase'] == 'phase0'])
     print(f"Included {phase0_rows} Phase 0 rows matching Phase 5 configurations")
     print(f"Loaded {len(results_df)} total rows")
+    
+    return results_df
     
     return results_df
 
@@ -209,11 +210,6 @@ def parse_phase5_filenames(df):
     
     Phase 5 filename format: phase5_{prefix}_{noise_strategy}.csv
     """
-    # Rename 'rep' to 'representation' if still needed
-    if 'rep' in df.columns and 'representation' not in df.columns:
-        df = df.rename(columns={'rep': 'representation'})
-        print("Renamed 'rep' column to 'representation'")
-    
     # Parse noise_strategy from filename for Phase 5 rows only
     def extract_noise_strategy(row):
         if pd.notna(row.get('noise_strategy')):
