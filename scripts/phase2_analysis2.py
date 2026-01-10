@@ -115,8 +115,25 @@ def load_uncertainty_data(results_dir):
     print("LOADING UNCERTAINTY DATA")
     print("="*80)
     
-    results_dir = Path(results_dir)
+    results_dir = Path(results_dir).resolve()  # Convert to absolute path
+    print(f"Looking in: {results_dir}")
+    
+    # Try the glob pattern
     files = list(results_dir.glob("phase2*_uncertainty_values.csv"))
+    
+    # Debug: show what's in the directory
+    if not files:
+        print(f"\nDirectory contents:")
+        all_files = list(results_dir.glob("*.csv"))
+        phase2_files = [f for f in all_files if f.name.startswith('phase2')]
+        print(f"  Total CSV files: {len(all_files)}")
+        print(f"  Files starting with 'phase2': {len(phase2_files)}")
+        if phase2_files[:5]:
+            print(f"  Examples: {[f.name for f in phase2_files[:5]]}")
+        
+        # Try alternative pattern (in case of naming variations)
+        files = list(results_dir.glob("phase2_*_uncertainty_values.csv"))
+        print(f"  Trying 'phase2_*_uncertainty_values.csv': found {len(files)}")
     
     if not files:
         raise FileNotFoundError(f"No phase2*_uncertainty_values.csv files in {results_dir}")
