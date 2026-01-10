@@ -52,6 +52,7 @@ plt.rcParams.update({
 # Clean display names
 NOISE_STRATEGY_LABELS = {
     'gaussian': 'Gaussian',
+    'legacy': 'Legacy (Gaussian)',
     'hetero': 'Heteroscedastic',
     'heteroscedastic': 'Heteroscedastic',
     'value_proportional': 'Value-proportional',
@@ -64,6 +65,7 @@ NOISE_STRATEGY_LABELS = {
 
 NOISE_STRATEGY_COLORS = {
     'gaussian': '#3498db',
+    'legacy': '#2ecc71',
     'hetero': '#e74c3c',
     'heteroscedastic': '#e74c3c',
     'value_proportional': '#9b59b6',
@@ -116,36 +118,53 @@ def get_color(value, color_dict, default='#888888'):
 
 def load_phase5_results(results_dir):
     """
-    Load Phase 5 noise strategy results.
+    Load Phase 5 noise strategy results + Phase 0 as "legacy" baseline.
     
-    Expected filename format: phase5_rep_model_noisestrategy.csv
-    Expected columns: sigma, iteration, r2, rmse, mae
+    Phase 5 format: phase5_{model}_{noise_strategy}.csv
+    Phase 0 format: phase0_{rep}_{model}.csv (standard Gaussian noise)
     """
     print("\n" + "=" * 80)
     print("LOADING PHASE 5 NOISE STRATEGY DATA")
     print("=" * 80)
     
     results_dir = Path(results_dir)
-    phase5_files = list(results_dir.glob("phase5*.csv"))
-    phase5_files = [f for f in phase5_files if '_uncertainty' not in f.name.lower()]
     
     # Exclude size experiment files (contain n followed by digits like n500, n1000)
     import re
     size_pattern = re.compile(r'_n\d+[_.]')
+    
+    # Load Phase 5 files
+    phase5_files = list(results_dir.glob("phase5*.csv"))
+    phase5_files = [f for f in phase5_files if '_uncertainty' not in f.name.lower()]
     original_count = len(phase5_files)
     phase5_files = [f for f in phase5_files if not size_pattern.search(f.name)]
     
-    if not phase5_files:
-        raise FileNotFoundError(f"No phase5*.csv files found in {results_dir}")
-    
     print(f"Found {len(phase5_files)} Phase 5 result files (excluded {original_count - len(phase5_files)} size experiment files)")
-    print(f"Files: {[f.name for f in phase5_files[:5]]}{'...' if len(phase5_files) > 5 else ''}")
+    
+    # Load Phase 0 files as "legacy" noise strategy
+    phase0_files = list(results_dir.glob("phase0*.csv"))
+    phase0_files = [f for f in phase0_files if '_uncertainty' not in f.name.lower()]
+    print(f"Found {len(phase0_files)} Phase 0 files to include as 'legacy' strategy")
     
     all_results = []
+    
+    # Load Phase 5
     for filepath in phase5_files:
         df = pd.read_csv(filepath)
         df['source_file'] = filepath.name
+        df['phase'] = 'phase5'
         all_results.append(df)
+    
+    # Load Phase 0 as legacy
+    for filepath in phase0_files:
+        df = pd.read_csv(filepath)
+        df['source_file'] = filepath.name
+        df['phase'] = 'phase0'
+        df['noise_strategy'] = 'legacy'  # Pre-assign noise strategy
+        all_results.append(df)
+    
+    if not all_results:
+        raise FileNotFoundError(f"No phase5*.csv or phase0*.csv files found in {results_dir}")
     
     results_df = pd.concat(all_results, ignore_index=True)
     print(f"Loaded {len(results_df)} total rows")
@@ -158,8 +177,8 @@ def parse_phase5_filenames(df):
     """
     Parse experimental info from filenames and CSV columns.
     
-    Filename format: phase5_{prefix}_{noise_strategy}.csv
-    Example: phase5_dnn_heteroscedastic.csv → noise_strategy = heteroscedastic
+    Phase 5 filename format: phase5_{prefix}_{noise_strategy}.csv
+    Phase 0: Already has noise_strategy='legacy' assigned during loading
     
     CSV columns: model, rep (representation), sigma, r2, etc.
     """
@@ -168,24 +187,27 @@ def parse_phase5_filenames(df):
         df = df.rename(columns={'rep': 'representation'})
         print("Renamed 'rep' column to 'representation'")
     
-    # Parse noise_strategy from filename
-    # Format: phase5_{prefix}_{noise_strategy}.csv
-    def extract_noise_strategy(filename):
+    # Parse noise_strategy from filename for Phase 5 rows only
+    # Phase 0 rows already have noise_strategy='legacy'
+    def extract_noise_strategy(row):
+        if pd.notna(row.get('noise_strategy')):
+            return row['noise_strategy']  # Already set (e.g., phase0 legacy)
+        
+        filename = row['source_file']
         name = filename.replace('.csv', '')
         parts = name.split('_')
         
         # phase5_prefix_noisestrategy or phase5_prefix_noise_strategy
         if len(parts) >= 3:
             # Join everything after the second part as noise_strategy
-            # e.g., phase5_dnn_value_proportional → value_proportional
             return '_'.join(parts[2:])
         return None
     
-    df['noise_strategy'] = df['source_file'].apply(extract_noise_strategy)
+    df['noise_strategy'] = df.apply(extract_noise_strategy, axis=1)
     
-    print(f"Parsed noise strategies: {df['noise_strategy'].unique()}")
-    print(f"Models in data: {df['model'].unique()}")
-    print(f"Representations in data: {df['representation'].unique()}")
+    print(f"Noise strategies: {sorted(df['noise_strategy'].dropna().unique())}")
+    print(f"Models: {sorted(df['model'].dropna().unique())}")
+    print(f"Representations: {sorted(df['representation'].dropna().unique())}")
     
     # Drop rows with missing required columns
     required_cols = ['model', 'representation', 'noise_strategy', 'sigma', 'r2']

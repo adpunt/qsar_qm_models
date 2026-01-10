@@ -84,6 +84,8 @@ def format_representation(rep):
         'sns': 'SNS',
         'ecfp4': 'ECFP4',
         'smiles': 'SMILES',
+        'randomized_smiles': 'R-SMILES',
+        'random_smiles': 'R-SMILES',
         'mhggnn': 'MHGGNN',
         'graph': 'Graph',
     }
