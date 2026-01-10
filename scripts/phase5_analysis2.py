@@ -591,9 +591,45 @@ def main(results_dir="../results"):
         print("Or CSV should contain columns: model, representation, noise_strategy, sigma, r2")
         return
     
+    # DEBUG: Show data summary
+    print("\n" + "=" * 80)
+    print("DATA DEBUGGING")
+    print("=" * 80)
+    print(f"\nDataFrame shape: {df.shape}")
+    print(f"\nColumns: {list(df.columns)}")
+    print(f"\nSample of data:")
+    print(df[['model', 'representation', 'noise_strategy', 'sigma', 'r2']].head(20).to_string())
+    
+    print(f"\n--- R² Statistics ---")
+    print(f"  Min: {df['r2'].min()}")
+    print(f"  Max: {df['r2'].max()}")
+    print(f"  Mean: {df['r2'].mean()}")
+    print(f"  Median: {df['r2'].median()}")
+    print(f"  NaN count: {df['r2'].isna().sum()}")
+    
+    # Check for outliers
+    r2_outliers = df[df['r2'].abs() > 10]
+    if len(r2_outliers) > 0:
+        print(f"\n⚠️  WARNING: {len(r2_outliers)} rows with |R²| > 10 (likely errors)")
+        print(r2_outliers[['model', 'representation', 'noise_strategy', 'sigma', 'r2']].head(10).to_string())
+    
+    print(f"\n--- Unique Values ---")
+    print(f"  Models ({len(df['model'].unique())}): {sorted(df['model'].unique())[:10]}...")
+    print(f"  Representations ({len(df['representation'].unique())}): {sorted(df['representation'].unique())[:10]}...")
+    print(f"  Noise strategies ({len(df['noise_strategy'].unique())}): {sorted(df['noise_strategy'].unique())}")
+    
+    print(f"\n--- Counts by noise_strategy ---")
+    print(df.groupby('noise_strategy').size().to_string())
+    
+    print(f"\n--- Sample model/rep combinations ---")
+    combos = df.groupby(['model', 'representation']).size().reset_index(name='count')
+    print(combos.head(15).to_string())
+    
+    print("=" * 80)
+    
     print(f"\nExperiment summary:")
-    print(f"  Models: {', '.join(sorted(df['model'].unique()))}")
-    print(f"  Representations: {', '.join(sorted(df['representation'].unique()))}")
+    print(f"  Models: {', '.join(sorted(df['model'].unique())[:5])}{'...' if len(df['model'].unique()) > 5 else ''}")
+    print(f"  Representations: {', '.join(sorted(df['representation'].unique())[:5])}{'...' if len(df['representation'].unique()) > 5 else ''}")
     print(f"  Noise strategies: {', '.join(sorted(df['noise_strategy'].unique()))}")
     print(f"  σ range: {df['sigma'].min()} - {df['sigma'].max()}")
     
