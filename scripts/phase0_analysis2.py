@@ -195,6 +195,10 @@ def load_screening_results(results_dir="../results"):
                 else:
                     df['rep'] = 'mhggnn'
             
+            # Ensure 'rep' column exists (standardize from 'representation' if needed)
+            if 'representation' in df.columns and 'rep' not in df.columns:
+                df['rep'] = df['representation']
+            
             all_data.append(df)
         except Exception as e:
             print(f"Warning: {filepath.name}: {e}")

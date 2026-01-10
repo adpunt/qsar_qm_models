@@ -204,12 +204,18 @@ def load_phase0_data(results_dir="../results"):
             df = pd.read_csv(filepath)
             df['source_file'] = filepath.name
             
-            # For MHGGNN files, set representation
+            # For MHGGNN files, set representation to 'mhggnn'
             if 'mhggnn' in filepath.name.lower():
                 if 'rep' in df.columns:
                     df['rep'] = 'mhggnn'
+                elif 'representation' in df.columns:
+                    df['representation'] = 'mhggnn'
                 else:
                     df['rep'] = 'mhggnn'
+            
+            # Ensure 'rep' column exists (standardize from 'representation' if needed)
+            if 'representation' in df.columns and 'rep' not in df.columns:
+                df['rep'] = df['representation']
             
             all_data.append(df)
         except Exception as e:
@@ -230,18 +236,16 @@ def load_phase0_data(results_dir="../results"):
     # Add model_type classification
     combined_df['model_type'] = combined_df['model'].apply(get_model_type)
     
-    # Standardize column names
-    if 'rep' in combined_df.columns:
-        combined_df = combined_df.rename(columns={'rep': 'representation'})
-    
-    # Aggregate across iterations
-    results = combined_df.groupby(['model', 'representation', 'sigma', 'model_type']).agg({
+    # Aggregate across iterations using 'rep' column (same as phase0)
+    results = combined_df.groupby(['model', 'rep', 'sigma', 'model_type']).agg({
         'r2': 'mean',
         'rmse': 'mean',
         'mae': 'mean',
         'iteration': 'count'
     }).reset_index()
-    results.rename(columns={'iteration': 'n_seeds'}, inplace=True)
+    
+    # Now rename 'rep' to 'representation' for consistency
+    results.rename(columns={'rep': 'representation', 'iteration': 'n_seeds'}, inplace=True)
     
     # Filter out problematic data
     print("\nFiltering out problematic data...")
