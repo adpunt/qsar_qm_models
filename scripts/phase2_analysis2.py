@@ -1076,7 +1076,7 @@ def create_tables(metrics_df, decomp_df, output_dir):
 # MAIN
 # ============================================================================
 
-def main(results_dir="results"):
+def main(results_dir="../results"):
     """Main analysis"""
     print("="*80)
     print("PHASE 2: UNCERTAINTY ANALYSIS (UNIFIED)")
@@ -1178,5 +1178,5 @@ def main(results_dir="results"):
 
 
 if __name__ == "__main__":
-    results_dir = sys.argv[1] if len(sys.argv) > 1 else "results"
+    results_dir = sys.argv[1] if len(sys.argv) > 1 else "../results"
     main(results_dir)

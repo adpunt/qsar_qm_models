@@ -55,6 +55,7 @@ REPRESENTATION_COLORS = {
     'graph': '#949494',
     'pdv-3d': '#56B4E9',
     'random_smiles': '#756bb1',
+    'mhggnn': '#CC79A7',  # Pink/magenta for MHGGNN pretrained embeddings
 }
 
 MODEL_COLORS = {
@@ -64,9 +65,13 @@ MODEL_COLORS = {
     'qrf': '#16a085',
     'ngboost': '#f39c12',
     'dnn': '#34495e',
+    'mlp': '#2c3e50',
     'dnn_bnn_full': '#e67e22',
     'dnn_bnn_last': '#95a5a6',
     'dnn_bnn_variational': '#d35400',
+    'mlp_bnn_full': '#8e44ad',
+    'mlp_bnn_last': '#7f8c8d',
+    'mlp_bnn_variational': '#c0392b',
 }
 
 # ============================================================================
@@ -84,6 +89,7 @@ def format_representation(rep):
         'randomized_smiles': 'R-SMILES',
         'random_smiles': 'R-SMILES',
         'graph': 'Graph',
+        'mhggnn': 'MHGGNN',
     }
     return rep_map.get(rep.lower(), rep.upper())
 
@@ -105,6 +111,9 @@ def format_model(model):
         'dnn_bnn_full': 'DNN-BNN-Full',
         'dnn_bnn_last': 'DNN-BNN-Last',
         'dnn_bnn_variational': 'DNN-BNN-Var',
+        'mlp_bnn_full': 'MLP-BNN-Full',
+        'mlp_bnn_last': 'MLP-BNN-Last',
+        'mlp_bnn_variational': 'MLP-BNN-Var',
     }
     return model_map.get(model.lower(), model.capitalize())
 
@@ -113,25 +122,43 @@ def format_model(model):
 # ============================================================================
 
 def load_screening_results(results_dir="../results"):
-    """Load Phase 0c screening results"""
+    """Load Phase 0c screening results including MHGGNN files"""
     print("\n" + "="*80)
     print("LOADING PHASE 0C SCREENING DATA")
     print("="*80)
     
     results_dir = Path(results_dir)
-    screening_files = list(results_dir.glob("phase0c_screen_*.csv"))
     
-    if not screening_files:
-        print("ERROR: No phase0c_screen_*.csv files found!")
+    # Load both phase0c_screen_*.csv and phase0_mhggnn_*.csv files
+    screening_files = list(results_dir.glob("phase0c_screen_*.csv"))
+    mhggnn_files = list(results_dir.glob("phase0_mhggnn_*.csv"))
+    
+    # Combine all files
+    all_files = screening_files + mhggnn_files
+    
+    if not all_files:
+        print("ERROR: No phase0c_screen_*.csv or phase0_mhggnn_*.csv files found!")
         return pd.DataFrame()
     
-    print(f"Found {len(screening_files)} screening files")
+    print(f"Found {len(screening_files)} standard screening files")
+    print(f"Found {len(mhggnn_files)} MHGGNN files")
+    print(f"Total: {len(all_files)} files")
     
     all_data = []
-    for filepath in screening_files:
+    for filepath in all_files:
         try:
             df = pd.read_csv(filepath)
             df['source_file'] = filepath.name
+            
+            # For MHGGNN files, set representation to 'mhggnn'
+            if 'mhggnn' in filepath.name.lower():
+                if 'rep' in df.columns:
+                    df['rep'] = 'mhggnn'
+                elif 'representation' in df.columns:
+                    df['representation'] = 'mhggnn'
+                else:
+                    df['rep'] = 'mhggnn'
+            
             all_data.append(df)
         except Exception as e:
             print(f"Warning: {filepath.name}: {e}")
@@ -173,6 +200,7 @@ def load_screening_results(results_dir="../results"):
     print(f"\nFinal aggregated data: {len(results)} rows")
     print(f"Unique models: {results['model'].nunique()}")
     print(f"Unique representations: {results['representation'].nunique()}")
+    print(f"Representations found: {sorted(results['representation'].unique())}")
     print(f"Sigma values: {sorted(results['sigma'].unique())}")
     
     return results
@@ -181,13 +209,6 @@ def load_screening_results(results_dir="../results"):
 def calculate_robustness_metrics(df, sigma_high=0.6):
     """
     Calculate robustness metrics for each model-representation pair
-    
-    Metrics calculated:
-    - baseline_r2: R² at σ=0
-    - r2_high: R² at σ=sigma_high
-    - retention_pct: (r2_high / baseline_r2) * 100
-    - nsi_r2: slope of R² vs σ (Noise Sensitivity Index)
-    - nsi_rmse: slope of RMSE vs σ
     """
     print("\n" + "="*80)
     print(f"CALCULATING ROBUSTNESS METRICS (σ_high = {sigma_high})")
@@ -236,7 +257,6 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
         # Calculate NSI (slope of performance vs sigma)
         if len(group) >= 3:
             try:
-                # R² NSI
                 slope_r2, intercept_r2, r_val_r2, p_val_r2, _ = stats.linregress(
                     group['sigma'], group['r2']
                 )
@@ -244,13 +264,11 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
                 metrics['nsi_r2_pval'] = p_val_r2
                 metrics['nsi_r2_r'] = r_val_r2
                 
-                # Relative NSI (normalized by baseline)
                 if intercept_r2 != 0:
                     metrics['nsi_r2_relative'] = slope_r2 / abs(intercept_r2)
                 else:
                     metrics['nsi_r2_relative'] = np.nan
                 
-                # RMSE NSI
                 slope_rmse, _, r_val_rmse, p_val_rmse, _ = stats.linregress(
                     group['sigma'], group['rmse']
                 )
@@ -283,7 +301,6 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
     
     print(f"Calculated metrics for {len(metrics_df)} configurations")
     
-    # Summary statistics
     print(f"\nBaseline R² statistics:")
     print(f"  Mean: {metrics_df['baseline_r2'].mean():.4f}")
     print(f"  Median: {metrics_df['baseline_r2'].median():.4f}")
@@ -302,26 +319,17 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
 
 
 def perform_variance_decomposition(df, output_dir):
-    """
-    ANOVA variance decomposition to determine variance explained by:
-    - Model architecture
-    - Representation  
-    - Residual
-    
-    Uses R² at moderate noise (σ=0.3) as the dependent variable
-    """
+    """ANOVA variance decomposition"""
     print("\n" + "="*80)
     print("PERFORMING ANOVA VARIANCE DECOMPOSITION")
     print("="*80)
     
-    # Get R² at σ=0.3
     df_03 = df[np.abs(df['sigma'] - 0.3) < 0.05].copy()
     
     if len(df_03) == 0:
         print("⚠️  No data at σ=0.3 for ANOVA")
         return
     
-    # Clean data
     df_03 = df_03[df_03['r2'] > -10].dropna(subset=['r2', 'model', 'representation'])
     df_03 = df_03[~df_03['representation'].isin(['random_smiles', 'randomized_smiles'])].copy()
     
@@ -330,24 +338,17 @@ def perform_variance_decomposition(df, output_dir):
     print(f"  {df_03['model'].nunique()} models")
     print(f"  {df_03['representation'].nunique()} representations")
     
-    # Calculate ANOVA
-    from scipy import stats
-    
-    # Grand mean
     grand_mean = df_03['r2'].mean()
     total_ss = ((df_03['r2'] - grand_mean) ** 2).sum()
     
-    # Model effect
     model_means = df_03.groupby('model')['r2'].mean()
     model_counts = df_03.groupby('model').size()
     ss_model = sum(model_counts * (model_means - grand_mean) ** 2)
     
-    # Representation effect
     rep_means = df_03.groupby('representation')['r2'].mean()
     rep_counts = df_03.groupby('representation').size()
     ss_rep = sum(rep_counts * (rep_means - grand_mean) ** 2)
     
-    # Interaction effect
     interaction_means = df_03.groupby(['model', 'representation'])['r2'].mean()
     interaction_counts = df_03.groupby(['model', 'representation']).size()
     ss_interaction = 0
@@ -356,39 +357,32 @@ def perform_variance_decomposition(df, output_dir):
         expected = model_means[model] + rep_means[rep] - grand_mean
         ss_interaction += count * (cell_mean - expected) ** 2
     
-    # Residual
     ss_residual = total_ss - ss_model - ss_rep - ss_interaction
     
-    # Degrees of freedom
     n = len(df_03)
     df_model = df_03['model'].nunique() - 1
     df_rep = df_03['representation'].nunique() - 1
     df_interaction = df_model * df_rep
     df_residual = n - (df_model + 1) * (df_rep + 1)
     
-    # Mean squares
     ms_model = ss_model / df_model if df_model > 0 else 0
     ms_rep = ss_rep / df_rep if df_rep > 0 else 0
     ms_interaction = ss_interaction / df_interaction if df_interaction > 0 else 0
     ms_residual = ss_residual / df_residual if df_residual > 0 else 0
     
-    # F-statistics
     f_model = ms_model / ms_residual if ms_residual > 0 else np.nan
     f_rep = ms_rep / ms_residual if ms_residual > 0 else np.nan
     f_interaction = ms_interaction / ms_residual if ms_residual > 0 else np.nan
     
-    # P-values
     p_model = 1 - stats.f.cdf(f_model, df_model, df_residual) if not np.isnan(f_model) else np.nan
     p_rep = 1 - stats.f.cdf(f_rep, df_rep, df_residual) if not np.isnan(f_rep) else np.nan
     p_interaction = 1 - stats.f.cdf(f_interaction, df_interaction, df_residual) if not np.isnan(f_interaction) else np.nan
     
-    # Variance explained (η²)
     eta2_model = ss_model / total_ss * 100
     eta2_rep = ss_rep / total_ss * 100
     eta2_interaction = ss_interaction / total_ss * 100
     eta2_residual = ss_residual / total_ss * 100
     
-    # Print results
     print("\n" + "="*80)
     print("ANOVA TABLE (R² at σ=0.3)")
     print("="*80)
@@ -402,7 +396,6 @@ def perform_variance_decomposition(df, output_dir):
     print(f"{'Total':<20} {total_ss:>12.4f} {n-1:>6} {'':>12} {'':>10} {'':>10} {100.0:>10.2f}")
     print("="*80)
     
-    # Save to file
     output_path = Path(output_dir) / "anova_variance_decomposition.txt"
     with open(output_path, 'w') as f:
         f.write("="*80 + "\n")
@@ -437,25 +430,14 @@ def perform_variance_decomposition(df, output_dir):
     }
 
 
-
 def define_robustness_score(metrics_df):
-    """
-    Define composite robustness score based on:
-    1. Low absolute NSI (slow degradation)
-    2. High retention percentage
-    3. Reasonable baseline (filtered already)
-    """
-    # Use retention and NSI for ranking
-    # Higher retention = better, lower |NSI| = better
-    
-    # Normalize both to 0-1 range
+    """Define composite robustness score"""
     ret_normalized = (metrics_df['retention_pct'] - metrics_df['retention_pct'].min()) / \
                      (metrics_df['retention_pct'].max() - metrics_df['retention_pct'].min())
     
     nsi_abs = metrics_df['nsi_r2'].abs()
     nsi_normalized = 1 - ((nsi_abs - nsi_abs.min()) / (nsi_abs.max() - nsi_abs.min()))
     
-    # Combined score (equal weight)
     metrics_df['robustness_score'] = (ret_normalized + nsi_normalized) / 2
     
     return metrics_df
@@ -466,130 +448,86 @@ def define_robustness_score(metrics_df):
 # ============================================================================
 
 def create_figure1_global_landscape(df, metrics_df, output_dir):
-    """
-    Figure 1: Global noise robustness landscape across all model-representation pairs
-    
-    Panel A: Top 20 most noise-robust configurations (horizontal bars)
-    Panel B: Bottom 20 least robust configurations (horizontal bars)
-    Panel C: Global heatmap of retention % at high noise
-    
-    Layout: VERTICAL (3 rows x 1 column) for better readability
-    """
+    """Figure 1: Global noise robustness landscape"""
     print("\n" + "="*80)
     print("GENERATING FIGURE 1: GLOBAL ROBUSTNESS LANDSCAPE (VERTICAL LAYOUT)")
     print("="*80)
     
-    fig = plt.figure(figsize=(12, 18))  # Taller for vertical layout
+    fig = plt.figure(figsize=(12, 18))
     gs = fig.add_gridspec(3, 1, hspace=0.35, wspace=0.20,
                           left=0.10, right=0.95, top=0.96, bottom=0.04)
     
-    # ========================================================================
-    # PANEL A: Top 20 most robust configurations
-    # ========================================================================
-    
+    # PANEL A: Top 20
     ax_a = fig.add_subplot(gs[0, 0])
-    
-    # Rank by robustness score (combination of retention and NSI)
     top_20 = metrics_df.nlargest(20, 'robustness_score').sort_values('robustness_score')
-    
     y_pos = np.arange(len(top_20))
-    
-    # Color bars by representation
     bar_colors = [REPRESENTATION_COLORS.get(rep, '#999999') for rep in top_20['representation']]
     
-    bars = ax_a.barh(y_pos, top_20['robustness_score'], 
-                     color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
+    ax_a.barh(y_pos, top_20['robustness_score'], 
+              color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
     
-    # Annotate with baseline and high-noise R²
     for i, (idx, row) in enumerate(top_20.iterrows()):
-        # Add text showing baseline R² and high-noise R²
         text = f"R²₀={row['baseline_r2']:.2f}, R²_h={row['r2_high']:.2f}"
-        ax_a.text(row['robustness_score'] + 0.01, i, text, 
-                 va='center', fontsize=7, color='black')
+        ax_a.text(row['robustness_score'] + 0.01, i, text, va='center', fontsize=7, color='black')
     
     ax_a.set_yticks(y_pos)
     labels = [f"{format_model(row['model'])}/{format_representation(row['representation'])}" 
               for _, row in top_20.iterrows()]
     ax_a.set_yticklabels(labels, fontsize=8)
     ax_a.set_xlabel('Robustness Score', fontsize=10)
-    ax_a.set_title('A. Top 20 Most Noise-Robust Configurations', 
-                   fontsize=11, fontweight='bold', pad=12)
+    ax_a.set_title('A. Top 20 Most Noise-Robust Configurations', fontsize=11, fontweight='bold', pad=12)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
     ax_a.set_xlim(0, max(top_20['robustness_score']) * 1.25)
     ax_a.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # ========================================================================
-    # PANEL B: Bottom 20 least robust configurations
-    # ========================================================================
-    
+    # PANEL B: Bottom 20
     ax_b = fig.add_subplot(gs[1, 0])
-    
     bottom_20 = metrics_df.nsmallest(20, 'robustness_score').sort_values('robustness_score', ascending=False)
-    
     y_pos = np.arange(len(bottom_20))
-    
     bar_colors = [REPRESENTATION_COLORS.get(rep, '#999999') for rep in bottom_20['representation']]
     
-    bars = ax_b.barh(y_pos, bottom_20['robustness_score'], 
-                     color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
+    ax_b.barh(y_pos, bottom_20['robustness_score'], 
+              color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
     
-    # Annotate
     for i, (idx, row) in enumerate(bottom_20.iterrows()):
         text = f"R²₀={row['baseline_r2']:.2f}, R²_h={row['r2_high']:.2f}"
-        ax_b.text(row['robustness_score'] + 0.01, i, text, 
-                 va='center', fontsize=7, color='black')
+        ax_b.text(row['robustness_score'] + 0.01, i, text, va='center', fontsize=7, color='black')
     
     ax_b.set_yticks(y_pos)
     labels = [f"{format_model(row['model'])}/{format_representation(row['representation'])}" 
               for _, row in bottom_20.iterrows()]
     ax_b.set_yticklabels(labels, fontsize=8)
     ax_b.set_xlabel('Robustness Score', fontsize=10)
-    ax_b.set_title('B. Bottom 20 Least Robust Configurations', 
-                   fontsize=11, fontweight='bold', pad=12)
+    ax_b.set_title('B. Bottom 20 Least Robust Configurations', fontsize=11, fontweight='bold', pad=12)
     ax_b.spines['top'].set_visible(False)
     ax_b.spines['right'].set_visible(False)
     ax_b.set_xlim(0, max(bottom_20['robustness_score']) * 1.25)
     ax_b.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # ========================================================================
-    # PANEL C: Global heatmap of retention % at high noise
-    # ========================================================================
-    
+    # PANEL C: Heatmap
     ax_c = fig.add_subplot(gs[2, 0])
     
-    # Create pivot table for heatmap
-    # Use retention_pct as the metric
     heatmap_data = metrics_df.pivot_table(
-        index='model',
-        columns='representation',
-        values='retention_pct',
-        aggfunc='mean'
+        index='model', columns='representation', values='retention_pct', aggfunc='mean'
     )
-    
-    # Sort by average retention
     heatmap_data = heatmap_data.loc[heatmap_data.mean(axis=1).sort_values(ascending=False).index]
     
-    # Format labels
     formatted_models = [format_model(m) for m in heatmap_data.index]
     formatted_reps = [format_representation(r) for r in heatmap_data.columns]
     
-    # Plot heatmap
     im = ax_c.imshow(heatmap_data.values, aspect='auto', cmap='RdYlGn', 
                      vmin=0, vmax=100, interpolation='nearest')
     
-    # Set ticks
     ax_c.set_xticks(np.arange(len(heatmap_data.columns)))
     ax_c.set_yticks(np.arange(len(heatmap_data.index)))
     ax_c.set_xticklabels(formatted_reps, rotation=45, ha='right', fontsize=9)
     ax_c.set_yticklabels(formatted_models, fontsize=9)
     
-    # Add colorbar
     cbar = plt.colorbar(im, ax=ax_c, fraction=0.03, pad=0.04)
     cbar.set_label('Retention at high noise (%)', fontsize=9, rotation=270, labelpad=20)
     cbar.ax.tick_params(labelsize=8)
     
-    # Add text annotations
     for i in range(len(heatmap_data.index)):
         for j in range(len(heatmap_data.columns)):
             value = heatmap_data.iloc[i, j]
@@ -598,141 +536,38 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
                 ax_c.text(j, i, f'{value:.0f}', ha='center', va='center',
                          color=text_color, fontsize=7, fontweight='bold')
     
-    ax_c.set_title('C. Global Heatmap: Retention % at High Noise\n(Average across configurations)', 
-                   fontsize=10, fontweight='bold', pad=10)
+    ax_c.set_title('C. Global Heatmap: Retention % at High Noise', fontsize=10, fontweight='bold', pad=10)
     ax_c.set_xlabel('Representation', fontsize=9)
     ax_c.set_ylabel('Model', fontsize=9)
     
-    # ========================================================================
-    # Save figure
-    # ========================================================================
-    
     output_path = Path(output_dir) / "figure1_global_robustness_landscape.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Figure 1 (3-panel) to {output_path}")
+    print(f"✓ Saved Figure 1 to {output_path}")
     plt.close()
-
-
-def create_supplementary_degradation_curves(df, metrics_df, output_dir):
-    """
-    Supplementary figure: R² degradation curves for top 5 vs bottom 5
-    
-    Originally Figure 1 Panel C, now moved to separate figure to streamline main Figure 1
-    """
-    print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY: DEGRADATION CURVES")
-    print("="*80)
-    
-    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
-    
-    # Select top 5 and bottom 5 for visualization
-    top_5 = metrics_df.nlargest(5, 'robustness_score')
-    bottom_5 = metrics_df.nsmallest(5, 'robustness_score')
-    
-    # Plot top configurations
-    for idx, (_, row) in enumerate(top_5.iterrows()):
-        model, rep = row['model'], row['representation']
-        pair_data = df[(df['model'] == model) & (df['representation'] == rep)].sort_values('sigma')
-        
-        if len(pair_data) == 0:
-            continue
-        
-        color = REPRESENTATION_COLORS.get(rep, '#999999')
-        ax.plot(pair_data['sigma'], pair_data['r2'], 
-                 marker='o', markersize=4, linewidth=2, alpha=0.9,
-                 label=f"{model}/{rep} (top #{idx+1})", color=color, linestyle='-')
-        
-        # Annotate NSI on the line
-        mid_idx = len(pair_data) // 2
-        if mid_idx < len(pair_data):
-            ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] + 0.02, 
-                     f"NSI={row['nsi_r2']:.3f}", fontsize=6, color=color, fontweight='bold',
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                             alpha=0.8, edgecolor=color, linewidth=1))
-    
-    # Plot bottom configurations with dashed lines
-    for idx, (_, row) in enumerate(bottom_5.iterrows()):
-        model, rep = row['model'], row['representation']
-        pair_data = df[(df['model'] == model) & (df['representation'] == rep)].sort_values('sigma')
-        
-        if len(pair_data) == 0:
-            continue
-        
-        color = REPRESENTATION_COLORS.get(rep, '#999999')
-        ax.plot(pair_data['sigma'], pair_data['r2'], 
-                 marker='s', markersize=4, linewidth=2, alpha=0.8,
-                 label=f"{model}/{rep} (bottom #{idx+1})", color=color, linestyle='--')
-        
-        # Annotate NSI
-        mid_idx = len(pair_data) // 2
-        if mid_idx < len(pair_data):
-            ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] - 0.02, 
-                     f"NSI={row['nsi_r2']:.3f}", fontsize=6, color=color, fontweight='bold',
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                             alpha=0.8, edgecolor=color, linewidth=1))
-    
-    ax.set_xlabel('Noise level (σ)', fontsize=9)
-    ax.set_ylabel('R² score', fontsize=9)
-    ax.set_title('R² Degradation Curves: Top 5 vs Bottom 5 Configurations\n(Ranked by robustness score)', 
-                   fontsize=10, fontweight='bold', pad=10)
-    ax.legend(fontsize=7, loc='best', ncol=2, frameon=True, framealpha=0.9)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-    ax.set_ylim(bottom=0)
-    
-    output_path = Path(output_dir) / "supplementary_degradation_curves.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved degradation curves to {output_path}")
-    plt.close()
-
-
-# ============================================================================
-# FIGURE 2: REPRESENTATION AND NOISE-TYPE EFFECTS
-# ============================================================================
 
 
 def create_figure2_representation_effects(df, metrics_df, output_dir):
-    """
-    Figure 2: Representation and noise-type effects on robustness
-    
-    Panel A: Performance at σ=0.3 by representation (violin plots)
-    Panel B: Noise robustness by representation (violin plots)
-    Panel C: Noise-type difficulty ranking (bar plot)
-    Panel D: Noise-by-representation interaction
-    Panel E: SNS top performers across noise (line plot)
-    Panel F: PDV top performers across noise (line plot)
-    """
+    """Figure 2: Representation and noise-type effects on robustness"""
     print("\n" + "="*80)
-    print("GENERATING FIGURE 2: REPRESENTATION EFFECTS (EXTENDED)")
+    print("GENERATING FIGURE 2: REPRESENTATION EFFECTS")
     print("="*80)
     
     fig = plt.figure(figsize=(15, 10))
     gs = fig.add_gridspec(2, 3, hspace=0.40, wspace=0.35,
                           left=0.08, right=0.98, top=0.96, bottom=0.06)
     
-    # ========================================================================
     # PANEL A: Performance at σ=0.3 by representation
-    # ========================================================================
-    
     ax_a = fig.add_subplot(gs[0, 0])
     
-    # Get R² at σ=0.3 instead of baseline
     r2_at_03 = []
     for (model, rep), group in df.groupby(['model', 'representation']):
         sigma_03 = group[np.abs(group['sigma'] - 0.3) < 0.05]
         if len(sigma_03) > 0:
-            r2_at_03.append({
-                'model': model,
-                'representation': rep,
-                'r2_at_03': sigma_03['r2'].values[0]
-            })
+            r2_at_03.append({'model': model, 'representation': rep, 'r2_at_03': sigma_03['r2'].values[0]})
     r2_at_03_df = pd.DataFrame(r2_at_03)
     
-    # Prepare data for violin plot
     rep_order = r2_at_03_df.groupby('representation')['r2_at_03'].median().sort_values(ascending=False).index
     
-    # Filter out representations with insufficient data
     valid_reps = []
     valid_data = []
     for rep in rep_order:
@@ -742,13 +577,7 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
             valid_data.append(data)
     
     if len(valid_data) > 0:
-        parts = ax_a.violinplot(
-            valid_data,
-            positions=range(len(valid_reps)),
-            widths=0.7,
-            showmeans=True,
-            showmedians=True
-        )
+        parts = ax_a.violinplot(valid_data, positions=range(len(valid_reps)), widths=0.7, showmeans=True, showmedians=True)
         
         for i, pc in enumerate(parts['bodies']):
             rep = valid_reps[i]
@@ -758,32 +587,16 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
             pc.set_edgecolor('black')
             pc.set_linewidth(0.8)
         
-        for i, rep in enumerate(valid_reps):
-            rep_data = r2_at_03_df[r2_at_03_df['representation'] == rep]['r2_at_03'].dropna()
-            y = rep_data.values
-            x = np.random.normal(i, 0.04, size=len(y))
-            ax_a.scatter(x, y, alpha=0.4, s=8, color='black', zorder=3)
-        
         ax_a.set_xticks(range(len(valid_reps)))
-        formatted_reps = [format_representation(r) for r in valid_reps]
-        ax_a.set_xticklabels(formatted_reps, rotation=45, ha='right')
+        ax_a.set_xticklabels([format_representation(r) for r in valid_reps], rotation=45, ha='right')
         ax_a.set_ylabel('R² at σ=0.3', fontsize=9)
-        ax_a.set_title('A. Performance Landscape at Moderate Noise', 
-                       fontsize=10, fontweight='bold', pad=10)
+        ax_a.set_title('A. Performance at Moderate Noise', fontsize=10, fontweight='bold', pad=10)
         ax_a.spines['top'].set_visible(False)
         ax_a.spines['right'].set_visible(False)
         ax_a.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
         ax_a.set_ylim(bottom=0)
-    else:
-        ax_a.text(0.5, 0.5, 'Insufficient data for violin plot',
-                 ha='center', va='center', transform=ax_a.transAxes)
-        ax_a.set_title('A. Performance Landscape at Moderate Noise', 
-                       fontsize=10, fontweight='bold', pad=10)
     
-    # ========================================================================
     # PANEL B: Noise robustness by representation
-    # ========================================================================
-    
     ax_b = fig.add_subplot(gs[0, 1])
     
     rep_order_robust = metrics_df.groupby('representation')['retention_pct'].median().sort_values(ascending=False).index
@@ -797,13 +610,7 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
             valid_data_robust.append(data)
     
     if len(valid_data_robust) > 0:
-        parts = ax_b.violinplot(
-            valid_data_robust,
-            positions=range(len(valid_reps_robust)),
-            widths=0.7,
-            showmeans=True,
-            showmedians=True
-        )
+        parts = ax_b.violinplot(valid_data_robust, positions=range(len(valid_reps_robust)), widths=0.7, showmeans=True, showmedians=True)
         
         for i, pc in enumerate(parts['bodies']):
             rep = valid_reps_robust[i]
@@ -813,215 +620,125 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
             pc.set_edgecolor('black')
             pc.set_linewidth(0.8)
         
-        for i, rep in enumerate(valid_reps_robust):
-            rep_data = metrics_df[metrics_df['representation'] == rep]['retention_pct'].dropna()
-            y = rep_data.values
-            x = np.random.normal(i, 0.04, size=len(y))
-            ax_b.scatter(x, y, alpha=0.4, s=8, color='black', zorder=3)
-        
         ax_b.set_xticks(range(len(valid_reps_robust)))
-        formatted_reps = [format_representation(r) for r in valid_reps_robust]
-        ax_b.set_xticklabels(formatted_reps, rotation=45, ha='right')
+        ax_b.set_xticklabels([format_representation(r) for r in valid_reps_robust], rotation=45, ha='right')
         ax_b.set_ylabel('Retention at high noise (%)', fontsize=9)
-        ax_b.set_title('B. Noise Robustness by Representation', 
-                       fontsize=10, fontweight='bold', pad=10)
+        ax_b.set_title('B. Noise Robustness by Representation', fontsize=10, fontweight='bold', pad=10)
         ax_b.spines['top'].set_visible(False)
         ax_b.spines['right'].set_visible(False)
         ax_b.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
-        ax_b.axhline(y=100, color='gray', linestyle='--', linewidth=0.8, alpha=0.5, label='No degradation')
+        ax_b.axhline(y=100, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
         ax_b.set_ylim(bottom=0)
-    else:
-        ax_b.text(0.5, 0.5, 'Insufficient data for violin plot',
-                 ha='center', va='center', transform=ax_b.transAxes)
-        ax_b.set_title('B. Noise Robustness by Representation', 
-                       fontsize=10, fontweight='bold', pad=10)
     
-    # ========================================================================
-    # PANEL C: Noise-type difficulty ranking
-    # ========================================================================
-    
+    # PANEL C: Noise sensitivity ranking
     ax_c = fig.add_subplot(gs[0, 2])
     
     noise_difficulty = metrics_df.groupby('representation').agg({
         'nsi_r2': lambda x: np.abs(x).mean(),
         'retention_pct': 'mean'
     }).reset_index()
-    
     noise_difficulty['difficulty'] = noise_difficulty['nsi_r2'].abs()
     noise_difficulty = noise_difficulty.sort_values('difficulty', ascending=False)
     
     colors = [REPRESENTATION_COLORS.get(rep, '#999999') for rep in noise_difficulty['representation']]
-    
-    bars = ax_c.bar(range(len(noise_difficulty)), noise_difficulty['difficulty'],
-                    color=colors, alpha=0.8, edgecolor='black', linewidth=0.8)
-    
+    ax_c.bar(range(len(noise_difficulty)), noise_difficulty['difficulty'], color=colors, alpha=0.8, edgecolor='black', linewidth=0.8)
     ax_c.set_xticks(range(len(noise_difficulty)))
-    formatted_reps = [format_representation(r) for r in noise_difficulty['representation']]
-    ax_c.set_xticklabels(formatted_reps, rotation=45, ha='right')
+    ax_c.set_xticklabels([format_representation(r) for r in noise_difficulty['representation']], rotation=45, ha='right')
     ax_c.set_ylabel('Average |NSI| (degradation rate)', fontsize=9)
-    ax_c.set_title('C. Representation Sensitivity to Noise\n(Higher = more sensitive)', 
-                   fontsize=10, fontweight='bold', pad=10)
+    ax_c.set_title('C. Representation Sensitivity to Noise', fontsize=10, fontweight='bold', pad=10)
     ax_c.spines['top'].set_visible(False)
     ax_c.spines['right'].set_visible(False)
     ax_c.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # ========================================================================
     # PANEL D: Noise-by-representation interaction
-    # ========================================================================
-    
     ax_d = fig.add_subplot(gs[1, 0])
     
     representations = sorted(df['representation'].unique())
-    
     for rep in representations:
         rep_data = df[df['representation'] == rep]
         avg_by_sigma = rep_data.groupby('sigma')['r2'].mean().reset_index()
-        
         color = REPRESENTATION_COLORS.get(rep, '#999999')
-        ax_d.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
-                 marker='o', markersize=4, linewidth=2, alpha=0.8,
-                 label=format_representation(rep), color=color)
+        ax_d.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'], marker='o', markersize=4, 
+                  linewidth=2, alpha=0.8, label=format_representation(rep), color=color)
     
     ax_d.set_xlabel('Noise level (σ)', fontsize=9)
     ax_d.set_ylabel('Average R² (across models)', fontsize=9)
-    ax_d.set_title('D. Representation Performance Across Noise Levels', 
-                   fontsize=10, fontweight='bold', pad=10)
-    ax_d.legend(fontsize=7, loc='best', frameon=True, fancybox=True, 
-               framealpha=0.9, ncol=2)
+    ax_d.set_title('D. Representation Performance Across Noise Levels', fontsize=10, fontweight='bold', pad=10)
+    ax_d.legend(fontsize=7, loc='best', frameon=True, fancybox=True, framealpha=0.9, ncol=2)
     ax_d.spines['top'].set_visible(False)
     ax_d.spines['right'].set_visible(False)
     ax_d.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # ========================================================================
-    # PANEL E: SNS Top Performers Across Noise
-    # ========================================================================
-    
+    # PANEL E: SNS Top Performers
     ax_e = fig.add_subplot(gs[1, 1])
-    
-    # Select top models for SNS
     target_models = ['xgboost', 'ngboost', 'rf', 'gauche']
     
     for model in target_models:
         model_data = df[(df['model'] == model) & (df['representation'] == 'sns')]
-        
         if len(model_data) > 0:
             avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
-            
             color = MODEL_COLORS.get(model, '#999999')
-            ax_e.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
-                     marker='o', markersize=5, linewidth=2.5, alpha=0.9,
-                     label=format_model(model), color=color)
+            ax_e.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'], marker='o', markersize=5, 
+                      linewidth=2.5, alpha=0.9, label=format_model(model), color=color)
     
     ax_e.set_xlabel('Noise level (σ)', fontsize=9)
     ax_e.set_ylabel('R²', fontsize=9)
-    ax_e.set_title('E. SNS: Top Performer Comparison', 
-                   fontsize=10, fontweight='bold', pad=10)
+    ax_e.set_title('E. SNS: Top Performer Comparison', fontsize=10, fontweight='bold', pad=10)
     ax_e.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_e.spines['top'].set_visible(False)
     ax_e.spines['right'].set_visible(False)
     ax_e.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     ax_e.set_ylim(bottom=0)
     
-    # ========================================================================
-    # PANEL F: PDV Top Performers Across Noise
-    # ========================================================================
-    
+    # PANEL F: PDV Top Performers
     ax_f = fig.add_subplot(gs[1, 2])
     
     for model in target_models:
         model_data = df[(df['model'] == model) & (df['representation'] == 'pdv')]
-        
         if len(model_data) > 0:
             avg_by_sigma = model_data.groupby('sigma')['r2'].mean().reset_index()
-            
             color = MODEL_COLORS.get(model, '#999999')
-            ax_f.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'],
-                     marker='o', markersize=5, linewidth=2.5, alpha=0.9,
-                     label=format_model(model), color=color)
+            ax_f.plot(avg_by_sigma['sigma'], avg_by_sigma['r2'], marker='o', markersize=5, 
+                      linewidth=2.5, alpha=0.9, label=format_model(model), color=color)
     
     ax_f.set_xlabel('Noise level (σ)', fontsize=9)
     ax_f.set_ylabel('R²', fontsize=9)
-    ax_f.set_title('F. PDV: Top Performer Comparison', 
-                   fontsize=10, fontweight='bold', pad=10)
+    ax_f.set_title('F. PDV: Top Performer Comparison', fontsize=10, fontweight='bold', pad=10)
     ax_f.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_f.spines['top'].set_visible(False)
     ax_f.spines['right'].set_visible(False)
     ax_f.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     ax_f.set_ylim(bottom=0)
     
-    # ========================================================================
-    # Save figure
-    # ========================================================================
-    
     output_path = Path(output_dir) / "figure2_representation_effects.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Figure 2 (extended, 6 panels) to {output_path}")
+    print(f"✓ Saved Figure 2 to {output_path}")
     plt.close()
 
-    plt.close()
-
-
-# ============================================================================
-# SUPPLEMENTARY FIGURES
-# ============================================================================
 
 def create_supplementary_s1(metrics_df, output_dir):
-    """
-    Supplementary S1: Per-model summary of baseline vs retention
-    Scatter plot with quadrants
-    """
-    print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY S1: BASELINE VS RETENTION")
-    print("="*80)
+    """Supplementary S1: Baseline vs Retention scatter"""
+    print("\nGENERATING SUPPLEMENTARY S1")
     
     fig, ax = plt.subplots(figsize=(8, 7))
     
-    # Create scatter plot
     representations = metrics_df['representation'].unique()
-    
     for rep in representations:
         rep_data = metrics_df[metrics_df['representation'] == rep]
         color = REPRESENTATION_COLORS.get(rep, '#999999')
-        
         ax.scatter(rep_data['baseline_r2'], rep_data['retention_pct'],
-                  alpha=0.7, s=60, color=color, label=rep.upper(),
+                  alpha=0.7, s=60, color=color, label=format_representation(rep),
                   edgecolors='black', linewidth=0.5)
     
-    # Add quadrant lines
     median_baseline = metrics_df['baseline_r2'].median()
     median_retention = metrics_df['retention_pct'].median()
     
     ax.axvline(median_baseline, color='gray', linestyle='--', linewidth=1, alpha=0.5)
     ax.axhline(median_retention, color='gray', linestyle='--', linewidth=1, alpha=0.5)
     
-    # Annotate quadrants
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
-    
-    # Top-right quadrant (best)
-    ax.text(xlim[1] * 0.95, ylim[1] * 0.95, 'High baseline\nHigh retention',
-           ha='right', va='top', fontsize=8, style='italic',
-           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.5))
-    
-    # Bottom-right
-    ax.text(xlim[1] * 0.95, ylim[0] * 1.05, 'High baseline\nLow retention',
-           ha='right', va='bottom', fontsize=8, style='italic',
-           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.5))
-    
-    # Top-left
-    ax.text(xlim[0] * 1.05, ylim[1] * 0.95, 'Low baseline\nHigh retention',
-           ha='left', va='top', fontsize=8, style='italic',
-           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcoral', alpha=0.5))
-    
-    # Bottom-left (worst)
-    ax.text(xlim[0] * 1.05, ylim[0] * 1.05, 'Low baseline\nLow retention',
-           ha='left', va='bottom', fontsize=8, style='italic',
-           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.5))
-    
     ax.set_xlabel('Baseline R² (σ=0)', fontsize=10)
     ax.set_ylabel('Retention at high noise (%)', fontsize=10)
-    ax.set_title('Supplementary S1: Baseline Performance vs Noise Retention', 
-                fontsize=11, fontweight='bold', pad=15)
+    ax.set_title('Supplementary S1: Baseline vs Noise Retention', fontsize=11, fontweight='bold', pad=15)
     ax.legend(fontsize=8, loc='best', ncol=2, frameon=True, fancybox=True, framealpha=0.9)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -1034,24 +751,16 @@ def create_supplementary_s1(metrics_df, output_dir):
 
 
 def create_supplementary_s2(metrics_df, output_dir):
-    """
-    Supplementary S2: Distribution of NSI metrics
-    Histograms and violin plots
-    """
-    print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY S2: NSI DISTRIBUTIONS")
-    print("="*80)
+    """Supplementary S2: NSI distributions"""
+    print("\nGENERATING SUPPLEMENTARY S2")
     
     fig = plt.figure(figsize=(10, 8))
     gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.30)
     
     # Panel A: Histogram of NSI (R²)
     ax_a = fig.add_subplot(gs[0, 0])
-    
-    ax_a.hist(metrics_df['nsi_r2'].dropna(), bins=30, 
-             color='#3498db', alpha=0.7, edgecolor='black', linewidth=0.8)
-    ax_a.axvline(metrics_df['nsi_r2'].median(), color='red', linestyle='--', 
-                linewidth=2, label=f'Median = {metrics_df["nsi_r2"].median():.4f}')
+    ax_a.hist(metrics_df['nsi_r2'].dropna(), bins=30, color='#3498db', alpha=0.7, edgecolor='black', linewidth=0.8)
+    ax_a.axvline(metrics_df['nsi_r2'].median(), color='red', linestyle='--', linewidth=2, label=f'Median = {metrics_df["nsi_r2"].median():.4f}')
     ax_a.axvline(0, color='black', linestyle='-', linewidth=1, alpha=0.5)
     ax_a.set_xlabel('NSI (R²) - Degradation slope', fontsize=9)
     ax_a.set_ylabel('Frequency', fontsize=9)
@@ -1061,19 +770,12 @@ def create_supplementary_s2(metrics_df, output_dir):
     ax_a.spines['right'].set_visible(False)
     ax_a.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # Panel B: NSI by representation (violin)
+    # Panel B: NSI by representation
     ax_b = fig.add_subplot(gs[0, 1])
-    
     rep_order = metrics_df.groupby('representation')['nsi_r2'].apply(lambda x: np.abs(x).median()).sort_values().index
     
-    parts = ax_b.violinplot(
-        [metrics_df[metrics_df['representation'] == rep]['nsi_r2'].dropna() 
-         for rep in rep_order],
-        positions=range(len(rep_order)),
-        widths=0.7,
-        showmeans=True,
-        showmedians=True
-    )
+    parts = ax_b.violinplot([metrics_df[metrics_df['representation'] == rep]['nsi_r2'].dropna() for rep in rep_order],
+                             positions=range(len(rep_order)), widths=0.7, showmeans=True, showmedians=True)
     
     for i, pc in enumerate(parts['bodies']):
         rep = rep_order[i]
@@ -1085,7 +787,7 @@ def create_supplementary_s2(metrics_df, output_dir):
     
     ax_b.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
     ax_b.set_xticks(range(len(rep_order)))
-    ax_b.set_xticklabels(rep_order, rotation=45, ha='right')
+    ax_b.set_xticklabels([format_representation(r) for r in rep_order], rotation=45, ha='right')
     ax_b.set_ylabel('NSI (R²)', fontsize=9)
     ax_b.set_title('B. NSI by Representation', fontsize=10, fontweight='bold')
     ax_b.spines['top'].set_visible(False)
@@ -1094,11 +796,8 @@ def create_supplementary_s2(metrics_df, output_dir):
     
     # Panel C: Histogram of NSI (RMSE)
     ax_c = fig.add_subplot(gs[1, 0])
-    
-    ax_c.hist(metrics_df['nsi_rmse'].dropna(), bins=30, 
-             color='#e74c3c', alpha=0.7, edgecolor='black', linewidth=0.8)
-    ax_c.axvline(metrics_df['nsi_rmse'].median(), color='blue', linestyle='--', 
-                linewidth=2, label=f'Median = {metrics_df["nsi_rmse"].median():.4f}')
+    ax_c.hist(metrics_df['nsi_rmse'].dropna(), bins=30, color='#e74c3c', alpha=0.7, edgecolor='black', linewidth=0.8)
+    ax_c.axvline(metrics_df['nsi_rmse'].median(), color='blue', linestyle='--', linewidth=2, label=f'Median = {metrics_df["nsi_rmse"].median():.4f}')
     ax_c.set_xlabel('NSI (RMSE) - Error increase slope', fontsize=9)
     ax_c.set_ylabel('Frequency', fontsize=9)
     ax_c.set_title('C. Distribution of NSI (RMSE)', fontsize=10, fontweight='bold')
@@ -1107,20 +806,12 @@ def create_supplementary_s2(metrics_df, output_dir):
     ax_c.spines['right'].set_visible(False)
     ax_c.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # Panel D: NSI by model family (violin)
+    # Panel D: NSI by model
     ax_d = fig.add_subplot(gs[1, 1])
-    
-    # Extract model family
     model_order = metrics_df.groupby('model')['nsi_r2'].apply(lambda x: np.abs(x).median()).sort_values().index[:10]
     
-    parts = ax_d.violinplot(
-        [metrics_df[metrics_df['model'] == model]['nsi_r2'].dropna() 
-         for model in model_order],
-        positions=range(len(model_order)),
-        widths=0.7,
-        showmeans=True,
-        showmedians=True
-    )
+    parts = ax_d.violinplot([metrics_df[metrics_df['model'] == model]['nsi_r2'].dropna() for model in model_order],
+                             positions=range(len(model_order)), widths=0.7, showmeans=True, showmedians=True)
     
     for i, pc in enumerate(parts['bodies']):
         model = model_order[i]
@@ -1132,7 +823,7 @@ def create_supplementary_s2(metrics_df, output_dir):
     
     ax_d.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
     ax_d.set_xticks(range(len(model_order)))
-    ax_d.set_xticklabels(model_order, rotation=45, ha='right', fontsize=7)
+    ax_d.set_xticklabels([format_model(m) for m in model_order], rotation=45, ha='right', fontsize=7)
     ax_d.set_ylabel('NSI (R²)', fontsize=9)
     ax_d.set_title('D. NSI by Model (Top 10)', fontsize=10, fontweight='bold')
     ax_d.spines['top'].set_visible(False)
@@ -1145,159 +836,47 @@ def create_supplementary_s2(metrics_df, output_dir):
     plt.close()
 
 
-def create_supplementary_s3(df, metrics_df, output_dir):
-    """
-    Supplementary S3: Per-target breakdown
-    (Only if multiple targets are available)
-    """
-    print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY S3: PER-TARGET BREAKDOWN")
-    print("="*80)
-    
-    # Check if 'target' column exists
-    if 'target' not in df.columns:
-        print("⚠️  No 'target' column found. Skipping S3.")
-        print("    This is normal if Phase 0 only used one property (e.g., HOMO-LUMO gap)")
-        return
-    
-    targets = df['target'].unique()
-    
-    if len(targets) <= 1:
-        print(f"⚠️  Only one target found: {targets}. Skipping S3.")
-        return
-    
-    print(f"Found {len(targets)} targets: {targets}")
-    
-    # Create grid of subplots
-    n_targets = len(targets)
-    ncols = min(3, n_targets)
-    nrows = (n_targets + ncols - 1) // ncols
-    
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
-    axes = np.array(axes).flatten()
-    
-    for idx, target in enumerate(targets):
-        ax = axes[idx]
-        
-        # Filter data for this target
-        target_metrics = metrics_df[metrics_df.get('target') == target]
-        
-        if len(target_metrics) == 0:
-            ax.text(0.5, 0.5, f'No data for {target}', 
-                   ha='center', va='center', transform=ax.transAxes)
-            continue
-        
-        # Create heatmap for this target
-        heatmap_data = target_metrics.pivot_table(
-            index='model',
-            columns='representation',
-            values='retention_pct',
-            aggfunc='mean'
-        )
-        
-        im = ax.imshow(heatmap_data.values, aspect='auto', cmap='RdYlGn', 
-                      vmin=0, vmax=100, interpolation='nearest')
-        
-        ax.set_xticks(np.arange(len(heatmap_data.columns)))
-        ax.set_yticks(np.arange(len(heatmap_data.index)))
-        ax.set_xticklabels(heatmap_data.columns, rotation=45, ha='right', fontsize=7)
-        ax.set_yticklabels(heatmap_data.index, fontsize=7)
-        ax.set_title(f'{target}', fontsize=9, fontweight='bold')
-        
-        # Colorbar
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    
-    # Hide unused subplots
-    for idx in range(len(targets), len(axes)):
-        axes[idx].axis('off')
-    
-    plt.tight_layout()
-    output_path = Path(output_dir) / "supplementary_s3_per_target_breakdown.png"
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Supplementary S3 to {output_path}")
-    plt.close()
-
-
-# ============================================================================
-# SUMMARY TABLES
-# ============================================================================
-
 def create_summary_tables(metrics_df, output_dir):
-    """Create summary tables for the paper"""
-    print("\n" + "="*80)
-    print("GENERATING SUMMARY TABLES")
-    print("="*80)
-    
+    """Create summary tables"""
+    print("\nGENERATING SUMMARY TABLES")
     output_dir = Path(output_dir)
     
-    # Table 1: Top 20 by robustness score
+    # Table 1: Top 20
     table1 = metrics_df.nlargest(20, 'robustness_score')[
-        ['model', 'representation', 'baseline_r2', 'r2_high', 
-         'retention_pct', 'nsi_r2', 'robustness_score']
+        ['model', 'representation', 'baseline_r2', 'r2_high', 'retention_pct', 'nsi_r2', 'robustness_score']
     ].copy()
-    
-    table1.columns = ['Model', 'Representation', 'Baseline R²', 'R² (high noise)',
-                     'Retention (%)', 'NSI (R²)', 'Robustness Score']
-    
+    table1.columns = ['Model', 'Representation', 'Baseline R²', 'R² (high noise)', 'Retention (%)', 'NSI (R²)', 'Robustness Score']
     table1.to_csv(output_dir / "table1_top20_robust_configs.csv", index=False, float_format='%.4f')
+    print(f"✓ Saved Table 1")
     
-    with open(output_dir / "table1_top20_robust_configs.tex", 'w') as f:
-        f.write(table1.to_latex(index=False, float_format="%.4f"))
-    
-    print(f"✓ Saved Table 1: Top 20 configurations")
-    
-    # Table 2: Performance by representation
+    # Table 2: By representation
     table2 = metrics_df.groupby('representation').agg({
         'baseline_r2': ['mean', 'std', 'median'],
         'retention_pct': ['mean', 'std', 'median'],
         'nsi_r2': lambda x: np.abs(x).mean(),
         'robustness_score': ['mean', 'std']
     }).round(4)
-    
     table2.to_csv(output_dir / "table2_performance_by_representation.csv")
+    print(f"✓ Saved Table 2")
     
-    with open(output_dir / "table2_performance_by_representation.tex", 'w') as f:
-        f.write(table2.to_latex(float_format="%.4f"))
-    
-    print(f"✓ Saved Table 2: Performance by representation")
-    
-    # Table 3: Performance by model
+    # Table 3: By model
     table3 = metrics_df.groupby('model').agg({
         'baseline_r2': ['mean', 'std', 'median'],
         'retention_pct': ['mean', 'std', 'median'],
         'nsi_r2': lambda x: np.abs(x).mean(),
         'robustness_score': ['mean', 'std']
     }).round(4)
-    
     table3 = table3.sort_values(('robustness_score', 'mean'), ascending=False).head(20)
     table3.to_csv(output_dir / "table3_performance_by_model.csv")
-    
-    with open(output_dir / "table3_performance_by_model.tex", 'w') as f:
-        f.write(table3.to_latex(float_format="%.4f"))
-    
-    print(f"✓ Saved Table 3: Performance by model (top 20)")
+    print(f"✓ Saved Table 3")
 
-
-# ============================================================================
-# STATISTICAL ANALYSIS
-# ============================================================================
 
 def perform_statistical_tests(df, metrics_df, output_dir):
-    """
-    Perform statistical tests for key comparisons
-    Uses Wilcoxon signed-rank test for paired comparisons
-    """
-    print("\n" + "="*80)
-    print("PERFORMING STATISTICAL TESTS")
-    print("="*80)
-    
+    """Perform statistical tests"""
+    print("\nPERFORMING STATISTICAL TESTS")
     output_dir = Path(output_dir)
-    results_text = []
-    results_text.append("STATISTICAL COMPARISONS - PHASE 0")
-    results_text.append("="*80)
-    results_text.append("")
+    results_text = ["STATISTICAL COMPARISONS - PHASE 0", "="*80, ""]
     
-    # Test 1: Compare representations (e.g., SNS vs PDV vs ECFP4)
     results_text.append("TEST 1: Representation Comparisons")
     results_text.append("-"*80)
     
@@ -1306,135 +885,65 @@ def perform_statistical_tests(df, metrics_df, output_dir):
     for i in range(len(reps)):
         for j in range(i+1, len(reps)):
             rep1, rep2 = reps[i], reps[j]
-            
             data1 = metrics_df[metrics_df['representation'] == rep1]['retention_pct'].dropna()
             data2 = metrics_df[metrics_df['representation'] == rep2]['retention_pct'].dropna()
             
             if len(data1) >= 3 and len(data2) >= 3:
-                # Mann-Whitney U test (independent samples)
                 from scipy.stats import mannwhitneyu
                 stat, p_val = mannwhitneyu(data1, data2, alternative='two-sided')
-                
                 mean1, mean2 = data1.mean(), data2.mean()
                 
-                results_text.append(f"{rep1.upper()} vs {rep2.upper()}:")
+                results_text.append(f"{format_representation(rep1)} vs {format_representation(rep2)}:")
                 results_text.append(f"  Mean retention: {mean1:.2f}% vs {mean2:.2f}%")
                 results_text.append(f"  Mann-Whitney U: stat={stat:.2f}, p={p_val:.4f}")
                 
                 if p_val < 0.05:
                     winner = rep1 if mean1 > mean2 else rep2
-                    results_text.append(f"  → Significant difference (p<0.05), {winner.upper()} superior")
+                    results_text.append(f"  → Significant difference, {format_representation(winner)} superior")
                 else:
                     results_text.append(f"  → No significant difference")
                 results_text.append("")
     
-    # Test 2: Compare model families
-    results_text.append("\nTEST 2: Model Family Comparisons")
-    results_text.append("-"*80)
-    
-    models = metrics_df['model'].value_counts().head(5).index
-    
-    for i in range(min(3, len(models))):
-        for j in range(i+1, min(3, len(models))):
-            model1, model2 = models[i], models[j]
-            
-            data1 = metrics_df[metrics_df['model'] == model1]['retention_pct'].dropna()
-            data2 = metrics_df[metrics_df['model'] == model2]['retention_pct'].dropna()
-            
-            if len(data1) >= 3 and len(data2) >= 3:
-                from scipy.stats import mannwhitneyu
-                stat, p_val = mannwhitneyu(data1, data2, alternative='two-sided')
-                
-                mean1, mean2 = data1.mean(), data2.mean()
-                
-                results_text.append(f"{model1} vs {model2}:")
-                results_text.append(f"  Mean retention: {mean1:.2f}% vs {mean2:.2f}%")
-                results_text.append(f"  Mann-Whitney U: stat={stat:.2f}, p={p_val:.4f}")
-                
-                if p_val < 0.05:
-                    winner = model1 if mean1 > mean2 else model2
-                    results_text.append(f"  → Significant difference (p<0.05), {winner} superior")
-                else:
-                    results_text.append(f"  → No significant difference")
-                results_text.append("")
-    
-    # Save results
     output_path = output_dir / "statistical_tests_phase0.txt"
     with open(output_path, 'w') as f:
         f.write('\n'.join(results_text))
-    
     print(f"✓ Saved statistical tests to {output_path}")
 
+
 def perform_noise_robustness_anova(metrics_df, output_dir):
-    """
-    ANOVA variance decomposition for NOISE ROBUSTNESS metrics
-    
-    Analyzes what contributes to noise degradation (not just overall performance):
-    1. NSI (R²) - slope of degradation
-    2. Retention (%) - performance preservation at high noise
-    3. |NSI| - absolute degradation rate
-    
-    Unlike the standard ANOVA which looks at performance at one noise level,
-    this analyzes what drives the CHANGE in performance across noise levels.
-    """
+    """ANOVA for noise robustness metrics"""
     print("\n" + "="*80)
     print("ANOVA VARIANCE DECOMPOSITION - NOISE ROBUSTNESS")
     print("="*80)
     
-    from scipy import stats
-    
-    # Clean data
     analysis_df = metrics_df.dropna(subset=['nsi_r2', 'retention_pct', 'model', 'representation']).copy()
     analysis_df = analysis_df[~analysis_df['representation'].isin(['random_smiles', 'randomized_smiles'])].copy()
-    
-    # Add absolute NSI
     analysis_df['abs_nsi'] = analysis_df['nsi_r2'].abs()
     
-    print(f"\nData for ANOVA:")
-    print(f"  {len(analysis_df)} observations")
-    print(f"  {analysis_df['model'].nunique()} models")
-    print(f"  {analysis_df['representation'].nunique()} representations")
+    print(f"\nData for ANOVA: {len(analysis_df)} observations")
     
-    # Analyze three dependent variables
     dependent_vars = {
-        'NSI (R²)': 'nsi_r2',  # Slope - more negative = faster degradation
-        'Retention (%)': 'retention_pct',  # Higher = better
-        '|NSI|': 'abs_nsi'  # Absolute degradation rate
+        'NSI (R²)': 'nsi_r2',
+        'Retention (%)': 'retention_pct',
+        '|NSI|': 'abs_nsi'
     }
     
     all_results = {}
-    output_text = []
-    output_text.append("="*80)
-    output_text.append("ANOVA VARIANCE DECOMPOSITION - NOISE ROBUSTNESS METRICS")
-    output_text.append("="*80)
-    output_text.append("")
+    output_text = ["="*80, "ANOVA VARIANCE DECOMPOSITION - NOISE ROBUSTNESS METRICS", "="*80, ""]
     
     for metric_name, metric_col in dependent_vars.items():
-        print(f"\n{'='*80}")
-        print(f"ANALYZING: {metric_name}")
-        print(f"{'='*80}")
-        
-        output_text.append(f"\n{'='*80}")
-        output_text.append(f"METRIC: {metric_name}")
-        output_text.append(f"{'='*80}")
-        
         y_values = analysis_df[metric_col]
-        
-        # Grand mean
         grand_mean = y_values.mean()
         total_ss = ((y_values - grand_mean) ** 2).sum()
         
-        # Model effect
         model_means = analysis_df.groupby('model')[metric_col].mean()
         model_counts = analysis_df.groupby('model').size()
         ss_model = sum(model_counts * (model_means - grand_mean) ** 2)
         
-        # Representation effect
         rep_means = analysis_df.groupby('representation')[metric_col].mean()
         rep_counts = analysis_df.groupby('representation').size()
         ss_rep = sum(rep_counts * (rep_means - grand_mean) ** 2)
         
-        # Interaction effect
         interaction_means = analysis_df.groupby(['model', 'representation'])[metric_col].mean()
         interaction_counts = analysis_df.groupby(['model', 'representation']).size()
         ss_interaction = 0
@@ -1443,128 +952,33 @@ def perform_noise_robustness_anova(metrics_df, output_dir):
             expected = model_means[model] + rep_means[rep] - grand_mean
             ss_interaction += count * (cell_mean - expected) ** 2
         
-        # Residual
         ss_residual = total_ss - ss_model - ss_rep - ss_interaction
         
-        # Degrees of freedom
-        n = len(analysis_df)
-        df_model = analysis_df['model'].nunique() - 1
-        df_rep = analysis_df['representation'].nunique() - 1
-        df_interaction = df_model * df_rep
-        df_residual = n - (df_model + 1) * (df_rep + 1)
-        
-        # Mean squares
-        ms_model = ss_model / df_model if df_model > 0 else 0
-        ms_rep = ss_rep / df_rep if df_rep > 0 else 0
-        ms_interaction = ss_interaction / df_interaction if df_interaction > 0 else 0
-        ms_residual = ss_residual / df_residual if df_residual > 0 else 0
-        
-        # F-statistics
-        f_model = ms_model / ms_residual if ms_residual > 0 else np.nan
-        f_rep = ms_rep / ms_residual if ms_residual > 0 else np.nan
-        f_interaction = ms_interaction / ms_residual if ms_residual > 0 else np.nan
-        
-        # P-values
-        p_model = 1 - stats.f.cdf(f_model, df_model, df_residual) if not np.isnan(f_model) else np.nan
-        p_rep = 1 - stats.f.cdf(f_rep, df_rep, df_residual) if not np.isnan(f_rep) else np.nan
-        p_interaction = 1 - stats.f.cdf(f_interaction, df_interaction, df_residual) if not np.isnan(f_interaction) else np.nan
-        
-        # Variance explained (η²)
         eta2_model = (ss_model / total_ss * 100) if total_ss > 0 else 0
         eta2_rep = (ss_rep / total_ss * 100) if total_ss > 0 else 0
         eta2_interaction = (ss_interaction / total_ss * 100) if total_ss > 0 else 0
         eta2_residual = (ss_residual / total_ss * 100) if total_ss > 0 else 0
         
-        # Store results
         all_results[metric_name] = {
             'eta2_model': eta2_model,
             'eta2_representation': eta2_rep,
             'eta2_interaction': eta2_interaction,
-            'eta2_residual': eta2_residual,
-            'p_model': p_model,
-            'p_rep': p_rep,
-            'p_interaction': p_interaction
+            'eta2_residual': eta2_residual
         }
         
-        # Print table
-        print(f"\n{'Source':<20} {'SS':>12} {'df':>6} {'MS':>12} {'F':>10} {'p-value':>10} {'η² (%)':>10}")
-        print("-"*80)
-        print(f"{'Model':<20} {ss_model:>12.4f} {df_model:>6} {ms_model:>12.4f} {f_model:>10.2f} {p_model:>10.4f} {eta2_model:>10.2f}")
-        print(f"{'Representation':<20} {ss_rep:>12.4f} {df_rep:>6} {ms_rep:>12.4f} {f_rep:>10.2f} {p_rep:>10.4f} {eta2_rep:>10.2f}")
-        print(f"{'Interaction':<20} {ss_interaction:>12.4f} {df_interaction:>6} {ms_interaction:>12.4f} {f_interaction:>10.2f} {p_interaction:>10.4f} {eta2_interaction:>10.2f}")
-        print(f"{'Residual':<20} {ss_residual:>12.4f} {df_residual:>6} {ms_residual:>12.4f} {'':>10} {'':>10} {eta2_residual:>10.2f}")
-        print("-"*80)
-        print(f"{'Total':<20} {total_ss:>12.4f} {n-1:>6} {'':>12} {'':>10} {'':>10} {100.0:>10.2f}")
-        
-        # Add to output text
-        output_text.append(f"\n{'Source':<20} {'SS':>12} {'df':>6} {'MS':>12} {'F':>10} {'p-value':>10} {'η² (%)':>10}")
-        output_text.append("-"*80)
-        output_text.append(f"{'Model':<20} {ss_model:>12.4f} {df_model:>6} {ms_model:>12.4f} {f_model:>10.2f} {p_model:>10.4f} {eta2_model:>10.2f}")
-        output_text.append(f"{'Representation':<20} {ss_rep:>12.4f} {df_rep:>6} {ms_rep:>12.4f} {f_rep:>10.2f} {p_rep:>10.4f} {eta2_rep:>10.2f}")
-        output_text.append(f"{'Interaction':<20} {ss_interaction:>12.4f} {df_interaction:>6} {ms_interaction:>12.4f} {f_interaction:>10.2f} {p_interaction:>10.4f} {eta2_interaction:>10.2f}")
-        output_text.append(f"{'Residual':<20} {ss_residual:>12.4f} {df_residual:>6} {ms_residual:>12.4f} {'':>10} {'':>10} {eta2_residual:>10.2f}")
-        output_text.append("-"*80)
-        output_text.append(f"{'Total':<20} {total_ss:>12.4f} {n-1:>6} {'':>12} {'':>10} {'':>10} {100.0:>10.2f}")
-        
-        # Interpretation
-        print(f"\nINTERPRETATION:")
-        print(f"  - Model architecture explains {eta2_model:.1f}% of variance in {metric_name}")
-        print(f"  - Representation explains {eta2_rep:.1f}% of variance in {metric_name}")
-        print(f"  - Interaction explains {eta2_interaction:.1f}% of variance in {metric_name}")
-        print(f"  - Residual (unexplained) is {eta2_residual:.1f}% of variance")
-        
-        output_text.append(f"\nINTERPRETATION:")
-        output_text.append(f"  - Model architecture explains {eta2_model:.1f}% of variance in {metric_name}")
-        output_text.append(f"  - Representation explains {eta2_rep:.1f}% of variance in {metric_name}")
-        output_text.append(f"  - Interaction explains {eta2_interaction:.1f}% of variance in {metric_name}")
-        output_text.append(f"  - Residual (unexplained) is {eta2_residual:.1f}% of variance")
-        output_text.append("")
+        output_text.append(f"\nMETRIC: {metric_name}")
+        output_text.append(f"  Model: {eta2_model:.1f}%")
+        output_text.append(f"  Representation: {eta2_rep:.1f}%")
+        output_text.append(f"  Interaction: {eta2_interaction:.1f}%")
+        output_text.append(f"  Residual: {eta2_residual:.1f}%")
     
-    # Create summary comparison
-    print(f"\n{'='*80}")
-    print("SUMMARY COMPARISON ACROSS METRICS")
-    print(f"{'='*80}")
-    print(f"\n{'Metric':<20} {'Model η²':>12} {'Rep η²':>12} {'Interaction η²':>12} {'Residual η²':>12}")
-    print("-"*80)
-    
-    output_text.append(f"\n{'='*80}")
-    output_text.append("SUMMARY COMPARISON ACROSS METRICS")
-    output_text.append(f"{'='*80}")
-    output_text.append(f"\n{'Metric':<20} {'Model η²':>12} {'Rep η²':>12} {'Interaction η²':>12} {'Residual η²':>12}")
-    output_text.append("-"*80)
-    
-    for metric_name, results in all_results.items():
-        print(f"{metric_name:<20} {results['eta2_model']:>11.1f}% {results['eta2_representation']:>11.1f}% {results['eta2_interaction']:>11.1f}% {results['eta2_residual']:>11.1f}%")
-        output_text.append(f"{metric_name:<20} {results['eta2_model']:>11.1f}% {results['eta2_representation']:>11.1f}% {results['eta2_interaction']:>11.1f}% {results['eta2_residual']:>11.1f}%")
-    
-    print("="*80)
-    output_text.append("="*80)
-    
-    # Key insights
-    print("\nKEY INSIGHTS:")
-    output_text.append("\nKEY INSIGHTS:")
-    
-    # Which factor dominates for each metric?
-    for metric_name, results in all_results.items():
-        factors = {
-            'Model': results['eta2_model'],
-            'Representation': results['eta2_representation'],
-            'Interaction': results['eta2_interaction']
-        }
-        dominant = max(factors.items(), key=lambda x: x[1])
-        
-        insight = f"  - {metric_name}: {dominant[0]} dominates ({dominant[1]:.1f}% variance explained)"
-        print(insight)
-        output_text.append(insight)
-    
-    # Save to file
     output_path = Path(output_dir) / "anova_noise_robustness_decomposition.txt"
     with open(output_path, 'w') as f:
         f.write('\n'.join(output_text))
-    
-    print(f"\n✓ Saved noise robustness ANOVA results to {output_path}")
+    print(f"✓ Saved noise robustness ANOVA to {output_path}")
     
     return all_results
+
 
 # ============================================================================
 # MAIN EXECUTION
@@ -1577,71 +991,33 @@ def main(results_dir="../results"):
     print("Journal of Cheminformatics Style")
     print("="*80)
     
-    # Load data
     df = load_screening_results(results_dir)
     if len(df) == 0:
         print("ERROR: No data loaded!")
         return
     
-    # Calculate metrics
     metrics_df = calculate_robustness_metrics(df, sigma_high=0.6)
-    
-    
-    # Define robustness score
     metrics_df = define_robustness_score(metrics_df)
     
-    # Create output directory
     output_dir = Path(results_dir) / "phase0_figures_v2"
     output_dir.mkdir(exist_ok=True, parents=True)
     
-    # Save metrics
     metrics_df.to_csv(output_dir / "phase0_robustness_metrics.csv", index=False)
     print(f"\n✓ Saved metrics to {output_dir / 'phase0_robustness_metrics.csv'}")
     
-    # Perform ANOVA variance decomposition
     perform_variance_decomposition(df, output_dir)
-
     perform_noise_robustness_anova(metrics_df, output_dir)
     
-    # Generate figures
     print("\n" + "="*80)
     print("GENERATING FIGURES")
     print("="*80)
     
     create_figure1_global_landscape(df, metrics_df, output_dir)
-    create_supplementary_degradation_curves(df, metrics_df, output_dir)
     create_figure2_representation_effects(df, metrics_df, output_dir)
-    
-    # Generate supplementary figures
     create_supplementary_s1(metrics_df, output_dir)
     create_supplementary_s2(metrics_df, output_dir)
-    create_supplementary_s3(df, metrics_df, output_dir)
-    
-    # Generate tables
     create_summary_tables(metrics_df, output_dir)
-    
-    # Statistical tests
     perform_statistical_tests(df, metrics_df, output_dir)
-    
-    # Summary
-    print("\n" + "="*80)
-    print("PHASE 0 ANALYSIS COMPLETE")
-    print("="*80)
-    print(f"\nAll outputs saved to: {output_dir}")
-    print("\nGenerated files:")
-    print("  Figures:")
-    print("    - figure1_global_robustness_landscape.png")
-    print("    - figure2_representation_effects.png")
-    print("    - supplementary_s1_baseline_vs_retention.png")
-    print("    - supplementary_s2_nsi_distributions.png")
-    print("    - supplementary_s3_per_target_breakdown.png (if multi-target)")
-    print("  Tables:")
-    print("    - table1_top20_robust_configs.csv/.tex")
-    print("    - table2_performance_by_representation.csv/.tex")
-    print("    - table3_performance_by_model.csv/.tex")
-    print("  Data:")
-    print("    - phase0_robustness_metrics.csv")
-    print("    - statistical_tests_phase0.txt")
     
     print("\n" + "="*80)
     print("SUMMARY STATISTICS")
@@ -1649,15 +1025,13 @@ def main(results_dir="../results"):
     
     print("\nTop 10 Most Robust Configurations:")
     for idx, (_, row) in enumerate(metrics_df.nlargest(10, 'robustness_score').iterrows(), 1):
-        print(f"  {idx}. {row['model']}/{row['representation']}: "
-              f"Score={row['robustness_score']:.3f}, "
-              f"R²₀={row['baseline_r2']:.3f}, "
-              f"Retention={row['retention_pct']:.1f}%")
+        print(f"  {idx}. {format_model(row['model'])}/{format_representation(row['representation'])}: "
+              f"Score={row['robustness_score']:.3f}, R²₀={row['baseline_r2']:.3f}, Retention={row['retention_pct']:.1f}%")
     
     print("\nRepresentation Rankings (by median retention):")
     rep_ranking = metrics_df.groupby('representation')['retention_pct'].median().sort_values(ascending=False)
     for idx, (rep, val) in enumerate(rep_ranking.items(), 1):
-        print(f"  {idx}. {rep.upper()}: {val:.1f}%")
+        print(f"  {idx}. {format_representation(rep)}: {val:.1f}%")
 
 
 if __name__ == "__main__":
