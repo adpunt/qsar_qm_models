@@ -224,6 +224,7 @@ def load_phase0_metrics(results_dir):
     
     # Try different possible locations
     possible_paths = [
+        results_dir / "phase0_figures_v2" / "phase0_robustness_metrics.csv",
         results_dir / "phase0_figures_v3" / "phase0_robustness_metrics.csv",
         results_dir / "phase0_figures" / "phase0_robustness_metrics.csv",
         results_dir / "phase0_robustness_metrics.csv",
@@ -234,18 +235,43 @@ def load_phase0_metrics(results_dir):
             print(f"✓ Found Phase 0 metrics at {path}")
             df = pd.read_csv(path)
             
-            # Standardize column names
-            if 'ds_thresholded' in df.columns:
-                df['nds'] = df['ds_thresholded']
-            elif 'nds_thresholded' in df.columns:
-                df['nds'] = df['nds_thresholded']
-            elif 'nsi_r2' in df.columns:
-                df['nds'] = df['nsi_r2']
+            print(f"  Columns found: {list(df.columns)}")
+            
+            # Standardize NDS column name (try multiple possible names)
+            if 'nds' not in df.columns:
+                if 'ds_thresholded' in df.columns:
+                    df['nds'] = df['ds_thresholded']
+                    print("  Using ds_thresholded as nds")
+                elif 'nds_thresholded' in df.columns:
+                    df['nds'] = df['nds_thresholded']
+                    print("  Using nds_thresholded as nds")
+                elif 'nsi_r2' in df.columns:
+                    df['nds'] = df['nsi_r2']
+                    print("  Using nsi_r2 as nds")
+                else:
+                    print("  ⚠️  No NDS column found!")
+                    df['nds'] = np.nan
+            
+            # Create meets_baseline_threshold if it doesn't exist
+            if 'meets_baseline_threshold' not in df.columns:
+                if 'baseline_r2' in df.columns:
+                    df['meets_baseline_threshold'] = df['baseline_r2'] > 0.6
+                    print(f"  Created meets_baseline_threshold from baseline_r2 > 0.6")
+                    print(f"    {df['meets_baseline_threshold'].sum()} of {len(df)} configs meet threshold")
+                else:
+                    print("  ⚠️  No baseline_r2 column - cannot create threshold")
+                    df['meets_baseline_threshold'] = True  # Assume all pass
+            
+            # Ensure baseline_r2 exists
+            if 'baseline_r2' not in df.columns:
+                print("  ⚠️  No baseline_r2 column found!")
+                df['baseline_r2'] = np.nan
             
             print(f"  Loaded {len(df)} configurations")
             return df
     
     print("⚠️  Phase 0 metrics not found - cross-phase analysis will be limited")
+    print(f"  Searched in: {[str(p) for p in possible_paths]}")
     return pd.DataFrame()
 
 
@@ -535,17 +561,50 @@ def calculate_cross_phase_metrics(metrics_df, phase0_df):
     
     # Standardize Phase 0 column names
     phase0_clean = phase0_df.copy()
-    if 'model' in phase0_clean.columns:
+    if 'model' in phase0_clean.columns and 'model_name' not in phase0_clean.columns:
         phase0_clean = phase0_clean.rename(columns={'model': 'model_name'})
     
-    # Merge
+    # Debug: show what we're trying to merge
+    print(f"\nPhase 2 configs: {len(phase2_agg)}")
+    print(f"  Models: {sorted(phase2_agg['model_name'].unique())}")
+    print(f"  Reps: {sorted(phase2_agg['representation'].unique())}")
+    
+    print(f"\nPhase 0 configs: {len(phase0_clean)}")
+    print(f"  Models: {sorted(phase0_clean['model_name'].unique())}")
+    print(f"  Reps: {sorted(phase0_clean['representation'].unique())}")
+    
+    # Check which columns we need exist
+    required_cols = ['model_name', 'representation', 'baseline_r2', 'nds', 'meets_baseline_threshold']
+    available_cols = [c for c in required_cols if c in phase0_clean.columns]
+    missing_cols = [c for c in required_cols if c not in phase0_clean.columns]
+    
+    if missing_cols:
+        print(f"  ⚠️  Missing columns in Phase 0: {missing_cols}")
+    
+    # Merge on available columns
     cross_df = phase2_agg.merge(
-        phase0_clean[['model_name', 'representation', 'baseline_r2', 'nds', 'meets_baseline_threshold']],
+        phase0_clean[available_cols],
         on=['model_name', 'representation'],
         how='inner'
     )
     
-    print(f"✓ Merged {len(cross_df)} configurations with both UQ and NDS data")
+    print(f"\n✓ Merged {len(cross_df)} configurations with both UQ and NDS data")
+    
+    if len(cross_df) == 0:
+        print("  ⚠️  No matching configurations found!")
+        print("  Checking for partial matches...")
+        
+        # Check for model overlap
+        p2_models = set(phase2_agg['model_name'].str.lower())
+        p0_models = set(phase0_clean['model_name'].str.lower())
+        common_models = p2_models & p0_models
+        print(f"    Common models (case-insensitive): {common_models}")
+        
+        # Check for rep overlap
+        p2_reps = set(phase2_agg['representation'].str.lower())
+        p0_reps = set(phase0_clean['representation'].str.lower())
+        common_reps = p2_reps & p0_reps
+        print(f"    Common reps (case-insensitive): {common_reps}")
     
     if len(cross_df) > 3:
         # Calculate correlation between UQ quality and NDS
