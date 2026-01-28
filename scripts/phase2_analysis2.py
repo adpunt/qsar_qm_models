@@ -64,10 +64,17 @@ MODEL_COLORS = {
     'bnn_full': '#2ecc71',
     'bnn_last': '#27ae60',
     'bnn_variational': '#9b59b6',
+    'bnn_var': '#9b59b6',
     'gauche': '#f39c12',
+    'gp': '#f39c12',
     'mlp_bnn_full': '#1abc9c',
     'mlp_bnn_last': '#34495e',
     'mlp_bnn_variational': '#d35400',
+    'mlp_bnn_var': '#d35400',
+    # Additional name variants
+    'dnn_bnn_full': '#1abc9c',
+    'dnn_bnn_last': '#34495e',
+    'dnn_bnn_variational': '#d35400',
 }
 
 MODEL_MARKERS = {
@@ -76,10 +83,16 @@ MODEL_MARKERS = {
     'bnn_full': '^',
     'bnn_last': 'v',
     'bnn_variational': 'D',
+    'bnn_var': 'D',
     'gauche': 'p',
-    'mlp_bnn_full': 'o',
+    'gp': 'p',
+    'mlp_bnn_full': '^',
     'mlp_bnn_last': 'v',
     'mlp_bnn_variational': 'D',
+    'mlp_bnn_var': 'D',
+    'dnn_bnn_full': '^',
+    'dnn_bnn_last': 'v',
+    'dnn_bnn_variational': 'D',
 }
 
 REPRESENTATION_COLORS = {
@@ -97,10 +110,16 @@ MODEL_DISPLAY = {
     'bnn_full': 'BNN-Full',
     'bnn_last': 'BNN-Last',
     'bnn_variational': 'BNN-Var',
+    'bnn_var': 'BNN-Var',
     'gauche': 'GP',
+    'gp': 'GP',
     'mlp_bnn_full': 'MLP-BNN-Full',
     'mlp_bnn_last': 'MLP-BNN-Last',
     'mlp_bnn_variational': 'MLP-BNN-Var',
+    'mlp_bnn_var': 'MLP-BNN-Var',
+    'dnn_bnn_full': 'DNN-BNN-Full',
+    'dnn_bnn_last': 'DNN-BNN-Last', 
+    'dnn_bnn_variational': 'DNN-BNN-Var',
 }
 
 REP_DISPLAY = {
@@ -406,12 +425,30 @@ def calculate_decomposition_response(uncertainty_df):
     print("="*80)
     
     if 'epistemic_uncertainty' not in uncertainty_df.columns:
-        print("⚠️  No decomposition data available")
+        print("⚠️  No decomposition data available (missing epistemic_uncertainty column)")
+        return pd.DataFrame()
+    
+    if 'aleatoric_uncertainty' not in uncertainty_df.columns:
+        print("⚠️  No decomposition data available (missing aleatoric_uncertainty column)")
+        return pd.DataFrame()
+    
+    # Check if columns have actual data
+    epist_valid = uncertainty_df['epistemic_uncertainty'].notna().sum()
+    alea_valid = uncertainty_df['aleatoric_uncertainty'].notna().sum()
+    print(f"  Valid epistemic values: {epist_valid}")
+    print(f"  Valid aleatoric values: {alea_valid}")
+    
+    if epist_valid == 0 or alea_valid == 0:
+        print("⚠️  Decomposition columns exist but have no valid data")
         return pd.DataFrame()
     
     decomp_response = []
     
     for (model, rep), group in uncertainty_df.groupby(['model_name', 'representation']):
+        # Check if this model/rep has decomposition data
+        if group['aleatoric_uncertainty'].isna().all() or group['epistemic_uncertainty'].isna().all():
+            continue
+        
         # Get means at each sigma
         sigma_means = group.groupby('sigma').agg({
             'epistemic_uncertainty': 'mean',
@@ -881,19 +918,20 @@ def create_figure6_uncertainty_noise_response(uncertainty_df, metrics_df, respon
     ax_b.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
     
     # ========================================================================
-    # PANEL C: Actual vs ideal inflation scatter
+    # PANEL C: Baseline uncertainty vs inflation slope scatter
     # ========================================================================
     ax_c = fig.add_subplot(gs[0, 2])
     
-    # For each config, plot (ideal inflation, actual inflation)
-    # Ideal = increase of σ_max from baseline
+    # Plot baseline uncertainty vs actual inflation slope
+    # This shows: do models that start with higher uncertainty track noise better?
     for _, row in response_df.iterrows():
         model = row['model_name']
         rep = row['representation']
         actual_slope = row['uncertainty_inflation_slope']
+        baseline_unc = row['baseline_uncertainty']
         r2 = row['uncertainty_inflation_r2']
         
-        if np.isnan(actual_slope):
+        if np.isnan(actual_slope) or np.isnan(baseline_unc):
             continue
         
         color = MODEL_COLORS.get(model, '#999999')
@@ -902,30 +940,27 @@ def create_figure6_uncertainty_noise_response(uncertainty_df, metrics_df, respon
         # Size by R² (how linear the response is)
         size = 50 + 100 * r2 if not np.isnan(r2) else 50
         
-        ax_c.scatter(1.0, actual_slope, s=size, alpha=0.7, color=color, marker=marker,
-                    edgecolors='black', linewidth=0.5)
+        ax_c.scatter(baseline_unc, actual_slope, s=size, alpha=0.7, color=color, marker=marker,
+                    edgecolors='black', linewidth=0.5, label=get_display_name(model))
     
-    # Add diagonal line
-    ax_c.plot([0, 2], [0, 2], 'k--', linewidth=1.5, alpha=0.5, label='Perfect tracking')
+    # Add ideal slope line
+    ax_c.axhline(1.0, color='green', linestyle='--', linewidth=2, alpha=0.7, label='Ideal slope=1')
     
     # Add horizontal band for "good" tracking
-    ax_c.axhspan(0.8, 1.2, alpha=0.1, color='green', label='Good tracking (0.8-1.2)')
+    ax_c.axhspan(0.8, 1.2, alpha=0.1, color='green')
     
-    ax_c.set_xlabel('Ideal Inflation Slope (=1)', fontsize=9)
-    ax_c.set_ylabel('Actual Inflation Slope', fontsize=9)
-    ax_c.set_title('C. Tracking Quality\n(point size = linearity R²)', fontsize=10, fontweight='bold', pad=10)
-    ax_c.legend(fontsize=7, loc='upper left', framealpha=0.9)
+    ax_c.set_xlabel('Baseline Uncertainty (σ=0)', fontsize=9)
+    ax_c.set_ylabel('Uncertainty Inflation Slope', fontsize=9)
+    ax_c.set_title('C. Baseline vs Noise Tracking\n(point size = linearity R²)', fontsize=10, fontweight='bold', pad=10)
+    
+    # Create legend with unique models only
+    handles, labels = ax_c.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax_c.legend(by_label.values(), by_label.keys(), fontsize=6, loc='best', ncol=2, framealpha=0.9)
+    
     ax_c.spines['top'].set_visible(False)
     ax_c.spines['right'].set_visible(False)
     ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
-    ax_c.set_xlim(0.5, 1.5)
-    
-    # Add model legend
-    legend_handles = [plt.Line2D([0], [0], marker=MODEL_MARKERS.get(m, 'o'), color='w',
-                                 markerfacecolor=MODEL_COLORS.get(m, '#999999'),
-                                 markersize=8, label=get_display_name(m))
-                     for m in sorted(response_df['model_name'].unique())]
-    ax_c.legend(handles=legend_handles, fontsize=6, loc='lower right', ncol=2, framealpha=0.9)
     
     output_path = Path(output_dir) / "figure6_uncertainty_noise_response.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -1192,34 +1227,43 @@ def create_figure8_decomposition_response(uncertainty_df, decomp_response_df, ou
     # ========================================================================
     ax_c = fig.add_subplot(gs[0, 2])
     
-    # Average slopes by model
+    # Average slopes by model - only include models with valid aleatoric data
     model_slopes = decomp_response_df.groupby('model_name').agg({
         'aleatoric_slope': 'mean',
         'epistemic_slope': 'mean',
         'aleatoric_r2': 'mean',
     }).reset_index()
     
-    model_slopes = model_slopes.sort_values('aleatoric_slope', ascending=True)
+    # Filter out models with NaN or very small aleatoric slopes (likely no decomposition)
+    model_slopes = model_slopes.dropna(subset=['aleatoric_slope'])
+    model_slopes = model_slopes[model_slopes['aleatoric_slope'].abs() > 1e-6]
     
-    y_pos = np.arange(len(model_slopes))
-    colors = [MODEL_COLORS.get(m, '#999999') for m in model_slopes['model_name']]
-    
-    # Plot aleatoric slopes
-    bars = ax_c.barh(y_pos, model_slopes['aleatoric_slope'],
-                    color=colors, alpha=0.8, height=0.7, edgecolor='black', linewidth=0.5)
-    
-    # Ideal slope line
-    ax_c.axvline(1.0, color='green', linestyle='--', linewidth=2, alpha=0.7, label='Ideal (slope=1)')
-    
-    ax_c.set_yticks(y_pos)
-    ax_c.set_yticklabels([get_display_name(m) for m in model_slopes['model_name']], fontsize=8)
-    ax_c.set_xlabel('Aleatoric Inflation Slope', fontsize=9)
-    ax_c.set_title('C. Aleatoric Noise Tracking\n(1.0 = perfect tracking of injected σ)', 
-                   fontsize=10, fontweight='bold', pad=10)
-    ax_c.legend(fontsize=7, loc='lower right', framealpha=0.9)
-    ax_c.spines['top'].set_visible(False)
-    ax_c.spines['right'].set_visible(False)
-    ax_c.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
+    if len(model_slopes) == 0:
+        ax_c.text(0.5, 0.5, 'No valid decomposition data', ha='center', va='center', 
+                 transform=ax_c.transAxes, fontsize=10)
+        ax_c.axis('off')
+    else:
+        model_slopes = model_slopes.sort_values('aleatoric_slope', ascending=True)
+        
+        y_pos = np.arange(len(model_slopes))
+        colors = [MODEL_COLORS.get(m, '#999999') for m in model_slopes['model_name']]
+        
+        # Plot aleatoric slopes
+        bars = ax_c.barh(y_pos, model_slopes['aleatoric_slope'],
+                        color=colors, alpha=0.8, height=0.7, edgecolor='black', linewidth=0.5)
+        
+        # Ideal slope line
+        ax_c.axvline(1.0, color='green', linestyle='--', linewidth=2, alpha=0.7, label='Ideal (slope=1)')
+        
+        ax_c.set_yticks(y_pos)
+        ax_c.set_yticklabels([get_display_name(m) for m in model_slopes['model_name']], fontsize=8)
+        ax_c.set_xlabel('Aleatoric Inflation Slope', fontsize=9)
+        ax_c.set_title('C. Aleatoric Noise Tracking\n(1.0 = perfect tracking of injected σ)', 
+                       fontsize=10, fontweight='bold', pad=10)
+        ax_c.legend(fontsize=7, loc='lower right', framealpha=0.9)
+        ax_c.spines['top'].set_visible(False)
+        ax_c.spines['right'].set_visible(False)
+        ax_c.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
     
     output_path = Path(output_dir) / "figure8_decomposition_response.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')

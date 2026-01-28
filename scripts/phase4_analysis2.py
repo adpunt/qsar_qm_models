@@ -167,9 +167,21 @@ def parse_phase4_info(df):
     """
     Parse model, rep, noise strategy from filenames
     
-    Format: phase4_rep_model_noisestrategy.csv
-    Example: phase4_pdv_rf_gaussian.csv
+    Handles multiple formats:
+    - phase4_noisestrategy_model_rep.csv (e.g., phase4_gaussian_rf_ecfp4.csv)
+    - phase4_rep_model_noisestrategy.csv
+    - phase4X_target_rep_model_noisestrategy.csv
+    
+    Uses heuristics to detect which part is which based on known values.
     """
+    
+    known_models = {'rf', 'qrf', 'xgboost', 'ngboost', 'dnn', 'mlp', 'gauche', 'gp',
+                    'bnn', 'conformal_rf', 'conformal_qrf', 'conformal_xgboost',
+                    'conformal_ngboost', 'conformal_gauche', 'conformal_dnn'}
+    known_reps = {'pdv', 'sns', 'ecfp4', 'smiles', 'mhggnn', 'graph', 'continuous_pdv'}
+    known_noise = {'gaussian', 'hetero', 'heteroscedastic', 'legacy', 'valprop', 
+                   'quantile', 'outlier', 'uniform', 'laplace', 'threshold',
+                   'value-proportional', 'valueproportional'}
     
     def extract_info(row):
         filename = row['source_file']
@@ -178,40 +190,52 @@ def parse_phase4_info(df):
         name = filename.replace('.csv', '')
         parts = name.split('_')
         
-        # Try different parsing patterns
-        # Pattern 1: phase4_rep_model_noisestrategy
-        # Pattern 2: phase4X_target_rep_model_noisestrategy (legacy - extract rep/model/noise only)
+        # Remove 'phase4' or 'phase4X' prefix
+        if parts[0].startswith('phase4'):
+            parts = parts[1:]
         
-        if len(parts) >= 4:
-            # Check if second part looks like a subphase indicator (e.g., 'a', 'b') or target
-            if parts[0].startswith('phase4') and len(parts[0]) > 6:
-                # e.g., phase4a_target_rep_model_noise
-                rep = parts[2]
-                model = parts[3]
-                noise_strategy = parts[4] if len(parts) > 4 else 'gaussian'
-            else:
-                # e.g., phase4_rep_model_noise
-                rep = parts[1]
-                model = parts[2]
-                noise_strategy = parts[3] if len(parts) > 3 else 'gaussian'
+        # Now identify each part
+        model = None
+        rep = None
+        noise_strategy = None
+        
+        for part in parts:
+            part_lower = part.lower()
             
-            return pd.Series({
-                'representation': rep,
-                'model': model,
-                'noise_strategy': noise_strategy
-            })
+            # Check if it's a known model
+            if part_lower in known_models or any(m in part_lower for m in ['bnn', 'conformal']):
+                model = part_lower
+            # Check if it's a known representation
+            elif part_lower in known_reps:
+                rep = part_lower
+            # Check if it's a known noise strategy
+            elif part_lower in known_noise:
+                noise_strategy = part_lower
+            # Skip target names like 'homolumo', 'alpha', etc.
+            elif part_lower in {'homolumo', 'alpha', 'mu', 'cv', 'gap', 'homo', 'lumo', 'r2', 'zpve'}:
+                continue
         
         return pd.Series({
-            'representation': None,
-            'model': None,
-            'noise_strategy': None
+            'representation': rep,
+            'model': model,
+            'noise_strategy': noise_strategy
         })
     
     info = df.apply(extract_info, axis=1)
     df[['representation', 'model', 'noise_strategy']] = info
     
-    # Remove rows where parsing failed
-    df = df.dropna(subset=['representation', 'model', 'noise_strategy'])
+    # Debug: show what we parsed
+    print(f"\nParsed unique values:")
+    print(f"  Models: {sorted(df['model'].dropna().unique())}")
+    print(f"  Representations: {sorted(df['representation'].dropna().unique())}")
+    print(f"  Noise strategies: {sorted(df['noise_strategy'].dropna().unique())}")
+    
+    # Remove rows where critical fields are missing
+    before = len(df)
+    df = df.dropna(subset=['model', 'noise_strategy'])
+    after = len(df)
+    if before != after:
+        print(f"  Dropped {before - after} rows with missing model/noise_strategy")
     
     return df
 
