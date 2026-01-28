@@ -8,9 +8,9 @@ Based on the detailed outline:
 - Supplementary S1-S3: Additional analyses
 
 Key metrics used:
-- DS (Degradation Slope): slope of R² vs σ (negative = degradation)
+- NDS (Noise Degradation Slope): slope of R² vs σ (negative = degradation)
 - Baseline R² at σ=0
-- DS is thresholded: only calculated for configs with baseline R² > 0.6
+- NDS is thresholded: only calculated for configs with baseline R² > 0.6
   (except for one comparison showing the threshold importance)
 """
 
@@ -516,8 +516,8 @@ def perform_variance_decomposition(df, output_dir):
 
 def create_threshold_comparison_figure(metrics_df, output_dir):
     """
-    ONE-TIME figure showing why baseline threshold matters for DS.
-    Highlights configs like NGBoost/SMILES with good DS but poor baseline.
+    ONE-TIME figure showing why baseline threshold matters for NDS.
+    Highlights configs like NGBoost/SMILES with good NDS but poor baseline.
     """
     print("\n" + "="*80)
     print("GENERATING THRESHOLD COMPARISON FIGURE")
@@ -526,7 +526,7 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
     
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     
-    # Panel A: Baseline R² vs DS (unthresholded) - all configs
+    # Panel A: Baseline R² vs NDS (unthresholded) - all configs
     ax_a = axes[0]
     
     # Color by whether meets threshold
@@ -540,8 +540,8 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
                  alpha=0.7, s=60, c='#2ecc71', label='Meets threshold (R² > 0.6)',
                  edgecolors='black', linewidth=0.5, marker='o')
     
-    # Highlight problematic configs (good DS but poor baseline)
-    # These are configs with DS > -0.5 (relatively flat) but baseline < 0.6
+    # Highlight problematic configs (good NDS but poor baseline)
+    # These are configs with NDS > -0.5 (relatively flat) but baseline < 0.6
     problematic = below_thresh[(below_thresh['ds_r2'] > -0.5) & (below_thresh['baseline_r2'] < 0.6)]
     
     if len(problematic) > 0:
@@ -561,8 +561,8 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
     ax_a.axhline(0, color='black', linestyle='-', linewidth=0.5, alpha=0.3)
     
     ax_a.set_xlabel('Baseline R² (σ=0)', fontsize=10)
-    ax_a.set_ylabel('Degradation Slope (DS)', fontsize=10)
-    ax_a.set_title('A. Why Threshold Matters: Baseline vs Degradation Slope', fontsize=11, fontweight='bold', pad=12)
+    ax_a.set_ylabel('Noise Degradation Slope', fontsize=10)
+    ax_a.set_title('A. Why Threshold Matters: Baseline vs Noise Degradation Slope', fontsize=11, fontweight='bold', pad=12)
     ax_a.legend(fontsize=8, loc='lower left', frameon=True, framealpha=0.9)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
@@ -589,7 +589,7 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
     if len(table_data) > 0:
         table = ax_b.table(
             cellText=table_data,
-            colLabels=['Configuration', 'Baseline R²', 'DS (R²)', 'Status'],
+            colLabels=['Configuration', 'Baseline R²', 'NDS', 'Status'],
             loc='center',
             cellLoc='center',
             colWidths=[0.4, 0.2, 0.2, 0.2]
@@ -618,14 +618,14 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
     with open(summary_path, 'w') as f:
         f.write("="*80 + "\n")
         f.write("BASELINE THRESHOLD ANALYSIS\n")
-        f.write("Why we require baseline R² > 0.6 for Degradation Slope (DS) analysis\n")
+        f.write("Why we require baseline R² > 0.6 for Noise Degradation Slope (NDS) analysis\n")
         f.write("="*80 + "\n\n")
         
         f.write(f"Total configurations: {len(metrics_df)}\n")
         f.write(f"Configs meeting threshold (R² > 0.6): {meets_thresh.shape[0]}\n")
         f.write(f"Configs below threshold: {below_thresh.shape[0]}\n\n")
         
-        f.write("PROBLEM: Some configs show low degradation (DS close to 0) but have poor\n")
+        f.write("PROBLEM: Some configs show low degradation (NDS close to 0) but have poor\n")
         f.write("baseline performance. Without thresholding, these would appear 'robust'\n")
         f.write("when in reality they simply never performed well to begin with.\n\n")
         
@@ -633,7 +633,7 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
         f.write("-"*80 + "\n")
         for _, row in problematic_sorted.iterrows():
             f.write(f"  {format_model(row['model'])}/{format_representation(row['representation'])}: ")
-            f.write(f"Baseline R²={row['baseline_r2']:.3f}, DS={row['ds_r2']:.4f}\n")
+            f.write(f"Baseline R²={row['baseline_r2']:.3f}, NDS={row['ds_r2']:.4f}\n")
         
         f.write("\n" + "="*80 + "\n")
         f.write("NOTE: These configurations may still be valuable for uncertainty quantification\n")
@@ -648,7 +648,7 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
 # ============================================================================
 
 def create_figure1_global_landscape(df, metrics_df, output_dir):
-    """Figure 1: Global noise robustness landscape (using thresholded DS)"""
+    """Figure 1: Global noise robustness landscape (using thresholded NDS)"""
     print("\n" + "="*80)
     print("GENERATING FIGURE 1: GLOBAL ROBUSTNESS LANDSCAPE (VERTICAL LAYOUT)")
     print("="*80)
@@ -676,7 +676,7 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
               color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
     
     for i, (idx, row) in enumerate(top_20.iterrows()):
-        text = f"R²₀={row['baseline_r2']:.2f}, DS={row['ds_thresholded']:.3f}"
+        text = f"R²₀={row['baseline_r2']:.2f}, NDS={row['ds_thresholded']:.3f}"
         ax_a.text(row['robustness_score'] + 0.01, i, text, va='center', fontsize=7, color='black')
     
     ax_a.set_yticks(y_pos)
@@ -700,7 +700,7 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
               color=bar_colors, alpha=0.8, height=0.75, edgecolor='black', linewidth=0.5)
     
     for i, (idx, row) in enumerate(bottom_20.iterrows()):
-        text = f"R²₀={row['baseline_r2']:.2f}, DS={row['ds_thresholded']:.3f}"
+        text = f"R²₀={row['baseline_r2']:.2f}, NDS={row['ds_thresholded']:.3f}"
         ax_b.text(row['robustness_score'] + 0.01, i, text, va='center', fontsize=7, color='black')
     
     ax_b.set_yticks(y_pos)
@@ -740,7 +740,7 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
     ax_c.set_yticklabels(formatted_models, fontsize=9)
     
     cbar = plt.colorbar(im, ax=ax_c, fraction=0.03, pad=0.04)
-    cbar.set_label('Degradation Slope (DS)', fontsize=9, rotation=270, labelpad=20)
+    cbar.set_label('Noise Degradation Slope', fontsize=9, rotation=270, labelpad=20)
     cbar.ax.tick_params(labelsize=8)
     
     for i in range(len(heatmap_data.index)):
@@ -751,7 +751,7 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
                 ax_c.text(j, i, f'{value:.2f}', ha='center', va='center',
                          color=text_color, fontsize=7, fontweight='bold')
     
-    ax_c.set_title('C. Global Heatmap: Degradation Slope (baseline R² > 0.6)', fontsize=10, fontweight='bold', pad=10)
+    ax_c.set_title('C. Global Heatmap: Noise Degradation Slope (baseline R² > 0.6)', fontsize=10, fontweight='bold', pad=10)
     ax_c.set_xlabel('Representation', fontsize=9)
     ax_c.set_ylabel('Model', fontsize=9)
     
@@ -792,11 +792,11 @@ def create_supplementary_degradation_curves(df, metrics_df, output_dir):
                 marker='o', markersize=5, linewidth=2.5, alpha=0.9,
                 label=label, color=color, linestyle='-')
         
-        # Annotate DS on the line
+        # Annotate noise degradation slope on the line
         mid_idx = len(pair_data) // 2
         if mid_idx < len(pair_data):
             ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] + 0.02, 
-                    f"DS={row['ds_thresholded']:.3f}", fontsize=7, color=color, fontweight='bold',
+                    f"NDS={row['ds_thresholded']:.3f}", fontsize=7, color=color, fontweight='bold',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
                               alpha=0.8, edgecolor=color, linewidth=1))
     
@@ -814,11 +814,11 @@ def create_supplementary_degradation_curves(df, metrics_df, output_dir):
                 marker='s', markersize=5, linewidth=2, alpha=0.7,
                 label=label, color=color, linestyle='--')
         
-        # Annotate DS
+        # Annotate noise degradation slope
         mid_idx = len(pair_data) // 2
         if mid_idx < len(pair_data):
             ax.text(pair_data.iloc[mid_idx]['sigma'], pair_data.iloc[mid_idx]['r2'] - 0.03, 
-                    f"DS={row['ds_thresholded']:.3f}", fontsize=7, color=color, fontweight='bold',
+                    f"NDS={row['ds_thresholded']:.3f}", fontsize=7, color=color, fontweight='bold',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
                               alpha=0.8, edgecolor=color, linewidth=1))
     
@@ -926,8 +926,8 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
         ax_b.set_xticklabels([format_representation(r) for r in valid_reps_ds], rotation=45, ha='right')
     
     ax_b.axhline(y=0, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
-    ax_b.set_ylabel('Degradation Slope (DS)', fontsize=9)
-    ax_b.set_title('B. Degradation Slope by Representation', fontsize=10, fontweight='bold', pad=10)
+    ax_b.set_ylabel('Noise Degradation Slope', fontsize=9)
+    ax_b.set_title('B. Noise Degradation Slope by Representation', fontsize=10, fontweight='bold', pad=10)
     ax_b.spines['top'].set_visible(False)
     ax_b.spines['right'].set_visible(False)
     ax_b.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
@@ -945,7 +945,7 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
     ax_c.barh(range(len(ds_ranking)), ds_ranking['mean_abs_ds'], color=colors, alpha=0.8, edgecolor='black', linewidth=0.8)
     ax_c.set_yticks(range(len(ds_ranking)))
     ax_c.set_yticklabels([format_representation(r) for r in ds_ranking['representation']])
-    ax_c.set_xlabel('Average |DS| (lower = more stable)', fontsize=9)
+    ax_c.set_xlabel('Average |Noise Degradation Slope| (lower = more stable)', fontsize=9)
     ax_c.set_title('C. Representation Stability Ranking', fontsize=10, fontweight='bold', pad=10)
     ax_c.spines['top'].set_visible(False)
     ax_c.spines['right'].set_visible(False)
@@ -1049,8 +1049,8 @@ def create_supplementary_baseline_vs_ds(metrics_df, output_dir):
     ax.axvline(0.6, color='red', linestyle=':', linewidth=1, alpha=0.5, label='Threshold')
     
     ax.set_xlabel('Baseline R² (σ=0)', fontsize=10)
-    ax.set_ylabel('Degradation Slope (DS)', fontsize=10)
-    ax.set_title('Supplementary: Baseline Performance vs Degradation Slope\n(baseline R² > 0.6 only)', 
+    ax.set_ylabel('Noise Degradation Slope', fontsize=10)
+    ax.set_title('Supplementary: Baseline Performance vs Noise Degradation Slope\n(baseline R² > 0.6 only)', 
                  fontsize=11, fontweight='bold', pad=15)
     ax.legend(fontsize=8, loc='best', ncol=2, frameon=True, fancybox=True, framealpha=0.9)
     ax.spines['top'].set_visible(False)
@@ -1072,15 +1072,15 @@ def create_supplementary_ds_distributions(metrics_df, output_dir):
     fig = plt.figure(figsize=(10, 8))
     gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.30)
     
-    # Panel A: Histogram of DS (R²)
+    # Panel A: Histogram of Noise Degradation Slope
     ax_a = fig.add_subplot(gs[0, 0])
     ax_a.hist(metrics_thresh['ds_thresholded'].dropna(), bins=30, color='#3498db', alpha=0.7, edgecolor='black', linewidth=0.8)
     ax_a.axvline(metrics_thresh['ds_thresholded'].median(), color='red', linestyle='--', linewidth=2, 
                  label=f'Median = {metrics_thresh["ds_thresholded"].median():.4f}')
     ax_a.axvline(0, color='black', linestyle='-', linewidth=1, alpha=0.5)
-    ax_a.set_xlabel('Degradation Slope (DS)', fontsize=9)
+    ax_a.set_xlabel('Noise Degradation Slope', fontsize=9)
     ax_a.set_ylabel('Frequency', fontsize=9)
-    ax_a.set_title('A. Distribution of DS (thresholded)', fontsize=10, fontweight='bold')
+    ax_a.set_title('A. Distribution of Noise Degradation Slope', fontsize=10, fontweight='bold')
     ax_a.legend(fontsize=8)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
@@ -1113,20 +1113,20 @@ def create_supplementary_ds_distributions(metrics_df, output_dir):
         ax_b.set_xticklabels([format_representation(r) for r in valid_reps], rotation=45, ha='right')
     
     ax_b.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax_b.set_ylabel('Degradation Slope (DS)', fontsize=9)
-    ax_b.set_title('B. DS by Representation', fontsize=10, fontweight='bold')
+    ax_b.set_ylabel('Noise Degradation Slope', fontsize=9)
+    ax_b.set_title('B. Noise Degradation Slope by Representation', fontsize=10, fontweight='bold')
     ax_b.spines['top'].set_visible(False)
     ax_b.spines['right'].set_visible(False)
     ax_b.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # Panel C: Histogram of DS (RMSE)
+    # Panel C: Histogram of Noise Degradation Slope (RMSE)
     ax_c = fig.add_subplot(gs[1, 0])
     ax_c.hist(metrics_thresh['ds_rmse'].dropna(), bins=30, color='#e74c3c', alpha=0.7, edgecolor='black', linewidth=0.8)
     ax_c.axvline(metrics_thresh['ds_rmse'].median(), color='blue', linestyle='--', linewidth=2, 
                  label=f'Median = {metrics_thresh["ds_rmse"].median():.4f}')
-    ax_c.set_xlabel('DS (RMSE) - Error increase slope', fontsize=9)
+    ax_c.set_xlabel('Noise Degradation Slope (RMSE)', fontsize=9)
     ax_c.set_ylabel('Frequency', fontsize=9)
-    ax_c.set_title('C. Distribution of DS (RMSE)', fontsize=10, fontweight='bold')
+    ax_c.set_title('C. Distribution of RMSE Noise Degradation Slope', fontsize=10, fontweight='bold')
     ax_c.legend(fontsize=8)
     ax_c.spines['top'].set_visible(False)
     ax_c.spines['right'].set_visible(False)
@@ -1159,8 +1159,8 @@ def create_supplementary_ds_distributions(metrics_df, output_dir):
         ax_d.set_xticklabels([format_model(m) for m in valid_models], rotation=45, ha='right', fontsize=7)
     
     ax_d.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax_d.set_ylabel('Degradation Slope (DS)', fontsize=9)
-    ax_d.set_title('D. DS by Model (Top 10 most stable)', fontsize=10, fontweight='bold')
+    ax_d.set_ylabel('Noise Degradation Slope', fontsize=9)
+    ax_d.set_title('D. Noise Degradation Slope by Model (Top 10 most stable)', fontsize=10, fontweight='bold')
     ax_d.spines['top'].set_visible(False)
     ax_d.spines['right'].set_visible(False)
     ax_d.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
@@ -1182,7 +1182,7 @@ def create_summary_tables(metrics_df, output_dir):
     table1 = metrics_thresh.nlargest(20, 'robustness_score')[
         ['model', 'representation', 'baseline_r2', 'r2_high', 'ds_thresholded', 'robustness_score']
     ].copy()
-    table1.columns = ['Model', 'Representation', 'Baseline R²', 'R² (high noise)', 'DS', 'Robustness Score']
+    table1.columns = ['Model', 'Representation', 'Baseline R²', 'R² (high noise)', 'Noise Degradation Slope', 'Robustness Score']
     table1.to_csv(output_dir / "table1_top20_robust_configs.csv", index=False, float_format='%.4f')
     print(f"✓ Saved Table 1")
     
@@ -1223,7 +1223,7 @@ def perform_statistical_tests(df, metrics_df, output_dir):
     results_text.append("Note: All comparisons use thresholded data (baseline R² > 0.6)")
     results_text.append("")
     
-    results_text.append("TEST 1: Representation Comparisons (DS)")
+    results_text.append("TEST 1: Representation Comparisons (Noise Degradation Slope)")
     results_text.append("-"*80)
     
     reps = metrics_thresh['representation'].value_counts().head(5).index
@@ -1240,7 +1240,7 @@ def perform_statistical_tests(df, metrics_df, output_dir):
                 mean1, mean2 = data1.abs().mean(), data2.abs().mean()
                 
                 results_text.append(f"{format_representation(rep1)} vs {format_representation(rep2)}:")
-                results_text.append(f"  Mean |DS|: {mean1:.4f} vs {mean2:.4f}")
+                results_text.append(f"  Mean |Noise Degradation Slope|: {mean1:.4f} vs {mean2:.4f}")
                 results_text.append(f"  Mann-Whitney U: stat={stat:.2f}, p={p_val:.4f}")
                 
                 if p_val < 0.05:
@@ -1256,10 +1256,10 @@ def perform_statistical_tests(df, metrics_df, output_dir):
     print(f"✓ Saved statistical tests to {output_path}")
 
 
-def perform_ds_anova(metrics_df, output_dir):
-    """ANOVA variance decomposition for DS"""
+def perform_nds_anova(metrics_df, output_dir):
+    """ANOVA variance decomposition for Noise Degradation Slope"""
     print("\n" + "="*80)
-    print("ANOVA VARIANCE DECOMPOSITION - DEGRADATION SLOPE")
+    print("ANOVA VARIANCE DECOMPOSITION - NOISE DEGRADATION SLOPE")
     print("="*80)
     
     # Use thresholded data
@@ -1271,12 +1271,12 @@ def perform_ds_anova(metrics_df, output_dir):
     print(f"\nData for ANOVA: {len(analysis_df)} observations (thresholded)")
     
     dependent_vars = {
-        'DS': 'ds_thresholded',
-        '|DS|': 'abs_ds'
+        'Noise Degradation Slope': 'ds_thresholded',
+        '|Noise Degradation Slope|': 'abs_ds'
     }
     
     all_results = {}
-    output_text = ["="*80, "ANOVA VARIANCE DECOMPOSITION - DEGRADATION SLOPE METRICS", 
+    output_text = ["="*80, "ANOVA VARIANCE DECOMPOSITION - NOISE DEGRADATION SLOPE METRICS", 
                    "(Baseline R² > 0.6 threshold applied)", "="*80, ""]
     
     for metric_name, metric_col in dependent_vars.items():
@@ -1320,10 +1320,10 @@ def perform_ds_anova(metrics_df, output_dir):
         output_text.append(f"  Interaction: {eta2_interaction:.1f}%")
         output_text.append(f"  Residual: {eta2_residual:.1f}%")
     
-    output_path = Path(output_dir) / "anova_ds_decomposition.txt"
+    output_path = Path(output_dir) / "anova_nds_decomposition.txt"
     with open(output_path, 'w') as f:
         f.write('\n'.join(output_text))
-    print(f"✓ Saved DS ANOVA to {output_path}")
+    print(f"✓ Saved Noise Degradation Slope ANOVA to {output_path}")
     
     return all_results
 
@@ -1340,8 +1340,8 @@ def main(results_dir="../results"):
     print("="*80)
     print("\nKey changes in this version:")
     print("  - Retention metric REMOVED")
-    print("  - NSI renamed to Degradation Slope (DS)")
-    print("  - DS thresholded: only calculated for baseline R² > 0.6")
+    print("  - NSI renamed to Noise Degradation Slope (NDS)")
+    print("  - NDS thresholded: only calculated for baseline R² > 0.6")
     print("="*80)
     
     df = load_screening_results(results_dir)
@@ -1362,7 +1362,7 @@ def main(results_dir="../results"):
     create_threshold_comparison_figure(metrics_df, output_dir)
     
     perform_variance_decomposition(df, output_dir)
-    perform_ds_anova(metrics_df, output_dir)
+    perform_nds_anova(metrics_df, output_dir)
     
     print("\n" + "="*80)
     print("GENERATING FIGURES (using thresholded DS)")
@@ -1388,12 +1388,12 @@ def main(results_dir="../results"):
     print("\nTop 10 Most Robust Configurations (thresholded):")
     for idx, (_, row) in enumerate(metrics_thresh.nlargest(10, 'robustness_score').iterrows(), 1):
         print(f"  {idx}. {format_model(row['model'])}/{format_representation(row['representation'])}: "
-              f"Score={row['robustness_score']:.3f}, R²₀={row['baseline_r2']:.3f}, DS={row['ds_thresholded']:.4f}")
+              f"Score={row['robustness_score']:.3f}, R²₀={row['baseline_r2']:.3f}, NDS={row['ds_thresholded']:.4f}")
     
-    print("\nRepresentation Rankings (by median |DS|, lower = more stable):")
+    print("\nRepresentation Rankings (by median |NDS|, lower = more stable):")
     rep_ranking = metrics_thresh.groupby('representation')['ds_thresholded'].apply(lambda x: x.abs().median()).sort_values()
     for idx, (rep, val) in enumerate(rep_ranking.items(), 1):
-        print(f"  {idx}. {format_representation(rep)}: |DS|={val:.4f}")
+        print(f"  {idx}. {format_representation(rep)}: |NDS|={val:.4f}")
 
 
 if __name__ == "__main__":
