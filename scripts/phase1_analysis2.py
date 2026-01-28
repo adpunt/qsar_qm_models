@@ -1,10 +1,11 @@
 """
-Phase 1 Analysis - Deterministic vs Probabilistic Models
-=========================================================
+Phase 1 Analysis - Deterministic vs Probabilistic Models + Conformal Prediction
+================================================================================
 
 Pulls data from Phase 0 screening results and analyzes:
 - Deterministic models: RF, XGBoost, DNN, MLP
 - Probabilistic models: QRF, NGBoost, GP/GAUCHE, BNN variants
+- Conformal Prediction: Conformal-RF, Conformal-XGBoost, Conformal-GP, etc.
 
 Key metrics:
 - NDS (Noise Degradation Slope): slope of R² vs σ (negative = degradation)
@@ -47,6 +48,7 @@ plt.rcParams.update({
 COLORS = {
     'deterministic': '#0173B2',
     'probabilistic': '#DE8F05',
+    'conformal': '#029E73',
 }
 
 REPRESENTATION_COLORS = {
@@ -72,6 +74,13 @@ MODEL_COLORS = {
     'mlp_bnn_full': '#8e44ad',
     'mlp_bnn_last': '#7f8c8d',
     'mlp_bnn_variational': '#c0392b',
+    # Conformal variants
+    'conformal_rf': '#1abc9c',
+    'conformal_qrf': '#16a085',
+    'conformal_xgboost': '#e67e22',
+    'conformal_ngboost': '#d35400',
+    'conformal_gauche': '#8e44ad',
+    'conformal_dnn': '#7f8c8d',
 }
 
 # ============================================================================
@@ -144,8 +153,12 @@ def format_model(model):
 
 
 def get_model_type(model_name):
-    """Classify model as deterministic or probabilistic"""
+    """Classify model as deterministic, probabilistic, or conformal"""
     model_lower = model_name.lower()
+    
+    # Conformal models
+    if 'conformal' in model_lower:
+        return 'conformal'
     
     # Probabilistic models
     prob_keywords = ['qrf', 'ngboost', 'gauche', 'bnn', 'gp']
@@ -153,6 +166,37 @@ def get_model_type(model_name):
         return 'probabilistic'
     
     return 'deterministic'
+
+
+def get_conformal_base(model_name):
+    """Get the base model for a conformal variant"""
+    model_lower = model_name.lower()
+    
+    if 'conformal_' in model_lower:
+        return model_lower.replace('conformal_', '')
+    return None
+
+
+def get_conformal_pair(model_name):
+    """Get the (base, conformal) pair for a model"""
+    model_lower = model_name.lower()
+    
+    conformal_pairs = {
+        'rf': ('rf', 'conformal_rf'),
+        'conformal_rf': ('rf', 'conformal_rf'),
+        'qrf': ('qrf', 'conformal_qrf'),
+        'conformal_qrf': ('qrf', 'conformal_qrf'),
+        'xgboost': ('xgboost', 'conformal_xgboost'),
+        'conformal_xgboost': ('xgboost', 'conformal_xgboost'),
+        'ngboost': ('ngboost', 'conformal_ngboost'),
+        'conformal_ngboost': ('ngboost', 'conformal_ngboost'),
+        'gauche': ('gauche', 'conformal_gauche'),
+        'conformal_gauche': ('gauche', 'conformal_gauche'),
+        'dnn': ('dnn', 'conformal_dnn'),
+        'conformal_dnn': ('dnn', 'conformal_dnn'),
+    }
+    
+    return conformal_pairs.get(model_lower, (model_name, None))
 
 
 def get_model_pair(model_name):
@@ -720,6 +764,225 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
     plt.close()
 
 
+def create_figure5_conformal_comparison(df, metrics_df, output_dir):
+    """
+    Figure 5: Conformal Prediction Comparison
+    
+    Panel A: Base model vs Conformal degradation curves
+    Panel B: NDS comparison (base vs conformal) bar chart
+    Panel C: Baseline R² impact (does CP hurt baseline performance?)
+    Panel D: Heatmap of NDS by model × representation (conformal only)
+    """
+    print("\n" + "="*80)
+    print("GENERATING FIGURE 5: CONFORMAL PREDICTION COMPARISON")
+    print("="*80)
+    
+    # Use thresholded metrics
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
+    
+    # Define conformal pairs to analyze
+    conformal_pairs = [
+        ('rf', 'conformal_rf', 'RF'),
+        ('qrf', 'conformal_qrf', 'QRF'),
+        ('xgboost', 'conformal_xgboost', 'XGBoost'),
+        ('ngboost', 'conformal_ngboost', 'NGBoost'),
+        ('gauche', 'conformal_gauche', 'GP'),
+    ]
+    
+    # Filter to pairs that exist in data
+    available_models = set(df['model'].unique())
+    valid_pairs = [(base, conf, name) for base, conf, name in conformal_pairs 
+                   if base in available_models and conf in available_models]
+    
+    if len(valid_pairs) == 0:
+        print("⚠️  No conformal pairs found in data - skipping Figure 5")
+        return
+    
+    print(f"Found {len(valid_pairs)} conformal pairs: {[name for _, _, name in valid_pairs]}")
+    
+    fig = plt.figure(figsize=(14, 12))
+    gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.30,
+                          left=0.08, right=0.98, top=0.94, bottom=0.08)
+    
+    available_reps = df['representation'].unique()
+    primary_rep = 'pdv' if 'pdv' in available_reps else available_reps[0]
+    
+    # ========================================================================
+    # PANEL A: Degradation curves for base vs conformal
+    # ========================================================================
+    ax_a = fig.add_subplot(gs[0, 0])
+    
+    for base, conf, name in valid_pairs[:4]:  # Limit to 4 pairs for clarity
+        # Base model
+        base_data = df[(df['model'] == base) & (df['representation'] == primary_rep)]
+        if len(base_data) > 0:
+            avg = base_data.groupby('sigma')['r2'].mean().reset_index()
+            color = MODEL_COLORS.get(base, '#999999')
+            ax_a.plot(avg['sigma'], avg['r2'],
+                     marker='o', linestyle='-', linewidth=2, alpha=0.9,
+                     label=f'{name}', color=color, markersize=5)
+        
+        # Conformal variant
+        conf_data = df[(df['model'] == conf) & (df['representation'] == primary_rep)]
+        if len(conf_data) > 0:
+            avg = conf_data.groupby('sigma')['r2'].mean().reset_index()
+            color = MODEL_COLORS.get(conf, '#1abc9c')
+            ax_a.plot(avg['sigma'], avg['r2'],
+                     marker='s', linestyle='--', linewidth=2, alpha=0.8,
+                     label=f'Conf-{name}', color=color, markersize=5)
+    
+    ax_a.set_xlabel('Noise level (σ)', fontsize=9)
+    ax_a.set_ylabel('R² score', fontsize=9)
+    ax_a.set_title(f'A. Base vs Conformal Degradation ({format_representation(primary_rep)})', 
+                   fontsize=10, fontweight='bold', pad=10)
+    ax_a.legend(fontsize=6, loc='best', ncol=2, frameon=True, framealpha=0.9)
+    ax_a.spines['top'].set_visible(False)
+    ax_a.spines['right'].set_visible(False)
+    ax_a.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    ax_a.set_ylim(bottom=0)
+    
+    # ========================================================================
+    # PANEL B: NDS comparison bar chart
+    # ========================================================================
+    ax_b = fig.add_subplot(gs[0, 1])
+    
+    comparison_data = []
+    for base, conf, name in valid_pairs:
+        for rep in metrics_thresh['representation'].unique():
+            base_met = metrics_thresh[(metrics_thresh['model'] == base) & (metrics_thresh['representation'] == rep)]
+            conf_met = metrics_thresh[(metrics_thresh['model'] == conf) & (metrics_thresh['representation'] == rep)]
+            
+            if len(base_met) > 0 and len(conf_met) > 0:
+                comparison_data.append({
+                    'pair_name': name,
+                    'representation': rep,
+                    'base_nds': base_met['nds_thresholded'].mean(),
+                    'conf_nds': conf_met['nds_thresholded'].mean(),
+                    'nds_diff': conf_met['nds_thresholded'].mean() - base_met['nds_thresholded'].mean(),
+                    'base_baseline': base_met['baseline_r2'].mean(),
+                    'conf_baseline': conf_met['baseline_r2'].mean(),
+                })
+    
+    if comparison_data:
+        comp_df = pd.DataFrame(comparison_data)
+        
+        # Average across representations
+        avg_comp = comp_df.groupby('pair_name').agg({
+            'base_nds': 'mean',
+            'conf_nds': 'mean',
+            'nds_diff': 'mean',
+        }).reset_index()
+        
+        x = np.arange(len(avg_comp))
+        width = 0.35
+        
+        ax_b.bar(x - width/2, avg_comp['base_nds'], width, label='Base Model',
+                color=COLORS['deterministic'], alpha=0.8, edgecolor='black', linewidth=0.5)
+        ax_b.bar(x + width/2, avg_comp['conf_nds'], width, label='Conformal',
+                color=COLORS['conformal'], alpha=0.8, edgecolor='black', linewidth=0.5)
+        
+        ax_b.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+        ax_b.set_xticks(x)
+        ax_b.set_xticklabels(avg_comp['pair_name'], fontsize=8)
+        ax_b.set_ylabel('Noise Degradation Slope', fontsize=9)
+        ax_b.set_title('B. Noise Degradation Slope: Base vs Conformal\n(closer to 0 = more stable)', 
+                       fontsize=10, fontweight='bold', pad=10)
+        ax_b.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
+        ax_b.spines['top'].set_visible(False)
+        ax_b.spines['right'].set_visible(False)
+        ax_b.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # ========================================================================
+    # PANEL C: Baseline R² impact
+    # ========================================================================
+    ax_c = fig.add_subplot(gs[1, 0])
+    
+    if comparison_data:
+        comp_df = pd.DataFrame(comparison_data)
+        
+        # Scatter: base baseline vs conformal baseline
+        for _, row in comp_df.iterrows():
+            color = REPRESENTATION_COLORS.get(row['representation'], '#999999')
+            ax_c.scatter(row['base_baseline'], row['conf_baseline'],
+                        s=60, alpha=0.7, color=color, edgecolors='black', linewidth=0.5)
+        
+        # Add diagonal (no change line)
+        lims = [
+            min(comp_df['base_baseline'].min(), comp_df['conf_baseline'].min()) - 0.05,
+            max(comp_df['base_baseline'].max(), comp_df['conf_baseline'].max()) + 0.05
+        ]
+        ax_c.plot(lims, lims, 'k--', linewidth=1.5, alpha=0.5, label='No change')
+        
+        # Legend for representations
+        from matplotlib.patches import Patch
+        legend_handles = [Patch(facecolor=REPRESENTATION_COLORS.get(rep, '#999999'), 
+                               edgecolor='black', label=format_representation(rep))
+                         for rep in comp_df['representation'].unique()]
+        ax_c.legend(handles=legend_handles, fontsize=7, loc='lower right', framealpha=0.9)
+        
+        ax_c.set_xlabel('Base Model Baseline R²', fontsize=9)
+        ax_c.set_ylabel('Conformal Baseline R²', fontsize=9)
+        ax_c.set_title('C. Baseline Performance Impact\n(below diagonal = CP hurts baseline)', 
+                       fontsize=10, fontweight='bold', pad=10)
+        ax_c.spines['top'].set_visible(False)
+        ax_c.spines['right'].set_visible(False)
+        ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
+    
+    # ========================================================================
+    # PANEL D: NDS difference heatmap (conformal - base)
+    # ========================================================================
+    ax_d = fig.add_subplot(gs[1, 1])
+    
+    if comparison_data:
+        comp_df = pd.DataFrame(comparison_data)
+        
+        # Pivot for heatmap
+        pivot = comp_df.pivot_table(
+            values='nds_diff',
+            index='pair_name',
+            columns='representation',
+            aggfunc='mean'
+        )
+        
+        if len(pivot) > 0:
+            # Rename columns for display
+            pivot.columns = [format_representation(c) for c in pivot.columns]
+            
+            # Color scale: green = CP better (positive diff means less negative NDS)
+            # Since NDS is negative, positive diff = improvement
+            vmax = max(abs(pivot.values.min()), abs(pivot.values.max()))
+            
+            im = ax_d.imshow(pivot.values, cmap='RdYlGn', aspect='auto',
+                            vmin=-vmax, vmax=vmax, interpolation='nearest')
+            
+            ax_d.set_xticks(np.arange(len(pivot.columns)))
+            ax_d.set_yticks(np.arange(len(pivot.index)))
+            ax_d.set_xticklabels(pivot.columns, fontsize=8)
+            ax_d.set_yticklabels(pivot.index, fontsize=8)
+            
+            # Add text annotations
+            for i in range(len(pivot.index)):
+                for j in range(len(pivot.columns)):
+                    val = pivot.values[i, j]
+                    if not np.isnan(val):
+                        text_color = 'white' if abs(val) > vmax * 0.5 else 'black'
+                        ax_d.text(j, i, f'{val:.3f}', ha='center', va='center',
+                                fontsize=7, color=text_color)
+            
+            cbar = plt.colorbar(im, ax=ax_d, shrink=0.8)
+            cbar.set_label('NDS Change (Conf - Base)\n+ve = CP more stable', fontsize=7)
+            
+            ax_d.set_xlabel('Representation', fontsize=9)
+            ax_d.set_ylabel('Model Pair', fontsize=9)
+            ax_d.set_title('D. Conformal Impact on Noise Degradation Slope\n(green = CP improves stability)', 
+                          fontsize=10, fontweight='bold', pad=10)
+    
+    output_path = Path(output_dir) / "figure5_conformal_comparison.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✓ Saved Figure 5 to {output_path}")
+    plt.close()
+
+
 def create_summary_tables(metrics_df, output_dir):
     """Create summary tables"""
     print("\n" + "="*80)
@@ -783,6 +1046,61 @@ def create_summary_tables(metrics_df, output_dir):
                          'nds_r2', 'nds_thresholded', 'meets_baseline_threshold']].copy()
     table4.to_csv(output_dir / "table_phase1_all_configs.csv", index=False, float_format='%.4f')
     print(f"✓ Saved all configs table")
+    
+    # Table 5: Conformal prediction comparisons
+    conformal_pairs = [
+        ('rf', 'conformal_rf'),
+        ('qrf', 'conformal_qrf'),
+        ('xgboost', 'conformal_xgboost'),
+        ('ngboost', 'conformal_ngboost'),
+        ('gauche', 'conformal_gauche'),
+    ]
+    
+    conformal_results = []
+    for base, conf in conformal_pairs:
+        for rep in metrics_thresh['representation'].unique():
+            base_data = metrics_thresh[(metrics_thresh['model'] == base) & (metrics_thresh['representation'] == rep)]
+            conf_data = metrics_thresh[(metrics_thresh['model'] == conf) & (metrics_thresh['representation'] == rep)]
+            
+            if len(base_data) > 0 and len(conf_data) > 0:
+                conformal_results.append({
+                    'base_model': base,
+                    'conformal_model': conf,
+                    'representation': rep,
+                    'base_baseline_r2': base_data['baseline_r2'].mean(),
+                    'conf_baseline_r2': conf_data['baseline_r2'].mean(),
+                    'baseline_change': conf_data['baseline_r2'].mean() - base_data['baseline_r2'].mean(),
+                    'base_nds': base_data['nds_thresholded'].mean(),
+                    'conf_nds': conf_data['nds_thresholded'].mean(),
+                    'nds_change': conf_data['nds_thresholded'].mean() - base_data['nds_thresholded'].mean(),
+                })
+    
+    if conformal_results:
+        table5 = pd.DataFrame(conformal_results).round(4)
+        table5.to_csv(output_dir / "table_phase1_conformal_comparisons.csv", index=False)
+        print(f"✓ Saved conformal comparisons table")
+        
+        # LaTeX version
+        with open(output_dir / "table_phase1_conformal_comparisons.tex", 'w') as f:
+            f.write("% Conformal prediction comparison\n")
+            f.write("\\begin{table}[htbp]\n")
+            f.write("\\centering\n")
+            f.write("\\caption{Impact of conformal prediction on noise robustness. NDS Change shows the difference in Noise Degradation Slope (conformal $-$ base); positive values indicate conformal prediction improves stability (less negative slope).}\n")
+            f.write("\\label{tab:conformal_comparison}\n")
+            f.write("\\begin{tabular}{llcccc}\n")
+            f.write("\\toprule\n")
+            f.write("Base & Rep & Base NDS & Conf NDS & NDS Change & Baseline $\\Delta$ \\\\\n")
+            f.write("\\midrule\n")
+            for _, row in table5.iterrows():
+                change_symbol = "+" if row['nds_change'] > 0 else ""
+                baseline_symbol = "+" if row['baseline_change'] > 0 else ""
+                f.write(f"{format_model(row['base_model'])} & {format_representation(row['representation'])} & ")
+                f.write(f"{row['base_nds']:.4f} & {row['conf_nds']:.4f} & ")
+                f.write(f"{change_symbol}{row['nds_change']:.4f} & {baseline_symbol}{row['baseline_change']:.3f} \\\\\n")
+            f.write("\\bottomrule\n")
+            f.write("\\end{tabular}\n")
+            f.write("\\end{table}\n")
+        print(f"✓ Saved conformal comparisons LaTeX table")
 
 
 def perform_statistical_tests(metrics_df, output_dir):
@@ -850,6 +1168,75 @@ def perform_statistical_tests(metrics_df, output_dir):
         else:
             results_text.append(f"  Insufficient data for comparison")
     
+    # Conformal prediction comparisons
+    results_text.append("\n" + "="*80)
+    results_text.append("CONFORMAL PREDICTION COMPARISONS")
+    results_text.append("="*80)
+    
+    conformal_pairs = [
+        ('rf', 'conformal_rf', 'RF → Conformal-RF'),
+        ('qrf', 'conformal_qrf', 'QRF → Conformal-QRF'),
+        ('xgboost', 'conformal_xgboost', 'XGBoost → Conformal-XGBoost'),
+        ('ngboost', 'conformal_ngboost', 'NGBoost → Conformal-NGBoost'),
+        ('gauche', 'conformal_gauche', 'GP → Conformal-GP'),
+    ]
+    
+    for base, conf, name in conformal_pairs:
+        results_text.append(f"\n{name.upper()}")
+        results_text.append("-"*80)
+        
+        base_data = metrics_thresh[metrics_thresh['model'] == base]['nds_thresholded'].dropna()
+        conf_data = metrics_thresh[metrics_thresh['model'] == conf]['nds_thresholded'].dropna()
+        
+        if len(base_data) >= 3 and len(conf_data) >= 3:
+            stat, p_val = stats.mannwhitneyu(base_data.abs(), conf_data.abs(), alternative='two-sided')
+            results_text.append(f"  {base}: mean |NDS|={base_data.abs().mean():.4f}, n={len(base_data)}")
+            results_text.append(f"  {conf}: mean |NDS|={conf_data.abs().mean():.4f}, n={len(conf_data)}")
+            results_text.append(f"  Mann-Whitney U: p={p_val:.6f}")
+            
+            # Also compare baseline R²
+            base_baseline = metrics_thresh[metrics_thresh['model'] == base]['baseline_r2'].mean()
+            conf_baseline = metrics_thresh[metrics_thresh['model'] == conf]['baseline_r2'].mean()
+            baseline_diff = conf_baseline - base_baseline
+            
+            results_text.append(f"  Baseline R² change: {baseline_diff:+.4f} ({base_baseline:.4f} → {conf_baseline:.4f})")
+            
+            if p_val < 0.05:
+                winner = conf if conf_data.abs().mean() < base_data.abs().mean() else base
+                results_text.append(f"  → Significant: {winner} more stable")
+            else:
+                results_text.append(f"  → No significant difference in noise robustness")
+            
+            # Verdict
+            if conf_data.abs().mean() < base_data.abs().mean() and baseline_diff >= -0.05:
+                results_text.append(f"  ✓ Conformal IMPROVES stability without hurting baseline")
+            elif conf_data.abs().mean() < base_data.abs().mean() and baseline_diff < -0.05:
+                results_text.append(f"  ⚠️ Conformal improves stability BUT hurts baseline by {abs(baseline_diff):.3f}")
+            elif conf_data.abs().mean() >= base_data.abs().mean() and baseline_diff < -0.05:
+                results_text.append(f"  ✗ Conformal HURTS both stability and baseline")
+            else:
+                results_text.append(f"  → No clear benefit from conformal prediction")
+        else:
+            results_text.append(f"  Insufficient data for comparison")
+    
+    # Overall conformal summary
+    results_text.append("\n" + "="*80)
+    results_text.append("CONFORMAL PREDICTION SUMMARY")
+    results_text.append("="*80)
+    
+    conf_models = metrics_thresh[metrics_thresh['model_type'] == 'conformal']
+    non_conf = metrics_thresh[metrics_thresh['model_type'] != 'conformal']
+    
+    if len(conf_models) > 0 and len(non_conf) > 0:
+        results_text.append(f"\nOverall conformal vs non-conformal:")
+        results_text.append(f"  Conformal: mean |NDS|={conf_models['nds_thresholded'].abs().mean():.4f}, n={len(conf_models)}")
+        results_text.append(f"  Non-conformal: mean |NDS|={non_conf['nds_thresholded'].abs().mean():.4f}, n={len(non_conf)}")
+        
+        stat, p_val = stats.mannwhitneyu(conf_models['nds_thresholded'].abs(), 
+                                         non_conf['nds_thresholded'].abs(), 
+                                         alternative='two-sided')
+        results_text.append(f"  Mann-Whitney U: p={p_val:.6f}")
+    
     output_path = output_dir / "statistical_tests_phase1.txt"
     with open(output_path, 'w') as f:
         f.write('\n'.join(results_text))
@@ -862,12 +1249,13 @@ def perform_statistical_tests(metrics_df, output_dir):
 def main(results_dir="../results"):
     """Main execution"""
     print("="*80)
-    print("PHASE 1 ANALYSIS - DETERMINISTIC VS PROBABILISTIC")
+    print("PHASE 1 ANALYSIS - DETERMINISTIC VS PROBABILISTIC + CONFORMAL")
     print("="*80)
     print("\nKey changes in this version:")
     print("  - Retention metric REMOVED")
     print("  - NSI renamed to Noise Degradation Slope (NDS)")
     print("  - NDS thresholded: only calculated for baseline R² > 0.6")
+    print("  - Added conformal prediction comparisons")
     print("="*80)
     
     df = load_phase0_data(results_dir)
@@ -890,6 +1278,7 @@ def main(results_dir="../results"):
     
     create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir)
     create_figure4_bayesian_transformations(df, metrics_df, output_dir)
+    create_figure5_conformal_comparison(df, metrics_df, output_dir)
     create_summary_tables(metrics_df, output_dir)
     perform_statistical_tests(metrics_df, output_dir)
     
@@ -903,17 +1292,48 @@ def main(results_dir="../results"):
     print(f"Configs meeting threshold (R² > 0.6): {len(metrics_thresh)}")
     
     print("\nModel Type Comparison (thresholded):")
-    for model_type in ['deterministic', 'probabilistic']:
+    for model_type in ['deterministic', 'probabilistic', 'conformal']:
         subset = metrics_thresh[metrics_thresh['model_type'] == model_type]
         if len(subset) > 0:
             print(f"  {model_type.capitalize()}:")
             print(f"    Models: {subset['model'].nunique()}")
             print(f"    Mean |NDS|: {subset['nds_thresholded'].abs().mean():.4f}")
     
+    # Conformal summary
+    conformal_models = metrics_thresh[metrics_thresh['model_type'] == 'conformal']
+    if len(conformal_models) > 0:
+        print("\nConformal Prediction Impact:")
+        
+        conformal_pairs = [
+            ('rf', 'conformal_rf'),
+            ('qrf', 'conformal_qrf'),
+            ('xgboost', 'conformal_xgboost'),
+            ('gauche', 'conformal_gauche'),
+        ]
+        
+        for base, conf in conformal_pairs:
+            base_data = metrics_thresh[metrics_thresh['model'] == base]
+            conf_data = metrics_thresh[metrics_thresh['model'] == conf]
+            
+            if len(base_data) > 0 and len(conf_data) > 0:
+                base_nds = base_data['nds_thresholded'].abs().mean()
+                conf_nds = conf_data['nds_thresholded'].abs().mean()
+                improvement = base_nds - conf_nds  # Positive = CP better
+                
+                symbol = "✓" if improvement > 0 else "✗"
+                print(f"  {symbol} {format_model(base)} → Conf: |NDS| {base_nds:.4f} → {conf_nds:.4f} ({improvement:+.4f})")
+    
     print("\n" + "="*80)
     print("PHASE 1 ANALYSIS COMPLETE")
     print("="*80)
     print(f"\nAll outputs saved to: {output_dir}")
+    print("\nGenerated files:")
+    print("  - figure3_deterministic_vs_probabilistic.png")
+    print("  - figure4_bayesian_transformations.png")
+    print("  - figure5_conformal_comparison.png")
+    print("  - table_phase1_*.csv")
+    print("  - table_phase1_conformal_comparisons.tex")
+    print("  - statistical_tests_phase1.txt")
 
 
 if __name__ == "__main__":
