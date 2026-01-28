@@ -562,70 +562,69 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
     
     ax_a.set_xlabel('Baseline R² (σ=0)', fontsize=10)
     ax_a.set_ylabel('Noise Degradation Slope', fontsize=10)
-    ax_a.set_title('A. Why Threshold Matters: Baseline vs Noise Degradation Slope', fontsize=11, fontweight='bold', pad=12)
+    ax_a.set_title('Why Threshold Matters: Baseline vs Noise Degradation Slope', fontsize=11, fontweight='bold', pad=12)
     ax_a.legend(fontsize=8, loc='lower left', frameon=True, framealpha=0.9)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
     ax_a.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # Panel B: Table of problematic configs
+    # Remove panel B (we'll output LaTeX table instead)
     ax_b = axes[1]
     ax_b.axis('off')
+    ax_b.text(0.5, 0.5, 'See LaTeX table:\nthreshold_excluded_configs.tex', 
+              ha='center', va='center', fontsize=12, style='italic',
+              transform=ax_b.transAxes)
     
-    # Create table data
-    table_data = []
+    # Create table data for LaTeX
     problematic_sorted = metrics_df[metrics_df['meets_baseline_threshold'] == False].copy()
     problematic_sorted['abs_ds'] = problematic_sorted['ds_r2'].abs()
-    problematic_sorted = problematic_sorted.nsmallest(10, 'abs_ds')  # Least degradation
-    
-    for _, row in problematic_sorted.iterrows():
-        table_data.append([
-            f"{format_model(row['model'])}/{format_representation(row['representation'])}",
-            f"{row['baseline_r2']:.3f}",
-            f"{row['ds_r2']:.4f}",
-            "Excluded"
-        ])
-    
-    if len(table_data) > 0:
-        table = ax_b.table(
-            cellText=table_data,
-            colLabels=['Configuration', 'Baseline R²', 'NDS', 'Status'],
-            loc='center',
-            cellLoc='center',
-            colWidths=[0.4, 0.2, 0.2, 0.2]
-        )
-        table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1.2, 1.5)
-        
-        # Style header
-        for j in range(4):
-            table[(0, j)].set_facecolor('#3498db')
-            table[(0, j)].set_text_props(color='white', fontweight='bold')
-        
-        ax_b.set_title('B. Configs with Low Degradation but Poor Baseline\n(Excluded from main analysis)',
-                      fontsize=11, fontweight='bold', pad=12, y=0.95)
+    problematic_sorted = problematic_sorted.nsmallest(15, 'abs_ds')  # Top 15 least degradation
     
     plt.tight_layout()
     
-    output_path = Path(output_dir) / "threshold_comparison_why_it_matters.png"
+    output_path = Path(output_dir) / "threshold_comparison_scatter.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved threshold comparison to {output_path}")
+    print(f"✓ Saved threshold comparison scatter to {output_path}")
     plt.close()
+    
+    # Generate LaTeX table
+    latex_path = Path(output_dir) / "threshold_excluded_configs.tex"
+    with open(latex_path, 'w') as f:
+        f.write("% Configurations excluded from main analysis (baseline R² ≤ 0.6)\n")
+        f.write("% These show low noise degradation but poor baseline performance\n")
+        f.write("\\begin{table}[htbp]\n")
+        f.write("\\centering\n")
+        f.write("\\caption{Model-representation configurations excluded from noise robustness analysis due to poor baseline performance (R$^2 \\leq 0.6$). These configurations exhibit low noise degradation slopes but fail to achieve adequate predictive performance even under clean conditions. Note: Some excluded configurations (e.g., NGBoost/SMILES) may still provide valuable uncertainty estimates despite poor point predictions.}\n")
+        f.write("\\label{tab:excluded_configs}\n")
+        f.write("\\begin{tabular}{llcc}\n")
+        f.write("\\toprule\n")
+        f.write("Model & Representation & Baseline R$^2$ & Noise Degradation Slope \\\\\n")
+        f.write("\\midrule\n")
+        
+        for _, row in problematic_sorted.iterrows():
+            model_fmt = format_model(row['model'])
+            rep_fmt = format_representation(row['representation'])
+            f.write(f"{model_fmt} & {rep_fmt} & {row['baseline_r2']:.3f} & {row['ds_r2']:.4f} \\\\\n")
+        
+        f.write("\\bottomrule\n")
+        f.write("\\end{tabular}\n")
+        f.write("\\end{table}\n")
+    
+    print(f"✓ Saved LaTeX table to {latex_path}")
     
     # Also save a text summary
     summary_path = Path(output_dir) / "threshold_comparison_summary.txt"
     with open(summary_path, 'w') as f:
         f.write("="*80 + "\n")
         f.write("BASELINE THRESHOLD ANALYSIS\n")
-        f.write("Why we require baseline R² > 0.6 for Noise Degradation Slope (NDS) analysis\n")
+        f.write("Why we require baseline R² > 0.6 for Noise Degradation Slope analysis\n")
         f.write("="*80 + "\n\n")
         
         f.write(f"Total configurations: {len(metrics_df)}\n")
         f.write(f"Configs meeting threshold (R² > 0.6): {meets_thresh.shape[0]}\n")
         f.write(f"Configs below threshold: {below_thresh.shape[0]}\n\n")
         
-        f.write("PROBLEM: Some configs show low degradation (NDS close to 0) but have poor\n")
+        f.write("PROBLEM: Some configs show low degradation (slope close to 0) but have poor\n")
         f.write("baseline performance. Without thresholding, these would appear 'robust'\n")
         f.write("when in reality they simply never performed well to begin with.\n\n")
         
@@ -633,7 +632,7 @@ def create_threshold_comparison_figure(metrics_df, output_dir):
         f.write("-"*80 + "\n")
         for _, row in problematic_sorted.iterrows():
             f.write(f"  {format_model(row['model'])}/{format_representation(row['representation'])}: ")
-            f.write(f"Baseline R²={row['baseline_r2']:.3f}, NDS={row['ds_r2']:.4f}\n")
+            f.write(f"Baseline R²={row['baseline_r2']:.3f}, Slope={row['ds_r2']:.4f}\n")
         
         f.write("\n" + "="*80 + "\n")
         f.write("NOTE: These configurations may still be valuable for uncertainty quantification\n")
@@ -761,12 +760,12 @@ def create_figure1_global_landscape(df, metrics_df, output_dir):
     plt.close()
 
 
-def create_supplementary_degradation_curves(df, metrics_df, output_dir):
+def create_s3_degradation_curves(df, metrics_df, output_dir):
     """
-    Supplementary figure: R² degradation curves for top 5 vs bottom 5
+    S3: R² degradation curves for top 5 vs bottom 5 (thresholded)
     """
     print("\n" + "="*80)
-    print("GENERATING SUPPLEMENTARY: DEGRADATION CURVES")
+    print("GENERATING S3: DEGRADATION CURVES")
     print("="*80)
     
     # Use only thresholded configs
@@ -832,9 +831,9 @@ def create_supplementary_degradation_curves(df, metrics_df, output_dir):
     ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     ax.set_ylim(bottom=0)
     
-    output_path = Path(output_dir) / "supplementary_degradation_curves.png"
+    output_path = Path(output_dir) / "s3_degradation_curves.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved degradation curves to {output_path}")
+    print(f"✓ Saved S3 degradation curves to {output_path}")
     plt.close()
 
 
@@ -1029,9 +1028,9 @@ def create_figure2_representation_effects(df, metrics_df, output_dir):
     plt.close()
 
 
-def create_supplementary_baseline_vs_ds(metrics_df, output_dir):
-    """Supplementary: Baseline R² vs DS scatter (thresholded only)"""
-    print("\nGENERATING SUPPLEMENTARY: BASELINE VS DS")
+def create_s1_baseline_vs_nds(metrics_df, output_dir):
+    """S1: Baseline R² vs NDS scatter (thresholded only)"""
+    print("\nGENERATING S1: BASELINE VS NDS")
     
     metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
     
@@ -1050,22 +1049,22 @@ def create_supplementary_baseline_vs_ds(metrics_df, output_dir):
     
     ax.set_xlabel('Baseline R² (σ=0)', fontsize=10)
     ax.set_ylabel('Noise Degradation Slope', fontsize=10)
-    ax.set_title('Supplementary: Baseline Performance vs Noise Degradation Slope\n(baseline R² > 0.6 only)', 
+    ax.set_title('Baseline Performance vs Noise Degradation Slope\n(baseline R² > 0.6 only)', 
                  fontsize=11, fontweight='bold', pad=15)
     ax.legend(fontsize=8, loc='best', ncol=2, frameon=True, fancybox=True, framealpha=0.9)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     
-    output_path = Path(output_dir) / "supplementary_baseline_vs_ds.png"
+    output_path = Path(output_dir) / "s1_baseline_vs_nds.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Supplementary to {output_path}")
+    print(f"✓ Saved S1 to {output_path}")
     plt.close()
 
 
-def create_supplementary_ds_distributions(metrics_df, output_dir):
-    """Supplementary: DS distributions"""
-    print("\nGENERATING SUPPLEMENTARY: DS DISTRIBUTIONS")
+def create_supplementary_nds_distributions(metrics_df, output_dir):
+    """S2: NDS distributions (thresholded)"""
+    print("\nGENERATING S2: NDS DISTRIBUTIONS")
     
     metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
     
@@ -1165,9 +1164,9 @@ def create_supplementary_ds_distributions(metrics_df, output_dir):
     ax_d.spines['right'].set_visible(False)
     ax_d.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    output_path = Path(output_dir) / "supplementary_ds_distributions.png"
+    output_path = Path(output_dir) / "s2_nds_distributions.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✓ Saved Supplementary to {output_path}")
+    print(f"✓ Saved S2 to {output_path}")
     plt.close()
 
 
@@ -1365,14 +1364,14 @@ def main(results_dir="../results"):
     perform_nds_anova(metrics_df, output_dir)
     
     print("\n" + "="*80)
-    print("GENERATING FIGURES (using thresholded DS)")
+    print("GENERATING FIGURES (using thresholded NDS)")
     print("="*80)
     
     create_figure1_global_landscape(df, metrics_df, output_dir)
-    create_supplementary_degradation_curves(df, metrics_df, output_dir)
+    create_s3_degradation_curves(df, metrics_df, output_dir)
     create_figure2_representation_effects(df, metrics_df, output_dir)
-    create_supplementary_baseline_vs_ds(metrics_df, output_dir)
-    create_supplementary_ds_distributions(metrics_df, output_dir)
+    create_s1_baseline_vs_nds(metrics_df, output_dir)
+    create_supplementary_nds_distributions(metrics_df, output_dir)
     create_summary_tables(metrics_df, output_dir)
     perform_statistical_tests(df, metrics_df, output_dir)
     

@@ -6,10 +6,10 @@ Pulls data from Phase 0 screening results and analyzes:
 - Deterministic models: RF, XGBoost, DNN, MLP
 - Probabilistic models: QRF, NGBoost, GP/GAUCHE, BNN variants
 
-Key metrics (NO AUC):
-- NSI (Noise Sensitivity Index): slope of R² vs σ
-- Retention percentage: (R²_high / R²_baseline) * 100
+Key metrics:
+- NDS (Noise Degradation Slope): slope of R² vs σ (negative = degradation)
 - Baseline R² at σ=0
+- NDS is thresholded: only calculated for configs with baseline R² > 0.6
 """
 
 import pandas as pd
@@ -285,10 +285,16 @@ def load_phase0_data(results_dir="../results"):
 # METRICS CALCULATION
 # ============================================================================
 
-def calculate_robustness_metrics(df, sigma_high=0.6):
-    """Calculate robustness metrics for each model-representation pair"""
+def calculate_robustness_metrics(df, baseline_threshold=0.6):
+    """
+    Calculate robustness metrics for each model-representation pair.
+    
+    NDS (Noise Degradation Slope) is calculated for ALL configs initially,
+    but nds_thresholded is only set for configs with baseline R² > threshold.
+    """
     print("\n" + "="*80)
-    print(f"CALCULATING ROBUSTNESS METRICS (σ_high = {sigma_high})")
+    print(f"CALCULATING ROBUSTNESS METRICS")
+    print(f"  Baseline threshold for NDS: R² > {baseline_threshold}")
     print("="*80)
     
     metrics_list = []
@@ -314,8 +320,8 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
             metrics['baseline_r2'] = np.nan
             metrics['baseline_rmse'] = np.nan
         
-        # High noise
-        sigma_h = group[np.abs(group['sigma'] - sigma_high) < 0.05]
+        # High noise (σ=0.6)
+        sigma_h = group[np.abs(group['sigma'] - 0.6) < 0.05]
         if len(sigma_h) > 0:
             metrics['r2_high'] = sigma_h['r2'].values[0]
             metrics['rmse_high'] = sigma_h['rmse'].values[0]
@@ -323,48 +329,87 @@ def calculate_robustness_metrics(df, sigma_high=0.6):
             metrics['r2_high'] = np.nan
             metrics['rmse_high'] = np.nan
         
-        # Retention percentage
-        if not np.isnan(metrics['baseline_r2']) and not np.isnan(metrics['r2_high']):
-            if metrics['baseline_r2'] != 0:
-                metrics['retention_pct'] = (metrics['r2_high'] / metrics['baseline_r2']) * 100
-            else:
-                metrics['retention_pct'] = np.nan
-        else:
-            metrics['retention_pct'] = np.nan
-        
-        # NSI (slope)
+        # Calculate NDS (Noise Degradation Slope) for ALL configs
         if len(group) >= 3:
             try:
                 slope_r2, intercept, r_val, p_val, _ = stats.linregress(group['sigma'], group['r2'])
-                metrics['nsi_r2'] = slope_r2
-                metrics['nsi_r2_pval'] = p_val
-                metrics['nsi_r2_r'] = r_val
+                metrics['nds_r2'] = slope_r2  # Unthresholded NDS
+                metrics['nds_r2_pval'] = p_val
+                metrics['nds_r2_r'] = r_val
                 
                 slope_rmse, _, _, _, _ = stats.linregress(group['sigma'], group['rmse'])
-                metrics['nsi_rmse'] = slope_rmse
+                metrics['nds_rmse'] = slope_rmse
             except:
-                metrics['nsi_r2'] = np.nan
-                metrics['nsi_rmse'] = np.nan
+                metrics['nds_r2'] = np.nan
+                metrics['nds_rmse'] = np.nan
         else:
-            metrics['nsi_r2'] = np.nan
-            metrics['nsi_rmse'] = np.nan
+            metrics['nds_r2'] = np.nan
+            metrics['nds_rmse'] = np.nan
+        
+        # Thresholded NDS: only valid if baseline R² > threshold
+        if not np.isnan(metrics['baseline_r2']) and metrics['baseline_r2'] > baseline_threshold:
+            metrics['nds_thresholded'] = metrics['nds_r2']
+            metrics['meets_baseline_threshold'] = True
+        else:
+            metrics['nds_thresholded'] = np.nan
+            metrics['meets_baseline_threshold'] = False
         
         metrics_list.append(metrics)
     
     metrics_df = pd.DataFrame(metrics_list)
     
-    # Filter outliers
-    print("\nFiltering outliers...")
-    before_count = len(metrics_df)
+    # Summary statistics
+    n_total = len(metrics_df)
+    n_meets_threshold = metrics_df['meets_baseline_threshold'].sum()
+    n_below_threshold = n_total - n_meets_threshold
     
-    metrics_df = metrics_df[
-        (metrics_df['baseline_r2'] >= 0.1) &
-        (metrics_df['retention_pct'] >= -50) &
-        (metrics_df['retention_pct'] <= 150)
-    ].copy()
+    print(f"\nCalculated metrics for {n_total} configurations")
+    print(f"  Configs meeting baseline threshold (R² > {baseline_threshold}): {n_meets_threshold}")
+    print(f"  Configs below threshold: {n_below_threshold}")
     
-    print(f"  Before: {before_count}, After: {len(metrics_df)}")
-    print(f"  Excluded: {before_count - len(metrics_df)} outliers")
+    # Model type breakdown
+    for model_type in ['deterministic', 'probabilistic']:
+        subset = metrics_df[metrics_df['model_type'] == model_type]
+        n_type = len(subset)
+        n_thresh = subset['meets_baseline_threshold'].sum()
+        print(f"\n  {model_type.capitalize()}:")
+        print(f"    Total: {n_type}, Meeting threshold: {n_thresh}")
+    
+    return metrics_df
+
+
+def define_robustness_score(metrics_df):
+    """
+    Define composite robustness score based on:
+    - Baseline R² (higher is better)
+    - NDS magnitude (less negative / closer to 0 is better)
+    
+    Only uses thresholded NDS for the score.
+    """
+    # Filter to only configs that meet threshold
+    valid_mask = metrics_df['meets_baseline_threshold'] == True
+    
+    # For configs meeting threshold, calculate robustness score
+    baseline_min = metrics_df.loc[valid_mask, 'baseline_r2'].min()
+    baseline_max = metrics_df.loc[valid_mask, 'baseline_r2'].max()
+    baseline_range = baseline_max - baseline_min if baseline_max != baseline_min else 1
+    
+    baseline_normalized = (metrics_df['baseline_r2'] - baseline_min) / baseline_range
+    
+    # Normalize NDS (less negative is better)
+    nds_vals = metrics_df.loc[valid_mask, 'nds_thresholded'].dropna()
+    if len(nds_vals) > 0:
+        nds_min = nds_vals.min()
+        nds_max = nds_vals.max()
+        nds_range = nds_max - nds_min if nds_max != nds_min else 1
+        
+        nds_normalized = (metrics_df['nds_thresholded'] - nds_min) / nds_range
+    else:
+        nds_normalized = pd.Series(np.nan, index=metrics_df.index)
+    
+    # Composite score
+    metrics_df['robustness_score'] = (baseline_normalized + nds_normalized) / 2
+    metrics_df.loc[~valid_mask, 'robustness_score'] = np.nan
     
     return metrics_df
 
@@ -377,6 +422,9 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     print("\n" + "="*80)
     print("GENERATING FIGURE 3: DETERMINISTIC VS PROBABILISTIC")
     print("="*80)
+    
+    # Use thresholded metrics
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
     
     fig = plt.figure(figsize=(12, 10))
     gs = fig.add_gridspec(2, 2, hspace=0.35, wspace=0.30,
@@ -439,39 +487,39 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
     ax_b.set_ylim(bottom=0)
     
     # ========================================================================
-    # PANEL C: Baseline vs Retention scatter
+    # PANEL C: Baseline vs NDS scatter (thresholded)
     # ========================================================================
     ax_c = fig.add_subplot(gs[1, 0])
     
     for model_type in ['deterministic', 'probabilistic']:
-        subset = metrics_df[metrics_df['model_type'] == model_type]
+        subset = metrics_thresh[metrics_thresh['model_type'] == model_type]
         if len(subset) > 0:
             color = COLORS[model_type]
             marker = 'o' if model_type == 'deterministic' else 's'
-            ax_c.scatter(subset['baseline_r2'], subset['retention_pct'],
+            ax_c.scatter(subset['baseline_r2'], subset['nds_thresholded'],
                         alpha=0.7, s=60, color=color, marker=marker,
                         label=model_type.capitalize(),
                         edgecolors='black', linewidth=0.5)
     
-    ax_c.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_c.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
     ax_c.set_xlabel('Baseline R² (σ=0)', fontsize=9)
-    ax_c.set_ylabel('Retention at high noise (%)', fontsize=9)
-    ax_c.set_title('C. Baseline vs Robustness', fontsize=10, fontweight='bold', pad=10)
+    ax_c.set_ylabel('Noise Degradation Slope', fontsize=9)
+    ax_c.set_title('C. Baseline vs Noise Degradation Slope', fontsize=10, fontweight='bold', pad=10)
     ax_c.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
     ax_c.spines['top'].set_visible(False)
     ax_c.spines['right'].set_visible(False)
     ax_c.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
     
     # ========================================================================
-    # PANEL D: Retention by model type (box plot)
+    # PANEL D: NDS by model type (box plot)
     # ========================================================================
     ax_d = fig.add_subplot(gs[1, 1])
     
-    det_retention = metrics_df[metrics_df['model_type'] == 'deterministic']['retention_pct'].dropna()
-    prob_retention = metrics_df[metrics_df['model_type'] == 'probabilistic']['retention_pct'].dropna()
+    det_nds = metrics_thresh[metrics_thresh['model_type'] == 'deterministic']['nds_thresholded'].dropna()
+    prob_nds = metrics_thresh[metrics_thresh['model_type'] == 'probabilistic']['nds_thresholded'].dropna()
     
-    if len(det_retention) > 0 and len(prob_retention) > 0:
-        bp = ax_d.boxplot([det_retention, prob_retention],
+    if len(det_nds) > 0 and len(prob_nds) > 0:
+        bp = ax_d.boxplot([det_nds, prob_nds],
                          labels=['Deterministic', 'Probabilistic'],
                          patch_artist=True, widths=0.6)
         
@@ -481,19 +529,19 @@ def create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir):
             box.set_alpha(0.7)
         
         # Add individual points
-        for i, (data, color) in enumerate([(det_retention, COLORS['deterministic']),
-                                            (prob_retention, COLORS['probabilistic'])]):
+        for i, (data, color) in enumerate([(det_nds, COLORS['deterministic']),
+                                            (prob_nds, COLORS['probabilistic'])]):
             x = np.random.normal(i+1, 0.04, size=len(data))
             ax_d.scatter(x, data, alpha=0.4, s=20, color=color, zorder=3)
         
         # Statistical test
-        stat, p_val = stats.mannwhitneyu(det_retention, prob_retention, alternative='two-sided')
+        stat, p_val = stats.mannwhitneyu(det_nds.abs(), prob_nds.abs(), alternative='two-sided')
         sig_text = f"p = {p_val:.4f}" + (" *" if p_val < 0.05 else "")
         ax_d.text(0.5, 0.95, sig_text, transform=ax_d.transAxes, ha='center', fontsize=8)
     
-    ax_d.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
-    ax_d.set_ylabel('Retention at high noise (%)', fontsize=9)
-    ax_d.set_title('D. Retention Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
+    ax_d.axhline(0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+    ax_d.set_ylabel('Noise Degradation Slope', fontsize=9)
+    ax_d.set_title('D. Noise Degradation Slope Distribution by Model Type', fontsize=10, fontweight='bold', pad=10)
     ax_d.spines['top'].set_visible(False)
     ax_d.spines['right'].set_visible(False)
     ax_d.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
@@ -509,6 +557,9 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
     print("\n" + "="*80)
     print("GENERATING FIGURE 4: BAYESIAN TRANSFORMATIONS")
     print("="*80)
+    
+    # Use thresholded metrics
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
     
     fig = plt.figure(figsize=(12, 12))
     gs = fig.add_gridspec(3, 2, hspace=0.40, wspace=0.30,
@@ -572,7 +623,7 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
         ax.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
         ax.set_ylim(bottom=0)
     
-    # Row 2: Retention comparison (base vs best variant) across representations
+    # Row 2: Baseline comparison (base vs best variant) across representations
     representations = sorted(df['representation'].unique())
     
     for idx, trans in enumerate(transformations):
@@ -581,48 +632,47 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
         base = trans['base']
         variants = trans['variants']
         
-        base_retentions = []
-        variant_retentions = []
+        base_baselines = []
+        variant_baselines = []
         rep_labels = []
         
         for rep in representations:
-            base_met = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
+            base_met = metrics_thresh[(metrics_thresh['model'] == base) & (metrics_thresh['representation'] == rep)]
             
-            # Get best variant for this representation
-            best_var_ret = None
+            # Get best variant for this representation (by baseline R²)
+            best_var_baseline = None
             for var in variants:
-                var_met = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+                var_met = metrics_thresh[(metrics_thresh['model'] == var) & (metrics_thresh['representation'] == rep)]
                 if len(var_met) > 0:
-                    var_ret = var_met['retention_pct'].mean()
-                    if best_var_ret is None or var_ret > best_var_ret:
-                        best_var_ret = var_ret
+                    var_baseline = var_met['baseline_r2'].mean()
+                    if best_var_baseline is None or var_baseline > best_var_baseline:
+                        best_var_baseline = var_baseline
             
-            if len(base_met) > 0 and best_var_ret is not None:
-                base_retentions.append(base_met['retention_pct'].mean())
-                variant_retentions.append(best_var_ret)
+            if len(base_met) > 0 and best_var_baseline is not None:
+                base_baselines.append(base_met['baseline_r2'].mean())
+                variant_baselines.append(best_var_baseline)
                 rep_labels.append(format_representation(rep))
         
-        if base_retentions:
+        if base_baselines:
             x = np.arange(len(rep_labels))
             width = 0.35
             
-            ax.bar(x - width/2, base_retentions, width, label=format_model(base),
+            ax.bar(x - width/2, base_baselines, width, label=format_model(base),
                   color=COLORS['deterministic'], alpha=0.8, edgecolor='black', linewidth=0.5)
-            ax.bar(x + width/2, variant_retentions, width, label='Best BNN',
+            ax.bar(x + width/2, variant_baselines, width, label='Best BNN',
                   color=COLORS['probabilistic'], alpha=0.8, edgecolor='black', linewidth=0.5)
             
             ax.set_xticks(x)
             ax.set_xticklabels(rep_labels, rotation=45, ha='right', fontsize=8)
-            ax.axhline(100, color='gray', linestyle='--', linewidth=1, alpha=0.5)
         
-        ax.set_ylabel('Retention (%)', fontsize=9)
-        ax.set_title(f'B{idx+1}. {trans["title"]} Retention by Rep', fontsize=10, fontweight='bold', pad=10)
+        ax.set_ylabel('Baseline R²', fontsize=9)
+        ax.set_title(f'B{idx+1}. {trans["title"]} Baseline by Rep', fontsize=10, fontweight='bold', pad=10)
         ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.9)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.grid(True, axis='y', alpha=0.3, linestyle=':', linewidth=0.5)
     
-    # Row 3: NSI improvement (base - variant, positive = variant better)
+    # Row 3: NDS improvement (base - variant, positive = variant better)
     for idx, trans in enumerate(transformations):
         ax = fig.add_subplot(gs[2, idx])
         
@@ -634,17 +684,17 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
         colors_list = []
         
         for rep in representations:
-            base_met = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
+            base_met = metrics_thresh[(metrics_thresh['model'] == base) & (metrics_thresh['representation'] == rep)]
             
             for var in variants:
-                var_met = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+                var_met = metrics_thresh[(metrics_thresh['model'] == var) & (metrics_thresh['representation'] == rep)]
                 
                 if len(base_met) > 0 and len(var_met) > 0:
-                    # NSI improvement: less negative is better, so var - base
-                    # If var NSI is -0.3 and base NSI is -0.4, improvement is 0.1 (positive = good)
-                    base_nsi = base_met['nsi_r2'].mean()
-                    var_nsi = var_met['nsi_r2'].mean()
-                    improvement = var_nsi - base_nsi  # Less negative = positive improvement
+                    # NDS improvement: less negative is better, so var - base
+                    # If var NDS is -0.3 and base NDS is -0.4, improvement is 0.1 (positive = good)
+                    base_nds = base_met['nds_thresholded'].mean()
+                    var_nds = var_met['nds_thresholded'].mean()
+                    improvement = var_nds - base_nds  # Less negative = positive improvement
                     
                     improvements.append(improvement)
                     labels.append(f"{format_model(var)}\n{format_representation(rep)}")
@@ -657,9 +707,9 @@ def create_figure4_bayesian_transformations(df, metrics_df, output_dir):
             ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
             ax.set_yticks(y_pos)
             ax.set_yticklabels(labels, fontsize=6)
-            ax.set_xlabel('NSI improvement (less negative = better)', fontsize=9)
+            ax.set_xlabel('Noise Degradation Slope improvement (less negative = better)', fontsize=9)
         
-        ax.set_title(f'C{idx+1}. {trans["title"]} NSI Change', fontsize=10, fontweight='bold', pad=10)
+        ax.set_title(f'C{idx+1}. {trans["title"]} Noise Degradation Slope Change', fontsize=10, fontweight='bold', pad=10)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.grid(True, axis='x', alpha=0.3, linestyle=':', linewidth=0.5)
@@ -678,26 +728,27 @@ def create_summary_tables(metrics_df, output_dir):
     
     output_dir = Path(output_dir)
     
-    # Table 1: By model type
-    table1 = metrics_df.groupby('model_type').agg({
+    # Use thresholded metrics
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
+    
+    # Table 1: By model type (thresholded)
+    table1 = metrics_thresh.groupby('model_type').agg({
         'baseline_r2': ['mean', 'std'],
-        'retention_pct': ['mean', 'std'],
-        'nsi_r2': lambda x: np.abs(x).mean(),
+        'nds_thresholded': ['mean', 'std'],
     }).round(4)
     table1.to_csv(output_dir / "table_phase1_by_model_type.csv")
     print(f"✓ Saved model type summary")
     
-    # Table 2: Full breakdown
-    table2 = metrics_df.groupby(['model', 'representation', 'model_type']).agg({
+    # Table 2: Full breakdown (thresholded)
+    table2 = metrics_thresh.groupby(['model', 'representation', 'model_type']).agg({
         'baseline_r2': 'mean',
         'r2_high': 'mean',
-        'retention_pct': 'mean',
-        'nsi_r2': 'mean',
+        'nds_thresholded': 'mean',
     }).round(4)
     table2.to_csv(output_dir / "table_phase1_full_breakdown.csv")
     print(f"✓ Saved full breakdown table")
     
-    # Table 3: Bayesian transformation comparisons (DNN didn't run)
+    # Table 3: Bayesian transformation comparisons
     transformations = [
         ('rf', ['qrf']),
         ('mlp', ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']),
@@ -706,9 +757,9 @@ def create_summary_tables(metrics_df, output_dir):
     
     for base, variants in transformations:
         for var in variants:
-            for rep in metrics_df['representation'].unique():
-                base_data = metrics_df[(metrics_df['model'] == base) & (metrics_df['representation'] == rep)]
-                var_data = metrics_df[(metrics_df['model'] == var) & (metrics_df['representation'] == rep)]
+            for rep in metrics_thresh['representation'].unique():
+                base_data = metrics_thresh[(metrics_thresh['model'] == base) & (metrics_thresh['representation'] == rep)]
+                var_data = metrics_thresh[(metrics_thresh['model'] == var) & (metrics_thresh['representation'] == rep)]
                 
                 if len(base_data) > 0 and len(var_data) > 0:
                     pair_results.append({
@@ -717,18 +768,21 @@ def create_summary_tables(metrics_df, output_dir):
                         'representation': rep,
                         'base_baseline': base_data['baseline_r2'].mean(),
                         'var_baseline': var_data['baseline_r2'].mean(),
-                        'base_retention': base_data['retention_pct'].mean(),
-                        'var_retention': var_data['retention_pct'].mean(),
-                        'retention_diff': var_data['retention_pct'].mean() - base_data['retention_pct'].mean(),
-                        'base_nsi': base_data['nsi_r2'].mean(),
-                        'var_nsi': var_data['nsi_r2'].mean(),
-                        'nsi_improvement': var_data['nsi_r2'].mean() - base_data['nsi_r2'].mean(),
+                        'base_nds': base_data['nds_thresholded'].mean(),
+                        'var_nds': var_data['nds_thresholded'].mean(),
+                        'nds_improvement': var_data['nds_thresholded'].mean() - base_data['nds_thresholded'].mean(),
                     })
     
     if pair_results:
         table3 = pd.DataFrame(pair_results).round(4)
         table3.to_csv(output_dir / "table_phase1_bayesian_transformations.csv", index=False)
         print(f"✓ Saved Bayesian transformations table")
+    
+    # Table 4: All configs with threshold status
+    table4 = metrics_df[['model', 'representation', 'model_type', 'baseline_r2', 
+                         'nds_r2', 'nds_thresholded', 'meets_baseline_threshold']].copy()
+    table4.to_csv(output_dir / "table_phase1_all_configs.csv", index=False, float_format='%.4f')
+    print(f"✓ Saved all configs table")
 
 
 def perform_statistical_tests(metrics_df, output_dir):
@@ -738,24 +792,31 @@ def perform_statistical_tests(metrics_df, output_dir):
     print("="*80)
     
     output_dir = Path(output_dir)
+    
+    # Use thresholded metrics
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True].copy()
+    
     results_text = ["STATISTICAL COMPARISONS - PHASE 1", "="*80, ""]
+    results_text.append("Note: All comparisons use thresholded data (baseline R² > 0.6)")
+    results_text.append("")
     
     # Overall comparison
     results_text.append("OVERALL: DETERMINISTIC vs PROBABILISTIC")
     results_text.append("-"*80)
     
-    det_ret = metrics_df[metrics_df['model_type'] == 'deterministic']['retention_pct'].dropna()
-    prob_ret = metrics_df[metrics_df['model_type'] == 'probabilistic']['retention_pct'].dropna()
+    det_nds = metrics_thresh[metrics_thresh['model_type'] == 'deterministic']['nds_thresholded'].dropna()
+    prob_nds = metrics_thresh[metrics_thresh['model_type'] == 'probabilistic']['nds_thresholded'].dropna()
     
-    if len(det_ret) >= 3 and len(prob_ret) >= 3:
-        stat, p_val = stats.mannwhitneyu(det_ret, prob_ret, alternative='two-sided')
-        results_text.append(f"Retention % comparison:")
-        results_text.append(f"  Deterministic: mean={det_ret.mean():.2f}%, n={len(det_ret)}")
-        results_text.append(f"  Probabilistic: mean={prob_ret.mean():.2f}%, n={len(prob_ret)}")
+    if len(det_nds) >= 3 and len(prob_nds) >= 3:
+        # Compare absolute NDS (lower is better)
+        stat, p_val = stats.mannwhitneyu(det_nds.abs(), prob_nds.abs(), alternative='two-sided')
+        results_text.append(f"Noise Degradation Slope (|NDS|) comparison:")
+        results_text.append(f"  Deterministic: mean |NDS|={det_nds.abs().mean():.4f}, n={len(det_nds)}")
+        results_text.append(f"  Probabilistic: mean |NDS|={prob_nds.abs().mean():.4f}, n={len(prob_nds)}")
         results_text.append(f"  Mann-Whitney U: stat={stat:.2f}, p={p_val:.6f}")
         if p_val < 0.05:
-            winner = 'Probabilistic' if prob_ret.mean() > det_ret.mean() else 'Deterministic'
-            results_text.append(f"  → Significant (p<0.05): {winner} models show better retention")
+            winner = 'Probabilistic' if prob_nds.abs().mean() < det_nds.abs().mean() else 'Deterministic'
+            results_text.append(f"  → Significant (p<0.05): {winner} models show better noise stability")
         else:
             results_text.append(f"  → No significant difference")
     
@@ -773,17 +834,17 @@ def perform_statistical_tests(metrics_df, output_dir):
         results_text.append(f"\n{name.upper()}")
         results_text.append("-"*80)
         
-        base_data = metrics_df[metrics_df['model'] == base]['retention_pct'].dropna()
-        var_data = metrics_df[metrics_df['model'] == var]['retention_pct'].dropna()
+        base_data = metrics_thresh[metrics_thresh['model'] == base]['nds_thresholded'].dropna()
+        var_data = metrics_thresh[metrics_thresh['model'] == var]['nds_thresholded'].dropna()
         
         if len(base_data) >= 3 and len(var_data) >= 3:
-            stat, p_val = stats.mannwhitneyu(base_data, var_data, alternative='two-sided')
-            results_text.append(f"  {base}: mean={base_data.mean():.2f}%, n={len(base_data)}")
-            results_text.append(f"  {var}: mean={var_data.mean():.2f}%, n={len(var_data)}")
+            stat, p_val = stats.mannwhitneyu(base_data.abs(), var_data.abs(), alternative='two-sided')
+            results_text.append(f"  {base}: mean |NDS|={base_data.abs().mean():.4f}, n={len(base_data)}")
+            results_text.append(f"  {var}: mean |NDS|={var_data.abs().mean():.4f}, n={len(var_data)}")
             results_text.append(f"  Mann-Whitney U: p={p_val:.6f}")
             if p_val < 0.05:
-                winner = var if var_data.mean() > base_data.mean() else base
-                results_text.append(f"  → Significant: {winner} superior")
+                winner = var if var_data.abs().mean() < base_data.abs().mean() else base
+                results_text.append(f"  → Significant: {winner} more stable")
             else:
                 results_text.append(f"  → No significant difference")
         else:
@@ -803,22 +864,28 @@ def main(results_dir="../results"):
     print("="*80)
     print("PHASE 1 ANALYSIS - DETERMINISTIC VS PROBABILISTIC")
     print("="*80)
+    print("\nKey changes in this version:")
+    print("  - Retention metric REMOVED")
+    print("  - NSI renamed to Noise Degradation Slope (NDS)")
+    print("  - NDS thresholded: only calculated for baseline R² > 0.6")
+    print("="*80)
     
     df = load_phase0_data(results_dir)
     if len(df) == 0:
         print("ERROR: No data loaded!")
         return
     
-    metrics_df = calculate_robustness_metrics(df, sigma_high=0.6)
+    metrics_df = calculate_robustness_metrics(df, baseline_threshold=0.6)
+    metrics_df = define_robustness_score(metrics_df)
     
-    output_dir = Path(results_dir) / "phase1_figures"
+    output_dir = Path(results_dir) / "phase1_figures_v3"
     output_dir.mkdir(exist_ok=True, parents=True)
     
     metrics_df.to_csv(output_dir / "phase1_robustness_metrics.csv", index=False)
     print(f"\n✓ Saved metrics to {output_dir / 'phase1_robustness_metrics.csv'}")
     
     print("\n" + "="*80)
-    print("GENERATING FIGURES")
+    print("GENERATING FIGURES (using thresholded NDS)")
     print("="*80)
     
     create_figure3_deterministic_vs_probabilistic(df, metrics_df, output_dir)
@@ -830,14 +897,18 @@ def main(results_dir="../results"):
     print("SUMMARY")
     print("="*80)
     
-    print("\nModel Type Comparison:")
+    metrics_thresh = metrics_df[metrics_df['meets_baseline_threshold'] == True]
+    
+    print(f"\nTotal configs: {len(metrics_df)}")
+    print(f"Configs meeting threshold (R² > 0.6): {len(metrics_thresh)}")
+    
+    print("\nModel Type Comparison (thresholded):")
     for model_type in ['deterministic', 'probabilistic']:
-        subset = metrics_df[metrics_df['model_type'] == model_type]
+        subset = metrics_thresh[metrics_thresh['model_type'] == model_type]
         if len(subset) > 0:
             print(f"  {model_type.capitalize()}:")
             print(f"    Models: {subset['model'].nunique()}")
-            print(f"    Mean retention: {subset['retention_pct'].mean():.1f}%")
-            print(f"    Mean |NSI|: {subset['nsi_r2'].abs().mean():.4f}")
+            print(f"    Mean |NDS|: {subset['nds_thresholded'].abs().mean():.4f}")
     
     print("\n" + "="*80)
     print("PHASE 1 ANALYSIS COMPLETE")
