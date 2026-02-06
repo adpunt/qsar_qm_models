@@ -241,7 +241,7 @@ def parse_arguments():
     parser.add_argument("--tuning", type=str2bool, default=False, help="Hyperparameter tuning (default is False)")
     parser.add_argument("--kernel", type=str, default="tanimoto", help="Specify the kernel for certain models (Gaussian Process)")
     parser.add_argument("-k", "--k_domains", type=int, default=1, help="Number of domains for clustering (default is 1)")
-    parser.add_argument("-s", "--split", type=str, default="random", help="Method for splitting data (default is random)")
+    parser.add_argument("-s", "--split", type=str, default="scaffold", help="Method for splitting data (default is scaffold)")
     parser.add_argument("-c", "--clustering_method", type=str, default="Agglomerative", help="Method to cluster the chemical domain (default is Agglomerative)")
     parser.add_argument("--max_vocab", type=int, default=30, help="Max vocab length of SMILES OHE generation (default is 30)")
     parser.add_argument("--custom_model", type=str, default=None, help="Filepath to custom PyTorch model in .pt file")
@@ -1357,6 +1357,11 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
                             args, s, rep, iteration, iteration_seed, file_no,
                             y_test_original, trial)
 
+        elif model_type == "mlp_bnn_last_standalone":
+            return train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
+                                              args, s, rep, iteration, iteration_seed, file_no,
+                                              y_test_original)
+
     if args.tuning:
         temp_study_name = f"temp_qspr_{uuid.uuid4().hex}"
         study = optuna.create_study(
@@ -1705,6 +1710,9 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                             'x_val': x_val, 'y_val': y_val,
                             'y_test_original': y_test_orig
                         }
+
+                        print(f"DEBUG sigma={s} rep={rep}: train={x_train.shape}, val={x_val.shape}, test={x_test.shape}")
+                        print(f"DEBUG y_train[:5]={y_train[:5]}, y_val[:5]={y_val[:5]}")
                     
                     print(f"  Combining {len(available)} representations...")
                     h_train, h_test, h_val, _ = create_hybrid_representation(
@@ -1783,6 +1791,8 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
                             print(f"model: {model}")
                             print(f"rep: {rep}")
+                            print(f"DEBUG sigma={s}: x_val type={type(x_val)}, shape={x_val.shape if hasattr(x_val, 'shape') else len(x_val)}")
+                            print(f"DEBUG sigma={s}: y_val={y_val[:5] if len(y_val) > 0 else 'EMPTY'}")
                             run_model(
                                 x_train, y_train, x_test, y_test, x_val, y_val,
                                 model, args, iteration_seed, rep, iteration, s,
