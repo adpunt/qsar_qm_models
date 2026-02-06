@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 
 data/smiles_cache/
+slurm_scripts_anova/
+slurm_scripts_uncertainty/
+scripts/test_runtime_scaling.sh
