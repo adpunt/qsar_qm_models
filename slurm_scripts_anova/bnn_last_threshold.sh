@@ -1,0 +1,140 @@
+#!/bin/bash
+#SBATCH --job-name=bnn_last_threshold
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=47:59:00
+#SBATCH --partition=long
+#SBATCH --mem=128G
+#SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
+
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+cd /data/stat-cadd/scat9264/qsar_qm_models
+. setup.sh
+cd scripts
+
+# BNN last_layer for threshold
+
+# dnn_bnn_last/ecfp4
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m dnn \
+    -r ecfp4 \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_ecfp4_dnn_bnn_last.csv
+
+# dnn_bnn_last/pdv
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m dnn \
+    -r pdv \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_pdv_dnn_bnn_last.csv
+
+# dnn_bnn_last/sns
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m dnn \
+    -r sns \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_sns_dnn_bnn_last.csv
+
+# dnn_bnn_last/smiles
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m dnn \
+    -r smiles \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_smiles_dnn_bnn_last.csv
+
+# dnn_bnn_last/mhggnn
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m dnn \
+    -r mhggnn \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_mhggnn_dnn_bnn_last.csv
+
+# mlp_bnn_last/ecfp4
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m mlp \
+    -r ecfp4 \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_ecfp4_mlp_bnn_last.csv
+
+# mlp_bnn_last/pdv
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m mlp \
+    -r pdv \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_pdv_mlp_bnn_last.csv
+
+# mlp_bnn_last/sns
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m mlp \
+    -r sns \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_sns_mlp_bnn_last.csv
+
+# mlp_bnn_last/smiles
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m mlp \
+    -r smiles \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_smiles_mlp_bnn_last.csv
+
+# mlp_bnn_last/mhggnn
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m mlp \
+    -r mhggnn \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy threshold \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    --bayesian-transformation last_layer -u True \
+    -f ../results/anova_threshold_mhggnn_mlp_bnn_last.csv
+
