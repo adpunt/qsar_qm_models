@@ -264,6 +264,50 @@ def load_uncertainty_data(results_dir):
     return None
 
 
+def fix_injected_noise(df):
+    """
+    Recompute injected_noise to correct the scale mismatch bug.
+
+    The saved injected_noise = y_true_noisy - y_true_original, but these are in
+    different scales (normalized vs raw). The actual noise is:
+        noise = y_true_noisy - normalize(y_true_original)
+
+    We recover the normalization transform per group via linear regression:
+        y_true_noisy = a * y_true_original + b + noise
+    The residuals are the correct noise values.
+    """
+    if 'y_true_noisy' not in df.columns or 'y_true_original' not in df.columns:
+        return df
+
+    required_cols = {'model', 'representation', 'sigma', 'iteration'}
+    group_cols = [c for c in required_cols if c in df.columns]
+    if not group_cols:
+        return df
+
+    corrected_noise = df['injected_noise'].copy() if 'injected_noise' in df.columns else pd.Series(np.nan, index=df.index)
+    n_fixed = 0
+
+    for group_key, group_idx in df.groupby(group_cols).groups.items():
+        group = df.loc[group_idx]
+        y_noisy = group['y_true_noisy'].values
+        y_orig = group['y_true_original'].values
+
+        mask = np.isfinite(y_noisy) & np.isfinite(y_orig)
+        if mask.sum() < 10:
+            continue
+
+        # Linear regression to recover normalization parameters
+        slope, intercept, _, _, _ = stats.linregress(y_orig[mask], y_noisy[mask])
+        # Residuals = actual noise in normalized space
+        residuals = y_noisy - (slope * y_orig + intercept)
+        corrected_noise.loc[group_idx] = residuals
+        n_fixed += 1
+
+    df['injected_noise'] = corrected_noise
+    print(f"  Fixed injected_noise via linear regression ({n_fixed} groups)")
+    return df
+
+
 def load_validation_data(validation_dir):
     """Load validation data from KIRBy (combined_summary.csv)."""
     if validation_dir is None:
@@ -2190,6 +2234,8 @@ def main():
     print("\n[1/3] Loading data...")
     qm9_df = load_anova_data(args.qm9_dir)
     unc_df = load_uncertainty_data(args.qm9_dir)
+    if unc_df is not None:
+        unc_df = fix_injected_noise(unc_df)
     validation_df = load_validation_data(args.validation_dir)
 
     if qm9_df is None:

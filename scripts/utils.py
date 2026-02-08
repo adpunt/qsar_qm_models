@@ -170,17 +170,31 @@ def decompose_uncertainty_distributional(pred_mean, pred_std_or_var, model_type=
 # SAVE UNCERTAINTY WITH DECOMPOSITION
 # ============================================================================
 
-def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy, 
+def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy,
                            filepath, model_name, rep, sigma_noise, iteration, file_no,
                            y_pred_std_calibrated=None, temperature=None,
                            epistemic_uncertainty=None, aleatoric_uncertainty=None):
     """
     Save uncertainty values with optional epistemic/aleatoric decomposition.
-    
-    UPDATED to handle decomposition columns.
+
+    injected_noise is computed as the residual from the normalization transform,
+    recovering the actual noise in normalized space.
     """
     uncertainty_file = filepath.replace('.csv', '_uncertainty_values.csv')
-    
+
+    # Compute correct injected noise via linear regression
+    # y_true_noisy = a * y_true_original + b + noise (a,b are normalization params)
+    # Residuals from this regression = actual noise in normalized space
+    y_orig = np.asarray(y_true_original, dtype=np.float64)
+    y_noisy = np.asarray(y_true_noisy, dtype=np.float64)
+    finite_mask = np.isfinite(y_orig) & np.isfinite(y_noisy)
+    if finite_mask.sum() >= 10:
+        from scipy.stats import linregress
+        slope, intercept, _, _, _ = linregress(y_orig[finite_mask], y_noisy[finite_mask])
+        injected_noise = y_noisy - (slope * y_orig + intercept)
+    else:
+        injected_noise = y_noisy - y_orig  # fallback
+
     rows = []
     for i in range(len(y_pred_mean)):
         row = {
@@ -194,7 +208,7 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             'y_pred_std_uncalibrated': y_pred_std[i],
             'y_true_original': y_true_original[i],
             'y_true_noisy': y_true_noisy[i],
-            'injected_noise': y_true_noisy[i] - y_true_original[i]
+            'injected_noise': injected_noise[i]
         }
         
         # Add calibrated values if provided
