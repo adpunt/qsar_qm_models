@@ -73,7 +73,7 @@ Outputs:
 PRIMARY_STRATEGY = 'legacy'      # REVIEW: Main example strategy
 CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
 PRIMARY_REP = 'pdv'              # REVIEW: Main representation
-SUPPLEMENTARY_REP = 'sns'        # REVIEW: Supplementary representation
+SUPPLEMENTARY_REP = 'ecfp4'      # Changed from SNS: ECFP4 is more robust and representative of QSAR practice
 
 # All strategies for completeness checks
 ALL_STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
@@ -1233,8 +1233,14 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
         color = MODEL_COLORS.get(model, '#333333')
         ax_a.plot(bin_centers, bin_errors, 'o-', label=get_model_label(model), color=color, markersize=4)
 
-    # Diagonal
-    lims = [0, ax_a.get_xlim()[1]] if ax_a.get_xlim()[1] > 0 else [0, 1]
+    # Diagonal and axis limits
+    # Clip y-axis to prevent extreme outliers (e.g. QRF) from dominating
+    xlim = ax_a.get_xlim()[1] if ax_a.get_xlim()[1] > 0 else 1
+    ylim_max = ax_a.get_ylim()[1]
+    # Cap at 3x the x range to keep plot readable
+    reasonable_ylim = min(ylim_max, xlim * 3)
+    ax_a.set_ylim(0, reasonable_ylim)
+    lims = [0, min(xlim, reasonable_ylim)]
     ax_a.plot(lims, lims, 'k--', alpha=0.5, label='Perfect')
     ax_a.set_xlabel('Predicted Uncertainty')
     ax_a.set_ylabel('Actual Error')
@@ -1504,48 +1510,54 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
         ax_c.text(0.5, 0.5, 'No injected_noise data', ha='center', va='center', transform=ax_c.transAxes)
         ax_c.set_title(f'C. Uncertainty-Noise Correlation{title_suffix}', fontweight='bold')
 
-    # Panel D: Aleatoric vs Epistemic
+    # Panel D: Separation Plot - Aleatoric & Epistemic vs Sigma
+    # KEY TEST: aleatoric should increase with sigma, epistemic should stay flat
     ax_d = axes[1, 1]
 
-    if 'aleatoric_uncertainty' in filtered.columns and 'epistemic_uncertainty' in filtered.columns:
-        alea_corr, epis_corr = [], []
-        models = []
+    has_decomposition = ('aleatoric_uncertainty' in filtered.columns and
+                         'epistemic_uncertainty' in filtered.columns)
+    plotted_separation = False
 
+    if has_decomposition:
         for model in filtered['model'].unique():
             model_data = filtered[filtered['model'] == model]
 
-            if 'injected_noise' not in model_data.columns:
-                continue
-
-            noise_mag = np.abs(model_data['injected_noise'].values)
             alea = model_data['aleatoric_uncertainty'].values
             epis = model_data['epistemic_uncertainty'].values
 
-            mask = np.isfinite(alea) & np.isfinite(epis) & np.isfinite(noise_mag)
-            if mask.sum() < 100:
+            # Only plot models with valid decomposition data
+            valid_mask = np.isfinite(alea) & np.isfinite(epis) & (alea > 0)
+            if valid_mask.sum() < 100:
                 continue
 
-            a_corr, _ = stats.spearmanr(alea[mask], noise_mag[mask])
-            e_corr, _ = stats.spearmanr(epis[mask], noise_mag[mask])
+            alea_means, epis_means, sigmas = [], [], []
+            for sigma in sorted(model_data['sigma'].unique()):
+                sigma_data = model_data[model_data['sigma'] == sigma]
+                a = sigma_data['aleatoric_uncertainty'].values
+                e = sigma_data['epistemic_uncertainty'].values
+                m = np.isfinite(a) & np.isfinite(e)
+                if m.sum() > 10:
+                    alea_means.append(np.mean(a[m]))
+                    epis_means.append(np.mean(e[m]))
+                    sigmas.append(sigma)
 
-            models.append(model)
-            alea_corr.append(a_corr)
-            epis_corr.append(e_corr)
+            if len(sigmas) >= 3:
+                color = MODEL_COLORS.get(model, '#333333')
+                label = get_model_label(model)
+                ax_d.plot(sigmas, alea_means, 'o-', color=color,
+                          label=f'{label} (alea.)', markersize=3, linewidth=1.2)
+                ax_d.plot(sigmas, epis_means, 's--', color=color,
+                          label=f'{label} (epist.)', markersize=3, linewidth=1.0, alpha=0.6)
+                plotted_separation = True
 
-        if models:
-            x = np.arange(len(models))
-            width = 0.35
-
-            ax_d.bar(x - width/2, alea_corr, width, label='Aleatoric', color='#E69F00')  # Orange (colorblind-safe)
-            ax_d.bar(x + width/2, epis_corr, width, label='Epistemic', color='#0072B2')  # Blue (colorblind-safe)
-            ax_d.set_xticks(x)
-            ax_d.set_xticklabels([get_model_label(m) for m in models], rotation=45, ha='right')
-            ax_d.set_ylabel('ρ (with injected noise)')
-            ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
-            ax_d.legend()
-            ax_d.axhline(0, color='black', linewidth=0.5)
+    if plotted_separation:
+        ax_d.set_xlabel('Injected Noise Level (σ)')
+        ax_d.set_ylabel('Mean Uncertainty')
+        ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
+        ax_d.legend(fontsize=5, ncol=2)
     else:
-        ax_d.text(0.5, 0.5, 'No aleatoric/epistemic data', ha='center', va='center', transform=ax_d.transAxes)
+        ax_d.text(0.5, 0.5, 'No aleatoric/epistemic\ndecomposition data',
+                  ha='center', va='center', transform=ax_d.transAxes, fontsize=9)
         ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
 
     for ax in axes.flat:
@@ -1749,8 +1761,20 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     y_true = y_pred = None
 
                 if y_true is not None:
-                    cov_1sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=1)
-                    cov_2sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=2)
+                    is_conformal = 'conformal' in model
+                    if is_conformal:
+                        # For conformal models, uncertainty is pseudo-std derived from
+                        # interval_width / (2*1.645). Recover the actual half-width
+                        # to compute coverage properly against the interval bounds.
+                        half_width = unc_values[mask] * 1.645  # undo the /1.645
+                        cov_nominal = calculate_coverage(y_true, y_pred, half_width, k=1)
+                        # Also compute at 2x the interval for comparison
+                        cov_2x = calculate_coverage(y_true, y_pred, half_width, k=2)
+                        cov_1sigma = cov_nominal
+                        cov_2sigma = cov_2x
+                    else:
+                        cov_1sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=1)
+                        cov_2sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=2)
                 else:
                     cov_1sigma = cov_2sigma = np.nan
 
@@ -1854,6 +1878,40 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     f.write("  W < 0.5: Weak agreement\n")
                 print("✓ Saved table6_kendalls_w.txt")
 
+    # Table 7: Strategy Sensitivity Ratio (NDS_strategy / NDS_legacy)
+    # Tests whether certain noise types differentially affect model families
+    if len(nds_df) > 0 and 'legacy' in nds_df['strategy'].values:
+        # Compute mean NDS per model per strategy on PRIMARY_REP
+        nds_primary = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
+        pivot = nds_primary.groupby(['model', 'strategy'])['nds'].mean().unstack('strategy')
+
+        if 'legacy' in pivot.columns:
+            ratio_df = pivot.div(pivot['legacy'], axis=0)
+            # Add model family classification
+            tree_models = ['rf', 'xgboost', 'qrf', 'ngboost', 'lgb',
+                           'conformal_rf_split', 'conformal_qrf_split']
+            nn_models = ['dnn', 'mlp', 'flexible_dnn',
+                         'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational',
+                         'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational',
+                         'conformal_dnn_split']
+
+            ratio_df['family'] = 'other'
+            ratio_df.loc[ratio_df.index.isin(tree_models), 'family'] = 'tree'
+            ratio_df.loc[ratio_df.index.isin(nn_models), 'family'] = 'nn'
+
+            ratio_df.to_csv(output_dir / 'table7_strategy_sensitivity_ratio.csv')
+            print("✓ Saved table7_strategy_sensitivity_ratio.csv")
+
+            # Summary by family
+            for family in ['tree', 'nn']:
+                fam_data = ratio_df[ratio_df['family'] == family]
+                if len(fam_data) > 0:
+                    for strat in [s for s in ALL_STRATEGIES if s != 'legacy' and s in fam_data.columns]:
+                        vals = fam_data[strat].dropna()
+                        if len(vals) > 0:
+                            print(f"  {family} {strat}/legacy ratio: "
+                                  f"mean={vals.mean():.3f} (range {vals.min():.3f}-{vals.max():.3f})")
+
 
 # =============================================================================
 # REPORT
@@ -1950,6 +2008,18 @@ def main():
     if qm9_df is None:
         print("ERROR: No QM9 ANOVA data found!")
         return
+
+    # Exclude graph models (Graph_GP, GCN, GIN) - not in scope
+    EXCLUDED_MODELS = {'graph_gp', 'gcn', 'gin', 'ginct', 'gin2d'}
+    pre_filter = len(qm9_df)
+    qm9_df = qm9_df[~qm9_df['model'].isin(EXCLUDED_MODELS)]
+    if len(qm9_df) < pre_filter:
+        print(f"  Filtered out {pre_filter - len(qm9_df)} rows from excluded graph models")
+    if unc_df is not None:
+        pre_filter_unc = len(unc_df)
+        unc_df = unc_df[~unc_df['model'].isin(EXCLUDED_MODELS)]
+        if len(unc_df) < pre_filter_unc:
+            print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded graph models")
 
     # Calculate NDS
     print("\n[2/3] Calculating metrics...")
