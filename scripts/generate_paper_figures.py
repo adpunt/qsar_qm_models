@@ -82,6 +82,39 @@ ALL_STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hete
 # Flag to generate supplementary figures
 GENERATE_SUPPLEMENTARY = True
 
+# =============================================================================
+# ANOVA DESIGN — Curated models/reps for balanced, non-redundant design
+# =============================================================================
+# Models EXCLUDED from ANOVA (remain in the full study for other analyses):
+#   - conformal_*: Wrappers around base models; NDS Spearman rho > 0.99 with
+#     their base models. Kept for Part 2 uncertainty analysis.
+#   - qrf: NDS rho = 0.996 with rf. Kept for probabilistic vs deterministic
+#     comparison in Part 1 deep dives.
+#
+# Reps EXCLUDED from ANOVA:
+#   - sns: Spearman rho = 0.90 with ecfp4 across 14 models (both substructure
+#     fingerprints). Kept for supplementary per-rep analysis.
+#   - randomized_smiles: Incomplete data coverage across models.
+#
+# Full BNN variants (last + variational) are ALL included in ANOVA.
+# Although pairwise rho ~0.99, user requires all transformation variants
+# to be represented for completeness.
+#
+# See supplementary ICC table (table_supp_icc.csv) and redundancy table
+# (table_supp_pairwise_redundancy.csv) for justification.
+# =============================================================================
+
+ANOVA_MODELS_EXCLUDE = {
+    'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',  # Wrappers (rho > 0.99)
+    'qrf',  # Redundant with rf (rho = 0.996)
+}
+
+ANOVA_REPS_EXCLUDE = {
+    'sns',                # Redundant with ecfp4 (rho = 0.90)
+    'randomized_smiles',  # Incomplete coverage
+    'random_smiles',      # Alias
+}
+
 import argparse
 import pandas as pd
 import numpy as np
@@ -338,6 +371,228 @@ def load_validation_data(validation_dir):
     return None
 
 
+def calculate_validation_nds(validation_df):
+    """Convert validation data into NDS-compatible format.
+
+    The KIRBy validation script outputs:
+    - all_results.csv: per-sigma R² (columns: sigma, r2, model, rep, strategy)
+    - summary.csv: NSI (= NDS), baseline_r2 (columns: model, rep, strategy, baseline_r2, NSI)
+
+    This function handles both formats and adds a 'dataset' column.
+    """
+    if validation_df is None or len(validation_df) == 0:
+        return None
+
+    # If summary format (has NSI column), convert directly
+    if 'NSI' in validation_df.columns:
+        nds_df = validation_df.rename(columns={'NSI': 'nds'})
+        if 'baseline_r2' not in nds_df.columns and 'baseline_r2' not in nds_df.columns:
+            nds_df['baseline_r2'] = np.nan
+        # Ensure dataset column exists
+        if 'dataset' not in nds_df.columns:
+            nds_df['dataset'] = 'validation'
+        return nds_df
+
+    # If per-sigma format (has sigma and r2 columns), compute NDS
+    if 'sigma' in validation_df.columns and 'r2' in validation_df.columns:
+        group_cols = ['model', 'rep', 'strategy']
+        if 'dataset' in validation_df.columns:
+            group_cols = ['dataset'] + group_cols
+
+        nds_results = []
+        for keys, group in validation_df.groupby(group_cols):
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            avg = group.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
+            if len(avg) < 3:
+                continue
+            baseline = avg[avg['sigma'] == 0.0]['r2'].values
+            if len(baseline) == 0:
+                continue
+            baseline = baseline[0]
+            if baseline < BASELINE_THRESHOLD:
+                continue
+            try:
+                slope, _, r_val, _, _ = stats.linregress(avg['sigma'], avg['r2'])
+            except:
+                continue
+            row = dict(zip(group_cols, keys))
+            row.update({'nds': slope, 'baseline_r2': baseline, 'r2_fit': r_val**2})
+            nds_results.append(row)
+
+        if nds_results:
+            return pd.DataFrame(nds_results)
+
+    return None
+
+
+def create_validation_figures(validation_df, val_nds_df, output_dir):
+    """Generate all validation-related figures and tables.
+
+    Validation data (LogD, Caco2_Efflux, hERG-Ki) is integrated into the paper
+    as generalisation evidence — NOT a separate section.
+
+    Outputs:
+    - fig_validation_overview.png: NDS heatmap per dataset (like Figure 1B)
+    - fig_validation_anova.png: η² decomposition on validation datasets
+    - table_validation_nds.csv: Full NDS table across datasets
+    - table_validation_anova.csv: Validation ANOVA statistics
+    """
+    if val_nds_df is None or len(val_nds_df) == 0:
+        print("⚠ No validation NDS data available — skipping validation figures")
+        return
+
+    datasets = val_nds_df['dataset'].unique() if 'dataset' in val_nds_df.columns else ['validation']
+    print(f"  Validation datasets: {sorted(datasets)}, {len(val_nds_df)} configs total")
+
+    # --- Table: Validation NDS (cross-dataset comparison) ---
+    if 'dataset' in val_nds_df.columns:
+        pivot = val_nds_df.pivot_table(
+            values='nds', index=['model', 'rep'], columns='dataset', aggfunc='mean'
+        )
+        pivot['MEAN'] = pivot.mean(axis=1)
+        pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
+        pivot = pivot.sort_values('MEAN', ascending=False)
+        pivot.to_csv(output_dir / 'table_validation_nds.csv')
+        print("✓ Saved table_validation_nds.csv")
+    else:
+        val_nds_df.to_csv(output_dir / 'table_validation_nds.csv', index=False)
+        print("✓ Saved table_validation_nds.csv")
+
+    # --- Figure: Validation NDS heatmap per dataset ---
+    n_datasets = len(datasets)
+    if n_datasets > 0 and 'dataset' in val_nds_df.columns:
+        fig, axes = plt.subplots(1, n_datasets, figsize=(5 * n_datasets, 6), squeeze=False)
+        axes = axes[0]
+
+        for i, dataset in enumerate(sorted(datasets)):
+            ax = axes[i]
+            ds_data = val_nds_df[val_nds_df['dataset'] == dataset]
+            if len(ds_data) == 0:
+                continue
+
+            pivot = ds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+            col_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                         if c in pivot.columns]
+            if not col_order:
+                continue
+            pivot = pivot[col_order]
+            pivot.index = [get_model_label(m) for m in pivot.index]
+
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+                        ax=ax, cbar_kws={'label': 'NDS'})
+            ax.set_title(f'{dataset}', fontweight='bold')
+            ax.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
+            if i > 0:
+                ax.set_ylabel('')
+
+        plt.suptitle('Validation Datasets: NDS by Model × Strategy', fontweight='bold', y=1.02)
+        plt.tight_layout()
+        plt.savefig(output_dir / 'fig_validation_overview.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("✓ Saved fig_validation_overview.png")
+
+    # --- Figure: Validation ANOVA (η² decomposition) ---
+    if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
+        anova_results = {}
+        for dataset in sorted(datasets):
+            ds_df = validation_df[validation_df['dataset'] == dataset]
+            if len(ds_df) == 0:
+                continue
+            # Run robustness ANOVA on this dataset
+            robust = run_robustness_anova(ds_df)
+            if robust:
+                anova_results[dataset] = robust
+
+        if anova_results:
+            fig, axes = plt.subplots(1, len(anova_results), figsize=(4 * len(anova_results), 5), squeeze=False)
+            axes = axes[0]
+
+            for i, (dataset, result) in enumerate(anova_results.items()):
+                ax = axes[i]
+                factors = ['Model', 'Rep', 'Interaction']
+                values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
+                colors = ['#3498db', '#e74c3c', '#2ecc71']
+                ax.bar(factors, values, color=colors)
+                ax.set_ylabel('Variance Explained (η², %)')
+                ax.set_title(f'{dataset}', fontweight='bold')
+                ax.set_ylim(0, 100)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+
+            plt.suptitle('Validation: ANOVA Variance Decomposition (Robustness)', fontweight='bold', y=1.02)
+            plt.tight_layout()
+            plt.savefig(output_dir / 'fig_validation_anova.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("✓ Saved fig_validation_anova.png")
+
+            # Save ANOVA table
+            rows = []
+            for dataset, result in anova_results.items():
+                rows.append({
+                    'Dataset': dataset,
+                    'Model_η²': result['eta2_model'],
+                    'Rep_η²': result['eta2_rep'],
+                    'Interaction_η²': result['eta2_interaction'],
+                    'n_models': result.get('n_models', ''),
+                    'n_reps': result.get('n_reps', ''),
+                })
+            pd.DataFrame(rows).to_csv(output_dir / 'table_validation_anova.csv', index=False)
+            print("✓ Saved table_validation_anova.csv")
+
+    # --- Cross-dataset ranking comparison ---
+    if 'dataset' in val_nds_df.columns and len(datasets) >= 2:
+        # Compare model rankings across datasets using Gaussian strategy
+        rank_data = {}
+        for dataset in sorted(datasets):
+            ds_nds = val_nds_df[(val_nds_df['dataset'] == dataset) &
+                                (val_nds_df['strategy'] == 'legacy')]
+            if len(ds_nds) == 0:
+                ds_nds = val_nds_df[val_nds_df['dataset'] == dataset]
+            model_means = ds_nds.groupby('model')['nds'].mean()
+            rank_data[dataset] = model_means.rank(ascending=False)
+
+        if rank_data:
+            rank_df = pd.DataFrame(rank_data)
+            # Also add QM9 rankings for comparison if we can compute them later
+            rank_df['Mean Rank'] = rank_df.mean(axis=1)
+            rank_df = rank_df.sort_values('Mean Rank')
+            rank_df.to_csv(output_dir / 'table_validation_rankings.csv')
+            print("✓ Saved table_validation_rankings.csv")
+
+    # --- Probabilistic comparison on validation datasets ---
+    if 'dataset' in val_nds_df.columns:
+        prob_pairs = [
+            ('rf', 'qrf', 'RF vs QRF'),
+        ]
+        # Add DNN/MLP BNN comparisons if available
+        for base in ['dnn', 'mlp']:
+            for suffix in ['_bnn_full', '_bnn_last', '_bnn_variational']:
+                variant = base + suffix
+                if variant in val_nds_df['model'].values:
+                    prob_pairs.append((base, variant, f'{base.upper()} vs {variant}'))
+
+        rows = []
+        for base, variant, label in prob_pairs:
+            for dataset in sorted(datasets):
+                ds_nds = val_nds_df[val_nds_df['dataset'] == dataset]
+                base_nds = ds_nds[ds_nds['model'] == base]['nds'].mean()
+                var_nds = ds_nds[ds_nds['model'] == variant]['nds'].mean()
+                if np.isfinite(base_nds) and np.isfinite(var_nds):
+                    rows.append({
+                        'Dataset': dataset,
+                        'Comparison': label,
+                        'Base NDS': base_nds,
+                        'Variant NDS': var_nds,
+                        'Δ NDS': var_nds - base_nds,
+                        'Variant Better': var_nds > base_nds,
+                    })
+
+        if rows:
+            pd.DataFrame(rows).to_csv(output_dir / 'table_validation_probabilistic.csv', index=False)
+            print("✓ Saved table_validation_probabilistic.csv")
+
+
 # =============================================================================
 # METRIC CALCULATIONS
 # =============================================================================
@@ -537,14 +792,19 @@ def calculate_kendalls_w(nds_df, rep='pdv'):
 
 
 def run_anova_decomposition(df, sigma_value=0.3):
-    """Run two-way ANOVA for model/rep effects."""
+    """Run two-way ANOVA for model/rep effects.
+
+    Filters to ANOVA-curated models and reps (see ANOVA_MODELS_EXCLUDE,
+    ANOVA_REPS_EXCLUDE). Excluded models/reps remain available for other analyses.
+    """
     df_sigma = df[np.abs(df['sigma'] - sigma_value) < 0.05].copy()
 
     if len(df_sigma) == 0:
         return None
 
     df_sigma = df_sigma[df_sigma['r2'] > -10].dropna(subset=['r2', 'model', 'rep'])
-    df_sigma = df_sigma[~df_sigma['rep'].isin(['randomized_smiles', 'random_smiles'])]
+    df_sigma = df_sigma[~df_sigma['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    df_sigma = df_sigma[~df_sigma['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
     if len(df_sigma) < 10:
         return None
@@ -587,7 +847,11 @@ def run_anova_decomposition(df, sigma_value=0.3):
 
 
 def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
-    """Run ANOVA on NDS values."""
+    """Run ANOVA on NDS values.
+
+    Filters to ANOVA-curated models and reps (see ANOVA_MODELS_EXCLUDE,
+    ANOVA_REPS_EXCLUDE). Excluded models/reps remain available for other analyses.
+    """
     nds_data = []
 
     for (model, rep, iteration), group in df.groupby(['model', 'rep', 'iteration']):
@@ -609,7 +873,8 @@ def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
         return None
 
     nds_df = pd.DataFrame(nds_data)
-    nds_df = nds_df[~nds_df['rep'].isin(['randomized_smiles', 'random_smiles'])]
+    nds_df = nds_df[~nds_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    nds_df = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
     grand_mean = nds_df['nds'].mean()
     total_ss = ((nds_df['nds'] - grand_mean) ** 2).sum()
@@ -706,7 +971,8 @@ def run_simple_effects_analysis(df, output_dir):
         # --- Performance simple effects (R² at σ=0.3) ---
         df_sigma = strategy_df[np.abs(strategy_df['sigma'] - 0.3) < 0.05].copy()
         df_sigma = df_sigma[df_sigma['r2'] > -10].dropna(subset=['r2', 'model', 'rep'])
-        df_sigma = df_sigma[~df_sigma['rep'].isin(['randomized_smiles', 'random_smiles'])]
+        df_sigma = df_sigma[~df_sigma['rep'].isin(ANOVA_REPS_EXCLUDE)]
+        df_sigma = df_sigma[~df_sigma['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
         if len(df_sigma) >= 10:
             # Simple effect of model at each representation
@@ -754,7 +1020,8 @@ def run_simple_effects_analysis(df, output_dir):
 
         if len(nds_data) >= 10:
             nds_df = pd.DataFrame(nds_data)
-            nds_df = nds_df[~nds_df['rep'].isin(['randomized_smiles', 'random_smiles'])]
+            nds_df = nds_df[~nds_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
+            nds_df = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
             # Simple effect of model at each representation
             model_at_rep = run_simple_effects(nds_df, 'nds', 'rep', 'model')
@@ -805,6 +1072,150 @@ def run_simple_effects_analysis(df, output_dir):
                 print(f"    {model}: Rep η² = {eta2:.1f}%")
     else:
         print("⚠ No simple effects data computed")
+
+
+# =============================================================================
+# SUPPLEMENTARY: ICC AND PAIRWISE REDUNDANCY TABLES
+# =============================================================================
+
+def compute_icc_and_redundancy(nds_df, output_dir):
+    """Compute ICC(1,1) for all model pairs and pairwise Spearman redundancy.
+
+    Outputs three supplementary CSVs:
+      - table_supp_model_redundancy.csv: Spearman rho between model NDS profiles
+      - table_supp_rep_redundancy.csv: Spearman rho between rep NDS profiles
+      - table_supp_icc.csv: ICC(1,1) for each model pair
+
+    These tables justify which models/reps were excluded from the ANOVA.
+    """
+    if len(nds_df) == 0:
+        print("⚠ No NDS data for ICC computation")
+        return
+
+    strategies = [s for s in ALL_STRATEGIES if s in nds_df['strategy'].unique()]
+
+    # Build NDS pivot: mean NDS per (model, rep, strategy)
+    mean_nds = nds_df.groupby(['model', 'rep', 'strategy'])['nds'].mean().reset_index()
+
+    # ── Pairwise MODEL redundancy using full (rep x strategy) vectors ──
+    models = sorted(mean_nds['model'].unique())
+    model_profiles = {}
+    for model in models:
+        mdata = mean_nds[mean_nds['model'] == model]
+        profile = {}
+        for _, row in mdata.iterrows():
+            profile[(row['rep'], row['strategy'])] = row['nds']
+        model_profiles[model] = profile
+
+    model_pairs = []
+    for i, m1 in enumerate(models):
+        for m2 in models[i+1:]:
+            shared = sorted(set(model_profiles[m1].keys()) & set(model_profiles[m2].keys()))
+            if len(shared) < 3:
+                continue
+            v1 = [model_profiles[m1][k] for k in shared]
+            v2 = [model_profiles[m2][k] for k in shared]
+            rho, p = stats.spearmanr(v1, v2)
+            model_pairs.append({
+                'model_a': m1, 'model_b': m2,
+                'n_shared_points': len(shared),
+                'spearman_rho': rho, 'p_value': p,
+                'excluded_from_anova': (
+                    'yes' if m1 in ANOVA_MODELS_EXCLUDE or m2 in ANOVA_MODELS_EXCLUDE
+                    else 'no'
+                ),
+            })
+
+    if model_pairs:
+        mp_df = pd.DataFrame(model_pairs).sort_values('spearman_rho', ascending=False)
+        mp_df.to_csv(output_dir / 'table_supp_model_redundancy.csv', index=False)
+        print(f"✓ Saved table_supp_model_redundancy.csv ({len(mp_df)} pairs)")
+
+    # ── Pairwise REP redundancy ──
+    reps = sorted(mean_nds['rep'].unique())
+    rep_profiles = {}
+    for rep in reps:
+        rdata = mean_nds[mean_nds['rep'] == rep]
+        profile = {}
+        for _, row in rdata.iterrows():
+            profile[(row['model'], row['strategy'])] = row['nds']
+        rep_profiles[rep] = profile
+
+    rep_pairs = []
+    for i, r1 in enumerate(reps):
+        for r2 in reps[i+1:]:
+            shared = sorted(set(rep_profiles[r1].keys()) & set(rep_profiles[r2].keys()))
+            if len(shared) < 3:
+                continue
+            v1 = [rep_profiles[r1][k] for k in shared]
+            v2 = [rep_profiles[r2][k] for k in shared]
+            rho, p = stats.spearmanr(v1, v2)
+            rep_pairs.append({
+                'rep_a': r1, 'rep_b': r2,
+                'n_shared_points': len(shared),
+                'spearman_rho': rho, 'p_value': p,
+                'excluded_from_anova': (
+                    'yes' if r1 in ANOVA_REPS_EXCLUDE or r2 in ANOVA_REPS_EXCLUDE
+                    else 'no'
+                ),
+            })
+
+    if rep_pairs:
+        rp_df = pd.DataFrame(rep_pairs).sort_values('spearman_rho', ascending=False)
+        rp_df.to_csv(output_dir / 'table_supp_rep_redundancy.csv', index=False)
+        print(f"✓ Saved table_supp_rep_redundancy.csv ({len(rp_df)} pairs)")
+
+    # ── ICC(1,1) per model pair ──
+    # Treats reps as "subjects", compares NDS agreement between two models
+    overall_nds = mean_nds.groupby(['model', 'rep'])['nds'].mean().reset_index()
+    icc_rows = []
+
+    for i, m1 in enumerate(models):
+        for m2 in models[i+1:]:
+            m1_data = overall_nds[overall_nds['model'] == m1][['rep', 'nds']].rename(
+                columns={'nds': 'nds_m1'})
+            m2_data = overall_nds[overall_nds['model'] == m2][['rep', 'nds']].rename(
+                columns={'nds': 'nds_m2'})
+            merged = m1_data.merge(m2_data, on='rep')
+
+            if len(merged) < 2:
+                continue
+
+            n = len(merged)
+            k = 2
+            data = merged[['nds_m1', 'nds_m2']].values
+            grand_mean = data.mean()
+            row_means = data.mean(axis=1)
+            bms = k * ((row_means - grand_mean) ** 2).sum() / (n - 1)
+            wms = ((data - row_means.reshape(-1, 1)) ** 2).sum() / (n * (k - 1))
+
+            if bms + (k - 1) * wms == 0:
+                icc = np.nan
+            else:
+                icc = (bms - wms) / (bms + (k - 1) * wms)
+
+            mad = np.mean(np.abs(merged['nds_m1'] - merged['nds_m2']))
+
+            icc_rows.append({
+                'model_a': m1, 'model_b': m2,
+                'n_shared_reps': n,
+                'icc_1_1': icc,
+                'mean_abs_nds_diff': mad,
+                'mean_nds_a': merged['nds_m1'].mean(),
+                'mean_nds_b': merged['nds_m2'].mean(),
+            })
+
+    if icc_rows:
+        icc_df = pd.DataFrame(icc_rows).sort_values('icc_1_1', ascending=False)
+        icc_df.to_csv(output_dir / 'table_supp_icc.csv', index=False)
+        print(f"✓ Saved table_supp_icc.csv ({len(icc_df)} model pairs)")
+
+        high_icc = icc_df[icc_df['icc_1_1'] > 0.9].head(10)
+        if len(high_icc) > 0:
+            print("  High ICC pairs (>0.9, candidates for ANOVA exclusion):")
+            for _, r in high_icc.iterrows():
+                print(f"    {r['model_a']} <-> {r['model_b']}: "
+                      f"ICC={r['icc_1_1']:.3f}, MAD={r['mean_abs_nds_diff']:.4f}")
 
 
 # =============================================================================
@@ -1006,13 +1417,60 @@ def create_figure1(df, nds_df, output_dir):
     plt.close()
     print("✓ Saved fig1_global_overview.png")
 
+    # --- ECFP4 variant (Issue C: compare to PDV; supplementary unless very different) ---
+    fig_e, axes_e = plt.subplots(1, 2, figsize=(12, 5))
+    ax_ea = axes_e[0]
+
+    ecfp4_data = df[(df['rep'] == 'ecfp4') & (df['strategy'] == 'legacy')]
+    for model in key_models:
+        model_data = ecfp4_data[ecfp4_data['model'] == model]
+        if len(model_data) == 0:
+            continue
+        avg = model_data.groupby('sigma')['r2'].mean().reset_index()
+        color = MODEL_COLORS.get(model, '#333333')
+        ax_ea.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model),
+                   color=color, markersize=4)
+
+    ax_ea.set_xlabel('Noise Level (σ)')
+    ax_ea.set_ylabel('R²')
+    ax_ea.set_title('A. Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
+    ax_ea.legend(loc='lower left', ncol=2)
+    ax_ea.set_ylim(-0.1, 1.0)
+    ax_ea.spines['top'].set_visible(False)
+    ax_ea.spines['right'].set_visible(False)
+
+    ax_eb = axes_e[1]
+    if len(nds_df) > 0:
+        nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4']
+        if len(nds_ecfp4) > 0:
+            pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+            col_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                         if c in pivot.columns]
+            pivot = pivot[col_order]
+            pivot.index = [get_model_label(m) for m in pivot.index]
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+                        ax=ax_eb, cbar_kws={'label': 'NDS'})
+            ax_eb.set_xlabel('Noise Strategy')
+            ax_eb.set_ylabel('Model')
+            ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
+            ax_eb.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.savefig(output_dir / 'fig1_supp_ecfp4_overview.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved fig1_supp_ecfp4_overview.png (supplementary — compare to PDV)")
+
 
 # =============================================================================
 # FIGURE 2: ANOVA DECOMPOSITION
 # =============================================================================
 
 def create_figure2(df, output_dir):
-    """Figure 2: ANOVA variance decomposition across strategies."""
+    """Figure 2: ANOVA variance decomposition.
+
+    Issue E: Gaussian is primary. Other 4 concordant strategies noted via mean rho.
+    Outlier flagged as different.
+    """
     strategies = df['strategy'].unique()
 
     perf_results = {}
@@ -1035,54 +1493,64 @@ def create_figure2(df, output_dir):
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # Panel A: Performance ANOVA
-    ax_a = axes[0]
-    strats = list(perf_results.keys())
-    x = np.arange(len(strats))
-    width = 0.25
+    # Preferred strategy order: Gaussian first, then concordant 4, then outlier
+    strat_order = ['legacy', 'valprop', 'quantile', 'threshold', 'hetero', 'outlier']
 
-    if strats:
-        model_vals = [perf_results[s]['eta2_model'] for s in strats]
-        rep_vals = [perf_results[s]['eta2_rep'] for s in strats]
-        int_vals = [perf_results[s]['eta2_interaction'] for s in strats]
+    def _plot_anova_panel(ax, results, title):
+        strats = [s for s in strat_order if s in results]
+        if not strats:
+            return
 
-        ax_a.bar(x - width, model_vals, width, label='Model', color='#3498db')
-        ax_a.bar(x, rep_vals, width, label='Representation', color='#e74c3c')
-        ax_a.bar(x + width, int_vals, width, label='Interaction', color='#2ecc71')
+        x = np.arange(len(strats))
+        width = 0.25
 
-        ax_a.axhline(72, color='#e74c3c', linestyle='--', alpha=0.5)
-        ax_a.text(len(strats)-0.5, 74, 'Rep ~72%', fontsize=7, color='#e74c3c')
+        model_vals = [results[s]['eta2_model'] for s in strats]
+        rep_vals = [results[s]['eta2_rep'] for s in strats]
+        int_vals = [results[s]['eta2_interaction'] for s in strats]
 
-        ax_a.set_ylabel('Variance Explained (η², %)')
-        ax_a.set_title('A. Performance (R² at σ=0.3)', fontweight='bold')
-        ax_a.set_xticks(x)
-        ax_a.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strats], rotation=45, ha='right')
-        ax_a.legend()
-        ax_a.set_ylim(0, 100)
+        ax.bar(x - width, model_vals, width, label='Model', color='#3498db')
+        ax.bar(x, rep_vals, width, label='Representation', color='#e74c3c')
+        ax.bar(x + width, int_vals, width, label='Interaction', color='#2ecc71')
 
-    # Panel B: Robustness ANOVA
-    ax_b = axes[1]
-    strats_r = list(robust_results.keys())
-    x_r = np.arange(len(strats_r))
+        # Highlight Gaussian as primary
+        ax.axvspan(-0.5, 0.5, alpha=0.08, color='#0072B2')
 
-    if strats_r:
-        model_vals = [robust_results[s]['eta2_model'] for s in strats_r]
-        rep_vals = [robust_results[s]['eta2_rep'] for s in strats_r]
-        int_vals = [robust_results[s]['eta2_interaction'] for s in strats_r]
+        # Mark outlier if present
+        if 'outlier' in strats:
+            outlier_idx = strats.index('outlier')
+            ax.axvspan(outlier_idx - 0.5, outlier_idx + 0.5, alpha=0.08, color='#F0E442')
 
-        ax_b.bar(x_r - width, model_vals, width, label='Model', color='#3498db')
-        ax_b.bar(x_r, rep_vals, width, label='Representation', color='#e74c3c')
-        ax_b.bar(x_r + width, int_vals, width, label='Interaction', color='#2ecc71')
+        # Compute cross-strategy concordance (rho between η² vectors, excluding outlier)
+        concordant = [s for s in strats if s != 'outlier']
+        if len(concordant) >= 3 and 'legacy' in concordant:
+            legacy_vec = [results['legacy']['eta2_model'], results['legacy']['eta2_rep'],
+                          results['legacy']['eta2_interaction']]
+            rhos = []
+            for s in concordant:
+                if s == 'legacy':
+                    continue
+                other_vec = [results[s]['eta2_model'], results[s]['eta2_rep'],
+                             results[s]['eta2_interaction']]
+                rho, _ = stats.spearmanr(legacy_vec, other_vec)
+                rhos.append(rho)
+            if rhos:
+                mean_rho = np.mean(rhos)
+                ax.text(0.98, 0.97,
+                        f'Concordant strategies ρ = {mean_rho:.2f}\nOutlier strategy differs',
+                        transform=ax.transAxes, ha='right', va='top', fontsize=7,
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
-        ax_b.axhline(67, color='#3498db', linestyle='--', alpha=0.5)
-        ax_b.text(len(strats_r)-0.5, 69, 'Model ~67%', fontsize=7, color='#3498db')
+        ax.set_ylabel('Variance Explained (η², %)')
+        ax.set_title(title, fontweight='bold')
+        ax.set_xticks(x)
+        labels = [STRATEGY_LABELS.get(s, s) for s in strats]
+        labels[0] = labels[0] + ' *'  # Mark Gaussian as primary
+        ax.set_xticklabels(labels, rotation=45, ha='right')
+        ax.legend()
+        ax.set_ylim(0, 100)
 
-        ax_b.set_ylabel('Variance Explained (η², %)')
-        ax_b.set_title('B. Robustness (NDS)', fontweight='bold')
-        ax_b.set_xticks(x_r)
-        ax_b.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strats_r], rotation=45, ha='right')
-        ax_b.legend()
-        ax_b.set_ylim(0, 100)
+    _plot_anova_panel(axes[0], perf_results, 'A. Performance (R² at σ=0.3)')
+    _plot_anova_panel(axes[1], robust_results, 'B. Robustness (NDS)')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -1105,8 +1573,20 @@ def create_figure2(df, output_dir):
             row['Robust_Rep_η²'] = robust_results[s]['eta2_rep']
         rows.append(row)
 
-    pd.DataFrame(rows).to_csv(output_dir / 'table1_anova_summary.csv', index=False)
+    anova_table = pd.DataFrame(rows)
+    anova_table.to_csv(output_dir / 'table1_anova_summary.csv', index=False)
     print("✓ Saved table1_anova_summary.csv")
+
+    # Log ANOVA design decisions
+    print(f"\n  ANOVA design:")
+    print(f"    Models excluded: {sorted(ANOVA_MODELS_EXCLUDE)}")
+    print(f"    Reps excluded: {sorted(ANOVA_REPS_EXCLUDE)}")
+    # Report what's actually in the ANOVA
+    all_models_in = sorted(set(df['model'].unique()) - ANOVA_MODELS_EXCLUDE
+                           - {'graph_gp', 'gcn', 'gin', 'ginct', 'gin2d'})
+    all_reps_in = sorted(set(df['rep'].unique()) - ANOVA_REPS_EXCLUDE)
+    print(f"    Models in ANOVA: {all_models_in}")
+    print(f"    Reps in ANOVA: {all_reps_in}")
 
     # Simple effects analysis (recommended when interaction η² > 30%)
     run_simple_effects_analysis(df, output_dir)
@@ -1208,6 +1688,51 @@ def create_figure3(nds_df, validation_df, output_dir):
     plt.savefig(output_dir / 'fig3_ranking_consistency.png', dpi=300, bbox_inches='tight')
     plt.close()
     print("✓ Saved fig3_ranking_consistency.png")
+
+    # --- ECFP4 variant (Issue C) ---
+    nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4'] if 'rep' in nds_df.columns else nds_df
+    if len(nds_ecfp4) > 0:
+        fig_e, axes_e = plt.subplots(1, 2, figsize=(10, 5))
+
+        # Bump chart across strategies
+        ax_ea = axes_e[0]
+        pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        if len(pivot) > 0:
+            rankings = pivot.rank(ascending=False)
+            strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                          if c in rankings.columns]
+            for model in rankings.index:
+                ranks = [rankings.loc[model, s] for s in strat_list]
+                color = MODEL_COLORS.get(model, '#333333')
+                ax_ea.plot(range(len(strat_list)), ranks, 'o-', label=get_model_label(model),
+                           color=color, markersize=4)
+            ax_ea.set_xticks(range(len(strat_list)))
+            ax_ea.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strat_list], rotation=45, ha='right')
+            ax_ea.set_ylabel('Rank (1 = most robust)')
+            ax_ea.set_title('A. Rankings Across Strategies (ECFP4)', fontweight='bold')
+            ax_ea.invert_yaxis()
+
+        # Baseline vs NDS scatter
+        ax_eb = axes_e[1]
+        nds_ecfp4_leg = nds_ecfp4[nds_ecfp4['strategy'] == 'legacy'] if 'strategy' in nds_ecfp4.columns else nds_ecfp4
+        for model in nds_ecfp4_leg['model'].unique():
+            md = nds_ecfp4_leg[nds_ecfp4_leg['model'] == model]
+            color = MODEL_COLORS.get(model, '#333333')
+            ax_eb.scatter(md['baseline_r2'], md['nds'], label=get_model_label(model),
+                          color=color, alpha=0.7, s=50)
+        ax_eb.set_xlabel('Baseline R² (σ=0)')
+        ax_eb.set_ylabel('NDS (slope)')
+        ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
+        ax_eb.axhline(0, color='black', linewidth=0.5)
+
+        for ax in axes_e:
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+        plt.tight_layout()
+        plt.savefig(output_dir / 'fig3_supp_ecfp4_ranking.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("✓ Saved fig3_supp_ecfp4_ranking.png (supplementary)")
 
 
 # =============================================================================
@@ -1858,6 +2383,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         if len(nds_pdv) > 0:
             pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
             pivot['MEAN'] = pivot.mean(axis=1)
+            pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
             pivot = pivot.sort_values('MEAN', ascending=False)
             pivot.rename(columns=STRATEGY_LABELS, inplace=True)
             pivot.to_csv(output_dir / 'table2_nds_by_strategy_pdv.csv')
@@ -1866,6 +2392,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         # Also save full table with all reps for supplementary
         pivot_all = nds_df.pivot_table(values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
         pivot_all['MEAN'] = pivot_all.mean(axis=1)
+        pivot_all['STD'] = pivot_all.drop(columns=['MEAN']).std(axis=1)
         pivot_all = pivot_all.sort_values('MEAN', ascending=False)
         pivot_all.rename(columns=STRATEGY_LABELS, inplace=True)
         pivot_all.to_csv(output_dir / 'table2_supp_nds_all_reps.csv')
@@ -2120,6 +2647,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             tree_models = ['rf', 'xgboost', 'qrf', 'ngboost', 'lgb',
                            'conformal_rf_split', 'conformal_qrf_split']
             nn_models = ['dnn', 'mlp', 'flexible_dnn',
+                         'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
                          'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational',
                          'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational',
                          'conformal_dnn_split']
@@ -2142,6 +2670,195 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                         if len(vals) > 0:
                             print(f"  {family} {strat}/Gaussian ratio: "
                                   f"mean={vals.mean():.3f} (range {vals.min():.3f}-{vals.max():.3f})")
+
+
+# =============================================================================
+# INTERACTION FIGURE (Issue D)
+# =============================================================================
+
+def create_interaction_figure(nds_df, output_dir):
+    """Visualize the model x representation interaction effect.
+
+    Panel A: Bump chart — model ranks across representations (Gaussian strategy).
+    Panel B: Scatter — NDS on ECFP4 vs NDS on PDV per model (shows rho ~ 0.15).
+
+    This figure demonstrates that model rankings change across representations
+    (disordinal interaction), and that PDV produces fundamentally different
+    rankings from fingerprint-based representations.
+    """
+    if len(nds_df) == 0:
+        print("⚠ Could not create interaction figure - no NDS data")
+        return
+
+    nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # Panel A: Bump chart — model ranks across representations
+    ax_a = axes[0]
+
+    # Get mean NDS per model x rep (Gaussian strategy)
+    pivot = nds_legacy.pivot_table(values='nds', index='model', columns='rep', aggfunc='mean')
+
+    # Only include reps with enough models
+    valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
+    # Order reps sensibly
+    rep_order = [r for r in ['ecfp4', 'mhggnn', 'smiles', 'pdv'] if r in valid_reps]
+    rep_order += [r for r in valid_reps if r not in rep_order]
+
+    if len(rep_order) >= 2:
+        rankings = pivot[rep_order].rank(ascending=False)  # Higher NDS = rank 1 (most robust)
+
+        for model in rankings.index:
+            ranks = [rankings.loc[model, r] if pd.notna(rankings.loc[model, r]) else np.nan
+                     for r in rep_order]
+            if all(np.isnan(r) for r in ranks):
+                continue
+            color = MODEL_COLORS.get(model, '#333333')
+            valid_idx = [i for i, r in enumerate(ranks) if not np.isnan(r)]
+            valid_ranks = [ranks[i] for i in valid_idx]
+            ax_a.plot(valid_idx, valid_ranks, 'o-', label=get_model_label(model),
+                      color=color, markersize=5, alpha=0.8)
+
+        ax_a.set_xticks(range(len(rep_order)))
+        ax_a.set_xticklabels(rep_order, rotation=45, ha='right')
+        ax_a.set_ylabel('Rank (1 = most robust)')
+        ax_a.set_title('A. Model Rankings Across Representations (Gaussian)', fontweight='bold')
+        ax_a.invert_yaxis()
+        ax_a.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=6)
+
+    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV
+    ax_b = axes[1]
+
+    ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['nds'].mean()
+    pdv_nds = nds_legacy[nds_legacy['rep'] == 'pdv'].groupby('model')['nds'].mean()
+
+    shared_models = sorted(set(ecfp4_nds.index) & set(pdv_nds.index))
+
+    if len(shared_models) >= 3:
+        e_vals = [ecfp4_nds[m] for m in shared_models]
+        p_vals = [pdv_nds[m] for m in shared_models]
+
+        for m, ev, pv in zip(shared_models, e_vals, p_vals):
+            color = MODEL_COLORS.get(m, '#333333')
+            ax_b.scatter(ev, pv, color=color, s=60, zorder=3)
+            ax_b.annotate(get_model_label(m), (ev, pv), fontsize=6,
+                          xytext=(4, 4), textcoords='offset points')
+
+        # Compute and annotate rho
+        rho, p = stats.spearmanr(e_vals, p_vals)
+        ax_b.text(0.05, 0.95, f'Spearman ρ = {rho:.2f} (p = {p:.3f})',
+                  transform=ax_b.transAxes, fontsize=8, va='top',
+                  bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+
+        # Identity line
+        all_vals = e_vals + p_vals
+        lim = [min(all_vals) - 0.02, max(all_vals) + 0.02]
+        ax_b.plot(lim, lim, '--', color='gray', alpha=0.5, linewidth=0.8)
+
+    ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
+    ax_b.set_ylabel('NDS on PDV (Gaussian)')
+    ax_b.set_title('B. Representation Changes Model Rankings', fontweight='bold')
+
+    for ax in axes:
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(output_dir / 'fig_interaction.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved fig_interaction.png")
+
+
+# =============================================================================
+# FULL EXPERIMENT OVERVIEW (all configs, including non-ANOVA)
+# =============================================================================
+
+def create_full_overview(nds_df, output_dir):
+    """Scatter plot of ALL model x rep configurations for select strategies.
+
+    Shows the complete experimental landscape, including configurations that
+    were excluded from the ANOVA (conformal, qrf, sns, etc.).
+    Each point is one model x rep configuration; color = model, shape = rep.
+    """
+    if len(nds_df) == 0:
+        print("⚠ Could not create full overview - no NDS data")
+        return
+
+    # Select strategies: Gaussian (primary) + outlier (most different)
+    strategies_to_show = ['legacy', 'outlier']
+    strategies_available = [s for s in strategies_to_show if s in nds_df['strategy'].unique()]
+
+    if not strategies_available:
+        strategies_available = nds_df['strategy'].unique()[:2]
+
+    n_panels = len(strategies_available)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
+    if n_panels == 1:
+        axes = [axes]
+
+    # Rep markers
+    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^', 'sns': 'D',
+                   'mhggnn': 'v', 'randomized_smiles': 'P', 'mol2vec': '*',
+                   'chemberta': 'X'}
+
+    for idx, strategy in enumerate(strategies_available):
+        ax = axes[idx]
+        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+
+        strat_data = nds_df[nds_df['strategy'] == strategy]
+        mean_nds = strat_data.groupby(['model', 'rep']).agg(
+            nds_mean=('nds', 'mean'),
+            baseline_r2=('baseline_r2', 'mean')
+        ).reset_index()
+
+        for _, row in mean_nds.iterrows():
+            color = MODEL_COLORS.get(row['model'], '#333333')
+            marker = rep_markers.get(row['rep'], 'o')
+            in_anova = (row['model'] not in ANOVA_MODELS_EXCLUDE and
+                        row['rep'] not in ANOVA_REPS_EXCLUDE)
+            alpha = 0.9 if in_anova else 0.35
+            edgecolor = 'black' if in_anova else 'gray'
+
+            ax.scatter(row['baseline_r2'], row['nds_mean'],
+                       color=color, marker=marker, s=50, alpha=alpha,
+                       edgecolors=edgecolor, linewidths=0.5)
+
+        ax.set_xlabel('Baseline R² (σ=0)')
+        ax.set_ylabel('NDS')
+        ax.set_title(f'{strategy_label} Strategy — All Configurations', fontweight='bold')
+        ax.axhline(0, color='black', linewidth=0.5)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        # Add text: opaque = in ANOVA, faded = excluded
+        ax.text(0.02, 0.02, 'Opaque = in ANOVA, faded = excluded from ANOVA',
+                transform=ax.transAxes, fontsize=6, va='bottom',
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+
+    # Create legend for reps (markers)
+    from matplotlib.lines import Line2D
+    rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
+                          linestyle='None', markersize=6, label=r)
+                   for r in sorted(mean_nds['rep'].unique()) if r in rep_markers]
+    axes[-1].legend(handles=rep_handles, loc='lower right', fontsize=6, title='Rep', title_fontsize=7)
+
+    plt.tight_layout()
+    plt.savefig(output_dir / 'fig_full_overview.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Saved fig_full_overview.png")
+
+    # Also save the underlying data as a table
+    all_configs = nds_df.groupby(['model', 'rep', 'strategy']).agg(
+        nds_mean=('nds', 'mean'),
+        nds_std=('nds', 'std'),
+        baseline_r2=('baseline_r2', 'mean'),
+        n_iterations=('nds', 'count')
+    ).reset_index()
+    all_configs['in_anova'] = (~all_configs['model'].isin(ANOVA_MODELS_EXCLUDE) &
+                                ~all_configs['rep'].isin(ANOVA_REPS_EXCLUDE))
+    all_configs.to_csv(output_dir / 'table_all_configurations.csv', index=False)
+    print(f"✓ Saved table_all_configurations.csv ({len(all_configs)} rows)")
 
 
 # =============================================================================
@@ -2270,10 +2987,18 @@ def main():
     print("\n--- METHODS FIGURE ---")
     create_methods_figure(output_dir)
 
+    # Process validation data into NDS format
+    val_nds_df = calculate_validation_nds(validation_df)
+    if val_nds_df is not None:
+        print(f"  Validation NDS: {len(val_nds_df)} configs across "
+              f"{val_nds_df['dataset'].nunique() if 'dataset' in val_nds_df.columns else 1} datasets")
+
     print("\n--- PART 1: THE WHAT ---")
     create_figure1(qm9_df, nds_df, output_dir)
     create_figure2(qm9_df, output_dir)
     create_figure3(nds_df, validation_df, output_dir)
+    create_interaction_figure(nds_df, output_dir)
+    create_full_overview(nds_df, output_dir)
 
     print("\n--- PART 2: THE WHY ---")
     create_figure4(qm9_df, nds_df, output_dir)
@@ -2283,6 +3008,12 @@ def main():
 
     print("\n--- TABLES ---")
     create_tables(nds_df, unc_df, qm9_df, output_dir)
+
+    print("\n--- VALIDATION (GENERALISATION) ---")
+    create_validation_figures(validation_df, val_nds_df, output_dir)
+
+    print("\n--- SUPPLEMENTARY: ICC & REDUNDANCY ---")
+    compute_icc_and_redundancy(nds_df, output_dir)
 
     print("\n--- REPORT ---")
     generate_report(nds_df, excluded_df, output_dir)

@@ -2162,16 +2162,22 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     else:
         model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
     
-    model_name = "flexible_dnn"
+    # Encode architecture in model name when custom hidden sizes provided
+    arch_str = "_".join(str(h) for h in params['hidden_sizes'])
+    if params['hidden_sizes'] == [128, 64]:
+        model_name = "flexible_dnn"
+    else:
+        model_name = f"flexible_dnn_{arch_str}"
+
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
-        model_name = "flexible_bnn_full"
+        model_name = model_name.replace("flexible_dnn", "flexible_bnn_full")
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
-        model_name = "flexible_bnn_last"
+        model_name = model_name.replace("flexible_dnn", "flexible_bnn_last")
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
-        model_name = "flexible_bnn_variational"
+        model_name = model_name.replace("flexible_dnn", "flexible_bnn_variational")
     
     from loss_functions import get_loss_function
     criterion = get_loss_function(loss_name, **loss_kwargs)
