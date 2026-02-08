@@ -1941,6 +1941,119 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     return metrics[3]
 
+def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val, 
+                               args, s, rep, iteration, iteration_seed, file_no, 
+                               y_test_original):
+    """
+    Standalone BNN-Last training that matches phase2_train.py exactly
+    """
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset, DataLoader
+    import torchbnn as bnn
+    import numpy as np
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Create model directly (not transform)
+    model = nn.Sequential(
+        nn.Linear(x_train.shape[1], 128),
+        nn.ReLU(),
+        nn.Dropout(0.2),
+        nn.Linear(128, 64),
+        nn.ReLU(),
+        nn.Dropout(0.2),
+        bnn.BayesLinear(in_features=64, out_features=1, prior_mu=0, prior_sigma=0.1)
+    ).to(device)
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+    
+    # Tensors - Y is shape (N,) not (N, 1)
+    X_tr_t = torch.FloatTensor(x_train).to(device)
+    y_tr_t = torch.FloatTensor(y_train).to(device)
+    X_val_t = torch.FloatTensor(x_val).to(device)
+    y_val_t = torch.FloatTensor(y_val).to(device)
+    X_test_t = torch.FloatTensor(x_test).to(device)
+    
+    train_loader = DataLoader(TensorDataset(X_tr_t, y_tr_t), batch_size=32, shuffle=True)
+    
+    # Training with early stopping
+    best_val_loss = float('inf')
+    patience = 10
+    patience_counter = 0
+    
+    for epoch in range(100):
+        model.train()
+        for batch_X, batch_y in train_loader:
+            optimizer.zero_grad()
+            pred = model(batch_X)
+            if pred.dim() > 1:
+                pred = pred.squeeze()
+            loss = criterion(pred, batch_y)
+            loss.backward()
+            optimizer.step()
+        
+        # Single-pass validation
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(X_val_t)
+            if val_pred.dim() > 1:
+                val_pred = val_pred.squeeze()
+            val_loss = criterion(val_pred, y_val_t).item()
+        
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch}, Val Loss: {val_loss:.4f}")
+        
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+    
+    # BNN prediction with MC sampling
+    model.eval()
+    n_samples = 100
+    predictions = []
+    
+    with torch.no_grad():
+        for _ in range(n_samples):
+            pred = model(X_test_t)
+            if pred.dim() > 1:
+                pred = pred.squeeze()
+            predictions.append(pred.cpu().numpy())
+    
+    predictions = np.array(predictions)
+    y_pred = predictions.mean(axis=0)
+    y_pred_std = predictions.std(axis=0)
+    
+    # Use your existing metrics function
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+    
+    save_results(args.filepath, s, iteration, 'mlp_bnn_last', rep, args.sample_size, 
+                 metrics, 'default', 'mse')
+    
+    if args.uncertainty:
+        save_uncertainty_values(
+            y_pred_mean=y_pred,
+            y_pred_std=y_pred_std,
+            y_true_original=y_test_original,
+            y_true_noisy=y_test,
+            filepath=args.filepath,
+            model_name='mlp_bnn_last',
+            rep=rep,
+            sigma_noise=s,
+            iteration=iteration,
+            file_no=file_no,
+            y_pred_std_calibrated=y_pred_std,
+            temperature=1.0
+        )
+    
+    return metrics[3]
+
 def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
                             domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
     params = {}

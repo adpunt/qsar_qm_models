@@ -113,14 +113,15 @@ plt.rcParams.update({
     'lines.linewidth': 1.5,
 })
 
-# Color palettes
+# Color palettes - Colorblind-friendly (Okabe-Ito + Wong palette)
+# Avoids red-green confusion, uses blue-orange contrast
 STRATEGY_COLORS = {
-    'legacy': '#3498db',
-    'valprop': '#e74c3c',
-    'quantile': '#2ecc71',
-    'threshold': '#9b59b6',
-    'outlier': '#f39c12',
-    'hetero': '#1abc9c',
+    'legacy': '#0072B2',       # Blue
+    'valprop': '#E69F00',      # Orange
+    'quantile': '#56B4E9',     # Sky blue
+    'threshold': '#CC79A7',    # Pink/magenta
+    'outlier': '#F0E442',      # Yellow
+    'hetero': '#009E73',       # Teal/bluish-green
 }
 
 STRATEGY_LABELS = {
@@ -133,23 +134,72 @@ STRATEGY_LABELS = {
 }
 
 MODEL_COLORS = {
-    # Deterministic
-    'rf': '#27ae60',
-    'xgboost': '#f39c12',
-    'dnn': '#3498db',
-    'mlp': '#9b59b6',
-    # Probabilistic
-    'qrf': '#16a085',
-    'ngboost': '#e67e22',
-    'gauche': '#8e44ad',
-    # BNN variants
-    'dnn_bnn_full': '#e74c3c',
-    'dnn_bnn_last': '#c0392b',
-    'dnn_bnn_variational': '#a93226',
-    'mlp_bnn_full': '#2980b9',
-    'mlp_bnn_last': '#1f618d',
-    'mlp_bnn_variational': '#154360',
+    # Colorblind-friendly palette (Okabe-Ito)
+    # Deterministic - cooler tones
+    'rf': '#0072B2',           # Blue
+    'xgboost': '#E69F00',      # Orange
+    'dnn': '#56B4E9',          # Sky blue
+    'mlp': '#CC79A7',          # Pink/magenta
+    'svm': '#999999',          # Gray
+    'lgb': '#D55E00',          # Vermillion
+    # Probabilistic - warmer/distinct tones
+    'qrf': '#009E73',          # Teal
+    'ngboost': '#F0E442',      # Yellow
+    'gauche': '#0072B2',       # Blue (GP variant)
+    # BNN variants - gradient of blues/teals
+    'dnn_bnn_full': '#332288',     # Dark purple
+    'dnn_bnn_last': '#6699CC',     # Light blue
+    'dnn_bnn_variational': '#88CCEE',  # Cyan
+    'mlp_bnn_full': '#882255',     # Wine
+    'mlp_bnn_last': '#AA4499',     # Magenta
+    'mlp_bnn_variational': '#CC6677',  # Rose
+    # Conformal
+    'conformal_rf': '#44AA99',     # Teal
+    'conformal_qrf': '#117733',    # Dark green
+    'conformal_dnn': '#DDCC77',    # Sand
 }
+
+MODEL_LABELS = {
+    # Deterministic
+    'rf': 'RF',
+    'xgboost': 'XGBoost',
+    'dnn': 'DNN',
+    'mlp': 'MLP',
+    'lgb': 'LightGBM',
+    'svm': 'SVM',
+    # Probabilistic
+    'qrf': 'QRF',
+    'ngboost': 'NGBoost',
+    'gauche': 'GP (Gauche)',
+    # BNN variants
+    'dnn_bnn_full': 'DNN-BNN (Full)',
+    'dnn_bnn_last': 'DNN-BNN (Last)',
+    'dnn_bnn_variational': 'DNN-BNN (Var)',
+    'mlp_bnn_full': 'MLP-BNN (Full)',
+    'mlp_bnn_last': 'MLP-BNN (Last)',
+    'mlp_bnn_variational': 'MLP-BNN (Var)',
+    # Conformal
+    'conformal_rf': 'CP-RF',
+    'conformal_qrf': 'CP-QRF',
+    'conformal_dnn': 'CP-DNN',
+}
+
+REP_LABELS = {
+    'pdv': 'PDV',
+    'ecfp4': 'ECFP4',
+    'sns': 'SNS',
+    'smiles': 'SMILES',
+    'randomized_smiles': 'R-SMILES',
+    'mhggnn': 'MHG-GNN',
+}
+
+def get_model_label(model):
+    """Get clean display label for model."""
+    return MODEL_LABELS.get(model, model.upper())
+
+def get_rep_label(rep):
+    """Get clean display label for representation."""
+    return REP_LABELS.get(rep, rep.upper())
 
 DATASET_MARKERS = {
     'QM9': 'o',
@@ -158,9 +208,7 @@ DATASET_MARKERS = {
     'hERG-Ki': 'D',
 }
 
-# NOTE: Paper Results section and Table 3 use threshold 0.6, but this is 0.5.
-# Reconcile after seeing results - either change this to 0.6 or update paper.
-BASELINE_THRESHOLD = 0.5
+BASELINE_THRESHOLD = 0.6
 
 # =============================================================================
 # DATA LOADING
@@ -250,7 +298,13 @@ def load_validation_data(validation_dir):
 # =============================================================================
 
 def calculate_nds(df, baseline_threshold=BASELINE_THRESHOLD):
-    """Calculate NDS for each model-rep-strategy combination."""
+    """Calculate NDS for each model-rep-strategy combination.
+
+    Returns:
+        nds_df: DataFrame of NDS results for configs above threshold
+        excluded_df: DataFrame of all excluded configs (baseline < threshold)
+            Includes 'marginal' column (True if baseline in [0.5, threshold))
+    """
     nds_results = []
     excluded = []
 
@@ -267,24 +321,31 @@ def calculate_nds(df, baseline_threshold=BASELINE_THRESHOLD):
             continue
         baseline = baseline[0]
 
-        if baseline < baseline_threshold:
-            excluded.append({'model': model, 'rep': rep, 'strategy': strategy, 'baseline': baseline})
-            continue
-
+        # Calculate NDS regardless (needed for marginal reporting)
         try:
             slope, intercept, r_val, p_val, std_err = stats.linregress(
                 avg_group['sigma'], avg_group['r2']
             )
-            nds_results.append({
-                'model': model,
-                'rep': rep,
-                'strategy': strategy,
-                'nds': slope,
-                'baseline_r2': baseline,
-                'r2_fit': r_val**2,
-            })
         except:
             continue
+
+        if baseline < baseline_threshold:
+            excluded.append({
+                'model': model, 'rep': rep, 'strategy': strategy,
+                'baseline': baseline,
+                'nds': slope,
+                'marginal': baseline >= 0.5,
+            })
+            continue
+
+        nds_results.append({
+            'model': model,
+            'rep': rep,
+            'strategy': strategy,
+            'nds': slope,
+            'baseline_r2': baseline,
+            'r2_fit': r_val**2,
+        })
 
     return pd.DataFrame(nds_results), pd.DataFrame(excluded)
 
@@ -540,6 +601,139 @@ def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
 
 
 # =============================================================================
+# METHODS FIGURE: NOISE STRATEGY DISTRIBUTIONS
+# =============================================================================
+
+def create_methods_figure(output_dir):
+    """
+    Methods Figure: Visualization of how each noise strategy transforms labels.
+
+    This figure belongs in the Methods section to help readers understand
+    what each noise injection strategy does before seeing results.
+    """
+    from scipy import stats as sp_stats
+
+    np.random.seed(42)
+
+    # Generate synthetic data resembling a molecular property distribution
+    n_samples = 2000
+    y_clean = np.concatenate([
+        np.random.normal(-0.5, 0.3, n_samples // 3),
+        np.random.normal(0.2, 0.4, n_samples // 3),
+        np.random.normal(0.8, 0.25, n_samples // 3 + n_samples % 3),
+    ])
+
+    def apply_noise(y, sigma, strategy):
+        """Apply noise strategy to labels."""
+        n = len(y)
+
+        if strategy == 'legacy':
+            noise = np.random.normal(0, sigma, n)
+        elif strategy == 'valprop':
+            noise = np.random.normal(0, 1, n) * (sigma + 0.1 * np.abs(y))
+        elif strategy == 'quantile':
+            quantiles = sp_stats.rankdata(y) / len(y)
+            multipliers = np.where((quantiles < 0.1) | (quantiles > 0.9), 2.0, 0.1)
+            noise = np.random.normal(0, sigma, n) * multipliers
+        elif strategy == 'threshold':
+            median = np.median(y)
+            multipliers = np.where(y > median, 2.0, 0.1)
+            noise = np.random.normal(0, sigma, n) * multipliers
+        elif strategy == 'outlier':
+            z_scores = np.abs(sp_stats.zscore(y))
+            multipliers = np.where(z_scores > 2.0, 3.0, 0.1)
+            noise = np.random.normal(0, sigma, n) * multipliers
+        elif strategy == 'hetero':
+            alpha, beta = 0.1, 0.05
+            variance = alpha * sigma**2 + beta * sigma**2 * np.abs(y)
+            noise = np.random.normal(0, np.sqrt(variance))
+        else:
+            noise = np.zeros(n)
+
+        return y + noise
+
+    strategies = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+    sigma = 0.5  # Representative noise level
+
+    # Create 2x3 figure
+    fig, axes = plt.subplots(2, 3, figsize=(10, 6))
+    axes = axes.flatten()
+
+    for i, strategy in enumerate(strategies):
+        ax = axes[i]
+        y_noisy = apply_noise(y_clean, sigma, strategy)
+
+        ax.hist(y_clean, bins=50, alpha=0.4, color='#666666', label='Clean', density=True)
+        ax.hist(y_noisy, bins=50, alpha=0.6, color=STRATEGY_COLORS[strategy],
+                label=f'Noisy (σ={sigma})', density=True)
+
+        ax.set_title(STRATEGY_LABELS[strategy], fontsize=10, fontweight='bold',
+                     color=STRATEGY_COLORS[strategy])
+        ax.set_yticks([])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+
+        rmse = np.sqrt(np.mean((y_noisy - y_clean)**2))
+        ax.text(0.95, 0.95, f'RMSE={rmse:.2f}', transform=ax.transAxes,
+                ha='right', va='top', fontsize=8)
+
+        if i == 0:
+            ax.legend(loc='upper left', fontsize=7)
+
+    fig.suptitle('Noise Strategy Comparison (σ = 0.5)', fontsize=12, fontweight='bold')
+    plt.tight_layout()
+
+    plt.savefig(output_dir / 'fig_methods_noise_strategies.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print("✓ Saved fig_methods_noise_strategies.png")
+
+    # Also create a more detailed version showing sigma progression
+    fig2 = plt.figure(figsize=(12, 10))
+    gs = gridspec.GridSpec(6, 4, hspace=0.4, wspace=0.3)
+    sigmas = [0.0, 0.3, 0.6, 1.0]
+
+    for i, strategy in enumerate(strategies):
+        for j, sig in enumerate(sigmas):
+            ax = fig2.add_subplot(gs[i, j])
+
+            if sig == 0.0:
+                y_noisy = y_clean.copy()
+            else:
+                y_noisy = apply_noise(y_clean, sig, strategy)
+
+            ax.hist(y_clean, bins=50, alpha=0.4, color='#666666', density=True)
+            if sig > 0:
+                ax.hist(y_noisy, bins=50, alpha=0.6, color=STRATEGY_COLORS[strategy], density=True)
+
+            if j == 0:
+                ax.set_ylabel(STRATEGY_LABELS[strategy], fontsize=9, fontweight='bold')
+            if i == 0:
+                ax.set_title(f'σ = {sig}', fontsize=10)
+            if i == 5:
+                ax.set_xlabel('Normalized Value')
+
+            ax.set_yticks([])
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+
+            if sig > 0:
+                rmse = np.sqrt(np.mean((y_noisy - y_clean)**2))
+                ax.text(0.95, 0.95, f'RMSE={rmse:.2f}', transform=ax.transAxes,
+                        ha='right', va='top', fontsize=7, color='gray')
+
+    fig2.suptitle('Effect of Noise Injection Strategies on Label Distribution',
+                  fontsize=12, fontweight='bold', y=0.98)
+    fig2.text(0.5, 0.02, 'Gray = Clean labels | Colored = After noise injection',
+              ha='center', fontsize=9, style='italic')
+
+    plt.savefig(output_dir / 'fig_methods_noise_strategies_detailed.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print("✓ Saved fig_methods_noise_strategies_detailed.png")
+
+
+# =============================================================================
 # FIGURE 1: GLOBAL OVERVIEW
 # =============================================================================
 
@@ -561,7 +755,7 @@ def create_figure1(df, nds_df, output_dir):
 
         avg = model_data.groupby('sigma')['r2'].mean().reset_index()
         color = MODEL_COLORS.get(model, '#333333')
-        ax_a.plot(avg['sigma'], avg['r2'], 'o-', label=model.upper(),
+        ax_a.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model),
                   color=color, markersize=4)
 
     ax_a.set_xlabel('Noise Level (σ)')
@@ -589,7 +783,11 @@ def create_figure1(df, nds_df, output_dir):
                      if c in pivot.columns]
         pivot = pivot[col_order]
 
-        sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdYlGn', center=0,
+        # Rename index to clean model labels
+        pivot.index = [get_model_label(m) for m in pivot.index]
+
+        # Use colorblind-friendly diverging colormap (blue-white-orange)
+        sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
                     ax=ax_b, cbar_kws={'label': 'NDS'})
         ax_b.set_xlabel('Noise Strategy')
         ax_b.set_ylabel('Model')
@@ -732,7 +930,7 @@ def create_figure3(nds_df, validation_df, output_dir):
             for model in rankings.index:
                 ranks = [rankings.loc[model, s] for s in strategies if s in rankings.columns]
                 color = MODEL_COLORS.get(model, '#333333')
-                ax_a.plot(range(len(strategies)), ranks, 'o-', label=model, color=color, markersize=4)
+                ax_a.plot(range(len(strategies)), ranks, 'o-', label=get_model_label(model), color=color, markersize=4)
 
             ax_a.set_xticks(range(len(strategies)))
             ax_a.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strategies], rotation=45, ha='right')
@@ -750,7 +948,7 @@ def create_figure3(nds_df, validation_df, output_dir):
         model_data = nds_pdv_legacy[nds_pdv_legacy['model'] == model]
         color = MODEL_COLORS.get(model, '#333333')
         ax_b.scatter(model_data['baseline_r2'], model_data['nds'],
-                     label=model, color=color, alpha=0.7, s=50)
+                     label=get_model_label(model), color=color, alpha=0.7, s=50)
 
     ax_b.set_xlabel('Baseline R² (σ=0)')
     ax_b.set_ylabel('NDS (slope)')
@@ -781,7 +979,7 @@ def create_figure3(nds_df, validation_df, output_dir):
 
             if not all(np.isnan(nds_vals)):
                 color = MODEL_COLORS.get(model.lower(), '#333333')
-                ax_c.plot(range(len(datasets)), nds_vals, 'o-', label=model,
+                ax_c.plot(range(len(datasets)), nds_vals, 'o-', label=get_model_label(model),
                           color=color, markersize=6)
 
         ax_c.set_xticks(range(len(datasets)))
@@ -834,8 +1032,7 @@ def create_figure4(df, nds_df, output_dir):
 
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
             color = MODEL_COLORS.get(model, '#333333')
-            label = model.replace('_', '-').upper()
-            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=label, color=color, markersize=4)
+            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
 
         ax_line.set_xlabel('Noise Level (σ)')
         ax_line.set_ylabel('R²')
@@ -859,7 +1056,7 @@ def create_figure4(df, nds_df, output_dir):
 
             ax_bar.bar(x, mean_nds.values, color=colors)
             ax_bar.set_xticks(x)
-            ax_bar.set_xticklabels([m.replace('_', '-').upper() for m in dnn_variants], rotation=45, ha='right')
+            ax_bar.set_xticklabels([get_model_label(m) for m in dnn_variants], rotation=45, ha='right')
             ax_bar.set_ylabel('NDS (higher = more robust)')
             panel_letter = 'B' if row == 0 else 'D'
             ax_bar.set_title(f'{panel_letter}. NDS ({strategy_label})', fontweight='bold')
@@ -910,8 +1107,7 @@ def create_figure5(df, nds_df, output_dir):
 
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
             color = MODEL_COLORS.get(model, '#333333')
-            label = model.replace('_', '-').upper()
-            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=label, color=color, markersize=4)
+            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
 
         ax_line.set_xlabel('Noise Level (σ)')
         ax_line.set_ylabel('R²')
@@ -933,7 +1129,7 @@ def create_figure5(df, nds_df, output_dir):
 
             ax_mlp.bar(x, mean_nds.values, color=colors)
             ax_mlp.set_xticks(x)
-            ax_mlp.set_xticklabels([m.replace('_', '-').upper() for m in mlp_variants], rotation=45, ha='right')
+            ax_mlp.set_xticklabels([get_model_label(m) for m in mlp_variants], rotation=45, ha='right')
             ax_mlp.set_ylabel('NDS')
             panel_letter = 'B' if row == 0 else 'E'
             ax_mlp.set_title(f'{panel_letter}. MLP NDS ({strategy_label})', fontweight='bold')
@@ -1035,7 +1231,7 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
                 bin_errors.append(actual_m[bin_mask].mean())
 
         color = MODEL_COLORS.get(model, '#333333')
-        ax_a.plot(bin_centers, bin_errors, 'o-', label=model, color=color, markersize=4)
+        ax_a.plot(bin_centers, bin_errors, 'o-', label=get_model_label(model), color=color, markersize=4)
 
     # Diagonal
     lims = [0, ax_a.get_xlim()[1]] if ax_a.get_xlim()[1] > 0 else [0, 1]
@@ -1083,7 +1279,8 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
     if ece_data:
         ece_df = pd.DataFrame(ece_data).sort_values('ece')
         colors = [MODEL_COLORS.get(m, '#333333') for m in ece_df['model']]
-        ax_b.barh(ece_df['model'], ece_df['ece'], color=colors)
+        labels = [get_model_label(m) for m in ece_df['model']]
+        ax_b.barh(labels, ece_df['ece'], color=colors)
         ax_b.set_xlabel('ECE (lower = better)')
         ax_b.set_title(f'B. Expected Calibration Error{title_suffix}', fontweight='bold')
 
@@ -1112,7 +1309,8 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
     if corr_data:
         corr_df = pd.DataFrame(corr_data).sort_values('corr', ascending=False)
         colors = [MODEL_COLORS.get(m, '#333333') for m in corr_df['model']]
-        ax_c.barh(corr_df['model'], corr_df['corr'], color=colors)
+        labels = [get_model_label(m) for m in corr_df['model']]
+        ax_c.barh(labels, corr_df['corr'], color=colors)
         ax_c.set_xlabel('ρ (uncertainty-error)')
         ax_c.set_title(f'C. Uncertainty-Error Correlation{title_suffix}', fontweight='bold')
         ax_c.axvline(0, color='black', linewidth=0.5)
@@ -1238,7 +1436,7 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
             sigma_df = pd.DataFrame(sigma_means)
             color = MODEL_COLORS.get(model, '#333333')
             ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
-                      label=model, color=color, markersize=4)
+                      label=get_model_label(model), color=color, markersize=4)
 
     ax_a.set_xlabel('Injected Noise Level (σ)')
     ax_a.set_ylabel('Mean Predicted Uncertainty')
@@ -1270,7 +1468,8 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
     if corr_data:
         corr_df = pd.DataFrame(corr_data).sort_values('corr', ascending=False)
         colors = [MODEL_COLORS.get(m, '#333333') for m in corr_df['model']]
-        ax_b.barh(corr_df['model'], corr_df['corr'], color=colors)
+        labels = [get_model_label(m) for m in corr_df['model']]
+        ax_b.barh(labels, corr_df['corr'], color=colors)
         ax_b.set_xlabel('ρ (uncertainty ↔ error)')
         ax_b.set_title(f'B. Uncertainty-Error Correlation{title_suffix}', fontweight='bold')
         ax_b.axvline(0, color='black', linewidth=0.5)
@@ -1296,7 +1495,8 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
         if noise_corr_data:
             noise_corr_df = pd.DataFrame(noise_corr_data).sort_values('corr', ascending=False)
             colors = [MODEL_COLORS.get(m, '#333333') for m in noise_corr_df['model']]
-            ax_c.barh(noise_corr_df['model'], noise_corr_df['corr'], color=colors)
+            labels = [get_model_label(m) for m in noise_corr_df['model']]
+            ax_c.barh(labels, noise_corr_df['corr'], color=colors)
             ax_c.set_xlabel('ρ (uncertainty ↔ injected noise)')
             ax_c.set_title(f'C. Uncertainty-Noise Correlation (KEY){title_suffix}', fontweight='bold')
             ax_c.axvline(0, color='black', linewidth=0.5)
@@ -1336,10 +1536,10 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
             x = np.arange(len(models))
             width = 0.35
 
-            ax_d.bar(x - width/2, alea_corr, width, label='Aleatoric', color='#e74c3c')
-            ax_d.bar(x + width/2, epis_corr, width, label='Epistemic', color='#3498db')
+            ax_d.bar(x - width/2, alea_corr, width, label='Aleatoric', color='#E69F00')  # Orange (colorblind-safe)
+            ax_d.bar(x + width/2, epis_corr, width, label='Epistemic', color='#0072B2')  # Blue (colorblind-safe)
             ax_d.set_xticks(x)
-            ax_d.set_xticklabels(models, rotation=45, ha='right')
+            ax_d.set_xticklabels([get_model_label(m) for m in models], rotation=45, ha='right')
             ax_d.set_ylabel('ρ (with injected noise)')
             ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
             ax_d.legend()
@@ -1586,7 +1786,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             # Average R² per model at this sigma
             model_r2 = sigma_df.groupby('model')['r2'].mean()
 
-            # Filter to baseline > 0.5 at sigma=0
+            # Filter to baseline > threshold at sigma=0
             if sigma == 0.0:
                 valid_models = model_r2[model_r2 > BASELINE_THRESHOLD].index.tolist()
 
@@ -1666,8 +1866,27 @@ def generate_report(nds_df, excluded_df, output_dir):
     lines.append("PAPER FIGURES GENERATION REPORT")
     lines.append("=" * 80)
 
-    lines.append(f"\nNDS calculated for {len(nds_df)} configurations")
+    lines.append(f"\nBaseline R² threshold: {BASELINE_THRESHOLD}")
+    lines.append(f"NDS calculated for {len(nds_df)} configurations")
     lines.append(f"Excluded {len(excluded_df)} configurations (baseline R² < {BASELINE_THRESHOLD})")
+
+    if len(excluded_df) > 0 and 'marginal' in excluded_df.columns:
+        marginal = excluded_df[excluded_df['marginal'] == True]
+        clearly_excluded = excluded_df[excluded_df['marginal'] == False]
+        lines.append(f"\n  Marginal exclusions (0.5 <= R² < {BASELINE_THRESHOLD}): {len(marginal)}")
+        lines.append(f"  Clearly excluded (R² < 0.5): {len(clearly_excluded)}")
+
+        if len(marginal) > 0:
+            lines.append(f"\n  --- MARGINAL EXCLUSIONS (would pass at 0.5 threshold) ---")
+            marginal_sorted = marginal.sort_values('baseline', ascending=False)
+            for _, row in marginal_sorted.iterrows():
+                lines.append(f"    {row['model']:25s} {row['rep']:20s} {row['strategy']:12s}  "
+                             f"R²={row['baseline']:.3f}  NDS={row['nds']:.4f}")
+
+    # Save excluded configs CSV for reference
+    if len(excluded_df) > 0:
+        excluded_df.to_csv(output_dir / 'excluded_configs.csv', index=False)
+        lines.append(f"\n  Full exclusion list saved to excluded_configs.csv")
 
     if len(nds_df) > 0:
         lines.append("\n" + "=" * 80)
@@ -1736,10 +1955,17 @@ def main():
     print("\n[2/3] Calculating metrics...")
     nds_df, excluded_df = calculate_nds(qm9_df)
     print(f"  NDS calculated: {len(nds_df)} configs")
-    print(f"  Excluded (low baseline): {len(excluded_df)} configs")
+    print(f"  Excluded (baseline R² < {BASELINE_THRESHOLD}): {len(excluded_df)} configs")
+    if len(excluded_df) > 0 and 'marginal' in excluded_df.columns:
+        n_marginal = excluded_df['marginal'].sum()
+        print(f"    Marginal (0.5 <= R² < {BASELINE_THRESHOLD}): {n_marginal}")
+        print(f"    Clearly excluded (R² < 0.5): {len(excluded_df) - n_marginal}")
 
     # Generate figures
     print("\n[3/3] Generating figures...")
+
+    print("\n--- METHODS FIGURE ---")
+    create_methods_figure(output_dir)
 
     print("\n--- PART 1: THE WHAT ---")
     create_figure1(qm9_df, nds_df, output_dir)

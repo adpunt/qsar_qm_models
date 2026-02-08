@@ -236,11 +236,14 @@ def run_robustness_anova(df, baseline_threshold=0.6):
     Run ANOVA on noise degradation slope (NDS) instead of raw R².
 
     This tests: "Model drives noise ROBUSTNESS"
+
+    IMPORTANT: Computes NDS per-iteration to get proper within-cell replication
+    for ANOVA (10 NDS values per model-rep cell).
     """
-    # Calculate NDS for each model-rep combination
+    # Calculate NDS for each model-rep-iteration combination
     nds_data = []
 
-    for (model, rep), group in df.groupby(['model', 'rep']):
+    for (model, rep, iteration), group in df.groupby(['model', 'rep', 'iteration']):
         group = group.sort_values('sigma')
 
         if len(group) < 3:
@@ -251,12 +254,13 @@ def run_robustness_anova(df, baseline_threshold=0.6):
         if len(baseline) == 0 or baseline['r2'].values[0] < baseline_threshold:
             continue
 
-        # Calculate slope
+        # Calculate slope for this iteration
         try:
             slope, _, r_val, p_val, _ = stats.linregress(group['sigma'], group['r2'])
             nds_data.append({
                 'model': model,
                 'rep': rep,
+                'iteration': iteration,
                 'nds': slope,  # Negative = degradation
                 'baseline_r2': baseline['r2'].values[0],
             })
