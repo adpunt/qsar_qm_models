@@ -2075,9 +2075,9 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh'])
             params_source = 'tuning_trial'
         else:
-            params['hidden_sizes'] = [128, 64]
+            params['hidden_sizes'] = getattr(args, 'hidden_sizes', None) or [128, 64]
             params['activation'] = 'relu'
-            params_source = 'default'
+            params_source = 'default' if not getattr(args, 'hidden_sizes', None) else 'cli'
     
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh()}
     activation = activation_map[params['activation']]

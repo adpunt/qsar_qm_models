@@ -275,6 +275,8 @@ def parse_arguments():
             "Default is None (no transformation)."
         )
     )
+    parser.add_argument("--hidden-sizes", type=int, nargs='+', default=None,
+                       help="Hidden layer sizes for flexible_dnn/dnn/mlp (e.g. --hidden-sizes 256 128 64 32)")
     parser.add_argument("--calibration-size", type=int, default=20,
                        help="Percentage of validation set for conformal calibration (default is 20)")
     parser.add_argument("--domain-method", type=str, default='none',

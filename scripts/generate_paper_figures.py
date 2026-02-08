@@ -27,6 +27,7 @@ Outputs:
     fig6_uncertainty_quality.png
     fig7_uncertainty_noise_tracking.png
     table1_anova_summary.csv
+    table1_supp_simple_effects.csv
     table2_nds_by_strategy.csv
     table3_probabilistic_comparison.csv
     table4_uncertainty_metrics.csv
@@ -600,6 +601,168 @@ def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
     }
 
 
+def run_simple_effects(df, response_col, group_col, factor_col):
+    """
+    Run one-way ANOVA (simple effects) for `factor_col` within each level of `group_col`.
+
+    When interaction η² is large, main effects are misleading. Simple effects
+    answer: "How much does Factor A matter at each level of Factor B?"
+
+    Returns list of dicts with group level, η², F-statistic, and p-value.
+    """
+    results = []
+    for group_level, group_data in df.groupby(group_col):
+        groups = [g[response_col].values for _, g in group_data.groupby(factor_col)
+                  if len(g) >= 2]
+        if len(groups) < 2:
+            continue
+
+        grand_mean = group_data[response_col].mean()
+        total_ss = ((group_data[response_col] - grand_mean) ** 2).sum()
+        if total_ss == 0:
+            continue
+
+        factor_means = group_data.groupby(factor_col)[response_col].mean()
+        factor_counts = group_data.groupby(factor_col).size()
+        ss_factor = sum(factor_counts * (factor_means - grand_mean) ** 2)
+
+        eta2 = (ss_factor / total_ss) * 100
+
+        # F-test
+        try:
+            f_stat, p_val = stats.f_oneway(*groups)
+        except:
+            f_stat, p_val = np.nan, np.nan
+
+        results.append({
+            'group': group_level,
+            'eta2': eta2,
+            'f_stat': f_stat,
+            'p_value': p_val,
+            'n': len(group_data),
+            'n_levels': len(groups),
+        })
+
+    return results
+
+
+def run_simple_effects_analysis(df, output_dir):
+    """
+    Simple effects analysis for performance and robustness.
+
+    When two-way ANOVA shows large interaction, main effects are uninterpretable.
+    Simple effects decompose: effect of model at each rep, and effect of rep at each model.
+    """
+    all_rows = []
+
+    for strategy in df['strategy'].unique():
+        strategy_df = df[df['strategy'] == strategy]
+        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+
+        # --- Performance simple effects (R² at σ=0.3) ---
+        df_sigma = strategy_df[np.abs(strategy_df['sigma'] - 0.3) < 0.05].copy()
+        df_sigma = df_sigma[df_sigma['r2'] > -10].dropna(subset=['r2', 'model', 'rep'])
+        df_sigma = df_sigma[~df_sigma['rep'].isin(['randomized_smiles', 'random_smiles'])]
+
+        if len(df_sigma) >= 10:
+            # Simple effect of model at each representation
+            model_at_rep = run_simple_effects(df_sigma, 'r2', 'rep', 'model')
+            for r in model_at_rep:
+                all_rows.append({
+                    'Strategy': strategy_label,
+                    'Analysis': 'Performance',
+                    'Type': 'Model effect',
+                    'Within': r['group'],
+                    'eta2': r['eta2'],
+                    'F': r['f_stat'],
+                    'p': r['p_value'],
+                    'n': r['n'],
+                })
+
+            # Simple effect of representation at each model
+            rep_at_model = run_simple_effects(df_sigma, 'r2', 'model', 'rep')
+            for r in rep_at_model:
+                all_rows.append({
+                    'Strategy': strategy_label,
+                    'Analysis': 'Performance',
+                    'Type': 'Rep effect',
+                    'Within': r['group'],
+                    'eta2': r['eta2'],
+                    'F': r['f_stat'],
+                    'p': r['p_value'],
+                    'n': r['n'],
+                })
+
+        # --- Robustness simple effects (NDS) ---
+        nds_data = []
+        for (model, rep, iteration), group in strategy_df.groupby(['model', 'rep', 'iteration']):
+            group = group.sort_values('sigma')
+            if len(group) < 3:
+                continue
+            baseline = group[group['sigma'] == 0.0]
+            if len(baseline) == 0 or baseline['r2'].values[0] < BASELINE_THRESHOLD:
+                continue
+            try:
+                slope, _, _, _, _ = stats.linregress(group['sigma'], group['r2'])
+                nds_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'nds': slope})
+            except:
+                continue
+
+        if len(nds_data) >= 10:
+            nds_df = pd.DataFrame(nds_data)
+            nds_df = nds_df[~nds_df['rep'].isin(['randomized_smiles', 'random_smiles'])]
+
+            # Simple effect of model at each representation
+            model_at_rep = run_simple_effects(nds_df, 'nds', 'rep', 'model')
+            for r in model_at_rep:
+                all_rows.append({
+                    'Strategy': strategy_label,
+                    'Analysis': 'Robustness',
+                    'Type': 'Model effect',
+                    'Within': r['group'],
+                    'eta2': r['eta2'],
+                    'F': r['f_stat'],
+                    'p': r['p_value'],
+                    'n': r['n'],
+                })
+
+            # Simple effect of representation at each model
+            rep_at_model = run_simple_effects(nds_df, 'nds', 'model', 'rep')
+            for r in rep_at_model:
+                all_rows.append({
+                    'Strategy': strategy_label,
+                    'Analysis': 'Robustness',
+                    'Type': 'Rep effect',
+                    'Within': r['group'],
+                    'eta2': r['eta2'],
+                    'F': r['f_stat'],
+                    'p': r['p_value'],
+                    'n': r['n'],
+                })
+
+    if all_rows:
+        se_df = pd.DataFrame(all_rows)
+        se_df.to_csv(output_dir / 'table1_supp_simple_effects.csv', index=False)
+        print(f"✓ Saved table1_supp_simple_effects.csv ({len(se_df)} rows)")
+
+        # Print summary
+        print("\n  Simple Effects Summary (η² for model effect within each representation):")
+        perf_model = se_df[(se_df['Analysis'] == 'Performance') & (se_df['Type'] == 'Model effect')]
+        if len(perf_model) > 0:
+            summary = perf_model.groupby('Within')['eta2'].mean()
+            for rep, eta2 in summary.items():
+                print(f"    {rep}: Model η² = {eta2:.1f}%")
+
+        print("  Simple Effects Summary (η² for rep effect within each model):")
+        perf_rep = se_df[(se_df['Analysis'] == 'Performance') & (se_df['Type'] == 'Rep effect')]
+        if len(perf_rep) > 0:
+            summary = perf_rep.groupby('Within')['eta2'].mean()
+            for model, eta2 in sorted(summary.items(), key=lambda x: -x[1]):
+                print(f"    {model}: Rep η² = {eta2:.1f}%")
+    else:
+        print("⚠ No simple effects data computed")
+
+
 # =============================================================================
 # METHODS FIGURE: NOISE STRATEGY DISTRIBUTIONS
 # =============================================================================
@@ -901,6 +1064,9 @@ def create_figure2(df, output_dir):
     pd.DataFrame(rows).to_csv(output_dir / 'table1_anova_summary.csv', index=False)
     print("✓ Saved table1_anova_summary.csv")
 
+    # Simple effects analysis (recommended when interaction η² > 30%)
+    run_simple_effects_analysis(df, output_dir)
+
 
 # =============================================================================
 # FIGURE 3: RANKING CONSISTENCY
@@ -952,7 +1118,7 @@ def create_figure3(nds_df, validation_df, output_dir):
 
     ax_b.set_xlabel('Baseline R² (σ=0)')
     ax_b.set_ylabel('NDS (slope)')
-    ax_b.set_title('B. Baseline vs Robustness (PDV, Legacy)', fontweight='bold')
+    ax_b.set_title('B. Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
     ax_b.axhline(0, color='black', linewidth=0.5)
     ax_b.legend(loc='lower right', fontsize=6, ncol=2)
 
@@ -985,7 +1151,7 @@ def create_figure3(nds_df, validation_df, output_dir):
         ax_c.set_xticks(range(len(datasets)))
         ax_c.set_xticklabels(datasets, rotation=45, ha='right')
         ax_c.set_ylabel('NDS')
-        ax_c.set_title('C. Cross-Dataset (PDV, Legacy)', fontweight='bold')
+        ax_c.set_title('C. Cross-Dataset (PDV, Gaussian)', fontweight='bold')
         ax_c.axhline(0, color='black', linewidth=0.5)
         ax_c.legend(loc='lower right', fontsize=6)
 
@@ -1207,7 +1373,9 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
         model_data = filtered[filtered['model'] == model]
 
         pred = model_data[unc_col].values
-        if 'y_true_original' in model_data.columns:
+        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
             actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
         elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
             actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
@@ -1255,7 +1423,9 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
         model_data = filtered[filtered['model'] == model]
 
         pred = model_data[unc_col].values
-        if 'y_true_original' in model_data.columns:
+        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
             actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
         elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
             actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
@@ -1298,7 +1468,9 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
         model_data = filtered[filtered['model'] == model]
 
         pred = model_data[unc_col].values
-        if 'y_true_original' in model_data.columns:
+        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
             actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
         elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
             actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
@@ -1457,7 +1629,9 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
         model_data = filtered[filtered['model'] == model]
 
         unc_values = model_data[unc_col].values
-        if 'y_true_original' in model_data.columns:
+        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+            errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
             errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
         elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
             errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
@@ -1641,6 +1815,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
             pivot['MEAN'] = pivot.mean(axis=1)
             pivot = pivot.sort_values('MEAN', ascending=False)
+            pivot.rename(columns=STRATEGY_LABELS, inplace=True)
             pivot.to_csv(output_dir / 'table2_nds_by_strategy_pdv.csv')
             print("✓ Saved table2_nds_by_strategy_pdv.csv")
 
@@ -1648,6 +1823,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         pivot_all = nds_df.pivot_table(values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
         pivot_all['MEAN'] = pivot_all.mean(axis=1)
         pivot_all = pivot_all.sort_values('MEAN', ascending=False)
+        pivot_all.rename(columns=STRATEGY_LABELS, inplace=True)
         pivot_all.to_csv(output_dir / 'table2_supp_nds_all_reps.csv')
         print("✓ Saved table2_supp_nds_all_reps.csv (supplementary)")
 
@@ -1727,7 +1903,10 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                 unc_values = model_data[unc_col].values
 
                 # Calculate error
-                if 'y_true_original' in model_data.columns:
+                # Use y_true_noisy (normalized space) to match y_pred_mean (normalized space)
+                if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                    errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+                elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
                     errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
                 elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
                     errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
@@ -1750,8 +1929,14 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                         unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
 
                 # Coverage at 1σ and 2σ intervals
-                # Get predictions for coverage calculation
-                if 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                # IMPORTANT: Use y_true_noisy (normalized space) with y_pred_mean (normalized space)
+                # NOT y_true_original (original scale) — that causes a scale mismatch
+                # giving near-zero coverage for all models.
+                if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                    y_true = model_data['y_true_noisy'].values[mask]
+                    y_pred = model_data['y_pred_mean'].values[mask]
+                elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                    # Fallback — may have scale mismatch if data is normalized
                     y_true = model_data['y_true_original'].values[mask]
                     y_pred = model_data['y_pred_mean'].values[mask]
                 elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
@@ -1899,17 +2084,19 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             ratio_df.loc[ratio_df.index.isin(tree_models), 'family'] = 'tree'
             ratio_df.loc[ratio_df.index.isin(nn_models), 'family'] = 'nn'
 
+            ratio_df.rename(columns=STRATEGY_LABELS, inplace=True)
             ratio_df.to_csv(output_dir / 'table7_strategy_sensitivity_ratio.csv')
             print("✓ Saved table7_strategy_sensitivity_ratio.csv")
 
             # Summary by family
+            strategy_display = {STRATEGY_LABELS.get(s, s) for s in ALL_STRATEGIES if s != 'legacy'}
             for family in ['tree', 'nn']:
                 fam_data = ratio_df[ratio_df['family'] == family]
                 if len(fam_data) > 0:
-                    for strat in [s for s in ALL_STRATEGIES if s != 'legacy' and s in fam_data.columns]:
+                    for strat in [s for s in fam_data.columns if s in strategy_display]:
                         vals = fam_data[strat].dropna()
                         if len(vals) > 0:
-                            print(f"  {family} {strat}/legacy ratio: "
+                            print(f"  {family} {strat}/Gaussian ratio: "
                                   f"mean={vals.mean():.3f} (range {vals.min():.3f}-{vals.max():.3f})")
 
 
@@ -1948,7 +2135,7 @@ def generate_report(nds_df, excluded_df, output_dir):
 
     if len(nds_df) > 0:
         lines.append("\n" + "=" * 80)
-        lines.append("KEY FINDINGS (PDV representation, Legacy strategy)")
+        lines.append("KEY FINDINGS (PDV representation, Gaussian strategy)")
         lines.append("=" * 80)
 
         # Filter to PDV + legacy for consistent reporting
