@@ -674,32 +674,34 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep='pdv', strategy=
     """
     Wilcoxon signed-rank test for paired model comparison.
 
-    Compares NDS values between a base model and its variant
-    (e.g., DNN vs DNN-BNN-Full) across matched conditions.
+    Pairs models across all shared (rep, strategy) conditions to get enough
+    matched observations. Falls back to single rep×strategy if pairing across
+    conditions yields too few points.
 
     Returns:
         dict with statistic, p_value, and interpretation
     """
-    base_data = nds_df[(nds_df['model'] == model_base) &
-                       (nds_df['rep'] == rep) &
-                       (nds_df['strategy'] == strategy)]
-    var_data = nds_df[(nds_df['model'] == model_variant) &
-                      (nds_df['rep'] == rep) &
-                      (nds_df['strategy'] == strategy)]
+    # Pair across all shared conditions (rep × strategy) for sufficient n
+    base_data = nds_df[nds_df['model'] == model_base]
+    var_data = nds_df[nds_df['model'] == model_variant]
 
     if len(base_data) == 0 or len(var_data) == 0:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': 0}
 
-    base_nds = base_data['nds'].values
-    var_nds = var_data['nds'].values
+    # Create keys for pairing
+    base_keyed = base_data.set_index(['rep', 'strategy'])['nds']
+    var_keyed = var_data.set_index(['rep', 'strategy'])['nds']
+    shared_keys = base_keyed.index.intersection(var_keyed.index)
 
-    # Need paired data - if different lengths, can't do paired test
-    n = min(len(base_nds), len(var_nds))
+    base_nds = base_keyed.loc[shared_keys].values
+    var_nds = var_keyed.loc[shared_keys].values
+
+    n = len(shared_keys)
     if n < 5:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': n}
 
     try:
-        stat, p_val = stats.wilcoxon(base_nds[:n], var_nds[:n], alternative='two-sided')
+        stat, p_val = stats.wilcoxon(base_nds, var_nds, alternative='two-sided')
         return {
             'statistic': stat,
             'p_value': p_val,
@@ -707,7 +709,7 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep='pdv', strategy=
             'n': n,
             'base_mean': np.mean(base_nds),
             'var_mean': np.mean(var_nds),
-            'improvement': np.mean(var_nds) - np.mean(base_nds)  # Positive = variant better (less negative NDS)
+            'improvement': np.mean(var_nds) - np.mean(base_nds)
         }
     except Exception as e:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': n, 'error': str(e)}
@@ -740,28 +742,27 @@ def calculate_kendalls_w(nds_df, rep='pdv'):
     if len(strategies) < 2 or len(models) < 3:
         return {'W': np.nan, 'p_value': np.nan, 'interpretation': 'Insufficient data'}
 
-    # Build ranking matrix
-    rank_matrix = []
+    # Find models present in ALL strategies
+    model_nds_by_strategy = {}
     for strategy in strategies:
         strat_data = df[df['strategy'] == strategy]
-        model_nds = strat_data.groupby('model')['nds'].mean()
-        ranks = model_nds.rank(ascending=False)  # Higher NDS (less negative) = better rank
-        rank_matrix.append(ranks)
+        model_nds_by_strategy[strategy] = strat_data.groupby('model')['nds'].mean()
 
-    # Convert to matrix
-    rank_df = pd.DataFrame(rank_matrix).T
-    rank_df.columns = strategies
+    valid_models = [m for m in models
+                    if all(m in model_nds_by_strategy[s].index for s in strategies)]
 
-    # Drop models with missing rankings
-    rank_df = rank_df.dropna()
-
-    if len(rank_df) < 3:
+    if len(valid_models) < 3:
         return {'W': np.nan, 'p_value': np.nan, 'interpretation': 'Insufficient complete rankings'}
 
-    # Calculate Kendall's W
-    # W = 12 * S / (k^2 * (n^3 - n))
+    # Re-rank using only valid models (avoids gaps that inflate W > 1)
+    rank_df = pd.DataFrame(index=valid_models, columns=strategies, dtype=float)
+    for strategy in strategies:
+        nds_vals = model_nds_by_strategy[strategy].loc[valid_models]
+        rank_df[strategy] = nds_vals.rank(ascending=False)
+
+    # Calculate Kendall's W = 12 * S / (k^2 * (n^3 - n))
     k = len(strategies)  # number of raters
-    n = len(rank_df)     # number of items
+    n = len(valid_models)  # number of items
 
     rank_sums = rank_df.sum(axis=1)
     mean_rank_sum = rank_sums.mean()
@@ -1520,25 +1521,25 @@ def create_figure2(df, output_dir):
             outlier_idx = strats.index('outlier')
             ax.axvspan(outlier_idx - 0.5, outlier_idx + 0.5, alpha=0.08, color='#F0E442')
 
-        # Compute cross-strategy concordance (rho between η² vectors, excluding outlier)
+        # Annotate cross-strategy concordance using η² ordering consistency
         concordant = [s for s in strats if s != 'outlier']
-        if len(concordant) >= 3 and 'legacy' in concordant:
-            legacy_vec = [results['legacy']['eta2_model'], results['legacy']['eta2_rep'],
-                          results['legacy']['eta2_interaction']]
-            rhos = []
+        if len(concordant) >= 3:
+            # Compare η² ordering: for each non-outlier pair, is Model>Rep>Int ordering same?
+            orderings = []
             for s in concordant:
-                if s == 'legacy':
-                    continue
-                other_vec = [results[s]['eta2_model'], results[s]['eta2_rep'],
-                             results[s]['eta2_interaction']]
-                rho, _ = stats.spearmanr(legacy_vec, other_vec)
-                rhos.append(rho)
-            if rhos:
-                mean_rho = np.mean(rhos)
-                ax.text(0.98, 0.97,
-                        f'Concordant strategies ρ = {mean_rho:.2f}\nOutlier strategy differs',
-                        transform=ax.transAxes, ha='right', va='top', fontsize=7,
-                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+                vals = [results[s]['eta2_model'], results[s]['eta2_rep'], results[s]['eta2_interaction']]
+                orderings.append(np.argsort(vals)[::-1])  # descending order
+
+            # Count how many pairs agree on ordering
+            from itertools import combinations
+            n_agree = sum(1 for a, b in combinations(orderings, 2) if np.array_equal(a, b))
+            n_pairs = len(list(combinations(orderings, 2)))
+            agreement_pct = 100 * n_agree / n_pairs if n_pairs > 0 else 0
+
+            ax.text(0.98, 0.97,
+                    f'{len(concordant)} strategies share ordering ({agreement_pct:.0f}% agree)\nOutlier strategy differs',
+                    transform=ax.transAxes, ha='right', va='top', fontsize=7,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
@@ -1606,11 +1607,15 @@ def create_figure3(nds_df, validation_df, output_dir):
     # Filter to PDV only for consistent comparison (don't mix representations)
     nds_pdv = nds_df[nds_df['rep'] == 'pdv'] if 'rep' in nds_df.columns else nds_df
 
-    # Panel A: Bump chart - ranks across strategies (PDV only)
+    # Panel A: Bump chart - ranks across strategies (PDV only, ANOVA models)
     ax_a = axes[0]
 
     if len(nds_pdv) > 0:
-        pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        # Filter to ANOVA-included models for readability
+        nds_pdv_anova = nds_pdv[~nds_pdv['model'].isin(ANOVA_MODELS_EXCLUDE)]
+        pivot = nds_pdv_anova.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        # Only keep models with data for all strategies
+        pivot = pivot.dropna()
         if len(pivot) > 0:
             rankings = pivot.rank(ascending=False)  # Higher NDS = rank 1
 
@@ -1620,7 +1625,8 @@ def create_figure3(nds_df, validation_df, output_dir):
             for model in rankings.index:
                 ranks = [rankings.loc[model, s] for s in strategies if s in rankings.columns]
                 color = MODEL_COLORS.get(model, '#333333')
-                ax_a.plot(range(len(strategies)), ranks, 'o-', label=get_model_label(model), color=color, markersize=4)
+                ax_a.plot(range(len(strategies)), ranks, 'o-', label=get_model_label(model), color=color,
+                          markersize=4, linewidth=1.5)
 
             ax_a.set_xticks(range(len(strategies)))
             ax_a.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strategies], rotation=45, ha='right')
@@ -2592,25 +2598,28 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         # Get rankings per strategy
         strategies = nds_df['strategy'].unique()
         if len(strategies) > 1:
-            rank_matrix = []
             models = nds_df['model'].unique()
 
+            # First pass: find models present in ALL strategies
+            model_nds_by_strategy = {}
             for strategy in strategies:
                 strat_data = nds_df[nds_df['strategy'] == strategy]
-                model_nds = strat_data.groupby('model')['nds'].mean()
-                # Higher NDS = more robust = rank 1
-                ranks = model_nds.rank(ascending=False)
-                rank_matrix.append([ranks.get(m, np.nan) for m in models])
+                model_nds_by_strategy[strategy] = strat_data.groupby('model')['nds'].mean()
 
-            rank_matrix = np.array(rank_matrix)
+            valid_models = [m for m in models
+                           if all(m in model_nds_by_strategy[s].index for s in strategies)]
 
-            # Remove models with any NaN
-            valid_cols = ~np.any(np.isnan(rank_matrix), axis=0)
-            rank_matrix = rank_matrix[:, valid_cols]
-            valid_models = [m for m, v in zip(models, valid_cols) if v]
+            if len(valid_models) > 2:
+                # Second pass: rank only valid models within each strategy
+                rank_matrix = []
+                for strategy in strategies:
+                    nds_vals = model_nds_by_strategy[strategy].loc[valid_models]
+                    ranks = nds_vals.rank(ascending=False)  # Higher NDS = more robust = rank 1
+                    rank_matrix.append(ranks.values)
 
-            if rank_matrix.shape[1] > 2:
-                # Calculate Kendall's W
+                rank_matrix = np.array(rank_matrix)  # shape: (n_strategies, n_models)
+
+                # Calculate Kendall's W = 12 * S / (k² * (n³ - n))
                 n_raters = rank_matrix.shape[0]  # strategies
                 n_items = rank_matrix.shape[1]   # models
 
@@ -2621,18 +2630,25 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                 max_ss = (n_raters ** 2) * (n_items ** 3 - n_items) / 12
                 kendalls_w = ss_between / max_ss if max_ss > 0 else 0
 
+                # Chi-squared significance test
+                chi2 = n_raters * (n_items - 1) * kendalls_w
+                p_value = 1 - stats.chi2.cdf(chi2, n_items - 1)
+
                 # Save summary
                 with open(output_dir / 'table6_kendalls_w.txt', 'w') as f:
                     f.write("Kendall's W Concordance Analysis\n")
                     f.write("=" * 50 + "\n\n")
                     f.write(f"Number of raters (strategies): {n_raters}\n")
                     f.write(f"Number of items (models): {n_items}\n")
-                    f.write(f"Kendall's W: {kendalls_w:.4f}\n\n")
+                    f.write(f"Kendall's W: {kendalls_w:.4f}\n")
+                    f.write(f"Chi-squared: {chi2:.2f}\n")
+                    f.write(f"p-value: {p_value:.2e}\n\n")
+                    f.write(f"Models included: {', '.join(sorted(valid_models))}\n\n")
                     f.write("Interpretation:\n")
                     f.write("  W > 0.7: Strong agreement\n")
                     f.write("  W 0.5-0.7: Moderate agreement\n")
                     f.write("  W < 0.5: Weak agreement\n")
-                print("✓ Saved table6_kendalls_w.txt")
+                print(f"✓ Saved table6_kendalls_w.txt (W={kendalls_w:.4f}, n={n_items} models)")
 
     # Table 7: Strategy Sensitivity Ratio (NDS_strategy / NDS_legacy)
     # Tests whether certain noise types differentially affect model families

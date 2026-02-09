@@ -201,41 +201,8 @@ for strategy in STRATEGIES:
     scripts_generated.append(script_path.name)
 
 # =============================================================================
-# 7. CONFORMAL
+# 7. CONFORMAL — SKIPPED (in ANOVA_MODELS_EXCLUDE, already have data)
 # =============================================================================
-print("Generating conformal scripts...")
-
-conformal_bases = ['rf', 'qrf', 'dnn']
-
-for strategy in STRATEGIES:
-    content = slurm_header(f"conf_{strategy}", time="47:59:00", mem="128G")
-    content += f"# Conformal prediction for {strategy}\n\n"
-
-    for base in conformal_bases:
-        for rep in REPS:
-            # Skip mhggnn for now (may need special handling)
-            if rep == 'mhggnn':
-                continue
-
-            output = f"../results/anova_{strategy}_{rep}_conformal_{base}.csv"
-            content += f"# conformal_{base}/{rep}\n"
-            content += f"""python process_and_train.py -d QM9 -t homo_lumo_gap \\
-    -m conformal \\
-    --cp-base-model {base} \\
-    -r {rep} \\
-    --sigma {ALL_SIGMAS} \\
-    --noise-strategy {STRATEGY_FULL[strategy]} \\
-    -n 10000 \\
-    -b 10 \\
-    --normalize True \\
-    -u True \\
-    -f {output}
-
-"""
-
-    script_path = SLURM_DIR / f"conformal_{strategy}.sh"
-    script_path.write_text(content)
-    scripts_generated.append(script_path.name)
 
 # =============================================================================
 # MASTER SUBMIT SCRIPT
@@ -274,10 +241,6 @@ for s in STRATEGIES:
 content += "\necho 'Submitting flexible DNN scripts...'\n"
 for s in STRATEGIES:
     content += f"sbatch flex_dnn_{s}.sh\n"
-
-content += "\necho 'Submitting conformal scripts...'\n"
-for s in STRATEGIES:
-    content += f"sbatch conformal_{s}.sh\n"
 
 content += "\necho 'All jobs submitted!'\n"
 
