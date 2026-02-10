@@ -363,7 +363,13 @@ def fix_injected_noise(df):
 
 
 def load_validation_data(validation_dir):
-    """Load validation data from KIRBy (combined_summary.csv)."""
+    """Load validation data from KIRBy results directory.
+
+    Supports two layouts:
+    1. combined_summary.csv (pre-merged, must have 'dataset' column)
+    2. Per-dataset subdirectories, each with all_results.csv or summary.csv
+       The subdirectory name becomes the 'dataset' column.
+    """
     if validation_dir is None:
         return None
 
@@ -375,20 +381,50 @@ def load_validation_data(validation_dir):
         print(f"Loaded validation data: {len(df)} rows")
         return df
 
-    # Try loading individual summaries
+    # Try loading per-dataset subdirectories
     all_data = []
-    for subdir in validation_dir.iterdir():
-        if subdir.is_dir():
-            summary = subdir / 'summary.csv'
-            if summary.exists():
-                df = pd.read_csv(summary)
-                all_data.append(df)
+    for subdir in sorted(validation_dir.iterdir()):
+        if not subdir.is_dir():
+            continue
+        # Prefer all_results.csv (per-sigma format) for NDS computation
+        results_file = subdir / 'all_results.csv'
+        if results_file.exists():
+            df = pd.read_csv(results_file)
+            df['dataset'] = subdir.name
+            all_data.append(df)
+            continue
+        # Fall back to summary.csv
+        summary = subdir / 'summary.csv'
+        if summary.exists():
+            df = pd.read_csv(summary)
+            df['dataset'] = subdir.name
+            # Normalize column names: KIRBy uses NDS_r2, we expect nds
+            if 'NDS_r2' in df.columns and 'nds' not in df.columns:
+                df = df.rename(columns={'NDS_r2': 'nds'})
+            all_data.append(df)
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
-        print(f"Loaded validation data: {len(combined)} rows from {len(all_data)} datasets")
+        # Normalize names to match QM9 conventions (lowercase, no hyphens)
+        val_model_map = {
+            'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',
+            'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
+            'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
+            'BNN-Var': 'dnn_bnn_variational',
+        }
+        val_rep_map = {
+            'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
+            'MHG-GNN-pretrained': 'mhggnn', 'SMILES': 'smiles',
+        }
+        if 'model' in combined.columns:
+            combined['model'] = combined['model'].map(val_model_map).fillna(combined['model'].str.lower())
+        if 'rep' in combined.columns:
+            combined['rep'] = combined['rep'].map(val_rep_map).fillna(combined['rep'].str.lower())
+        datasets = combined['dataset'].unique()
+        print(f"Loaded validation data: {len(combined)} rows from {len(datasets)} datasets ({', '.join(sorted(datasets))})")
         return combined
 
+    print("⚠ No validation data found")
     return None
 
 
@@ -404,12 +440,17 @@ def calculate_validation_nds(validation_df):
     if validation_df is None or len(validation_df) == 0:
         return None
 
-    # If summary format (has NSI column), convert directly
-    if 'NSI' in validation_df.columns:
-        nds_df = validation_df.rename(columns={'NSI': 'nds'})
-        if 'baseline_r2' not in nds_df.columns and 'baseline_r2' not in nds_df.columns:
+    # If summary format (has NSI or NDS_r2 or nds column), convert directly
+    nds_col = None
+    for col in ['nds', 'NSI', 'NDS_r2', 'nsi_r2']:
+        if col in validation_df.columns:
+            nds_col = col
+            break
+
+    if nds_col is not None:
+        nds_df = validation_df.rename(columns={nds_col: 'nds'})
+        if 'baseline_r2' not in nds_df.columns:
             nds_df['baseline_r2'] = np.nan
-        # Ensure dataset column exists
         if 'dataset' not in nds_df.columns:
             nds_df['dataset'] = 'validation'
         return nds_df
