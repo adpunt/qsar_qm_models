@@ -152,7 +152,7 @@ plt.rcParams.update({
 STRATEGY_COLORS = {
     'legacy': '#0072B2',       # Blue
     'valprop': '#E69F00',      # Orange
-    'quantile': '#56B4E9',     # Sky blue
+    'quantile': '#882255',     # Wine/purple
     'threshold': '#CC79A7',    # Pink/magenta
     'outlier': '#F0E442',      # Yellow
     'hetero': '#009E73',       # Teal/bluish-green
@@ -168,54 +168,75 @@ STRATEGY_LABELS = {
 }
 
 MODEL_COLORS = {
-    # Colorblind-friendly palette (Okabe-Ito)
-    # Deterministic - cooler tones
-    'rf': '#0072B2',           # Blue
-    'xgboost': '#E69F00',      # Orange
-    'dnn': '#56B4E9',          # Sky blue
-    'mlp': '#CC79A7',          # Pink/magenta
-    'svm': '#999999',          # Gray
-    'lgb': '#D55E00',          # Vermillion
-    # Probabilistic - warmer/distinct tones
-    'qrf': '#009E73',          # Teal
-    'ngboost': '#F0E442',      # Yellow
-    'gauche': '#0072B2',       # Blue (GP variant)
-    # BNN variants - gradient of blues/teals
+    # Tree-based — blues/greens
+    'rf': '#0072B2',               # Blue
+    'xgboost': '#56B4E9',          # Sky blue
+    'lgb': '#009E73',              # Teal
+    'qrf': '#117733',              # Dark green
+    'ngboost': '#D55E00',          # Vermillion (stands out)
+    # Neural networks — warm tones
+    'dnn': '#E69F00',              # Orange
+    'mlp': '#CC79A7',              # Pink
+    'flexible_dnn': '#E69F00',     # Orange (same as dnn base)
+    'flexible_dnn_256_128_64': '#C68500',  # Darker orange
+    'flexible_dnn_512_256': '#F0C050',     # Lighter orange
+    # SVM / GP
+    'svm': '#999999',              # Gray
+    'gauche': '#882255',           # Wine
+    # DNN-BNN variants — purples
     'dnn_bnn_full': '#332288',     # Dark purple
-    'dnn_bnn_last': '#6699CC',     # Light blue
-    'dnn_bnn_variational': '#88CCEE',  # Cyan
-    'mlp_bnn_full': '#882255',     # Wine
-    'mlp_bnn_last': '#AA4499',     # Magenta
-    'mlp_bnn_variational': '#CC6677',  # Rose
-    # Conformal
+    'dnn_bnn_last': '#6633CC',     # Medium purple
+    'dnn_bnn_variational': '#9966FF',  # Light purple
+    'bnn_full': '#332288',         # Alias
+    'bnn_last': '#6633CC',         # Alias
+    'bnn_variational': '#9966FF',  # Alias
+    # MLP-BNN variants — reds/roses
+    'mlp_bnn_full': '#CC3311',     # Red
+    'mlp_bnn_last': '#EE6677',     # Salmon
+    'mlp_bnn_variational': '#EE99AA',  # Light pink
+    # Conformal — teals
     'conformal_rf': '#44AA99',     # Teal
-    'conformal_qrf': '#117733',    # Dark green
-    'conformal_dnn': '#DDCC77',    # Sand
+    'conformal_qrf': '#2D6A4F',    # Dark teal
+    'conformal_dnn': '#74C69D',    # Light teal
+    'conformal_rf_split': '#44AA99',   # Alias
+    'conformal_qrf_split': '#2D6A4F',  # Alias
+    'conformal_dnn_split': '#74C69D',  # Alias
 }
 
 MODEL_LABELS = {
-    # Deterministic
+    # Tree-based
     'rf': 'RF',
     'xgboost': 'XGBoost',
-    'dnn': 'DNN',
-    'mlp': 'MLP',
     'lgb': 'LightGBM',
-    'svm': 'SVM',
-    # Probabilistic
     'qrf': 'QRF',
     'ngboost': 'NGBoost',
+    # Neural networks
+    'dnn': 'DNN',
+    'mlp': 'MLP',
+    'flexible_dnn': 'DNN [128,64]',
+    'flexible_dnn_256_128_64': 'DNN [256,128,64]',
+    'flexible_dnn_512_256': 'DNN [512,256]',
+    # SVM / GP
+    'svm': 'SVM',
     'gauche': 'GP (Gauche)',
-    # BNN variants
+    # DNN-BNN variants
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
-    'dnn_bnn_variational': 'DNN-BNN (Var)',
+    'dnn_bnn_variational': 'DNN-BNN (Var.)',
+    'bnn_full': 'DNN-BNN (Full)',
+    'bnn_last': 'DNN-BNN (Last)',
+    'bnn_variational': 'DNN-BNN (Var.)',
+    # MLP-BNN variants
     'mlp_bnn_full': 'MLP-BNN (Full)',
     'mlp_bnn_last': 'MLP-BNN (Last)',
-    'mlp_bnn_variational': 'MLP-BNN (Var)',
+    'mlp_bnn_variational': 'MLP-BNN (Var.)',
     # Conformal
     'conformal_rf': 'CP-RF',
     'conformal_qrf': 'CP-QRF',
     'conformal_dnn': 'CP-DNN',
+    'conformal_rf_split': 'CP-RF',
+    'conformal_qrf_split': 'CP-QRF',
+    'conformal_dnn_split': 'CP-DNN',
 }
 
 REP_LABELS = {
@@ -479,7 +500,9 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
             pivot = pivot[col_order]
             pivot.index = [get_model_label(m) for m in pivot.index]
 
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+            vals = pivot.values[~np.isnan(pivot.values)]
+            cv = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=cv,
                         ax=ax, cbar_kws={'label': 'NDS'})
             ax.set_title(f'{dataset}', fontweight='bold')
             ax.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
@@ -1405,8 +1428,11 @@ def create_figure1(df, nds_df, output_dir):
         # Rename index to clean model labels
         pivot.index = [get_model_label(m) for m in pivot.index]
 
-        # Use colorblind-friendly diverging colormap (blue-white-orange)
-        sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+        # Use colorblind-friendly diverging colormap centered at data midpoint
+        # so both colors are visible (all NDS values are negative)
+        vals = pivot.values[~np.isnan(pivot.values)]
+        center_val = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
+        sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=center_val,
                     ax=ax_b, cbar_kws={'label': 'NDS'})
         ax_b.set_xlabel('Noise Strategy')
         ax_b.set_ylabel('Model')
@@ -1449,7 +1475,9 @@ def create_figure1(df, nds_df, output_dir):
                          if c in pivot.columns]
             pivot = pivot[col_order]
             pivot.index = [get_model_label(m) for m in pivot.index]
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+            vals_e = pivot.values[~np.isnan(pivot.values)]
+            cv_e = (vals_e.min() + vals_e.max()) / 2 if len(vals_e) > 0 else 0
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=cv_e,
                         ax=ax_eb, cbar_kws={'label': 'NDS'})
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
@@ -1513,39 +1541,10 @@ def create_figure2(df, output_dir):
         ax.bar(x, rep_vals, width, label='Representation', color='#e74c3c')
         ax.bar(x + width, int_vals, width, label='Interaction', color='#2ecc71')
 
-        # Highlight Gaussian as primary
-        ax.axvspan(-0.5, 0.5, alpha=0.08, color='#0072B2')
-
-        # Mark outlier if present
-        if 'outlier' in strats:
-            outlier_idx = strats.index('outlier')
-            ax.axvspan(outlier_idx - 0.5, outlier_idx + 0.5, alpha=0.08, color='#F0E442')
-
-        # Annotate cross-strategy concordance using η² ordering consistency
-        concordant = [s for s in strats if s != 'outlier']
-        if len(concordant) >= 3:
-            # Compare η² ordering: for each non-outlier pair, is Model>Rep>Int ordering same?
-            orderings = []
-            for s in concordant:
-                vals = [results[s]['eta2_model'], results[s]['eta2_rep'], results[s]['eta2_interaction']]
-                orderings.append(np.argsort(vals)[::-1])  # descending order
-
-            # Count how many pairs agree on ordering
-            from itertools import combinations
-            n_agree = sum(1 for a, b in combinations(orderings, 2) if np.array_equal(a, b))
-            n_pairs = len(list(combinations(orderings, 2)))
-            agreement_pct = 100 * n_agree / n_pairs if n_pairs > 0 else 0
-
-            ax.text(0.98, 0.97,
-                    f'{len(concordant)} strategies share ordering ({agreement_pct:.0f}% agree)\nOutlier strategy differs',
-                    transform=ax.transAxes, ha='right', va='top', fontsize=7,
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
         ax.set_xticks(x)
         labels = [STRATEGY_LABELS.get(s, s) for s in strats]
-        labels[0] = labels[0] + ' *'  # Mark Gaussian as primary
         ax.set_xticklabels(labels, rotation=45, ha='right')
         ax.legend()
         ax.set_ylim(0, 100)
@@ -1910,15 +1909,33 @@ def create_figure5(df, nds_df, output_dir):
 # FIGURE 6: UNCERTAINTY QUALITY
 # =============================================================================
 
-def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title_suffix=""):
+def _get_errors(model_data, unc_col):
+    """Get uncertainty values and actual errors from model data. Returns (unc, errors, mask) or None."""
+    unc_values = model_data[unc_col].values
+    if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+    elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
+    elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
+        errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
+    else:
+        return None
+    mask = np.isfinite(unc_values) & np.isfinite(errors) & (unc_values > 0)
+    if mask.sum() < 100:
+        return None
+    return unc_values, errors, mask
+
+
+def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, title_suffix=""):
     """
-    Helper to create uncertainty quality figure for a given strategy/rep.
-    Called by create_figure6 for main and supplementary versions.
+    Combined uncertainty figure with 3 panels:
+    A) Calibration scatter (predicted uncertainty vs actual error, binned)
+    B) Mean uncertainty vs noise level (line plot per model)
+    C) Aleatoric vs Epistemic decomposition vs noise level
     """
     if unc_df is None or len(unc_df) == 0:
         return False
 
-    # Filter to specified strategy and rep
     filtered = unc_df.copy()
     if 'strategy' in filtered.columns and strategy:
         filtered = filtered[filtered['strategy'] == strategy]
@@ -1928,45 +1945,28 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
     if len(filtered) == 0:
         return False
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-
-    # Find uncertainty column
     unc_col = None
     for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty', 'std']:
         if col in filtered.columns:
             unc_col = col
             break
-
     if unc_col is None:
-        plt.close()
         return False
 
-    # Panel A: Calibration plot
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+    # --- Panel A: Calibration scatter ---
     ax_a = axes[0]
-
-    for model in filtered['model'].unique():
+    for model in sorted(filtered['model'].unique()):
         model_data = filtered[filtered['model'] == model]
-
-        pred = model_data[unc_col].values
-        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-            actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
-        else:
+        result = _get_errors(model_data, unc_col)
+        if result is None:
             continue
-
-        mask = np.isfinite(pred) & np.isfinite(actual) & (pred > 0)
+        pred, actual, mask = result
         pred_m, actual_m = pred[mask], actual[mask]
 
-        if len(pred_m) < 100:
-            continue
-
-        # Bin and plot
         bins = np.percentile(pred_m, np.linspace(0, 100, 11))
         bin_centers, bin_errors = [], []
-
         for i in range(len(bins) - 1):
             bin_mask = (pred_m >= bins[i]) & (pred_m < bins[i + 1])
             if bin_mask.sum() > 0:
@@ -1974,307 +1974,60 @@ def _create_uncertainty_quality_figure(unc_df, output_path, strategy, rep, title
                 bin_errors.append(actual_m[bin_mask].mean())
 
         color = MODEL_COLORS.get(model, '#333333')
-        ax_a.plot(bin_centers, bin_errors, 'o-', label=get_model_label(model), color=color, markersize=4)
+        ax_a.plot(bin_centers, bin_errors, 'o-', label=get_model_label(model),
+                  color=color, markersize=3, linewidth=1.0, alpha=0.8)
 
-    # Diagonal and axis limits
-    # Clip y-axis to prevent extreme outliers (e.g. QRF) from dominating
     xlim = ax_a.get_xlim()[1] if ax_a.get_xlim()[1] > 0 else 1
     ylim_max = ax_a.get_ylim()[1]
-    # Cap at 3x the x range to keep plot readable
     reasonable_ylim = min(ylim_max, xlim * 3)
     ax_a.set_ylim(0, reasonable_ylim)
     lims = [0, min(xlim, reasonable_ylim)]
-    ax_a.plot(lims, lims, 'k--', alpha=0.5, label='Perfect')
+    ax_a.plot(lims, lims, 'k--', alpha=0.4, label='Perfect', linewidth=0.8)
     ax_a.set_xlabel('Predicted Uncertainty')
     ax_a.set_ylabel('Actual Error')
-    ax_a.set_title(f'A. Calibration{title_suffix}', fontweight='bold')
-    ax_a.legend(fontsize=6)
+    ax_a.set_title('A. Calibration', fontweight='bold')
+    ax_a.legend(fontsize=5, ncol=2)
 
-    # Panel B: ECE comparison
+    # --- Panel B: Mean uncertainty vs sigma level ---
     ax_b = axes[1]
-
-    ece_data = []
-    for model in filtered['model'].unique():
-        model_data = filtered[filtered['model'] == model]
-
-        pred = model_data[unc_col].values
-        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-            actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
-        else:
-            continue
-
-        mask = np.isfinite(pred) & np.isfinite(actual) & (pred > 0)
-        pred_m, actual_m = pred[mask], actual[mask]
-
-        if len(pred_m) < 100:
-            continue
-
-        # Calculate ECE
-        bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-        bins = np.unique(bins)
-        ece = 0
-        for i in range(len(bins) - 1):
-            bin_mask = (pred_m >= bins[i]) & (pred_m < bins[i + 1])
-            if bin_mask.sum() > 0:
-                bin_pred = pred_m[bin_mask].mean()
-                bin_actual = actual_m[bin_mask].mean()
-                bin_weight = bin_mask.sum() / len(pred_m)
-                ece += bin_weight * np.abs(bin_pred - bin_actual)
-
-        ece_data.append({'model': model, 'ece': ece})
-
-    if ece_data:
-        ece_df = pd.DataFrame(ece_data).sort_values('ece')
-        colors = [MODEL_COLORS.get(m, '#333333') for m in ece_df['model']]
-        labels = [get_model_label(m) for m in ece_df['model']]
-        ax_b.barh(labels, ece_df['ece'], color=colors)
-        ax_b.set_xlabel('ECE (lower = better)')
-        ax_b.set_title(f'B. Expected Calibration Error{title_suffix}', fontweight='bold')
-
-    # Panel C: Uncertainty-error correlation
-    ax_c = axes[2]
-
-    corr_data = []
-    for model in filtered['model'].unique():
-        model_data = filtered[filtered['model'] == model]
-
-        pred = model_data[unc_col].values
-        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            actual = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-            actual = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
-        else:
-            continue
-
-        mask = np.isfinite(pred) & np.isfinite(actual)
-        if mask.sum() < 100:
-            continue
-
-        corr, _ = stats.spearmanr(pred[mask], actual[mask])
-        corr_data.append({'model': model, 'corr': corr})
-
-    if corr_data:
-        corr_df = pd.DataFrame(corr_data).sort_values('corr', ascending=False)
-        colors = [MODEL_COLORS.get(m, '#333333') for m in corr_df['model']]
-        labels = [get_model_label(m) for m in corr_df['model']]
-        ax_c.barh(labels, corr_df['corr'], color=colors)
-        ax_c.set_xlabel('ρ (uncertainty-error)')
-        ax_c.set_title(f'C. Uncertainty-Error Correlation{title_suffix}', fontweight='bold')
-        ax_c.axvline(0, color='black', linewidth=0.5)
-
-    for ax in axes:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    return True
-
-
-def create_figure6(unc_df, output_dir):
-    """
-    Figure 6: Uncertainty quality metrics (calibration, ECE).
-
-    REVIEW AFTER RESULTS:
-    - Are uncertainty estimates well-calibrated?
-    - Does calibration quality differ across strategies?
-    - Check if SUPPLEMENTARY_REP shows same pattern as PRIMARY_REP
-    """
-    if unc_df is None or len(unc_df) == 0:
-        print("⚠ Skipping Figure 6 - no uncertainty data")
-        return
-
-    strategy_label = STRATEGY_LABELS.get(PRIMARY_STRATEGY, PRIMARY_STRATEGY)
-
-    # Main figure: PRIMARY_REP + PRIMARY_STRATEGY
-    success = _create_uncertainty_quality_figure(
-        unc_df,
-        output_dir / 'fig6_uncertainty_quality.png',
-        strategy=PRIMARY_STRATEGY,
-        rep=PRIMARY_REP,
-        title_suffix=f" ({PRIMARY_REP.upper()}, {strategy_label})"
-    )
-    if success:
-        print(f"✓ Saved fig6_uncertainty_quality.png ({PRIMARY_REP}, {PRIMARY_STRATEGY})")
-    else:
-        print("⚠ Could not create Figure 6 main")
-
-    # Supplementary: SUPPLEMENTARY_REP + PRIMARY_STRATEGY
-    if GENERATE_SUPPLEMENTARY:
-        success = _create_uncertainty_quality_figure(
-            unc_df,
-            output_dir / f'fig6_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png',
-            strategy=PRIMARY_STRATEGY,
-            rep=SUPPLEMENTARY_REP,
-            title_suffix=f" ({SUPPLEMENTARY_REP.upper()}, {strategy_label})"
-        )
-        if success:
-            print(f"✓ Saved fig6_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png (supplementary)")
-
-        # Supplementary: PRIMARY_REP + CONTRAST_STRATEGY
-        # REVIEW: Does calibration hold under different noise?
-        contrast_label = STRATEGY_LABELS.get(CONTRAST_STRATEGY, CONTRAST_STRATEGY)
-        success = _create_uncertainty_quality_figure(
-            unc_df,
-            output_dir / f'fig6_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png',
-            strategy=CONTRAST_STRATEGY,
-            rep=PRIMARY_REP,
-            title_suffix=f" ({PRIMARY_REP.upper()}, {contrast_label})"
-        )
-        if success:
-            print(f"✓ Saved fig6_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png (supplementary)")
-
-
-# =============================================================================
-# FIGURE 7: UNCERTAINTY TRACKS NOISE (KEY FIGURE)
-# =============================================================================
-
-def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_suffix=""):
-    """
-    Helper to create uncertainty-noise tracking figure for a given strategy/rep.
-
-    REVIEW AFTER RESULTS:
-    - Panel C is the KEY panel: Does uncertainty correlate with injected noise?
-    - Panel D: Is it aleatoric or epistemic that tracks noise?
-    - Hypothesis: Robust models attribute noise to aleatoric uncertainty
-    """
-    if unc_df is None or len(unc_df) == 0:
-        return False
-
-    # Filter to specified strategy and rep
-    filtered = unc_df.copy()
-    if 'strategy' in filtered.columns and strategy:
-        filtered = filtered[filtered['strategy'] == strategy]
-    if 'rep' in filtered.columns and rep:
-        filtered = filtered[filtered['rep'] == rep]
-
-    if len(filtered) == 0:
-        return False
-
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-
-    # Find columns
-    unc_col = None
-    for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty']:
-        if col in filtered.columns:
-            unc_col = col
-            break
-
-    if unc_col is None or 'sigma' not in filtered.columns:
-        plt.close()
-        return False
-
-    # Panel A: Mean uncertainty vs sigma level
-    ax_a = axes[0, 0]
-
-    for model in filtered['model'].unique():
-        model_data = filtered[filtered['model'] == model]
-
-        sigma_means = []
-        for sigma in sorted(model_data['sigma'].unique()):
-            sigma_data = model_data[model_data['sigma'] == sigma]
-            unc_values = sigma_data[unc_col].values
-            unc_values = unc_values[np.isfinite(unc_values)]
-            if len(unc_values) > 0:
-                sigma_means.append({'sigma': sigma, 'mean_unc': unc_values.mean()})
-
-        if sigma_means:
-            sigma_df = pd.DataFrame(sigma_means)
-            color = MODEL_COLORS.get(model, '#333333')
-            ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
-                      label=get_model_label(model), color=color, markersize=4)
-
-    ax_a.set_xlabel('Injected Noise Level (σ)')
-    ax_a.set_ylabel('Mean Predicted Uncertainty')
-    ax_a.set_title(f'A. Uncertainty vs Noise Level{title_suffix}', fontweight='bold')
-    ax_a.legend(fontsize=6, ncol=2)
-
-    # Panel B: Uncertainty-error correlation bar
-    ax_b = axes[0, 1]
-
-    corr_data = []
-    for model in filtered['model'].unique():
-        model_data = filtered[filtered['model'] == model]
-
-        unc_values = model_data[unc_col].values
-        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-            errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-            errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
-        else:
-            continue
-
-        mask = np.isfinite(unc_values) & np.isfinite(errors)
-        if mask.sum() < 100:
-            continue
-
-        corr, _ = stats.spearmanr(unc_values[mask], errors[mask])
-        corr_data.append({'model': model, 'corr': corr})
-
-    if corr_data:
-        corr_df = pd.DataFrame(corr_data).sort_values('corr', ascending=False)
-        colors = [MODEL_COLORS.get(m, '#333333') for m in corr_df['model']]
-        labels = [get_model_label(m) for m in corr_df['model']]
-        ax_b.barh(labels, corr_df['corr'], color=colors)
-        ax_b.set_xlabel('ρ (uncertainty ↔ error)')
-        ax_b.set_title(f'B. Uncertainty-Error Correlation{title_suffix}', fontweight='bold')
-        ax_b.axvline(0, color='black', linewidth=0.5)
-
-    # Panel C: Uncertainty-noise correlation (KEY)
-    ax_c = axes[1, 0]
-
-    if 'injected_noise' in filtered.columns:
-        noise_corr_data = []
-        for model in filtered['model'].unique():
+    if 'sigma' in filtered.columns:
+        for model in sorted(filtered['model'].unique()):
             model_data = filtered[filtered['model'] == model]
-
             unc_values = model_data[unc_col].values
-            noise_mag = np.abs(model_data['injected_noise'].values)
-
-            mask = np.isfinite(unc_values) & np.isfinite(noise_mag)
-            if mask.sum() < 100:
+            if np.sum(np.isfinite(unc_values) & (unc_values > 0)) < 100:
                 continue
 
-            corr, _ = stats.spearmanr(unc_values[mask], noise_mag[mask])
-            noise_corr_data.append({'model': model, 'corr': corr})
+            sigma_means = []
+            for sigma in sorted(model_data['sigma'].unique()):
+                sigma_data = model_data[model_data['sigma'] == sigma]
+                vals = sigma_data[unc_col].values
+                vals = vals[np.isfinite(vals)]
+                if len(vals) > 0:
+                    sigma_means.append({'sigma': sigma, 'mean_unc': vals.mean()})
 
-        if noise_corr_data:
-            noise_corr_df = pd.DataFrame(noise_corr_data).sort_values('corr', ascending=False)
-            colors = [MODEL_COLORS.get(m, '#333333') for m in noise_corr_df['model']]
-            labels = [get_model_label(m) for m in noise_corr_df['model']]
-            ax_c.barh(labels, noise_corr_df['corr'], color=colors)
-            ax_c.set_xlabel('ρ (uncertainty ↔ injected noise)')
-            ax_c.set_title(f'C. Uncertainty-Noise Correlation (KEY){title_suffix}', fontweight='bold')
-            ax_c.axvline(0, color='black', linewidth=0.5)
-    else:
-        ax_c.text(0.5, 0.5, 'No injected_noise data', ha='center', va='center', transform=ax_c.transAxes)
-        ax_c.set_title(f'C. Uncertainty-Noise Correlation{title_suffix}', fontweight='bold')
+            if sigma_means:
+                sigma_df = pd.DataFrame(sigma_means)
+                color = MODEL_COLORS.get(model, '#333333')
+                ax_b.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
+                          label=get_model_label(model), color=color,
+                          markersize=3, linewidth=1.0, alpha=0.8)
 
-    # Panel D: Separation Plot - Aleatoric & Epistemic vs Sigma
-    # KEY TEST: aleatoric should increase with sigma, epistemic should stay flat
-    ax_d = axes[1, 1]
+        ax_b.set_xlabel('Injected Noise Level (σ)')
+        ax_b.set_ylabel('Mean Predicted Uncertainty')
+        ax_b.set_title('B. Uncertainty vs Noise Level', fontweight='bold')
+        ax_b.legend(fontsize=5, ncol=2)
 
+    # --- Panel C: Aleatoric vs Epistemic decomposition ---
+    ax_c = axes[2]
     has_decomposition = ('aleatoric_uncertainty' in filtered.columns and
                          'epistemic_uncertainty' in filtered.columns)
     plotted_separation = False
 
-    if has_decomposition:
-        for model in filtered['model'].unique():
+    if has_decomposition and 'sigma' in filtered.columns:
+        for model in sorted(filtered['model'].unique()):
             model_data = filtered[filtered['model'] == model]
-
             alea = model_data['aleatoric_uncertainty'].values
             epis = model_data['epistemic_uncertainty'].values
-
-            # Only plot models with valid decomposition data
             valid_mask = np.isfinite(alea) & np.isfinite(epis) & (alea > 0)
             if valid_mask.sum() < 100:
                 continue
@@ -2293,23 +2046,23 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
             if len(sigmas) >= 3:
                 color = MODEL_COLORS.get(model, '#333333')
                 label = get_model_label(model)
-                ax_d.plot(sigmas, alea_means, 'o-', color=color,
-                          label=f'{label} (alea.)', markersize=3, linewidth=1.2)
-                ax_d.plot(sigmas, epis_means, 's--', color=color,
-                          label=f'{label} (epist.)', markersize=3, linewidth=1.0, alpha=0.6)
+                ax_c.plot(sigmas, alea_means, 'o-', color=color,
+                          label=f'{label} (alea.)', markersize=3, linewidth=1.0, alpha=0.8)
+                ax_c.plot(sigmas, epis_means, 's--', color=color,
+                          label=f'{label} (epist.)', markersize=3, linewidth=0.8, alpha=0.5)
                 plotted_separation = True
 
     if plotted_separation:
-        ax_d.set_xlabel('Injected Noise Level (σ)')
-        ax_d.set_ylabel('Mean Uncertainty')
-        ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
-        ax_d.legend(fontsize=5, ncol=2)
+        ax_c.set_xlabel('Injected Noise Level (σ)')
+        ax_c.set_ylabel('Mean Uncertainty')
+        ax_c.set_title('C. Aleatoric vs Epistemic', fontweight='bold')
+        ax_c.legend(fontsize=5, ncol=2)
     else:
-        ax_d.text(0.5, 0.5, 'No aleatoric/epistemic\ndecomposition data',
-                  ha='center', va='center', transform=ax_d.transAxes, fontsize=9)
-        ax_d.set_title(f'D. Aleatoric vs Epistemic{title_suffix}', fontweight='bold')
+        ax_c.text(0.5, 0.5, 'No aleatoric/epistemic\ndecomposition data',
+                  ha='center', va='center', transform=ax_c.transAxes, fontsize=9)
+        ax_c.set_title('C. Aleatoric vs Epistemic', fontweight='bold')
 
-    for ax in axes.flat:
+    for ax in axes:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
@@ -2319,60 +2072,55 @@ def _create_uncertainty_noise_figure(unc_df, output_path, strategy, rep, title_s
     return True
 
 
-def create_figure7(unc_df, output_dir):
+def create_uncertainty_figure(unc_df, output_dir):
     """
-    Figure 7: Uncertainty tracks noise - KEY FIGURE.
-
-    REVIEW AFTER RESULTS:
-    - This is the mechanistic explanation figure
-    - Panel C (uncertainty-noise correlation) is the key finding
-    - Panel D shows whether it's aleatoric or epistemic that tracks noise
-    - Check if pattern holds across strategies and representations
+    Combined uncertainty figure replacing old fig6 + fig7.
+    Three panels: calibration, uncertainty vs noise, aleatoric/epistemic.
     """
     if unc_df is None or len(unc_df) == 0:
-        print("⚠ Skipping Figure 7 - no uncertainty data")
+        print("⚠ Skipping uncertainty figure - no data")
         return
 
-    strategy_label = STRATEGY_LABELS.get(PRIMARY_STRATEGY, PRIMARY_STRATEGY)
-
     # Main figure: PRIMARY_REP + PRIMARY_STRATEGY
-    success = _create_uncertainty_noise_figure(
+    success = _create_combined_uncertainty_figure(
         unc_df,
-        output_dir / 'fig7_uncertainty_noise_tracking.png',
+        output_dir / 'fig_uncertainty_combined.png',
         strategy=PRIMARY_STRATEGY,
         rep=PRIMARY_REP,
-        title_suffix=""  # Main figure, no suffix needed
     )
     if success:
-        print(f"✓ Saved fig7_uncertainty_noise_tracking.png ({PRIMARY_REP}, {PRIMARY_STRATEGY})")
+        print(f"✓ Saved fig_uncertainty_combined.png ({PRIMARY_REP}, {PRIMARY_STRATEGY})")
     else:
-        print("⚠ Could not create Figure 7 main")
+        print("⚠ Could not create combined uncertainty figure")
 
-    # Supplementary versions
+    # Supplementary variants
     if GENERATE_SUPPLEMENTARY:
-        # SUPPLEMENTARY_REP + PRIMARY_STRATEGY
-        success = _create_uncertainty_noise_figure(
+        strategy_label = STRATEGY_LABELS.get(PRIMARY_STRATEGY, PRIMARY_STRATEGY)
+
+        # Different rep, same strategy
+        success = _create_combined_uncertainty_figure(
             unc_df,
-            output_dir / f'fig7_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png',
+            output_dir / f'fig_uncertainty_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png',
             strategy=PRIMARY_STRATEGY,
             rep=SUPPLEMENTARY_REP,
-            title_suffix=f" ({SUPPLEMENTARY_REP.upper()})"
         )
         if success:
-            print(f"✓ Saved fig7_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png (supplementary)")
+            print(f"✓ Saved fig_uncertainty_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png")
 
-        # PRIMARY_REP + CONTRAST_STRATEGY
-        # REVIEW: Does the uncertainty-noise correlation hold under different noise types?
-        contrast_label = STRATEGY_LABELS.get(CONTRAST_STRATEGY, CONTRAST_STRATEGY)
-        success = _create_uncertainty_noise_figure(
+        # Same rep, contrast strategy
+        success = _create_combined_uncertainty_figure(
             unc_df,
-            output_dir / f'fig7_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png',
+            output_dir / f'fig_uncertainty_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png',
             strategy=CONTRAST_STRATEGY,
             rep=PRIMARY_REP,
-            title_suffix=f" ({contrast_label})"
         )
         if success:
-            print(f"✓ Saved fig7_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png (supplementary)")
+            print(f"✓ Saved fig_uncertainty_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png")
+
+
+# NOTE: Old _create_uncertainty_noise_figure and create_figure7 removed.
+# Replaced by _create_combined_uncertainty_figure and create_uncertainty_figure above.
+# Bar chart panels (ECE, unc-error ρ, unc-noise ρ) now live in table4.
 
 
 # =============================================================================
@@ -2540,17 +2288,38 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                 else:
                     cov_1sigma = cov_2sigma = np.nan
 
+                # ECE: binned calibration error
+                pred_pos_mask = mask & (unc_values > 0)
+                pred_m = unc_values[pred_pos_mask]
+                actual_m = errors[pred_pos_mask]
+                ece = np.nan
+                if len(pred_m) >= 100:
+                    ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
+                    ece_bins = np.unique(ece_bins)
+                    ece = 0
+                    for i in range(len(ece_bins) - 1):
+                        bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
+                        if bin_mask.sum() > 0:
+                            bin_pred = pred_m[bin_mask].mean()
+                            bin_actual = actual_m[bin_mask].mean()
+                            bin_weight = bin_mask.sum() / len(pred_m)
+                            ece += bin_weight * np.abs(bin_pred - bin_actual)
+
                 unc_metrics.append({
                     'Model': model,
                     'Unc-Error ρ': unc_err_corr,
                     'Unc-Noise ρ': unc_noise_corr,
+                    'ECE': ece,
                     'Coverage 1σ': cov_1sigma,
                     'Coverage 2σ': cov_2sigma,
                     'Mean Uncertainty': unc_values[mask].mean(),
                 })
 
             if unc_metrics:
-                unc_metrics_df = pd.DataFrame(unc_metrics).sort_values('Unc-Noise ρ', ascending=False)
+                unc_metrics_df = pd.DataFrame(unc_metrics).sort_values('Unc-Error ρ', ascending=False)
+                # Add clean labels
+                unc_metrics_df['Model'] = unc_metrics_df['Model'].map(
+                    lambda m: get_model_label(m))
                 unc_metrics_df.to_csv(output_dir / 'table4_uncertainty_metrics.csv', index=False)
                 print("✓ Saved table4_uncertainty_metrics.csv")
 
@@ -2790,79 +2559,96 @@ def create_interaction_figure(nds_df, output_dir):
 # FULL EXPERIMENT OVERVIEW (all configs, including non-ANOVA)
 # =============================================================================
 
-def create_full_overview(nds_df, output_dir):
-    """Scatter plot of ALL model x rep configurations for select strategies.
+def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_labels=None):
+    """Helper: scatter plot of ALL model x rep configurations for given strategies.
 
-    Shows the complete experimental landscape, including configurations that
-    were excluded from the ANOVA (conformal, qrf, sns, etc.).
     Each point is one model x rep configuration; color = model, shape = rep.
     """
-    if len(nds_df) == 0:
-        print("⚠ Could not create full overview - no NDS data")
+    strategies_available = [s for s in strategies if s in nds_df['strategy'].unique()]
+    if not strategies_available:
         return
 
-    # Select strategies: Gaussian (primary) + outlier (most different)
-    strategies_to_show = ['legacy', 'outlier']
-    strategies_available = [s for s in strategies_to_show if s in nds_df['strategy'].unique()]
-
-    if not strategies_available:
-        strategies_available = nds_df['strategy'].unique()[:2]
-
     n_panels = len(strategies_available)
-    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 5))
+    fig, axes = plt.subplots(1, n_panels, figsize=(5.5 * n_panels, 5))
     if n_panels == 1:
         axes = [axes]
 
-    # Rep markers
     rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^', 'sns': 'D',
                    'mhggnn': 'v', 'randomized_smiles': 'P', 'mol2vec': '*',
                    'chemberta': 'X'}
 
+    last_mean_nds = None
     for idx, strategy in enumerate(strategies_available):
         ax = axes[idx]
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+        label_prefix = f'{panel_labels[idx]}. ' if panel_labels and idx < len(panel_labels) else ''
 
         strat_data = nds_df[nds_df['strategy'] == strategy]
         mean_nds = strat_data.groupby(['model', 'rep']).agg(
             nds_mean=('nds', 'mean'),
             baseline_r2=('baseline_r2', 'mean')
         ).reset_index()
+        last_mean_nds = mean_nds
 
         for _, row in mean_nds.iterrows():
             color = MODEL_COLORS.get(row['model'], '#333333')
             marker = rep_markers.get(row['rep'], 'o')
-            in_anova = (row['model'] not in ANOVA_MODELS_EXCLUDE and
-                        row['rep'] not in ANOVA_REPS_EXCLUDE)
-            alpha = 0.9 if in_anova else 0.35
-            edgecolor = 'black' if in_anova else 'gray'
-
             ax.scatter(row['baseline_r2'], row['nds_mean'],
-                       color=color, marker=marker, s=50, alpha=alpha,
-                       edgecolors=edgecolor, linewidths=0.5)
+                       color=color, marker=marker, s=50, alpha=0.8,
+                       edgecolors='black', linewidths=0.5)
 
         ax.set_xlabel('Baseline R² (σ=0)')
-        ax.set_ylabel('NDS')
-        ax.set_title(f'{strategy_label} Strategy — All Configurations', fontweight='bold')
+        if idx == 0:
+            ax.set_ylabel('NDS')
+        else:
+            ax.set_ylabel('')
+        ax.set_title(f'{label_prefix}{strategy_label}', fontweight='bold')
         ax.axhline(0, color='black', linewidth=0.5)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        # Add text: opaque = in ANOVA, faded = excluded
-        ax.text(0.02, 0.02, 'Opaque = in ANOVA, faded = excluded from ANOVA',
-                transform=ax.transAxes, fontsize=6, va='bottom',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-    # Create legend for reps (markers)
-    from matplotlib.lines import Line2D
-    rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
-                          linestyle='None', markersize=6, label=r)
-                   for r in sorted(mean_nds['rep'].unique()) if r in rep_markers]
-    axes[-1].legend(handles=rep_handles, loc='lower right', fontsize=6, title='Rep', title_fontsize=7)
+    # Create legend for reps (markers) on last panel
+    if last_mean_nds is not None:
+        from matplotlib.lines import Line2D
+        rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
+                              linestyle='None', markersize=6, label=r)
+                       for r in sorted(last_mean_nds['rep'].unique()) if r in rep_markers]
+        axes[-1].legend(handles=rep_handles, loc='lower right', fontsize=6,
+                        title='Rep', title_fontsize=7)
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'fig_full_overview.png', dpi=300, bbox_inches='tight')
+    plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
     plt.close()
-    print("✓ Saved fig_full_overview.png")
+    print(f"✓ Saved {filename}")
+
+
+def create_full_overview(nds_df, output_dir):
+    """Scatter plots of ALL model x rep configurations.
+
+    Main figure: one panel per severity tier (Gaussian, Outlier, Threshold).
+    Supplementary: remaining strategies (Quantile, Heteroscedastic, Value-prop).
+    """
+    if len(nds_df) == 0:
+        print("⚠ Could not create full overview - no NDS data")
+        return
+
+    # Main figure: one strategy per tier (moderate, mild, severe)
+    _plot_full_overview_panels(
+        nds_df,
+        strategies=['legacy', 'outlier', 'threshold'],
+        output_dir=output_dir,
+        filename='fig_full_overview.png',
+        panel_labels=['A', 'B', 'C']
+    )
+
+    # Supplementary: remaining strategies
+    _plot_full_overview_panels(
+        nds_df,
+        strategies=['quantile', 'hetero', 'valprop'],
+        output_dir=output_dir,
+        filename='fig_full_overview_supp.png',
+        panel_labels=['A', 'B', 'C']
+    )
 
     # Also save the underlying data as a table
     all_configs = nds_df.groupby(['model', 'rep', 'strategy']).agg(
@@ -3019,8 +2805,7 @@ def main():
     print("\n--- PART 2: THE WHY ---")
     create_figure4(qm9_df, nds_df, output_dir)
     create_figure5(qm9_df, nds_df, output_dir)
-    create_figure6(unc_df, output_dir)
-    create_figure7(unc_df, output_dir)
+    create_uncertainty_figure(unc_df, output_dir)
 
     print("\n--- TABLES ---")
     create_tables(nds_df, unc_df, qm9_df, output_dir)
