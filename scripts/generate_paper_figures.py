@@ -300,6 +300,13 @@ def load_uncertainty_data(results_dir):
     results_dir = Path(results_dir)
     all_data = []
 
+    # Valid strategy names for filename parsing
+    VALID_STRATEGIES = {
+        'legacy', 'outlier', 'quantile', 'threshold', 'hetero', 'valprop',
+        'heteroscedastic', 'value_proportional',
+    }
+    STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+
     patterns = ["uncertainty_*_uncertainty_values.csv", "*_uncertainty_values.csv"]
 
     for pattern in patterns:
@@ -307,6 +314,20 @@ def load_uncertainty_data(results_dir):
             try:
                 df = pd.read_csv(f)
                 df['source_file'] = f.name
+
+                # Normalize column: representation → rep
+                if 'representation' in df.columns and 'rep' not in df.columns:
+                    df.rename(columns={'representation': 'rep'}, inplace=True)
+
+                # Extract strategy from filename if not in data
+                # Pattern: uncertainty_{strategy}_{rep}_{model}_uncertainty_values.csv
+                if 'strategy' not in df.columns:
+                    parts = f.stem.replace('_uncertainty_values', '').split('_')
+                    if len(parts) >= 2 and parts[0] == 'uncertainty':
+                        candidate = parts[1]
+                        if candidate in VALID_STRATEGIES:
+                            df['strategy'] = STRATEGY_NORMALIZE.get(candidate, candidate)
+
                 all_data.append(df)
             except Exception as e:
                 print(f"Warning: Could not load {f.name}: {e}")
@@ -314,6 +335,10 @@ def load_uncertainty_data(results_dir):
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
         print(f"Loaded uncertainty data: {len(combined)} rows")
+        if 'strategy' in combined.columns:
+            print(f"  Strategies: {sorted(combined['strategy'].unique())}")
+        if 'rep' in combined.columns:
+            print(f"  Representations: {sorted(combined['rep'].unique())}")
         return combined
     return None
 
@@ -333,7 +358,7 @@ def fix_injected_noise(df):
     if 'y_true_noisy' not in df.columns or 'y_true_original' not in df.columns:
         return df
 
-    required_cols = {'model', 'representation', 'sigma', 'iteration'}
+    required_cols = {'model', 'rep', 'sigma', 'iteration'}
     group_cols = [c for c in required_cols if c in df.columns]
     if not group_cols:
         return df
@@ -548,9 +573,13 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
             pivot = pivot[col_order]
             pivot.index = [get_model_label(m) for m in pivot.index]
 
-            vals = pivot.values[~np.isnan(pivot.values)]
-            cv = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=cv,
+            # Clip extreme NDS values (e.g. diverged models) for sane colormap
+            NDS_CLIP = 2.0
+            pivot_display = pivot.clip(lower=-NDS_CLIP)
+            vals = pivot_display.values[~np.isnan(pivot_display.values)]
+            vmin = vals.min() if len(vals) > 0 else -NDS_CLIP
+            sns.heatmap(pivot_display, annot=True, fmt='.2f', cmap='RdBu', center=0,
+                        vmin=vmin, vmax=0,
                         ax=ax, cbar_kws={'label': 'NDS'})
             ax.set_title(f'{dataset}', fontweight='bold')
             ax.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
@@ -2003,6 +2032,16 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
 
+    # Pre-filter: exclude models with negligible uncertainty (e.g. plain DNN/MLP)
+    valid_models = []
+    for model in filtered['model'].unique():
+        mdata = filtered[filtered['model'] == model]
+        uvals = mdata[unc_col].values
+        finite_mask = np.isfinite(uvals)
+        if finite_mask.sum() > 100 and uvals[finite_mask].mean() > 1e-3:
+            valid_models.append(model)
+    filtered = filtered[filtered['model'].isin(valid_models)]
+
     # --- Panel A: Calibration scatter ---
     ax_a = axes[0]
     for model in sorted(filtered['model'].unique()):
@@ -2288,6 +2327,12 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
                 mask = np.isfinite(unc_values) & np.isfinite(errors)
                 if mask.sum() < 100:
+                    continue
+
+                # Skip models with negligible uncertainty (e.g. plain DNN/MLP
+                # that don't produce meaningful uncertainty estimates)
+                mean_unc = unc_values[mask].mean()
+                if mean_unc < 1e-3:
                     continue
 
                 # Uncertainty-error correlation
