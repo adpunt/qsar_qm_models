@@ -362,6 +362,29 @@ def fix_injected_noise(df):
     return df
 
 
+def _normalize_validation_names(df):
+    """Normalize KIRBy naming conventions to match QM9 conventions."""
+    val_model_map = {
+        'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',
+        'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
+        'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
+        'BNN-Var': 'dnn_bnn_variational',
+    }
+    val_rep_map = {
+        'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
+        'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
+        'SMILES': 'smiles',
+    }
+    if 'model' in df.columns:
+        df['model'] = df['model'].map(val_model_map).fillna(df['model'].str.lower())
+    if 'rep' in df.columns:
+        df['rep'] = df['rep'].map(val_rep_map).fillna(df['rep'].str.lower())
+    # Normalize NDS column name
+    if 'NDS_r2' in df.columns and 'nds' not in df.columns:
+        df = df.rename(columns={'NDS_r2': 'nds'})
+    return df
+
+
 def load_validation_data(validation_dir):
     """Load validation data from KIRBy results directory.
 
@@ -378,7 +401,8 @@ def load_validation_data(validation_dir):
 
     if summary_file.exists():
         df = pd.read_csv(summary_file)
-        print(f"Loaded validation data: {len(df)} rows")
+        df = _normalize_validation_names(df)
+        print(f"Loaded validation data: {len(df)} rows from combined_summary.csv")
         return df
 
     # Try loading per-dataset subdirectories
@@ -398,28 +422,11 @@ def load_validation_data(validation_dir):
         if summary.exists():
             df = pd.read_csv(summary)
             df['dataset'] = subdir.name
-            # Normalize column names: KIRBy uses NDS_r2, we expect nds
-            if 'NDS_r2' in df.columns and 'nds' not in df.columns:
-                df = df.rename(columns={'NDS_r2': 'nds'})
             all_data.append(df)
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
-        # Normalize names to match QM9 conventions (lowercase, no hyphens)
-        val_model_map = {
-            'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',
-            'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
-            'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
-            'BNN-Var': 'dnn_bnn_variational',
-        }
-        val_rep_map = {
-            'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
-            'MHG-GNN-pretrained': 'mhggnn', 'SMILES': 'smiles',
-        }
-        if 'model' in combined.columns:
-            combined['model'] = combined['model'].map(val_model_map).fillna(combined['model'].str.lower())
-        if 'rep' in combined.columns:
-            combined['rep'] = combined['rep'].map(val_rep_map).fillna(combined['rep'].str.lower())
+        combined = _normalize_validation_names(combined)
         datasets = combined['dataset'].unique()
         print(f"Loaded validation data: {len(combined)} rows from {len(datasets)} datasets ({', '.join(sorted(datasets))})")
         return combined
