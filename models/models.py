@@ -1472,6 +1472,57 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
 
     return metrics[3]
 
+
+def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+    params = {}
+    params_source = 'default'
+
+    if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
+        best_params = load_best_hyperparameters('lgb', rep)
+        if best_params is not None:
+            params = best_params
+            params_source = 'tuned'
+            print(f"Using tuned hyperparameters for lgb-{rep}")
+
+    if not params:
+        if args.tuning:
+            params['n_estimators'] = trial.suggest_int('n_estimators', 50, 2000)
+            params['learning_rate'] = trial.suggest_float('learning_rate', 0.005, 0.3, log=True)
+            params['num_leaves'] = trial.suggest_int('num_leaves', 15, 127)
+            params['max_depth'] = trial.suggest_int('max_depth', 3, 15)
+            params['subsample'] = trial.suggest_float('subsample', 0.5, 1.0)
+            params['colsample_bytree'] = trial.suggest_float('colsample_bytree', 0.5, 1.0)
+            params['min_child_samples'] = trial.suggest_int('min_child_samples', 5, 50)
+            params['reg_alpha'] = trial.suggest_float('reg_alpha', 0.0, 1.0)
+            params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)
+            params_source = 'tuning_trial'
+        else:
+            params['n_estimators'] = 100
+            params['learning_rate'] = 0.1
+            params['num_leaves'] = 31
+            params['max_depth'] = -1
+            params['subsample'] = 1.0
+            params['colsample_bytree'] = 1.0
+            params['min_child_samples'] = 20
+            params['reg_alpha'] = 0.0
+            params['reg_lambda'] = 0.0
+            params_source = 'default'
+
+    if x_val is not None and y_val is not None:
+        x_train = np.vstack((x_train, x_val))
+        y_train = np.hstack((y_train, y_val))
+
+    model = lgb.LGBMRegressor(random_state=iteration_seed, verbose=-1, **params)
+    model.fit(x_train, y_train)
+    y_pred = model.predict(x_test)
+
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
+
+    save_results(args.filepath, s, iteration, 'lgb', rep, args.sample_size, metrics)
+
+    return metrics[3]
+
+
 def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
     params = {}
     params_source = 'default'
