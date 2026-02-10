@@ -27,7 +27,10 @@ import matplotlib.pyplot as plt
 import torchbnn as bnn
 from torchhk import transform_model, transform_layer
 import lightgbm as lgb
-from botorch import fit_gpytorch_model
+try:
+    from botorch.fit import fit_gpytorch_mll as fit_gpytorch_model
+except ImportError:
+    from botorch import fit_gpytorch_model
 import gauche
 from gauche.kernels.fingerprint_kernels import *
 from gauche.kernels.graph_kernels import *
