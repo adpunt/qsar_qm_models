@@ -28,9 +28,11 @@ Outputs:
     fig7_uncertainty_noise_tracking.png
     table1_anova_summary.csv
     table1_supp_simple_effects.csv
+    table1_supp_simple_effects_all_reps.csv
     table2_nds_by_strategy.csv
     table3_probabilistic_comparison.csv
     table4_uncertainty_metrics.csv
+    table4_supp_uncertainty_by_strategy_rep.csv
     paper_figures_report.txt
 """
 
@@ -1173,6 +1175,74 @@ def run_simple_effects_analysis(df, output_dir):
                 print(f"    {model}: Rep η² = {eta2:.1f}%")
     else:
         print("⚠ No simple effects data computed")
+
+    # --- Supplementary: simple effects for ALL reps/models (no ANOVA exclusions) ---
+    # This captures trends for SNS, randomized_smiles, conformal, QRF etc.
+    all_rows_full = []
+    for strategy in df['strategy'].unique():
+        strategy_df = df[df['strategy'] == strategy]
+        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+
+        # Performance (R² at σ=0.3) — no exclusions
+        df_sigma = strategy_df[np.abs(strategy_df['sigma'] - 0.3) < 0.05].copy()
+        df_sigma = df_sigma[df_sigma['r2'] > -10].dropna(subset=['r2', 'model', 'rep'])
+
+        if len(df_sigma) >= 10:
+            for r in run_simple_effects(df_sigma, 'r2', 'rep', 'model'):
+                all_rows_full.append({
+                    'Strategy': strategy_label, 'Analysis': 'Performance',
+                    'Type': 'Model effect', 'Within': r['group'],
+                    'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
+                })
+            for r in run_simple_effects(df_sigma, 'r2', 'model', 'rep'):
+                all_rows_full.append({
+                    'Strategy': strategy_label, 'Analysis': 'Performance',
+                    'Type': 'Rep effect', 'Within': r['group'],
+                    'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
+                })
+
+        # Robustness (NDS) — no exclusions
+        nds_data = []
+        for (model, rep, iteration), group in strategy_df.groupby(['model', 'rep', 'iteration']):
+            group = group.sort_values('sigma')
+            if len(group) < 3:
+                continue
+            baseline = group[group['sigma'] == 0.0]
+            if len(baseline) == 0 or baseline['r2'].values[0] < BASELINE_THRESHOLD:
+                continue
+            try:
+                slope, _, _, _, _ = stats.linregress(group['sigma'], group['r2'])
+                nds_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'nds': slope})
+            except:
+                continue
+
+        if len(nds_data) >= 10:
+            nds_df_full = pd.DataFrame(nds_data)
+            for r in run_simple_effects(nds_df_full, 'nds', 'rep', 'model'):
+                all_rows_full.append({
+                    'Strategy': strategy_label, 'Analysis': 'Robustness',
+                    'Type': 'Model effect', 'Within': r['group'],
+                    'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
+                })
+            for r in run_simple_effects(nds_df_full, 'nds', 'model', 'rep'):
+                all_rows_full.append({
+                    'Strategy': strategy_label, 'Analysis': 'Robustness',
+                    'Type': 'Rep effect', 'Within': r['group'],
+                    'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
+                })
+
+    if all_rows_full:
+        se_full_df = pd.DataFrame(all_rows_full)
+        se_full_df.to_csv(output_dir / 'table1_supp_simple_effects_all_reps.csv', index=False)
+        print(f"✓ Saved table1_supp_simple_effects_all_reps.csv ({len(se_full_df)} rows)")
+
+        # Print SNS specifically since it was excluded from ANOVA
+        rob_model = se_full_df[(se_full_df['Analysis'] == 'Robustness') & (se_full_df['Type'] == 'Model effect')]
+        sns_rows = rob_model[rob_model['Within'] == 'sns']
+        if len(sns_rows) > 0:
+            print(f"  SNS robustness — Model η² (mean across strategies): {sns_rows['eta2'].mean():.1f}%")
+    else:
+        print("⚠ No supplementary simple effects data computed")
 
 
 # =============================================================================
@@ -2415,6 +2485,88 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     lambda m: get_model_label(m))
                 unc_metrics_df.to_csv(output_dir / 'table4_uncertainty_metrics.csv', index=False)
                 print("✓ Saved table4_uncertainty_metrics.csv")
+
+    # Table 4b: Uncertainty metrics across ALL strategies and reps
+    # Answers: do uncertainty patterns hold across noise types and representations?
+    if unc_df is not None and len(unc_df) > 0:
+        unc_col = None
+        for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty']:
+            if col in unc_df.columns:
+                unc_col = col
+                break
+
+        if unc_col:
+            all_unc_rows = []
+            strategies = unc_df['strategy'].unique() if 'strategy' in unc_df.columns else ['all']
+            reps = unc_df['rep'].unique() if 'rep' in unc_df.columns else ['all']
+
+            for strategy in strategies:
+                for rep in reps:
+                    subset = unc_df.copy()
+                    if 'strategy' in subset.columns:
+                        subset = subset[subset['strategy'] == strategy]
+                    if 'rep' in subset.columns:
+                        subset = subset[subset['rep'] == rep]
+                    if len(subset) == 0:
+                        continue
+
+                    for model in subset['model'].unique():
+                        model_data = subset[subset['model'] == model]
+                        unc_values = model_data[unc_col].values
+                        mask = np.isfinite(unc_values)
+                        if mask.sum() < 100 or unc_values[mask].mean() < 1e-3:
+                            continue
+
+                        # Error computation
+                        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                            errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+                        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                            errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
+                        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
+                            errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
+                        else:
+                            continue
+
+                        valid = mask & np.isfinite(errors)
+                        if valid.sum() < 100:
+                            continue
+
+                        unc_err_corr, _ = stats.spearmanr(unc_values[valid], errors[valid])
+
+                        unc_noise_corr = np.nan
+                        if 'injected_noise' in model_data.columns:
+                            noise_mag = np.abs(model_data['injected_noise'].values)
+                            noise_mask = valid & np.isfinite(noise_mag)
+                            if noise_mask.sum() > 100:
+                                unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
+
+                        all_unc_rows.append({
+                            'Strategy': STRATEGY_LABELS.get(strategy, strategy),
+                            'Rep': rep,
+                            'Model': get_model_label(model),
+                            'Unc-Error ρ': unc_err_corr,
+                            'Unc-Noise ρ': unc_noise_corr,
+                            'Mean Uncertainty': unc_values[valid].mean(),
+                        })
+
+            if all_unc_rows:
+                unc_full_df = pd.DataFrame(all_unc_rows)
+                unc_full_df.to_csv(output_dir / 'table4_supp_uncertainty_by_strategy_rep.csv', index=False)
+                print(f"✓ Saved table4_supp_uncertainty_by_strategy_rep.csv ({len(unc_full_df)} rows)")
+
+                # Summary: which model has best unc-error correlation across strategies?
+                mean_by_model = unc_full_df.groupby('Model')['Unc-Error ρ'].mean().sort_values(ascending=False)
+                print("  Uncertainty-Error ρ (mean across strategies/reps):")
+                for model, rho in mean_by_model.head(5).items():
+                    print(f"    {model}: {rho:.3f}")
+
+                # Are BNNs better on any strategy?
+                bnn_rows = unc_full_df[unc_full_df['Model'].str.contains('BNN', case=False)]
+                if len(bnn_rows) > 0:
+                    bnn_by_strat = bnn_rows.groupby('Strategy')['Unc-Error ρ'].mean()
+                    print("  BNN Unc-Error ρ by strategy:")
+                    for strat, rho in bnn_by_strat.items():
+                        print(f"    {strat}: {rho:.3f}")
 
     # Table 5: Model rankings at specific sigma levels (shows ranking stability)
     # Uses PDV + legacy only
