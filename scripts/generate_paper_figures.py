@@ -109,6 +109,7 @@ GENERATE_SUPPLEMENTARY = True
 ANOVA_MODELS_EXCLUDE = {
     'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',  # Wrappers (rho > 0.99)
     'qrf',  # Redundant with rf (rho = 0.996)
+    'ngboost',  # TEMPORARY: valprop/hetero still running — remove when complete
 }
 
 ANOVA_REPS_EXCLUDE = {
@@ -338,9 +339,9 @@ def load_uncertainty_data(results_dir):
         combined = pd.concat(all_data, ignore_index=True)
         print(f"Loaded uncertainty data: {len(combined)} rows")
         if 'strategy' in combined.columns:
-            print(f"  Strategies: {sorted(combined['strategy'].unique())}")
+            print(f"  Strategies: {sorted(combined['strategy'].dropna().unique())}")
         if 'rep' in combined.columns:
-            print(f"  Representations: {sorted(combined['rep'].unique())}")
+            print(f"  Representations: {sorted(combined['rep'].dropna().unique())}")
         return combined
     return None
 
