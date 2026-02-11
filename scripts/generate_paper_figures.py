@@ -109,7 +109,6 @@ GENERATE_SUPPLEMENTARY = True
 ANOVA_MODELS_EXCLUDE = {
     'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',  # Wrappers (rho > 0.99)
     'qrf',  # Redundant with rf (rho = 0.996)
-    'ngboost',  # TEMPORARY: valprop/hetero still running — remove when complete
 }
 
 ANOVA_REPS_EXCLUDE = {
@@ -249,11 +248,17 @@ REP_LABELS = {
     'smiles': 'SMILES',
     'randomized_smiles': 'R-SMILES',
     'mhggnn': 'MHG-GNN',
+    'mol2vec': 'Mol2Vec',
 }
 
 def get_model_label(model):
     """Get clean display label for model."""
-    return MODEL_LABELS.get(model, model.upper())
+    if model in MODEL_LABELS:
+        return MODEL_LABELS[model]
+    if model.lower() in MODEL_LABELS:
+        return MODEL_LABELS[model.lower()]
+    # Fallback: replace underscores, title case (avoids ugly DNN_BNN_FULL)
+    return model.replace('_', '-').replace('bnn', 'BNN').replace('dnn', 'DNN').replace('mlp', 'MLP').title() if '_' in model else model.upper()
 
 def get_rep_label(rep):
     """Get clean display label for representation."""
@@ -293,6 +298,25 @@ def load_anova_data(results_dir):
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
+
+        # Normalize model names: bnn_full → dnn_bnn_full etc.
+        # process_and_train.py saves BNN-DNN variants as 'bnn_full' etc.
+        # but all downstream code expects 'dnn_bnn_full' prefix.
+        BNN_NAME_MAP = {
+            'bnn_full': 'dnn_bnn_full',
+            'bnn_last': 'dnn_bnn_last',
+            'bnn_variational': 'dnn_bnn_variational',
+        }
+        if 'model' in combined.columns:
+            n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
+            combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
+            if n_renamed > 0:
+                print(f"  Normalized {n_renamed} BNN model names (bnn_* → dnn_bnn_*)")
+
+        # Normalize column: representation → rep
+        if 'representation' in combined.columns and 'rep' not in combined.columns:
+            combined.rename(columns={'representation': 'rep'}, inplace=True)
+
         print(f"Loaded QM9 ANOVA data: {len(combined)} rows from {len(all_data)} files")
         return combined
     return None
@@ -576,14 +600,20 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
             pivot = pivot[col_order]
             pivot.index = [get_model_label(m) for m in pivot.index]
 
-            # Clip extreme NDS values (e.g. diverged models) for sane colormap
+            # Clip extreme NDS values for colormap, but annotate with actual values
             NDS_CLIP = 2.0
             pivot_display = pivot.clip(lower=-NDS_CLIP)
             vals = pivot_display.values[~np.isnan(pivot_display.values)]
             vmin = vals.min() if len(vals) > 0 else -NDS_CLIP
-            sns.heatmap(pivot_display, annot=True, fmt='.2f', cmap='RdBu', center=0,
+            # Custom annotation: actual values (compact format for extremes)
+            annot_text = pivot.applymap(
+                lambda x: '' if pd.isna(x) else (f'{x:.0f}' if abs(x) >= 10 else f'{x:.2f}'))
+            # Black background so NaN/missing cells are clearly marked
+            ax.set_facecolor('black')
+            sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdBu', center=0,
                         vmin=vmin, vmax=0,
-                        ax=ax, cbar_kws={'label': 'NDS'})
+                        ax=ax, cbar_kws={'label': 'NDS'}, linewidths=0.5,
+                        linecolor='#333333')
             ax.set_title(f'{dataset}', fontweight='bold')
             ax.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
             if i > 0:
@@ -750,7 +780,18 @@ def calculate_nds(df, baseline_threshold=BASELINE_THRESHOLD):
             'r2_fit': r_val**2,
         })
 
-    return pd.DataFrame(nds_results), pd.DataFrame(excluded)
+    nds_df = pd.DataFrame(nds_results)
+
+    # Flag suspicious positive NDS values (performance improving with noise)
+    if len(nds_df) > 0:
+        positive = nds_df[nds_df['nds'] > 0]
+        if len(positive) > 0:
+            print(f"\n  ⚠ WARNING: {len(positive)} configs have POSITIVE NDS (improving with noise):")
+            for _, row in positive.iterrows():
+                print(f"    {row['model']}/{row['rep']}/{row['strategy']}: NDS={row['nds']:.4f}")
+            print("    These are likely statistical artifacts from incomplete data.\n")
+
+    return nds_df, pd.DataFrame(excluded)
 
 
 def calculate_coverage(y_true, y_pred, uncertainty, k=1):
@@ -1538,6 +1579,19 @@ def create_figure1(df, nds_df, output_dir):
     key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost']
     pdv_data = df[(df['rep'] == 'pdv') & (df['strategy'] == 'legacy')]
 
+    # Background: all non-key models in light grey so full range is visible
+    all_models = pdv_data['model'].unique()
+    for model in all_models:
+        if model in key_models:
+            continue
+        model_data = pdv_data[pdv_data['model'] == model]
+        if len(model_data) == 0:
+            continue
+        avg = model_data.groupby('sigma')['r2'].mean().reset_index()
+        ax_a.plot(avg['sigma'], avg['r2'], '-', color='#cccccc', alpha=0.4,
+                  linewidth=1.0, zorder=1)
+
+    # Foreground: key models highlighted with bold lines
     for model in key_models:
         model_data = pdv_data[pdv_data['model'] == model]
         if len(model_data) == 0:
@@ -1546,7 +1600,7 @@ def create_figure1(df, nds_df, output_dir):
         avg = model_data.groupby('sigma')['r2'].mean().reset_index()
         color = MODEL_COLORS.get(model, '#333333')
         ax_a.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model),
-                  color=color, markersize=4)
+                  color=color, markersize=4, linewidth=2.0, alpha=0.85, zorder=5)
 
     ax_a.set_xlabel('Noise Level (σ)')
     ax_a.set_ylabel('R²')
@@ -1597,6 +1651,20 @@ def create_figure1(df, nds_df, output_dir):
     ax_ea = axes_e[0]
 
     ecfp4_data = df[(df['rep'] == 'ecfp4') & (df['strategy'] == 'legacy')]
+
+    # Background: all non-key models in light grey
+    all_ecfp4_models = ecfp4_data['model'].unique()
+    for model in all_ecfp4_models:
+        if model in key_models:
+            continue
+        model_data = ecfp4_data[ecfp4_data['model'] == model]
+        if len(model_data) == 0:
+            continue
+        avg = model_data.groupby('sigma')['r2'].mean().reset_index()
+        ax_ea.plot(avg['sigma'], avg['r2'], '-', color='#cccccc', alpha=0.4,
+                   linewidth=1.0, zorder=1)
+
+    # Foreground: key models highlighted
     for model in key_models:
         model_data = ecfp4_data[ecfp4_data['model'] == model]
         if len(model_data) == 0:
@@ -1604,7 +1672,7 @@ def create_figure1(df, nds_df, output_dir):
         avg = model_data.groupby('sigma')['r2'].mean().reset_index()
         color = MODEL_COLORS.get(model, '#333333')
         ax_ea.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model),
-                   color=color, markersize=4)
+                   color=color, markersize=4, linewidth=2.0, alpha=0.85, zorder=5)
 
     ax_ea.set_xlabel('Noise Level (σ)')
     ax_ea.set_ylabel('R²')
@@ -1754,7 +1822,7 @@ def create_figure3(nds_df, validation_df, output_dir):
     # Filter to PDV only for consistent comparison (don't mix representations)
     nds_pdv = nds_df[nds_df['rep'] == 'pdv'] if 'rep' in nds_df.columns else nds_df
 
-    # Panel A: Bump chart - ranks across strategies (PDV only, ANOVA models)
+    # Panel A: Heatmap - NDS by model × strategy (PDV only, ANOVA models)
     ax_a = axes[0]
 
     if len(nds_pdv) > 0:
@@ -1764,23 +1832,18 @@ def create_figure3(nds_df, validation_df, output_dir):
         # Only keep models with data for all strategies
         pivot = pivot.dropna()
         if len(pivot) > 0:
-            rankings = pivot.rank(ascending=False)  # Higher NDS = rank 1
+            strat_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                          if c in pivot.columns]
+            pivot = pivot[strat_order]
+            pivot.index = [get_model_label(m) for m in pivot.index]
+            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
+            # Sort by mean NDS (best at top)
+            pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
-            strategies = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                          if c in rankings.columns]
-
-            for model in rankings.index:
-                ranks = [rankings.loc[model, s] for s in strategies if s in rankings.columns]
-                color = MODEL_COLORS.get(model, '#333333')
-                ax_a.plot(range(len(strategies)), ranks, 'o-', label=get_model_label(model), color=color,
-                          markersize=4, linewidth=1.5)
-
-            ax_a.set_xticks(range(len(strategies)))
-            ax_a.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strategies], rotation=45, ha='right')
-            ax_a.set_ylabel('Rank (1 = most robust)')
-            ax_a.set_title('A. Rankings Across Strategies (PDV)', fontweight='bold')
-            ax_a.invert_yaxis()
-            ax_a.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=6)
+            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+                        ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+            ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
+            ax_a.set_ylabel('')
 
     # Panel B: Scatter - Baseline R² vs NDS (PDV only, legacy strategy)
     ax_b = axes[1]
@@ -1847,23 +1910,21 @@ def create_figure3(nds_df, validation_df, output_dir):
     if len(nds_ecfp4) > 0:
         fig_e, axes_e = plt.subplots(1, 2, figsize=(10, 5))
 
-        # Bump chart across strategies
+        # Heatmap across strategies
         ax_ea = axes_e[0]
         pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
         if len(pivot) > 0:
-            rankings = pivot.rank(ascending=False)
             strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                          if c in rankings.columns]
-            for model in rankings.index:
-                ranks = [rankings.loc[model, s] for s in strat_list]
-                color = MODEL_COLORS.get(model, '#333333')
-                ax_ea.plot(range(len(strat_list)), ranks, 'o-', label=get_model_label(model),
-                           color=color, markersize=4)
-            ax_ea.set_xticks(range(len(strat_list)))
-            ax_ea.set_xticklabels([STRATEGY_LABELS.get(s, s) for s in strat_list], rotation=45, ha='right')
-            ax_ea.set_ylabel('Rank (1 = most robust)')
-            ax_ea.set_title('A. Rankings Across Strategies (ECFP4)', fontweight='bold')
-            ax_ea.invert_yaxis()
+                          if c in pivot.columns]
+            pivot = pivot[strat_list].dropna()
+            pivot.index = [get_model_label(m) for m in pivot.index]
+            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
+            pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
+
+            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+                        ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+            ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
+            ax_ea.set_ylabel('')
 
         # Baseline vs NDS scatter
         ax_eb = axes_e[1]
@@ -1903,14 +1964,13 @@ def create_figure4(df, nds_df, output_dir):
     """
     dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
 
-    # 2x2 layout: top row = PRIMARY_STRATEGY, bottom row = CONTRAST_STRATEGY
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    for row, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
+    for col, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
 
-        # Panel A/C: R² vs σ
-        ax_line = axes[row, 0]
+        ax_line = axes[col]
         data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
         for model in dnn_variants:
@@ -1924,33 +1984,12 @@ def create_figure4(df, nds_df, output_dir):
 
         ax_line.set_xlabel('Noise Level (σ)')
         ax_line.set_ylabel('R²')
-        panel_letter = 'A' if row == 0 else 'C'
+        panel_letter = 'A' if col == 0 else 'B'
         ax_line.set_title(f'{panel_letter}. R² vs σ ({strategy_label})', fontweight='bold')
         ax_line.legend(loc='lower left', fontsize=7)
         ax_line.set_ylim(-0.1, 1.0)
 
-        # Panel B/D: NDS comparison
-        ax_bar = axes[row, 1]
-        # REVIEW: Currently filtering to PRIMARY_REP + this strategy
-        dnn_nds = nds_df[(nds_df['model'].isin(dnn_variants)) &
-                         (nds_df['rep'] == PRIMARY_REP) &
-                         (nds_df['strategy'] == strategy)]
-
-        if len(dnn_nds) > 0:
-            mean_nds = dnn_nds.groupby('model')['nds'].mean().reindex(dnn_variants)
-
-            colors = [MODEL_COLORS.get(m, '#333333') for m in dnn_variants]
-            x = range(len(dnn_variants))
-
-            ax_bar.bar(x, mean_nds.values, color=colors)
-            ax_bar.set_xticks(x)
-            ax_bar.set_xticklabels([get_model_label(m) for m in dnn_variants], rotation=45, ha='right')
-            ax_bar.set_ylabel('NDS (higher = more robust)')
-            panel_letter = 'B' if row == 0 else 'D'
-            ax_bar.set_title(f'{panel_letter}. NDS ({strategy_label})', fontweight='bold')
-            ax_bar.axhline(0, color='black', linewidth=0.5)
-
-    for ax in axes.flat:
+    for ax in axes:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
@@ -1958,6 +1997,15 @@ def create_figure4(df, nds_df, output_dir):
     plt.savefig(output_dir / 'fig4_dnn_family.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved fig4_dnn_family.png (showing {PRIMARY_STRATEGY} vs {CONTRAST_STRATEGY})")
+
+    # Output NDS table for DNN family (replaces bar chart panels)
+    dnn_nds_data = nds_df[(nds_df['model'].isin(dnn_variants)) & (nds_df['rep'] == PRIMARY_REP)]
+    if len(dnn_nds_data) > 0:
+        dnn_table = dnn_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        dnn_table.index = [get_model_label(m) for m in dnn_table.index]
+        dnn_table.columns = [STRATEGY_LABELS.get(s, s) for s in dnn_table.columns]
+        dnn_table.to_csv(output_dir / 'table_fig4_dnn_nds.csv')
+        print("✓ Saved table_fig4_dnn_nds.csv")
 
     # REVIEW: Check if the pattern holds - does BNN > DNN in both strategies?
 
@@ -1978,15 +2026,14 @@ def create_figure5(df, nds_df, output_dir):
     mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
     rf_models = ['rf', 'qrf']
 
-    # 2x3 layout: compare PRIMARY_STRATEGY vs CONTRAST_STRATEGY
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    # 1x2 layout: MLP R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    for row, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
+    for col, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
         data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
-        # Panel A/D: MLP R² vs σ
-        ax_line = axes[row, 0]
+        ax_line = axes[col]
 
         for model in mlp_variants:
             model_data = data[data['model'] == model]
@@ -1999,49 +2046,12 @@ def create_figure5(df, nds_df, output_dir):
 
         ax_line.set_xlabel('Noise Level (σ)')
         ax_line.set_ylabel('R²')
-        panel_letter = 'A' if row == 0 else 'D'
+        panel_letter = 'A' if col == 0 else 'B'
         ax_line.set_title(f'{panel_letter}. MLP R² vs σ ({strategy_label})', fontweight='bold')
         ax_line.legend(loc='lower left', fontsize=6)
         ax_line.set_ylim(-0.1, 1.0)
 
-        # Panel B/E: MLP NDS
-        ax_mlp = axes[row, 1]
-        mlp_nds = nds_df[(nds_df['model'].isin(mlp_variants)) &
-                         (nds_df['rep'] == PRIMARY_REP) &
-                         (nds_df['strategy'] == strategy)]
-
-        if len(mlp_nds) > 0:
-            mean_nds = mlp_nds.groupby('model')['nds'].mean().reindex(mlp_variants)
-            colors = [MODEL_COLORS.get(m, '#333333') for m in mlp_variants]
-            x = range(len(mlp_variants))
-
-            ax_mlp.bar(x, mean_nds.values, color=colors)
-            ax_mlp.set_xticks(x)
-            ax_mlp.set_xticklabels([get_model_label(m) for m in mlp_variants], rotation=45, ha='right')
-            ax_mlp.set_ylabel('NDS')
-            panel_letter = 'B' if row == 0 else 'E'
-            ax_mlp.set_title(f'{panel_letter}. MLP NDS ({strategy_label})', fontweight='bold')
-            ax_mlp.axhline(0, color='black', linewidth=0.5)
-
-        # Panel C/F: RF vs QRF
-        ax_rf = axes[row, 2]
-        rf_nds = nds_df[(nds_df['model'].isin(rf_models)) &
-                        (nds_df['rep'] == PRIMARY_REP) &
-                        (nds_df['strategy'] == strategy)]
-
-        if len(rf_nds) > 0:
-            mean_nds = rf_nds.groupby('model')['nds'].mean().reindex(rf_models)
-            colors = [MODEL_COLORS.get(m, '#333333') for m in rf_models]
-
-            ax_rf.bar(range(len(rf_models)), mean_nds.values, color=colors)
-            ax_rf.set_xticks(range(len(rf_models)))
-            ax_rf.set_xticklabels(['RF', 'QRF'])
-            ax_rf.set_ylabel('NDS')
-            panel_letter = 'C' if row == 0 else 'F'
-            ax_rf.set_title(f'{panel_letter}. RF vs QRF ({strategy_label})', fontweight='bold')
-            ax_rf.axhline(0, color='black', linewidth=0.5)
-
-    for ax in axes.flat:
+    for ax in axes:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
@@ -2049,6 +2059,23 @@ def create_figure5(df, nds_df, output_dir):
     plt.savefig(output_dir / 'fig5_mlp_rf_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved fig5_mlp_rf_comparison.png (showing {PRIMARY_STRATEGY} vs {CONTRAST_STRATEGY})")
+
+    # Output NDS tables for MLP family and RF/QRF (replaces bar chart panels)
+    mlp_nds_data = nds_df[(nds_df['model'].isin(mlp_variants)) & (nds_df['rep'] == PRIMARY_REP)]
+    if len(mlp_nds_data) > 0:
+        mlp_table = mlp_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        mlp_table.index = [get_model_label(m) for m in mlp_table.index]
+        mlp_table.columns = [STRATEGY_LABELS.get(s, s) for s in mlp_table.columns]
+        mlp_table.to_csv(output_dir / 'table_fig5_mlp_nds.csv')
+        print("✓ Saved table_fig5_mlp_nds.csv")
+
+    rf_nds_data = nds_df[(nds_df['model'].isin(rf_models)) & (nds_df['rep'] == PRIMARY_REP)]
+    if len(rf_nds_data) > 0:
+        rf_table = rf_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        rf_table.index = [get_model_label(m) for m in rf_table.index]
+        rf_table.columns = [STRATEGY_LABELS.get(s, s) for s in rf_table.columns]
+        rf_table.to_csv(output_dir / 'table_fig5_rf_qrf_nds.csv')
+        print("✓ Saved table_fig5_rf_qrf_nds.csv")
 
     # REVIEW: Does the probabilistic advantage hold under both noise types?
 
@@ -2725,7 +2752,7 @@ def create_interaction_figure(nds_df, output_dir):
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # Panel A: Bump chart — model ranks across representations
+    # Panel A: Heatmap — NDS by model × representation (Gaussian strategy)
     ax_a = axes[0]
 
     # Get mean NDS per model x rep (Gaussian strategy)
@@ -2738,25 +2765,15 @@ def create_interaction_figure(nds_df, output_dir):
     rep_order += [r for r in valid_reps if r not in rep_order]
 
     if len(rep_order) >= 2:
-        rankings = pivot[rep_order].rank(ascending=False)  # Higher NDS = rank 1 (most robust)
+        hm_pivot = pivot[rep_order].dropna(how='all')
+        hm_pivot.index = [get_model_label(m) for m in hm_pivot.index]
+        # Sort by mean NDS (best at top)
+        hm_pivot = hm_pivot.loc[hm_pivot.mean(axis=1).sort_values(ascending=False).index]
 
-        for model in rankings.index:
-            ranks = [rankings.loc[model, r] if pd.notna(rankings.loc[model, r]) else np.nan
-                     for r in rep_order]
-            if all(np.isnan(r) for r in ranks):
-                continue
-            color = MODEL_COLORS.get(model, '#333333')
-            valid_idx = [i for i, r in enumerate(ranks) if not np.isnan(r)]
-            valid_ranks = [ranks[i] for i in valid_idx]
-            ax_a.plot(valid_idx, valid_ranks, 'o-', label=get_model_label(model),
-                      color=color, markersize=5, alpha=0.8)
-
-        ax_a.set_xticks(range(len(rep_order)))
-        ax_a.set_xticklabels(rep_order, rotation=45, ha='right')
-        ax_a.set_ylabel('Rank (1 = most robust)')
-        ax_a.set_title('A. Model Rankings Across Representations (Gaussian)', fontweight='bold')
-        ax_a.invert_yaxis()
-        ax_a.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=6)
+        sns.heatmap(hm_pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+                    ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+        ax_a.set_title('A. Model × Representation Interaction (Gaussian NDS)', fontweight='bold')
+        ax_a.set_ylabel('')
 
     # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV
     ax_b = axes[1]
@@ -2789,7 +2806,7 @@ def create_interaction_figure(nds_df, output_dir):
 
     ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. Representation Changes Model Rankings', fontweight='bold')
+    ax_b.set_title('B. ECFP4 vs PDV Robustness (Disordinal Interaction)', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -2806,22 +2823,29 @@ def create_interaction_figure(nds_df, output_dir):
 # =============================================================================
 
 def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_labels=None):
-    """Helper: scatter plot of ALL model x rep configurations for given strategies.
+    """Helper: scatter plot of ANOVA model x rep configurations for given strategies.
 
     Each point is one model x rep configuration; color = model, shape = rep.
+    Filtered to ANOVA-included models/reps for readability.
     """
     strategies_available = [s for s in strategies if s in nds_df['strategy'].unique()]
     if not strategies_available:
         return
+
+    # Filter to ANOVA-included models and reps for readability
+    anova_nds = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE) &
+                       ~nds_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    # Exclude graph models
+    graph_models = {'graph_gp', 'gcn', 'gin', 'ginct', 'gin2d'}
+    anova_nds = anova_nds[~anova_nds['model'].isin(graph_models)]
 
     n_panels = len(strategies_available)
     fig, axes = plt.subplots(1, n_panels, figsize=(5.5 * n_panels, 5))
     if n_panels == 1:
         axes = [axes]
 
-    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^', 'sns': 'D',
-                   'mhggnn': 'v', 'randomized_smiles': 'P', 'mol2vec': '*',
-                   'chemberta': 'X'}
+    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^',
+                   'mhggnn': 'v'}
 
     last_mean_nds = None
     for idx, strategy in enumerate(strategies_available):
@@ -2829,7 +2853,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
         label_prefix = f'{panel_labels[idx]}. ' if panel_labels and idx < len(panel_labels) else ''
 
-        strat_data = nds_df[nds_df['strategy'] == strategy]
+        strat_data = anova_nds[anova_nds['strategy'] == strategy]
         mean_nds = strat_data.groupby(['model', 'rep']).agg(
             nds_mean=('nds', 'mean'),
             baseline_r2=('baseline_r2', 'mean')
@@ -2840,7 +2864,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
             color = MODEL_COLORS.get(row['model'], '#333333')
             marker = rep_markers.get(row['rep'], 'o')
             ax.scatter(row['baseline_r2'], row['nds_mean'],
-                       color=color, marker=marker, s=50, alpha=0.8,
+                       color=color, marker=marker, s=50, alpha=0.7,
                        edgecolors='black', linewidths=0.5)
 
         ax.set_xlabel('Baseline R² (σ=0)')
@@ -2853,14 +2877,27 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-    # Create legend for reps (markers) on last panel
+    # Dual legend: rep shapes (first panel) + model colors (last panel)
     if last_mean_nds is not None:
         from matplotlib.lines import Line2D
+
+        # Rep legend on first panel
         rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
-                              linestyle='None', markersize=6, label=r)
-                       for r in sorted(last_mean_nds['rep'].unique()) if r in rep_markers]
-        axes[-1].legend(handles=rep_handles, loc='lower right', fontsize=6,
-                        title='Rep', title_fontsize=7)
+                              linestyle='None', markersize=6,
+                              label=REP_LABELS.get(r, r))
+                       for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn']
+                       if r in last_mean_nds['rep'].unique()]
+        axes[0].legend(handles=rep_handles, loc='lower left', fontsize=5,
+                       title='Rep', title_fontsize=6)
+
+        # Model color legend on last panel (only models present in data)
+        models_present = sorted(last_mean_nds['model'].unique())
+        model_handles = [Line2D([0], [0], marker='o', color=MODEL_COLORS.get(m, '#333333'),
+                                linestyle='None', markersize=5,
+                                label=get_model_label(m))
+                         for m in models_present]
+        axes[-1].legend(handles=model_handles, loc='lower right', fontsize=4,
+                        title='Model', title_fontsize=5, ncol=2)
 
     plt.tight_layout()
     plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
