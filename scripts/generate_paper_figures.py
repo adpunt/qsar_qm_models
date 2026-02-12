@@ -483,6 +483,7 @@ def _normalize_validation_names(df):
     val_model_map = {
         'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',
         'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
+        'LightGBM': 'lgb', 'LGBM': 'lgb',
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
         'BNN-Var': 'dnn_bnn_variational',
     }
@@ -611,7 +612,7 @@ def calculate_validation_nds(validation_df):
     return None
 
 
-def create_validation_figures(validation_df, val_nds_df, output_dir):
+def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir):
     """Generate all validation-related figures and tables.
 
     Validation data (LogD, Caco2_Efflux, hERG-Ki) is integrated into the paper
@@ -620,6 +621,10 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
     Outputs:
     - fig_validation_overview.png: NDS heatmap per dataset (like Figure 1B)
     - fig_validation_anova.png: η² decomposition on validation datasets
+    - fig_validation_degradation.png: R² vs σ curves per dataset
+    - fig_validation_strategy.png: Strategy comparison across datasets
+    - fig_validation_qm9_correlation.png: QM9 vs external NDS correlation
+    - fig_validation_rep_comparison.png: Representation effect on external datasets
     - table_validation_nds.csv: Full NDS table across datasets
     - table_validation_anova.csv: Validation ANOVA statistics
     """
@@ -709,7 +714,7 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
                 ax = axes[i]
                 factors = ['Model', 'Rep', 'Interaction']
                 values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                colors = ['#3498db', '#E69F00', '#0072B2']  # Blue, Orange, Dark blue
+                colors = ['#2166AC', '#B2182B', '#7A3B9E']  # Blue, Red, Purple
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -788,6 +793,221 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
         if rows:
             pd.DataFrame(rows).to_csv(output_dir / 'table_validation_probabilistic.csv', index=False)
             print("✓ Saved table_validation_probabilistic.csv")
+
+    # --- Figure: R² degradation curves per dataset ---
+    if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
+        for dataset in sorted(datasets):
+            ds_df = validation_df[validation_df['dataset'] == dataset]
+            if len(ds_df) == 0:
+                continue
+
+            # One panel per representation
+            reps = sorted(ds_df['rep'].unique()) if 'rep' in ds_df.columns else ['all']
+            n_reps = len(reps)
+            fig, axes_deg = plt.subplots(1, n_reps, figsize=(5 * n_reps, 5), squeeze=False)
+            axes_deg = axes_deg[0]
+
+            for j, rep in enumerate(reps):
+                ax = axes_deg[j]
+                rep_df = ds_df[ds_df['rep'] == rep] if 'rep' in ds_df.columns else ds_df
+                # Use legacy strategy for clean comparison
+                leg_df = rep_df[rep_df['strategy'] == 'legacy'] if 'strategy' in rep_df.columns else rep_df
+
+                for model in sorted(leg_df['model'].unique()):
+                    m_df = leg_df[leg_df['model'] == model]
+                    sigma_means = m_df.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
+                    if len(sigma_means) < 2:
+                        continue
+                    color = MODEL_COLORS.get(model, '#333333')
+                    ax.plot(sigma_means['sigma'], sigma_means['r2'], 'o-',
+                            label=get_model_label(model), color=color,
+                            markersize=4, linewidth=1.5, alpha=0.8)
+
+                ax.set_xlabel('Injected Noise Level (σ)')
+                ax.set_ylabel('R²')
+                ax.set_title(f'{rep.upper()}', fontweight='bold')
+                ax.axhline(0, color='grey', linewidth=0.5, linestyle='--')
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                if j == 0:
+                    ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
+
+            plt.suptitle(f'{dataset}: R² Degradation with Noise (Gaussian Strategy)',
+                         fontweight='bold', y=1.02)
+            plt.tight_layout()
+            safe_name = dataset.replace('/', '_').replace(' ', '_')
+            plt.savefig(output_dir / f'fig_validation_degradation_{safe_name}.png',
+                        dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"✓ Saved fig_validation_degradation_{safe_name}.png")
+
+    # --- Figure: Strategy comparison across datasets ---
+    if val_nds_df is not None and 'dataset' in val_nds_df.columns and 'strategy' in val_nds_df.columns:
+        strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                      if s in val_nds_df['strategy'].unique()]
+        if len(strategies) >= 2:
+            # Heatmap: mean NDS by strategy × dataset (averaged across models and reps)
+            pivot_strat = val_nds_df.pivot_table(
+                values='nds', index='strategy', columns='dataset', aggfunc='mean')
+            # Reorder strategies
+            strat_order = [s for s in strategies if s in pivot_strat.index]
+            pivot_strat = pivot_strat.loc[strat_order]
+            pivot_strat['MEAN'] = pivot_strat.mean(axis=1)
+            pivot_strat = pivot_strat.sort_values('MEAN', ascending=False)
+            pivot_strat.index = [STRATEGY_LABELS.get(s, s) for s in pivot_strat.index]
+
+            fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
+            ax.set_facecolor('black')
+            sns.heatmap(pivot_strat, annot=True, fmt='.3f', cmap='RdBu', center=0, vmax=0,
+                        ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
+                        linecolor='#333333')
+            ax.set_title('Noise Strategy Robustness Across Validation Datasets', fontweight='bold')
+            ax.set_ylabel('Strategy')
+            plt.tight_layout()
+            plt.savefig(output_dir / 'fig_validation_strategy.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("✓ Saved fig_validation_strategy.png")
+
+    # --- Figure: Representation comparison on external datasets ---
+    if val_nds_df is not None and 'rep' in val_nds_df.columns and 'dataset' in val_nds_df.columns:
+        reps_available = sorted(val_nds_df['rep'].unique())
+        if len(reps_available) >= 2:
+            # Mean NDS by rep × dataset (averaged across models and strategies)
+            pivot_rep = val_nds_df.pivot_table(
+                values='nds', index='rep', columns='dataset', aggfunc='mean')
+            pivot_rep['MEAN'] = pivot_rep.mean(axis=1)
+            pivot_rep = pivot_rep.sort_values('MEAN', ascending=False)
+
+            fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
+            ax.set_facecolor('black')
+            sns.heatmap(pivot_rep, annot=True, fmt='.3f', cmap='RdBu', center=0, vmax=0,
+                        ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
+                        linecolor='#333333')
+            ax.set_title('Representation Effect on Robustness (Validation Datasets)', fontweight='bold')
+            ax.set_ylabel('Representation')
+            plt.tight_layout()
+            plt.savefig(output_dir / 'fig_validation_rep_comparison.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("✓ Saved fig_validation_rep_comparison.png")
+
+    # --- Figure: QM9 vs External NDS correlation ---
+    if qm9_nds_df is not None and val_nds_df is not None and 'dataset' in val_nds_df.columns:
+        # Compute mean QM9 NDS per model (across reps and strategies)
+        qm9_model_nds = qm9_nds_df.groupby('model')['nds'].mean().reset_index()
+        qm9_model_nds = qm9_model_nds.rename(columns={'nds': 'qm9_nds'})
+
+        # For each external dataset, compute mean NDS per model
+        for dataset in sorted(datasets):
+            ds_nds = val_nds_df[val_nds_df['dataset'] == dataset]
+            ds_model_nds = ds_nds.groupby('model')['nds'].mean().reset_index()
+            ds_model_nds = ds_model_nds.rename(columns={'nds': 'ext_nds'})
+
+            merged = qm9_model_nds.merge(ds_model_nds, on='model', how='inner')
+            if len(merged) < 3:
+                continue
+
+            fig, ax = plt.subplots(figsize=(6, 6))
+            for _, row in merged.iterrows():
+                color = MODEL_COLORS.get(row['model'], '#333333')
+                ax.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=80, zorder=5)
+                ax.annotate(get_model_label(row['model']),
+                            (row['qm9_nds'], row['ext_nds']),
+                            textcoords="offset points", xytext=(5, 5), fontsize=7)
+
+            # Correlation line
+            r, p = stats.pearsonr(merged['qm9_nds'], merged['ext_nds'])
+            slope, intercept = np.polyfit(merged['qm9_nds'], merged['ext_nds'], 1)
+            x_range = np.linspace(merged['qm9_nds'].min(), merged['qm9_nds'].max(), 100)
+            ax.plot(x_range, slope * x_range + intercept, '--', color='grey', alpha=0.6)
+
+            ax.set_xlabel('QM9 Mean NDS')
+            ax.set_ylabel(f'{dataset} Mean NDS')
+            ax.set_title(f'QM9 vs {dataset} Robustness (r={r:.2f}, p={p:.3f})', fontweight='bold')
+            ax.axhline(0, color='grey', linewidth=0.3)
+            ax.axvline(0, color='grey', linewidth=0.3)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            plt.tight_layout()
+            safe_name = dataset.replace('/', '_').replace(' ', '_')
+            plt.savefig(output_dir / f'fig_validation_qm9_correlation_{safe_name}.png',
+                        dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"✓ Saved fig_validation_qm9_correlation_{safe_name}.png")
+
+    # --- Figure: Combined NDS comparison (QM9 vs all external) ---
+    if qm9_nds_df is not None and val_nds_df is not None and 'dataset' in val_nds_df.columns:
+        # Model-level summary: QM9 NDS vs mean external NDS
+        qm9_model_nds = qm9_nds_df.groupby('model')['nds'].mean().reset_index()
+        qm9_model_nds = qm9_model_nds.rename(columns={'nds': 'qm9_nds'})
+        ext_model_nds = val_nds_df.groupby('model')['nds'].mean().reset_index()
+        ext_model_nds = ext_model_nds.rename(columns={'nds': 'ext_nds'})
+        merged = qm9_model_nds.merge(ext_model_nds, on='model', how='inner')
+
+        if len(merged) >= 3:
+            fig, ax = plt.subplots(figsize=(7, 7))
+            for _, row in merged.iterrows():
+                color = MODEL_COLORS.get(row['model'], '#333333')
+                ax.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
+                           edgecolors='black', linewidth=0.5)
+                ax.annotate(get_model_label(row['model']),
+                            (row['qm9_nds'], row['ext_nds']),
+                            textcoords="offset points", xytext=(6, 6), fontsize=8)
+
+            r, p = stats.pearsonr(merged['qm9_nds'], merged['ext_nds'])
+            slope, intercept = np.polyfit(merged['qm9_nds'], merged['ext_nds'], 1)
+            x_range = np.linspace(merged['qm9_nds'].min(), merged['qm9_nds'].max(), 100)
+            ax.plot(x_range, slope * x_range + intercept, '--', color='grey', alpha=0.6, linewidth=1.5)
+
+            ax.set_xlabel('QM9 Mean NDS', fontsize=12)
+            ax.set_ylabel('External Datasets Mean NDS', fontsize=12)
+            ax.set_title(f'Robustness Transferability: QM9 → External (r={r:.2f}, p={p:.3f})',
+                         fontweight='bold', fontsize=12)
+            ax.axhline(0, color='grey', linewidth=0.3)
+            ax.axvline(0, color='grey', linewidth=0.3)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            plt.tight_layout()
+            plt.savefig(output_dir / 'fig_validation_qm9_transferability.png',
+                        dpi=300, bbox_inches='tight')
+            plt.close()
+            print("✓ Saved fig_validation_qm9_transferability.png")
+
+            # Save correlation table
+            merged_sorted = merged.sort_values('qm9_nds', ascending=False)
+            merged_sorted['model_label'] = merged_sorted['model'].apply(get_model_label)
+            merged_sorted.to_csv(output_dir / 'table_validation_qm9_correlation.csv', index=False)
+            print("✓ Saved table_validation_qm9_correlation.csv")
+
+    # --- Figure: Per-model robustness profile across datasets ---
+    if val_nds_df is not None and 'dataset' in val_nds_df.columns:
+        # Grouped bar chart: NDS by model for each dataset
+        models_in_val = sorted(val_nds_df['model'].unique())
+        if len(models_in_val) >= 2 and len(datasets) >= 2:
+            model_ds = val_nds_df.pivot_table(values='nds', index='model', columns='dataset', aggfunc='mean')
+            model_ds = model_ds.dropna(how='all')
+            model_ds.index = [get_model_label(m) for m in model_ds.index]
+            # Sort by mean NDS
+            model_ds['_mean'] = model_ds.mean(axis=1)
+            model_ds = model_ds.sort_values('_mean', ascending=False)
+            model_ds = model_ds.drop(columns='_mean')
+
+            fig, ax = plt.subplots(figsize=(max(10, len(model_ds) * 0.8), 6))
+            model_ds.plot(kind='bar', ax=ax, width=0.8, edgecolor='black', linewidth=0.5)
+            ax.set_ylabel('NDS (less negative = more robust)')
+            ax.set_xlabel('')
+            ax.set_title('Model Robustness Across Validation Datasets', fontweight='bold')
+            ax.axhline(0, color='black', linewidth=0.5)
+            ax.legend(title='Dataset', bbox_to_anchor=(1.02, 1), loc='upper left')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            plt.savefig(output_dir / 'fig_validation_model_comparison.png',
+                        dpi=300, bbox_inches='tight')
+            plt.close()
+            print("✓ Saved fig_validation_model_comparison.png")
 
 
 # =============================================================================
@@ -1896,9 +2116,9 @@ def create_figure2(df, output_dir):
 # FIGURE 3: RANKING CONSISTENCY
 # =============================================================================
 
-def create_figure3(nds_df, validation_df, output_dir):
+def create_figure3(nds_df, validation_df, val_nds_df, output_dir):
     """Figure 3: Ranking consistency across strategies, sigmas, datasets. Uses PDV only."""
-    n_panels = 3 if validation_df is not None else 2
+    n_panels = 3 if val_nds_df is not None else 2
     fig, axes = plt.subplots(1, n_panels, figsize=(5.5*n_panels, 6))
     if n_panels == 2:
         axes = [axes[0], axes[1], None]
@@ -1948,29 +2168,29 @@ def create_figure3(nds_df, validation_df, output_dir):
     ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
                 borderaxespad=0, frameon=False)
 
-    # Panel C: Cross-dataset rankings (if validation data available)
+    # Panel C: Cross-dataset rankings (if validation NDS available)
     # Filter to PDV for consistency
-    if validation_df is not None and axes[2] is not None:
+    if val_nds_df is not None and axes[2] is not None:
         ax_c = axes[2]
 
-        val_pdv = validation_df[validation_df['rep'] == 'pdv'] if 'rep' in validation_df.columns else validation_df
+        val_pdv = val_nds_df[val_nds_df['rep'] == 'pdv'] if 'rep' in val_nds_df.columns else val_nds_df
         val_pdv_legacy = val_pdv[val_pdv['strategy'] == 'legacy'] if 'strategy' in val_pdv.columns else val_pdv
 
-        datasets = val_pdv_legacy['dataset'].unique() if len(val_pdv_legacy) > 0 else []
+        datasets = sorted(val_pdv_legacy['dataset'].unique()) if len(val_pdv_legacy) > 0 else []
 
-        for model in val_pdv_legacy['model'].unique():
+        for model in sorted(val_pdv_legacy['model'].unique()):
             model_data = val_pdv_legacy[val_pdv_legacy['model'] == model]
 
             nds_vals = []
             for ds in datasets:
                 ds_data = model_data[model_data['dataset'] == ds]
-                if len(ds_data) > 0 and 'NDS_r2' in ds_data.columns:
-                    nds_vals.append(ds_data['NDS_r2'].values[0])  # Single value per model/dataset
+                if len(ds_data) > 0:
+                    nds_vals.append(ds_data['nds'].values[0])
                 else:
                     nds_vals.append(np.nan)
 
-            if not all(np.isnan(nds_vals)):
-                color = MODEL_COLORS.get(model.lower(), '#333333')
+            if not all(np.isnan(v) for v in nds_vals):
+                color = MODEL_COLORS.get(model, '#333333')
                 ax_c.plot(range(len(datasets)), nds_vals, 'o-', label=get_model_label(model),
                           color=color, markersize=6)
 
@@ -3156,7 +3376,7 @@ def main():
     print("\n--- PART 1: THE WHAT ---")
     create_figure1(qm9_df, nds_df, output_dir)
     create_figure2(qm9_df, output_dir)
-    create_figure3(nds_df, validation_df, output_dir)
+    create_figure3(nds_df, validation_df, val_nds_df, output_dir)
     create_interaction_figure(nds_df, output_dir)
     create_full_overview(nds_df, output_dir)
 
@@ -3169,7 +3389,7 @@ def main():
     create_tables(nds_df, unc_df, qm9_df, output_dir)
 
     print("\n--- VALIDATION (GENERALISATION) ---")
-    create_validation_figures(validation_df, val_nds_df, output_dir)
+    create_validation_figures(validation_df, val_nds_df, nds_df, output_dir)
 
     print("\n--- SUPPLEMENTARY: ICC & REDUNDANCY ---")
     compute_icc_and_redundancy(nds_df, output_dir)
