@@ -280,6 +280,7 @@ DATASET_MARKERS = {
 }
 
 BASELINE_THRESHOLD = 0.6
+CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
 
 # =============================================================================
 # DATA LOADING
@@ -328,6 +329,61 @@ def load_anova_data(results_dir):
         print(f"Loaded QM9 ANOVA data: {len(combined)} rows from {len(all_data)} files")
         return combined
     return None
+
+
+def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
+    """Filter out catastrophic training iterations (R² below threshold).
+
+    DNN training on certain representations (e.g. mol2vec) occasionally produces
+    catastrophic failures with wildly negative R² (e.g. -63.6). These poison
+    mean R² calculations and can flip NDS positive. This function removes
+    entire iterations where any sigma level has R² below the threshold.
+
+    Returns:
+        filtered_df: DataFrame with catastrophic iterations removed
+        filtered_log: DataFrame logging what was removed (for paper reporting)
+    """
+    if 'iteration' not in df.columns or 'r2' not in df.columns:
+        return df, pd.DataFrame()
+
+    # Identify iterations where ANY sigma level has R² below threshold
+    catastrophic_mask = df['r2'] < r2_threshold
+    if catastrophic_mask.sum() == 0:
+        return df, pd.DataFrame()
+
+    # Log the catastrophic rows before filtering
+    catastrophic_rows = df[catastrophic_mask].copy()
+    log_entries = []
+    for _, row in catastrophic_rows.iterrows():
+        log_entries.append({
+            'model': row.get('model', ''),
+            'rep': row.get('rep', ''),
+            'strategy': row.get('strategy', ''),
+            'sigma': row.get('sigma', np.nan),
+            'iteration': row.get('iteration', ''),
+            'r2': row['r2'],
+        })
+    filtered_log = pd.DataFrame(log_entries)
+
+    # Remove entire iterations that contain catastrophic R² values
+    # (not just the single bad sigma — the whole iteration is suspect)
+    group_cols = ['model', 'rep', 'strategy', 'iteration']
+    available_cols = [c for c in group_cols if c in df.columns]
+    catastrophic_iters = catastrophic_rows[available_cols].drop_duplicates()
+
+    pre_count = len(df)
+    filtered_df = df.merge(catastrophic_iters, on=available_cols, how='left', indicator=True)
+    filtered_df = filtered_df[filtered_df['_merge'] == 'left_only'].drop(columns='_merge')
+    n_removed = pre_count - len(filtered_df)
+
+    print(f"\n  Catastrophic iteration filter (R² < {r2_threshold}):")
+    print(f"    Removed {n_removed} rows ({len(filtered_log)} catastrophic R² values across "
+          f"{len(catastrophic_iters)} iterations)")
+    for _, entry in filtered_log.iterrows():
+        print(f"    {entry['model']}/{entry['rep']}/{entry['strategy']} "
+              f"σ={entry['sigma']:.1f} iter={entry['iteration']} R²={entry['r2']:.2f}")
+
+    return filtered_df, filtered_log
 
 
 def load_uncertainty_data(results_dir):
@@ -2945,6 +3001,17 @@ def generate_report(nds_df, excluded_df, output_dir):
     lines.append("PAPER FIGURES GENERATION REPORT")
     lines.append("=" * 80)
 
+    lines.append(f"\nCatastrophic iteration threshold: R² < {CATASTROPHIC_R2_THRESHOLD}")
+    catastrophic_path = output_dir / 'filtered_catastrophic_iterations.csv'
+    if catastrophic_path.exists():
+        cat_df = pd.read_csv(catastrophic_path)
+        lines.append(f"Catastrophic iterations filtered: {len(cat_df)} rows removed before NDS calculation")
+        for _, row in cat_df.iterrows():
+            lines.append(f"  {row['model']}/{row['rep']}/{row['strategy']} "
+                         f"σ={row['sigma']:.1f} iter={row['iteration']} R²={row['r2']:.2f}")
+    else:
+        lines.append("Catastrophic iterations filtered: 0")
+
     lines.append(f"\nBaseline R² threshold: {BASELINE_THRESHOLD}")
     lines.append(f"NDS calculated for {len(nds_df)} configurations")
     lines.append(f"Excluded {len(excluded_df)} configurations (baseline R² < {BASELINE_THRESHOLD})")
@@ -3045,6 +3112,12 @@ def main():
         unc_df = unc_df[~unc_df['model'].isin(EXCLUDED_MODELS)]
         if len(unc_df) < pre_filter_unc:
             print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded models")
+
+    # Filter catastrophic training iterations (e.g. DNN/mol2vec with R² = -63)
+    qm9_df, catastrophic_log = filter_catastrophic_iterations(qm9_df)
+    if len(catastrophic_log) > 0:
+        catastrophic_log.to_csv(output_dir / 'filtered_catastrophic_iterations.csv', index=False)
+        print(f"    Saved filtered_catastrophic_iterations.csv")
 
     # Calculate NDS
     print("\n[2/3] Calculating metrics...")
