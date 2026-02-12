@@ -1125,10 +1125,119 @@ def apply_bayesian_transformation_last_layer(model):
 
     return model
 
+class VBLLLayer(nn.Module):
+    """
+    Variational Bayesian Last Layer (Harrison 2024).
+
+    Maintains a mean-field variational posterior q(W) = N(weight_mu, diag(exp(weight_log_sigma)^2))
+    over the weight matrix, with a standard normal prior p(W) = N(0, I).
+    Uses the reparameterization trick for gradient estimation.
+    """
+    def __init__(self, in_features, out_features, prior_mu=0.0, prior_sigma=1.0):
+        super(VBLLLayer, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.prior_mu = prior_mu
+        self.prior_sigma = prior_sigma
+
+        # Variational posterior parameters
+        self.weight_mu = nn.Parameter(torch.zeros(out_features, in_features))
+        self.weight_log_sigma = nn.Parameter(torch.full((out_features, in_features), -3.0))
+        self.bias_mu = nn.Parameter(torch.zeros(out_features))
+        self.bias_log_sigma = nn.Parameter(torch.full((out_features,), -3.0))
+
+        # Learned log observation noise (aleatoric uncertainty)
+        self.log_noise_var = nn.Parameter(torch.tensor(-2.0))
+
+        # Initialize weight_mu with Kaiming uniform
+        nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
+        fan_in = in_features
+        bound = 1.0 / math.sqrt(fan_in)
+        nn.init.uniform_(self.bias_mu, -bound, bound)
+
+    @property
+    def noise_var(self):
+        return torch.exp(self.log_noise_var)
+
+    def kl_divergence(self):
+        """Closed-form KL(q(W)||p(W)) for diagonal Gaussians."""
+        prior_var = self.prior_sigma ** 2
+
+        # Weight KL
+        w_var = torch.exp(2.0 * self.weight_log_sigma)
+        kl_w = 0.5 * torch.sum(
+            w_var / prior_var
+            + ((self.prior_mu - self.weight_mu) ** 2) / prior_var
+            - 1.0
+            + math.log(prior_var) - 2.0 * self.weight_log_sigma
+        )
+
+        # Bias KL
+        b_var = torch.exp(2.0 * self.bias_log_sigma)
+        kl_b = 0.5 * torch.sum(
+            b_var / prior_var
+            + ((self.prior_mu - self.bias_mu) ** 2) / prior_var
+            - 1.0
+            + math.log(prior_var) - 2.0 * self.bias_log_sigma
+        )
+
+        return kl_w + kl_b
+
+    def forward(self, x):
+        if self.training:
+            # Reparameterization trick: W = mu + sigma * epsilon
+            weight_sigma = torch.exp(self.weight_log_sigma)
+            weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
+            bias_sigma = torch.exp(self.bias_log_sigma)
+            bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+        else:
+            # At eval time, sample from posterior (for MC uncertainty estimation)
+            weight_sigma = torch.exp(self.weight_log_sigma)
+            weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
+            bias_sigma = torch.exp(self.bias_log_sigma)
+            bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+        return F.linear(x, weight, bias)
+
+
+class VBLLLoss(nn.Module):
+    """
+    ELBO loss for VBLL: Gaussian NLL (with learned noise) + KL divergence / n_data.
+
+    NLL = 0.5 * log(noise_var) + 0.5 * (pred - target)^2 / noise_var
+    Loss = mean(NLL) + KL(q||p) / n_data
+    """
+    def __init__(self, model, n_data):
+        super(VBLLLoss, self).__init__()
+        self.model = model
+        self.n_data = n_data
+
+        # Find the VBLLLayer in the model
+        self.vbll_layer = None
+        for module in model.modules():
+            if isinstance(module, VBLLLayer):
+                self.vbll_layer = module
+                break
+
+    def forward(self, pred, target):
+        if self.vbll_layer is not None:
+            noise_var = self.vbll_layer.noise_var
+            # Gaussian NLL with learned observation noise
+            nll = 0.5 * torch.log(noise_var) + 0.5 * ((pred - target) ** 2) / noise_var
+            nll = nll.mean()
+            kl = self.vbll_layer.kl_divergence()
+            return nll + kl / self.n_data
+        # Fallback to MSE if no VBLLLayer found
+        return nn.MSELoss()(pred, target)
+
+
 def apply_bayesian_transformation_last_layer_variational(model):
     """
-    Converts the last Linear layer of a PyTorch model to a Bayesian Linear layer
-    (VBLL - Variational Bayesian Last Layer) while keeping the rest of the model deterministic.
+    Converts the last Linear layer of a PyTorch model to a VBLLLayer
+    (Variational Bayesian Last Layer, Harrison 2024) while keeping the rest
+    of the model deterministic.
+
+    The VBLLLayer maintains a variational posterior over the last-layer weights
+    and is trained with an ELBO loss (MSE + KL divergence).
 
     Parameters
     ----------
@@ -1138,7 +1247,7 @@ def apply_bayesian_transformation_last_layer_variational(model):
     Returns
     -------
     model : nn.Module
-        The transformed model with the last layer replaced by a Bayesian layer.
+        The transformed model with the last layer replaced by a VBLLLayer.
     """
     last_linear_name = None
     last_linear_module = None
@@ -1153,20 +1262,17 @@ def apply_bayesian_transformation_last_layer_variational(model):
     if last_linear_module is None:
         raise ValueError("No nn.Linear layer found to replace.")
 
-    # Transform using torchhk-style util
-    bayesian_layer = transform_layer(
-        last_linear_module,
-        nn.Linear,
-        bnn.BayesLinear,
-        args={
-            "prior_mu": 0,
-            "prior_sigma": 0.1,
-            "in_features": ".in_features",
-            "out_features": ".out_features",
-            "bias": ".bias"
-        },
-        attrs={"weight_mu": ".weight"}
+    # Create VBLLLayer with same dimensions
+    vbll_layer = VBLLLayer(
+        in_features=last_linear_module.in_features,
+        out_features=last_linear_module.out_features
     )
+
+    # Initialize weight_mu from pretrained weights
+    with torch.no_grad():
+        vbll_layer.weight_mu.copy_(last_linear_module.weight.data)
+        if last_linear_module.bias is not None:
+            vbll_layer.bias_mu.copy_(last_linear_module.bias.data)
 
     # Helper for recursive attribute setting
     def set_nested_attr(obj, attr_path, value):
@@ -1176,7 +1282,7 @@ def apply_bayesian_transformation_last_layer_variational(model):
         setattr(obj, attrs[-1], value)
 
     # Replace in the model
-    set_nested_attr(model, last_linear_name, bayesian_layer)
+    set_nested_attr(model, last_linear_name, vbll_layer)
 
     return model
 
@@ -1892,12 +1998,14 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = "bnn_variational"
+        # Use ELBO loss (MSE + KL divergence) for VBLL
+        criterion = VBLLLoss(model, n_data=len(x_train))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     # STEP 5: Train with appropriate domain labels
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
-             domain_labels_train=domain_labels_train if needs_domains else None, 
+             domain_labels_train=domain_labels_train if needs_domains else None,
              domain_labels_val=domain_labels_val_train if needs_domains else None)
     
     model.eval()
@@ -1941,13 +2049,23 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred_std_uncalibrated = preds.std(axis=0).flatten()
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
         
-        # Decompose uncertainty
-        epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
-        
+        # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
+        vbll_layer = None
+        for module in model.modules():
+            if isinstance(module, VBLLLayer):
+                vbll_layer = module
+                break
+
+        if vbll_layer is not None:
+            learned_noise_var = vbll_layer.noise_var.item()
+            epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
+        else:
+            epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
+
         # Apply calibration to epistemic (aleatoric stays None for standard BNN)
         if epistemic is not None:
             epistemic = epistemic * temperature
-        
+
         y_pred = y_pred_mean
 
     else:
@@ -2464,11 +2582,15 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         model_name = model_type
 
     model.to(device)
-    
+
     # Get loss function
     from loss_functions import get_loss_function
     criterion = get_loss_function(loss_name, **loss_kwargs)
-    
+
+    # Override with ELBO loss for VBLL
+    if args.bayesian_transformation == "variational":
+        criterion = VBLLLoss(model, n_data=len(x_train))
+
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
     # Train with domain labels if needed
@@ -2521,10 +2643,29 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         
         if args.uncertainty:
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
+
+            # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
+            vbll_layer = None
+            for module in model.modules():
+                if isinstance(module, VBLLLayer):
+                    vbll_layer = module
+                    break
+
+            if vbll_layer is not None:
+                learned_noise_var = vbll_layer.noise_var.item()
+                epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
+            else:
+                epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
+
+            # Apply calibration to epistemic (aleatoric stays None for standard BNN)
+            if epistemic is not None:
+                epistemic = epistemic * temperature
         else:
             y_pred_std_calibrated = None
             temperature = None
-        
+            epistemic = None
+            aleatoric = None
+
         y_pred = y_pred_mean
 
     else:
@@ -2539,15 +2680,17 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
-     
+        epistemic = None
+        aleatoric = None
+
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    
+
     # Update model name with loss function if not MSE
     full_model_name = f"{model_name}_{loss_name}" if loss_name != 'mse' else model_name
-    
+
     save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
-    # STEP 3: Save uncertainty with calibration
+    # STEP 3: Save uncertainty with calibration and decomposition
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -2561,9 +2704,11 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            temperature=temperature,
+            epistemic_uncertainty=epistemic,
+            aleatoric_uncertainty=aleatoric
         )
-        
+
     return metrics[3]
 
 def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial=None):

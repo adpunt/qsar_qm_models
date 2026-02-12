@@ -166,6 +166,33 @@ def decompose_uncertainty_distributional(pred_mean, pred_std_or_var, model_type=
     return epistemic, aleatoric, total
 
 
+def decompose_uncertainty_vbll(predictions_array, learned_noise_var):
+    """
+    Decompose uncertainty from VBLL (Variational Bayesian Last Layer).
+
+    Args:
+        predictions_array: numpy array of shape (num_samples, num_datapoints)
+            from MC sampling over the variational posterior.
+        learned_noise_var: scalar learned observation noise variance from
+            VBLLLayer.noise_var (exp(log_noise_var)).
+
+    Returns:
+        epistemic: std across MC weight samples (model uncertainty)
+        aleatoric: sqrt(learned_noise_var) broadcast to all samples (data noise)
+        total: sqrt(epistemic^2 + aleatoric^2)
+    """
+    # Epistemic: variance across different weight samples
+    epistemic = predictions_array.std(axis=0)
+
+    # Aleatoric: learned observation noise (constant per-sample)
+    aleatoric = np.full_like(epistemic, np.sqrt(learned_noise_var))
+
+    # Total predictive uncertainty
+    total = np.sqrt(epistemic**2 + aleatoric**2)
+
+    return epistemic, aleatoric, total
+
+
 # ============================================================================
 # SAVE UNCERTAINTY WITH DECOMPOSITION
 # ============================================================================
