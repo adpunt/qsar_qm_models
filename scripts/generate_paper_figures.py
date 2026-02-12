@@ -2,18 +2,20 @@
 """
 Master Figure Generation Script for Noise Robustness Paper
 
-Produces all 7 main figures + tables for the paper structure:
+Produces all main figures + tables for the paper structure:
 
 PART 1: THE WHAT
   Figure 1: Global Overview (R² vs σ line plot, NDS heatmap)
   Figure 2: ANOVA Decomposition (η² bars by strategy)
-  Figure 3: Ranking Consistency (bump charts, cross-dataset)
+  Figure 3: Ranking Consistency (heatmaps, cross-dataset)
 
 PART 2: THE WHY
-  Figure 4: DNN Family Comparison (DNN vs BNN variants)
-  Figure 5: MLP Family + RF/QRF Comparison
-  Figure 6: Uncertainty Quality (calibration, coverage, ECE)
-  Figure 7: Uncertainty Tracks Noise (KEY FIGURE)
+  Figure 4: DNN Family Comparison (DNN vs BNN variants) — CSV table + R² vs σ plot
+  Figure 5: MLP Family + RF/QRF Comparison — CSV table + R² vs σ plot
+  Figure: Uncertainty Tracks Noise (single-panel: mean uncertainty vs σ)
+
+Calibration (ECE, coverage), unc-error/unc-noise correlations, and
+aleatoric/epistemic decomposition are reported in table4 CSVs.
 
 Run: python generate_paper_figures.py [--qm9-dir ../results] [--validation-dir /path/to/kirby/results]
 
@@ -22,17 +24,16 @@ Outputs:
     fig1_global_overview.png
     fig2_anova_decomposition.png
     fig3_ranking_consistency.png
-    fig4_dnn_family.png
-    fig5_mlp_rf_comparison.png
-    fig6_uncertainty_quality.png
-    fig7_uncertainty_noise_tracking.png
+    fig4_dnn_family.png / .csv
+    fig5_mlp_rf_comparison.png / .csv
+    fig_uncertainty_combined.png
     table1_anova_summary.csv
     table1_supp_simple_effects.csv
     table1_supp_simple_effects_all_reps.csv
     table2_nds_by_strategy.csv
     table3_probabilistic_comparison.csv
-    table4_uncertainty_metrics.csv
-    table4_supp_uncertainty_by_strategy_rep.csv
+    table4_uncertainty_metrics.csv (ECE, coverage, correlations, aleatoric/epistemic)
+    table4_supp_uncertainty_by_strategy_rep.csv (same metrics × all strategies/reps)
     paper_figures_report.txt
 """
 
@@ -115,6 +116,13 @@ ANOVA_REPS_EXCLUDE = {
     'sns',                # Redundant with ecfp4 (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
+}
+
+# Old var-BNN implementation was identical to last-layer BNN (both used torchbnn.BayesLinear).
+# Exclude until new VBLL experiments complete. Remove this exclusion once VBLL data arrives.
+VBLL_PENDING_EXCLUDE = {
+    'dnn_bnn_variational', 'bnn_variational',
+    'mlp_bnn_variational',
 }
 
 import argparse
@@ -645,7 +653,7 @@ def create_validation_figures(validation_df, val_nds_df, output_dir):
                 ax = axes[i]
                 factors = ['Model', 'Rep', 'Interaction']
                 values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                colors = ['#3498db', '#e74c3c', '#2ecc71']
+                colors = ['#3498db', '#E69F00', '#0072B2']  # Blue, Orange, Dark blue
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -1494,9 +1502,23 @@ def create_methods_figure(output_dir):
         ax = axes[i]
         y_noisy = apply_noise(y_clean, sigma, strategy)
 
-        ax.hist(y_clean, bins=50, alpha=0.4, color='#666666', label='Clean', density=True)
-        ax.hist(y_noisy, bins=50, alpha=0.6, color=STRATEGY_COLORS[strategy],
-                label=f'Noisy (σ={sigma})', density=True)
+        # Clean distribution: light blue, low alpha
+        ax.hist(y_clean, bins=50, alpha=0.25, color='#0072B2', label='Clean', density=True)
+
+        # Noisy distribution: strategy color, more prominent
+        n_noisy, bins_noisy, patches_noisy = ax.hist(
+            y_noisy, bins=50, alpha=0.5, color=STRATEGY_COLORS[strategy],
+            label=f'Noisy (σ={sigma})', density=True
+        )
+
+        # Highlight the tails (upper/lower 15% of bin range) with full opacity
+        bin_centers = 0.5 * (bins_noisy[:-1] + bins_noisy[1:])
+        q_lo, q_hi = np.percentile(bin_centers, 15), np.percentile(bin_centers, 85)
+        for patch, center in zip(patches_noisy, bin_centers):
+            if center < q_lo or center > q_hi:
+                patch.set_alpha(0.9)
+                patch.set_edgecolor(STRATEGY_COLORS[strategy])
+                patch.set_linewidth(0.5)
 
         ax.set_title(STRATEGY_LABELS[strategy], fontsize=10, fontweight='bold',
                      color=STRATEGY_COLORS[strategy])
@@ -1754,8 +1776,8 @@ def create_figure2(df, output_dir):
         int_vals = [results[s]['eta2_interaction'] for s in strats]
 
         ax.bar(x - width, model_vals, width, label='Model', color='#3498db')
-        ax.bar(x, rep_vals, width, label='Representation', color='#e74c3c')
-        ax.bar(x + width, int_vals, width, label='Interaction', color='#2ecc71')
+        ax.bar(x, rep_vals, width, label='Representation', color='#E69F00')
+        ax.bar(x + width, int_vals, width, label='Interaction', color='#0072B2')
 
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
@@ -1840,7 +1862,7 @@ def create_figure3(nds_df, validation_df, output_dir):
             # Sort by mean NDS (best at top)
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
-            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                         ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
             ax_a.set_ylabel('')
@@ -1860,7 +1882,8 @@ def create_figure3(nds_df, validation_df, output_dir):
     ax_b.set_ylabel('NDS (slope)')
     ax_b.set_title('B. Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
     ax_b.axhline(0, color='black', linewidth=0.5)
-    ax_b.legend(loc='lower right', fontsize=6, ncol=2)
+    ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
+                borderaxespad=0, frameon=False)
 
     # Panel C: Cross-dataset rankings (if validation data available)
     # Filter to PDV for consistency
@@ -1893,7 +1916,8 @@ def create_figure3(nds_df, validation_df, output_dir):
         ax_c.set_ylabel('NDS')
         ax_c.set_title('C. Cross-Dataset (PDV, Gaussian)', fontweight='bold')
         ax_c.axhline(0, color='black', linewidth=0.5)
-        ax_c.legend(loc='lower right', fontsize=6)
+        ax_c.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=3,
+                    borderaxespad=0, frameon=False)
 
     for ax in axes:
         if ax is not None:
@@ -1921,7 +1945,7 @@ def create_figure3(nds_df, validation_df, output_dir):
             pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
-            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
             ax_ea.set_ylabel('')
@@ -1938,6 +1962,8 @@ def create_figure3(nds_df, validation_df, output_dir):
         ax_eb.set_ylabel('NDS (slope)')
         ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
         ax_eb.axhline(0, color='black', linewidth=0.5)
+        ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
+                     borderaxespad=0, frameon=False)
 
         for ax in axes_e:
             ax.spines['top'].set_visible(False)
@@ -1962,7 +1988,8 @@ def create_figure4(df, nds_df, output_dir):
     - Is the improvement larger under certain noise types?
     - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last']
+    # dnn_bnn_variational excluded pending VBLL re-implementation
 
     # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -2023,7 +2050,8 @@ def create_figure5(df, nds_df, output_dir):
     - Does QRF beat RF?
     - Is the pattern consistent across strategies?
     """
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last']
+    # mlp_bnn_variational excluded pending VBLL re-implementation
     rf_models = ['rf', 'qrf']
 
     # 1x2 layout: MLP R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
@@ -2084,29 +2112,12 @@ def create_figure5(df, nds_df, output_dir):
 # FIGURE 6: UNCERTAINTY QUALITY
 # =============================================================================
 
-def _get_errors(model_data, unc_col):
-    """Get uncertainty values and actual errors from model data. Returns (unc, errors, mask) or None."""
-    unc_values = model_data[unc_col].values
-    if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-    elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-    elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-        errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
-    else:
-        return None
-    mask = np.isfinite(unc_values) & np.isfinite(errors) & (unc_values > 0)
-    if mask.sum() < 100:
-        return None
-    return unc_values, errors, mask
-
 
 def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, title_suffix=""):
     """
-    Combined uncertainty figure with 3 panels:
-    A) Calibration scatter (predicted uncertainty vs actual error, binned)
-    B) Mean uncertainty vs noise level (line plot per model)
-    C) Aleatoric vs Epistemic decomposition vs noise level
+    Uncertainty figure — single panel: mean uncertainty vs noise level.
+    Calibration metrics (ECE, coverage) and aleatoric/epistemic decomposition
+    are reported in table4 CSVs instead of as figure panels.
     """
     if unc_df is None or len(unc_df) == 0:
         return False
@@ -2117,7 +2128,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
     if 'rep' in filtered.columns and rep:
         filtered = filtered[filtered['rep'] == rep]
 
-    if len(filtered) == 0:
+    if len(filtered) == 0 or 'sigma' not in filtered.columns:
         return False
 
     unc_col = None
@@ -2128,7 +2139,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
     if unc_col is None:
         return False
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
 
     # Pre-filter: exclude models with negligible uncertainty (e.g. plain DNN/MLP)
     valid_models = []
@@ -2140,116 +2151,32 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             valid_models.append(model)
     filtered = filtered[filtered['model'].isin(valid_models)]
 
-    # --- Panel A: Calibration scatter ---
-    ax_a = axes[0]
     for model in sorted(filtered['model'].unique()):
         model_data = filtered[filtered['model'] == model]
-        result = _get_errors(model_data, unc_col)
-        if result is None:
+        unc_values = model_data[unc_col].values
+        if np.sum(np.isfinite(unc_values) & (unc_values > 0)) < 100:
             continue
-        pred, actual, mask = result
-        pred_m, actual_m = pred[mask], actual[mask]
 
-        bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-        bin_centers, bin_errors = [], []
-        for i in range(len(bins) - 1):
-            bin_mask = (pred_m >= bins[i]) & (pred_m < bins[i + 1])
-            if bin_mask.sum() > 0:
-                bin_centers.append(pred_m[bin_mask].mean())
-                bin_errors.append(actual_m[bin_mask].mean())
+        sigma_means = []
+        for sigma in sorted(model_data['sigma'].unique()):
+            sigma_data = model_data[model_data['sigma'] == sigma]
+            vals = sigma_data[unc_col].values
+            vals = vals[np.isfinite(vals)]
+            if len(vals) > 0:
+                sigma_means.append({'sigma': sigma, 'mean_unc': vals.mean()})
 
-        color = MODEL_COLORS.get(model, '#333333')
-        ax_a.plot(bin_centers, bin_errors, 'o-', label=get_model_label(model),
-                  color=color, markersize=3, linewidth=1.0, alpha=0.8)
+        if sigma_means:
+            sigma_df = pd.DataFrame(sigma_means)
+            color = MODEL_COLORS.get(model, '#333333')
+            ax.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
+                    label=get_model_label(model), color=color,
+                    markersize=4, linewidth=1.2, alpha=0.8)
 
-    xlim = ax_a.get_xlim()[1] if ax_a.get_xlim()[1] > 0 else 1
-    ylim_max = ax_a.get_ylim()[1]
-    reasonable_ylim = min(ylim_max, xlim * 3)
-    ax_a.set_ylim(0, reasonable_ylim)
-    lims = [0, min(xlim, reasonable_ylim)]
-    ax_a.plot(lims, lims, 'k--', alpha=0.4, label='Perfect', linewidth=0.8)
-    ax_a.set_xlabel('Predicted Uncertainty')
-    ax_a.set_ylabel('Actual Error')
-    ax_a.set_title('A. Calibration', fontweight='bold')
-    ax_a.legend(fontsize=5, ncol=2)
-
-    # --- Panel B: Mean uncertainty vs sigma level ---
-    ax_b = axes[1]
-    if 'sigma' in filtered.columns:
-        for model in sorted(filtered['model'].unique()):
-            model_data = filtered[filtered['model'] == model]
-            unc_values = model_data[unc_col].values
-            if np.sum(np.isfinite(unc_values) & (unc_values > 0)) < 100:
-                continue
-
-            sigma_means = []
-            for sigma in sorted(model_data['sigma'].unique()):
-                sigma_data = model_data[model_data['sigma'] == sigma]
-                vals = sigma_data[unc_col].values
-                vals = vals[np.isfinite(vals)]
-                if len(vals) > 0:
-                    sigma_means.append({'sigma': sigma, 'mean_unc': vals.mean()})
-
-            if sigma_means:
-                sigma_df = pd.DataFrame(sigma_means)
-                color = MODEL_COLORS.get(model, '#333333')
-                ax_b.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
-                          label=get_model_label(model), color=color,
-                          markersize=3, linewidth=1.0, alpha=0.8)
-
-        ax_b.set_xlabel('Injected Noise Level (σ)')
-        ax_b.set_ylabel('Mean Predicted Uncertainty')
-        ax_b.set_title('B. Uncertainty vs Noise Level', fontweight='bold')
-        ax_b.legend(fontsize=5, ncol=2)
-
-    # --- Panel C: Aleatoric vs Epistemic decomposition ---
-    ax_c = axes[2]
-    has_decomposition = ('aleatoric_uncertainty' in filtered.columns and
-                         'epistemic_uncertainty' in filtered.columns)
-    plotted_separation = False
-
-    if has_decomposition and 'sigma' in filtered.columns:
-        for model in sorted(filtered['model'].unique()):
-            model_data = filtered[filtered['model'] == model]
-            alea = model_data['aleatoric_uncertainty'].values
-            epis = model_data['epistemic_uncertainty'].values
-            valid_mask = np.isfinite(alea) & np.isfinite(epis) & (alea > 0)
-            if valid_mask.sum() < 100:
-                continue
-
-            alea_means, epis_means, sigmas = [], [], []
-            for sigma in sorted(model_data['sigma'].unique()):
-                sigma_data = model_data[model_data['sigma'] == sigma]
-                a = sigma_data['aleatoric_uncertainty'].values
-                e = sigma_data['epistemic_uncertainty'].values
-                m = np.isfinite(a) & np.isfinite(e)
-                if m.sum() > 10:
-                    alea_means.append(np.mean(a[m]))
-                    epis_means.append(np.mean(e[m]))
-                    sigmas.append(sigma)
-
-            if len(sigmas) >= 3:
-                color = MODEL_COLORS.get(model, '#333333')
-                label = get_model_label(model)
-                ax_c.plot(sigmas, alea_means, 'o-', color=color,
-                          label=f'{label} (alea.)', markersize=3, linewidth=1.0, alpha=0.8)
-                ax_c.plot(sigmas, epis_means, 's--', color=color,
-                          label=f'{label} (epist.)', markersize=3, linewidth=0.8, alpha=0.5)
-                plotted_separation = True
-
-    if plotted_separation:
-        ax_c.set_xlabel('Injected Noise Level (σ)')
-        ax_c.set_ylabel('Mean Uncertainty')
-        ax_c.set_title('C. Aleatoric vs Epistemic', fontweight='bold')
-        ax_c.legend(fontsize=5, ncol=2)
-    else:
-        ax_c.text(0.5, 0.5, 'No aleatoric/epistemic\ndecomposition data',
-                  ha='center', va='center', transform=ax_c.transAxes, fontsize=9)
-        ax_c.set_title('C. Aleatoric vs Epistemic', fontweight='bold')
-
-    for ax in axes:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+    ax.set_xlabel('Injected Noise Level (σ)')
+    ax.set_ylabel('Mean Predicted Uncertainty')
+    ax.legend(fontsize=7, ncol=2, loc='upper left', framealpha=0.9)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -2259,8 +2186,8 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
 def create_uncertainty_figure(unc_df, output_dir):
     """
-    Combined uncertainty figure replacing old fig6 + fig7.
-    Three panels: calibration, uncertainty vs noise, aleatoric/epistemic.
+    Uncertainty figure: single-panel mean uncertainty vs noise level.
+    Calibration metrics and aleatoric/epistemic are in table4 CSVs.
     """
     if unc_df is None or len(unc_df) == 0:
         print("⚠ Skipping uncertainty figure - no data")
@@ -2278,34 +2205,16 @@ def create_uncertainty_figure(unc_df, output_dir):
     else:
         print("⚠ Could not create combined uncertainty figure")
 
-    # Supplementary variants
-    if GENERATE_SUPPLEMENTARY:
-        strategy_label = STRATEGY_LABELS.get(PRIMARY_STRATEGY, PRIMARY_STRATEGY)
-
-        # Different rep, same strategy
-        success = _create_combined_uncertainty_figure(
-            unc_df,
-            output_dir / f'fig_uncertainty_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png',
-            strategy=PRIMARY_STRATEGY,
-            rep=SUPPLEMENTARY_REP,
-        )
-        if success:
-            print(f"✓ Saved fig_uncertainty_supp_{SUPPLEMENTARY_REP}_{PRIMARY_STRATEGY}.png")
-
-        # Same rep, contrast strategy
-        success = _create_combined_uncertainty_figure(
-            unc_df,
-            output_dir / f'fig_uncertainty_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png',
-            strategy=CONTRAST_STRATEGY,
-            rep=PRIMARY_REP,
-        )
-        if success:
-            print(f"✓ Saved fig_uncertainty_supp_{PRIMARY_REP}_{CONTRAST_STRATEGY}.png")
+    # Supplementary uncertainty figures removed — calibration, ECE, coverage,
+    # aleatoric/epistemic, and unc-error/unc-noise correlations are all in
+    # table4_uncertainty_metrics.csv and table4_supp_uncertainty_by_strategy_rep.csv
 
 
-# NOTE: Old _create_uncertainty_noise_figure and create_figure7 removed.
-# Replaced by _create_combined_uncertainty_figure and create_uncertainty_figure above.
-# Bar chart panels (ECE, unc-error ρ, unc-noise ρ) now live in table4.
+# NOTE: Old _create_uncertainty_noise_figure, create_figure7, and 3-panel
+# uncertainty figures (calibration scatter, aleatoric/epistemic) removed.
+# ECE, coverage, correlations, and aleatoric/epistemic decomposition
+# are now in table4_uncertainty_metrics.csv and table4_supp CSVs.
+# Only the uncertainty-vs-noise-level line plot remains as a figure.
 
 
 # =============================================================================
@@ -2339,9 +2248,10 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']},
+        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last']},
+        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
+        # Note: dnn_bnn_variational and mlp_bnn_variational excluded pending VBLL re-run
     }
 
     # Filter to PDV + legacy for fair comparison
@@ -2496,6 +2406,19 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                             bin_weight = bin_mask.sum() / len(pred_m)
                             ece += bin_weight * np.abs(bin_pred - bin_actual)
 
+                # Aleatoric / epistemic decomposition
+                mean_alea = mean_epis = np.nan
+                if 'aleatoric_uncertainty' in model_data.columns:
+                    alea = model_data['aleatoric_uncertainty'].values
+                    alea_valid = alea[np.isfinite(alea) & (alea > 0)]
+                    if len(alea_valid) > 10:
+                        mean_alea = alea_valid.mean()
+                if 'epistemic_uncertainty' in model_data.columns:
+                    epis = model_data['epistemic_uncertainty'].values
+                    epis_valid = epis[np.isfinite(epis) & (epis > 0)]
+                    if len(epis_valid) > 10:
+                        mean_epis = epis_valid.mean()
+
                 unc_metrics.append({
                     'Model': model,
                     'Unc-Error ρ': unc_err_corr,
@@ -2504,6 +2427,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     'Coverage 1σ': cov_1sigma,
                     'Coverage 2σ': cov_2sigma,
                     'Mean Uncertainty': unc_values[mask].mean(),
+                    'Mean Aleatoric': mean_alea,
+                    'Mean Epistemic': mean_epis,
                 })
 
             if unc_metrics:
@@ -2568,13 +2493,63 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                             if noise_mask.sum() > 100:
                                 unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
 
+                        # ECE: binned calibration error
+                        pred_m = unc_values[valid]
+                        actual_m = errors[valid]
+                        ece = np.nan
+                        if len(pred_m) >= 100:
+                            ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
+                            ece_bins = np.unique(ece_bins)
+                            ece = 0
+                            for i in range(len(ece_bins) - 1):
+                                bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
+                                if bin_mask.sum() > 0:
+                                    bin_pred = pred_m[bin_mask].mean()
+                                    bin_actual = actual_m[bin_mask].mean()
+                                    bin_weight = bin_mask.sum() / len(pred_m)
+                                    ece += bin_weight * np.abs(bin_pred - bin_actual)
+
+                        # Coverage
+                        y_true_col = y_pred_col = None
+                        if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                            y_true_col, y_pred_col = 'y_true_noisy', 'y_pred_mean'
+                        elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                            y_true_col, y_pred_col = 'y_true_original', 'y_pred_mean'
+                        elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
+                            y_true_col, y_pred_col = 'y_true', 'y_pred'
+
+                        cov_1sigma = cov_2sigma = np.nan
+                        if y_true_col:
+                            yt = model_data[y_true_col].values[valid]
+                            yp = model_data[y_pred_col].values[valid]
+                            cov_1sigma = calculate_coverage(yt, yp, unc_values[valid], k=1)
+                            cov_2sigma = calculate_coverage(yt, yp, unc_values[valid], k=2)
+
+                        # Aleatoric / epistemic decomposition
+                        mean_alea = mean_epis = np.nan
+                        if 'aleatoric_uncertainty' in model_data.columns:
+                            alea = model_data['aleatoric_uncertainty'].values
+                            alea_valid = alea[np.isfinite(alea) & (alea > 0)]
+                            if len(alea_valid) > 10:
+                                mean_alea = alea_valid.mean()
+                        if 'epistemic_uncertainty' in model_data.columns:
+                            epis = model_data['epistemic_uncertainty'].values
+                            epis_valid = epis[np.isfinite(epis) & (epis > 0)]
+                            if len(epis_valid) > 10:
+                                mean_epis = epis_valid.mean()
+
                         all_unc_rows.append({
                             'Strategy': STRATEGY_LABELS.get(strategy, strategy),
                             'Rep': rep,
                             'Model': get_model_label(model),
                             'Unc-Error ρ': unc_err_corr,
                             'Unc-Noise ρ': unc_noise_corr,
+                            'ECE': ece,
+                            'Coverage 1σ': cov_1sigma,
+                            'Coverage 2σ': cov_2sigma,
                             'Mean Uncertainty': unc_values[valid].mean(),
+                            'Mean Aleatoric': mean_alea,
+                            'Mean Epistemic': mean_epis,
                         })
 
             if all_unc_rows:
@@ -2737,12 +2712,10 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 def create_interaction_figure(nds_df, output_dir):
     """Visualize the model x representation interaction effect.
 
-    Panel A: Bump chart — model ranks across representations (Gaussian strategy).
-    Panel B: Scatter — NDS on ECFP4 vs NDS on PDV per model (shows rho ~ 0.15).
+    Panel A: Heatmap — NDS by model × representation (Gaussian strategy).
+    Panel B: Scatter — NDS on ECFP4 vs NDS on PDV per model.
 
-    This figure demonstrates that model rankings change across representations
-    (disordinal interaction), and that PDV produces fundamentally different
-    rankings from fingerprint-based representations.
+    BNN variants use different marker shapes but same color as base model.
     """
     if len(nds_df) == 0:
         print("⚠ Could not create interaction figure - no NDS data")
@@ -2750,7 +2723,7 @@ def create_interaction_figure(nds_df, output_dir):
 
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # Panel A: Heatmap — NDS by model × representation (Gaussian strategy)
     ax_a = axes[0]
@@ -2758,25 +2731,35 @@ def create_interaction_figure(nds_df, output_dir):
     # Get mean NDS per model x rep (Gaussian strategy)
     pivot = nds_legacy.pivot_table(values='nds', index='model', columns='rep', aggfunc='mean')
 
-    # Only include reps with enough models
+    # Include all reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
-    # Order reps sensibly
-    rep_order = [r for r in ['ecfp4', 'mhggnn', 'smiles', 'pdv'] if r in valid_reps]
+    rep_order = [r for r in ['ecfp4', 'pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
     rep_order += [r for r in valid_reps if r not in rep_order]
 
     if len(rep_order) >= 2:
         hm_pivot = pivot[rep_order].dropna(how='all')
         hm_pivot.index = [get_model_label(m) for m in hm_pivot.index]
+        hm_pivot.columns = [get_rep_label(r) for r in hm_pivot.columns]
         # Sort by mean NDS (best at top)
         hm_pivot = hm_pivot.loc[hm_pivot.mean(axis=1).sort_values(ascending=False).index]
 
-        sns.heatmap(hm_pivot, annot=True, fmt='.3f', cmap='RdYlGn', vmax=0,
+        sns.heatmap(hm_pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
-        ax_a.set_title('A. Model × Representation Interaction (Gaussian NDS)', fontweight='bold')
+        ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
 
-    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV
+    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
     ax_b = axes[1]
+
+    # BNN marker mapping: different shape, same color as base
+    BNN_BASE_MAP = {
+        'dnn_bnn_full': 'dnn', 'dnn_bnn_last': 'dnn',
+        'mlp_bnn_full': 'mlp', 'mlp_bnn_last': 'mlp',
+    }
+    BNN_MARKERS = {
+        'dnn_bnn_full': 's', 'dnn_bnn_last': '^',
+        'mlp_bnn_full': 's', 'mlp_bnn_last': '^',
+    }
 
     ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['nds'].mean()
     pdv_nds = nds_legacy[nds_legacy['rep'] == 'pdv'].groupby('model')['nds'].mean()
@@ -2784,16 +2767,17 @@ def create_interaction_figure(nds_df, output_dir):
     shared_models = sorted(set(ecfp4_nds.index) & set(pdv_nds.index))
 
     if len(shared_models) >= 3:
-        e_vals = [ecfp4_nds[m] for m in shared_models]
-        p_vals = [pdv_nds[m] for m in shared_models]
-
-        for m, ev, pv in zip(shared_models, e_vals, p_vals):
-            color = MODEL_COLORS.get(m, '#333333')
-            ax_b.scatter(ev, pv, color=color, s=60, zorder=3)
-            ax_b.annotate(get_model_label(m), (ev, pv), fontsize=6,
-                          xytext=(4, 4), textcoords='offset points')
+        for m in shared_models:
+            ev, pv = ecfp4_nds[m], pdv_nds[m]
+            base_model = BNN_BASE_MAP.get(m, m)
+            color = MODEL_COLORS.get(base_model, MODEL_COLORS.get(m, '#333333'))
+            marker = BNN_MARKERS.get(m, 'o')
+            ax_b.scatter(ev, pv, color=color, marker=marker, s=60, zorder=3,
+                         label=get_model_label(m), edgecolors='white', linewidths=0.3)
 
         # Compute and annotate rho
+        e_vals = [ecfp4_nds[m] for m in shared_models]
+        p_vals = [pdv_nds[m] for m in shared_models]
         rho, p = stats.spearmanr(e_vals, p_vals)
         ax_b.text(0.05, 0.95, f'Spearman ρ = {rho:.2f} (p = {p:.3f})',
                   transform=ax_b.transAxes, fontsize=8, va='top',
@@ -2804,9 +2788,13 @@ def create_interaction_figure(nds_df, output_dir):
         lim = [min(all_vals) - 0.02, max(all_vals) + 0.02]
         ax_b.plot(lim, lim, '--', color='gray', alpha=0.5, linewidth=0.8)
 
+        # Legend outside plot area
+        ax_b.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0), fontsize=6,
+                    borderaxespad=0, frameon=True, fancybox=False)
+
     ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. ECFP4 vs PDV Robustness (Disordinal Interaction)', fontweight='bold')
+    ax_b.set_title('B. ECFP4 vs PDV Robustness', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -3046,15 +3034,17 @@ def main():
 
     # Exclude graph models (Graph_GP, GCN, GIN) - not in scope
     EXCLUDED_MODELS = {'graph_gp', 'gcn', 'gin', 'ginct', 'gin2d'}
+    # Also exclude old var-BNN data (incorrect implementation, identical to last-layer)
+    EXCLUDED_MODELS = EXCLUDED_MODELS | VBLL_PENDING_EXCLUDE
     pre_filter = len(qm9_df)
     qm9_df = qm9_df[~qm9_df['model'].isin(EXCLUDED_MODELS)]
     if len(qm9_df) < pre_filter:
-        print(f"  Filtered out {pre_filter - len(qm9_df)} rows from excluded graph models")
+        print(f"  Filtered out {pre_filter - len(qm9_df)} rows from excluded models (graph + old var-BNN)")
     if unc_df is not None:
         pre_filter_unc = len(unc_df)
         unc_df = unc_df[~unc_df['model'].isin(EXCLUDED_MODELS)]
         if len(unc_df) < pre_filter_unc:
-            print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded graph models")
+            print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded models")
 
     # Calculate NDS
     print("\n[2/3] Calculating metrics...")
