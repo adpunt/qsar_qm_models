@@ -160,13 +160,14 @@ plt.rcParams.update({
 # Color palettes - Colorblind-friendly (Okabe-Ito + Wong palette)
 # Avoids red-green confusion, uses blue-orange contrast
 STRATEGY_COLORS = {
-    'legacy': '#0072B2',       # Blue
+    'legacy': '#D55E00',       # Vermillion/red-orange (distinct from clean blue)
     'valprop': '#E69F00',      # Orange
     'quantile': '#882255',     # Wine/purple
     'threshold': '#CC79A7',    # Pink/magenta
     'outlier': '#F0E442',      # Yellow
     'hetero': '#009E73',       # Teal/bluish-green
 }
+CLEAN_COLOR = '#0072B2'        # Blue — used only for clean (no-noise) data
 
 STRATEGY_LABELS = {
     'legacy': 'Gaussian',
@@ -281,6 +282,81 @@ DATASET_MARKERS = {
 
 BASELINE_THRESHOLD = 0.6
 CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
+VALIDATION_NDS_CLIP = -5.0  # Clip extreme validation NDS (e.g. DNN divergence on hERG-Ki)
+
+
+def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=None,
+                              fmt='.2f', extra_filters=None):
+    """Create annotation text for heatmaps distinguishing missing vs filtered data.
+
+    For NaN cells in pivot:
+    - If (index, column) combination exists in raw_df → "N/A" (filtered, e.g. baseline < 0.6)
+    - If not in raw_df → "missing" (experiment not yet run)
+
+    Args:
+        pivot: DataFrame with NaN for missing/filtered cells
+        raw_df: Raw experiment data (pre-NDS) to check what was actually run
+        index_col: Column name in raw_df corresponding to pivot index (e.g. 'model')
+        columns_col: Column name in raw_df corresponding to pivot columns (e.g. 'strategy')
+        rep_filter: If set, filter raw_df to this rep value
+        fmt: Format string for numeric values
+        extra_filters: Dict of {column: value} for additional filters on raw_df
+    Returns:
+        DataFrame of annotation strings (same shape as pivot)
+    """
+    if raw_df is None:
+        # No raw data: can't distinguish, use generic format
+        try:
+            return pivot.map(lambda x: '' if pd.isna(x) else f'{x:{fmt[1:]}}')
+        except AttributeError:
+            return pivot.applymap(lambda x: '' if pd.isna(x) else f'{x:{fmt[1:]}}')
+
+    # Build set of (index, column) combos that exist in raw data
+    filtered_raw = raw_df.copy()
+    if rep_filter is not None and 'rep' in filtered_raw.columns:
+        filtered_raw = filtered_raw[filtered_raw['rep'] == rep_filter]
+    if extra_filters:
+        for col, val in extra_filters.items():
+            if col in filtered_raw.columns:
+                filtered_raw = filtered_raw[filtered_raw[col] == val]
+
+    existing_combos = set()
+    if index_col in filtered_raw.columns and columns_col in filtered_raw.columns:
+        for _, row in filtered_raw[[index_col, columns_col]].drop_duplicates().iterrows():
+            existing_combos.add((row[index_col], row[columns_col]))
+
+    annot = pd.DataFrame('', index=pivot.index, columns=pivot.columns)
+    for idx in pivot.index:
+        for col in pivot.columns:
+            val = pivot.loc[idx, col]
+            if pd.isna(val):
+                # Check if this combo exists in raw data (map labels back to raw names)
+                raw_idx = idx  # May need reverse mapping
+                raw_col = col
+                # Try reverse-mapping labels to raw names
+                for raw_name, label in MODEL_LABELS.items():
+                    if label == idx:
+                        raw_idx = raw_name
+                        break
+                for raw_name, label in STRATEGY_LABELS.items():
+                    if label == col:
+                        raw_col = raw_name
+                        break
+                for raw_name, label in REP_LABELS.items():
+                    if label == col:
+                        raw_col = raw_name
+                        break
+
+                if (raw_idx, raw_col) in existing_combos:
+                    annot.loc[idx, col] = 'N/A'
+                else:
+                    annot.loc[idx, col] = 'missing'
+            else:
+                if abs(val) >= 10:
+                    annot.loc[idx, col] = f'{val:.0f}'
+                else:
+                    annot.loc[idx, col] = f'{val:{fmt[1:]}}'
+    return annot
 
 # =============================================================================
 # DATA LOADING
@@ -632,6 +708,15 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         print("⚠ No validation NDS data available — skipping validation figures")
         return
 
+    # Clip extreme NDS values (e.g. DNN divergence on hERG-Ki → NDS=-280)
+    extreme_mask = val_nds_df['nds'] < VALIDATION_NDS_CLIP
+    if extreme_mask.any():
+        extreme_configs = val_nds_df[extreme_mask][['model', 'rep', 'strategy', 'dataset', 'nds']].to_string()
+        print(f"  ⚠ Clipping {extreme_mask.sum()} extreme validation NDS values (< {VALIDATION_NDS_CLIP}):")
+        print(f"    {extreme_configs}")
+        val_nds_df = val_nds_df.copy()
+        val_nds_df.loc[extreme_mask, 'nds'] = VALIDATION_NDS_CLIP
+
     datasets = val_nds_df['dataset'].unique() if 'dataset' in val_nds_df.columns else ['validation']
     print(f"  Validation datasets: {sorted(datasets)}, {len(val_nds_df)} configs total")
 
@@ -667,24 +752,29 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             if not col_order:
                 continue
             pivot = pivot[col_order]
-            pivot.index = [get_model_label(m) for m in pivot.index]
 
-            # Clip extreme NDS values for colormap, but annotate with actual values
+            # Clip extreme NDS for colormap but show actual values in annotations
             NDS_CLIP = 2.0
             pivot_display = pivot.clip(lower=-NDS_CLIP)
+
+            # Build annotations: missing vs N/A vs actual value
+            ds_raw = validation_df[validation_df['dataset'] == dataset] if validation_df is not None else None
+            annot_text = make_heatmap_annotations(pivot, ds_raw, 'model', 'strategy', fmt='.2f')
+            pivot.index = [get_model_label(m) for m in pivot.index]
+            pivot_display.index = pivot.index
+            annot_text.index = pivot.index
+            pivot.columns = [STRATEGY_LABELS.get(c, c) for c in col_order]
+            pivot_display.columns = pivot.columns
+            annot_text.columns = pivot.columns
+
             vals = pivot_display.values[~np.isnan(pivot_display.values)]
             vmin = vals.min() if len(vals) > 0 else -NDS_CLIP
-            # Custom annotation: actual values (compact format for extremes)
-            annot_text = pivot.applymap(
-                lambda x: '' if pd.isna(x) else (f'{x:.0f}' if abs(x) >= 10 else f'{x:.2f}'))
-            # Black background so NaN/missing cells are clearly marked
             ax.set_facecolor('black')
             sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdBu', center=0,
                         vmin=vmin, vmax=0,
                         ax=ax, cbar_kws={'label': 'NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title(f'{dataset}', fontweight='bold')
-            ax.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
             if i > 0:
                 ax.set_ylabel('')
 
@@ -924,9 +1014,13 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             ax.set_ylabel(f'{dataset} Mean NDS')
             ax.set_title(f'QM9 vs {dataset} Robustness (r={r:.2f}, p={p:.3f})', fontweight='bold')
             ax.axhline(0, color='grey', linewidth=0.3)
-            ax.axvline(0, color='grey', linewidth=0.3)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
+            # Tight axis around data
+            x_pad = (merged['qm9_nds'].max() - merged['qm9_nds'].min()) * 0.15
+            y_pad = (merged['ext_nds'].max() - merged['ext_nds'].min()) * 0.15
+            ax.set_xlim(merged['qm9_nds'].min() - x_pad, merged['qm9_nds'].max() + x_pad)
+            ax.set_ylim(merged['ext_nds'].min() - y_pad, merged['ext_nds'].max() + y_pad)
 
             plt.tight_layout()
             safe_name = dataset.replace('/', '_').replace(' ', '_')
@@ -964,9 +1058,13 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             ax.set_title(f'Robustness Transferability: QM9 → External (r={r:.2f}, p={p:.3f})',
                          fontweight='bold', fontsize=12)
             ax.axhline(0, color='grey', linewidth=0.3)
-            ax.axvline(0, color='grey', linewidth=0.3)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
+            # Tight axis around data (don't extend to 0)
+            x_pad = (merged['qm9_nds'].max() - merged['qm9_nds'].min()) * 0.15
+            y_pad = (merged['ext_nds'].max() - merged['ext_nds'].min()) * 0.15
+            ax.set_xlim(merged['qm9_nds'].min() - x_pad, merged['qm9_nds'].max() + x_pad)
+            ax.set_ylim(merged['ext_nds'].min() - y_pad, merged['ext_nds'].max() + y_pad)
 
             plt.tight_layout()
             plt.savefig(output_dir / 'fig_validation_qm9_transferability.png',
@@ -1783,16 +1881,16 @@ def create_methods_figure(output_dir):
         bins = np.linspace(all_vals.min(), all_vals.max(), 51)
 
         # Filled histograms: very transparent so overlap is visible
-        ax.hist(y_clean, bins=bins, alpha=0.15, color='#0072B2', density=True)
+        ax.hist(y_clean, bins=bins, alpha=0.15, color=CLEAN_COLOR, density=True)
         ax.hist(y_noisy, bins=bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
 
-        # Bold step outlines on TOP of curves
+        # Step outlines on TOP of curves (slightly transparent so crossings visible)
         n_clean, _, _ = ax.hist(y_clean, bins=bins, density=True,
-                                histtype='step', linewidth=2.0, color='#0072B2',
-                                label='Clean')
+                                histtype='step', linewidth=2.0, color=CLEAN_COLOR,
+                                alpha=0.7, label='Clean')
         n_noisy, _, _ = ax.hist(y_noisy, bins=bins, density=True,
                                 histtype='step', linewidth=2.0, color=STRATEGY_COLORS[strategy],
-                                label=f'Noisy (σ={sigma})')
+                                alpha=0.7, label=f'Noisy (σ={sigma})')
 
         ax.set_title(STRATEGY_LABELS[strategy], fontsize=10, fontweight='bold',
                      color=STRATEGY_COLORS[strategy])
@@ -1831,13 +1929,13 @@ def create_methods_figure(output_dir):
 
             detail_bins = np.linspace(min(y_clean.min(), y_noisy.min()),
                                       max(y_clean.max(), y_noisy.max()), 51)
-            ax.hist(y_clean, bins=detail_bins, alpha=0.15, color='#0072B2', density=True)
+            ax.hist(y_clean, bins=detail_bins, alpha=0.15, color=CLEAN_COLOR, density=True)
             ax.hist(y_clean, bins=detail_bins, density=True,
-                    histtype='step', linewidth=1.5, color='#0072B2')
+                    histtype='step', linewidth=1.5, color=CLEAN_COLOR, alpha=0.7)
             if sig > 0:
                 ax.hist(y_noisy, bins=detail_bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
                 ax.hist(y_noisy, bins=detail_bins, density=True,
-                        histtype='step', linewidth=1.5, color=STRATEGY_COLORS[strategy])
+                        histtype='step', linewidth=1.5, color=STRATEGY_COLORS[strategy], alpha=0.7)
 
             if j == 0:
                 ax.set_ylabel(STRATEGY_LABELS[strategy], fontsize=9, fontweight='bold')
@@ -1922,27 +2020,33 @@ def create_figure1(df, nds_df, output_dir):
             # Fallback to most common rep
             nds_pdv = nds_df
 
+        # Build full pivot (all models × all strategies) so missing cells appear
+        all_models = sorted(nds_df['model'].unique())
+        all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                          if s in nds_df['strategy'].unique()]
         pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        pivot = pivot.reindex(index=all_models, columns=all_strategies)
 
-        # Reorder columns
-        col_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                     if c in pivot.columns]
-        pivot = pivot[col_order]
+        # Create annotations distinguishing missing vs filtered
+        annot_text = make_heatmap_annotations(pivot, df, 'model', 'strategy',
+                                               rep_filter='pdv', fmt='.2f')
 
-        # Rename index to clean model labels
+        # Rename index/columns to clean labels
         pivot.index = [get_model_label(m) for m in pivot.index]
+        annot_text.index = pivot.index
+        col_order = all_strategies
+        pivot.columns = [STRATEGY_LABELS.get(c, c) for c in col_order]
+        annot_text.columns = pivot.columns
 
         # Use colorblind-friendly diverging colormap centered at data midpoint
-        # so both colors are visible (all NDS values are negative)
         vals = pivot.values[~np.isnan(pivot.values)]
         center_val = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
         ax_b.set_facecolor('black')
-        sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=center_val,
-                    ax=ax_b, cbar_kws={'label': 'NDS'})
+        sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', center=center_val,
+                    ax=ax_b, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         ax_b.set_xlabel('Noise Strategy')
         ax_b.set_ylabel('Model')
         ax_b.set_title('B. NDS by Model × Strategy (PDV)', fontweight='bold')
-        ax_b.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_global_overview.png', dpi=300, bbox_inches='tight')
@@ -1989,20 +2093,27 @@ def create_figure1(df, nds_df, output_dir):
     if len(nds_df) > 0:
         nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4']
         if len(nds_ecfp4) > 0:
+            all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                              if s in nds_df['strategy'].unique()]
+            all_models_e = sorted(nds_df['model'].unique())
             pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-            col_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                         if c in pivot.columns]
-            pivot = pivot[col_order]
+            pivot = pivot.reindex(index=all_models_e, columns=all_strategies)
+
+            annot_text = make_heatmap_annotations(pivot, df, 'model', 'strategy',
+                                                   rep_filter='ecfp4', fmt='.2f')
             pivot.index = [get_model_label(m) for m in pivot.index]
+            annot_text.index = pivot.index
+            pivot.columns = [STRATEGY_LABELS.get(c, c) for c in all_strategies]
+            annot_text.columns = pivot.columns
+
             vals_e = pivot.values[~np.isnan(pivot.values)]
             cv_e = (vals_e.min() + vals_e.max()) / 2 if len(vals_e) > 0 else 0
             ax_eb.set_facecolor('black')
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=cv_e,
-                        ax=ax_eb, cbar_kws={'label': 'NDS'})
+            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', center=cv_e,
+                        ax=ax_eb, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
             ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
-            ax_eb.set_xticklabels([STRATEGY_LABELS.get(c, c) for c in col_order], rotation=45, ha='right')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_supp_ecfp4_overview.png', dpi=300, bbox_inches='tight')
@@ -2116,7 +2227,7 @@ def create_figure2(df, output_dir):
 # FIGURE 3: RANKING CONSISTENCY
 # =============================================================================
 
-def create_figure3(nds_df, validation_df, val_nds_df, output_dir):
+def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     """Figure 3: Ranking consistency across strategies, sigmas, datasets. Uses PDV only."""
     n_panels = 3 if val_nds_df is not None else 2
     fig, axes = plt.subplots(1, n_panels, figsize=(5.5*n_panels, 6))
@@ -2217,19 +2328,26 @@ def create_figure3(nds_df, validation_df, val_nds_df, output_dir):
     if len(nds_ecfp4) > 0:
         fig_e, axes_e = plt.subplots(1, 2, figsize=(10, 5))
 
-        # Heatmap across strategies
+        # Heatmap across strategies (show all models, with missing/N/A annotations)
         ax_ea = axes_e[0]
+        strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                      if c in nds_df['strategy'].unique()]
+        all_models_e3 = sorted(nds_ecfp4['model'].unique())
         pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        pivot = pivot.reindex(index=all_models_e3, columns=strat_list)
         if len(pivot) > 0:
-            strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                          if c in pivot.columns]
-            pivot = pivot[strat_list].dropna()
+            annot_text = make_heatmap_annotations(pivot, raw_df, 'model', 'strategy',
+                                                   rep_filter='ecfp4', fmt='.3f')
             pivot.index = [get_model_label(m) for m in pivot.index]
-            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
-            pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
+            annot_text.index = pivot.index
+            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in strat_list]
+            annot_text.columns = pivot.columns
+            sort_idx = pivot.mean(axis=1).sort_values(ascending=False).index
+            pivot = pivot.loc[sort_idx]
+            annot_text = annot_text.loc[sort_idx]
 
             ax_ea.set_facecolor('black')
-            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
+            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
             ax_ea.set_ylabel('')
@@ -2994,7 +3112,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 # INTERACTION FIGURE (Issue D)
 # =============================================================================
 
-def create_interaction_figure(nds_df, output_dir):
+def create_interaction_figure(nds_df, raw_df, output_dir):
     """Visualize the model x representation interaction effect.
 
     Panel A: Heatmap — NDS by model × representation (Gaussian strategy).
@@ -3022,14 +3140,25 @@ def create_interaction_figure(nds_df, output_dir):
     rep_order += [r for r in valid_reps if r not in rep_order]
 
     if len(rep_order) >= 2:
-        hm_pivot = pivot[rep_order].dropna(how='all')
+        # Reindex to show all models
+        all_models_int = sorted(nds_legacy['model'].unique())
+        hm_pivot = pivot.reindex(index=all_models_int, columns=rep_order)
+        hm_pivot = hm_pivot.dropna(how='all')
+
+        annot_text = make_heatmap_annotations(hm_pivot, raw_df, 'model', 'rep',
+                                               fmt='.3f',
+                                               extra_filters={'strategy': 'legacy'})
         hm_pivot.index = [get_model_label(m) for m in hm_pivot.index]
+        annot_text.index = hm_pivot.index
         hm_pivot.columns = [get_rep_label(r) for r in hm_pivot.columns]
+        annot_text.columns = hm_pivot.columns
         # Sort by mean NDS (best at top)
-        hm_pivot = hm_pivot.loc[hm_pivot.mean(axis=1).sort_values(ascending=False).index]
+        sort_idx = hm_pivot.mean(axis=1).sort_values(ascending=False).index
+        hm_pivot = hm_pivot.loc[sort_idx]
+        annot_text = annot_text.loc[sort_idx]
 
         ax_a.set_facecolor('black')
-        sns.heatmap(hm_pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
+        sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='RdBu', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
@@ -3376,8 +3505,8 @@ def main():
     print("\n--- PART 1: THE WHAT ---")
     create_figure1(qm9_df, nds_df, output_dir)
     create_figure2(qm9_df, output_dir)
-    create_figure3(nds_df, validation_df, val_nds_df, output_dir)
-    create_interaction_figure(nds_df, output_dir)
+    create_figure3(nds_df, validation_df, val_nds_df, qm9_df, output_dir)
+    create_interaction_figure(nds_df, qm9_df, output_dir)
     create_full_overview(nds_df, output_dir)
 
     print("\n--- PART 2: THE WHY ---")
