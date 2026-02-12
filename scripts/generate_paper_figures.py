@@ -1558,23 +1558,21 @@ def create_methods_figure(output_dir):
         ax = axes[i]
         y_noisy = apply_noise(y_clean, sigma, strategy)
 
-        # Clean distribution: light blue, low alpha
-        ax.hist(y_clean, bins=50, alpha=0.25, color='#0072B2', label='Clean', density=True)
+        # Use common bins for both distributions
+        all_vals = np.concatenate([y_clean, y_noisy])
+        bins = np.linspace(all_vals.min(), all_vals.max(), 51)
 
-        # Noisy distribution: strategy color, more prominent
-        n_noisy, bins_noisy, patches_noisy = ax.hist(
-            y_noisy, bins=50, alpha=0.5, color=STRATEGY_COLORS[strategy],
-            label=f'Noisy (σ={sigma})', density=True
-        )
+        # Filled histograms: very transparent so overlap is visible
+        ax.hist(y_clean, bins=bins, alpha=0.15, color='#0072B2', density=True)
+        ax.hist(y_noisy, bins=bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
 
-        # Highlight the tails (upper/lower 15% of bin range) with full opacity
-        bin_centers = 0.5 * (bins_noisy[:-1] + bins_noisy[1:])
-        q_lo, q_hi = np.percentile(bin_centers, 15), np.percentile(bin_centers, 85)
-        for patch, center in zip(patches_noisy, bin_centers):
-            if center < q_lo or center > q_hi:
-                patch.set_alpha(0.9)
-                patch.set_edgecolor(STRATEGY_COLORS[strategy])
-                patch.set_linewidth(0.5)
+        # Bold step outlines on TOP of curves
+        n_clean, _, _ = ax.hist(y_clean, bins=bins, density=True,
+                                histtype='step', linewidth=2.0, color='#0072B2',
+                                label='Clean')
+        n_noisy, _, _ = ax.hist(y_noisy, bins=bins, density=True,
+                                histtype='step', linewidth=2.0, color=STRATEGY_COLORS[strategy],
+                                label=f'Noisy (σ={sigma})')
 
         ax.set_title(STRATEGY_LABELS[strategy], fontsize=10, fontweight='bold',
                      color=STRATEGY_COLORS[strategy])
@@ -1611,9 +1609,15 @@ def create_methods_figure(output_dir):
             else:
                 y_noisy = apply_noise(y_clean, sig, strategy)
 
-            ax.hist(y_clean, bins=50, alpha=0.4, color='#666666', density=True)
+            detail_bins = np.linspace(min(y_clean.min(), y_noisy.min()),
+                                      max(y_clean.max(), y_noisy.max()), 51)
+            ax.hist(y_clean, bins=detail_bins, alpha=0.15, color='#0072B2', density=True)
+            ax.hist(y_clean, bins=detail_bins, density=True,
+                    histtype='step', linewidth=1.5, color='#0072B2')
             if sig > 0:
-                ax.hist(y_noisy, bins=50, alpha=0.6, color=STRATEGY_COLORS[strategy], density=True)
+                ax.hist(y_noisy, bins=detail_bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
+                ax.hist(y_noisy, bins=detail_bins, density=True,
+                        histtype='step', linewidth=1.5, color=STRATEGY_COLORS[strategy])
 
             if j == 0:
                 ax.set_ylabel(STRATEGY_LABELS[strategy], fontsize=9, fontweight='bold')
@@ -1648,8 +1652,8 @@ def create_methods_figure(output_dir):
 
 def create_figure1(df, nds_df, output_dir):
     """Figure 1: Global Overview - R² vs σ line plot + NDS heatmap."""
-    fig = plt.figure(figsize=(12, 5))
-    gs = gridspec.GridSpec(1, 2, width_ratios=[1.2, 1])
+    fig = plt.figure(figsize=(14, 6))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.2])
 
     # Panel A: R² vs σ for key models on PDV
     ax_a = fig.add_subplot(gs[0])
@@ -1712,6 +1716,7 @@ def create_figure1(df, nds_df, output_dir):
         # so both colors are visible (all NDS values are negative)
         vals = pivot.values[~np.isnan(pivot.values)]
         center_val = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
+        ax_b.set_facecolor('black')
         sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=center_val,
                     ax=ax_b, cbar_kws={'label': 'NDS'})
         ax_b.set_xlabel('Noise Strategy')
@@ -1771,6 +1776,7 @@ def create_figure1(df, nds_df, output_dir):
             pivot.index = [get_model_label(m) for m in pivot.index]
             vals_e = pivot.values[~np.isnan(pivot.values)]
             cv_e = (vals_e.min() + vals_e.max()) / 2 if len(vals_e) > 0 else 0
+            ax_eb.set_facecolor('black')
             sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', center=cv_e,
                         ax=ax_eb, cbar_kws={'label': 'NDS'})
             ax_eb.set_xlabel('Noise Strategy')
@@ -1831,9 +1837,9 @@ def create_figure2(df, output_dir):
         rep_vals = [results[s]['eta2_rep'] for s in strats]
         int_vals = [results[s]['eta2_interaction'] for s in strats]
 
-        ax.bar(x - width, model_vals, width, label='Model', color='#3498db')
-        ax.bar(x, rep_vals, width, label='Representation', color='#E69F00')
-        ax.bar(x + width, int_vals, width, label='Interaction', color='#0072B2')
+        ax.bar(x - width, model_vals, width, label='Model', color='#2166AC')
+        ax.bar(x, rep_vals, width, label='Representation', color='#B2182B')
+        ax.bar(x + width, int_vals, width, label='Interaction', color='#7A3B9E')
 
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
@@ -1893,7 +1899,7 @@ def create_figure2(df, output_dir):
 def create_figure3(nds_df, validation_df, output_dir):
     """Figure 3: Ranking consistency across strategies, sigmas, datasets. Uses PDV only."""
     n_panels = 3 if validation_df is not None else 2
-    fig, axes = plt.subplots(1, n_panels, figsize=(4*n_panels, 5))
+    fig, axes = plt.subplots(1, n_panels, figsize=(5.5*n_panels, 6))
     if n_panels == 2:
         axes = [axes[0], axes[1], None]
 
@@ -1918,6 +1924,7 @@ def create_figure3(nds_df, validation_df, output_dir):
             # Sort by mean NDS (best at top)
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
+            ax_a.set_facecolor('black')
             sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                         ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
@@ -2001,6 +2008,7 @@ def create_figure3(nds_df, validation_df, output_dir):
             pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
+            ax_ea.set_facecolor('black')
             sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
@@ -2230,6 +2238,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     ax.set_xlabel('Injected Noise Level (σ)')
     ax.set_ylabel('Mean Predicted Uncertainty')
+    ax.set_title('Uncertainty Tracking of Injected Noise', fontweight='bold')
     ax.legend(fontsize=7, ncol=2, loc='upper left', framealpha=0.9)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -2799,6 +2808,7 @@ def create_interaction_figure(nds_df, output_dir):
         # Sort by mean NDS (best at top)
         hm_pivot = hm_pivot.loc[hm_pivot.mean(axis=1).sort_values(ascending=False).index]
 
+        ax_a.set_facecolor('black')
         sns.heatmap(hm_pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
@@ -2943,6 +2953,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         axes[-1].legend(handles=model_handles, loc='lower right', fontsize=4,
                         title='Model', title_fontsize=5, ncol=2)
 
+    fig.suptitle('Baseline Performance vs Noise Robustness (ANOVA Configurations)',
+                 fontsize=12, fontweight='bold', y=1.02)
     plt.tight_layout()
     plt.savefig(output_dir / filename, dpi=300, bbox_inches='tight')
     plt.close()
