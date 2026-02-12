@@ -656,25 +656,31 @@ Despite the variation in absolute performance degradation, relative model rankin
 % Current text still references ESOL and hERG classification. Figures reference esol_degradation_curves.png
 % and herg_degradation_curves.png — these may also need regenerating.
 %
-% TODO [CATASTROPHIC FAILURES]: Address and discuss catastrophic validation failures:
+% TODO [CATASTROPHIC FAILURES]: Address and discuss catastrophic failures:
 % - DNN+PDV on hERG-Ki: NDS = -1094 (model collapse under noise, other reps/datasets fine)
 % - XGBoost on Caco2_Efflux: NDS -1.1 to -1.4 across all reps (dataset-specific weakness)
 % - Caco2_Efflux is universally the hardest dataset for all models
-% - These should be filtered (baseline R² < 0.6 threshold), flagged with asterisks/footnotes,
-%   and discussed in text as expected real-world failure modes (distribution shift, small N, etc.)
-% - Do NOT silently remove — clearly note each exclusion and its justification.
+% - QM9 ANOVA: catastrophic DNN training iterations (R² < -0.5) now auto-filtered by
+%   generate_paper_figures.py, logged to filtered_catastrophic_iterations.csv
+% - Validation failures: filtered by baseline R² < 0.6 threshold, listed in excluded_configs.csv
+% - All exclusions must be explicitly noted in paper text (not silently removed).
 %
-% TODO [MOL2VEC ANOMALY]: Investigate and discuss mol2vec positive NDS:
-% - dnn/mol2vec/valprop: NDS = +0.738 (performance IMPROVED with noise!)
-% - dnn/mol2vec/outlier: NDS = -0.021 (near-zero degradation)
-% - But flexible_dnn/mol2vec/valprop: NDS = -1.856 (extreme negative — opposite direction)
-% - dnn/mol2vec/legacy is MISSING (no Gaussian baseline for comparison)
-% - Pattern is DNN-specific on mol2vec; other models on mol2vec are normal
-% - Hypotheses: (1) noise as regularisation for overfit DNN on low-quality rep,
-%   (2) valprop noise structure accidentally matching mol2vec feature scale,
-%   (3) statistical fluke from single-iteration data
-% - Needs: test multiple seeds, test different architectures, compare R² curves at each sigma level
-% - If confirmed real: major finding for discussion (conditions where noise helps)
+% TODO [MOL2VEC ANOMALY — RESOLVED]: The original positive NDS (+0.738) for
+% dnn/mol2vec/valprop was a statistical artifact caused by catastrophic DNN training
+% failures (individual iterations with R² as low as -63.6). When these occur at
+% sigma=0, they depress the baseline mean R² and artificially inflate the NDS slope.
+% Investigation (5 seeds × 3 strategies, 5 architectures × 3 strategies) confirmed:
+%   - True dnn/mol2vec/valprop NDS = -0.61 ± 0.06 (all seeds negative)
+%   - Effect is architecture-independent (all 5 architectures show NDS ~ -0.64)
+%   - Root cause: DNN training instability on mol2vec, not a real signal
+% generate_paper_figures.py now filters iterations with R² < -0.5 before NDS calculation.
+% Filtered iterations are logged to filtered_catastrophic_iterations.csv.
+%
+% TODO [PAPER NOTE]: Add a brief note in Methods or Results:
+%   "N training iterations were excluded due to catastrophic training failures
+%   (R² < -0.5), primarily affecting DNN on mol2vec (see Supplementary Table X).
+%   These are attributed to DNN training instability on lower-dimensional
+%   representations and do not affect conclusions."
 \subsubsection{Generalization Across Prediction Targets}
 
 To assess whether noise robustness results generalize beyond HOMO-LUMO gap on QM9, we evaluated top configurations across two additional molecular property datasets: ESOL for aqueous solubility via regression \citep{Delaney2004} and hERG, cardiac ion channel inhibition via classification \citep{Czodrowski2013}. Figure~\ref{fig:cross_dataset_degradation} shows how predictive performance degrades under two noise strategies across five configurations on each dataset. For ESOL, we used heteroscedastic and legacy noise and for hERG classification, we used uniform label flipping and class-imbalanced corruption. 
