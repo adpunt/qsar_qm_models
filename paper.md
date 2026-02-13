@@ -212,12 +212,8 @@ The majority of experiments were conducted on the QM9 molecular property dataset
 % TODO: modify with new results
 We selected HOMO-LUMO energy gap as the primary prediction target in QM9, as it captures electronic characteristics relevant to molecular reactivity and stability \citep{Islam2019, Hllermeier2021}. The HOMO-LUMO gap is a well-established target for quantum chemistry benchmarks as it is defined as the difference between highest occupied and lowest unoccupied molecular orbital energies—directly, meaning it relates to a molecule's electronic excitability, charge transfer capability, and chemical stability \citep{Fediai2023}. We also assumed that thanks to the consistent calculation method, and notwithstanding approximations in the level of theory used, the QM data were "free" of noise.
 
-% TODO: Replace ESOL/hERG validation datasets with actual datasets used:
-% - LogD (lipophilicity) from OpenADMET
-% - Caco2 efflux permeability from OpenADMET
-% - hERG-Ki (regression, not classification) from ChEMBL
-% The paragraph below describes the wrong datasets.
-To assess whether noise robustness results generalize beyond the HOMO-LUMO gap, we evaluated top configurations across two additional molecular property datasets: ESOL (aqueous solubility via regression) and hERG (cardiac ion channel inhibition via classification). The ESOL dataset, introduced by \cite{Delaney2004}, contains 1,128 compounds with experimentally measured aqueous solubilities expressed as log(mol/L), a physicochemical property involved in drug absorption and formulation. We applied both heteroscedastic and legacy noise to simulate realistic measurement uncertainty using the NoiseInject framework. hERG binding classification relates to the inhibition of the human ether-à-go-go-related gene potassium channel (Kv11.1), which can cause fatal cardiac arrhythmias through QT interval prolongation \citep{Czodrowski2013}. hERG classification typically distinguishes blockers from non-blockers using $IC50_{50}$ thresholds around $10 \mu M$ \citep{Ryu2020}. For hERG classification, used NoiseInject to add uniform label flipping and class-imbalanced corruption.
+% TODO [DATA PENDING]: Confirm final dataset sizes and add citations for OpenADMET datasets.
+To assess whether noise robustness results generalize beyond the HOMO-LUMO gap, we evaluated model configurations across three additional molecular property datasets with experimentally measured endpoints. From the OpenADMET benchmark suite, we used LogD (lipophilicity) and Caco-2 efflux permeability, both of which are key ADME properties in drug discovery. From ChEMBL, we used hERG-Ki, measuring binding affinity to the cardiac ion channel hERG (Kv11.1) as a continuous regression target (Ki values) rather than a binary classification threshold. All three datasets were evaluated using all six noise injection strategies and the same noise levels ($\sigma \in \{0, 0.1, \ldots, 1.0\}$) as the QM9 experiments, enabling direct comparison of robustness rankings across prediction targets.
 
 SMILES strings were sanitized and canonicalized using \texttt{RDKit}, and target values were  normalized to zero mean and unit variance. Data loading and pre-processing were performed under a global random seed to ensure reproducibility. Prior to modeling, all molecular structures were sanitized and canonicalized using \texttt{RDKit} to remove invalid valence states and standardize atom and bond typing \citep{rdkit}. Target values were mean-centered and normalized to zero mean and unit variance. Data loading and pre-processing were performed with a global random seed to ensure reproducibility.
 
@@ -258,10 +254,12 @@ where $\|\cdot\|$ represents the Euclidean norm \citep{gauche}.
 % RECOMMENDATION: Keep the detailed version here; trim the intro to a brief motivation.
 NNs are a popular choice in QSAR research, though they are often outperformed by more traditional methods \citep{Baskin2008, Koutsoukas2017}. Decision trees and related ensemble models tend to perform stronger on smaller datasets, overfit less, and don't rely on a static 3D molecular structure like NNs do \citep{Baskin2008, Koutsoukas2017}. NNs are often deterministic; however, they can be transformed into probabilistic models through several approaches. BNNs introduce priors on the weights and compute a posterior distribution on those weights given the input data, providing uncertainty quantification. This can be done by approximations, including Monte Carlo dropout, variational inference, or ensembles \citep{gal2016}. To improve computational efficiency, several strategies exist for converting NNs to BNNs. One straightforward yet computationally expensive approach is to replace all linear layers with Bayesian layers (full Bayesian transformation, or full-BNN), using Gaussian priors $\mathcal{N}(0, 0.1^2)$ on all weights. Replacing only the final layer is computationally lighter (last-layer transformation, or last-layer-BNN), using the same priors on the final layer only. A third approach is Variational Bayesian Last Layers (VBLL), which maintains a mean-field variational posterior $q(\mathbf{W}) = \mathcal{N}(\boldsymbol{\mu}_W, \text{diag}(\boldsymbol{\sigma}_W^2))$ over the last-layer weights and is trained by maximizing the evidence lower bound (ELBO), i.e., minimizing the reconstruction loss plus KL divergence $D_{\text{KL}}(q(\mathbf{W}) \| p(\mathbf{W}))$ from a standard normal prior, scaled by $1/N$ \citep{Harrison2024} (variational transformation, or var-BNN). The VBLL also learns a scalar observation noise variance, enabling decomposition of predictive uncertainty into epistemic (from weight posterior sampling) and aleatoric (from learned noise) components. All BNN variants use 100 Monte Carlo forward passes at inference to estimate predictive distributions. Bayesian approaches also act as forms of regularization \citep{Burden2009}, as dropouts help to prevent overfitting.
 
+% TODO [MISSING FILE]: bayesian_transformation.png does not exist yet. Create methods diagram
+% showing deterministic vs BNN architecture (fixed weights vs weight distributions).
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.85\textwidth]{bayesian_transformation.png}
-    \caption{Deterministic versus Bayesian neural network architectures. Deterministic networks use fixed weights $W$ to produce point predictions, while Bayesian networks treat weights as distributions $\mathcal{N}(\mu, \sigma^2)$, generating prediction histograms through multiple stochastic forward passes to quantify epistemic uncertainty.}
+    \caption{Deterministic versus Bayesian neural network architectures. Deterministic networks use fixed weights $W$ to produce point predictions, while Bayesian networks treat weights as distributions $\mathcal{N}(\mu, \sigma^2)$, generating prediction histograms through multiple stochastic forward passes.}
     \label{fig:bayesian_transformation}
 \end{figure}
 
@@ -325,7 +323,7 @@ In this research, our objective is to evaluate the robustness of QSAR models aga
 
 Experimental noise is often modeled as homoscedastic Gaussian noise and is added evenly across all labels. However, not all experimental noise is random. It may be heteroscedastic, where the variance depends on the molecule itself or experimental factors, or systematic, where biases from factors like assay conditions are introduced. We used a variety of noise strategies to model the different types of possible experimental noise that could arise in cheminformatics data. 
 
-The following strategies were implemented for regression:
+The following strategies were implemented for regression (Table~\ref{tab:regression_noise}, Figure~\ref{fig:noise_strategies}):
 \begin{table}[h]
 \centering
 \begin{tabular}{lll}
@@ -349,7 +347,7 @@ The parameter $\sigma$ serves as a noise scaling factor across all strategies. F
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{fig_methods_noise_strategies.png}
-\caption{Effect of each noise injection strategy on the label distribution at $\sigma = 0.5$. Gray histograms show the clean HOMO-LUMO gap distribution; colored histograms show the distribution after noise injection. Each strategy produces a distinct perturbation pattern, ranging from uniform displacement (Gaussian) to targeted corruption of specific label regions (quantile, threshold, outlier). The detailed progression across noise levels is shown in Supplementary Figure~S1.}
+\caption{Effect of each noise injection strategy on the label distribution at $\sigma = 0.5$. Gray histograms show the clean HOMO-LUMO gap distribution; colored histograms show the distribution after noise injection. Each strategy produces a distinct perturbation pattern, ranging from uniform displacement (Gaussian) to targeted corruption of specific label regions (quantile, threshold, outlier). The detailed progression across noise levels is shown in Supplementary Figure~\ref{fig:supp_noise_detailed}.}
 \label{fig:noise_strategies}
 \end{figure}
 
@@ -448,7 +446,7 @@ Outlier         & 21.9 & 32.6 &  1.6 & 0.2 \\
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig2_anova_decomposition.png}
-    \caption{\textbf{ANOVA variance decomposition by noise strategy.} (A) Variance explained ($\eta^2$, \%) for predictive performance (R$^2$ at $\sigma=0.3$). Representation dominates on four of six strategies, while model architecture dominates on heteroscedastic and value-proportional noise. (B) Variance explained for noise robustness (NDS). Model architecture dominates on Gaussian, threshold, and heteroscedastic noise, but explains almost no variance on outlier ($1.6\%$) and value-proportional ($8.8\%$) noise. Interaction terms (green) account for the remaining variance.}
+    \caption{\textbf{ANOVA variance decomposition by noise strategy.} Variance explained ($\eta^2$, \%) for (A) predictive performance (R$^2$ at $\sigma=0.3$) and (B) noise robustness (NDS), decomposed into model architecture, molecular representation, and interaction effects for each noise strategy.}
     \label{fig:anova_decomposition}
 \end{figure}
 
@@ -492,14 +490,14 @@ Figure~\ref{fig:full_overview} shows all model--representation configurations pl
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig_full_overview.png}
-    \caption{\textbf{All model--representation configurations across noise severity tiers.} Each point is one model--representation configuration; marker shape indicates representation, color indicates model. (A) Gaussian noise (moderate tier). (B) Outlier noise (mild tier): NDS values compress toward zero, making models difficult to distinguish. (C) Threshold noise (severe tier): all configurations shift downward, but relative positioning is largely preserved.}
+    \caption{\textbf{All model--representation configurations across noise severity tiers.} Each point is one model--representation configuration; marker shape indicates representation, color indicates model. Panels show (A) Gaussian, (B) outlier, and (C) threshold noise strategies, spanning the mild-to-severe range.}
     \label{fig:full_overview}
 \end{figure}
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig_interaction.png}
-    \caption{\textbf{Representation--model interaction effects.} (A) Model robustness rankings across representations under Gaussian noise. Rank crossings indicate disordinal interaction: the most robust model changes depending on which representation is used. (B) NDS on PDV versus ECFP4 for each model under Gaussian noise. The weak correlation (Spearman $\rho = 0.40$, $p = 0.069$) confirms that robustness rankings on one representation do not reliably predict rankings on another.}
+    \caption{\textbf{Representation--model interaction effects.} (A) NDS heatmap showing model robustness across representations under Gaussian noise. (B) NDS on PDV versus ECFP4 for each model under Gaussian noise, with Spearman correlation.}
     \label{fig:interaction}
 \end{figure}
 
@@ -528,22 +526,27 @@ The practical implication is that model architecture is the main driver of noise
 % - Once data arrives: regenerate figures, remap references, review numbers
 \subsubsection{Bayesian Transformations and Probabilistic Approaches}
 
-One goal of this research was to evaluate whether Bayesian transformations on neural networks improve robustness to label noise. Aggregating across all configurations, we found no significant overall difference between deterministic and probabilistic approaches (Mann-Whitney U, $p = 0.841$; Figure~\ref{fig:det_vs_prob}D). Deterministic models achieved mean $|$NDS$|$ of 0.403 ($n=43$) versus 0.403 for probabilistic models ($n=74$). However, architecture-specific comparisons reveal a more nuanced picture.
+One goal of this research was to evaluate whether Bayesian transformations on neural networks improve robustness to label noise. % TODO [DATA PENDING]: Update NDS numbers and p-values once all BNN ANOVA data completes.
+Aggregating across all configurations, we found no significant overall difference between deterministic and probabilistic approaches (Mann-Whitney U, $p = 0.841$). Deterministic models achieved mean $|$NDS$|$ of 0.403 ($n=43$) versus 0.403 for probabilistic models ($n=74$). However, architecture-specific comparisons reveal a more nuanced picture (Figure~\ref{fig:dnn_family}).
 
+% TODO [BLOCKED]: fig4_dnn_family.png is generated but may change once BNN ANOVA data completes.
+% Update numbers and review figure after all DNN BNN jobs finish.
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\textwidth]{figure3_deterministic_vs_probabilistic.png}
-    \caption{\textbf{Deterministic versus probabilistic model comparison.} (A) Performance degradation for RF (deterministic) versus QRF (probabilistic) on PDV representation. (B) MLP versus Bayesian neural network variants on PDV. (C) Baseline R$^2$ versus Noise Degradation Slope for all configurations. (D) NDS distribution by model type shows no significant overall difference ($p = 0.841$).}
-    \label{fig:det_vs_prob}
+    \includegraphics[width=\textwidth]{fig4_dnn_family.png}
+    \caption{\textbf{DNN family comparison.} R$^2$ versus noise level $\sigma$ for the DNN and its BNN variants (full, last-layer, variational) across noise strategies.}
+    \label{fig:dnn_family}
 \end{figure}
 
-For random forests, the QRF variant shows no significant difference from its deterministic counterpart. Mann-Whitney U tests comparing RF versus QRF across representations showed no significant difference in noise robustness ($p = 0.31$), with RF achieving mean $|$NDS$|$ of 0.326 versus 0.354 for QRF, as seen in Figure~\ref{fig:bayesian_transforms}C1.
+For random forests, the QRF variant shows no significant difference from its deterministic counterpart. Mann-Whitney U tests comparing RF versus QRF across representations showed no significant difference in noise robustness ($p = 0.31$), with RF achieving mean $|$NDS$|$ of 0.326 versus 0.354 for QRF, as seen in Figure~\ref{fig:mlp_rf_comparison}.
 
+% TODO [BLOCKED]: fig5_mlp_rf_comparison.png is generated but may change once MLP BNN and RF/QRF
+% hetero/valprop ANOVA data completes. Update numbers and review figure after jobs finish.
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\textwidth]{figure4_bayesian_transformations.png}
-    \caption{\textbf{Bayesian transformation effects across representations.} (A1--A2) Performance degradation curves on PDV for RF$\rightarrow$QRF and MLP$\rightarrow$BNN transformations. (B1--B2) Baseline R$^2$ comparison by representation. (C1--C2) Noise Degradation Slope improvement; positive values indicate the Bayesian variant degrades more slowly.}
-    \label{fig:bayesian_transforms}
+    \includegraphics[width=\textwidth]{fig5_mlp_rf_comparison.png}
+    \caption{\textbf{MLP and RF family comparison.} R$^2$ versus noise level $\sigma$ for the MLP and its BNN variants, and for RF versus QRF, across noise strategies.}
+    \label{fig:mlp_rf_comparison}
 \end{figure}
 
 For NNs, Bayesian transformations had mixed effects on noise robustness, often dependent on the representation. MLP-BNN-Full showed significantly improved noise robustness compared to deterministic MLP ($p = 0.038$), with mean $|$NDS$|$ of 0.376 versus 0.489. However, last-layer (MLP-BNN-Last) and variational (MLP-BNN-Var) transformations showed no significant improvement ($p = 0.93$ and $p = 0.66$ respectively). Table~\ref{tab:nn_transforms} shows that for vector-based representations (PDV, ECFP4), BNN variants provide minimal improvement over deterministic MLP. However, on SMILES variants, MLP-BNN-Full substantially improves noise robustness.
@@ -572,18 +575,24 @@ The pattern suggests that Bayesian transformations are most beneficial when the 
 
 We evaluated the uncertainty estimates produced by probabilistic models under increasing label noise, focusing on four questions: (1) do uncertainty estimates correlate with actual prediction error? (2) do models detect when noise has been injected? (3) how well-calibrated are the predicted intervals? and (4) for models with aleatoric/epistemic decomposition, does the correct component respond to noise?
 
-% TODO: Populate table from table4_uncertainty_metrics.csv after re-running figures script.
-% The table below is a placeholder structure — numbers will come from the updated table4.
+% TODO [DATA PENDING]: Update table once BNN variational uncertainty data is available.
+% Models with mean uncertainty < 1e-3 (deterministic DNN/MLP) are excluded.
 \begin{table}[htbp]
 \centering
-\caption{Uncertainty quantification metrics for probabilistic models under Gaussian noise (ECFP4 representation). Unc-Error $\rho$: Spearman correlation between predicted uncertainty and absolute prediction error (higher = better). Unc-Noise $\rho$: Spearman correlation between predicted uncertainty and magnitude of injected noise (higher = better detection). ECE: Expected calibration error (lower = better). Coverage: proportion of true values within the predicted interval at $1\sigma$ (target: 68\%) and $2\sigma$ (target: 95\%).}
+\caption{Uncertainty quantification metrics for probabilistic models under Gaussian noise (ECFP4 representation). Unc-Error $\rho$: Spearman correlation between predicted uncertainty and absolute prediction error. Unc-Noise $\rho$: Spearman correlation between predicted uncertainty and injected noise magnitude. ECE: Expected calibration error. Coverage: proportion of true values within the predicted interval at $1\sigma$ (target: 68\%) and $2\sigma$ (target: 95\%).}
 \label{tab:uncertainty_metrics}
 \small
 \begin{tabular}{lrrrrr}
 \toprule
 \textbf{Model} & \textbf{Unc-Error $\rho$} & \textbf{Unc-Noise $\rho$} & \textbf{ECE} & \textbf{Cov. $1\sigma$} & \textbf{Cov. $2\sigma$} \\
 \midrule
-% TODO: Fill from table4\_uncertainty\_metrics.csv \\
+NGBoost        & 0.22 & 0.38 & 0.12 & 69.4\% & 95.1\% \\
+QRF            & 0.22 & 0.04 & 0.16 & 69.0\% & 91.7\% \\
+GP (Gauche)    & 0.20 & 0.33 & 0.20 & 74.6\% & 94.8\% \\
+MLP-BNN (Full) & 0.19 & 0.32 & 0.23 & 74.9\% & 94.9\% \\
+DNN-BNN (Full) & 0.17 & 0.34 & 0.19 & 73.9\% & 94.7\% \\
+MLP-BNN (Last) & 0.11 & 0.23 & 0.14 & 56.5\% & 82.4\% \\
+DNN-BNN (Last) & 0.09 & 0.15 & 0.14 & 52.4\% & 79.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -616,14 +625,11 @@ Overall, NGBoost produces the most useful uncertainty estimates under noisy cond
 \subsubsection{Generalization Across Noise Injection Strategies}
 The majority of experiments were conducted with artificial noise drawn from a Gaussian distribution and randomly distributed across all labels, with the HOMO-LUMO gap as the prediction target. We now assess how our research generalize to alternative noise injection strategies representing different data quality issues.
 
-We evaluated six artificial noise injection strategies designed to mimic various experimental data quality scenarios (Figure~\ref{fig:phase5_noise_strategy}). Model performance varied substantially across noise strategies (Figure~\ref{fig:phase5_noise_strategy}A, Table~\ref{tab:phase5_noise_strategy}). We clustered the strategies into three tiers based on mean retention percentage: \textbf{mild} (outlier: 2.5\%, heteroscedastic: 6.6\% degradation), \textbf{moderate} (quantile-based: 11.4\%, legacy Gaussian: 19.0\%), and \textbf{severe} (value-proportional: 34.1\%, threshold: 42.2\%) (Figure~\ref{fig:phase5_noise_strategy}B).
+We evaluated six artificial noise injection strategies designed to mimic various experimental data quality scenarios. Model performance varied substantially across noise strategies (Table~\ref{tab:phase5_noise_strategy}). We clustered the strategies into three tiers based on mean retention percentage: \textbf{mild} (outlier: 2.5\%, heteroscedastic: 6.6\% degradation), \textbf{moderate} (quantile-based: 11.4\%, legacy Gaussian: 19.0\%), and \textbf{severe} (value-proportional: 34.1\%, threshold: 42.2\%).
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{figure8_noise_strategy_generalization.png}
-\caption{Noise corruption strategy analysis. (A) Performance degradation trajectories across increasing noise levels for each strategy, showing mean $R^2$ averaged across all models. (B) Strategy difficulty ranking by mean retention percentage with standard deviation error bars. (C) Heatmap of retention percentage across model-representation configurations and noise strategies, revealing consistent patterns where NGBoost configurations show highest retention across all strategies.}
-\label{fig:phase5_noise_strategy}
-\end{figure}
+% NOTE: Noise strategy generalization is now covered by fig1_global_overview.png (Panel B: NDS heatmap
+% across strategies) and fig2_anova_decomposition.png (η² breakdown by strategy). Separate figure
+% removed to avoid redundancy with Strategy-Specific Patterns section.
 
 \begin{table}[htbp]
 \centering
@@ -647,71 +653,55 @@ Threshold & 0.785 & 57.8 & 4.7 & 0.675 \\
 
 These results indicate that the type of label noise has a strong impact on a model's ability to learn in the presence of noise. Outlier corruption was the least damaging, since many models have built-in techniques for identifying and ignoring outliers. For example, tree-based approaches isolate outliers into leaf nodes. Similarly, heteroscedastic noise, which scales with property magnitude, proved relatively benign as models could identify and adapt to the structured noise pattern. Threshold noise on the other hand, which deterministically corrupts all labels above a property cutoff, causes the greatest disruption in predictive performance. 
 
-Gaussian noise is conventionally used to model label noise. However, this misses the full picture. Evaluating performance across different types of noise produces a clearer understanding of how real-world noise would be handled. The heatmap analysis (Figure~\ref{fig:phase5_noise_strategy}C) reveals that while absolute performance varies considerably across modeling techniques, relative model rankings remain consistent. NGBoost configurations achieve the highest retention across all noise types, followed by RF, then DNN.
+Gaussian noise is conventionally used to model label noise. However, this misses the full picture. Evaluating performance across different types of noise produces a clearer understanding of how real-world noise would be handled. The heatmap analysis (Figure~\ref{fig:global_overview}B) reveals that while absolute performance varies considerably across modeling techniques, relative model rankings remain consistent. NGBoost configurations achieve the highest retention across all noise types, followed by RF, then DNN.
 
-Despite the variation in absolute performance degradation, relative model rankings remained stable across all six noise strategies (Figure~\ref{fig:phase5_noise_strategy}C).
+Despite the variation in absolute performance degradation, relative model rankings remained stable across all six noise strategies (Figure~\ref{fig:global_overview}B).
 
-% TODO [VALIDATION DATASETS]: Update this section to match the actual validation datasets used.
-% The Methods section TODO (line ~209) lists: LogD, Caco2 (OpenADMET), hERG-Ki (ChEMBL regression).
-% Current text still references ESOL and hERG classification. Figures reference esol_degradation_curves.png
-% and herg_degradation_curves.png — these may also need regenerating.
-%
 % TODO [CATASTROPHIC FAILURES]: Address and discuss catastrophic failures:
 % - DNN+PDV on hERG-Ki: NDS = -1094 (model collapse under noise, other reps/datasets fine)
 % - XGBoost on Caco2_Efflux: NDS -1.1 to -1.4 across all reps (dataset-specific weakness)
 % - Caco2_Efflux is universally the hardest dataset for all models
-% - QM9 ANOVA: catastrophic DNN training iterations (R² < -0.5) now auto-filtered by
-%   generate_paper_figures.py, logged to filtered_catastrophic_iterations.csv
-% - Validation failures: filtered by baseline R² < 0.6 threshold, listed in excluded_configs.csv
+% - Validation failures: filtered by baseline R^2 < 0.6 threshold
 % - All exclusions must be explicitly noted in paper text (not silently removed).
-%
-% TODO [MOL2VEC ANOMALY — RESOLVED]: The original positive NDS (+0.738) for
-% dnn/mol2vec/valprop was a statistical artifact caused by catastrophic DNN training
-% failures (individual iterations with R² as low as -63.6). When these occur at
-% sigma=0, they depress the baseline mean R² and artificially inflate the NDS slope.
-% Investigation (5 seeds × 3 strategies, 5 architectures × 3 strategies) confirmed:
-%   - True dnn/mol2vec/valprop NDS = -0.61 ± 0.06 (all seeds negative)
-%   - Effect is architecture-independent (all 5 architectures show NDS ~ -0.64)
-%   - Root cause: DNN training instability on mol2vec, not a real signal
-% generate_paper_figures.py now filters iterations with R² < -0.5 before NDS calculation.
-% Filtered iterations are logged to filtered_catastrophic_iterations.csv.
 %
 % TODO [PAPER NOTE]: Add a brief note in Methods or Results:
 %   "N training iterations were excluded due to catastrophic training failures
-%   (R² < -0.5), primarily affecting DNN on mol2vec (see Supplementary Table X).
+%   (R^2 < -0.5), primarily affecting DNN on mol2vec (see Supplementary Table X).
 %   These are attributed to DNN training instability on lower-dimensional
 %   representations and do not affect conclusions."
 \subsubsection{Generalization Across Prediction Targets}
 
-To assess whether noise robustness results generalize beyond HOMO-LUMO gap on QM9, we evaluated top configurations across two additional molecular property datasets: ESOL for aqueous solubility via regression \citep{Delaney2004} and hERG, cardiac ion channel inhibition via classification \citep{Czodrowski2013}. Figure~\ref{fig:cross_dataset_degradation} shows how predictive performance degrades under two noise strategies across five configurations on each dataset. For ESOL, we used heteroscedastic and legacy noise and for hERG classification, we used uniform label flipping and class-imbalanced corruption. 
+% TODO [DATA PENDING]: Validation jobs (NGBoost, SVM, LightGBM) may still be running.
+% Update text and figures once all validation data is available. Numbers below are preliminary.
+To assess whether noise robustness results generalize beyond the HOMO-LUMO gap on QM9, we evaluated model configurations across three additional experimentally-derived molecular property datasets: LogD (lipophilicity) from OpenADMET, Caco-2 efflux permeability from OpenADMET, and hERG-Ki (cardiac ion channel binding affinity, regression) from ChEMBL. All three are regression targets, and all experiments used the NoiseInject framework with noise levels $\sigma \in \{0, 0.1, \ldots, 1.0\}$ across all six noise strategies. These datasets represent realistic ADME property prediction scenarios where experimental noise is inherently present.
+
+Figure~\ref{fig:validation_overview} shows NDS heatmaps for each validation dataset, broken down by model and noise strategy. Configurations with $|$NDS$| > 2.0$ were filtered as artifacts (shown as ``N/A''), and missing model--strategy combinations are indicated. The same baseline R$^2 > 0.6$ threshold was applied to exclude configurations where poor clean-data performance would produce misleading robustness estimates.
 
 \begin{figure}[htbp]
 \centering
-\begin{subfigure}[b]{\textwidth}
-    \centering
-    \includegraphics[width=\textwidth]{esol_degradation_curves.png}
-    \caption{ESOL (solubility regression)}
-\end{subfigure}
-\vspace{0.5cm}
-\begin{subfigure}[b]{\textwidth}
-    \centering
-    \includegraphics[width=\textwidth]{herg_degradation_curves.png}
-    \caption{hERG (cardiotoxicity classification)}
-\end{subfigure}
-\caption{Predictive performance degradation under noise for alternative datasets. (A) ESOL solubility prediction under heteroscedastic and legacy noise. (B) hERG classification under uniform and class-imbalanced label corruption.}
-\label{fig:cross_dataset_degradation}
+\includegraphics[width=\textwidth]{fig_validation_overview.png}
+\caption{\textbf{Validation dataset NDS heatmaps.} NDS by model and noise strategy for each external dataset (LogD, Caco-2 efflux, hERG-Ki). Black cells with ``missing'' indicate configurations not yet run; ``N/A'' indicates filtered extreme values.}
+\label{fig:validation_overview}
 \end{figure}
 
-Across both datasets, tree-based modeling maintained the highest predictive performance and noise robustness. RF and QRF configurations on both datasets maintained both strong predictive performance and retention. NNs underperformed on ESOL, while achieving mixed results on hERG. These findings in the models roughly mirror those of QM9. 
+To assess whether robustness rankings transfer from QM9 to external datasets, we compared per-model mean NDS on QM9 against mean NDS on each external dataset (Figure~\ref{fig:validation_qm9_transferability}), and examined the per-model robustness profile across datasets (Figure~\ref{fig:validation_model_comparison}).
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=\textwidth]{cross_dataset_comparison.png}
-\caption{Cross-dataset robustness comparison. (A) Retention for configurations evaluated on both datasets. (B) Dataset difficulty measured by average retention with standard deviation. (C) Representation performance aggregated across models. (D, E) Top 10 configurations ranked by retention for ESOL and hERG respectively.}
-\label{fig:cross_dataset_comparison}
+\includegraphics[width=0.8\textwidth]{fig_validation_qm9_transferability.png}
+\caption{\textbf{Robustness transferability from QM9 to external datasets.} Per-model mean NDS on QM9 versus mean NDS across all three external datasets, with Pearson correlation and linear trend line.}
+\label{fig:validation_qm9_transferability}
 \end{figure}
 
-MHG-GNN embeddings, when paired with tree-based models, ranked among the top configurations on both ESOL and hERG, suggesting that the noise robustness of pretrained graph representations transfers across molecular property domains. However, end-to-end GNN architectures were not evaluated on these datasets. PDV maintained its strong noise robustness over non-graph representations, followed by SNS, which again is mirrored by HOMO-LUMO gap on QM9. 
+% TODO [DATA PENDING]: Update per-dataset correlation figures and model comparison after
+% NGBoost, SVM, LightGBM validation data completes.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_model_comparison.png}
+\caption{\textbf{Model robustness across validation datasets.} Mean NDS by model for each external dataset, ordered by overall mean NDS.}
+\label{fig:validation_model_comparison}
+\end{figure}
 
 \section{Conclusion}\label{sec13}
 This study demonstrates that while molecular representation has a stronger impact on QSAR model performance than the choice of model architecture, the roles are reversed for noise robustness; once noise is introduced into the labels, the choice of model architecture becomes more important. We found that tree-based methods and GPs maintained strong performance under label corruption. NGBoost emerged as a particularly strong choice despite its relatively poor performance in clean data. This may be because NGBoost’s probabilistic formulation captures the error structure more effectively than deterministic gradient boosting. Although the model architecture was the primary factor in noise robustness, molecular representation also had an impact, and PDV and SNS fingerprints showed the highest retention under noise.
@@ -829,15 +819,84 @@ MLP & hidden\_size & 32 \\
 \end{table}
 
 
+To validate the ANOVA design, we computed pairwise Spearman rank correlations between all model NDS profiles and between all representation NDS profiles (Supplementary Tables S5 and S6). Models with $\rho > 0.99$ (e.g., conformal wrappers vs. their base models) were excluded from the ANOVA to avoid inflating model degrees of freedom with near-duplicate levels. Representations with $\rho > 0.90$ (SNS vs. ECFP4) were similarly excluded. We also computed ICC(1,1) for all model pairs to assess within-family consistency (Supplementary Table S7).
+
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.8\textwidth]{supplementary_s5_extended_uncertainty_error.png}
-\caption{Supplementary Figure S4. Extended uncertainty-error analysis across probabilistic models and noise levels. Hexbin plots show predicted uncertainty versus absolute error at three noise levels ($\sigma=0, 0.3, 1.0$) with Pearson correlations and perfect calibration line (dashed).}
-\label{fig:supp_s4_uncertainty_grid}
+\includegraphics[width=\textwidth]{fig_methods_noise_strategies_detailed.png}
+\caption{Supplementary Figure S1. Detailed noise strategy distributions at multiple $\sigma$ levels showing the progression of label corruption for each strategy.}
+\label{fig:supp_noise_detailed}
 \end{figure}
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig1_supp_ecfp4_overview.png}
+\caption{Supplementary Figure S2. Global overview of noise robustness on ECFP4 representation. (A) Performance degradation curves under Gaussian noise. (B) NDS heatmap across model architectures and noise strategies.}
+\label{fig:supp_ecfp4_overview}
+\end{figure}
 
-To validate the ANOVA design, we computed pairwise Spearman rank correlations between all model NDS profiles and between all representation NDS profiles (Supplementary Tables S5 and S6). Models with $\rho > 0.99$ (e.g., conformal wrappers vs. their base models) were excluded from the ANOVA to avoid inflating model degrees of freedom with near-duplicate levels. Representations with $\rho > 0.90$ (SNS vs. ECFP4) were similarly excluded. We also computed ICC(1,1) for all model pairs to assess within-family consistency (Supplementary Table S7).
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig3_supp_ecfp4_ranking.png}
+\caption{Supplementary Figure S3. NDS heatmap and baseline R$^2$ versus NDS scatter for ECFP4 representation under Gaussian noise.}
+\label{fig:supp_ecfp4_ranking}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_full_overview_supp.png}
+\caption{Supplementary Figure S4. All model--representation configurations for remaining noise strategies: quantile, heteroscedastic, and value-proportional noise.}
+\label{fig:full_overview_supp}
+\end{figure}
+
+% TODO [DATA PENDING]: Update validation supplementary figures once all validation jobs complete.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_strategy.png}
+\caption{Supplementary Figure S5. Noise strategy effect on robustness across validation datasets. Mean NDS by strategy and dataset.}
+\label{fig:supp_validation_strategy}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_rep_comparison.png}
+\caption{Supplementary Figure S6. Representation effect on robustness across validation datasets. Mean NDS by representation and dataset.}
+\label{fig:supp_validation_rep}
+\end{figure}
+
+% TODO [DATA PENDING]: Per-dataset QM9 correlation figures will update as validation data completes.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig3_ranking_consistency.png}
+\caption{Supplementary Figure S7. Ranking consistency on PDV. (A) NDS heatmap across models and strategies. (B) Baseline R$^2$ versus NDS scatter. (C) Cross-dataset NDS comparison.}
+\label{fig:supp_ranking_consistency}
+\end{figure}
+
+% Supplementary tables referenced from main text
+% TODO: Format these CSVs into proper LaTeX tables or provide as supplementary data files.
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Configurations excluded from robustness analysis due to baseline R$^2 \leq 0.6$. Available as \texttt{excluded\_configs.csv}.}
+\label{tab:excluded_configs}
+\small
+\textit{63 configurations excluded; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. NDS values across all model--representation--strategy combinations. Available as \texttt{table2\_supp\_nds\_all\_reps.csv}.}
+\label{tab:nds_all_reps}
+\small
+\textit{Full NDS table; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Simple effects analysis: $\eta^2$ for model architecture within each representation level, and vice versa, by noise strategy. Available as \texttt{table1\_supp\_simple\_effects.csv}.}
+\label{tab:simple_effects}
+\small
+\textit{Simple effects analysis; see supplementary data file.}
+\end{table}
 
 % An appendix contains supplementary information that is not an essential part of the text itself but which may be helpful in providing a more comprehensive understanding of the research problem or it is information that is too cumbersome to be included in the body of the paper.
 
