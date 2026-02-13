@@ -366,11 +366,11 @@ The software is available under an MIT license at \url{github.com/adpunt/noise\_
 
 \subsection{The Role Inversion: Performance vs Robustness}\label{sec:role_inversion}
 
-A central finding of this study is that the factors governing predictive performance differ fundamentally from those governing noise robustness. ANOVA decomposition across six noise strategies reveals a consistent pattern (Table~\ref{tab:anova_decomposition}, Figure~\ref{fig:anova_decomposition}): for predictive performance (R$^2$ at $\sigma = 0.3$), model architecture and molecular representation contribute roughly equally ($\eta^2 \approx 20$--$29\%$ each), with interaction and residual terms accounting for the remainder. For noise robustness (NDS), model architecture becomes the dominant factor ($\eta^2 = 25.6$--$47.6\%$), while representation recedes to a minor role ($\eta^2 = 2.0$--$14.9\%$).
+A central finding of this study is that the factors governing predictive performance differ fundamentally from those governing noise robustness. ANOVA decomposition across six noise strategies reveals a consistent pattern (Table~\ref{tab:anova_decomposition}, Figure~\ref{fig:anova_decomposition}): for predictive performance (R$^2$ at $\sigma = 0.3$), model architecture and molecular representation contribute roughly equally ($\eta^2 \approx 20$--$29\%$ each), with interaction and residual terms accounting for the remainder. For noise robustness (NDS), model architecture becomes the dominant factor ($\eta^2 = 25.1$--$47.5\%$), while representation recedes to a minor role ($\eta^2 = 2.0$--$14.9\%$).
 
 This role inversion has a natural interpretation. For performance, molecular representation determines what chemical information is available to the model, while architecture determines how efficiently it is used---both matter roughly equally. For robustness, representation becomes less important because noise corrupts labels, not features. Instead, the model's inductive biases---how it regularizes, ensembles, or distributes uncertainty---determine whether corrupted labels degrade predictions or are absorbed by the learning algorithm.
 
-The exception is outlier noise, where model architecture explained only $12.1\%$ of robustness variance and neither factor was dominant. This is consistent with outlier noise being the mildest strategy (mean $|$NDS$| = 0.099$): when degradation is negligible, there is little variance for any factor to explain. The strongest model effects emerged under threshold ($\eta^2 = 46.5\%$) and value-proportional ($\eta^2 = 47.6\%$) noise---the two most severe strategies---indicating that structured noise is most revealing of architectural differences.
+The exception is outlier noise, where model architecture explained only $12.1\%$ of robustness variance and neither factor was dominant. This is consistent with outlier noise being the mildest strategy (mean $|$NDS$| = 0.099$): when degradation is negligible, there is little variance for any factor to explain. The strongest model effects emerged under threshold ($\eta^2 = 46.5\%$) and value-proportional ($\eta^2 = 47.5\%$) noise---the two most severe strategies---indicating that structured noise is most revealing of architectural differences.
 
 \begin{table}[htbp]
 \centering
@@ -386,8 +386,8 @@ The exception is outlier noise, where model architecture explained only $12.1\%$
 Gaussian        & 20.6 & 27.5 & 40.8 &  9.1 \\
 Quantile        & 22.0 & 28.3 & 33.3 &  3.5 \\
 Threshold       & 20.9 & 29.6 & 46.5 & 14.9 \\
-Heteroscedastic & 25.0 & 25.6 & 25.6 &  3.4 \\
-Value-prop.     & 28.0 & 20.9 & 47.6 & 11.9 \\
+Heteroscedastic & 25.1 & 23.7 & 25.1 &  3.2 \\
+Value-prop.     & 28.3 & 21.0 & 47.5 & 12.0 \\
 Outlier         & 20.6 & 29.6 & 12.1 &  2.0 \\
 \bottomrule
 \end{tabular}
@@ -497,7 +497,7 @@ The overall ANOVA establishes that model architecture is the dominant factor for
 
 \paragraph{The BNN natural experiment.} Full versus last-layer Bayesian transformation provides a controlled comparison: same base architecture, same training data, same representations, differing only in the extent of Bayesian treatment. The contrast is stark. For DNN-BNN-Last, representation explains $57.7\%$ of robustness variance under Gaussian noise; for DNN-BNN-Full, only $15.3\%$. For MLP variants, the difference is even larger: $79.6\%$ (Last) versus $28.0\%$ (Full). Full Bayesian treatment transforms a representation-mediated architecture into an inherently robust one by placing priors on all weights, not just the output layer.
 
-This mechanistic difference is visible in the degradation curves (Figures~\ref{fig:dnn_family} and~\ref{fig:mlp_rf_comparison}) and reflected in paired statistical comparisons (Table~\ref{tab:wilcoxon_bnn}). DNN-BNN-Full was significantly more robust than deterministic DNN ($p = 1.2 \times 10^{-7}$, mean NDS improvement $+0.067$), while DNN-BNN-Last showed no significant improvement ($p = 0.105$). The same pattern held for MLP: MLP-BNN-Full improved significantly ($p = 1.2 \times 10^{-7}$, improvement $+0.115$), MLP-BNN-Last did not ($p = 0.248$). The benefit of full Bayesian transformation also varies by representation (Table~\ref{tab:nn_transforms}): on SMILES, where the base MLP struggles most, MLP-BNN-Full improves NDS by $+0.217$; on ECFP4, where the base model is already adequate, the improvement is only $+0.094$.
+This mechanistic difference is visible in the degradation curves (Figures~\ref{fig:dnn_family} and~\ref{fig:mlp_rf_comparison}) and reflected in paired statistical comparisons (Table~\ref{tab:wilcoxon_bnn}). DNN-BNN-Full was significantly more robust than deterministic DNN ($p = 1.2 \times 10^{-7}$, mean NDS improvement $+0.067$), while DNN-BNN-Last showed no significant improvement ($p = 0.105$). The same pattern held for MLP: MLP-BNN-Full improved significantly ($p = 1.2 \times 10^{-7}$, improvement $+0.115$), MLP-BNN-Last did not ($p = 0.222$). The benefit of full Bayesian transformation also varies by representation (Table~\ref{tab:nn_transforms}): on SMILES, where the base MLP struggles most, MLP-BNN-Full improves NDS by $+0.217$; on ECFP4, where the base model is already adequate, the improvement is only $+0.094$.
 
 \begin{table}[htbp]
 \centering
@@ -530,7 +530,7 @@ For random forests, QRF was significantly \emph{less} robust than RF (Wilcoxon $
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig5_mlp_rf_comparison.png}
-    \caption{\textbf{MLP and RF family comparison.} R$^2$ versus noise level $\sigma$ for (A--B) MLP and its BNN variants and (C--D) RF versus QRF, under Gaussian and Heteroscedastic noise (PDV representation).}
+    \caption{\textbf{MLP and RF family comparison.} R$^2$ versus noise level $\sigma$ for (A--B) MLP and its BNN variants and (C--D) RF versus QRF, under Gaussian and Heteroscedastic noise (PDV representation). QRF heteroscedastic data on PDV is not yet available (panel D shows RF only).}
     \label{fig:mlp_rf_comparison}
 \end{figure}
 
