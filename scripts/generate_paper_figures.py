@@ -1119,29 +1119,20 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             model_ds = model_ds.drop(columns='_mean')
 
             fig, ax = plt.subplots(figsize=(max(10, len(model_ds) * 0.8), 6))
-            # Color bars by model using MODEL_COLORS, distinguish datasets by hatching
+            # Color bars by dataset (one color per dataset), models on x-axis
             model_labels = model_ds.index.tolist()
             datasets_list = model_ds.columns.tolist()
             n_models = len(model_labels)
             n_datasets = len(datasets_list)
             x = np.arange(n_models)
             width = 0.8 / n_datasets
-            hatches = ['', '//', '\\\\', 'xx', '..'][:n_datasets]
-            # Build reverse label→key mapping
-            _label_to_key = {}
-            for k, v in MODEL_LABELS.items():
-                if v not in _label_to_key:
-                    _label_to_key[v] = k
+            dataset_colors = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442'][:n_datasets]
             for i, dataset in enumerate(datasets_list):
                 offset = (i - n_datasets / 2 + 0.5) * width
                 values = model_ds[dataset].values
-                for j in range(n_models):
-                    raw_key = _label_to_key.get(model_labels[j], model_labels[j].lower().replace(' ', '_'))
-                    color = MODEL_COLORS.get(raw_key, '#333333')
-                    ax.bar(x[j] + offset, values[j], width,
-                           color=color, edgecolor='black', linewidth=0.5,
-                           hatch=hatches[i],
-                           label=dataset if j == 0 else '')
+                ax.bar(x + offset, values, width,
+                       color=dataset_colors[i], edgecolor='black', linewidth=0.5,
+                       label=dataset)
             ax.set_xticks(x)
             ax.set_xticklabels(model_labels)
             ax.set_ylabel('NDS (less negative = more robust)')
@@ -2516,32 +2507,48 @@ def create_figure5(df, nds_df, output_dir):
     # mlp_bnn_variational excluded pending VBLL re-implementation
     rf_models = ['rf', 'qrf']
 
-    # 1x2 layout: MLP R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
     for col, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
         data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
-        ax_line = axes[col]
-
+        # Top row: MLP variants
+        ax_mlp = axes[0, col]
         for model in mlp_variants:
             model_data = data[data['model'] == model]
             if len(model_data) == 0:
                 continue
-
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
             color = MODEL_COLORS.get(model, '#333333')
-            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
+            ax_mlp.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
 
-        ax_line.set_xlabel('Noise Level (σ)')
-        ax_line.set_ylabel('R²')
+        ax_mlp.set_xlabel('Noise Level (σ)')
+        ax_mlp.set_ylabel('R²')
         panel_letter = 'A' if col == 0 else 'B'
-        ax_line.set_title(f'{panel_letter}. MLP R² vs σ ({strategy_label})', fontweight='bold')
-        ax_line.legend(loc='lower left', fontsize=6)
-        ax_line.set_ylim(-0.1, 1.0)
+        ax_mlp.set_title(f'{panel_letter}. MLP R² vs σ ({strategy_label})', fontweight='bold')
+        ax_mlp.legend(loc='lower left', fontsize=6)
+        ax_mlp.set_ylim(-0.1, 1.0)
 
-    for ax in axes:
+        # Bottom row: RF vs QRF
+        ax_rf = axes[1, col]
+        for model in rf_models:
+            model_data = data[data['model'] == model]
+            if len(model_data) == 0:
+                continue
+            avg = model_data.groupby('sigma')['r2'].mean().reset_index()
+            color = MODEL_COLORS.get(model, '#333333')
+            ax_rf.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
+
+        ax_rf.set_xlabel('Noise Level (σ)')
+        ax_rf.set_ylabel('R²')
+        panel_letter = 'C' if col == 0 else 'D'
+        ax_rf.set_title(f'{panel_letter}. RF vs QRF R² vs σ ({strategy_label})', fontweight='bold')
+        ax_rf.legend(loc='lower left', fontsize=6)
+        ax_rf.set_ylim(-0.1, 1.0)
+
+    for ax in axes.flat:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
@@ -3309,7 +3316,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         axes = [axes]
 
     rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^',
-                   'mhggnn': 'v'}
+                   'mhggnn': 'v', 'mol2vec': 'D'}
 
     # First pass: collect all data to compute shared axes
     all_baseline_r2 = []
@@ -3373,7 +3380,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
                               linestyle='None', markersize=6,
                               label=REP_LABELS.get(r, r))
-                       for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn']
+                       for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
         axes[0].legend(handles=rep_handles, loc='lower left', fontsize=5,
                        title='Rep', title_fontsize=6)
