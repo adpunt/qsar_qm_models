@@ -387,11 +387,29 @@ To ensure meaningful robustness comparisons, we restricted analysis to configura
 
 \subsection{Strategy-Specific Patterns}
 
-The six noise strategies produced markedly different degradation profiles (Figure~\ref{fig:global_overview}B, Table~\ref{tab:anova_decomposition}). Outlier noise was the mildest: all models showed NDS values near zero (range: $-0.10$ to $-0.20$), consistent with the ability of ensemble methods to isolate outlying observations. Heteroscedastic noise was similarly benign for models with complete data (NDS range: $-0.10$ to $-0.21$), suggesting that value-dependent noise variance is relatively easy to accommodate.
+The six noise strategies produced markedly different degradation profiles (Figure~\ref{fig:global_overview}B, Table~\ref{tab:phase5_noise_strategy}), falling into three severity tiers. \textbf{Mild}: outlier noise (NDS range: $-0.10$ to $-0.14$) and heteroscedastic noise ($-0.17$ to $-0.22$), where models retained $>93\%$ of baseline performance. \textbf{Moderate}: quantile ($-0.27$ to $-0.35$) and Gaussian ($-0.31$ to $-0.39$) noise. \textbf{Severe}: value-proportional ($-0.54$ to $-0.65$) and threshold ($-0.61$ to $-0.73$) noise, where models lost $>34\%$ of baseline performance.
 
-Gaussian noise and quantile noise produced moderate degradation, with NDS values clustering around $-0.31$ to $-0.40$ and $-0.27$ to $-0.35$ respectively. Quantile noise, which applies elevated corruption to samples in the tails of the target distribution, was somewhat milder than Gaussian noise for most models, possibly because the corrupted region is smaller.
+\begin{table}[htbp]
+\centering
+\caption{\textbf{Noise strategy severity.} Mean performance retention and NDS across all ANOVA-included configurations.}
+\label{tab:phase5_noise_strategy}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Noise} & \textbf{Mean} & \textbf{Mean} & \textbf{Std} & \textbf{Mean} \\
+\textbf{Strategy} & \textbf{Baseline $R^2$} & \textbf{Retention \%} & \textbf{Retention \%} & \textbf{$|$NDS$|$} \\
+\midrule
+Outlier & 0.778 & 97.5 & 0.3 & 0.099 \\
+Heteroscedastic & 0.776 & 93.4 & 0.7 & 0.194 \\
+Quantile & 0.785 & 88.6 & 1.5 & 0.286 \\
+Gaussian & 0.831 & 81.0 & 3.3 & 0.362 \\
+Value-proportional & 0.785 & 65.9 & 3.6 & 0.612 \\
+Threshold & 0.785 & 57.8 & 4.7 & 0.675 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-Threshold noise was the most destructive strategy across all architectures, with NDS values ranging from $-0.66$ to $-0.79$. Threshold noise deterministically corrupts all labels above a property cutoff, effectively introducing a systematic bias that models cannot easily learn around. Value-proportional noise was similarly severe (NDS range: $-0.57$ to $-0.65$ for models with complete data), as it scales corruption with the magnitude of the target value, disproportionately affecting the most informative high-value samples.
+Outlier noise was benign because ensemble methods can isolate aberrant observations; heteroscedastic noise was similarly mild because its value-dependent variance is structured enough for models to accommodate. Threshold noise was the most destructive: it deterministically corrupts all labels above a property cutoff, introducing systematic bias that models cannot learn around. Value-proportional noise was similarly severe, disproportionately corrupting the most informative high-value samples.
 
 The ANOVA decomposition revealed that the relative importance of model architecture versus representation depends on both the metric and the noise strategy (Table~\ref{tab:anova_decomposition}, Figure~\ref{fig:anova_decomposition}). For performance (R$^2$ at $\sigma = 0.3$), model and representation contributed roughly equally across most strategies ($\eta^2 \approx 20$--$29\%$ each), with the interaction and residual terms accounting for the remainder. Value-proportional noise showed the largest imbalance, where model ($28.0\%$) slightly exceeded representation ($20.9\%$).
 
@@ -513,7 +531,7 @@ The practical implication is that model architecture is the main driver of noise
 % - Quantile + outlier: robustness almost entirely from model-rep pairing, not either factor alone
 % Could be a dedicated paragraph here, in Discussion, or both.
 
-\subsubsection{Bayesian Transformations and Probabilistic Approaches}
+\subsection{Bayesian Transformations and Probabilistic Approaches}
 
 One goal of this study was to evaluate whether Bayesian transformations on neural networks improve robustness to label noise. Paired Wilcoxon signed-rank tests on matched model--representation--strategy configurations reveal a clear pattern: full Bayesian transformations significantly improve robustness, while last-layer transformations do not (Table~\ref{tab:wilcoxon_bnn}, Figure~\ref{fig:dnn_family}). % TODO [DATA PENDING]: Update once BNN variational data completes.
 
@@ -577,7 +595,7 @@ MLP & R-SMILES & 0.675 & $-0.529$ & $-0.348$ & +0.180 \\
 
 This pattern suggests that full Bayesian transformations act as a regularizer that is most beneficial when the base model struggles with its input representation. On representations where NNs already excel (PDV, ECFP4), the additional Bayesian complexity provides minimal benefit.
 
-\subsubsection{Uncertainty Quantification in the Presence of Noise}
+\subsection{Uncertainty Quantification in the Presence of Noise}
 
 We evaluated the uncertainty estimates produced by probabilistic models under increasing label noise, focusing on four questions: (1) do uncertainty estimates correlate with actual prediction error? (2) do models detect when noise has been injected? (3) how well-calibrated are the predicted intervals? and (4) for models with aleatoric/epistemic decomposition, does the correct component respond to noise?
 
@@ -627,30 +645,7 @@ Overall, NGBoost produces the most useful uncertainty estimates under noisy cond
 % - Which models' uncertainty is most useful for identifying noisy predictions (practical filtering)?
 % Data source: table4_supp_uncertainty_by_strategy_rep.csv
 
-\subsubsection{Noise Strategy Severity}
-The six noise strategies fall into three severity tiers (Table~\ref{tab:phase5_noise_strategy}): \textbf{mild} (outlier, heteroscedastic), \textbf{moderate} (quantile, Gaussian), and \textbf{severe} (value-proportional, threshold). Outlier noise was the least damaging because models can isolate aberrant observations; threshold noise was the most destructive because it systematically biases labels above a property cutoff. The uniformity of strategy sensitivity ratios across architectures (Table~\ref{tab:strategy_sensitivity}) indicates that relative strategy severity is a property of the noise structure itself, not of model-specific vulnerabilities.
-
-\begin{table}[htbp]
-\centering
-\caption{\textbf{Noise strategy severity.} Mean performance retention and NDS across all ANOVA-included configurations.}
-\label{tab:phase5_noise_strategy}
-\small
-\begin{tabular}{lrrrr}
-\toprule
-\textbf{Noise} & \textbf{Mean} & \textbf{Mean} & \textbf{Std} & \textbf{Mean} \\
-\textbf{Strategy} & \textbf{Baseline $R^2$} & \textbf{Retention \%} & \textbf{Retention \%} & \textbf{$|$NDS$|$} \\
-\midrule
-Outlier & 0.778 & 97.5 & 0.3 & 0.099 \\
-Heteroscedastic & 0.776 & 93.4 & 0.7 & 0.194 \\
-Quantile & 0.785 & 88.6 & 1.5 & 0.286 \\
-Gaussian & 0.831 & 81.0 & 3.3 & 0.362 \\
-Value-proportional & 0.785 & 65.9 & 3.6 & 0.612 \\
-Threshold & 0.785 & 57.8 & 4.7 & 0.675 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsubsection{Generalization Across Prediction Targets}
+\subsection{Generalization Across Prediction Targets}
 
 % TODO [DATA PENDING]: Validation jobs (NGBoost, SVM, LightGBM) may still be running.
 % Update text and figures once all validation data is available.
