@@ -1119,30 +1119,26 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             model_ds = model_ds.drop(columns='_mean')
 
             fig, ax = plt.subplots(figsize=(max(10, len(model_ds) * 0.8), 6))
-            # Color bars by dataset (one color per dataset), models on x-axis
             model_labels = model_ds.index.tolist()
             datasets_list = model_ds.columns.tolist()
             n_models = len(model_labels)
             n_datasets = len(datasets_list)
             x = np.arange(n_models)
             width = 0.8 / n_datasets
-            dataset_colors = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442'][:n_datasets]
+            dataset_colors = ['#0072B2', '#D55E00', '#009E73'][:n_datasets]
             for i, dataset in enumerate(datasets_list):
                 offset = (i - n_datasets / 2 + 0.5) * width
                 values = model_ds[dataset].values
                 ax.bar(x + offset, values, width,
-                       color=dataset_colors[i], edgecolor='black', linewidth=0.5,
-                       label=dataset)
+                       color=dataset_colors[i], label=dataset)
             ax.set_xticks(x)
-            ax.set_xticklabels(model_labels)
+            ax.set_xticklabels(model_labels, rotation=45, ha='right')
             ax.set_ylabel('NDS (less negative = more robust)')
-            ax.set_xlabel('')
             ax.set_title('Model Robustness Across Validation Datasets', fontweight='bold')
             ax.axhline(0, color='black', linewidth=0.5)
-            ax.legend(title='Dataset', bbox_to_anchor=(1.02, 1), loc='upper left')
+            ax.legend(title='Dataset')
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
-            plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
             plt.savefig(output_dir / 'fig_validation_model_comparison.png',
                         dpi=300, bbox_inches='tight')
