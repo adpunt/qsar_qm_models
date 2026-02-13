@@ -3188,6 +3188,8 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         return
 
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
+    # Filter to ANOVA-included reps only
+    nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
@@ -3197,10 +3199,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     # Get mean NDS per model x rep (Gaussian strategy)
     pivot = nds_legacy.pivot_table(values='nds', index='model', columns='rep', aggfunc='mean')
 
-    # Include all reps with enough models
+    # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
     rep_order = [r for r in ['ecfp4', 'pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
-    rep_order += [r for r in valid_reps if r not in rep_order]
 
     if len(rep_order) >= 2:
         # Reindex to show all models
