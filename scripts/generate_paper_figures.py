@@ -306,9 +306,9 @@ def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=N
     if raw_df is None:
         # No raw data: can't distinguish, use generic format
         try:
-            return pivot.map(lambda x: '' if pd.isna(x) else f'{x:{fmt[1:]}}')
+            return pivot.map(lambda x: '' if pd.isna(x) else f'{x:{fmt}}')
         except AttributeError:
-            return pivot.applymap(lambda x: '' if pd.isna(x) else f'{x:{fmt[1:]}}')
+            return pivot.applymap(lambda x: '' if pd.isna(x) else f'{x:{fmt}}')
 
     # Build set of (index, column) combos that exist in raw data
     filtered_raw = raw_df.copy()
@@ -354,8 +354,16 @@ def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=N
                 if abs(val) >= 10:
                     annot.loc[idx, col] = f'{val:.0f}'
                 else:
-                    annot.loc[idx, col] = f'{val:{fmt[1:]}}'
+                    annot.loc[idx, col] = f'{val:{fmt}}'
     return annot
+
+
+def _white_text_for_missing(ax):
+    """Set 'missing' and 'N/A' heatmap annotations to white so they're visible on black."""
+    for text in ax.texts:
+        if text.get_text() in ('missing', 'N/A'):
+            text.set_color('white')
+            text.set_fontsize(7)
 
 # =============================================================================
 # DATA LOADING
@@ -773,10 +781,11 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             vals = pivot_display.values[~np.isnan(pivot_display.values)]
             vmin = vals.min() if len(vals) > 0 else -NDS_CLIP
             ax.set_facecolor('black')
-            sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdBu', center=0,
+            sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdYlGn', center=0,
                         vmin=vmin, vmax=0,
                         ax=ax, cbar_kws={'label': 'NDS'}, linewidths=0.5,
                         linecolor='#333333')
+            _white_text_for_missing(ax)
             ax.set_title(f'{dataset}', fontweight='bold')
             if i > 0:
                 ax.set_ylabel('')
@@ -807,7 +816,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax = axes[i]
                 factors = ['Model', 'Rep', 'Interaction']
                 values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                colors = ['#2166AC', '#B2182B', '#7A3B9E']  # Blue, Red, Purple
+                colors = ['#6BAED6', '#FC8D59', '#B39DDB']  # Blue, Red, Purple
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -951,7 +960,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_strat, annot=True, fmt='.2f', cmap='RdBu', center=0, vmax=0,
+            sns.heatmap(pivot_strat, annot=True, fmt='.2f', cmap='RdYlGn', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Noise Strategy Robustness Across Validation Datasets', fontweight='bold')
@@ -973,7 +982,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_rep, annot=True, fmt='.2f', cmap='RdBu', center=0, vmax=0,
+            sns.heatmap(pivot_rep, annot=True, fmt='.2f', cmap='RdYlGn', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Representation Effect on Robustness (Validation Datasets)', fontweight='bold')
@@ -2050,8 +2059,9 @@ def create_figure1(df, nds_df, output_dir):
         vals = pivot.values[~np.isnan(pivot.values)]
         center_val = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
         ax_b.set_facecolor('black')
-        sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', center=center_val,
+        sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', center=center_val,
                     ax=ax_b, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+        _white_text_for_missing(ax_b)
         ax_b.set_xlabel('Noise Strategy')
         ax_b.set_ylabel('Model')
         ax_b.set_title('B. NDS by Model × Strategy (PDV)', fontweight='bold')
@@ -2117,8 +2127,9 @@ def create_figure1(df, nds_df, output_dir):
             vals_e = pivot.values[~np.isnan(pivot.values)]
             cv_e = (vals_e.min() + vals_e.max()) / 2 if len(vals_e) > 0 else 0
             ax_eb.set_facecolor('black')
-            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', center=cv_e,
+            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', center=cv_e,
                         ax=ax_eb, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+            _white_text_for_missing(ax_eb)
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
             ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
@@ -2176,9 +2187,9 @@ def create_figure2(df, output_dir):
         rep_vals = [results[s]['eta2_rep'] for s in strats]
         int_vals = [results[s]['eta2_interaction'] for s in strats]
 
-        ax.bar(x - width, model_vals, width, label='Model', color='#2166AC')
-        ax.bar(x, rep_vals, width, label='Representation', color='#B2182B')
-        ax.bar(x + width, int_vals, width, label='Interaction', color='#7A3B9E')
+        ax.bar(x - width, model_vals, width, label='Model', color='#6BAED6')
+        ax.bar(x, rep_vals, width, label='Representation', color='#FC8D59')
+        ax.bar(x + width, int_vals, width, label='Interaction', color='#B39DDB')
 
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
@@ -2264,7 +2275,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
             ax_a.set_facecolor('black')
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', vmax=0,
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdYlGn', vmax=0,
                         ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
             ax_a.set_ylabel('')
@@ -2280,6 +2291,20 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         ax_b.scatter(model_data['baseline_r2'], model_data['nds'],
                      label=get_model_label(model), color=color, alpha=0.7, s=50)
 
+    # Compute shared axes from all legacy NDS data (both PDV and ECFP4)
+    nds_legacy_all = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
+    scatter_xlim = (0, 1.05)
+    if len(nds_legacy_all) > 0:
+        ymin = nds_legacy_all['nds'].min()
+        ymax = nds_legacy_all['nds'].max()
+        y_pad = (ymax - ymin) * 0.1
+        scatter_ylim = (ymin - y_pad, ymax + y_pad)
+    else:
+        scatter_ylim = None
+
+    ax_b.set_xlim(scatter_xlim)
+    if scatter_ylim:
+        ax_b.set_ylim(scatter_ylim)
     ax_b.set_xlabel('Baseline R² (σ=0)')
     ax_b.set_ylabel('NDS (slope)')
     ax_b.set_title('B. Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
@@ -2355,8 +2380,9 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             annot_text = annot_text.loc[sort_idx]
 
             ax_ea.set_facecolor('black')
-            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdBu', vmax=0,
+            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+            _white_text_for_missing(ax_ea)
             ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
             ax_ea.set_ylabel('')
 
@@ -2368,6 +2394,19 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             color = MODEL_COLORS.get(model, '#333333')
             ax_eb.scatter(md['baseline_r2'], md['nds'], label=get_model_label(model),
                           color=color, alpha=0.7, s=50)
+        # Use same shared axes as fig3 Panel B
+        nds_legacy_all = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
+        scatter_xlim = (0, 1.05)
+        if len(nds_legacy_all) > 0:
+            ymin = nds_legacy_all['nds'].min()
+            ymax = nds_legacy_all['nds'].max()
+            y_pad = (ymax - ymin) * 0.1
+            scatter_ylim = (ymin - y_pad, ymax + y_pad)
+        else:
+            scatter_ylim = None
+        ax_eb.set_xlim(scatter_xlim)
+        if scatter_ylim:
+            ax_eb.set_ylim(scatter_ylim)
         ax_eb.set_xlabel('Baseline R² (σ=0)')
         ax_eb.set_ylabel('NDS (slope)')
         ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
@@ -3166,8 +3205,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         annot_text = annot_text.loc[sort_idx]
 
         ax_a.set_facecolor('black')
-        sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='RdBu', vmax=0,
+        sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
+        _white_text_for_missing(ax_a)
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
 
@@ -3258,18 +3298,36 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
     rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^',
                    'mhggnn': 'v'}
 
+    # First pass: collect all data to compute shared axes
+    all_baseline_r2 = []
+    all_nds_mean = []
+    panel_data = []
     last_mean_nds = None
     for idx, strategy in enumerate(strategies_available):
-        ax = axes[idx]
-        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
-        label_prefix = f'{panel_labels[idx]}. ' if panel_labels and idx < len(panel_labels) else ''
-
         strat_data = anova_nds[anova_nds['strategy'] == strategy]
         mean_nds = strat_data.groupby(['model', 'rep']).agg(
             nds_mean=('nds', 'mean'),
             baseline_r2=('baseline_r2', 'mean')
         ).reset_index()
+        panel_data.append(mean_nds)
         last_mean_nds = mean_nds
+        all_baseline_r2.extend(mean_nds['baseline_r2'].dropna().tolist())
+        all_nds_mean.extend(mean_nds['nds_mean'].dropna().tolist())
+
+    # Compute shared limits
+    shared_xlim = (0, 1.05)
+    if all_nds_mean:
+        y_pad = (max(all_nds_mean) - min(all_nds_mean)) * 0.1
+        shared_ylim = (min(all_nds_mean) - y_pad, max(all_nds_mean) + y_pad)
+    else:
+        shared_ylim = None
+
+    # Second pass: plot with shared axes
+    for idx, strategy in enumerate(strategies_available):
+        ax = axes[idx]
+        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+        label_prefix = f'{panel_labels[idx]}. ' if panel_labels and idx < len(panel_labels) else ''
+        mean_nds = panel_data[idx]
 
         for _, row in mean_nds.iterrows():
             color = MODEL_COLORS.get(row['model'], '#333333')
@@ -3278,6 +3336,9 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                        color=color, marker=marker, s=50, alpha=0.7,
                        edgecolors='black', linewidths=0.5)
 
+        ax.set_xlim(shared_xlim)
+        if shared_ylim:
+            ax.set_ylim(shared_ylim)
         ax.set_xlabel('Baseline R² (σ=0)')
         if idx == 0:
             ax.set_ylabel('NDS')
