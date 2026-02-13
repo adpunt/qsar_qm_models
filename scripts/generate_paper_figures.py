@@ -951,7 +951,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_strat, annot=True, fmt='.3f', cmap='RdBu', center=0, vmax=0,
+            sns.heatmap(pivot_strat, annot=True, fmt='.2f', cmap='RdBu', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Noise Strategy Robustness Across Validation Datasets', fontweight='bold')
@@ -973,7 +973,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_rep, annot=True, fmt='.3f', cmap='RdBu', center=0, vmax=0,
+            sns.heatmap(pivot_rep, annot=True, fmt='.2f', cmap='RdBu', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Representation Effect on Robustness (Validation Datasets)', fontweight='bold')
@@ -2264,7 +2264,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
             ax_a.set_facecolor('black')
-            sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdBu', vmax=0,
+            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdBu', vmax=0,
                         ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
             ax_a.set_ylabel('')
@@ -2345,7 +2345,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         pivot = pivot.reindex(index=all_models_e3, columns=strat_list)
         if len(pivot) > 0:
             annot_text = make_heatmap_annotations(pivot, raw_df, 'model', 'strategy',
-                                                   rep_filter='ecfp4', fmt='.3f')
+                                                   rep_filter='ecfp4', fmt='.2f')
             pivot.index = [get_model_label(m) for m in pivot.index]
             annot_text.index = pivot.index
             pivot.columns = [STRATEGY_LABELS.get(s, s) for s in strat_list]
@@ -3154,7 +3154,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         hm_pivot = hm_pivot.dropna(how='all')
 
         annot_text = make_heatmap_annotations(hm_pivot, raw_df, 'model', 'rep',
-                                               fmt='.3f',
+                                               fmt='.2f',
                                                extra_filters={'strategy': 'legacy'})
         hm_pivot.index = [get_model_label(m) for m in hm_pivot.index]
         annot_text.index = hm_pivot.index
