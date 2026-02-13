@@ -118,12 +118,8 @@ ANOVA_REPS_EXCLUDE = {
     'random_smiles',      # Alias
 }
 
-# Old var-BNN implementation was identical to last-layer BNN (both used torchbnn.BayesLinear).
-# Exclude until new VBLL experiments complete. Remove this exclusion once VBLL data arrives.
-VBLL_PENDING_EXCLUDE = {
-    'dnn_bnn_variational', 'bnn_variational',
-    'mlp_bnn_variational',
-}
+# VBLL experiments complete — no longer excluded.
+VBLL_PENDING_EXCLUDE = set()
 
 import argparse
 import pandas as pd
@@ -807,16 +803,48 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         print("✓ Saved fig_validation_overview.png")
 
     # --- Figure: Validation ANOVA (η² decomposition) ---
-    if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
+    # Use val_nds_df directly — it already has NDS per (dataset, model, rep, strategy).
+    # Each strategy serves as a replicate observation per model-rep cell.
+    if 'dataset' in val_nds_df.columns and 'model' in val_nds_df.columns and 'rep' in val_nds_df.columns:
         anova_results = {}
         for dataset in sorted(datasets):
-            ds_df = validation_df[validation_df['dataset'] == dataset]
-            if len(ds_df) == 0:
+            ds_nds = val_nds_df[val_nds_df['dataset'] == dataset].copy()
+            ds_nds = ds_nds[~ds_nds['rep'].isin(ANOVA_REPS_EXCLUDE)]
+            ds_nds = ds_nds.dropna(subset=['nds'])
+            if len(ds_nds) < 10:
                 continue
-            # Run robustness ANOVA on this dataset
-            robust = run_robustness_anova(ds_df)
-            if robust:
-                anova_results[dataset] = robust
+
+            grand_mean = ds_nds['nds'].mean()
+            total_ss = ((ds_nds['nds'] - grand_mean) ** 2).sum()
+            if total_ss == 0:
+                continue
+
+            model_means = ds_nds.groupby('model')['nds'].mean()
+            model_counts = ds_nds.groupby('model').size()
+            ss_model = (model_counts * (model_means - grand_mean) ** 2).sum()
+
+            rep_means = ds_nds.groupby('rep')['nds'].mean()
+            rep_counts = ds_nds.groupby('rep').size()
+            ss_rep = (rep_counts * (rep_means - grand_mean) ** 2).sum()
+
+            interaction_means = ds_nds.groupby(['model', 'rep'])['nds'].mean()
+            interaction_counts = ds_nds.groupby(['model', 'rep']).size()
+            ss_interaction = 0
+            for (model, rep), count in interaction_counts.items():
+                if model in model_means.index and rep in rep_means.index:
+                    cell_mean = interaction_means[(model, rep)]
+                    expected = model_means[model] + rep_means[rep] - grand_mean
+                    ss_interaction += count * (cell_mean - expected) ** 2
+
+            anova_results[dataset] = {
+                'eta2_model': (ss_model / total_ss) * 100,
+                'eta2_rep': (ss_rep / total_ss) * 100,
+                'eta2_interaction': (ss_interaction / total_ss) * 100,
+                'eta2_residual': ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100,
+                'n_models': ds_nds['model'].nunique(),
+                'n_reps': ds_nds['rep'].nunique(),
+                'n': len(ds_nds),
+            }
 
         if anova_results:
             fig, axes = plt.subplots(1, len(anova_results), figsize=(4 * len(anova_results), 5), squeeze=False)
@@ -845,11 +873,13 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             for dataset, result in anova_results.items():
                 rows.append({
                     'Dataset': dataset,
-                    'Model_η²': result['eta2_model'],
-                    'Rep_η²': result['eta2_rep'],
-                    'Interaction_η²': result['eta2_interaction'],
-                    'n_models': result.get('n_models', ''),
-                    'n_reps': result.get('n_reps', ''),
+                    'Model_η²': round(result['eta2_model'], 1),
+                    'Rep_η²': round(result['eta2_rep'], 1),
+                    'Interaction_η²': round(result['eta2_interaction'], 1),
+                    'Residual_η²': round(result['eta2_residual'], 1),
+                    'n_models': result['n_models'],
+                    'n_reps': result['n_reps'],
+                    'n': result['n'],
                 })
             pd.DataFrame(rows).to_csv(output_dir / 'table_validation_anova.csv', index=False)
             print("✓ Saved table_validation_anova.csv")
@@ -2437,8 +2467,7 @@ def create_figure4(df, nds_df, output_dir):
     - Is the improvement larger under certain noise types?
     - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last']
-    # dnn_bnn_variational excluded pending VBLL re-implementation
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
 
     # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -2499,8 +2528,7 @@ def create_figure5(df, nds_df, output_dir):
     - Does QRF beat RF?
     - Is the pattern consistent across strategies?
     """
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last']
-    # mlp_bnn_variational excluded pending VBLL re-implementation
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
     rf_models = ['rf', 'qrf']
 
     # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
@@ -2604,8 +2632,6 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
     if unc_col is None:
         return False
 
-    fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-
     # Pre-filter: exclude models with negligible uncertainty (e.g. plain DNN/MLP)
     valid_models = []
     for model in filtered['model'].unique():
@@ -2616,6 +2642,26 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             valid_models.append(model)
     filtered = filtered[filtered['model'].isin(valid_models)]
 
+    # Check if any model has aleatoric/epistemic decomposition data
+    has_decomposition = ('aleatoric_uncertainty' in filtered.columns and
+                         'epistemic_uncertainty' in filtered.columns)
+    any_decomposition = False
+    if has_decomposition:
+        for model in filtered['model'].unique():
+            mdata = filtered[filtered['model'] == model]
+            alea = mdata['aleatoric_uncertainty'].values
+            epis = mdata['epistemic_uncertainty'].values
+            if (np.isfinite(alea).sum() > 10 and np.nanmean(alea[np.isfinite(alea)]) > 1e-6 and
+                np.isfinite(epis).sum() > 10 and np.nanmean(epis[np.isfinite(epis)]) > 1e-6):
+                any_decomposition = True
+                break
+
+    if any_decomposition:
+        fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(14, 5))
+    else:
+        fig, ax_a = plt.subplots(1, 1, figsize=(7, 5))
+
+    # --- Panel A: Mean uncertainty vs noise level ---
     for model in sorted(filtered['model'].unique()):
         model_data = filtered[filtered['model'] == model]
         unc_values = model_data[unc_col].values
@@ -2633,16 +2679,61 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
         if sigma_means:
             sigma_df = pd.DataFrame(sigma_means)
             color = MODEL_COLORS.get(model, '#333333')
-            ax.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
+            ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
                     label=get_model_label(model), color=color,
                     markersize=4, linewidth=1.2, alpha=0.8)
 
-    ax.set_xlabel('Injected Noise Level (σ)')
-    ax.set_ylabel('Mean Predicted Uncertainty')
-    ax.set_title('Uncertainty Tracking of Injected Noise', fontweight='bold')
-    ax.legend(fontsize=7, ncol=2, loc='upper left', framealpha=0.9)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    ax_a.set_xlabel('Injected Noise Level (σ)')
+    ax_a.set_ylabel('Mean Predicted Uncertainty')
+    ax_a.set_title('A. Total Uncertainty vs Noise Level', fontweight='bold')
+    ax_a.legend(fontsize=7, ncol=2, loc='upper left', framealpha=0.9)
+    ax_a.spines['top'].set_visible(False)
+    ax_a.spines['right'].set_visible(False)
+
+    # --- Panel B: Aleatoric vs Epistemic decomposition ---
+    if any_decomposition:
+        for model in sorted(filtered['model'].unique()):
+            model_data = filtered[filtered['model'] == model]
+            alea = model_data['aleatoric_uncertainty'].values
+            epis = model_data['epistemic_uncertainty'].values
+            valid_mask = (np.isfinite(alea) & np.isfinite(epis) &
+                         (alea > 1e-6) & (epis > 1e-6))
+            if valid_mask.sum() < 10:
+                continue
+
+            color = MODEL_COLORS.get(model, '#333333')
+            label = get_model_label(model)
+            sigmas = sorted(model_data['sigma'].unique())
+            if len(sigmas) < 3:
+                continue
+
+            alea_means, epis_means = [], []
+            for sigma in sigmas:
+                sigma_data = model_data[model_data['sigma'] == sigma]
+                a = sigma_data['aleatoric_uncertainty'].values
+                e = sigma_data['epistemic_uncertainty'].values
+                a_valid = a[np.isfinite(a) & (a > 1e-6)]
+                e_valid = e[np.isfinite(e) & (e > 1e-6)]
+                if len(a_valid) > 0 and len(e_valid) > 0:
+                    alea_means.append(a_valid.mean())
+                    epis_means.append(e_valid.mean())
+                else:
+                    alea_means.append(np.nan)
+                    epis_means.append(np.nan)
+
+            ax_b.plot(sigmas, alea_means, 'o-', color=color,
+                     label=f'{label} (aleatoric)', markersize=4,
+                     linewidth=1.2, alpha=0.8)
+            ax_b.plot(sigmas, epis_means, 's--', color=color,
+                     label=f'{label} (epistemic)', markersize=3,
+                     linewidth=1.0, alpha=0.5)
+
+        ax_b.set_xlabel('Injected Noise Level (σ)')
+        ax_b.set_ylabel('Mean Uncertainty Component')
+        ax_b.set_title('B. Aleatoric vs Epistemic Decomposition', fontweight='bold')
+        ax_b.legend(fontsize=5, ncol=2, loc='upper left', framealpha=0.9)
+        ax_b.spines['top'].set_visible(False)
+        ax_b.spines['right'].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -2714,10 +2805,9 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last']},
+        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']},
+        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
-        # Note: dnn_bnn_variational and mlp_bnn_variational excluded pending VBLL re-run
     }
 
     # Filter to PDV + legacy for fair comparison
