@@ -157,17 +157,16 @@ plt.rcParams.update({
     'lines.linewidth': 1.5,
 })
 
-# Color palettes - Colorblind-friendly (Okabe-Ito + Wong palette)
-# Avoids red-green confusion, uses blue-orange contrast
+# Color palettes — maximally distinct, all different from clean blue
+CLEAN_COLOR = '#0072B2'        # Steel blue — used ONLY for clean (no-noise) data
 STRATEGY_COLORS = {
-    'legacy': '#D55E00',       # Vermillion/red-orange (distinct from clean blue)
-    'valprop': '#E69F00',      # Orange
-    'quantile': '#882255',     # Wine/purple
-    'threshold': '#CC79A7',    # Pink/magenta
-    'outlier': '#F0E442',      # Yellow
-    'hetero': '#009E73',       # Teal/bluish-green
+    'legacy': '#E31A1C',       # Bright red
+    'valprop': '#FF7F00',      # Pure orange
+    'quantile': '#33A02C',     # Forest green
+    'threshold': '#6A3D9A',    # Royal purple
+    'outlier': '#B15928',      # Sienna/brown
+    'hetero': '#E91E63',       # Hot pink
 }
-CLEAN_COLOR = '#0072B2'        # Blue — used only for clean (no-noise) data
 
 STRATEGY_LABELS = {
     'legacy': 'Gaussian',
@@ -282,7 +281,7 @@ DATASET_MARKERS = {
 
 BASELINE_THRESHOLD = 0.6
 CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
-VALIDATION_NDS_CLIP = -5.0  # Clip extreme validation NDS (e.g. DNN divergence on hERG-Ki)
+VALIDATION_NDS_THRESHOLD = 2.0  # |NDS| above this = artifact, filter to N/A
 
 
 def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=None,
@@ -708,14 +707,18 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         print("⚠ No validation NDS data available — skipping validation figures")
         return
 
-    # Clip extreme NDS values (e.g. DNN divergence on hERG-Ki → NDS=-280)
-    extreme_mask = val_nds_df['nds'] < VALIDATION_NDS_CLIP
+    # Filter extreme NDS values (|NDS| > threshold = artifact, e.g. DNN divergence on hERG-Ki)
+    # These are set to NaN so they appear as "N/A" in heatmaps
+    val_nds_df = val_nds_df.copy()
+    extreme_mask = val_nds_df['nds'].abs() > VALIDATION_NDS_THRESHOLD
     if extreme_mask.any():
-        extreme_configs = val_nds_df[extreme_mask][['model', 'rep', 'strategy', 'dataset', 'nds']].to_string()
-        print(f"  ⚠ Clipping {extreme_mask.sum()} extreme validation NDS values (< {VALIDATION_NDS_CLIP}):")
-        print(f"    {extreme_configs}")
-        val_nds_df = val_nds_df.copy()
-        val_nds_df.loc[extreme_mask, 'nds'] = VALIDATION_NDS_CLIP
+        n_extreme = extreme_mask.sum()
+        print(f"  ⚠ Filtering {n_extreme} extreme validation NDS values (|NDS| > {VALIDATION_NDS_THRESHOLD}):")
+        for _, row in val_nds_df[extreme_mask].iterrows():
+            ds = row.get('dataset', '?')
+            print(f"    {row['model']}/{row.get('rep','?')}/{row.get('strategy','?')} "
+                  f"on {ds}: NDS={row['nds']:.1f}")
+        val_nds_df.loc[extreme_mask, 'nds'] = np.nan
 
     datasets = val_nds_df['dataset'].unique() if 'dataset' in val_nds_df.columns else ['validation']
     print(f"  Validation datasets: {sorted(datasets)}, {len(val_nds_df)} configs total")
@@ -996,13 +999,17 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             if len(merged) < 3:
                 continue
 
-            fig, ax = plt.subplots(figsize=(6, 6))
+            # Drop rows with NaN NDS (filtered artifacts)
+            merged = merged.dropna(subset=['qm9_nds', 'ext_nds'])
+            if len(merged) < 3:
+                continue
+
+            fig, ax = plt.subplots(figsize=(7, 6))
             for _, row in merged.iterrows():
                 color = MODEL_COLORS.get(row['model'], '#333333')
-                ax.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=80, zorder=5)
-                ax.annotate(get_model_label(row['model']),
-                            (row['qm9_nds'], row['ext_nds']),
-                            textcoords="offset points", xytext=(5, 5), fontsize=7)
+                ax.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=80, zorder=5,
+                           label=get_model_label(row['model']),
+                           edgecolors='black', linewidth=0.3)
 
             # Correlation line
             r, p = stats.pearsonr(merged['qm9_nds'], merged['ext_nds'])
@@ -1014,6 +1021,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             ax.set_ylabel(f'{dataset} Mean NDS')
             ax.set_title(f'QM9 vs {dataset} Robustness (r={r:.2f}, p={p:.3f})', fontweight='bold')
             ax.axhline(0, color='grey', linewidth=0.3)
+            ax.legend(fontsize=7, loc='best', framealpha=0.9)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             # Tight axis around data
@@ -1037,16 +1045,15 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         ext_model_nds = val_nds_df.groupby('model')['nds'].mean().reset_index()
         ext_model_nds = ext_model_nds.rename(columns={'nds': 'ext_nds'})
         merged = qm9_model_nds.merge(ext_model_nds, on='model', how='inner')
+        merged = merged.dropna(subset=['qm9_nds', 'ext_nds'])
 
         if len(merged) >= 3:
             fig, ax = plt.subplots(figsize=(7, 7))
             for _, row in merged.iterrows():
                 color = MODEL_COLORS.get(row['model'], '#333333')
                 ax.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
-                           edgecolors='black', linewidth=0.5)
-                ax.annotate(get_model_label(row['model']),
-                            (row['qm9_nds'], row['ext_nds']),
-                            textcoords="offset points", xytext=(6, 6), fontsize=8)
+                           edgecolors='black', linewidth=0.5,
+                           label=get_model_label(row['model']))
 
             r, p = stats.pearsonr(merged['qm9_nds'], merged['ext_nds'])
             slope, intercept = np.polyfit(merged['qm9_nds'], merged['ext_nds'], 1)
@@ -1058,6 +1065,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             ax.set_title(f'Robustness Transferability: QM9 → External (r={r:.2f}, p={p:.3f})',
                          fontweight='bold', fontsize=12)
             ax.axhline(0, color='grey', linewidth=0.3)
+            ax.legend(fontsize=8, loc='best', framealpha=0.9)
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             # Tight axis around data (don't extend to 0)
