@@ -1204,27 +1204,30 @@ class VBLLLoss(nn.Module):
     ELBO loss for VBLL: Gaussian NLL (with learned noise) + KL divergence / n_data.
 
     NLL = 0.5 * log(noise_var) + 0.5 * (pred - target)^2 / noise_var
-    Loss = mean(NLL) + KL(q||p) / n_data
+    Loss = mean(NLL) + sum(KL_i(q||p)) / n_data
+
+    Supports both last-layer and full-network VBLL: collects KL from ALL
+    VBLLLayers in the model. Observation noise comes from the last VBLLLayer
+    (the output layer).
     """
     def __init__(self, model, n_data):
         super(VBLLLoss, self).__init__()
         self.model = model
         self.n_data = n_data
 
-        # Find the VBLLLayer in the model
-        self.vbll_layer = None
-        for module in model.modules():
-            if isinstance(module, VBLLLayer):
-                self.vbll_layer = module
-                break
+        # Collect ALL VBLLLayers in the model
+        self.vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
+        # Observation noise comes from the last (output) VBLLLayer
+        self.output_layer = self.vbll_layers[-1] if self.vbll_layers else None
 
     def forward(self, pred, target):
-        if self.vbll_layer is not None:
-            noise_var = self.vbll_layer.noise_var
+        if self.output_layer is not None:
+            noise_var = self.output_layer.noise_var
             # Gaussian NLL with learned observation noise
             nll = 0.5 * torch.log(noise_var) + 0.5 * ((pred - target) ** 2) / noise_var
             nll = nll.mean()
-            kl = self.vbll_layer.kl_divergence()
+            # Sum KL from all variational layers
+            kl = sum(layer.kl_divergence() for layer in self.vbll_layers)
             return nll + kl / self.n_data
         # Fallback to MSE if no VBLLLayer found
         return nn.MSELoss()(pred, target)
@@ -1285,6 +1288,51 @@ def apply_bayesian_transformation_last_layer_variational(model):
     set_nested_attr(model, last_linear_name, vbll_layer)
 
     return model
+
+def apply_bayesian_transformation_full_variational(model):
+    """
+    Converts ALL Linear layers in a PyTorch model to VBLLLayers.
+
+    This is the full-network analogue of apply_bayesian_transformation_last_layer_variational:
+    every nn.Linear gets a variational posterior over its weights, trained with ELBO.
+    Only the final (output) VBLLLayer retains the learned observation noise parameter;
+    hidden layers contribute epistemic uncertainty only.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The PyTorch model to be transformed.
+
+    Returns
+    -------
+    model : nn.Module
+        The transformed model with all Linear layers replaced by VBLLLayers.
+    """
+    def set_nested_attr(obj, attr_path, value):
+        attrs = attr_path.split(".")
+        for a in attrs[:-1]:
+            obj = getattr(obj, a)
+        setattr(obj, attrs[-1], value)
+
+    linear_layers = [(name, module) for name, module in model.named_modules()
+                     if isinstance(module, nn.Linear)]
+
+    if not linear_layers:
+        raise ValueError("No nn.Linear layers found to replace.")
+
+    for name, module in linear_layers:
+        vbll_layer = VBLLLayer(
+            in_features=module.in_features,
+            out_features=module.out_features
+        )
+        with torch.no_grad():
+            vbll_layer.weight_mu.copy_(module.weight.data)
+            if module.bias is not None:
+                vbll_layer.bias_mu.copy_(module.bias.data)
+        set_nested_attr(model, name, vbll_layer)
+
+    return model
+
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None):
     params = {}
@@ -2000,6 +2048,10 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model_name = "bnn_variational"
         # Use ELBO loss (MSE + KL divergence) for VBLL
         criterion = VBLLLoss(model, n_data=len(x_train))
+    elif args.bayesian_transformation == "full_variational":
+        model = apply_bayesian_transformation_full_variational(model)
+        model_name = "bnn_full_variational"
+        criterion = VBLLLoss(model, n_data=len(x_train))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -2050,11 +2102,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
         
         # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
-        vbll_layer = None
-        for module in model.modules():
-            if isinstance(module, VBLLLayer):
-                vbll_layer = module
-                break
+        # Use the LAST VBLLLayer (output layer) for observation noise
+        vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
+        vbll_layer = vbll_layers[-1] if vbll_layers else None
 
         if vbll_layer is not None:
             learned_noise_var = vbll_layer.noise_var.item()
@@ -2350,9 +2400,14 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_variational")
-    
+    elif args.bayesian_transformation == "full_variational":
+        model = apply_bayesian_transformation_full_variational(model)
+        model_name = model_name.replace("flexible_dnn", "flexible_bnn_full_variational")
+
     from loss_functions import get_loss_function
     criterion = get_loss_function(loss_name, **loss_kwargs)
+    if args.bayesian_transformation in ("variational", "full_variational"):
+        criterion = VBLLLoss(model, n_data=len(x_train))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
@@ -2578,6 +2633,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = f"{model_type}_bnn_variational"
+    elif args.bayesian_transformation == "full_variational":
+        model = apply_bayesian_transformation_full_variational(model)
+        model_name = f"{model_type}_bnn_full_variational"
     else:
         model_name = model_type
 
@@ -2588,7 +2646,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     criterion = get_loss_function(loss_name, **loss_kwargs)
 
     # Override with ELBO loss for VBLL
-    if args.bayesian_transformation == "variational":
+    if args.bayesian_transformation in ("variational", "full_variational"):
         criterion = VBLLLoss(model, n_data=len(x_train))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
@@ -2645,11 +2703,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
 
             # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
-            vbll_layer = None
-            for module in model.modules():
-                if isinstance(module, VBLLLayer):
-                    vbll_layer = module
-                    break
+            # Use the LAST VBLLLayer (output layer) for observation noise
+            vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
+            vbll_layer = vbll_layers[-1] if vbll_layers else None
 
             if vbll_layer is not None:
                 learned_noise_var = vbll_layer.noise_var.item()

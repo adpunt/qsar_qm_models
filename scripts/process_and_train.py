@@ -269,9 +269,10 @@ def parse_arguments():
         help=(
             "Apply Bayesian transformation to applicable models (e.g., DNN, MLP). "
             "Options:\n"
-            "  full        - Replace all nn.Linear layers with Bayesian layers (BayesLinear).\n"
-            "  last_layer  - Replace only the final nn.Linear layer with a Bayesian layer (VBLL-style).\n"
-            "  variational - Use variational Bayes for uncertainty (sampling-based, not deterministic).\n"
+            "  full              - Replace all nn.Linear layers with BayesLinear (torchbnn).\n"
+            "  last_layer        - Replace only the final nn.Linear with BayesLinear.\n"
+            "  variational       - VBLL: replace last layer with VBLLLayer (learned noise).\n"
+            "  full_variational  - Full VBLL: replace ALL layers with VBLLLayer (learned noise on output).\n"
             "Default is None (no transformation)."
         )
     )

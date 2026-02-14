@@ -193,13 +193,16 @@ MODEL_COLORS = {
     'dnn_bnn_full': '#332288',     # Dark purple
     'dnn_bnn_last': '#6633CC',     # Medium purple
     'dnn_bnn_variational': '#9966FF',  # Light purple
+    'dnn_bnn_full_variational': '#7744BB',  # Purple between full and var
     'bnn_full': '#332288',         # Alias
     'bnn_last': '#6633CC',         # Alias
     'bnn_variational': '#9966FF',  # Alias
+    'bnn_full_variational': '#7744BB',  # Alias
     # MLP-BNN variants — reds/roses
     'mlp_bnn_full': '#CC3311',     # Red
     'mlp_bnn_last': '#EE6677',     # Salmon
     'mlp_bnn_variational': '#EE99AA',  # Light pink
+    'mlp_bnn_full_variational': '#DD5544',  # Orange-red between full and var
     # Conformal — teals
     'conformal_rf': '#44AA99',     # Teal
     'conformal_qrf': '#2D6A4F',    # Dark teal
@@ -229,13 +232,16 @@ MODEL_LABELS = {
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
     'dnn_bnn_variational': 'DNN-BNN (Var.)',
+    'dnn_bnn_full_variational': 'DNN-VBLL (Full)',
     'bnn_full': 'DNN-BNN (Full)',
     'bnn_last': 'DNN-BNN (Last)',
     'bnn_variational': 'DNN-BNN (Var.)',
+    'bnn_full_variational': 'DNN-VBLL (Full)',
     # MLP-BNN variants
     'mlp_bnn_full': 'MLP-BNN (Full)',
     'mlp_bnn_last': 'MLP-BNN (Last)',
     'mlp_bnn_variational': 'MLP-BNN (Var.)',
+    'mlp_bnn_full_variational': 'MLP-VBLL (Full)',
     # Conformal
     'conformal_rf': 'CP-RF',
     'conformal_qrf': 'CP-QRF',
@@ -404,6 +410,7 @@ def load_anova_data(results_dir):
             'bnn_full': 'dnn_bnn_full',
             'bnn_last': 'dnn_bnn_last',
             'bnn_variational': 'dnn_bnn_variational',
+            'bnn_full_variational': 'dnn_bnn_full_variational',
         }
         if 'model' in combined.columns:
             n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
@@ -2467,7 +2474,7 @@ def create_figure4(df, nds_df, output_dir):
     - Is the improvement larger under certain noise types?
     - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational', 'dnn_bnn_full_variational']
 
     # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -2528,7 +2535,7 @@ def create_figure5(df, nds_df, output_dir):
     - Does QRF beat RF?
     - Is the pattern consistent across strategies?
     """
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational', 'mlp_bnn_full_variational']
     rf_models = ['rf', 'qrf']
 
     # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
@@ -2805,8 +2812,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']},
+        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational', 'dnn_bnn_full_variational']},
+        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational', 'mlp_bnn_full_variational']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
     }
 
