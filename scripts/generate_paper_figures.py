@@ -382,7 +382,7 @@ def _white_text_for_missing(ax, pivot, annot_text):
 # =============================================================================
 
 def load_anova_data(results_dir):
-    """Load all anova_*.csv files."""
+    """Load all anova_*.csv files, deduplicating appended runs."""
     results_dir = Path(results_dir)
     all_data = []
 
@@ -422,9 +422,180 @@ def load_anova_data(results_dir):
         if 'representation' in combined.columns and 'rep' not in combined.columns:
             combined.rename(columns={'representation': 'rep'}, inplace=True)
 
+        # --- Deduplicate appended runs ---
+        # Files may have been appended to across multiple SLURM runs.
+        # Keep only the LAST occurrence of each (model, rep, strategy, sigma, iteration).
+        pre_dedup = len(combined)
+        dedup_cols = ['model', 'rep', 'strategy', 'sigma', 'iteration']
+        if all(c in combined.columns for c in dedup_cols):
+            combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
+            n_dupes = pre_dedup - len(combined)
+            if n_dupes > 0:
+                print(f"  Deduplicated: removed {n_dupes} duplicate rows (kept last run)")
+
         print(f"Loaded QM9 ANOVA data: {len(combined)} rows from {len(all_data)} files")
         return combined
     return None
+
+
+def audit_data_completeness(df, output_dir, min_iterations=5):
+    """Audit ANOVA data for missing sigmas/iterations. Run after all filtering.
+
+    Prints a summary and saves detailed gap report to CSV.
+    Configs with fewer than min_iterations are flagged as UNUSABLE.
+    """
+    EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+
+    # Only audit ANOVA-included configs
+    anova_df = df[
+        ~df['model'].isin(ANOVA_MODELS_EXCLUDE) &
+        ~df['rep'].isin(ANOVA_REPS_EXCLUDE)
+    ]
+
+    gap_rows = []
+    ok_count = 0
+    warn_count = 0
+    unusable_count = 0
+
+    for (model, rep, strategy), grp in anova_df.groupby(['model', 'rep', 'strategy']):
+        found_sigmas = set(grp['sigma'].unique())
+        missing_sigmas = EXPECTED_SIGMAS - found_sigmas
+
+        found_iters = set(grp['iteration'].unique()) if 'iteration' in grp.columns else set()
+        n_iters = len(found_iters)
+
+        # Check per-sigma iteration counts
+        per_sigma_iters = grp.groupby('sigma')['iteration'].nunique() if 'iteration' in grp.columns else pd.Series(dtype=int)
+
+        problems = []
+        if missing_sigmas:
+            problems.append(f"missing sigmas: {sorted(missing_sigmas)}")
+        if n_iters < min_iterations:
+            problems.append(f"only {n_iters} iterations (need >= {min_iterations})")
+
+        status = 'OK'
+        if n_iters < min_iterations:
+            status = 'UNUSABLE'
+            unusable_count += 1
+        elif missing_sigmas or n_iters < 10:
+            status = 'WARNING'
+            warn_count += 1
+        else:
+            ok_count += 1
+
+        if status != 'OK':
+            gap_rows.append({
+                'model': model,
+                'rep': rep,
+                'strategy': strategy,
+                'status': status,
+                'n_iterations': n_iters,
+                'n_sigmas': len(found_sigmas),
+                'missing_sigmas': str(sorted(missing_sigmas)) if missing_sigmas else '',
+                'problems': '; '.join(problems),
+            })
+
+    total = ok_count + warn_count + unusable_count
+    print(f"\n  DATA AUDIT ({total} configs):")
+    print(f"    OK (10 iters, 11 sigmas): {ok_count}")
+    print(f"    WARNING (usable but incomplete): {warn_count}")
+    print(f"    UNUSABLE (<{min_iterations} iterations): {unusable_count}")
+
+    if gap_rows:
+        gap_df = pd.DataFrame(gap_rows)
+        gap_path = output_dir / 'data_gaps.csv'
+        gap_df.to_csv(gap_path, index=False)
+        print(f"    Gap details saved to: {gap_path}")
+
+        # Print unusable configs
+        unusable = gap_df[gap_df['status'] == 'UNUSABLE']
+        if len(unusable) > 0:
+            print(f"\n    UNUSABLE CONFIGS ({len(unusable)}):")
+            for _, row in unusable.iterrows():
+                print(f"      {row['model']:30} / {row['rep']:10} / {row['strategy']:10} — {row['problems']}")
+
+        # Print warnings (cap at 20)
+        warnings_df = gap_df[gap_df['status'] == 'WARNING']
+        if len(warnings_df) > 0:
+            print(f"\n    WARNING CONFIGS ({len(warnings_df)}):")
+            for i, (_, row) in enumerate(warnings_df.iterrows()):
+                if i >= 20:
+                    print(f"      ... and {len(warnings_df) - 20} more (see data_gaps.csv)")
+                    break
+                print(f"      {row['model']:30} / {row['rep']:10} / {row['strategy']:10} — {row['n_iterations']} iters, {row['n_sigmas']} sigmas")
+    else:
+        print("    No gaps found!")
+
+    return gap_rows
+
+
+def audit_uncertainty_completeness(unc_df, output_dir):
+    """Audit uncertainty data for missing model/rep/strategy combos."""
+    EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+
+    # Find uncertainty column
+    unc_col = None
+    for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty', 'std']:
+        if col in unc_df.columns:
+            unc_col = col
+            break
+
+    gap_rows = []
+    ok_count = 0
+
+    group_cols = [c for c in ['model', 'rep', 'strategy'] if c in unc_df.columns]
+    if not group_cols:
+        print("\n  UNCERTAINTY AUDIT: Cannot audit — missing group columns")
+        return
+
+    for keys, grp in unc_df.groupby(group_cols):
+        if len(group_cols) == 3:
+            model, rep, strategy = keys
+        elif len(group_cols) == 2:
+            model, rep = keys
+            strategy = 'unknown'
+        else:
+            continue
+
+        found_sigmas = set(grp['sigma'].unique()) if 'sigma' in grp.columns else set()
+        missing_sigmas = EXPECTED_SIGMAS - found_sigmas
+        n_samples = len(grp)
+
+        # Check for all-NaN uncertainty
+        all_nan = unc_col and grp[unc_col].isna().all()
+        near_zero = unc_col and (grp[unc_col].abs().mean() < 1e-3 if not grp[unc_col].isna().all() else False)
+
+        problems = []
+        if missing_sigmas:
+            problems.append(f"missing sigmas: {sorted(missing_sigmas)}")
+        if all_nan:
+            problems.append("all uncertainty values NaN")
+        if near_zero:
+            problems.append("mean uncertainty < 1e-3 (effectively zero)")
+        if n_samples < 100:
+            problems.append(f"only {n_samples} rows")
+
+        if problems:
+            gap_rows.append({
+                'model': model, 'rep': rep, 'strategy': strategy,
+                'n_sigmas': len(found_sigmas), 'n_rows': n_samples,
+                'problems': '; '.join(problems),
+            })
+        else:
+            ok_count += 1
+
+    total = ok_count + len(gap_rows)
+    print(f"\n  UNCERTAINTY AUDIT ({total} configs):")
+    print(f"    OK: {ok_count}")
+    print(f"    Problems: {len(gap_rows)}")
+
+    if gap_rows:
+        gap_df = pd.DataFrame(gap_rows)
+        gap_path = output_dir / 'uncertainty_gaps.csv'
+        gap_df.to_csv(gap_path, index=False)
+        print(f"    Details saved to: {gap_path}")
+        for _, row in gap_df.iterrows():
+            print(f"      {row['model']:30} / {row.get('rep','?'):10} / {row.get('strategy','?'):10} — {row['problems']}")
 
 
 def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
@@ -521,6 +692,17 @@ def load_uncertainty_data(results_dir):
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
+
+        # Deduplicate appended runs
+        dedup_cols = [c for c in ['model', 'rep', 'strategy', 'sigma', 'iteration', 'sample_idx']
+                      if c in combined.columns]
+        if len(dedup_cols) >= 4:
+            pre_dedup = len(combined)
+            combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
+            n_dupes = pre_dedup - len(combined)
+            if n_dupes > 0:
+                print(f"  Deduplicated uncertainty: removed {n_dupes} duplicate rows")
+
         print(f"Loaded uncertainty data: {len(combined)} rows")
         if 'strategy' in combined.columns:
             print(f"  Strategies: {sorted(combined['strategy'].dropna().unique())}")
@@ -3665,6 +3847,11 @@ def main():
     if len(catastrophic_log) > 0:
         catastrophic_log.to_csv(output_dir / 'filtered_catastrophic_iterations.csv', index=False)
         print(f"    Saved filtered_catastrophic_iterations.csv")
+
+    # Audit data completeness — flags missing sigmas/iterations, saves data_gaps.csv
+    audit_data_completeness(qm9_df, output_dir)
+    if unc_df is not None:
+        audit_uncertainty_completeness(unc_df, output_dir)
 
     # Calculate NDS
     print("\n[2/3] Calculating metrics...")
