@@ -3853,6 +3853,76 @@ def main():
     if unc_df is not None:
         audit_uncertainty_completeness(unc_df, output_dir)
 
+    # Full data inventory — print everything that's loaded so we can see it in SLURM output
+    print("\n" + "=" * 80)
+    print("FULL DATA INVENTORY")
+    print("=" * 80)
+    all_models = sorted(qm9_df['model'].unique())
+    all_reps = sorted(qm9_df['rep'].unique())
+    all_strategies = sorted(qm9_df['strategy'].unique())
+    print(f"  Models ({len(all_models)}): {all_models}")
+    print(f"  Reps ({len(all_reps)}): {all_reps}")
+    print(f"  Strategies ({len(all_strategies)}): {all_strategies}")
+    print(f"  Total rows: {len(qm9_df)}")
+
+    # Per model×rep: number of strategies and mean iterations
+    print(f"\n  --- Iterations per model × rep × strategy (ANOVA-included only) ---")
+    anova_only = qm9_df[
+        ~qm9_df['model'].isin(ANOVA_MODELS_EXCLUDE) &
+        ~qm9_df['rep'].isin(ANOVA_REPS_EXCLUDE)
+    ]
+    inv_rows = []
+    for (model, rep, strat), grp in anova_only.groupby(['model', 'rep', 'strategy']):
+        n_iters = grp['iteration'].nunique() if 'iteration' in grp.columns else 0
+        n_sigmas = grp['sigma'].nunique() if 'sigma' in grp.columns else 0
+        inv_rows.append({'model': model, 'rep': rep, 'strategy': strat,
+                         'n_iterations': n_iters, 'n_sigmas': n_sigmas})
+    inv_df = pd.DataFrame(inv_rows)
+    inv_df.to_csv(output_dir / 'data_inventory.csv', index=False)
+
+    # Pivot: model×rep showing min iterations across strategies
+    if len(inv_df) > 0:
+        pivot = inv_df.groupby(['model', 'rep'])['n_iterations'].min().unstack(fill_value=0)
+        print(pivot.to_string())
+        print(f"\n  Saved full inventory to data_inventory.csv")
+
+    # SNS summary (not in ANOVA but may be used elsewhere)
+    sns_data = qm9_df[qm9_df['rep'] == 'sns'] if 'sns' in all_reps else pd.DataFrame()
+    if len(sns_data) > 0:
+        print(f"\n  --- SNS data (excluded from ANOVA, available for supplementary) ---")
+        sns_models = sorted(sns_data['model'].unique())
+        sns_strategies = sorted(sns_data['strategy'].unique())
+        print(f"  Models ({len(sns_models)}): {sns_models}")
+        print(f"  Strategies ({len(sns_strategies)}): {sns_strategies}")
+        for (model, strat), grp in sns_data.groupby(['model', 'strategy']):
+            n_iters = grp['iteration'].nunique() if 'iteration' in grp.columns else 0
+            n_sigmas = grp['sigma'].nunique() if 'sigma' in grp.columns else 0
+            if n_iters < 10 or n_sigmas < 11:
+                print(f"    {model:30} / {strat:10}: {n_iters} iters, {n_sigmas} sigmas")
+
+    # Uncertainty summary
+    if unc_df is not None:
+        print(f"\n  --- Uncertainty data ---")
+        unc_models = sorted(unc_df['model'].unique()) if 'model' in unc_df.columns else []
+        print(f"  Models ({len(unc_models)}): {unc_models}")
+        if 'rep' in unc_df.columns:
+            print(f"  Reps: {sorted(unc_df['rep'].unique())}")
+        if 'strategy' in unc_df.columns:
+            print(f"  Strategies: {sorted(unc_df['strategy'].unique())}")
+
+    # Validation summary
+    if validation_df is not None:
+        print(f"\n  --- Validation data ---")
+        if 'model' in validation_df.columns:
+            print(f"  Models: {sorted(validation_df['model'].unique())}")
+        if 'dataset' in validation_df.columns:
+            print(f"  Datasets: {sorted(validation_df['dataset'].unique())}")
+        if 'fold' in validation_df.columns:
+            print(f"  Folds: {sorted(validation_df['fold'].unique())}")
+        if 'sigma' in validation_df.columns:
+            print(f"  Sigmas: {sorted(validation_df['sigma'].unique())}")
+    print("=" * 80)
+
     # Calculate NDS
     print("\n[2/3] Calculating metrics...")
     nds_df, excluded_df = calculate_nds(qm9_df)
