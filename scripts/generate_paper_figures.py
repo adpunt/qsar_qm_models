@@ -441,65 +441,78 @@ def load_anova_data(results_dir):
 def audit_data_completeness(df, output_dir, min_iterations=5):
     """Audit ANOVA data for missing sigmas/iterations. Run after all filtering.
 
+    Checks ALL expected model×rep×strategy combos including completely missing ones.
     Prints a summary and saves detailed gap report to CSV.
-    Configs with fewer than min_iterations are flagged as UNUSABLE.
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
+    EXPECTED_REPS = {'ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec'}
+    EXPECTED_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero'}
 
-    # Only audit ANOVA-included configs
+    # Only audit ANOVA-included data
     anova_df = df[
         ~df['model'].isin(ANOVA_MODELS_EXCLUDE) &
         ~df['rep'].isin(ANOVA_REPS_EXCLUDE)
     ]
+    all_models = sorted(anova_df['model'].unique())
 
     gap_rows = []
     ok_count = 0
     warn_count = 0
     unusable_count = 0
+    missing_count = 0
 
-    for (model, rep, strategy), grp in anova_df.groupby(['model', 'rep', 'strategy']):
-        found_sigmas = set(grp['sigma'].unique())
-        missing_sigmas = EXPECTED_SIGMAS - found_sigmas
+    for model in all_models:
+        for rep in sorted(EXPECTED_REPS):
+            for strategy in sorted(EXPECTED_STRATEGIES):
+                grp = anova_df[(anova_df['model'] == model) &
+                               (anova_df['rep'] == rep) &
+                               (anova_df['strategy'] == strategy)]
 
-        found_iters = set(grp['iteration'].unique()) if 'iteration' in grp.columns else set()
-        n_iters = len(found_iters)
+                if len(grp) == 0:
+                    gap_rows.append({
+                        'model': model, 'rep': rep, 'strategy': strategy,
+                        'status': 'MISSING', 'n_iterations': 0, 'n_sigmas': 0,
+                        'missing_sigmas': str(sorted(EXPECTED_SIGMAS)),
+                        'problems': 'NO DATA',
+                    })
+                    missing_count += 1
+                    continue
 
-        # Check per-sigma iteration counts
-        per_sigma_iters = grp.groupby('sigma')['iteration'].nunique() if 'iteration' in grp.columns else pd.Series(dtype=int)
+                found_sigmas = set(grp['sigma'].unique())
+                missing_sigmas = EXPECTED_SIGMAS - found_sigmas
+                n_iters = grp['iteration'].nunique() if 'iteration' in grp.columns else 0
 
-        problems = []
-        if missing_sigmas:
-            problems.append(f"missing sigmas: {sorted(missing_sigmas)}")
-        if n_iters < min_iterations:
-            problems.append(f"only {n_iters} iterations (need >= {min_iterations})")
+                problems = []
+                if missing_sigmas:
+                    problems.append(f"missing sigmas: {sorted(missing_sigmas)}")
+                if n_iters < min_iterations:
+                    problems.append(f"only {n_iters} iterations (need >= {min_iterations})")
 
-        status = 'OK'
-        if n_iters < min_iterations:
-            status = 'UNUSABLE'
-            unusable_count += 1
-        elif missing_sigmas or n_iters < 10:
-            status = 'WARNING'
-            warn_count += 1
-        else:
-            ok_count += 1
+                if n_iters < min_iterations:
+                    status = 'UNUSABLE'
+                    unusable_count += 1
+                elif missing_sigmas or n_iters < 10:
+                    status = 'WARNING'
+                    warn_count += 1
+                else:
+                    status = 'OK'
+                    ok_count += 1
 
-        if status != 'OK':
-            gap_rows.append({
-                'model': model,
-                'rep': rep,
-                'strategy': strategy,
-                'status': status,
-                'n_iterations': n_iters,
-                'n_sigmas': len(found_sigmas),
-                'missing_sigmas': str(sorted(missing_sigmas)) if missing_sigmas else '',
-                'problems': '; '.join(problems),
-            })
+                if status != 'OK':
+                    gap_rows.append({
+                        'model': model, 'rep': rep, 'strategy': strategy,
+                        'status': status, 'n_iterations': n_iters,
+                        'n_sigmas': len(found_sigmas),
+                        'missing_sigmas': str(sorted(missing_sigmas)) if missing_sigmas else '',
+                        'problems': '; '.join(problems),
+                    })
 
-    total = ok_count + warn_count + unusable_count
-    print(f"\n  DATA AUDIT ({total} configs):")
+    total = ok_count + warn_count + unusable_count + missing_count
+    print(f"\n  DATA AUDIT ({total} model x rep x strategy configs):")
     print(f"    OK (10 iters, 11 sigmas): {ok_count}")
     print(f"    WARNING (usable but incomplete): {warn_count}")
     print(f"    UNUSABLE (<{min_iterations} iterations): {unusable_count}")
+    print(f"    MISSING (no data at all): {missing_count}")
 
     if gap_rows:
         gap_df = pd.DataFrame(gap_rows)
@@ -507,22 +520,17 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
         gap_df.to_csv(gap_path, index=False)
         print(f"    Gap details saved to: {gap_path}")
 
-        # Print unusable configs
-        unusable = gap_df[gap_df['status'] == 'UNUSABLE']
-        if len(unusable) > 0:
-            print(f"\n    UNUSABLE CONFIGS ({len(unusable)}):")
-            for _, row in unusable.iterrows():
-                print(f"      {row['model']:30} / {row['rep']:10} / {row['strategy']:10} — {row['problems']}")
-
-        # Print warnings (cap at 20)
-        warnings_df = gap_df[gap_df['status'] == 'WARNING']
-        if len(warnings_df) > 0:
-            print(f"\n    WARNING CONFIGS ({len(warnings_df)}):")
-            for i, (_, row) in enumerate(warnings_df.iterrows()):
-                if i >= 20:
-                    print(f"      ... and {len(warnings_df) - 20} more (see data_gaps.csv)")
+        for status_label in ['MISSING', 'UNUSABLE', 'WARNING']:
+            subset = gap_df[gap_df['status'] == status_label]
+            if len(subset) == 0:
+                continue
+            print(f"\n    {status_label} CONFIGS ({len(subset)}):")
+            for i, (_, row) in enumerate(subset.iterrows()):
+                if i >= 30:
+                    print(f"      ... and {len(subset) - 30} more (see data_gaps.csv)")
                     break
-                print(f"      {row['model']:30} / {row['rep']:10} / {row['strategy']:10} — {row['n_iterations']} iters, {row['n_sigmas']} sigmas")
+                detail = f"{row['n_iterations']} iters, {row['n_sigmas']} sigmas" if row['n_iterations'] > 0 else 'NO DATA'
+                print(f"      {row['model']:30} / {row['rep']:10} / {row['strategy']:10} — {detail}")
     else:
         print("    No gaps found!")
 
