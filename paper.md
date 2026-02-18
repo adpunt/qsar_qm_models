@@ -124,7 +124,7 @@
 %%==================================%%
 %% Sample for unstructured abstract %%
 %%==================================%%
-\abstract{Predictive models for chemical bioactivity are limited by experimental noise and intrinsic biological and chemical variability. Traditional machine learning approaches treat these noisy experimental labels as ground truth and can overfit to the noise itself. Probabilistic modeling, which provides uncertainty quantification, has been used to address some of these issues; however, the evaluation of different probabilistic approaches in terms of comparative effectiveness across different noise conditions and molecular representations remains limited. In this study, we examine noise robustness and uncertainty quantification in a wide range of contexts, comparing the effects of different molecular representations and model architectures under a variety of types of label noise. We injected artificial noise into both clean quantum-chemical datasets and experimental ADME datasets. We demonstrate that while molecular representation explains more variance in overall QSAR performance, model architecture explains more variance in specifically noise robustness. The modeling approaches that showed the highest noise robustness were NGBoost, SVM, and full Bayesian neural networks. Full Bayesian transformation significantly improved NN robustness, while last-layer transformation did not. Among probabilistic models, NGBoost provides the most useful uncertainty estimates under noisy conditions. Model rankings remain highly stable across different types of artificial noise ($W = 0.957$) but do not transfer to external datasets, indicating that dataset-specific factors dominate robustness on smaller experimental datasets. We introduce NoiseInject, an open-source benchmarking framework for evaluating noise robustness across arbitrary datasets, optimized for molecular data but usable on other subjects.}
+\abstract{Predictive models for chemical bioactivity are limited by experimental noise and intrinsic biological and chemical variability. Traditional machine learning approaches treat these noisy experimental labels as ground truth and can overfit to the noise itself. Probabilistic modeling, which provides uncertainty quantification, has been used to address some of these issues; however, the evaluation of different probabilistic approaches in terms of comparative effectiveness across different noise conditions and molecular representations remains limited. In this study, we examine noise robustness and uncertainty quantification in a wide range of contexts, comparing the effects of different molecular representations and model architectures under a variety of types of label noise. We injected artificial noise into both clean quantum-chemical datasets and experimental ADME datasets. We demonstrate that while molecular representation explains more variance in overall QSAR performance, model architecture explains more variance in specifically noise robustness. The modeling approaches that showed the highest noise robustness were NGBoost, SVM, and full Bayesian neural networks. Full Bayesian transformation significantly improved NN robustness, while last-layer transformation did not. Among probabilistic models, NGBoost provides the most useful uncertainty estimates under noisy conditions. Model rankings remain highly stable across different types of artificial noise ($W = 0.953$) but do not transfer to external datasets, indicating that dataset-specific factors dominate robustness on smaller experimental datasets. We introduce NoiseInject, an open-source benchmarking framework for evaluating noise robustness across arbitrary datasets, optimized for molecular data but usable on other subjects.}
 
 
 %%================================%%
@@ -347,7 +347,7 @@ The parameter $\sigma$ serves as a noise scaling factor across all strategies. F
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{fig_methods_noise_strategies.png}
-\caption{Effect of each noise injection strategy on the label distribution at $\sigma = 0.5$. Gray histograms show the clean HOMO-LUMO gap distribution; colored histograms show the distribution after noise injection. Each strategy produces a distinct perturbation pattern, ranging from uniform displacement (Gaussian) to targeted corruption of specific label regions (quantile, threshold, outlier). The detailed progression across noise levels is shown in Supplementary Figure~\ref{fig:supp_noise_detailed}.}
+\caption{Effect of each noise injection strategy on the HOMO-LUMO gap label distribution at $\sigma = 0.5$. Gray: clean distribution; colored: distribution after noise injection. Detailed progression across noise levels in Supplementary Figure~\ref{fig:supp_noise_detailed}.}
 \label{fig:noise_strategies}
 \end{figure}
 
@@ -366,15 +366,15 @@ The software is available under an MIT license at \url{github.com/adpunt/noise\_
 
 \subsection{The Role Inversion: Performance vs Robustness}\label{sec:role_inversion}
 
-A central finding of this study is that the factors governing predictive performance differ fundamentally from those governing noise robustness. ANOVA decomposition across six noise strategies reveals a consistent pattern (Table~\ref{tab:anova_decomposition}, Figure~\ref{fig:anova_decomposition}): for predictive performance (R$^2$ at $\sigma = 0.3$), model architecture and molecular representation contribute roughly equally ($\eta^2 \approx 20$--$29\%$ each), with interaction and residual terms accounting for the remainder. For noise robustness (NDS), model architecture becomes the dominant factor ($\eta^2 = 25.1$--$47.5\%$), while representation recedes to a minor role ($\eta^2 = 2.0$--$14.9\%$).
+A central finding of this study is that the factors governing predictive performance differ fundamentally from those governing noise robustness. ANOVA decomposition across six noise strategies reveals a consistent pattern (Table~\ref{tab:anova_decomposition}, Figure~\ref{fig:anova_decomposition}): for predictive performance (R$^2$ at $\sigma = 0.3$), model architecture and molecular representation contribute comparably ($\eta^2 \approx 23$--$28\%$ for model, $29$--$32\%$ for representation), with interaction and residual terms accounting for the remainder. For noise robustness (NDS), model architecture becomes the dominant factor ($\eta^2 = 11$--$49\%$), while representation recedes to a minor role ($\eta^2 = 1$--$15\%$).
 
 This role inversion has a natural interpretation. For performance, molecular representation determines what chemical information is available to the model, while architecture determines how efficiently it is used---both matter roughly equally. For robustness, representation becomes less important because noise corrupts labels, not features. Instead, the model's inductive biases---how it regularizes, ensembles, or distributes uncertainty---determine whether corrupted labels degrade predictions or are absorbed by the learning algorithm.
 
-The exception is outlier noise, where model architecture explained only $12.1\%$ of robustness variance and neither factor was dominant. This is consistent with outlier noise being the mildest strategy (mean $|$NDS$| = 0.099$): when degradation is negligible, there is little variance for any factor to explain. The strongest model effects emerged under threshold ($\eta^2 = 46.5\%$) and value-proportional ($\eta^2 = 47.5\%$) noise---the two most severe strategies---indicating that structured noise is most revealing of architectural differences.
+The strongest model effects emerged under the most severe strategies (threshold, value-proportional), while the mildest strategy (outlier) showed little variance for any factor to explain (Table~\ref{tab:anova_decomposition}). Structured noise that selectively corrupts specific label regions is most revealing of architectural differences.
 
 \begin{table}[htbp]
 \centering
-\caption{\textbf{ANOVA variance decomposition by noise strategy.} $\eta^2$ values (\%) for model architecture and molecular representation effects on predictive performance (R$^2$ at $\sigma=0.3$) and noise robustness (NDS). Interaction and residual terms account for the remaining variance.}
+\caption{ANOVA variance decomposition by noise strategy. $\eta^2$ (\%) for model architecture and molecular representation effects on performance (R$^2$ at $\sigma=0.3$) and robustness (NDS).}
 \label{tab:anova_decomposition}
 \small
 \begin{tabular}{lcccc}
@@ -383,12 +383,12 @@ The exception is outlier noise, where model architecture explained only $12.1\%$
 \cmidrule(lr){2-3} \cmidrule(lr){4-5}
 \textbf{Strategy} & \textbf{Model} & \textbf{Rep} & \textbf{Model} & \textbf{Rep} \\
 \midrule
-Gaussian        & 20.6 & 27.5 & 40.8 &  9.1 \\
-Quantile        & 22.0 & 28.3 & 33.3 &  3.5 \\
-Threshold       & 20.9 & 29.6 & 46.5 & 14.9 \\
-Heteroscedastic & 25.1 & 23.7 & 25.1 &  3.2 \\
-Value-prop.     & 28.3 & 21.0 & 47.5 & 12.0 \\
-Outlier         & 20.6 & 29.6 & 12.1 &  2.0 \\
+Gaussian        & 24.6 & 29.3 & 38.4 &  6.7 \\
+Quantile        & 26.1 & 28.7 & 32.5 &  2.3 \\
+Threshold       & 26.5 & 29.3 & 44.9 & 14.8 \\
+Heteroscedastic & 25.3 & 31.0 & 26.1 &  3.2 \\
+Value-prop.     & 27.6 & 28.6 & 49.3 & 11.8 \\
+Outlier         & 22.9 & 31.8 & 11.1 &  1.2 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -396,28 +396,21 @@ Outlier         & 20.6 & 29.6 & 12.1 &  2.0 \\
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig2_anova_decomposition.png}
-    \caption{\textbf{ANOVA variance decomposition by noise strategy.} Variance explained ($\eta^2$, \%) for (A) predictive performance (R$^2$ at $\sigma=0.3$) and (B) noise robustness (NDS), decomposed into model architecture, molecular representation, and interaction effects for each noise strategy.}
+    \caption{ANOVA variance decomposition ($\eta^2$, \%) for (A) predictive performance (R$^2$ at $\sigma=0.3$) and (B) noise robustness (NDS), by noise strategy.}
     \label{fig:anova_decomposition}
 \end{figure}
 
-To ensure meaningful robustness comparisons, we restricted analysis to configurations achieving baseline R$^2 > 0.6$. Configurations with poor baseline performance can exhibit misleadingly shallow degradation slopes simply because there is less performance to lose. This threshold excluded 63 configurations, of which 16 were marginal ($0.5 \leq R^2 < 0.6$). The majority of exclusions were BNN variants on mol2vec and MHG-GNN representations, where the Bayesian transformation produced near-zero baseline R$^2$ ($\approx -0.02$); these appear as ``N/A'' in supplementary tables and heatmaps. Additionally, 32 individual training iterations were excluded due to catastrophic failures (R$^2 < -0.5$), primarily affecting DNN on mol2vec (Supplementary Table~\ref{tab:excluded_configs}).
+To ensure meaningful robustness comparisons, we restricted analysis to configurations achieving baseline R$^2 > 0.6$, excluding 123 configurations where poor clean-data performance would produce misleadingly shallow degradation slopes (Supplementary Table~\ref{tab:excluded_configs}).
 
 \subsection{Model Rankings and Noise Strategy Patterns}\label{sec:rankings}
 
-We evaluated all model architectures under increasing noise on the PDV representation across six strategies (Figure~\ref{fig:global_overview}). Performance degrades approximately linearly with noise level for all models, but the rate of degradation---quantified by the Noise Degradation Slope (NDS)---varies substantially across architectures.
+We evaluated all model architectures under increasing noise on the PDV representation across six strategies. Performance degrades approximately linearly with noise level for all models, but the rate of degradation---quantified by the Noise Degradation Slope (NDS)---varies substantially across architectures (Supplementary Figure~\ref{fig:supp_global_overview}).
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{fig1_global_overview.png}
-    \caption{\textbf{Global overview of noise robustness.} (A) Performance degradation curves (PDV, Gaussian noise) showing R$^2$ versus noise level $\sigma$ for representative models. (B) NDS heatmap across all model architectures and noise strategies on PDV; darker cells indicate steeper degradation.}
-    \label{fig:global_overview}
-\end{figure}
-
-Averaging across all six strategies, NGBoost achieved the best mean robustness (mean NDS $= -0.334$), followed by SVM ($-0.358$) and DNN-BNN-Full ($-0.367$). QRF ($-0.407$) and MLP ($-0.406$) were the least robust overall (Table~\ref{tab:nds_ranking}). Model rankings across noise strategies were highly consistent: Kendall's coefficient of concordance yielded $W = 0.957$ ($\chi^2 = 80.40$, $p = 2.4 \times 10^{-11}$; 15 ANOVA-included models, 6 strategies), indicating that a model's relative robustness is largely strategy-independent (Supplementary Figure~\ref{fig:supp_ranking_consistency}). The main exception is outlier noise, where uniformly mild degradation compresses rankings and makes models harder to distinguish. Parallel analysis on the ECFP4 representation confirmed the same patterns (Supplementary Figures~\ref{fig:supp_ecfp4_overview} and~\ref{fig:supp_ecfp4_ranking}).
+NGBoost, SVM, and full BNNs formed a clearly more robust tier, while QRF and MLP were the least robust (Table~\ref{tab:nds_ranking}). Model rankings across noise strategies were highly consistent: Kendall's $W = 0.953$ ($p = 6.3 \times 10^{-14}$; 19 models, 6 strategies), indicating that a model's relative robustness is largely strategy-independent (Supplementary Figure~\ref{fig:supp_ranking_consistency}). Parallel analysis on ECFP4 confirmed the same patterns (Supplementary Figures~\ref{fig:supp_ecfp4_overview} and~\ref{fig:supp_ecfp4_ranking}).
 
 \begin{table}[htbp]
 \centering
-\caption{\textbf{Noise Degradation Slope by model on PDV.} Representative models ranked by mean NDS across all six strategies. Lower $|$NDS$|$ indicates greater noise robustness. Conformal wrappers, QRF, and flexible DNN architectural variants are excluded for clarity; full results in Supplementary Table~\ref{tab:nds_all_reps}.}
+\caption{NDS by model on PDV, ranked by mean across six strategies. Lower $|$NDS$|$ indicates greater robustness. Full results in Supplementary Table~\ref{tab:nds_all_reps}.}
 \label{tab:nds_ranking}
 \small
 \begin{tabular}{lccccccc}
@@ -425,26 +418,28 @@ Averaging across all six strategies, NGBoost achieved the best mean robustness (
 \textbf{Model} & \textbf{Gauss.} & \textbf{Outlier} & \textbf{Quant.} & \textbf{Thresh.} & \textbf{Hetero.} & \textbf{Val.-P.} & \textbf{Mean} \\
 \midrule
 NGBoost             & $-0.31$ & $-0.10$ & $-0.27$ & $-0.61$ & $-0.17$ & $-0.54$ & $-0.33$ \\
-SVM                 & $-0.34$ & $-0.10$ & $-0.28$ & $-0.67$ & $-0.18$ & $-0.58$ & $-0.36$ \\
-DNN-BNN (Full)      & $-0.34$ & $-0.13$ & $-0.30$ & $-0.66$ & $-0.19$ & $-0.59$ & $-0.37$ \\
+SVM                 & $-0.34$ & $-0.10$ & $-0.28$ & $-0.67$ & $-0.18$ & $-0.57$ & $-0.36$ \\
 MLP-BNN (Full)      & $-0.35$ & $-0.12$ & $-0.30$ & $-0.66$ & $-0.19$ & $-0.59$ & $-0.37$ \\
+DNN-BNN (Full)      & $-0.34$ & $-0.15$ & $-0.30$ & $-0.66$ & $-0.19$ & $-0.59$ & $-0.37$ \\
+MLP-BNN (Var.)      & $-0.35$ & $-0.12$ & $-0.30$ & $-0.67$ & $-0.20$ & $-0.60$ & $-0.37$ \\
 LightGBM            & $-0.35$ & $-0.11$ & $-0.30$ & $-0.69$ & $-0.19$ & $-0.61$ & $-0.38$ \\
+DNN-BNN (Var.)      & $-0.36$ & $-0.12$ & $-0.30$ & $-0.69$ & $-0.20$ & $-0.61$ & $-0.38$ \\
 XGBoost             & $-0.35$ & $-0.12$ & $-0.31$ & $-0.69$ & $-0.19$ & $-0.62$ & $-0.38$ \\
-GP (Gauche)         & $-0.36$ & $-0.12$ & $-0.32$ & $-0.69$ & $-0.20$ & $-0.62$ & $-0.39$ \\
-DNN-BNN (Last)      & $-0.36$ & $-0.13$ & $-0.33$ & $-0.69$ & $-0.22$ & $-0.62$ & $-0.39$ \\
+GP (Gauche)         & $-0.37$ & $-0.12$ & $-0.32$ & $-0.69$ & $-0.20$ & $-0.62$ & $-0.39$ \\
 DNN                 & $-0.36$ & $-0.13$ & $-0.33$ & $-0.70$ & $-0.20$ & $-0.63$ & $-0.39$ \\
 RF                  & $-0.36$ & $-0.12$ & $-0.31$ & $-0.73$ & $-0.20$ & $-0.64$ & $-0.39$ \\
-MLP-BNN (Last)      & $-0.39$ & $-0.14$ & $-0.34$ & $-0.70$ & $-0.22$ & $-0.64$ & $-0.40$ \\
-MLP                 & $-0.37$ & $-0.14$ & $-0.35$ & $-0.72$ & $-0.21$ & $-0.65$ & $-0.41$ \\
+DNN-BNN (Last)      & $-0.36$ & $-0.13$ & $-0.33$ & $-0.69$ & $-0.23$ & $-0.62$ & $-0.39$ \\
+MLP                 & $-0.36$ & $-0.13$ & $-0.34$ & $-0.72$ & $-0.21$ & $-0.65$ & $-0.40$ \\
+MLP-BNN (Last)      & $-0.39$ & $-0.14$ & $-0.34$ & $-0.70$ & $-0.22$ & $-0.64$ & $-0.41$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The six noise strategies produced markedly different absolute degradation but fell into three severity tiers (Table~\ref{tab:phase5_noise_strategy}). \textbf{Mild}: outlier noise (NDS range: $-0.10$ to $-0.14$) and heteroscedastic noise ($-0.17$ to $-0.22$), where models retained $>93\%$ of baseline performance. \textbf{Moderate}: quantile ($-0.27$ to $-0.35$) and Gaussian ($-0.31$ to $-0.39$). \textbf{Severe}: value-proportional ($-0.54$ to $-0.65$) and threshold ($-0.61$ to $-0.73$), where models lost $>34\%$ of baseline performance. Outlier noise was benign because ensemble methods can isolate aberrant observations; threshold noise was the most destructive because it deterministically corrupts all labels above a property cutoff, introducing systematic bias that models cannot learn around.
+The six strategies fell into three severity tiers (Table~\ref{tab:phase5_noise_strategy}): outlier and heteroscedastic noise were mild ($>93\%$ performance retained), quantile and Gaussian were moderate, and threshold and value-proportional were severe ($>34\%$ performance lost). Threshold noise was the most destructive because it deterministically corrupts all labels above a property cutoff, introducing systematic bias that models cannot learn around.
 
 \begin{table}[htbp]
 \centering
-\caption{\textbf{Noise strategy severity.} Mean performance retention and NDS across all ANOVA-included configurations.}
+\caption{Noise strategy severity: mean performance retention and NDS across ANOVA-included configurations.}
 \label{tab:phase5_noise_strategy}
 \small
 \begin{tabular}{lrrrr}
@@ -462,56 +457,37 @@ Threshold & 0.785 & 57.8 & 4.7 & 0.675 \\
 \end{tabular}
 \end{table}
 
-Despite the variation in absolute NDS values, the \emph{relative} severity of noise strategies was remarkably uniform across architectures. Strategy sensitivity ratios---each model's NDS on a given strategy divided by its Gaussian NDS---varied by less than $10\%$ across all models for every strategy (Table~\ref{tab:strategy_sensitivity}). Threshold noise was approximately $1.9$--$2.0\times$ as damaging as Gaussian for every model; value-proportional $1.60$--$1.77\times$; outlier $0.29$--$0.37\times$. This uniformity indicates that the relative severity of noise strategies is a property of the noise structure itself, not of model-specific vulnerabilities. Models differ in how much they degrade overall, but the proportional scaling across noise types is constant---a finding that simplifies noise robustness benchmarking.
+Despite the variation in absolute NDS values, the \emph{relative} severity of noise strategies was remarkably uniform across architectures: sensitivity ratios (each model's NDS on a given strategy divided by its Gaussian NDS) varied by less than $10\%$ across all models for every strategy (Supplementary Table~\ref{tab:supp_sensitivity_ratios}), indicating that strategy severity is a property of the noise structure, not the model.
 
-\begin{table}[htbp]
-\centering
-\caption{\textbf{Strategy sensitivity ratios relative to Gaussian noise.} Each value represents a model's NDS on the given strategy divided by its Gaussian NDS; values $> 1$ indicate greater damage than Gaussian, $< 1$ indicate less. Ratios are strikingly uniform across architectures, indicating that relative strategy severity is noise-intrinsic.}
-\label{tab:strategy_sensitivity}
-\small
-\begin{tabular}{lccccc}
-\toprule
-\textbf{Model} & \textbf{Outlier} & \textbf{Quantile} & \textbf{Threshold} & \textbf{Hetero.} & \textbf{Val.-Prop.} \\
-\midrule
-NGBoost  & 0.33 & 0.87 & 1.97 & 0.55 & 1.75 \\
-SVM      & 0.30 & 0.84 & 1.98 & 0.55 & 1.72 \\
-LightGBM & 0.32 & 0.86 & 1.98 & 0.55 & 1.75 \\
-XGBoost  & 0.35 & 0.88 & 1.98 & 0.54 & 1.77 \\
-RF       & 0.32 & 0.86 & 2.00 & 0.54 & 1.76 \\
-GP       & 0.34 & 0.87 & 1.91 & 0.56 & 1.71 \\
-DNN      & 0.37 & 0.91 & 1.93 & 0.55 & 1.74 \\
-MLP      & 0.37 & 0.92 & 1.92 & 0.55 & 1.74 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Baseline performance (R$^2$ at $\sigma = 0$) does not strongly predict noise robustness: models with similar clean-data performance can exhibit markedly different degradation slopes (Figure~\ref{fig:full_overview}), underscoring that robustness is a distinct property from accuracy. Sigma-level rankings (Supplementary Table~\ref{tab:sigma_rankings}) reveal this trade-off most clearly: NGBoost ranks 19th in clean performance but 5th at $\sigma = 1.0$, while QRF ranks 5th clean but drops to 17th under heavy noise. SVM shows a similar trajectory, rising from 11th clean to 4th at $\sigma = 1.0$. Models with inherent noise robustness tend to sacrifice clean-data accuracy---a trade-off that only becomes apparent under systematic noise evaluation.
+Baseline performance does not predict noise robustness (Supplementary Figure~\ref{fig:supp_full_overview}). Models with inherent noise robustness tend to sacrifice clean-data accuracy---NGBoost and SVM rank lower on clean data but rise under heavy noise (Supplementary Table~\ref{tab:sigma_rankings})---a trade-off that only becomes apparent under systematic noise evaluation.
 
 \subsection{Three Mechanisms of Noise Robustness}\label{sec:mechanisms}
 
 The overall ANOVA establishes that model architecture is the dominant factor for robustness, but simple effects analysis (Supplementary Table~\ref{tab:simple_effects}) reveals that different models achieve robustness through qualitatively different mechanisms, depending on how much their noise robustness depends on the choice of representation.
 
-\paragraph{Inherent robustness.} SVM and the full Bayesian neural network variants show robustness that is largely representation-independent. Within SVM, representation explains only $11.8\%$ of robustness variance under Gaussian noise ($p = 0.23$), $12.4\%$ under threshold ($p = 0.21$), and $13.4\%$ under value-proportional ($p = 0.16$)---none significant. Full BNNs show a similar pattern: DNN-BNN-Full's representation dependence is $15.3\%$ under Gaussian ($p = 0.11$) and $13.3\%$ under threshold ($p = 0.14$). These models achieve noise robustness through their inductive biases---SVM's margin maximization and the BNN's weight priors---rather than by relying on a favorable input representation.
+\paragraph{Inherent robustness.} SVM and full BNNs show robustness that is largely representation-independent: within these models, representation explains less than 15\% of robustness variance across all strategies (Supplementary Table~\ref{tab:simple_effects}). These models achieve robustness through their inductive biases---SVM's margin maximization and the BNN's weight priors---rather than by relying on a favorable input representation.
 
-\paragraph{Representation-mediated robustness.} RF, MLP, and the last-layer BNN variants show the opposite pattern: their robustness depends heavily on which representation they receive. Within MLP, representation explains $60.2\%$ of robustness variance under Gaussian noise ($p = 1.4 \times 10^{-8}$) and $85.5\%$ under threshold ($p = 2.9 \times 10^{-18}$). RF shows $69.4\%$ under Gaussian ($p = 2.5 \times 10^{-10}$) and $83.4\%$ under threshold ($p = 7.7 \times 10^{-16}$). These models can be robust, but only when paired with the right representation---on the wrong representation, they degrade steeply.
+\paragraph{Representation-mediated robustness.} RF, MLP, and last-layer BNNs show the opposite pattern. Within MLP, representation explains over 60\% of robustness variance under Gaussian noise and over 85\% under threshold noise. RF shows similarly strong representation dependence (Supplementary Table~\ref{tab:simple_effects}). These models can be robust, but only when paired with the right representation---on the wrong representation, they degrade steeply.
 
 \paragraph{The BNN natural experiment.} Full versus last-layer Bayesian transformation provides a controlled comparison: same base architecture, same training data, same representations, differing only in the extent of Bayesian treatment. The contrast is stark. For DNN-BNN-Last, representation explains $57.7\%$ of robustness variance under Gaussian noise; for DNN-BNN-Full, only $15.3\%$. For MLP variants, the difference is even larger: $79.6\%$ (Last) versus $28.0\%$ (Full). Full Bayesian treatment transforms a representation-mediated architecture into an inherently robust one by placing priors on all weights, not just the output layer.
 
-This mechanistic difference is visible in the degradation curves (Figures~\ref{fig:dnn_family} and~\ref{fig:mlp_rf_comparison}) and reflected in paired statistical comparisons (Table~\ref{tab:wilcoxon_bnn}). DNN-BNN-Full was significantly more robust than deterministic DNN ($p = 1.2 \times 10^{-7}$, mean NDS improvement $+0.067$), while DNN-BNN-Last showed no significant improvement ($p = 0.105$). The same pattern held for MLP: MLP-BNN-Full improved significantly ($p = 1.2 \times 10^{-7}$, improvement $+0.115$), MLP-BNN-Last did not ($p = 0.222$). The benefit of full Bayesian transformation also varies by representation (Table~\ref{tab:nn_transforms}): on SMILES, where the base MLP struggles most, MLP-BNN-Full improves NDS by $+0.217$; on ECFP4, where the base model is already adequate, the improvement is only $+0.094$.
+This mechanistic difference is visible in the degradation curves (Figures~\ref{fig:dnn_family} and~\ref{fig:mlp_rf_comparison}). Full BNN transformation significantly improved robustness for both DNN ($p < 10^{-6}$) and MLP ($p < 10^{-7}$), while last-layer transformation provided no significant benefit. VBLL transformation also significantly improved robustness for both architectures ($p < 10^{-4}$), with the MLP-BNN (Var.) achieving the largest improvement ($\Delta \text{NDS} = +0.134$; Table~\ref{tab:wilcoxon_bnn}). The benefit of full transformation varies by representation (Supplementary Table~\ref{tab:supp_nn_transforms}), with the largest improvement on SMILES where the base model struggles most.
 
 \begin{table}[htbp]
 \centering
-\caption{\textbf{Wilcoxon signed-rank tests for Bayesian and probabilistic transformations.} Paired comparisons of NDS across matched model--representation--strategy configurations. Positive improvement indicates the variant is more robust than its deterministic counterpart.}
+\caption{Wilcoxon signed-rank tests for Bayesian and probabilistic transformations. Positive $\Delta$ NDS indicates the variant is more robust than its deterministic counterpart.}
 \label{tab:wilcoxon_bnn}
 \small
 \begin{tabular}{llrrrl}
 \toprule
 \textbf{Family} & \textbf{Comparison} & \textbf{$n$} & \textbf{$\Delta$ NDS} & \textbf{$p$-value} & \textbf{Sig.} \\
 \midrule
-DNN & DNN vs DNN-BNN (Full) & 24 & $+0.067$ & $1.2 \times 10^{-7}$ & * \\
-DNN & DNN vs DNN-BNN (Last) & 22 & $+0.004$ & $0.105$ & \\
+DNN & DNN vs DNN-BNN (Full) & 24 & $+0.066$ & $6.0 \times 10^{-7}$ & * \\
+DNN & DNN vs DNN-BNN (Last) & 22 & $+0.002$ & $0.17$ & \\
+DNN & DNN vs DNN-BNN (Var.) & 18 & $+0.069$ & $5.3 \times 10^{-5}$ & * \\
 MLP & MLP vs MLP-BNN (Full) & 24 & $+0.115$ & $1.2 \times 10^{-7}$ & * \\
-MLP & MLP vs MLP-BNN (Last) & 22 & $+0.003$ & $0.222$ & \\
+MLP & MLP vs MLP-BNN (Last) & 22 & $+0.001$ & $0.46$ & \\
+MLP & MLP vs MLP-BNN (Var.) & 18 & $+0.134$ & $7.6 \times 10^{-6}$ & * \\
 RF  & RF vs QRF             & 20 & $-0.021$ & $2.7 \times 10^{-5}$ & * \\
 \bottomrule
 \end{tabular}
@@ -523,72 +499,47 @@ For random forests, QRF was significantly \emph{less} robust than RF (Wilcoxon $
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig4_dnn_family.png}
-    \caption{\textbf{DNN family comparison.} R$^2$ versus noise level $\sigma$ for the DNN and its BNN variants (full and last-layer) under Gaussian and Heteroscedastic noise (PDV representation).}
+    \caption{DNN family: R$^2$ versus $\sigma$ for deterministic DNN and BNN variants (full, last-layer) under Gaussian and heteroscedastic noise (PDV).}
     \label{fig:dnn_family}
 \end{figure}
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=\textwidth]{fig5_mlp_rf_comparison.png}
-    \caption{\textbf{MLP and RF family comparison.} R$^2$ versus noise level $\sigma$ for (A--B) MLP and its BNN variants and (C--D) RF versus QRF, under Gaussian and Heteroscedastic noise (PDV representation). QRF heteroscedastic data on PDV is not yet available (panel D shows RF only).}
+    \caption{MLP and RF families: R$^2$ versus $\sigma$ for (A--B) MLP and BNN variants and (C--D) RF versus QRF, under Gaussian and heteroscedastic noise (PDV).}
     \label{fig:mlp_rf_comparison}
 \end{figure}
 
-\begin{table}[htbp]
-\centering
-\caption{Neural network Bayesian transformation effects by representation.}
-\label{tab:nn_transforms}
-\small
-\begin{tabular}{llrrrr}
-\toprule
-\textbf{Model} & \textbf{Representation} & \textbf{Baseline R$^2$} & \textbf{MLP NDS} & \textbf{BNN-Full NDS} & \textbf{NDS Improvement} \\
-\midrule
-MLP & ECFP4 & 0.790 & $-0.495$ & $-0.402$ & +0.094 \\
-MLP & PDV & 0.828 & $-0.406$ & $-0.369$ & +0.037 \\
-MLP & SNS & 0.813 & $-0.546$ & $-0.434$ & +0.112 \\
-MLP & SMILES & 0.728 & $-0.600$ & $-0.383$ & +0.217 \\
-\bottomrule
-\end{tabular}
-\end{table}
+The representation perspective complements the model perspective. Some representations amplify architectural differences---on SMILES, model choice explains over 90\% of robustness variance---while others compress them: on PDV, model explains only 40\% (Supplementary Table~\ref{tab:simple_effects}). PDV acts as an equalizer, producing moderate robustness regardless of model choice, while SMILES acts as an amplifier, making model selection critical (Supplementary Figures~\ref{fig:supp_interaction} and~\ref{fig:supp_full_overview}; Supplementary Table~\ref{tab:nds_all_reps}).
 
-The representation perspective complements the model perspective. Some representations amplify model differences: within SMILES, model architecture explains $91.3\%$ of robustness variance under Gaussian noise---choosing the wrong model with SMILES input incurs a severe robustness penalty. Within ECFP4, model explains $74.6\%$. Other representations compress these differences: within PDV, model explains only $40.1\%$, and within mol2vec $41.3\%$. PDV acts as an equalizer, producing moderate robustness regardless of model choice, while SMILES acts as an amplifier, making model selection critical. These interaction patterns are visible in Figure~\ref{fig:interaction}A, where model rankings change substantially across representations, and Figure~\ref{fig:full_overview}, where the vertical spread of points for each model shows its representation sensitivity. The complete NDS values for all model--representation--strategy combinations are provided in Supplementary Table~\ref{tab:nds_all_reps}.
+% fig_full_overview moved to Supplementary Figure~\ref{fig:supp_full_overview}
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{fig_full_overview.png}
-    \caption{\textbf{All model--representation configurations across noise severity tiers.} Each point is one model--representation configuration; marker shape indicates representation, color indicates model. Panels show (A) Gaussian, (B) outlier, and (C) threshold noise strategies, spanning the mild-to-severe range. Configurations from the remaining strategies are shown in Supplementary Figure~\ref{fig:full_overview_supp}.}
-    \label{fig:full_overview}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=\textwidth]{fig_interaction.png}
-    \caption{\textbf{Representation--model interaction effects.} (A) NDS heatmap showing model robustness across representations under Gaussian noise. (B) NDS on PDV versus ECFP4 for each model under Gaussian noise, with Spearman correlation.}
-    \label{fig:interaction}
-\end{figure}
+% fig_interaction moved to Supplementary Figure~\ref{fig:supp_interaction}
 
 \subsection{Uncertainty as the Mechanistic Link}\label{sec:uncertainty}
 
-The three robustness mechanisms suggest a deeper question: \emph{why} do some architectures resist noise? We hypothesized that models whose uncertainty estimates respond to injected noise would also maintain prediction quality under noise---that noise detection and noise resistance are linked. Among the seven uncertainty-producing models, this link is strong: noise detection ability (Unc-Noise $\rho$ in Table~\ref{tab:uncertainty_metrics}) closely mirrors noise robustness (mean NDS), with a Spearman correlation of $\rho \approx 0.90$ ($p < 0.01$, $n = 7$). Models that detect noise also resist it.
+The three robustness mechanisms suggest a deeper question: \emph{why} do some architectures resist noise? We hypothesized that models whose uncertainty estimates respond to injected noise would also maintain prediction quality under noise---that noise detection and noise resistance are linked. Among the nine uncertainty-producing models (Table~\ref{tab:uncertainty_metrics}), models with explicit noise-modeling channels (NGBoost, GP, full BNNs) cluster at the top of both noise detection (Unc-Noise $\rho$) and robustness (mean NDS), while models that derive uncertainty post hoc (QRF, last-layer BNNs) fall at the bottom of both. The VBLL variants are a notable exception---achieving robustness comparable to full BNNs despite moderate noise tracking---suggesting that their learned observation noise parameter absorbs noise during training even when the resulting uncertainty estimates are less responsive at test time.
 
 % TODO [DATA PENDING]: Update table once BNN variational uncertainty data is available.
 % Models with mean uncertainty < 1e-3 (deterministic DNN/MLP) are excluded.
 \begin{table}[htbp]
 \centering
-\caption{Uncertainty quantification metrics for probabilistic models under Gaussian noise (ECFP4 representation). Unc-Error $\rho$: Spearman correlation between predicted uncertainty and absolute prediction error. Unc-Noise $\rho$: Spearman correlation between predicted uncertainty and injected noise magnitude. ECE: Expected calibration error. Coverage: proportion of true values within the predicted interval at $1\sigma$ (target: 68\%) and $2\sigma$ (target: 95\%).}
+\caption{Uncertainty quantification metrics for probabilistic models (ECFP4, Gaussian noise). Unc-Error $\rho$: uncertainty--error correlation. Unc-Noise $\rho$: uncertainty--noise correlation. Coverage targets: 68\% ($1\sigma$), 95\% ($2\sigma$).}
 \label{tab:uncertainty_metrics}
 \small
 \begin{tabular}{lrrrrr}
 \toprule
 \textbf{Model} & \textbf{Unc-Error $\rho$} & \textbf{Unc-Noise $\rho$} & \textbf{ECE} & \textbf{Cov. $1\sigma$} & \textbf{Cov. $2\sigma$} \\
 \midrule
-NGBoost        & 0.22 & 0.38 & 0.12 & 69.4\% & 95.1\% \\
-QRF            & 0.22 & 0.04 & 0.16 & 69.0\% & 91.7\% \\
-GP (Gauche)    & 0.20 & 0.33 & 0.20 & 74.6\% & 94.8\% \\
-MLP-BNN (Full) & 0.19 & 0.32 & 0.23 & 74.9\% & 94.9\% \\
-DNN-BNN (Full) & 0.17 & 0.34 & 0.19 & 73.9\% & 94.7\% \\
-MLP-BNN (Last) & 0.11 & 0.23 & 0.14 & 56.5\% & 82.4\% \\
-DNN-BNN (Last) & 0.09 & 0.15 & 0.14 & 52.4\% & 79.3\% \\
+QRF            & 0.22 & 0.25 & 0.16 & 69.9\% & 92.4\% \\
+NGBoost        & 0.22 & 0.40 & 0.12 & 69.4\% & 95.0\% \\
+MLP-BNN (Full) & 0.20 & 0.33 & 0.23 & 75.3\% & 95.1\% \\
+GP (Gauche)    & 0.20 & 0.36 & 0.19 & 74.7\% & 95.0\% \\
+DNN-BNN (Full) & 0.17 & 0.36 & 0.18 & 73.8\% & 94.8\% \\
+MLP-BNN (Last) & 0.11 & 0.24 & 0.14 & 56.0\% & 82.1\% \\
+MLP-BNN (Var.) & 0.10 & 0.18 & 0.15 & 55.9\% & 81.8\% \\
+DNN-BNN (Var.) & 0.10 & 0.19 & 0.14 & 52.6\% & 79.5\% \\
+DNN-BNN (Last) & 0.08 & 0.13 & 0.14 & 52.7\% & 79.3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -596,72 +547,57 @@ DNN-BNN (Last) & 0.09 & 0.15 & 0.14 & 52.4\% & 79.3\% \\
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{fig_uncertainty_combined.png}
-\caption{\textbf{Uncertainty quantification under increasing label noise} (PDV, Gaussian strategy). Mean predicted uncertainty as a function of injected noise level $\sigma$ for each probabilistic model. Models whose uncertainty grows with $\sigma$ are detecting added noise; flat lines indicate noise-insensitive estimates.}
-% TODO [DATA PENDING]: Expand to 3-panel figure once BNN variational uncertainty data is available.
+\caption{(A) Mean predicted uncertainty versus $\sigma$ for each probabilistic model (PDV, Gaussian strategy). (B) Aleatoric and epistemic uncertainty components versus $\sigma$ for models with decomposition data.}
 \label{fig:uncertainty_combined}
 \end{figure}
 
-NGBoost exemplifies this link. It produces the strongest noise tracking ($\rho = 0.38$), meaning its uncertainty estimates respond most to injected noise, and it achieves the best robustness (mean NDS $= -0.334$). It is also the best-calibrated model: $69.4\%$ coverage at $1\sigma$ (target: $68\%$) and $95.1\%$ at $2\sigma$ (target: $95\%$). At the other extreme, QRF produces uncertainty estimates that are essentially unresponsive to noise ($\rho = 0.04$) despite strong uncertainty-error correlation ($\rho = 0.22$)---its uncertainty captures model-specific variance but not data quality. This failure to detect noise maps directly onto QRF's poor robustness (mean NDS $= -0.407$, worst among all models).
+NGBoost exemplifies this link: it produces the strongest noise tracking and achieves both the best robustness and calibration (Table~\ref{tab:uncertainty_metrics}). Its advantage is mechanistic: NGBoost minimizes the negative log-likelihood of a learned Normal distribution, providing two gradient pathways when a noisy label produces a large residual---the model can increase the predicted scale $\sigma(x)$ rather than distorting the mean $\mu(x)$. The loss function routes noise into the uncertainty estimate instead of into the prediction. At the other extreme, QRF derives uncertainty from post-hoc quantile spreads across trees, with no training-time mechanism to respond to label quality---its noise tracking is weak ($\rho = 0.25$) relative to models with explicit noise channels, mapping onto its poor robustness.
 
-The Full versus Last BNN comparison reinforces this pattern from the uncertainty side. Full BNN variants show moderate noise tracking (DNN-BNN-Full $\rho = 0.34$, MLP-BNN-Full $\rho = 0.32$) and near-target coverage ($\sim$74\% at $1\sigma$). Last-layer variants show weaker noise tracking ($\rho = 0.15$--$0.23$) and substantially undercover ($52$--$57\%$ at $1\sigma$), producing uncertainty intervals that are too narrow. The same architectural change that converts representation-mediated robustness into inherent robustness (Section~\ref{sec:mechanisms}) also converts noise-blind uncertainty into noise-responsive uncertainty---the two properties are mechanistically linked through the extent of Bayesian treatment.
+The full versus last-layer BNN pattern reinforces this from the uncertainty side (Table~\ref{tab:uncertainty_metrics}): full variants show moderate noise tracking and near-target coverage, while last-layer variants undercover substantially. The same architectural change that converts representation-mediated robustness into inherent robustness (Section~\ref{sec:mechanisms}) also converts noise-blind uncertainty into noise-responsive uncertainty---the two properties are mechanistically linked through the extent of Bayesian treatment (Figure~\ref{fig:uncertainty_combined}).
 
-Figure~\ref{fig:uncertainty_combined} illustrates this separation: NGBoost, GP, and full BNNs increase their predicted uncertainty with $\sigma$, correctly signaling degraded data quality, while last-layer BNN variants show minimal response. The practical implication is that only models whose uncertainty is ``honest''---responsive to actual data quality---provide the kind of noise resistance that generalizes.
+The critical architectural distinction is whether a model's loss function provides an explicit gradient pathway for noise absorption. Models trained with likelihood-based objectives---NGBoost, GP, and VBLL---contain a learned variance or noise parameter that creates a trade-off: when a noisy label produces a large residual, increasing the noise parameter reduces the likelihood penalty at lower cost than distorting the mean prediction. Models trained with squared-error objectives---standard BNNs---lack this trade-off. All training pressure goes toward fitting the mean, and the weight posterior broadens only as a side effect of conflicting gradients from noisy labels, not as a directed response.
+
+Uncertainty decomposition makes this distinction visible (Figure~\ref{fig:uncertainty_combined}B). In the GP (Gauche), which separates posterior variance from a learned observation noise term, the observation noise component rises steeply with $\sigma$ while posterior variance remains flat---the model routes injected noise into its dedicated noise parameter rather than absorbing it into the prediction. BNNs, which lack a noise parameter, respond to noise entirely through posterior broadening, producing weaker noise tracking ($\rho = 0.33$--$0.36$ versus $\rho > 0.5$ for the GP's observation noise component alone). The VBLL variants add a learned observation noise parameter to the neural network loss, providing the same active noise channel within a BNN architecture and bridging this gap.
+
+These uncertainty patterns are not specific to a single noise type or representation: the uncertainty--noise correlation structure holds across all six strategies and four representations (Supplementary Table~\ref{tab:supp_uncertainty_by_strategy_rep}). The practical implication is that only models whose loss functions provide an explicit channel for noise absorption---allowing the model to widen its predictive distribution rather than chase noisy labels---provide the kind of noise resistance that generalizes.
 
 \subsection{Generalization Across Strategies and Datasets}\label{sec:generalization}
 
-The uniform strategy sensitivity ratios (Section~\ref{sec:rankings}) establish that robustness findings generalize well across noise types: a model's relative robustness on one strategy predicts its robustness on others ($W = 0.957$). The noise strategy acts as a scaling factor, not a differentiator---it determines how much damage occurs, but not which models handle it best.
+The uniform strategy sensitivity ratios (Section~\ref{sec:rankings}) establish that robustness findings generalize well across noise types: a model's relative robustness on one strategy predicts its robustness on others ($W = 0.953$). The noise strategy acts as a scaling factor, not a differentiator---it determines how much damage occurs, but not which models handle it best.
 
-Generalization across datasets is a different matter. We evaluated seven representative models---SVM, GP (Gauche), RF, QRF, DNN, LightGBM, and XGBoost---on three experimentally-derived molecular property datasets: LogD (lipophilicity), Caco-2 efflux permeability, and hERG-Ki (cardiac ion channel binding affinity), using all six noise strategies at $\sigma \in \{0, 0.1, \ldots, 1.0\}$. BNN variants and NGBoost were not included in external validation due to computational constraints. Configurations with $|$NDS$| > 2$ were filtered as artifacts (``N/A'' in Figure~\ref{fig:validation_overview}).
+Generalization across datasets is a different matter. We evaluated seven representative models---SVM, GP (Gauche), RF, QRF, DNN, LightGBM, and XGBoost---on three experimentally-derived molecular property datasets: LogD (lipophilicity), Caco-2 efflux permeability, and hERG-Ki (cardiac ion channel binding affinity), using all six noise strategies at $\sigma \in \{0, 0.1, \ldots, 1.0\}$. BNN variants and NGBoost were not included in external validation due to computational constraints. External validation used 5-fold scaffold cross-validation (GroupKFold on Murcko scaffolds) rather than the single deterministic scaffold split used for QM9, providing fold-averaged robustness estimates. Configurations with $|$NDS$| > 2$ were filtered as artifacts (``N/A'' in Figure~\ref{fig:validation_overview}).
 
-\begin{figure}[htbp]
+\begin{figure*}[htbp]
 \centering
 \includegraphics[width=\textwidth]{fig_validation_overview.png}
-\caption{\textbf{Validation dataset NDS heatmaps.} NDS by model and noise strategy for each external dataset (LogD, Caco-2 efflux, hERG-Ki). Black cells with white ``missing'' text indicate configurations not yet run; ``N/A'' indicates filtered extreme values ($|$NDS$| > 2$).}
+\caption{NDS heatmaps for three external validation datasets (LogD, Caco-2, hERG-Ki). Black cells indicate missing configurations; ``N/A'' indicates filtered extreme values ($|$NDS$| > 2$).}
 \label{fig:validation_overview}
-\end{figure}
+\end{figure*}
 
-Validation rankings diverge substantially from QM9 (Figure~\ref{fig:validation_model_comparison}). On external datasets, SVM achieved the best mean rank (1.67 across three datasets), followed by GP/Gauche (2.33) and RF (3.0). XGBoost, which ranked second on QM9, performed worst on validation (mean rank 6.67). The correlation between QM9 and external dataset NDS is negative and non-significant ($r = -0.30$, $p = 0.51$; Figure~\ref{fig:validation_qm9_transferability}), indicating that overall robustness rankings do not transfer.
+ANOVA on the external datasets confirms the role inversion: model architecture dominates robustness variance on all three datasets ($\eta^2 = 16$--$48\%$ for model versus $1$--$7\%$ for representation; Supplementary Figure~\ref{fig:supp_validation_anova}, Table~\ref{tab:supp_validation_anova}). The effect is strongest on Caco-2 ($\eta^2_{\text{model}} = 48.2\%$), the most challenging dataset, and weaker on hERG-Ki and LogD where large residual variance reflects strategy-level variability in these smaller datasets. Despite this structural consistency, validation rankings diverge substantially from QM9 (Supplementary Figure~\ref{fig:supp_validation_model_comparison}). SVM achieved the best mean rank across external datasets, followed by GP and RF, while XGBoost---second-best on QM9---performed worst. The correlation between QM9 and external dataset robustness is negative and non-significant ($r = -0.30$, $p = 0.51$), indicating that overall robustness rankings do not transfer.
 
 This non-transferability is interpretable through the mechanism framework developed in Section~\ref{sec:mechanisms}. SVM, whose robustness is inherent and representation-independent, ranks first on external datasets---architectural noise resistance transfers across data domains. XGBoost, whose QM9 robustness benefits from the large dataset size (130k molecules) and well-separated scaffold structure, loses this advantage on smaller, experimentally-derived datasets with 500--2,000 samples. The mechanisms that produce robustness, not just the robustness rankings themselves, determine whether findings transfer.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.8\textwidth]{fig_validation_qm9_transferability.png}
-\caption{\textbf{Robustness transferability from QM9 to external datasets.} Per-model mean NDS on QM9 versus mean NDS across three external datasets, with Pearson correlation. The negative, non-significant correlation indicates that QM9 robustness rankings do not predict external dataset robustness.}
-\label{fig:validation_qm9_transferability}
-\end{figure}
+% fig_validation_model_comparison moved to Supplementary Figure~\ref{fig:supp_validation_model_comparison}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{fig_validation_model_comparison.png}
-\caption{\textbf{Model robustness across validation datasets.} Mean NDS by model for each external dataset. Bar color indicates dataset; models are ordered by mean NDS (most robust first).}
-\label{fig:validation_model_comparison}
-\end{figure}
+The gradient boosting family illustrates this starkly. On QM9, XGBoost and LightGBM rank among the most robust models, while NGBoost---which sacrifices clean-data accuracy for probabilistic output---ranks lower. On external datasets, this ordering inverts: XGBoost collapses on Caco-2 efflux (NDS $< -1.3$), while LightGBM degrades half as steeply ($\text{NDS} \approx -0.8$). XGBoost's greedy exact splits overfit to QM9's large, well-structured training set; on smaller experimental datasets, this learned structure becomes a liability. LightGBM's histogram-based binning provides modest regularization but does not prevent the same failure mode. By contrast, NGBoost's probabilistic framework---which learns a full predictive distribution rather than a point estimate---provides built-in protection: when label quality degrades, the model widens its predictive intervals rather than producing overconfident wrong predictions.
 
-Certain findings were nonetheless robust across datasets. QRF was consistently less robust than RF on every external dataset (Table~\ref{tab:validation_probabilistic}), confirming the QM9 finding. Caco-2 efflux was the most challenging dataset, with all models showing steeper degradation than on LogD or hERG-Ki (Supplementary Figures~\ref{fig:supp_validation_strategy} and~\ref{fig:supp_validation_rep}). XGBoost degraded particularly steeply on Caco-2 (NDS $\approx -1.1$ to $-1.4$), a dataset-specific weakness not predicted by its QM9 performance.
-
-\begin{table}[htbp]
-\centering
-\caption{\textbf{RF vs QRF on validation datasets.} QRF is consistently less robust than RF across all external datasets.}
-\label{tab:validation_probabilistic}
-\small
-\begin{tabular}{lrrr}
-\toprule
-\textbf{Dataset} & \textbf{RF NDS} & \textbf{QRF NDS} & \textbf{$\Delta$ NDS} \\
-\midrule
-ChEMBL-hERG-Ki     & $-0.279$ & $-0.417$ & $-0.139$ \\
-OpenADMET-Caco2    & $-0.555$ & $-0.721$ & $-0.165$ \\
-OpenADMET-LogD     & $-0.111$ & $-0.202$ & $-0.091$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+Certain findings were nonetheless robust across datasets. QRF was consistently less robust than RF on every external dataset (Supplementary Table~\ref{tab:supp_validation_probabilistic}), confirming the QM9 finding. Caco-2 efflux was the most challenging dataset, with all models showing steeper degradation than on LogD or hERG-Ki (Supplementary Figures~\ref{fig:supp_validation_strategy} and~\ref{fig:supp_validation_rep}).
 
 \section{Conclusion}\label{sec13}
-This study demonstrates that while model architecture and molecular representation contribute roughly equally to QSAR model performance, model architecture becomes the dominant factor under label noise---explaining up to 48\% of robustness variance compared to 2--15\% for representation. Simple effects analysis reveals three distinct mechanisms of noise robustness: \emph{inherent} robustness (SVM, full BNNs) that operates independently of representation choice, \emph{representation-mediated} robustness (RF, MLP, last-layer BNNs) that depends critically on the input features, and ensemble-based robustness (LightGBM, XGBoost) that benefits from dataset-specific structure. The BNN natural experiment demonstrates that full Bayesian treatment converts a representation-mediated architecture into an inherently robust one ($p < 10^{-7}$), while last-layer treatment provides no benefit.
+This study demonstrates that while model architecture and molecular representation contribute roughly equally to QSAR model performance, model architecture becomes the dominant factor under label noise---explaining up to 49\% of robustness variance compared to 1--15\% for representation. Simple effects analysis reveals three distinct mechanisms of noise robustness: \emph{inherent} robustness (SVM, full BNNs) that operates independently of representation choice, \emph{representation-mediated} robustness (RF, MLP, last-layer BNNs) that depends critically on the input features, and ensemble-based robustness (LightGBM, XGBoost) that benefits from dataset-specific structure. The BNN natural experiment demonstrates that full Bayesian treatment converts a representation-mediated architecture into an inherently robust one ($p < 10^{-7}$), while last-layer treatment provides no benefit.
 
-These mechanisms are linked through uncertainty quantification: among probabilistic models, noise detection ability and robustness are strongly correlated ($\rho \approx 0.90$, $p < 0.01$). NGBoost, which best detects noise in its uncertainty estimates, also resists noise most effectively and produces the best-calibrated intervals. QRF, whose uncertainty is blind to noise, shows the steepest degradation---and is significantly less robust than its deterministic RF counterpart across all datasets tested.
+These mechanisms are linked through uncertainty quantification: among probabilistic models, those with explicit noise-modeling channels (NGBoost, GP, full BNNs) best detect noise and best resist it. NGBoost, which best detects noise in its uncertainty estimates, also resists noise most effectively and produces the best-calibrated intervals. QRF, whose uncertainty responds only weakly to noise, shows the steepest degradation---and is significantly less robust than its deterministic RF counterpart across all datasets tested.
 
-Across all six noise strategies, model rankings were highly concordant ($W = 0.957$), and the relative severity of noise strategies was uniform across architectures---the noise structure, not the model, determines relative damage. However, robustness rankings did not transfer from QM9 to smaller experimental datasets ($r = -0.30$, $p = 0.51$). Critically, whether findings transfer depends on the mechanism: SVM's inherent robustness generalizes to new domains, while XGBoost's dataset-specific robustness does not. The NoiseInject framework released with this work provides tools for benchmarking model robustness through controlled noise injection on arbitrary datasets.
+Across all six noise strategies, model rankings were highly concordant ($W = 0.953$), and the relative severity of noise strategies was uniform across architectures---the noise structure, not the model, determines relative damage. However, robustness rankings did not transfer from QM9 to smaller experimental datasets ($r = -0.30$, $p = 0.51$). Critically, whether findings transfer depends on the \emph{mechanism}: SVM's inherent robustness generalizes to new domains, while XGBoost's dataset-specific robustness does not.
+
+These findings yield practical guidance for model selection under noisy conditions. When robustness must transfer across data domains---as is common when moving from large benchmark datasets to smaller experimental assays---SVM and full BNNs are the safest choices, as their noise resistance is representation-independent and mechanism-driven. When well-calibrated uncertainty estimates are required, NGBoost provides the strongest noise tracking and best calibration among the models tested. When a favorable representation is available and computational cost is a concern, even simpler models such as RF can achieve adequate robustness, provided the representation is well-matched to the task.
+
+Several limitations should be acknowledged. The primary experiments were conducted on QM9, a large ($N = 130{,}000$), computationally derived dataset with negligible measurement noise. While the external validation on three experimentally-derived ADME datasets provides initial evidence for generalizability, these datasets are small (500--2,000 molecules) and represent only a narrow slice of the chemical and biological space relevant to drug discovery. Only seven of the nineteen ANOVA-included models were evaluated externally due to computational constraints, and probabilistic models such as NGBoost and BNN variants---among the most robust on QM9---were not included in external validation. Additionally, all experiments used regression targets; classification tasks, which are common in ADME and toxicity prediction, may exhibit different robustness patterns.
+
+Future work should extend this framework to classification tasks, larger and more diverse experimental datasets, and additional probabilistic architectures including deep ensembles and evidential neural networks. Domain-specific noise models---for example, incorporating known assay variability patterns---could replace the generic noise strategies used here and provide more realistic benchmarks for specific therapeutic areas.
+
+The NoiseInject framework released with this work provides tools for benchmarking model robustness through controlled noise injection on arbitrary datasets, enabling systematic evaluation of new models and representations as they emerge.
 
 \section*{Declarations}
 
@@ -772,7 +708,7 @@ MLP & hidden\_size & 32 \\
 \end{table}
 
 
-To validate the ANOVA design, we computed pairwise Spearman rank correlations between all model NDS profiles and between all representation NDS profiles (Supplementary Tables S5 and S6). Models with $\rho > 0.99$ (e.g., conformal wrappers vs. their base models) were excluded from the ANOVA to avoid inflating model degrees of freedom with near-duplicate levels. Representations with $\rho > 0.90$ (SNS vs. ECFP4) were similarly excluded. We also computed ICC(1,1) for all model pairs to assess within-family consistency (Supplementary Table S7).
+To validate the ANOVA design, we computed pairwise Spearman rank correlations between all model NDS profiles and between all representation NDS profiles (Supplementary Tables~\ref{tab:supp_model_redundancy} and~\ref{tab:supp_rep_redundancy}). Models with $\rho > 0.99$ (e.g., conformal wrappers vs. their base models) were excluded from the ANOVA to avoid inflating model degrees of freedom with near-duplicate levels. Representations with $\rho > 0.90$ (SNS vs. ECFP4) were similarly excluded. We also computed ICC(1,1) for all model pairs to assess within-family consistency (Supplementary Table~\ref{tab:supp_icc}).
 
 \begin{figure}[htbp]
 \centering
@@ -825,6 +761,34 @@ To validate the ANOVA design, we computed pairwise Spearman rank correlations be
 \label{fig:supp_ranking_consistency}
 \end{figure}
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig1_global_overview.png}
+\caption{Supplementary Figure. Global overview of noise robustness. (A) Performance degradation curves (PDV, Gaussian noise) showing R$^2$ versus noise level $\sigma$ for representative models. (B) NDS heatmap across all model architectures and noise strategies on PDV.}
+\label{fig:supp_global_overview}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_full_overview.png}
+\caption{Supplementary Figure. All model--representation configurations across noise severity tiers. Each point is one model--representation configuration; marker shape indicates representation, color indicates model. Panels show (A) Gaussian, (B) outlier, and (C) threshold noise strategies, spanning the mild-to-severe range. Remaining strategies are shown in Supplementary Figure~\ref{fig:full_overview_supp}.}
+\label{fig:supp_full_overview}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_interaction.png}
+\caption{Supplementary Figure. Representation--model interaction effects. (A) NDS heatmap showing model robustness across representations under Gaussian noise. (B) NDS on PDV versus ECFP4 for each model under Gaussian noise, with Spearman correlation.}
+\label{fig:supp_interaction}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_model_comparison.png}
+\caption{Supplementary Figure. Model robustness across validation datasets. Mean NDS by model for each external dataset. Bar color indicates dataset; models are ordered by mean NDS (most robust first).}
+\label{fig:supp_validation_model_comparison}
+\end{figure}
+
 % Supplementary tables referenced from main text
 % TODO: Format these CSVs into proper LaTeX tables or provide as supplementary data files.
 \begin{table}[h]
@@ -832,7 +796,7 @@ To validate the ANOVA design, we computed pairwise Spearman rank correlations be
 \caption{Supplementary Table. Configurations excluded from robustness analysis due to baseline R$^2 \leq 0.6$. Available as \texttt{excluded\_configs.csv}.}
 \label{tab:excluded_configs}
 \small
-\textit{63 configurations excluded; see supplementary data file.}
+\textit{123 configurations excluded; see supplementary data file.}
 \end{table}
 
 \begin{table}[h]
@@ -857,6 +821,107 @@ To validate the ANOVA design, we computed pairwise Spearman rank correlations be
 \label{tab:sigma_rankings}
 \small
 \textit{Sigma-level rankings; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Strategy sensitivity ratios relative to Gaussian noise. Each value represents a model's NDS on the given strategy divided by its Gaussian NDS; values $> 1$ indicate greater damage than Gaussian, $< 1$ indicate less.}
+\label{tab:supp_sensitivity_ratios}
+\small
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Model} & \textbf{Outlier} & \textbf{Quantile} & \textbf{Threshold} & \textbf{Hetero.} & \textbf{Val.-Prop.} \\
+\midrule
+NGBoost  & 0.33 & 0.87 & 1.97 & 0.55 & 1.75 \\
+SVM      & 0.30 & 0.84 & 1.98 & 0.55 & 1.72 \\
+LightGBM & 0.32 & 0.86 & 1.98 & 0.55 & 1.75 \\
+XGBoost  & 0.35 & 0.88 & 1.98 & 0.54 & 1.77 \\
+RF       & 0.32 & 0.86 & 2.00 & 0.54 & 1.76 \\
+GP       & 0.34 & 0.87 & 1.91 & 0.56 & 1.71 \\
+DNN      & 0.37 & 0.91 & 1.93 & 0.55 & 1.74 \\
+MLP      & 0.37 & 0.92 & 1.92 & 0.55 & 1.74 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Neural network Bayesian transformation effects by representation.}
+\label{tab:supp_nn_transforms}
+\small
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Model} & \textbf{Representation} & \textbf{Baseline R$^2$} & \textbf{MLP NDS} & \textbf{BNN-Full NDS} & \textbf{NDS Improvement} \\
+\midrule
+MLP & ECFP4 & 0.790 & $-0.495$ & $-0.402$ & +0.094 \\
+MLP & PDV & 0.828 & $-0.406$ & $-0.369$ & +0.037 \\
+MLP & SNS & 0.813 & $-0.546$ & $-0.434$ & +0.112 \\
+MLP & SMILES & 0.728 & $-0.600$ & $-0.383$ & +0.217 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. RF vs QRF on validation datasets. QRF is consistently less robust than RF across all external datasets.}
+\label{tab:supp_validation_probabilistic}
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Dataset} & \textbf{RF NDS} & \textbf{QRF NDS} & \textbf{$\Delta$ NDS} \\
+\midrule
+ChEMBL-hERG-Ki     & $-0.279$ & $-0.417$ & $-0.139$ \\
+OpenADMET-Caco2    & $-0.555$ & $-0.721$ & $-0.165$ \\
+OpenADMET-LogD     & $-0.111$ & $-0.202$ & $-0.091$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Pairwise Spearman rank correlations between model NDS profiles. Models with $\rho > 0.99$ were excluded from the ANOVA as near-duplicates. Available as \texttt{table\_supp\_model\_redundancy.csv}.}
+\label{tab:supp_model_redundancy}
+\small
+\textit{Model redundancy analysis; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Pairwise Spearman rank correlations between representation NDS profiles. Representations with $\rho > 0.90$ were excluded from the ANOVA. Available as \texttt{table\_supp\_rep\_redundancy.csv}.}
+\label{tab:supp_rep_redundancy}
+\small
+\textit{Representation redundancy analysis; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Intraclass correlation coefficients ICC(1,1) for all model pairs, assessing within-family consistency of NDS profiles. Available as \texttt{table\_supp\_icc.csv}.}
+\label{tab:supp_icc}
+\small
+\textit{ICC analysis; see supplementary data file.}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. Uncertainty quantification metrics broken down by noise strategy and representation for all probabilistic models. Available as \texttt{table4\_supp\_uncertainty\_by\_strategy\_rep.csv}.}
+\label{tab:supp_uncertainty_by_strategy_rep}
+\small
+\textit{Full uncertainty metrics by strategy and representation; see supplementary data file.}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_anova.png}
+\caption{Supplementary Figure. ANOVA variance decomposition ($\eta^2$, \%) on external validation datasets. Model, representation, and interaction contributions to NDS variance for each dataset.}
+\label{fig:supp_validation_anova}
+\end{figure}
+
+\begin{table}[h]
+\centering
+\caption{Supplementary Table. ANOVA variance decomposition on external validation datasets. Available as \texttt{table\_validation\_anova.csv}.}
+\label{tab:supp_validation_anova}
+\small
+\textit{Validation ANOVA; see supplementary data file.}
 \end{table}
 
 % An appendix contains supplementary information that is not an essential part of the text itself but which may be helpful in providing a more comprehensive understanding of the research problem or it is information that is too cumbersome to be included in the body of the paper.
