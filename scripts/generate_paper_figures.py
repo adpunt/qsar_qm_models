@@ -3998,12 +3998,12 @@ def main():
     # Uncertainty summary
     if unc_df is not None:
         print(f"\n  --- Uncertainty data ---")
-        unc_models = sorted(unc_df['model'].unique()) if 'model' in unc_df.columns else []
+        unc_models = sorted(unc_df['model'].dropna().unique()) if 'model' in unc_df.columns else []
         print(f"  Models ({len(unc_models)}): {unc_models}")
         if 'rep' in unc_df.columns:
-            print(f"  Reps: {sorted(unc_df['rep'].unique())}")
+            print(f"  Reps: {sorted(unc_df['rep'].dropna().unique())}")
         if 'strategy' in unc_df.columns:
-            print(f"  Strategies: {sorted(unc_df['strategy'].unique())}")
+            print(f"  Strategies: {sorted(unc_df['strategy'].dropna().unique())}")
 
     # Validation summary
     if validation_df is not None:
