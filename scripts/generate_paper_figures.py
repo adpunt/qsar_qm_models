@@ -3927,8 +3927,6 @@ def main():
 
     # Exclude graph models (Graph_GP, GCN, GIN) - not in scope
     EXCLUDED_MODELS = {'graph_gp', 'gcn', 'gin', 'ginct', 'gin2d'}
-    # Also exclude old var-BNN data (incorrect implementation, identical to last-layer)
-    EXCLUDED_MODELS = EXCLUDED_MODELS | VBLL_PENDING_EXCLUDE
     pre_filter = len(qm9_df)
     qm9_df = qm9_df[~qm9_df['model'].isin(EXCLUDED_MODELS)]
     if len(qm9_df) < pre_filter:
