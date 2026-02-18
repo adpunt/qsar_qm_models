@@ -107,19 +107,25 @@ GENERATE_SUPPLEMENTARY = True
 # (table_supp_pairwise_redundancy.csv) for justification.
 # =============================================================================
 
-ANOVA_MODELS_EXCLUDE = {
-    'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',  # Wrappers (rho > 0.99)
-    'qrf',  # Redundant with rf (rho = 0.996)
+# Models excluded from ALL figures globally
+GLOBAL_MODELS_EXCLUDE = {
+    # Conformal wrappers — rho > 0.99 with base models, add no information
+    'conformal_rf', 'conformal_qrf', 'conformal_dnn',
+    'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',
+    # Pre-VBLL variational — was identical to last-layer (bug), replaced by VBLL
+    'dnn_bnn_variational', 'mlp_bnn_variational',
 }
+
+ANOVA_MODELS_EXCLUDE = {
+    'qrf',  # Redundant with rf (rho = 0.996)
+    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # DNN architecture variants (mid-pack, don't answer research questions)
+} | GLOBAL_MODELS_EXCLUDE
 
 ANOVA_REPS_EXCLUDE = {
     'sns',                # Redundant with ecfp4 (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
 }
-
-# VBLL experiments complete — no longer excluded.
-VBLL_PENDING_EXCLUDE = set()
 
 import argparse
 import pandas as pd
@@ -173,44 +179,61 @@ STRATEGY_LABELS = {
     'hetero': 'Heteroscedastic',
 }
 
+# Colors: variants of the same model family share ONE color.
+# Distinction between variants comes from MODEL_MARKERS (shape).
 MODEL_COLORS = {
-    # Tree-based — blues/greens
+    # Tree-based — each distinct (different model families)
     'rf': '#0072B2',               # Blue
+    'qrf': '#0072B2',              # Blue (RF variant)
     'xgboost': '#56B4E9',          # Sky blue
     'lgb': '#009E73',              # Teal
-    'qrf': '#117733',              # Dark green
-    'ngboost': '#D55E00',          # Vermillion (stands out)
-    # Neural networks — warm tones
-    'dnn': '#E69F00',              # Orange
-    'mlp': '#CC79A7',              # Pink
-    'flexible_dnn': '#E69F00',     # Orange (same as dnn base)
-    'flexible_dnn_256_128_64': '#C68500',  # Darker orange
-    'flexible_dnn_512_256': '#F0C050',     # Lighter orange
-    # SVM / GP
+    'ngboost': '#D55E00',          # Vermillion
+    # DNN family — all orange
+    'dnn': '#E69F00',
+    'dnn_bnn_full': '#E69F00',
+    'dnn_bnn_last': '#E69F00',
+    'dnn_bnn_full_variational': '#E69F00',
+    'flexible_dnn': '#E69F00',
+    'flexible_dnn_256_128_64': '#E69F00',
+    'flexible_dnn_512_256': '#E69F00',
+    'bnn_full': '#E69F00',         # Alias
+    'bnn_last': '#E69F00',         # Alias
+    'bnn_full_variational': '#E69F00',  # Alias
+    # MLP family — all pink
+    'mlp': '#CC79A7',
+    'mlp_bnn_full': '#CC79A7',
+    'mlp_bnn_last': '#CC79A7',
+    'mlp_bnn_full_variational': '#CC79A7',
+    # SVM / GP — unique
     'svm': '#999999',              # Gray
     'gauche': '#882255',           # Wine
-    # DNN-BNN variants — purples
-    'dnn_bnn_full': '#332288',     # Dark purple
-    'dnn_bnn_last': '#6633CC',     # Medium purple
-    'dnn_bnn_variational': '#9966FF',  # Light purple
-    'dnn_bnn_full_variational': '#7744BB',  # Purple between full and var
-    'bnn_full': '#332288',         # Alias
-    'bnn_last': '#6633CC',         # Alias
-    'bnn_variational': '#9966FF',  # Alias
-    'bnn_full_variational': '#7744BB',  # Alias
-    # MLP-BNN variants — reds/roses
-    'mlp_bnn_full': '#CC3311',     # Red
-    'mlp_bnn_last': '#EE6677',     # Salmon
-    'mlp_bnn_variational': '#EE99AA',  # Light pink
-    'mlp_bnn_full_variational': '#DD5544',  # Orange-red between full and var
-    # Conformal — teals
-    'conformal_rf': '#44AA99',     # Teal
-    'conformal_qrf': '#2D6A4F',    # Dark teal
-    'conformal_dnn': '#74C69D',    # Light teal
-    'conformal_rf_split': '#44AA99',   # Alias
-    'conformal_qrf_split': '#2D6A4F',  # Alias
-    'conformal_dnn_split': '#74C69D',  # Alias
 }
+
+# Markers: variants of the same family get different shapes.
+# Base model = circle, BNN Full = square, BNN Last = triangle, VBLL = diamond.
+MODEL_MARKERS = {
+    # Base models
+    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
+    'svm': 'o', 'gauche': 'o',
+    'dnn': 'o', 'mlp': 'o',
+    # DNN family variants
+    'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_bnn_full_variational': 'D',
+    'bnn_full': 's', 'bnn_last': '^', 'bnn_full_variational': 'D',
+    # MLP family variants
+    'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_bnn_full_variational': 'D',
+    # DNN architecture variants
+    'flexible_dnn': 'o', 'flexible_dnn_256_128_64': 's', 'flexible_dnn_512_256': '^',
+}
+
+# Canonical ordering for legends — grouped by family, base model first.
+MODEL_ORDER = [
+    'rf', 'qrf',
+    'xgboost', 'lgb', 'ngboost',
+    'svm', 'gauche',
+    'dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational',
+    'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational',
+    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
+]
 
 MODEL_LABELS = {
     # Tree-based
@@ -231,24 +254,14 @@ MODEL_LABELS = {
     # DNN-BNN variants
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
-    'dnn_bnn_variational': 'DNN-BNN (Var.)',
-    'dnn_bnn_full_variational': 'DNN-VBLL (Full)',
+    'dnn_bnn_full_variational': 'DNN-VBLL',
     'bnn_full': 'DNN-BNN (Full)',
     'bnn_last': 'DNN-BNN (Last)',
-    'bnn_variational': 'DNN-BNN (Var.)',
-    'bnn_full_variational': 'DNN-VBLL (Full)',
+    'bnn_full_variational': 'DNN-VBLL',
     # MLP-BNN variants
     'mlp_bnn_full': 'MLP-BNN (Full)',
     'mlp_bnn_last': 'MLP-BNN (Last)',
-    'mlp_bnn_variational': 'MLP-BNN (Var.)',
-    'mlp_bnn_full_variational': 'MLP-VBLL (Full)',
-    # Conformal
-    'conformal_rf': 'CP-RF',
-    'conformal_qrf': 'CP-QRF',
-    'conformal_dnn': 'CP-DNN',
-    'conformal_rf_split': 'CP-RF',
-    'conformal_qrf_split': 'CP-QRF',
-    'conformal_dnn_split': 'CP-DNN',
+    'mlp_bnn_full_variational': 'MLP-VBLL',
 }
 
 REP_LABELS = {
@@ -409,7 +422,6 @@ def load_anova_data(results_dir):
         BNN_NAME_MAP = {
             'bnn_full': 'dnn_bnn_full',
             'bnn_last': 'dnn_bnn_last',
-            'bnn_variational': 'dnn_bnn_variational',
             'bnn_full_variational': 'dnn_bnn_full_variational',
         }
         if 'model' in combined.columns:
@@ -421,6 +433,15 @@ def load_anova_data(results_dir):
         # Normalize column: representation → rep
         if 'representation' in combined.columns and 'rep' not in combined.columns:
             combined.rename(columns={'representation': 'rep'}, inplace=True)
+
+        # Global model exclusion (CP, old variational) — applied at load time
+        if 'model' in combined.columns:
+            n_before = len(combined)
+            combined = combined[~combined['model'].isin(GLOBAL_MODELS_EXCLUDE)]
+            n_excluded = n_before - len(combined)
+            if n_excluded > 0:
+                print(f"  Global exclusion: removed {n_excluded} rows "
+                      f"(conformal wrappers + pre-VBLL variational)")
 
         # --- Deduplicate appended runs ---
         # Files may have been appended to across multiple SLURM runs.
@@ -711,6 +732,14 @@ def load_uncertainty_data(results_dir):
             if n_dupes > 0:
                 print(f"  Deduplicated uncertainty: removed {n_dupes} duplicate rows")
 
+        # Global model exclusion (CP, old variational)
+        if 'model' in combined.columns:
+            n_before = len(combined)
+            combined = combined[~combined['model'].isin(GLOBAL_MODELS_EXCLUDE)]
+            n_excluded = n_before - len(combined)
+            if n_excluded > 0:
+                print(f"  Global exclusion: removed {n_excluded} uncertainty rows")
+
         print(f"Loaded uncertainty data: {len(combined)} rows")
         if 'strategy' in combined.columns:
             print(f"  Strategies: {sorted(combined['strategy'].dropna().unique())}")
@@ -771,7 +800,6 @@ def _normalize_validation_names(df):
         'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
         'LightGBM': 'lgb', 'LGBM': 'lgb',
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
-        'BNN-Var': 'dnn_bnn_variational',
     }
     val_rep_map = {
         'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
@@ -863,6 +891,16 @@ def calculate_validation_nds(validation_df):
             nds_df['baseline_r2'] = np.nan
         if 'dataset' not in nds_df.columns:
             nds_df['dataset'] = 'validation'
+        # Apply same baseline R² filtering as QM9 NDS computation
+        if 'baseline_r2' in nds_df.columns:
+            low_baseline = nds_df['baseline_r2'] < BASELINE_THRESHOLD
+            n_filtered = low_baseline.sum()
+            if n_filtered > 0:
+                print(f"  ⚠ Filtering {n_filtered} validation configs with baseline R² < {BASELINE_THRESHOLD}:")
+                for _, row in nds_df[low_baseline].iterrows():
+                    print(f"    {row.get('model','?')}/{row.get('rep','?')}/{row.get('strategy','?')} "
+                          f"on {row.get('dataset','?')}: baseline_r2={row['baseline_r2']:.3f}")
+                nds_df = nds_df[~low_baseline].copy()
         return nds_df
 
     # If per-sigma format (has sigma and r2 columns), compute NDS
@@ -944,6 +982,22 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         pivot = pivot.sort_values('MEAN', ascending=False)
         pivot.to_csv(output_dir / 'table_validation_nds.csv')
         print("✓ Saved table_validation_nds.csv")
+
+        # Diagnostic: save full per-model/rep/strategy/dataset breakdown for inspection
+        diag_cols = ['dataset', 'model', 'rep', 'strategy', 'nds']
+        if 'baseline_r2' in val_nds_df.columns:
+            diag_cols.append('baseline_r2')
+        diag_df = val_nds_df[diag_cols].sort_values(['dataset', 'model', 'rep', 'strategy'])
+        diag_df.to_csv(output_dir / 'table_validation_nds_full.csv', index=False)
+        print(f"✓ Saved table_validation_nds_full.csv ({len(diag_df)} rows)")
+
+        # Flag extreme individual NDS values for investigation
+        extreme = diag_df[diag_df['nds'].abs() > 1.0].copy() if 'nds' in diag_df.columns else pd.DataFrame()
+        if len(extreme) > 0:
+            print(f"  ⚠ {len(extreme)} validation configs with |NDS| > 1.0:")
+            for _, row in extreme.iterrows():
+                bl = f", baseline_r2={row['baseline_r2']:.3f}" if 'baseline_r2' in row and pd.notna(row['baseline_r2']) else ""
+                print(f"    {row['model']}/{row['rep']}/{row['strategy']} on {row['dataset']}: NDS={row['nds']:.3f}{bl}")
     else:
         val_nds_df.to_csv(output_dir / 'table_validation_nds.csv', index=False)
         print("✓ Saved table_validation_nds.csv")
@@ -953,6 +1007,16 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     if n_datasets > 0 and 'dataset' in val_nds_df.columns:
         fig, axes = plt.subplots(1, n_datasets, figsize=(5 * n_datasets, 6), squeeze=False)
         axes = axes[0]
+
+        # Compute shared color scale across all datasets for uniform comparison
+        all_nds_vals = val_nds_df['nds'].dropna().values
+        if len(all_nds_vals) > 0:
+            NDS_CLIP = 2.0
+            clipped_vals = np.clip(all_nds_vals, -NDS_CLIP, 0)
+            shared_vmin = clipped_vals.min()
+        else:
+            NDS_CLIP = 2.0
+            shared_vmin = -NDS_CLIP
 
         for i, dataset in enumerate(sorted(datasets)):
             ax = axes[i]
@@ -968,7 +1032,6 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             pivot = pivot[col_order]
 
             # Clip extreme NDS for colormap but show actual values in annotations
-            NDS_CLIP = 2.0
             pivot_display = pivot.clip(lower=-NDS_CLIP)
 
             # Build annotations: missing vs N/A vs actual value
@@ -981,11 +1044,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             pivot_display.columns = pivot.columns
             annot_text.columns = pivot.columns
 
-            vals = pivot_display.values[~np.isnan(pivot_display.values)]
-            vmin = vals.min() if len(vals) > 0 else -NDS_CLIP
             ax.set_facecolor('black')
             sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdYlGn', center=0,
-                        vmin=vmin, vmax=0,
+                        vmin=shared_vmin, vmax=0,
                         ax=ax, cbar_kws={'label': 'NDS'}, linewidths=0.5,
                         linecolor='#333333')
             _white_text_for_missing(ax, pivot_display, annot_text)
@@ -2466,9 +2527,13 @@ def create_figure2(df, output_dir):
         if s in perf_results:
             row['Perf_Model_η²'] = perf_results[s]['eta2_model']
             row['Perf_Rep_η²'] = perf_results[s]['eta2_rep']
+            row['Perf_Interaction_η²'] = perf_results[s]['eta2_interaction']
+            row['Perf_Residual_η²'] = perf_results[s]['eta2_residual']
         if s in robust_results:
             row['Robust_Model_η²'] = robust_results[s]['eta2_model']
             row['Robust_Rep_η²'] = robust_results[s]['eta2_rep']
+            row['Robust_Interaction_η²'] = robust_results[s]['eta2_interaction']
+            row['Robust_Residual_η²'] = robust_results[s]['eta2_residual']
         rows.append(row)
 
     anova_table = pd.DataFrame(rows)
@@ -2664,7 +2729,7 @@ def create_figure4(df, nds_df, output_dir):
     - Is the improvement larger under certain noise types?
     - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational', 'dnn_bnn_full_variational']
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational']
 
     # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -2689,7 +2754,7 @@ def create_figure4(df, nds_df, output_dir):
         panel_letter = 'A' if col == 0 else 'B'
         ax_line.set_title(f'{panel_letter}. R² vs σ ({strategy_label})', fontweight='bold')
         ax_line.legend(loc='lower left', fontsize=7)
-        ax_line.set_ylim(-0.1, 1.0)
+        ax_line.set_ylim(0.4, 1.0)
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -2725,7 +2790,7 @@ def create_figure5(df, nds_df, output_dir):
     - Does QRF beat RF?
     - Is the pattern consistent across strategies?
     """
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational', 'mlp_bnn_full_variational']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational']
     rf_models = ['rf', 'qrf']
 
     # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
@@ -2750,7 +2815,7 @@ def create_figure5(df, nds_df, output_dir):
         panel_letter = 'A' if col == 0 else 'B'
         ax_mlp.set_title(f'{panel_letter}. MLP R² vs σ ({strategy_label})', fontweight='bold')
         ax_mlp.legend(loc='lower left', fontsize=6)
-        ax_mlp.set_ylim(-0.1, 1.0)
+        ax_mlp.set_ylim(0.4, 1.0)
 
         # Bottom row: RF vs QRF
         ax_rf = axes[1, col]
@@ -2767,7 +2832,7 @@ def create_figure5(df, nds_df, output_dir):
         panel_letter = 'C' if col == 0 else 'D'
         ax_rf.set_title(f'{panel_letter}. RF vs QRF R² vs σ ({strategy_label})', fontweight='bold')
         ax_rf.legend(loc='lower left', fontsize=6)
-        ax_rf.set_ylim(-0.1, 1.0)
+        ax_rf.set_ylim(0.4, 1.0)
 
     for ax in axes.flat:
         ax.spines['top'].set_visible(False)
@@ -2986,10 +3051,28 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
             pivot['MEAN'] = pivot.mean(axis=1)
             pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
-            pivot = pivot.sort_values('MEAN', ascending=False)
-            pivot.rename(columns=STRATEGY_LABELS, inplace=True)
-            pivot.to_csv(output_dir / 'table2_nds_by_strategy_pdv.csv')
-            print("✓ Saved table2_nds_by_strategy_pdv.csv")
+            pivot_labeled = pivot.rename(columns=STRATEGY_LABELS)
+
+            # Variant A: ranked by mean NDS
+            variant_a = pivot_labeled.sort_values('MEAN', ascending=False)
+            variant_a.to_csv(output_dir / 'table2_nds_by_strategy_pdv.csv')
+            print("✓ Saved table2_nds_by_strategy_pdv.csv (ranked by mean)")
+
+            # Variant B: ranked by Gaussian NDS
+            gauss_col = STRATEGY_LABELS.get('legacy', 'Gaussian')
+            if gauss_col in pivot_labeled.columns:
+                variant_b = pivot_labeled.sort_values(gauss_col, ascending=False)
+                variant_b.to_csv(output_dir / 'table2_nds_by_gaussian_pdv.csv')
+                print("✓ Saved table2_nds_by_gaussian_pdv.csv (ranked by Gaussian)")
+
+            # Variant C: per-strategy ranks and mean rank
+            strategy_cols = [c for c in pivot.columns if c not in ('MEAN', 'STD')]
+            rank_df = pivot[strategy_cols].rank(ascending=False)  # Higher NDS (less negative) = more robust = rank 1
+            rank_df = rank_df.rename(columns=STRATEGY_LABELS)
+            rank_df['Mean_Rank'] = rank_df.mean(axis=1)
+            rank_df = rank_df.sort_values('Mean_Rank')
+            rank_df.to_csv(output_dir / 'table2_nds_ranks_pdv.csv')
+            print("✓ Saved table2_nds_ranks_pdv.csv (per-strategy ranks)")
 
         # Also save full table with all reps for supplementary
         pivot_all = nds_df.pivot_table(values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
@@ -3002,8 +3085,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational', 'dnn_bnn_full_variational']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational', 'mlp_bnn_full_variational']},
+        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational']},
+        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
     }
 
@@ -3058,6 +3141,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         print("✓ Saved table3_wilcoxon_tests.csv")
 
     # Table 4: Uncertainty metrics (legacy strategy only)
+    # Generate per-rep tables AND averaged table for comparison
     if unc_df is not None and len(unc_df) > 0:
         unc_legacy = unc_df[unc_df['strategy'] == 'legacy'] if 'strategy' in unc_df.columns else unc_df
 
@@ -3069,128 +3153,145 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                 break
 
         if unc_col and len(unc_legacy) > 0:
-            unc_metrics = []
-            for model in unc_legacy['model'].unique():
-                model_data = unc_legacy[unc_legacy['model'] == model]
+            # Determine reps to iterate: each individual rep + 'all' (averaged)
+            if 'rep' in unc_legacy.columns:
+                available_reps = sorted(unc_legacy['rep'].unique())
+            else:
+                available_reps = []
+            reps_to_compute = available_reps + ['all']
 
-                unc_values = model_data[unc_col].values
-
-                # Calculate error
-                # Use y_true_noisy (normalized space) to match y_pred_mean (normalized space)
-                if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-                    errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
-                elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-                    errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
-                elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-                    errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
+            for rep_name in reps_to_compute:
+                if rep_name == 'all':
+                    rep_data = unc_legacy
                 else:
+                    rep_data = unc_legacy[unc_legacy['rep'] == rep_name]
+
+                if len(rep_data) == 0:
                     continue
 
-                mask = np.isfinite(unc_values) & np.isfinite(errors)
-                if mask.sum() < 100:
-                    continue
+                unc_metrics = []
+                for model in rep_data['model'].unique():
+                    model_data = rep_data[rep_data['model'] == model]
 
-                # Skip models with negligible uncertainty (e.g. plain DNN/MLP
-                # that don't produce meaningful uncertainty estimates)
-                mean_unc = unc_values[mask].mean()
-                if mean_unc < 1e-3:
-                    continue
+                    unc_values = model_data[unc_col].values
 
-                # Uncertainty-error correlation
-                unc_err_corr, _ = stats.spearmanr(unc_values[mask], errors[mask])
-
-                # Uncertainty-noise correlation (if available)
-                unc_noise_corr = np.nan
-                if 'injected_noise' in model_data.columns:
-                    noise_mag = np.abs(model_data['injected_noise'].values)
-                    noise_mask = mask & np.isfinite(noise_mag)
-                    if noise_mask.sum() > 100:
-                        unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
-
-                # Coverage at 1σ and 2σ intervals
-                # IMPORTANT: Use y_true_noisy (normalized space) with y_pred_mean (normalized space)
-                # NOT y_true_original (original scale) — that causes a scale mismatch
-                # giving near-zero coverage for all models.
-                if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
-                    y_true = model_data['y_true_noisy'].values[mask]
-                    y_pred = model_data['y_pred_mean'].values[mask]
-                elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
-                    # Fallback — may have scale mismatch if data is normalized
-                    y_true = model_data['y_true_original'].values[mask]
-                    y_pred = model_data['y_pred_mean'].values[mask]
-                elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
-                    y_true = model_data['y_true'].values[mask]
-                    y_pred = model_data['y_pred'].values[mask]
-                else:
-                    y_true = y_pred = None
-
-                if y_true is not None:
-                    is_conformal = 'conformal' in model
-                    if is_conformal:
-                        # For conformal models, uncertainty is pseudo-std derived from
-                        # interval_width / (2*1.645). Recover the actual half-width
-                        # to compute coverage properly against the interval bounds.
-                        half_width = unc_values[mask] * 1.645  # undo the /1.645
-                        cov_nominal = calculate_coverage(y_true, y_pred, half_width, k=1)
-                        # Also compute at 2x the interval for comparison
-                        cov_2x = calculate_coverage(y_true, y_pred, half_width, k=2)
-                        cov_1sigma = cov_nominal
-                        cov_2sigma = cov_2x
+                    # Calculate error
+                    # Use y_true_noisy (normalized space) to match y_pred_mean (normalized space)
+                    if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_noisy'].values)
+                    elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                        errors = np.abs(model_data['y_pred_mean'].values - model_data['y_true_original'].values)
+                    elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
+                        errors = np.abs(model_data['y_pred'].values - model_data['y_true'].values)
                     else:
-                        cov_1sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=1)
-                        cov_2sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=2)
-                else:
-                    cov_1sigma = cov_2sigma = np.nan
+                        continue
 
-                # ECE: binned calibration error
-                pred_pos_mask = mask & (unc_values > 0)
-                pred_m = unc_values[pred_pos_mask]
-                actual_m = errors[pred_pos_mask]
-                ece = np.nan
-                if len(pred_m) >= 100:
-                    ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-                    ece_bins = np.unique(ece_bins)
-                    ece = 0
-                    for i in range(len(ece_bins) - 1):
-                        bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
-                        if bin_mask.sum() > 0:
-                            bin_pred = pred_m[bin_mask].mean()
-                            bin_actual = actual_m[bin_mask].mean()
-                            bin_weight = bin_mask.sum() / len(pred_m)
-                            ece += bin_weight * np.abs(bin_pred - bin_actual)
+                    mask = np.isfinite(unc_values) & np.isfinite(errors)
+                    if mask.sum() < 100:
+                        continue
 
-                # Aleatoric / epistemic decomposition
-                mean_alea = mean_epis = np.nan
-                if 'aleatoric_uncertainty' in model_data.columns:
-                    alea = model_data['aleatoric_uncertainty'].values
-                    alea_valid = alea[np.isfinite(alea) & (alea > 0)]
-                    if len(alea_valid) > 10:
-                        mean_alea = alea_valid.mean()
-                if 'epistemic_uncertainty' in model_data.columns:
-                    epis = model_data['epistemic_uncertainty'].values
-                    epis_valid = epis[np.isfinite(epis) & (epis > 0)]
-                    if len(epis_valid) > 10:
-                        mean_epis = epis_valid.mean()
+                    # Skip models with negligible uncertainty (e.g. plain DNN/MLP
+                    # that don't produce meaningful uncertainty estimates)
+                    mean_unc = unc_values[mask].mean()
+                    if mean_unc < 1e-3:
+                        continue
 
-                unc_metrics.append({
-                    'Model': model,
-                    'Unc-Error ρ': unc_err_corr,
-                    'Unc-Noise ρ': unc_noise_corr,
-                    'ECE': ece,
-                    'Coverage 1σ': cov_1sigma,
-                    'Coverage 2σ': cov_2sigma,
-                    'Mean Uncertainty': unc_values[mask].mean(),
-                    'Mean Aleatoric': mean_alea,
-                    'Mean Epistemic': mean_epis,
-                })
+                    # Uncertainty-error correlation
+                    unc_err_corr, _ = stats.spearmanr(unc_values[mask], errors[mask])
 
-            if unc_metrics:
-                unc_metrics_df = pd.DataFrame(unc_metrics).sort_values('Unc-Error ρ', ascending=False)
-                # Add clean labels
-                unc_metrics_df['Model'] = unc_metrics_df['Model'].map(
-                    lambda m: get_model_label(m))
-                unc_metrics_df.to_csv(output_dir / 'table4_uncertainty_metrics.csv', index=False)
-                print("✓ Saved table4_uncertainty_metrics.csv")
+                    # Uncertainty-noise correlation (if available)
+                    unc_noise_corr = np.nan
+                    if 'injected_noise' in model_data.columns:
+                        noise_mag = np.abs(model_data['injected_noise'].values)
+                        noise_mask = mask & np.isfinite(noise_mag)
+                        if noise_mask.sum() > 100:
+                            unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
+
+                    # Coverage at 1σ and 2σ intervals
+                    # IMPORTANT: Use y_true_noisy (normalized space) with y_pred_mean (normalized space)
+                    # NOT y_true_original (original scale) — that causes a scale mismatch
+                    # giving near-zero coverage for all models.
+                    if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                        y_true = model_data['y_true_noisy'].values[mask]
+                        y_pred = model_data['y_pred_mean'].values[mask]
+                    elif 'y_true_original' in model_data.columns and 'y_pred_mean' in model_data.columns:
+                        # Fallback — may have scale mismatch if data is normalized
+                        y_true = model_data['y_true_original'].values[mask]
+                        y_pred = model_data['y_pred_mean'].values[mask]
+                    elif 'y_true' in model_data.columns and 'y_pred' in model_data.columns:
+                        y_true = model_data['y_true'].values[mask]
+                        y_pred = model_data['y_pred'].values[mask]
+                    else:
+                        y_true = y_pred = None
+
+                    if y_true is not None:
+                        is_conformal = 'conformal' in model
+                        if is_conformal:
+                            # For conformal models, uncertainty is pseudo-std derived from
+                            # interval_width / (2*1.645). Recover the actual half-width
+                            # to compute coverage properly against the interval bounds.
+                            half_width = unc_values[mask] * 1.645  # undo the /1.645
+                            cov_nominal = calculate_coverage(y_true, y_pred, half_width, k=1)
+                            # Also compute at 2x the interval for comparison
+                            cov_2x = calculate_coverage(y_true, y_pred, half_width, k=2)
+                            cov_1sigma = cov_nominal
+                            cov_2sigma = cov_2x
+                        else:
+                            cov_1sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=1)
+                            cov_2sigma = calculate_coverage(y_true, y_pred, unc_values[mask], k=2)
+                    else:
+                        cov_1sigma = cov_2sigma = np.nan
+
+                    # ECE: binned calibration error
+                    pred_pos_mask = mask & (unc_values > 0)
+                    pred_m = unc_values[pred_pos_mask]
+                    actual_m = errors[pred_pos_mask]
+                    ece = np.nan
+                    if len(pred_m) >= 100:
+                        ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
+                        ece_bins = np.unique(ece_bins)
+                        ece = 0
+                        for i in range(len(ece_bins) - 1):
+                            bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
+                            if bin_mask.sum() > 0:
+                                bin_pred = pred_m[bin_mask].mean()
+                                bin_actual = actual_m[bin_mask].mean()
+                                bin_weight = bin_mask.sum() / len(pred_m)
+                                ece += bin_weight * np.abs(bin_pred - bin_actual)
+
+                    # Aleatoric / epistemic decomposition
+                    mean_alea = mean_epis = np.nan
+                    if 'aleatoric_uncertainty' in model_data.columns:
+                        alea = model_data['aleatoric_uncertainty'].values
+                        alea_valid = alea[np.isfinite(alea) & (alea > 0)]
+                        if len(alea_valid) > 10:
+                            mean_alea = alea_valid.mean()
+                    if 'epistemic_uncertainty' in model_data.columns:
+                        epis = model_data['epistemic_uncertainty'].values
+                        epis_valid = epis[np.isfinite(epis) & (epis > 0)]
+                        if len(epis_valid) > 10:
+                            mean_epis = epis_valid.mean()
+
+                    unc_metrics.append({
+                        'Model': model,
+                        'Unc-Error ρ': unc_err_corr,
+                        'Unc-Noise ρ': unc_noise_corr,
+                        'ECE': ece,
+                        'Coverage 1σ': cov_1sigma,
+                        'Coverage 2σ': cov_2sigma,
+                        'Mean Uncertainty': unc_values[mask].mean(),
+                        'Mean Aleatoric': mean_alea,
+                        'Mean Epistemic': mean_epis,
+                    })
+
+                if unc_metrics:
+                    unc_metrics_df = pd.DataFrame(unc_metrics).sort_values('Unc-Error ρ', ascending=False)
+                    # Add clean labels
+                    unc_metrics_df['Model'] = unc_metrics_df['Model'].map(
+                        lambda m: get_model_label(m))
+                    suffix = f'_{rep_name}' if rep_name != 'all' else ''
+                    unc_metrics_df.to_csv(output_dir / f'table4_uncertainty_metrics{suffix}.csv', index=False)
+                    print(f"✓ Saved table4_uncertainty_metrics{suffix}.csv")
 
     # Table 4b: Uncertainty metrics across ALL strategies and reps
     # Answers: do uncertainty patterns hold across noise types and representations?
@@ -3430,13 +3531,12 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         if 'legacy' in pivot.columns:
             ratio_df = pivot.div(pivot['legacy'], axis=0)
             # Add model family classification
-            tree_models = ['rf', 'xgboost', 'qrf', 'ngboost', 'lgb',
-                           'conformal_rf_split', 'conformal_qrf_split']
-            nn_models = ['dnn', 'mlp', 'flexible_dnn',
-                         'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
-                         'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational',
-                         'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational',
-                         'conformal_dnn_split']
+            tree_models = ['rf', 'xgboost', 'ngboost', 'lgb']
+            nn_models = ['dnn', 'mlp',
+                         'dnn_bnn_full', 'dnn_bnn_last',
+                         'dnn_bnn_full_variational',
+                         'mlp_bnn_full', 'mlp_bnn_last',
+                         'mlp_bnn_full_variational']
 
             ratio_df['family'] = 'other'
             ratio_df.loc[ratio_df.index.isin(tree_models), 'family'] = 'tree'
@@ -3475,7 +3575,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         return
 
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
-    # Filter to ANOVA-included reps only
+    # Filter to ANOVA-included reps only (CP + old variational already removed at load time)
     nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -3518,27 +3618,20 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
     ax_b = axes[1]
 
-    # BNN marker mapping: different shape, same color as base
-    BNN_BASE_MAP = {
-        'dnn_bnn_full': 'dnn', 'dnn_bnn_last': 'dnn',
-        'mlp_bnn_full': 'mlp', 'mlp_bnn_last': 'mlp',
-    }
-    BNN_MARKERS = {
-        'dnn_bnn_full': 's', 'dnn_bnn_last': '^',
-        'mlp_bnn_full': 's', 'mlp_bnn_last': '^',
-    }
-
     ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['nds'].mean()
     pdv_nds = nds_legacy[nds_legacy['rep'] == 'pdv'].groupby('model')['nds'].mean()
 
-    shared_models = sorted(set(ecfp4_nds.index) & set(pdv_nds.index))
+    shared_models_set = set(ecfp4_nds.index) & set(pdv_nds.index)
+    # Use MODEL_ORDER for consistent legend ordering
+    shared_models = [m for m in MODEL_ORDER if m in shared_models_set]
+    # Append any models not in MODEL_ORDER (shouldn't happen, but safe)
+    shared_models += sorted(shared_models_set - set(shared_models))
 
     if len(shared_models) >= 3:
         for m in shared_models:
             ev, pv = ecfp4_nds[m], pdv_nds[m]
-            base_model = BNN_BASE_MAP.get(m, m)
-            color = MODEL_COLORS.get(base_model, MODEL_COLORS.get(m, '#333333'))
-            marker = BNN_MARKERS.get(m, 'o')
+            color = MODEL_COLORS.get(m, '#333333')
+            marker = MODEL_MARKERS.get(m, 'o')
             ax_b.scatter(ev, pv, color=color, marker=marker, s=60, zorder=3,
                          label=get_model_label(m), edgecolors='white', linewidths=0.3)
 
@@ -3669,9 +3762,12 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         axes[0].legend(handles=rep_handles, loc='lower left', fontsize=5,
                        title='Rep', title_fontsize=6)
 
-        # Model color legend on last panel (only models present in data)
-        models_present = sorted(last_mean_nds['model'].unique())
-        model_handles = [Line2D([0], [0], marker='o', color=MODEL_COLORS.get(m, '#333333'),
+        # Model color+marker legend on last panel — use MODEL_ORDER for grouping
+        models_in_data = set(last_mean_nds['model'].unique())
+        models_present = [m for m in MODEL_ORDER if m in models_in_data]
+        models_present += sorted(models_in_data - set(models_present))
+        model_handles = [Line2D([0], [0], marker=MODEL_MARKERS.get(m, 'o'),
+                                color=MODEL_COLORS.get(m, '#333333'),
                                 linestyle='None', markersize=5,
                                 label=get_model_label(m))
                          for m in models_present]
