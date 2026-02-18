@@ -192,18 +192,15 @@ MODEL_COLORS = {
     'dnn': '#E69F00',
     'dnn_bnn_full': '#E69F00',
     'dnn_bnn_last': '#E69F00',
-    'dnn_bnn_full_variational': '#E69F00',
+    'dnn_vbll': '#E69F00',
     'flexible_dnn': '#E69F00',
     'flexible_dnn_256_128_64': '#E69F00',
     'flexible_dnn_512_256': '#E69F00',
-    'bnn_full': '#E69F00',         # Alias
-    'bnn_last': '#E69F00',         # Alias
-    'bnn_full_variational': '#E69F00',  # Alias
     # MLP family — all pink
     'mlp': '#CC79A7',
     'mlp_bnn_full': '#CC79A7',
     'mlp_bnn_last': '#CC79A7',
-    'mlp_bnn_full_variational': '#CC79A7',
+    'mlp_vbll': '#CC79A7',
     # SVM / GP — unique
     'svm': '#999999',              # Gray
     'gauche': '#882255',           # Wine
@@ -217,10 +214,9 @@ MODEL_MARKERS = {
     'svm': 'o', 'gauche': 'o',
     'dnn': 'o', 'mlp': 'o',
     # DNN family variants
-    'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_bnn_full_variational': 'D',
-    'bnn_full': 's', 'bnn_last': '^', 'bnn_full_variational': 'D',
+    'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
     # MLP family variants
-    'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_bnn_full_variational': 'D',
+    'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_vbll': 'D',
     # DNN architecture variants
     'flexible_dnn': 'o', 'flexible_dnn_256_128_64': 's', 'flexible_dnn_512_256': '^',
 }
@@ -230,8 +226,8 @@ MODEL_ORDER = [
     'rf', 'qrf',
     'xgboost', 'lgb', 'ngboost',
     'svm', 'gauche',
-    'dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational',
-    'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational',
+    'dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll',
+    'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll',
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
 ]
 
@@ -254,14 +250,11 @@ MODEL_LABELS = {
     # DNN-BNN variants
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
-    'dnn_bnn_full_variational': 'DNN-VBLL',
-    'bnn_full': 'DNN-BNN (Full)',
-    'bnn_last': 'DNN-BNN (Last)',
-    'bnn_full_variational': 'DNN-VBLL',
+    'dnn_vbll': 'DNN-VBLL',
     # MLP-BNN variants
     'mlp_bnn_full': 'MLP-BNN (Full)',
     'mlp_bnn_last': 'MLP-BNN (Last)',
-    'mlp_bnn_full_variational': 'MLP-VBLL',
+    'mlp_vbll': 'MLP-VBLL',
 }
 
 REP_LABELS = {
@@ -416,19 +409,21 @@ def load_anova_data(results_dir):
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
 
-        # Normalize model names: bnn_full → dnn_bnn_full etc.
-        # process_and_train.py saves BNN-DNN variants as 'bnn_full' etc.
-        # but all downstream code expects 'dnn_bnn_full' prefix.
+        # Normalize model names from CSV conventions to clean internal names.
+        # process_and_train.py saves DNN-BNN variants as 'bnn_full' etc.
+        # VBLL variants saved as '*_full_variational' → renamed to '*_vbll'.
         BNN_NAME_MAP = {
             'bnn_full': 'dnn_bnn_full',
             'bnn_last': 'dnn_bnn_last',
-            'bnn_full_variational': 'dnn_bnn_full_variational',
+            'bnn_full_variational': 'dnn_vbll',
+            'dnn_bnn_full_variational': 'dnn_vbll',
+            'mlp_bnn_full_variational': 'mlp_vbll',
         }
         if 'model' in combined.columns:
             n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
             combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
             if n_renamed > 0:
-                print(f"  Normalized {n_renamed} BNN model names (bnn_* → dnn_bnn_*)")
+                print(f"  Normalized {n_renamed} model names (bnn_* → dnn_bnn_*, *_full_variational → *_vbll)")
 
         # Normalize column: representation → rep
         if 'representation' in combined.columns and 'rep' not in combined.columns:
@@ -2729,7 +2724,7 @@ def create_figure4(df, nds_df, output_dir):
     - Is the improvement larger under certain noise types?
     - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational']
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']
 
     # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -2790,7 +2785,7 @@ def create_figure5(df, nds_df, output_dir):
     - Does QRF beat RF?
     - Is the pattern consistent across strategies?
     """
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']
     rf_models = ['rf', 'qrf']
 
     # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
@@ -3085,8 +3080,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_full_variational']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_full_variational']},
+        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']},
+        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
     }
 
@@ -3533,10 +3528,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             # Add model family classification
             tree_models = ['rf', 'xgboost', 'ngboost', 'lgb']
             nn_models = ['dnn', 'mlp',
-                         'dnn_bnn_full', 'dnn_bnn_last',
-                         'dnn_bnn_full_variational',
-                         'mlp_bnn_full', 'mlp_bnn_last',
-                         'mlp_bnn_full_variational']
+                         'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll',
+                         'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']
 
             ratio_df['family'] = 'other'
             ratio_df.loc[ratio_df.index.isin(tree_models), 'family'] = 'tree'
