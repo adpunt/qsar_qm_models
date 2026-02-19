@@ -415,6 +415,7 @@ def load_anova_data(results_dir):
         BNN_NAME_MAP = {
             'bnn_full': 'dnn_bnn_full',
             'bnn_last': 'dnn_bnn_last',
+            'bnn_variational': 'dnn_bnn_variational',  # Old pre-VBLL variant → gets caught by GLOBAL_MODELS_EXCLUDE
             'bnn_full_variational': 'dnn_vbll',
             'dnn_bnn_full_variational': 'dnn_vbll',
             'mlp_bnn_full_variational': 'mlp_vbll',
@@ -726,6 +727,21 @@ def load_uncertainty_data(results_dir):
             n_dupes = pre_dedup - len(combined)
             if n_dupes > 0:
                 print(f"  Deduplicated uncertainty: removed {n_dupes} duplicate rows")
+
+        # Normalize BNN model names (same map as ANOVA loader)
+        BNN_NAME_MAP = {
+            'bnn_full': 'dnn_bnn_full',
+            'bnn_last': 'dnn_bnn_last',
+            'bnn_variational': 'dnn_bnn_variational',
+            'bnn_full_variational': 'dnn_vbll',
+            'dnn_bnn_full_variational': 'dnn_vbll',
+            'mlp_bnn_full_variational': 'mlp_vbll',
+        }
+        if 'model' in combined.columns:
+            n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
+            combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
+            if n_renamed > 0:
+                print(f"  Normalized {n_renamed} uncertainty model names")
 
         # Global model exclusion (CP, old variational)
         if 'model' in combined.columns:
