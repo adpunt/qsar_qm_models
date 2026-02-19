@@ -639,7 +639,7 @@ Generalization across datasets is a different matter. We evaluated seven represe
 \label{fig:validation_overview}
 \end{figure*}
 
-ANOVA on the external datasets confirms the role inversion: model architecture dominates robustness variance on all three datasets ($\eta^2 = 16$--$48\%$ for model versus $1$--$7\%$ for representation; Supplementary Figure~\ref{fig:supp_validation_anova}, Table~\ref{tab:supp_validation_anova}). The effect is strongest on Caco-2 ($\eta^2_{\text{model}} = 48.2\%$), the most challenging dataset, and weaker on hERG-Ki and LogD where large residual variance reflects strategy-level variability in these smaller datasets. Despite this structural consistency, validation rankings diverge substantially from QM9 (Supplementary Figure~\ref{fig:supp_validation_model_comparison}). SVM achieved the best mean rank across external datasets, followed by GP and RF, while XGBoost---second-best on QM9---performed worst. The correlation between QM9 and external dataset robustness is negative and non-significant ($r = -0.29$, $p = 0.53$; Figure~\ref{fig:validation_qm9_transferability}), indicating that overall robustness rankings do not transfer.
+ANOVA on the external datasets confirms the role inversion: model architecture dominates robustness variance on all three datasets ($\eta^2 = 16$--$48\%$ for model versus $1$--$7\%$ for representation; Supplementary Figure~\ref{fig:supp_validation_anova}, Table~\ref{tab:supp_validation_anova}). The effect is strongest on Caco-2 ($\eta^2_{\text{model}} = 48.2\%$), the most challenging dataset, and weaker on hERG-Ki and LogD where large residual variance reflects strategy-level variability in these smaller datasets. Despite this structural consistency, validation rankings diverge substantially from QM9 (Figure~\ref{fig:validation_model_comparison}). SVM achieved the best mean rank across external datasets, followed by GP and RF, while XGBoost---second-best on QM9---performed worst. The correlation between QM9 and external dataset robustness is negative and non-significant ($r = -0.29$, $p = 0.53$; Figure~\ref{fig:validation_qm9_transferability}), indicating that overall robustness rankings do not transfer.
 
 % TODO [DATA PENDING]: Regenerate after NGBoost validation jobs complete.
 %   More points will change r/p values. Cross-check r/p in text against figure.
@@ -652,11 +652,23 @@ ANOVA on the external datasets confirms the role inversion: model architecture d
 
 This non-transferability is interpretable through the mechanism framework developed in Section~\ref{sec:mechanisms}. SVM, whose robustness is inherent and representation-independent, ranks first on external datasets---architectural noise resistance transfers across data domains. XGBoost, whose QM9 robustness benefits from the large dataset size (130k molecules) and well-separated scaffold structure, loses this advantage on smaller, experimentally-derived datasets with 500--2,000 samples. The mechanisms that produce robustness, not just the robustness rankings themselves, determine whether findings transfer.
 
-% fig_validation_model_comparison moved to Supplementary Figure~\ref{fig:supp_validation_model_comparison}
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_model_comparison.png}
+\caption{Model robustness comparison across QM9 and three external validation datasets. Mean NDS by model for each dataset; models ordered by overall mean NDS (most robust first). QM9 rankings diverge substantially from external datasets, particularly for gradient boosting models.}
+\label{fig:validation_model_comparison}
+\end{figure*}
 
 The gradient boosting family illustrates this starkly. On QM9, XGBoost and LightGBM rank among the most robust models, while NGBoost---which sacrifices clean-data accuracy for probabilistic output---ranks lower. On external datasets, this ordering inverts: XGBoost collapses on Caco-2 efflux (NDS $< -1.3$), while LightGBM degrades half as steeply ($\text{NDS} \approx -0.8$). XGBoost's greedy exact splits overfit to QM9's large, well-structured training set; on smaller experimental datasets, this learned structure becomes a liability. LightGBM's histogram-based binning provides modest regularization but does not prevent the same failure mode. By contrast, NGBoost's probabilistic framework---which learns a full predictive distribution rather than a point estimate---provides built-in protection: when label quality degrades, the model widens its predictive intervals rather than producing overconfident wrong predictions.
 
-Certain findings were nonetheless robust across datasets. QRF was consistently less robust than RF on every external dataset (Supplementary Table~\ref{tab:supp_validation_probabilistic}), confirming the QM9 finding. Caco-2 efflux was the most challenging dataset, with all models showing steeper degradation than on LogD or hERG-Ki (Supplementary Figures~\ref{fig:supp_validation_strategy} and~\ref{fig:supp_validation_rep}).
+Certain findings were nonetheless robust across datasets. QRF was consistently less robust than RF on every external dataset (Supplementary Table~\ref{tab:supp_validation_probabilistic}), confirming the QM9 finding. Caco-2 efflux was the most challenging dataset, with all models showing steeper degradation than on LogD or hERG-Ki (Supplementary Figure~\ref{fig:supp_validation_strategy}). Representation choice had minimal effect on robustness across all three external datasets (Figure~\ref{fig:validation_rep_comparison}), reinforcing the ANOVA finding that model architecture, not representation, drives noise robustness.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_rep_comparison.png}
+\caption{Representation effect on robustness across validation datasets. Mean NDS by representation and dataset, confirming that representation has minimal influence on noise robustness compared to model architecture.}
+\label{fig:validation_rep_comparison}
+\end{figure}
 
 \section{Conclusion}\label{sec13}
 This study demonstrates that while model architecture and molecular representation contribute roughly equally to QSAR model performance, model architecture becomes the dominant factor under label noise---explaining up to 49\% of robustness variance compared to at most 15\% for representation. To our knowledge, this is the first study to combine systematic noise injection across multiple representations and model architectures, uncertainty strategy comparison, and external validation within a single framework. The variance decomposition approach, unusual in cheminformatics where pairwise significance tests predominate, enables a new kind of question: not just ``which model is better,'' but ``what explains the variation in robustness.''
@@ -829,12 +841,7 @@ To validate the ANOVA design, we computed pairwise Spearman rank correlations be
 \label{fig:supp_validation_strategy}
 \end{figure}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{fig_validation_rep_comparison.png}
-\caption{Supplementary Figure S6. Representation effect on robustness across validation datasets. Mean NDS by representation and dataset.}
-\label{fig:supp_validation_rep}
-\end{figure}
+% fig_validation_rep_comparison promoted to main text (Figure~\ref{fig:validation_rep_comparison})
 
 % TODO [DATA PENDING]: Per-dataset QM9 correlation figures will update as validation data completes.
 \begin{figure}[htbp]
@@ -853,12 +860,7 @@ To validate the ANOVA design, we computed pairwise Spearman rank correlations be
 \label{fig:supp_full_overview}
 \end{figure}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{fig_validation_model_comparison.png}
-\caption{Supplementary Figure. Model robustness across validation datasets. Mean NDS by model for each external dataset. Bar color indicates dataset; models are ordered by mean NDS (most robust first).}
-\label{fig:supp_validation_model_comparison}
-\end{figure}
+% fig_validation_model_comparison promoted to main text (Figure~\ref{fig:validation_model_comparison})
 
 % Supplementary tables referenced from main text
 % TODO: Format these CSVs into proper LaTeX tables or provide as supplementary data files.

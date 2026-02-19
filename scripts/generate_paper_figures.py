@@ -114,6 +114,8 @@ GLOBAL_MODELS_EXCLUDE = {
     'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',
     # Pre-VBLL variational — was identical to last-layer (bug), replaced by VBLL
     'dnn_bnn_variational', 'mlp_bnn_variational',
+    # MLP — current data is outlier; remove once re-run data replaces it
+    'mlp',
 }
 
 ANOVA_MODELS_EXCLUDE = {
@@ -211,20 +213,20 @@ MODEL_COLORS = {
 # When variants are shown alongside other models, use MODEL_COLORS (shared family color).
 # When variants are shown only against each other, use these to differentiate.
 DNN_FAMILY_COLORS = {
-    'dnn': '#E69F00',              # Orange (base)
-    'dnn_bnn_full': '#D4A017',     # Darker gold
-    'dnn_bnn_last': '#C68E17',     # Goldenrod
-    'dnn_vbll': '#B8860B',         # Dark goldenrod
+    'dnn': '#333333',              # Dark grey (base/deterministic)
+    'dnn_bnn_full': '#0072B2',     # Blue (full Bayesian)
+    'dnn_bnn_last': '#D55E00',     # Vermillion (last-layer)
+    'dnn_vbll': '#009E73',         # Teal (VBLL)
 }
 MLP_FAMILY_COLORS = {
-    'mlp': '#CC79A7',              # Pink (base)
-    'mlp_bnn_full': '#AA5585',     # Darker pink
-    'mlp_bnn_last': '#993366',     # Deep rose
-    'mlp_vbll': '#872657',         # Dark magenta
+    'mlp': '#333333',              # Dark grey (base/deterministic)
+    'mlp_bnn_full': '#0072B2',     # Blue (full Bayesian)
+    'mlp_bnn_last': '#D55E00',     # Vermillion (last-layer)
+    'mlp_vbll': '#009E73',         # Teal (VBLL)
 }
 RF_FAMILY_COLORS = {
     'rf': '#0072B2',               # Blue (base)
-    'qrf': '#005580',              # Darker blue
+    'qrf': '#D55E00',              # Vermillion (quantile variant)
 }
 
 # Markers: variants of the same family get different shapes.
@@ -1129,9 +1131,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         plt.close()
         print("✓ Saved fig_validation_overview.png")
 
-    # --- Figure: Validation ANOVA (η² decomposition) ---
+    # --- Figure: Validation ANOVA (η² decomposition with Strategy factor) ---
     # Use val_nds_df directly — it already has NDS per (dataset, model, rep, strategy).
-    # Each strategy serves as a replicate observation per model-rep cell.
+    has_strategy = 'strategy' in val_nds_df.columns and val_nds_df['strategy'].nunique() > 1
     if 'dataset' in val_nds_df.columns and 'model' in val_nds_df.columns and 'rep' in val_nds_df.columns:
         anova_results = {}
         for dataset in sorted(datasets):
@@ -1154,6 +1156,13 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             rep_counts = ds_nds.groupby('rep').size()
             ss_rep = (rep_counts * (rep_means - grand_mean) ** 2).sum()
 
+            # Strategy as a factor (if available)
+            ss_strategy = 0
+            if has_strategy:
+                strat_means = ds_nds.groupby('strategy')['nds'].mean()
+                strat_counts = ds_nds.groupby('strategy').size()
+                ss_strategy = (strat_counts * (strat_means - grand_mean) ** 2).sum()
+
             interaction_means = ds_nds.groupby(['model', 'rep'])['nds'].mean()
             interaction_counts = ds_nds.groupby(['model', 'rep']).size()
             ss_interaction = 0
@@ -1163,25 +1172,37 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                     expected = model_means[model] + rep_means[rep] - grand_mean
                     ss_interaction += count * (cell_mean - expected) ** 2
 
-            anova_results[dataset] = {
+            result = {
                 'eta2_model': (ss_model / total_ss) * 100,
                 'eta2_rep': (ss_rep / total_ss) * 100,
                 'eta2_interaction': (ss_interaction / total_ss) * 100,
-                'eta2_residual': ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100,
                 'n_models': ds_nds['model'].nunique(),
                 'n_reps': ds_nds['rep'].nunique(),
                 'n': len(ds_nds),
             }
+            if has_strategy:
+                result['eta2_strategy'] = (ss_strategy / total_ss) * 100
+                result['eta2_residual'] = ((total_ss - ss_model - ss_rep - ss_strategy - ss_interaction) / total_ss) * 100
+                result['n_strategies'] = ds_nds['strategy'].nunique()
+            else:
+                result['eta2_residual'] = ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100
+            anova_results[dataset] = result
 
         if anova_results:
-            fig, axes = plt.subplots(1, len(anova_results), figsize=(4 * len(anova_results), 5), squeeze=False)
+            fig, axes = plt.subplots(1, len(anova_results), figsize=(4.5 * len(anova_results), 5), squeeze=False)
             axes = axes[0]
 
             for i, (dataset, result) in enumerate(anova_results.items()):
                 ax = axes[i]
-                factors = ['Model', 'Rep', 'Interaction']
-                values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                colors = ['#6BAED6', '#FC8D59', '#B39DDB']  # Blue, Red, Purple
+                if has_strategy:
+                    factors = ['Model', 'Rep', 'Strategy', 'M×R']
+                    values = [result['eta2_model'], result['eta2_rep'],
+                              result['eta2_strategy'], result['eta2_interaction']]
+                    colors = ['#6BAED6', '#FC8D59', '#66C2A5', '#B39DDB']
+                else:
+                    factors = ['Model', 'Rep', 'M×R']
+                    values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
+                    colors = ['#6BAED6', '#FC8D59', '#B39DDB']
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -1198,16 +1219,21 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             # Save ANOVA table
             rows = []
             for dataset, result in anova_results.items():
-                rows.append({
+                row = {
                     'Dataset': dataset,
                     'Model_η²': round(result['eta2_model'], 1),
                     'Rep_η²': round(result['eta2_rep'], 1),
-                    'Interaction_η²': round(result['eta2_interaction'], 1),
-                    'Residual_η²': round(result['eta2_residual'], 1),
-                    'n_models': result['n_models'],
-                    'n_reps': result['n_reps'],
-                    'n': result['n'],
-                })
+                }
+                if 'eta2_strategy' in result:
+                    row['Strategy_η²'] = round(result['eta2_strategy'], 1)
+                row['Interaction_η²'] = round(result['eta2_interaction'], 1)
+                row['Residual_η²'] = round(result['eta2_residual'], 1)
+                row['n_models'] = result['n_models']
+                row['n_reps'] = result['n_reps']
+                if 'n_strategies' in result:
+                    row['n_strategies'] = result['n_strategies']
+                row['n'] = result['n']
+                rows.append(row)
             pd.DataFrame(rows).to_csv(output_dir / 'table_validation_anova.csv', index=False)
             print("✓ Saved table_validation_anova.csv")
 
@@ -1263,8 +1289,16 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             pd.DataFrame(rows).to_csv(output_dir / 'table_validation_probabilistic.csv', index=False)
             print("✓ Saved table_validation_probabilistic.csv")
 
-    # --- Figure: R² degradation curves per dataset ---
+    # --- Figure: R² degradation curves per dataset (unified axes) ---
     if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
+        # Pre-compute shared y-axis range across all datasets (legacy strategy only)
+        leg_all = validation_df[validation_df['strategy'] == 'legacy'] if 'strategy' in validation_df.columns else validation_df
+        all_r2 = leg_all['r2'].dropna().values
+        if len(all_r2) > 0:
+            shared_ylim = (max(min(all_r2) - 0.05, -0.5), max(all_r2) + 0.05)
+        else:
+            shared_ylim = None
+
         for dataset in sorted(datasets):
             ds_df = validation_df[validation_df['dataset'] == dataset]
             if len(ds_df) == 0:
@@ -1298,6 +1332,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.axhline(0, color='grey', linewidth=0.5, linestyle='--')
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
+                if shared_ylim:
+                    ax.set_ylim(shared_ylim)
                 if j == 0:
                     ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
 
@@ -1462,13 +1498,21 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             merged_sorted.to_csv(output_dir / 'table_validation_qm9_correlation.csv', index=False)
             print("✓ Saved table_validation_qm9_correlation.csv")
 
-    # --- Figure: Per-model robustness profile across datasets ---
+    # --- Figure: Per-model robustness profile across datasets (incl. QM9) ---
     if val_nds_df is not None and 'dataset' in val_nds_df.columns:
-        # Grouped bar chart: NDS by model for each dataset
+        # Grouped bar chart: NDS by model for each dataset + QM9
         models_in_val = sorted(val_nds_df['model'].unique())
         if len(models_in_val) >= 2 and len(datasets) >= 2:
             model_ds = val_nds_df.pivot_table(values='nds', index='model', columns='dataset', aggfunc='mean')
             model_ds = model_ds.dropna(how='all')
+
+            # Add QM9 mean NDS per model (averaged across reps and strategies)
+            if qm9_nds_df is not None and len(qm9_nds_df) > 0:
+                qm9_model_means = qm9_nds_df.groupby('model')['nds'].mean()
+                # Only include models present in validation data
+                qm9_col = qm9_model_means.reindex(model_ds.index)
+                model_ds.insert(0, 'QM9', qm9_col)
+
             model_ds.index = [get_model_label(m) for m in model_ds.index]
             # Sort by mean NDS
             model_ds['_mean'] = model_ds.mean(axis=1)
@@ -1482,7 +1526,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             n_datasets = len(datasets_list)
             x = np.arange(n_models)
             width = 0.8 / n_datasets
-            dataset_colors = ['#0072B2', '#D55E00', '#009E73'][:n_datasets]
+            dataset_colors = ['#999999', '#0072B2', '#D55E00', '#009E73'][:n_datasets]
             for i, dataset in enumerate(datasets_list):
                 offset = (i - n_datasets / 2 + 0.5) * width
                 values = model_ds[dataset].values
@@ -1491,7 +1535,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             ax.set_xticks(x)
             ax.set_xticklabels(model_labels, rotation=45, ha='right')
             ax.set_ylabel('NDS (less negative = more robust)')
-            ax.set_title('Model Robustness Across Validation Datasets', fontweight='bold')
+            ax.set_title('Model Robustness Across Datasets', fontweight='bold')
             ax.axhline(0, color='black', linewidth=0.5)
             ax.legend(title='Dataset')
             ax.spines['top'].set_visible(False)
@@ -3826,16 +3870,14 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
     if last_mean_nds is not None:
         from matplotlib.lines import Line2D
 
-        # Rep legend on first panel
+        # Combined legend on first panel (top-right)
         rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
                               linestyle='None', markersize=6,
                               label=REP_LABELS.get(r, r))
                        for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
-        axes[0].legend(handles=rep_handles, loc='lower left', fontsize=7,
-                       title='Rep', title_fontsize=8)
 
-        # Model color+marker legend on last panel — use MODEL_ORDER for grouping
+        # Model color+marker legend — use MODEL_ORDER for grouping
         models_in_data = set(last_mean_nds['model'].unique())
         models_present = [m for m in MODEL_ORDER if m in models_in_data]
         models_present += sorted(models_in_data - set(models_present))
@@ -3844,8 +3886,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                                 linestyle='None', markersize=6,
                                 label=get_model_label(m))
                          for m in models_present]
-        axes[-1].legend(handles=model_handles, loc='lower right', fontsize=6,
-                        title='Model', title_fontsize=7, ncol=2)
+        axes[0].legend(handles=rep_handles + model_handles, loc='upper right', fontsize=6,
+                        title='Rep / Model', title_fontsize=7, ncol=2)
 
     fig.suptitle('Baseline Performance vs Noise Robustness (ANOVA Configurations)',
                  fontsize=12, fontweight='bold', y=1.02)
