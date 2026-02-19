@@ -114,8 +114,6 @@ GLOBAL_MODELS_EXCLUDE = {
     'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',
     # Pre-VBLL variational — was identical to last-layer (bug), replaced by VBLL
     'dnn_bnn_variational', 'mlp_bnn_variational',
-    # MLP — current data is outlier; remove once re-run data replaces it
-    'mlp',
 }
 
 ANOVA_MODELS_EXCLUDE = {
@@ -2673,11 +2671,8 @@ def create_figure2(df, output_dir):
 # =============================================================================
 
 def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
-    """Figure 3: Ranking consistency across strategies, sigmas, datasets. Uses PDV only."""
-    n_panels = 3 if val_nds_df is not None else 2
-    fig, axes = plt.subplots(1, n_panels, figsize=(5.5*n_panels, 6))
-    if n_panels == 2:
-        axes = [axes[0], axes[1], None]
+    """Figure 3: Ranking consistency across strategies and sigmas. Uses PDV only."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 6))
 
     # Filter to PDV only for consistent comparison (don't mix representations)
     nds_pdv = nds_df[nds_df['rep'] == 'pdv'] if 'rep' in nds_df.columns else nds_df
@@ -2727,44 +2722,9 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
                 borderaxespad=0, frameon=False)
 
-    # Panel C: Cross-dataset rankings (if validation NDS available)
-    # Filter to PDV for consistency
-    if val_nds_df is not None and axes[2] is not None:
-        ax_c = axes[2]
-
-        val_pdv = val_nds_df[val_nds_df['rep'] == 'pdv'] if 'rep' in val_nds_df.columns else val_nds_df
-        val_pdv_legacy = val_pdv[val_pdv['strategy'] == 'legacy'] if 'strategy' in val_pdv.columns else val_pdv
-
-        datasets = sorted(val_pdv_legacy['dataset'].unique()) if len(val_pdv_legacy) > 0 else []
-
-        for model in sorted(val_pdv_legacy['model'].unique()):
-            model_data = val_pdv_legacy[val_pdv_legacy['model'] == model]
-
-            nds_vals = []
-            for ds in datasets:
-                ds_data = model_data[model_data['dataset'] == ds]
-                if len(ds_data) > 0:
-                    nds_vals.append(ds_data['nds'].values[0])
-                else:
-                    nds_vals.append(np.nan)
-
-            if not all(np.isnan(v) for v in nds_vals):
-                color = MODEL_COLORS.get(model, '#333333')
-                ax_c.plot(range(len(datasets)), nds_vals, 'o-', label=get_model_label(model),
-                          color=color, markersize=6)
-
-        ax_c.set_xticks(range(len(datasets)))
-        ax_c.set_xticklabels(datasets, rotation=45, ha='right')
-        ax_c.set_ylabel('NDS')
-        ax_c.set_title('C. Cross-Dataset (PDV, Gaussian)', fontweight='bold')
-        ax_c.axhline(0, color='black', linewidth=0.5)
-        ax_c.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=3,
-                    borderaxespad=0, frameon=False)
-
     for ax in axes:
-        if ax is not None:
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig3_ranking_consistency.png', dpi=300, bbox_inches='tight')
@@ -3886,7 +3846,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                                 linestyle='None', markersize=6,
                                 label=get_model_label(m))
                          for m in models_present]
-        axes[0].legend(handles=rep_handles + model_handles, loc='upper right', fontsize=6,
+        axes[-1].legend(handles=rep_handles + model_handles, loc='upper right', fontsize=6,
                         title='Rep / Model', title_fontsize=7, ncol=2)
 
     fig.suptitle('Baseline Performance vs Noise Robustness (ANOVA Configurations)',
