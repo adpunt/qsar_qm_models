@@ -838,10 +838,21 @@ def _normalize_validation_names(df):
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
         'SMILES': 'smiles',
     }
+    # Map directory names → display names for datasets
+    val_dataset_map = {
+        'openadmet_logd': 'OpenADMET-LogD',
+        'openadmet_caco2': 'OpenADMET-Caco2_Efflux',
+        'herg': 'ChEMBL-hERG-Ki',
+        'logd': 'OpenADMET-LogD',     # duplicate of openadmet_logd
+        'caco2': 'OpenADMET-Caco2_Efflux',  # duplicate of openadmet_caco2
+        'herg_fluid': 'ChEMBL-hERG-Ki',     # duplicate of herg
+    }
     if 'model' in df.columns:
         df['model'] = df['model'].map(val_model_map).fillna(df['model'].str.lower())
     if 'rep' in df.columns:
         df['rep'] = df['rep'].map(val_rep_map).fillna(df['rep'].str.lower())
+    if 'dataset' in df.columns:
+        df['dataset'] = df['dataset'].map(val_dataset_map).fillna(df['dataset'])
     # Normalize NDS column name
     if 'NDS_r2' in df.columns and 'nds' not in df.columns:
         df = df.rename(columns={'NDS_r2': 'nds'})
@@ -851,24 +862,15 @@ def _normalize_validation_names(df):
 def load_validation_data(validation_dir):
     """Load validation data from KIRBy results directory.
 
-    Supports two layouts:
-    1. combined_summary.csv (pre-merged, must have 'dataset' column)
-    2. Per-dataset subdirectories, each with all_results.csv or summary.csv
-       The subdirectory name becomes the 'dataset' column.
+    Prefers per-dataset subdirectories (always up-to-date) over
+    combined_summary.csv (may be stale if new models were added).
     """
     if validation_dir is None:
         return None
 
     validation_dir = Path(validation_dir)
-    summary_file = validation_dir / 'combined_summary.csv'
 
-    if summary_file.exists():
-        df = pd.read_csv(summary_file)
-        df = _normalize_validation_names(df)
-        print(f"Loaded validation data: {len(df)} rows from combined_summary.csv")
-        return df
-
-    # Try loading per-dataset subdirectories
+    # Try loading per-dataset subdirectories (preferred — always current)
     all_data = []
     for subdir in sorted(validation_dir.iterdir()):
         if not subdir.is_dir():
@@ -879,6 +881,7 @@ def load_validation_data(validation_dir):
             df = pd.read_csv(results_file)
             df['dataset'] = subdir.name
             all_data.append(df)
+            print(f"  Loaded {len(df)} rows from {subdir.name}/all_results.csv")
             continue
         # Fall back to summary.csv
         summary = subdir / 'summary.csv'
@@ -886,13 +889,31 @@ def load_validation_data(validation_dir):
             df = pd.read_csv(summary)
             df['dataset'] = subdir.name
             all_data.append(df)
+            print(f"  Loaded {len(df)} rows from {subdir.name}/summary.csv")
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
         combined = _normalize_validation_names(combined)
+        # Deduplicate: if logd + openadmet_logd map to same display name, keep longer data
+        if 'dataset' in combined.columns:
+            before = len(combined)
+            dedup_cols = [c for c in ['dataset', 'model', 'rep', 'strategy', 'sigma'] if c in combined.columns]
+            combined = combined.drop_duplicates(subset=dedup_cols, keep='first')
+            if len(combined) < before:
+                print(f"  Deduplicated: {before} → {len(combined)} rows (overlapping directories)")
         datasets = combined['dataset'].unique()
         print(f"Loaded validation data: {len(combined)} rows from {len(datasets)} datasets ({', '.join(sorted(datasets))})")
         return combined
+
+    # Fall back to combined_summary.csv (may be stale)
+    summary_file = validation_dir / 'combined_summary.csv'
+    if summary_file.exists():
+        df = pd.read_csv(summary_file)
+        df = _normalize_validation_names(df)
+        datasets = df['dataset'].unique() if 'dataset' in df.columns else ['unknown']
+        print(f"⚠ Using combined_summary.csv ({len(df)} rows, datasets: {sorted(datasets)}) — "
+              f"this file may be stale. Delete it to force per-directory loading.")
+        return df
 
     print("⚠ No validation data found")
     return None
@@ -910,14 +931,18 @@ def calculate_validation_nds(validation_df):
     if validation_df is None or len(validation_df) == 0:
         return None
 
-    # If summary format (has NSI or NDS_r2 or nds column), convert directly
+    # Prefer per-sigma computation (produces clean 1 row per config)
+    # over pre-computed NDS columns (which may have per-sigma duplicates)
+    has_sigma = 'sigma' in validation_df.columns and 'r2' in validation_df.columns
+
+    # If summary-only format (has NDS column but NO per-sigma data), convert directly
     nds_col = None
     for col in ['nds', 'NSI', 'NDS_r2', 'nsi_r2']:
         if col in validation_df.columns:
             nds_col = col
             break
 
-    if nds_col is not None:
+    if nds_col is not None and not has_sigma:
         nds_df = validation_df.rename(columns={nds_col: 'nds'})
         if 'baseline_r2' not in nds_df.columns:
             nds_df['baseline_r2'] = np.nan
@@ -935,7 +960,7 @@ def calculate_validation_nds(validation_df):
                 nds_df = nds_df[~low_baseline].copy()
         return nds_df
 
-    # If per-sigma format (has sigma and r2 columns), compute NDS
+    # Per-sigma format (has sigma and r2 columns): compute NDS from scratch
     if 'sigma' in validation_df.columns and 'r2' in validation_df.columns:
         group_cols = ['model', 'rep', 'strategy']
         if 'dataset' in validation_df.columns:
