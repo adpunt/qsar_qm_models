@@ -839,14 +839,15 @@ def _normalize_validation_names(df):
         'SMILES': 'smiles',
     }
     # Map directory names → display names for datasets
+    # herg_fluid is classification (no r2), excluded from regression NDS analysis
     val_dataset_map = {
         'openadmet_logd': 'OpenADMET-LogD',
         'openadmet_caco2': 'OpenADMET-Caco2_Efflux',
         'herg': 'ChEMBL-hERG-Ki',
-        'logd': 'OpenADMET-LogD',     # duplicate of openadmet_logd
-        'caco2': 'OpenADMET-Caco2_Efflux',  # duplicate of openadmet_caco2
-        'herg_fluid': 'ChEMBL-hERG-Ki',     # duplicate of herg
+        'logd': 'OpenADMET-LogD',              # duplicate of openadmet_logd
+        'caco2': 'OpenADMET-Caco2_Efflux',     # duplicate of openadmet_caco2
     }
+    VALIDATION_EXCLUDE_DIRS = {'herg_fluid'}  # classification dataset, not regression
     if 'model' in df.columns:
         df['model'] = df['model'].map(val_model_map).fillna(df['model'].str.lower())
     if 'rep' in df.columns:
@@ -871,14 +872,22 @@ def load_validation_data(validation_dir):
     validation_dir = Path(validation_dir)
 
     # Try loading per-dataset subdirectories (preferred — always current)
+    # Import exclusion set from _normalize_validation_names
+    exclude_dirs = {'herg_fluid'}  # classification datasets without r2
     all_data = []
     for subdir in sorted(validation_dir.iterdir()):
         if not subdir.is_dir():
+            continue
+        if subdir.name in exclude_dirs:
+            print(f"  Skipping {subdir.name}/ (classification dataset)")
             continue
         # Prefer all_results.csv (per-sigma format) for NDS computation
         results_file = subdir / 'all_results.csv'
         if results_file.exists():
             df = pd.read_csv(results_file)
+            if 'r2' not in df.columns:
+                print(f"  Skipping {subdir.name}/all_results.csv (no r2 column — classification data)")
+                continue
             df['dataset'] = subdir.name
             all_data.append(df)
             print(f"  Loaded {len(df)} rows from {subdir.name}/all_results.csv")
