@@ -188,14 +188,15 @@ MODEL_COLORS = {
     'xgboost': '#56B4E9',          # Sky blue
     'lgb': '#009E73',              # Teal
     'ngboost': '#D55E00',          # Vermillion
-    # DNN family — all orange
+    # DNN family — all orange (BNN/VBLL variants)
     'dnn': '#E69F00',
     'dnn_bnn_full': '#E69F00',
     'dnn_bnn_last': '#E69F00',
     'dnn_vbll': '#E69F00',
-    'flexible_dnn': '#E69F00',
-    'flexible_dnn_256_128_64': '#E69F00',
-    'flexible_dnn_512_256': '#E69F00',
+    # DNN architecture variants — olive/brown (separate from BNN family)
+    'flexible_dnn': '#8B6914',
+    'flexible_dnn_256_128_64': '#8B6914',
+    'flexible_dnn_512_256': '#8B6914',
     # MLP family — all pink
     'mlp': '#CC79A7',
     'mlp_bnn_full': '#CC79A7',
@@ -204,6 +205,26 @@ MODEL_COLORS = {
     # SVM / GP — unique
     'svm': '#999999',              # Gray
     'gauche': '#882255',           # Wine
+}
+
+# Within-family colors for figures that compare variants of the same family.
+# When variants are shown alongside other models, use MODEL_COLORS (shared family color).
+# When variants are shown only against each other, use these to differentiate.
+DNN_FAMILY_COLORS = {
+    'dnn': '#E69F00',              # Orange (base)
+    'dnn_bnn_full': '#D4A017',     # Darker gold
+    'dnn_bnn_last': '#C68E17',     # Goldenrod
+    'dnn_vbll': '#B8860B',         # Dark goldenrod
+}
+MLP_FAMILY_COLORS = {
+    'mlp': '#CC79A7',              # Pink (base)
+    'mlp_bnn_full': '#AA5585',     # Darker pink
+    'mlp_bnn_last': '#993366',     # Deep rose
+    'mlp_vbll': '#872657',         # Dark magenta
+}
+RF_FAMILY_COLORS = {
+    'rf': '#0072B2',               # Blue (base)
+    'qrf': '#005580',              # Darker blue
 }
 
 # Markers: variants of the same family get different shapes.
@@ -246,7 +267,7 @@ MODEL_LABELS = {
     'flexible_dnn_512_256': 'DNN [512,256]',
     # SVM / GP
     'svm': 'SVM',
-    'gauche': 'GP (Gauche)',
+    'gauche': 'GP',
     # DNN-BNN variants
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
@@ -2757,8 +2778,10 @@ def create_figure4(df, nds_df, output_dir):
                 continue
 
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = MODEL_COLORS.get(model, '#333333')
-            ax_line.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
+            color = DNN_FAMILY_COLORS.get(model, '#333333')
+            marker = MODEL_MARKERS.get(model, 'o')
+            ax_line.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
+                         label=get_model_label(model), color=color, markersize=5)
 
         ax_line.set_xlabel('Noise Level (σ)')
         ax_line.set_ylabel('R²')
@@ -2818,8 +2841,10 @@ def create_figure5(df, nds_df, output_dir):
             if len(model_data) == 0:
                 continue
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = MODEL_COLORS.get(model, '#333333')
-            ax_mlp.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
+            color = MLP_FAMILY_COLORS.get(model, '#333333')
+            marker = MODEL_MARKERS.get(model, 'o')
+            ax_mlp.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
+                        label=get_model_label(model), color=color, markersize=5)
 
         ax_mlp.set_xlabel('Noise Level (σ)')
         ax_mlp.set_ylabel('R²')
@@ -2835,8 +2860,10 @@ def create_figure5(df, nds_df, output_dir):
             if len(model_data) == 0:
                 continue
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = MODEL_COLORS.get(model, '#333333')
-            ax_rf.plot(avg['sigma'], avg['r2'], 'o-', label=get_model_label(model), color=color, markersize=4)
+            color = RF_FAMILY_COLORS.get(model, '#333333')
+            marker = MODEL_MARKERS.get(model, 'o')
+            ax_rf.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
+                       label=get_model_label(model), color=color, markersize=5)
 
         ax_rf.set_xlabel('Noise Level (σ)')
         ax_rf.set_ylabel('R²')
@@ -3768,8 +3795,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                               label=REP_LABELS.get(r, r))
                        for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
-        axes[0].legend(handles=rep_handles, loc='lower left', fontsize=5,
-                       title='Rep', title_fontsize=6)
+        axes[0].legend(handles=rep_handles, loc='lower left', fontsize=7,
+                       title='Rep', title_fontsize=8)
 
         # Model color+marker legend on last panel — use MODEL_ORDER for grouping
         models_in_data = set(last_mean_nds['model'].unique())
@@ -3777,11 +3804,11 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         models_present += sorted(models_in_data - set(models_present))
         model_handles = [Line2D([0], [0], marker=MODEL_MARKERS.get(m, 'o'),
                                 color=MODEL_COLORS.get(m, '#333333'),
-                                linestyle='None', markersize=5,
+                                linestyle='None', markersize=6,
                                 label=get_model_label(m))
                          for m in models_present]
-        axes[-1].legend(handles=model_handles, loc='lower right', fontsize=4,
-                        title='Model', title_fontsize=5, ncol=2)
+        axes[-1].legend(handles=model_handles, loc='lower right', fontsize=6,
+                        title='Model', title_fontsize=7, ncol=2)
 
     fig.suptitle('Baseline Performance vs Noise Robustness (ANOVA Configurations)',
                  fontsize=12, fontweight='bold', y=1.02)
