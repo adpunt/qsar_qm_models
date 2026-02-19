@@ -252,6 +252,12 @@ MODEL_ORDER = [
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
 ]
 
+def sort_models_by_family(models):
+    """Sort models by MODEL_ORDER (family grouping), then alphabetical for unknown."""
+    order_map = {m: i for i, m in enumerate(MODEL_ORDER)}
+    return sorted(models, key=lambda m: (order_map.get(m, len(MODEL_ORDER)), m))
+
+
 MODEL_LABELS = {
     # Tree-based
     'rf': 'RF',
@@ -1099,6 +1105,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             if not col_order:
                 continue
             pivot = pivot[col_order]
+            # Sort by family grouping
+            family_order = [m for m in sort_models_by_family(pivot.index.tolist())]
+            pivot = pivot.loc[family_order]
 
             # Clip extreme NDS for colormap but show actual values in annotations
             pivot_display = pivot.clip(lower=-NDS_CLIP)
@@ -1314,7 +1323,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 # Use legacy strategy for clean comparison
                 leg_df = rep_df[rep_df['strategy'] == 'legacy'] if 'strategy' in rep_df.columns else rep_df
 
-                for model in sorted(leg_df['model'].unique()):
+                for model in sort_models_by_family(leg_df['model'].unique().tolist()):
                     m_df = leg_df[leg_df['model'] == model]
                     sigma_means = m_df.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
                     if len(sigma_means) < 2:
@@ -1511,11 +1520,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 qm9_col = qm9_model_means.reindex(model_ds.index)
                 model_ds.insert(0, 'QM9', qm9_col)
 
+            # Sort by family grouping (MODEL_ORDER)
+            family_order = sort_models_by_family(model_ds.index.tolist())
+            model_ds = model_ds.loc[family_order]
             model_ds.index = [get_model_label(m) for m in model_ds.index]
-            # Sort by mean NDS
-            model_ds['_mean'] = model_ds.mean(axis=1)
-            model_ds = model_ds.sort_values('_mean', ascending=False)
-            model_ds = model_ds.drop(columns='_mean')
 
             fig, ax = plt.subplots(figsize=(max(10, len(model_ds) * 0.8), 6))
             model_labels = model_ds.index.tolist()
@@ -2458,7 +2466,7 @@ def create_figure1(df, nds_df, output_dir):
             nds_pdv = nds_df
 
         # Build full pivot (all models × all strategies) so missing cells appear
-        all_models = sorted(nds_df['model'].unique())
+        all_models = sort_models_by_family(nds_df['model'].unique().tolist())
         all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                           if s in nds_df['strategy'].unique()]
         pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
@@ -2533,7 +2541,7 @@ def create_figure1(df, nds_df, output_dir):
         if len(nds_ecfp4) > 0:
             all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                               if s in nds_df['strategy'].unique()]
-            all_models_e = sorted(nds_df['model'].unique())
+            all_models_e = sort_models_by_family(nds_df['model'].unique().tolist())
             pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
             pivot = pivot.reindex(index=all_models_e, columns=all_strategies)
 
@@ -2690,10 +2698,11 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             strat_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                           if c in pivot.columns]
             pivot = pivot[strat_order]
+            # Sort by family grouping (MODEL_ORDER)
+            family_order = sort_models_by_family(pivot.index.tolist())
+            pivot = pivot.loc[family_order]
             pivot.index = [get_model_label(m) for m in pivot.index]
             pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
-            # Sort by mean NDS (best at top)
-            pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
 
             ax_a.set_facecolor('black')
             sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdYlGn', vmax=0,
@@ -2706,11 +2715,12 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
 
     nds_pdv_legacy = nds_pdv[nds_pdv['strategy'] == 'legacy'] if 'strategy' in nds_pdv.columns else nds_pdv
 
-    for model in nds_pdv_legacy['model'].unique():
+    for model in sort_models_by_family(nds_pdv_legacy['model'].unique().tolist()):
         model_data = nds_pdv_legacy[nds_pdv_legacy['model'] == model]
         color = MODEL_COLORS.get(model, '#333333')
+        marker = MODEL_MARKERS.get(model, 'o')
         ax_b.scatter(model_data['baseline_r2'], model_data['nds'],
-                     label=get_model_label(model), color=color, alpha=0.7, s=50)
+                     label=get_model_label(model), color=color, marker=marker, alpha=0.7, s=50)
 
     # Use data-driven axis limits with generous padding (no fixed range)
     ax_b.autoscale()
@@ -2740,7 +2750,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         ax_ea = axes_e[0]
         strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                       if c in nds_df['strategy'].unique()]
-        all_models_e3 = sorted(nds_ecfp4['model'].unique())
+        all_models_e3 = sort_models_by_family(nds_ecfp4['model'].unique().tolist())
         pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
         pivot = pivot.reindex(index=all_models_e3, columns=strat_list)
         if len(pivot) > 0:
@@ -2750,9 +2760,6 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             annot_text.index = pivot.index
             pivot.columns = [STRATEGY_LABELS.get(s, s) for s in strat_list]
             annot_text.columns = pivot.columns
-            sort_idx = pivot.mean(axis=1).sort_values(ascending=False).index
-            pivot = pivot.loc[sort_idx]
-            annot_text = annot_text.loc[sort_idx]
 
             ax_ea.set_facecolor('black')
             sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
@@ -2761,14 +2768,15 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
             ax_ea.set_ylabel('')
 
-        # Baseline vs NDS scatter
+        # Baseline vs NDS scatter (with model-specific markers)
         ax_eb = axes_e[1]
         nds_ecfp4_leg = nds_ecfp4[nds_ecfp4['strategy'] == 'legacy'] if 'strategy' in nds_ecfp4.columns else nds_ecfp4
-        for model in nds_ecfp4_leg['model'].unique():
+        for model in sort_models_by_family(nds_ecfp4_leg['model'].unique().tolist()):
             md = nds_ecfp4_leg[nds_ecfp4_leg['model'] == model]
             color = MODEL_COLORS.get(model, '#333333')
+            marker = MODEL_MARKERS.get(model, 'o')
             ax_eb.scatter(md['baseline_r2'], md['nds'], label=get_model_label(model),
-                          color=color, alpha=0.7, s=50)
+                          color=color, marker=marker, alpha=0.7, s=50)
         # Use data-driven axis limits with generous padding
         ax_eb.autoscale()
         ax_eb.margins(x=0.08, y=0.08)
@@ -3003,7 +3011,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
         fig, ax_a = plt.subplots(1, 1, figsize=(7, 5))
 
     # --- Panel A: Mean uncertainty vs noise level ---
-    for model in sorted(filtered['model'].unique()):
+    for model in sort_models_by_family(filtered['model'].unique().tolist()):
         model_data = filtered[filtered['model'] == model]
         unc_values = model_data[unc_col].values
         if np.sum(np.isfinite(unc_values) & (unc_values > 0)) < 100:
@@ -3033,7 +3041,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     # --- Panel B: Aleatoric vs Epistemic decomposition ---
     if any_decomposition:
-        for model in sorted(filtered['model'].unique()):
+        for model in sort_models_by_family(filtered['model'].unique().tolist()):
             model_data = filtered[filtered['model'] == model]
             alea = model_data['aleatoric_uncertainty'].values
             epis = model_data['epistemic_uncertainty'].values
@@ -3669,7 +3677,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     if len(rep_order) >= 2:
         # Reindex to show all models
-        all_models_int = sorted(nds_legacy['model'].unique())
+        all_models_int = sort_models_by_family(nds_legacy['model'].unique().tolist())
         hm_pivot = pivot.reindex(index=all_models_int, columns=rep_order)
         hm_pivot = hm_pivot.dropna(how='all')
 
@@ -3680,10 +3688,6 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         annot_text.index = hm_pivot.index
         hm_pivot.columns = [get_rep_label(r) for r in hm_pivot.columns]
         annot_text.columns = hm_pivot.columns
-        # Sort by mean NDS (best at top)
-        sort_idx = hm_pivot.mean(axis=1).sort_values(ascending=False).index
-        hm_pivot = hm_pivot.loc[sort_idx]
-        annot_text = annot_text.loc[sort_idx]
 
         ax_a.set_facecolor('black')
         sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
