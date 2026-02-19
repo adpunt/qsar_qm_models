@@ -309,6 +309,7 @@ DATASET_MARKERS = {
 }
 
 BASELINE_THRESHOLD = 0.6
+VALIDATION_BASELINE_THRESHOLD = 0.3  # External datasets are harder; lower threshold
 CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
 VALIDATION_NDS_THRESHOLD = 2.0  # |NDS| above this = artifact, filter to N/A
 
@@ -957,12 +958,12 @@ def calculate_validation_nds(validation_df):
             nds_df['baseline_r2'] = np.nan
         if 'dataset' not in nds_df.columns:
             nds_df['dataset'] = 'validation'
-        # Apply same baseline R² filtering as QM9 NDS computation
+        # Apply baseline R² filtering (lower threshold for external datasets)
         if 'baseline_r2' in nds_df.columns:
-            low_baseline = nds_df['baseline_r2'] < BASELINE_THRESHOLD
+            low_baseline = nds_df['baseline_r2'] < VALIDATION_BASELINE_THRESHOLD
             n_filtered = low_baseline.sum()
             if n_filtered > 0:
-                print(f"  ⚠ Filtering {n_filtered} validation configs with baseline R² < {BASELINE_THRESHOLD}:")
+                print(f"  ⚠ Filtering {n_filtered} validation configs with baseline R² < {VALIDATION_BASELINE_THRESHOLD}:")
                 for _, row in nds_df[low_baseline].iterrows():
                     print(f"    {row.get('model','?')}/{row.get('rep','?')}/{row.get('strategy','?')} "
                           f"on {row.get('dataset','?')}: baseline_r2={row['baseline_r2']:.3f}")
@@ -986,7 +987,7 @@ def calculate_validation_nds(validation_df):
             if len(baseline) == 0:
                 continue
             baseline = baseline[0]
-            if baseline < BASELINE_THRESHOLD:
+            if baseline < VALIDATION_BASELINE_THRESHOLD:
                 continue
             try:
                 slope, _, r_val, _, _ = stats.linregress(avg['sigma'], avg['r2'])
