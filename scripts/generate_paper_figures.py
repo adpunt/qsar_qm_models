@@ -874,13 +874,15 @@ def load_validation_data(validation_dir):
 
     # Try loading per-dataset subdirectories (preferred — always current)
     # Import exclusion set from _normalize_validation_names
-    exclude_dirs = {'herg_fluid'}  # classification datasets without r2
+    # herg_fluid: classification (no r2)
+    # openadmet_*: older runs without scaffold CV folds, superseded by caco2/herg/logd
+    exclude_dirs = {'herg_fluid', 'openadmet_caco2', 'openadmet_logd'}
     all_data = []
     for subdir in sorted(validation_dir.iterdir()):
         if not subdir.is_dir():
             continue
         if subdir.name in exclude_dirs:
-            print(f"  Skipping {subdir.name}/ (classification dataset)")
+            print(f"  Skipping {subdir.name}/ (excluded: classification or superseded)")
             continue
         # Prefer all_results.csv (per-sigma format) for NDS computation
         results_file = subdir / 'all_results.csv'
