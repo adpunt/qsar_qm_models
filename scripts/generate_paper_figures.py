@@ -755,10 +755,12 @@ def load_uncertainty_data(results_dir):
                     df.rename(columns={'representation': 'rep'}, inplace=True)
 
                 # Extract strategy from filename if not in data
-                # Pattern: uncertainty_{strategy}_{rep}_{model}_uncertainty_values.csv
+                # Patterns:
+                #   uncertainty_{strategy}_{rep}_{model}_uncertainty_values.csv
+                #   anova_{strategy}_{rep}_{model}_uncertainty_values.csv
                 if 'strategy' not in df.columns:
                     parts = f.stem.replace('_uncertainty_values', '').split('_')
-                    if len(parts) >= 2 and parts[0] == 'uncertainty':
+                    if len(parts) >= 2 and parts[0] in ('uncertainty', 'anova'):
                         candidate = parts[1]
                         if candidate in VALID_STRATEGIES:
                             df['strategy'] = STRATEGY_NORMALIZE.get(candidate, candidate)
