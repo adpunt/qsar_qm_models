@@ -179,6 +179,14 @@ STRATEGY_LABELS = {
     'hetero': 'Heteroscedastic',
 }
 
+# ANOVA factor colors — consistent across fig2 and validation ANOVA figures
+ANOVA_FACTOR_COLORS = {
+    'Model': '#6BAED6',          # Light blue
+    'Representation': '#FC8D59', # Orange
+    'Strategy': '#66C2A5',       # Mint green (validation only)
+    'Interaction': '#B39DDB',    # Light purple
+}
+
 # Colors: variants of the same model family share ONE color.
 # Distinction between variants comes from MODEL_MARKERS (shape).
 MODEL_COLORS = {
@@ -256,6 +264,22 @@ def sort_models_by_family(models):
     """Sort models by MODEL_ORDER (family grouping), then alphabetical for unknown."""
     order_map = {m: i for i, m in enumerate(MODEL_ORDER)}
     return sorted(models, key=lambda m: (order_map.get(m, len(MODEL_ORDER)), m))
+
+
+def get_variant_color(model):
+    """Get color distinguishing variants within DNN/MLP families.
+
+    For figures where multiple DNN or MLP variants appear together (e.g. uncertainty),
+    use family-specific colors so variants are visually distinct. Non-family models
+    use their standard MODEL_COLORS.
+    """
+    if model in DNN_FAMILY_COLORS:
+        return DNN_FAMILY_COLORS[model]
+    if model in MLP_FAMILY_COLORS:
+        return MLP_FAMILY_COLORS[model]
+    if model in RF_FAMILY_COLORS:
+        return RF_FAMILY_COLORS[model]
+    return MODEL_COLORS.get(model, '#333333')
 
 
 MODEL_LABELS = {
@@ -1202,14 +1226,14 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             for i, (dataset, result) in enumerate(anova_results.items()):
                 ax = axes[i]
                 if has_strategy:
-                    factors = ['Model', 'Rep', 'Strategy', 'M×R']
+                    factors = ['Model', 'Representation', 'Strategy', 'Interaction']
                     values = [result['eta2_model'], result['eta2_rep'],
                               result['eta2_strategy'], result['eta2_interaction']]
-                    colors = ['#6BAED6', '#FC8D59', '#66C2A5', '#B39DDB']
+                    colors = [ANOVA_FACTOR_COLORS[f] for f in factors]
                 else:
-                    factors = ['Model', 'Rep', 'M×R']
+                    factors = ['Model', 'Representation', 'Interaction']
                     values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                    colors = ['#6BAED6', '#FC8D59', '#B39DDB']
+                    colors = [ANOVA_FACTOR_COLORS[f] for f in factors]
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -1297,14 +1321,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             print("✓ Saved table_validation_probabilistic.csv")
 
     # --- Figure: R² degradation curves per dataset (unified axes) ---
+    DEGRADATION_R2_FLOOR = -0.5  # Floor for y-axis; models below this are filtered
     if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
-        # Pre-compute shared y-axis range across all datasets (legacy strategy only)
-        leg_all = validation_df[validation_df['strategy'] == 'legacy'] if 'strategy' in validation_df.columns else validation_df
-        all_r2 = leg_all['r2'].dropna().values
-        if len(all_r2) > 0:
-            shared_ylim = (max(min(all_r2) - 0.05, -0.5), max(all_r2) + 0.05)
-        else:
-            shared_ylim = None
 
         for dataset in sorted(datasets):
             ds_df = validation_df[validation_df['dataset'] == dataset]
@@ -1317,6 +1335,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             fig, axes_deg = plt.subplots(1, n_reps, figsize=(5 * n_reps, 5), squeeze=False)
             axes_deg = axes_deg[0]
 
+            filtered_models = []  # Track models excluded for paper.md note
+
             for j, rep in enumerate(reps):
                 ax = axes_deg[j]
                 rep_df = ds_df[ds_df['rep'] == rep] if 'rep' in ds_df.columns else ds_df
@@ -1328,8 +1348,20 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                     sigma_means = m_df.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
                     if len(sigma_means) < 2:
                         continue
+
+                    # Filter models whose mean R² drops below floor at any sigma
+                    # These are divergent models that distort the plot
+                    if sigma_means['r2'].min() < DEGRADATION_R2_FLOOR:
+                        filtered_models.append({
+                            'dataset': dataset, 'rep': rep, 'model': model,
+                            'min_r2': sigma_means['r2'].min(),
+                        })
+                        continue
+
                     color = MODEL_COLORS.get(model, '#333333')
-                    ax.plot(sigma_means['sigma'], sigma_means['r2'], 'o-',
+                    marker = MODEL_MARKERS.get(model, 'o')
+                    ax.plot(sigma_means['sigma'], sigma_means['r2'],
+                            marker=marker, linestyle='-',
                             label=get_model_label(model), color=color,
                             markersize=4, linewidth=1.5, alpha=0.8)
 
@@ -1339,10 +1371,16 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.axhline(0, color='grey', linewidth=0.5, linestyle='--')
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
-                if shared_ylim:
-                    ax.set_ylim(shared_ylim)
-                if j == 0:
-                    ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
+                ax.set_ylim(DEGRADATION_R2_FLOOR, 1.05)
+                # Legend on every panel so each panel's models are labeled
+                ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
+
+            if filtered_models:
+                safe_name_f = dataset.replace('/', '_').replace(' ', '_')
+                print(f"  ⚠ {safe_name_f}: filtered {len(filtered_models)} divergent model×rep combos "
+                      f"from degradation plot (R² < {DEGRADATION_R2_FLOOR}):")
+                for fm in filtered_models:
+                    print(f"    {fm['model']}/{fm['rep']}: min R²={fm['min_r2']:.3f}")
 
             plt.suptitle(f'{dataset}: R² Degradation with Noise (Gaussian Strategy)',
                          fontweight='bold', y=1.02)
@@ -2615,9 +2653,12 @@ def create_figure2(df, output_dir):
         rep_vals = [results[s]['eta2_rep'] for s in strats]
         int_vals = [results[s]['eta2_interaction'] for s in strats]
 
-        ax.bar(x - width, model_vals, width, label='Model', color='#6BAED6')
-        ax.bar(x, rep_vals, width, label='Representation', color='#FC8D59')
-        ax.bar(x + width, int_vals, width, label='Interaction', color='#B39DDB')
+        ax.bar(x - width, model_vals, width, label='Model',
+               color=ANOVA_FACTOR_COLORS['Model'])
+        ax.bar(x, rep_vals, width, label='Representation',
+               color=ANOVA_FACTOR_COLORS['Representation'])
+        ax.bar(x + width, int_vals, width, label='Interaction',
+               color=ANOVA_FACTOR_COLORS['Interaction'])
 
         ax.set_ylabel('Variance Explained (η², %)')
         ax.set_title(title, fontweight='bold')
@@ -3027,8 +3068,10 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
         if sigma_means:
             sigma_df = pd.DataFrame(sigma_means)
-            color = MODEL_COLORS.get(model, '#333333')
-            ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'], 'o-',
+            color = get_variant_color(model)
+            marker = MODEL_MARKERS.get(model, 'o')
+            ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'],
+                    marker=marker, linestyle='-',
                     label=get_model_label(model), color=color,
                     markersize=4, linewidth=1.2, alpha=0.8)
 
@@ -3050,7 +3093,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             if valid_mask.sum() < 10:
                 continue
 
-            color = MODEL_COLORS.get(model, '#333333')
+            color = get_variant_color(model)
             label = get_model_label(model)
             sigmas = sorted(model_data['sigma'].unique())
             if len(sigmas) < 3:
@@ -3131,8 +3174,10 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
     """Create all summary tables."""
 
     # Table 2: NDS by model × strategy (PDV only - don't mix representations)
-    if len(nds_df) > 0:
-        nds_pdv = nds_df[nds_df['rep'] == 'pdv'] if 'rep' in nds_df.columns else nds_df
+    # Filter to ANOVA-included models for main table
+    nds_anova_tbl = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+    if len(nds_anova_tbl) > 0:
+        nds_pdv = nds_anova_tbl[nds_anova_tbl['rep'] == 'pdv'] if 'rep' in nds_anova_tbl.columns else nds_anova_tbl
 
         if len(nds_pdv) > 0:
             pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
@@ -3161,8 +3206,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             rank_df.to_csv(output_dir / 'table2_nds_ranks_pdv.csv')
             print("✓ Saved table2_nds_ranks_pdv.csv (per-strategy ranks)")
 
-        # Also save full table with all reps for supplementary
-        pivot_all = nds_df.pivot_table(values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
+        # Also save full table with all reps for supplementary (ANOVA models only)
+        pivot_all = nds_anova_tbl.pivot_table(values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
         pivot_all['MEAN'] = pivot_all.mean(axis=1)
         pivot_all['STD'] = pivot_all.drop(columns=['MEAN']).std(axis=1)
         pivot_all = pivot_all.sort_values('MEAN', ascending=False)
@@ -3552,16 +3597,18 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             print("✓ Saved table5_sigma_rankings.csv")
 
     # Table 6: Kendall's W for ranking consistency across strategies
-    if len(nds_df) > 0:
+    # Use ANOVA-included models only for consistency with other analyses
+    nds_anova = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+    if len(nds_anova) > 0:
         # Get rankings per strategy
-        strategies = nds_df['strategy'].unique()
+        strategies = nds_anova['strategy'].unique()
         if len(strategies) > 1:
-            models = nds_df['model'].unique()
+            models = nds_anova['model'].unique()
 
             # First pass: find models present in ALL strategies
             model_nds_by_strategy = {}
             for strategy in strategies:
-                strat_data = nds_df[nds_df['strategy'] == strategy]
+                strat_data = nds_anova[nds_anova['strategy'] == strategy]
                 model_nds_by_strategy[strategy] = strat_data.groupby('model')['nds'].mean()
 
             valid_models = [m for m in models
@@ -3610,9 +3657,11 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
     # Table 7: Strategy Sensitivity Ratio (NDS_strategy / NDS_legacy)
     # Tests whether certain noise types differentially affect model families
-    if len(nds_df) > 0 and 'legacy' in nds_df['strategy'].values:
+    # Use ANOVA-included models only
+    nds_anova_sr = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+    if len(nds_anova_sr) > 0 and 'legacy' in nds_anova_sr['strategy'].values:
         # Compute mean NDS per model per strategy on PRIMARY_REP
-        nds_primary = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
+        nds_primary = nds_anova_sr[nds_anova_sr['rep'] == PRIMARY_REP] if 'rep' in nds_anova_sr.columns else nds_anova_sr
         pivot = nds_primary.groupby(['model', 'strategy'])['nds'].mean().unstack('strategy')
 
         if 'legacy' in pivot.columns:
@@ -3660,8 +3709,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         return
 
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
-    # Filter to ANOVA-included reps only (CP + old variational already removed at load time)
+    # Filter to ANOVA-included models and reps (consistent with other ANOVA figures)
     nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    nds_legacy = nds_legacy[~nds_legacy['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
