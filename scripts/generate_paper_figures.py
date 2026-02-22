@@ -3711,9 +3711,8 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         return
 
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
-    # Filter to ANOVA-included models and reps (consistent with other ANOVA figures)
+    # Filter to ANOVA-included reps only; keep ALL models (including QRF) for interaction view
     nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
-    nds_legacy = nds_legacy[~nds_legacy['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
