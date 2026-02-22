@@ -1323,7 +1323,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             print("✓ Saved table_validation_probabilistic.csv")
 
     # --- Figure: R² degradation curves per dataset (unified axes) ---
-    DEGRADATION_R2_FLOOR = -0.5  # Floor for y-axis; models below this are filtered
+    DEGRADATION_R2_FLOOR = 0.5  # Floor for y-axis; models whose R² drops below 0.5 are filtered
     if validation_df is not None and 'sigma' in validation_df.columns and 'dataset' in validation_df.columns:
 
         for dataset in sorted(datasets):
@@ -1373,7 +1373,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.axhline(0, color='grey', linewidth=0.5, linestyle='--')
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
-                ax.set_ylim(DEGRADATION_R2_FLOOR, 1.05)
+                ax.set_ylim(DEGRADATION_R2_FLOOR - 0.05, 1.05)
                 # Legend on every panel so each panel's models are labeled
                 ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
 
@@ -2464,19 +2464,8 @@ def create_figure1(df, nds_df, output_dir):
     key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost']
     pdv_data = df[(df['rep'] == 'pdv') & (df['strategy'] == 'legacy')]
 
-    # Background: all non-key models in light grey so full range is visible
-    all_models = pdv_data['model'].unique()
-    for model in all_models:
-        if model in key_models:
-            continue
-        model_data = pdv_data[pdv_data['model'] == model]
-        if len(model_data) == 0:
-            continue
-        avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-        ax_a.plot(avg['sigma'], avg['r2'], '-', color='#cccccc', alpha=0.4,
-                  linewidth=1.0, zorder=1)
+    # Plot key models only (no grey background lines)
 
-    # Foreground: key models highlighted with bold lines
     for model in key_models:
         model_data = pdv_data[pdv_data['model'] == model]
         if len(model_data) == 0:
@@ -2545,19 +2534,8 @@ def create_figure1(df, nds_df, output_dir):
 
     ecfp4_data = df[(df['rep'] == 'ecfp4') & (df['strategy'] == 'legacy')]
 
-    # Background: all non-key models in light grey
-    all_ecfp4_models = ecfp4_data['model'].unique()
-    for model in all_ecfp4_models:
-        if model in key_models:
-            continue
-        model_data = ecfp4_data[ecfp4_data['model'] == model]
-        if len(model_data) == 0:
-            continue
-        avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-        ax_ea.plot(avg['sigma'], avg['r2'], '-', color='#cccccc', alpha=0.4,
-                   linewidth=1.0, zorder=1)
+    # Plot key models only (no grey background lines)
 
-    # Foreground: key models highlighted
     for model in key_models:
         model_data = ecfp4_data[ecfp4_data['model'] == model]
         if len(model_data) == 0:
