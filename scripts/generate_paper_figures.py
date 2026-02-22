@@ -235,6 +235,19 @@ RF_FAMILY_COLORS = {
     'qrf': '#D55E00',              # Vermillion (quantile variant)
 }
 
+# Unique colors for the uncertainty figure (9 models, all visually distinct)
+UNCERTAINTY_COLORS = {
+    'qrf':           '#E69F00',    # Amber
+    'ngboost':       '#D55E00',    # Vermillion
+    'gauche':        '#882255',    # Wine
+    'dnn_bnn_full':  '#0072B2',    # Blue
+    'dnn_bnn_last':  '#56B4E9',    # Sky blue
+    'dnn_vbll':      '#009E73',    # Teal
+    'mlp_bnn_full':  '#CC79A7',    # Pink
+    'mlp_bnn_last':  '#AA4499',    # Purple
+    'mlp_vbll':      '#332288',    # Indigo
+}
+
 # Markers: variants of the same family get different shapes.
 # Base model = circle, BNN Full = square, BNN Last = triangle, VBLL = diamond.
 MODEL_MARKERS = {
@@ -1345,15 +1358,29 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 # Use legacy strategy for clean comparison
                 leg_df = rep_df[rep_df['strategy'] == 'legacy'] if 'strategy' in rep_df.columns else rep_df
 
+                # Two-pass approach: first check which models pass the floor,
+                # then relax if ALL models are filtered (e.g. hERG-Ki)
+                effective_floor = DEGRADATION_R2_FLOOR
+                model_sigma_data = {}  # model -> sigma_means DataFrame
                 for model in sort_models_by_family(leg_df['model'].unique().tolist()):
                     m_df = leg_df[leg_df['model'] == model]
                     sigma_means = m_df.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
-                    if len(sigma_means) < 2:
-                        continue
+                    if len(sigma_means) >= 2:
+                        model_sigma_data[model] = sigma_means
 
-                    # Filter models whose mean R² drops below floor at any sigma
-                    # These are divergent models that distort the plot
-                    if sigma_means['r2'].min() < DEGRADATION_R2_FLOOR:
+                models_passing = [m for m, sd in model_sigma_data.items()
+                                  if sd['r2'].min() >= DEGRADATION_R2_FLOOR]
+
+                if len(models_passing) == 0 and len(model_sigma_data) > 0:
+                    effective_floor = 0.0
+                    models_passing = [m for m, sd in model_sigma_data.items()
+                                      if sd['r2'].min() >= effective_floor]
+                    print(f"  ⚠ {dataset}/{rep}: all models filtered at floor={DEGRADATION_R2_FLOOR}, "
+                          f"relaxing to {effective_floor}")
+
+                for model in sort_models_by_family(list(model_sigma_data.keys())):
+                    sigma_means = model_sigma_data[model]
+                    if sigma_means['r2'].min() < effective_floor:
                         filtered_models.append({
                             'dataset': dataset, 'rep': rep, 'model': model,
                             'min_r2': sigma_means['r2'].min(),
@@ -1373,7 +1400,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.axhline(0, color='grey', linewidth=0.5, linestyle='--')
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
-                ax.set_ylim(DEGRADATION_R2_FLOOR - 0.05, 1.05)
+                ax.set_ylim(effective_floor - 0.05, 1.05)
                 # Legend on every panel so each panel's models are labeled
                 ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
 
@@ -2750,8 +2777,9 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     ax_b.set_ylabel('NDS (slope)')
     ax_b.set_title('B. Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
     ax_b.axhline(0, color='black', linewidth=0.5)
-    ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
-                borderaxespad=0, frameon=False)
+    ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
+                borderaxespad=0, frameon=False, columnspacing=1.0,
+                handletextpad=0.5, labelspacing=0.6)
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -2805,8 +2833,9 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         ax_eb.set_ylabel('NDS (slope)')
         ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
         ax_eb.axhline(0, color='black', linewidth=0.5)
-        ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=5, ncol=4,
-                     borderaxespad=0, frameon=False)
+        ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
+                     borderaxespad=0, frameon=False, columnspacing=1.0,
+                     handletextpad=0.5, labelspacing=0.6)
 
         for ax in axes_e:
             ax.spines['top'].set_visible(False)
@@ -3048,7 +3077,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
         if sigma_means:
             sigma_df = pd.DataFrame(sigma_means)
-            color = get_variant_color(model)
+            color = UNCERTAINTY_COLORS.get(model, MODEL_COLORS.get(model, '#333333'))
             marker = MODEL_MARKERS.get(model, 'o')
             ax_a.plot(sigma_df['sigma'], sigma_df['mean_unc'],
                     marker=marker, linestyle='-',
@@ -3073,8 +3102,9 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             if valid_mask.sum() < 10:
                 continue
 
-            color = get_variant_color(model)
+            color = UNCERTAINTY_COLORS.get(model, MODEL_COLORS.get(model, '#333333'))
             label = get_model_label(model)
+            marker = MODEL_MARKERS.get(model, 'o')
             sigmas = sorted(model_data['sigma'].unique())
             if len(sigmas) < 3:
                 continue
@@ -3093,12 +3123,12 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
                     alea_means.append(np.nan)
                     epis_means.append(np.nan)
 
-            ax_b.plot(sigmas, alea_means, 'o-', color=color,
+            ax_b.plot(sigmas, alea_means, marker=marker, linestyle='-', color=color,
                      label=f'{label} (aleatoric)', markersize=4,
                      linewidth=1.2, alpha=0.8)
-            ax_b.plot(sigmas, epis_means, 's--', color=color,
+            ax_b.plot(sigmas, epis_means, marker=marker, linestyle='--', color=color,
                      label=f'{label} (epistemic)', markersize=3,
-                     linewidth=1.0, alpha=0.5)
+                     linewidth=1.0, alpha=0.8)
 
         ax_b.set_xlabel('Injected Noise Level (σ)')
         ax_b.set_ylabel('Mean Uncertainty Component')
@@ -3866,6 +3896,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         # Combined legend on first panel (top-right)
         rep_handles = [Line2D([0], [0], marker=rep_markers.get(r, 'o'), color='gray',
                               linestyle='None', markersize=6,
+                              markeredgecolor='black', markeredgewidth=0.5,
                               label=REP_LABELS.get(r, r))
                        for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
@@ -3877,6 +3908,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         model_handles = [Line2D([0], [0], marker=MODEL_MARKERS.get(m, 'o'),
                                 color=MODEL_COLORS.get(m, '#333333'),
                                 linestyle='None', markersize=6,
+                                markeredgecolor='black', markeredgewidth=0.5,
                                 label=get_model_label(m))
                          for m in models_present]
         axes[-1].legend(handles=rep_handles + model_handles, loc='upper right', fontsize=6,
