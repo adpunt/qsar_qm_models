@@ -61,6 +61,7 @@ echo "Setting shared library paths..."
 if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
     export LIBRARY_PATH="$CONDA_PREFIX/lib:${LIBRARY_PATH:-}"
+    export RUSTFLAGS="-C link-arg=-Wl,-rpath,$CONDA_PREFIX/lib"
 
     echo "Ensuring RDKit .so symlinks exist..."
     for full in "$CONDA_PREFIX"/lib/libRDKit*.so.1.2024.*; do
