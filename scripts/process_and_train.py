@@ -234,7 +234,7 @@ def parse_arguments():
     parser.add_argument("-m", "--models", nargs='*', help="Model(s) to use for prediction", required=True)
     parser.add_argument("-r", "--molecular_representations", nargs='*', help="Molecular representation as a list of strings", required=True)
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed (default is 42)")
-    parser.add_argument("-n", "--sample-size", type=int, default=1000, help="Sample size per iteration (default is 1000)")
+    parser.add_argument("-n", "--sample-size", type=int, default=10000, help="Sample size per iteration (default is 10000)")
     parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
     parser.add_argument("--sigma", nargs='*', default=[0.0], help="Standard deviation(s) of artificially added Gaussian noise (default is None)")
     parser.add_argument("--distribution", type=str, default='gaussian', help="Distribution of artificial noise (default is Gaussian)")
