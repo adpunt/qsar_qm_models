@@ -77,7 +77,7 @@ Outputs:
 PRIMARY_STRATEGY = 'legacy'      # REVIEW: Main example strategy
 CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
 PRIMARY_REP = 'pdv'              # REVIEW: Main representation
-SUPPLEMENTARY_REP = 'ecfp4'      # Changed from SNS: ECFP4 is more robust and representative of QSAR practice
+SUPPLEMENTARY_REP = 'ecfp4'      # RDKit topological fingerprint (path-based, NOT Morgan/ECFP circular)
 
 # All strategies for completeness checks
 ALL_STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
@@ -95,7 +95,7 @@ GENERATE_SUPPLEMENTARY = True
 #     comparison in Part 1 deep dives.
 #
 # Reps EXCLUDED from ANOVA:
-#   - sns: Spearman rho = 0.90 with ecfp4 across 14 models (both substructure
+#   - sns: Spearman rho = 0.90 with topological FP across 14 models (both binary
 #     fingerprints). Kept for supplementary per-rep analysis.
 #   - randomized_smiles: Incomplete data coverage across models.
 #
@@ -122,7 +122,7 @@ ANOVA_MODELS_EXCLUDE = {
 } | GLOBAL_MODELS_EXCLUDE
 
 ANOVA_REPS_EXCLUDE = {
-    'sns',                # Redundant with ecfp4 (rho = 0.90)
+    'sns',                # Redundant with topological FP (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
 }
@@ -323,7 +323,8 @@ MODEL_LABELS = {
 
 REP_LABELS = {
     'pdv': 'PDV',
-    'ecfp4': 'ECFP4',
+    'continuous_pdv': 'PDV (cont.)',
+    'ecfp4': 'Topological',
     'sns': 'SNS',
     'smiles': 'SMILES',
     'randomized_smiles': 'R-SMILES',
@@ -527,7 +528,7 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
     Prints a summary and saves detailed gap report to CSV.
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
-    EXPECTED_REPS = {'ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec'}
+    EXPECTED_REPS = {'ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec'}
     EXPECTED_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero'}
 
     # Only audit ANOVA-included data
@@ -880,7 +881,7 @@ def _normalize_validation_names(df):
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
     }
     val_rep_map = {
-        'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
+        'ECFP4': 'ecfp4', 'Topological': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
         'SMILES': 'smiles',
     }
@@ -2555,7 +2556,7 @@ def create_figure1(df, nds_df, output_dir):
 
     ax_ea.set_xlabel('Noise Level (σ)')
     ax_ea.set_ylabel('R²')
-    ax_ea.set_title('A. Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
+    ax_ea.set_title('A. Performance Degradation (Topological FP, Gaussian Noise)', fontweight='bold')
     ax_ea.legend(loc='lower left', ncol=2)
     ax_ea.set_ylim(-0.1, 1.0)
     ax_ea.spines['top'].set_visible(False)
@@ -2586,7 +2587,7 @@ def create_figure1(df, nds_df, output_dir):
             _white_text_for_missing(ax_eb, pivot, annot_text)
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
-            ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
+            ax_eb.set_title('B. NDS by Model × Strategy (Topological FP)', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_supp_ecfp4_overview.png', dpi=300, bbox_inches='tight')
@@ -2795,7 +2796,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             _white_text_for_missing(ax_ea, pivot, annot_text)
-            ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
+            ax_ea.set_title('A. NDS by Model × Strategy (Topological FP)', fontweight='bold')
             ax_ea.set_ylabel('')
 
         # Baseline vs NDS scatter (with model-specific markers)
@@ -2812,7 +2813,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         ax_eb.margins(x=0.08, y=0.08)
         ax_eb.set_xlabel('Baseline R² (σ=0)')
         ax_eb.set_ylabel('NDS (slope)')
-        ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
+        ax_eb.set_title('B. Baseline vs Robustness (Topological FP, Gaussian)', fontweight='bold')
         ax_eb.axhline(0, color='black', linewidth=0.5)
         ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
                      borderaxespad=0, frameon=False, columnspacing=1.0,
@@ -3691,7 +3692,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     """Visualize the model x representation interaction effect.
 
     Panel A: Heatmap — NDS by model × representation (Gaussian strategy).
-    Panel B: Scatter — NDS on ECFP4 vs NDS on PDV per model.
+    Panel B: Scatter — NDS on topological FP vs NDS on PDV per model.
 
     BNN variants use different marker shapes but same color as base model.
     """
@@ -3713,7 +3714,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
-    rep_order = [r for r in ['ecfp4', 'pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
+    rep_order = [r for r in ['ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
 
     if len(rep_order) >= 2:
         # Reindex to show all models
@@ -3736,7 +3737,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
 
-    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
+    # Panel B: Scatter — NDS on topological FP vs NDS on PDV, with legend (not annotations)
     ax_b = axes[1]
 
     ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['nds'].mean()
@@ -3773,9 +3774,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         ax_b.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0), fontsize=6,
                     borderaxespad=0, frameon=True, fancybox=False)
 
-    ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
+    ax_b.set_xlabel('NDS on Topological FP (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. ECFP4 vs PDV Robustness', fontweight='bold')
+    ax_b.set_title('B. Topological FP vs PDV Robustness', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -3813,8 +3814,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
     if n_panels == 1:
         axes = [axes]
 
-    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'smiles': '^',
-                   'mhggnn': 'v', 'mol2vec': 'D'}
+    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'continuous_pdv': 'P',
+                   'smiles': '^', 'mhggnn': 'v', 'mol2vec': 'D'}
 
     # First pass: collect all data to compute shared axes
     all_baseline_r2 = []
@@ -3879,7 +3880,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                               linestyle='None', markersize=6,
                               markeredgecolor='black', markeredgewidth=0.5,
                               label=REP_LABELS.get(r, r))
-                       for r in ['ecfp4', 'pdv', 'smiles', 'mhggnn', 'mol2vec']
+                       for r in ['ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
 
         # Model color+marker legend — use MODEL_ORDER for grouping
