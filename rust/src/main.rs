@@ -72,6 +72,7 @@ struct SmilesData {
     mol2vec_buf: [u8; 300],
     chemberta_buf: [u8; 768],
     mhggnn_buf: [u8; 1024],
+    morgan_buf: [u8; 256],
 }
 
 #[derive(Serialize, Clone)]
@@ -585,6 +586,11 @@ fn read_smiles_data(
         reader.read_exact(&mut mhggnn_buf).ok()?;
     }
 
+    let mut morgan_buf = [0u8; 256];
+    if molecular_representations.contains(&"morgan".to_string()) {
+        reader.read_exact(&mut morgan_buf).ok()?;
+    }
+
     // Store parsed data
     Some(SmilesData {
         isomeric_smiles,
@@ -597,6 +603,7 @@ fn read_smiles_data(
         mol2vec_buf,
         chemberta_buf,
         mhggnn_buf,
+        morgan_buf,
     })
 }
 
@@ -719,6 +726,15 @@ fn write_data(
                 writer.write_all(&mhggnn)?;
                 if log_writes {
                     println!("mhggnn: {:?}", mhggnn);
+                }
+            }
+
+            // morgan (256 bytes, ECFP4 radius=2 computed in Python)
+            if config.molecular_representations.contains(&"morgan".to_string()) {
+                let morgan = smiles_data.morgan_buf;
+                writer.write_all(&morgan)?;
+                if log_writes {
+                    println!("morgan: {:?}", morgan);
                 }
             }
 

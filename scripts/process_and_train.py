@@ -99,7 +99,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn', 'morgan']
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -285,7 +285,7 @@ def parse_arguments():
                                  'butina', 'splito', 'scaffold', 'molecular_weight'],
                         help="Method for domain clustering")
     parser.add_argument("--domain-representation", type=str, default='ecfp4',
-                        choices=['ecfp4', 'sns', 'pdv', 'mol2vec'],
+                        choices=['ecfp4', 'sns', 'pdv', 'mol2vec', 'morgan'],
                         help="Representation for domain clustering")
     parser.add_argument("--loss", type=str, default='mse',
                    choices=['mse', 'mae', 'smooth_l1', 'huber', 'cauchy', 'log_cosh',
@@ -337,6 +337,7 @@ def write_to_mmap(
     k_domains,
     sns_fp,
     max_vocab,
+    morgan_fp=None,
 ):
     entry = b""
 
@@ -402,6 +403,12 @@ def write_to_mmap(
     if "mhggnn" in molecular_representations:
         if mhggnn is not None:
             entry += mhggnn.tobytes()
+        else:
+            return
+
+    if "morgan" in molecular_representations:
+        if morgan_fp is not None:
+            entry += morgan_fp.tobytes()
         else:
             return
 
@@ -580,10 +587,15 @@ def load_and_split_polaris(dataset_tuple, args, files):
         mhggnn = None
         if 'mhggnn' in args.molecular_representations:
             mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
-        
+
+        morgan_fp_val = None
+        if 'morgan' in args.molecular_representations:
+            morgan_fp_val = morgan_fingerprint(mol)
+
         write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn,
                      target_list[local_idx], category, files,
-                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
+                     morgan_fp=morgan_fp_val)
     
     if 'sns' in args.molecular_representations:
         del mols_train
@@ -729,10 +741,14 @@ def split_qm9(qm9, args, files):
         if 'mhggnn' in args.molecular_representations:
             mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
 
+        morgan_fp_val = None
+        if 'morgan' in args.molecular_representations:
+            morgan_fp_val = morgan_fingerprint(mol)
+
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab, morgan_fp=morgan_fp_val)
 
             if category == "train":
                 successful_train_idx.append(index)
@@ -840,6 +856,14 @@ def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol = Chem.MolFromSmiles(smiles_string)
     descriptor_vals = mol_descriptor_calculator.CalcDescriptors(mol)
     return np.array(descriptor_vals)
+
+def morgan_fingerprint(mol, radius=2, n_bits=2048):
+    """Compute Morgan/ECFP4 fingerprint as a packed uint8 array (256 bytes).
+    Uses radius=2, 2048 bits to match KIRBy validation experiments."""
+    generator = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=n_bits)
+    fp = generator.GetFingerprint(mol)
+    bits = np.array(fp, dtype=np.uint8)
+    return np.packbits(bits, bitorder='little')
 
 def create_sort_and_slice_ecfp_featuriser(mols_train, 
                                           max_radius = 2, 
@@ -1153,8 +1177,18 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 if "mhggnn" == rep:
                     mhggnn = np.frombuffer(mhggnn_bytes, dtype=np.uint8)
                     feature_vector.append(mhggnn)
-                    if logging: 
+                    if logging:
                         print(f"mhggnn: {mhggnn}")
+
+            # --- Morgan ECFP4 fingerprint ---
+            if "morgan" in molecular_representations:
+                morgan_bytes = mmap_file.read(256)
+                if rep == "morgan":
+                    morgan_packed = np.frombuffer(morgan_bytes, dtype=np.uint8)
+                    morgan_fp = np.unpackbits(morgan_packed, bitorder="little")
+                    feature_vector.append(morgan_fp)
+                    if logging:
+                        print(f"[{entry}] morgan: {morgan_fp}")
 
             # --- processed target ---
             processed_bytes = mmap_file.read(4)
@@ -1168,8 +1202,8 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 if logging:
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
-            # --- sns_fp ---
-            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec" or rep =="chemberta" or rep == "mhggnn":
+            # --- append feature vector for Python-computed reps ---
+            if rep in ("sns", "pdv", "continuous_pdv", "mol2vec", "chemberta", "mhggnn", "morgan"):
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)

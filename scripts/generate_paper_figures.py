@@ -325,6 +325,7 @@ REP_LABELS = {
     'pdv': 'PDV',
     'continuous_pdv': 'PDV (cont.)',
     'ecfp4': 'Topological',
+    'morgan': 'ECFP4',
     'sns': 'SNS',
     'smiles': 'SMILES',
     'randomized_smiles': 'R-SMILES',
@@ -453,6 +454,10 @@ def _white_text_for_missing(ax, pivot, annot_text):
 # DATA LOADING
 # =============================================================================
 
+STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+KNOWN_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero',
+                    'heteroscedastic', 'value_proportional'}
+
 def load_anova_data(results_dir):
     """Load all anova_*.csv files, deduplicating appended runs."""
     results_dir = Path(results_dir)
@@ -464,9 +469,15 @@ def load_anova_data(results_dir):
         try:
             df = pd.read_csv(f)
             # Parse filename: anova_{strategy}_{rep}_{model}.csv
-            parts = f.stem.split('_')
-            if len(parts) >= 4 and parts[0] == 'anova':
-                df['strategy'] = parts[1]
+            # Strategy may be multi-word (value_proportional) or full name (heteroscedastic)
+            rest = f.stem[len('anova_'):]
+            strategy = None
+            for s in sorted(KNOWN_STRATEGIES, key=len, reverse=True):
+                if rest.startswith(s + '_'):
+                    strategy = STRATEGY_NORMALIZE.get(s, s)
+                    break
+            if strategy:
+                df['strategy'] = strategy
             df['source_file'] = f.name
             all_data.append(df)
         except Exception as e:
@@ -528,7 +539,7 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
     Prints a summary and saves detailed gap report to CSV.
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
-    EXPECTED_REPS = {'ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec'}
+    EXPECTED_REPS = {'ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec', 'morgan'}
     EXPECTED_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero'}
 
     # Only audit ANOVA-included data
@@ -881,7 +892,7 @@ def _normalize_validation_names(df):
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
     }
     val_rep_map = {
-        'ECFP4': 'ecfp4', 'Topological': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
+        'ECFP4': 'morgan', 'Topological': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
         'SMILES': 'smiles',
     }
@@ -3714,7 +3725,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
-    rep_order = [r for r in ['ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
+    rep_order = [r for r in ['ecfp4', 'morgan', 'pdv', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
 
     if len(rep_order) >= 2:
         # Reindex to show all models
@@ -3815,7 +3826,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         axes = [axes]
 
     rep_markers = {'ecfp4': 'o', 'pdv': 's', 'continuous_pdv': 'P',
-                   'smiles': '^', 'mhggnn': 'v', 'mol2vec': 'D'}
+                   'smiles': '^', 'mhggnn': 'v', 'mol2vec': 'D', 'morgan': '<'}
 
     # First pass: collect all data to compute shared axes
     all_baseline_r2 = []
@@ -3880,7 +3891,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                               linestyle='None', markersize=6,
                               markeredgecolor='black', markeredgewidth=0.5,
                               label=REP_LABELS.get(r, r))
-                       for r in ['ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
+                       for r in ['ecfp4', 'morgan', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
 
         # Model color+marker legend — use MODEL_ORDER for grouping
