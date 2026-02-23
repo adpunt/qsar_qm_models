@@ -1177,14 +1177,16 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         plt.close()
         print("✓ Saved fig_validation_overview.png")
 
-    # --- Figure: Validation ANOVA (η² decomposition with Strategy factor) ---
-    # Use val_nds_df directly — it already has NDS per (dataset, model, rep, strategy).
-    has_strategy = 'strategy' in val_nds_df.columns and val_nds_df['strategy'].nunique() > 1
+    # --- Figure: Validation ANOVA (η² decomposition: Model × Rep, legacy strategy only) ---
+    # Filter to legacy strategy so the ANOVA mirrors the QM9 per-strategy design.
     if 'dataset' in val_nds_df.columns and 'model' in val_nds_df.columns and 'rep' in val_nds_df.columns:
         anova_results = {}
         for dataset in sorted(datasets):
             ds_nds = val_nds_df[val_nds_df['dataset'] == dataset].copy()
             ds_nds = ds_nds[~ds_nds['rep'].isin(ANOVA_REPS_EXCLUDE)]
+            # Use legacy strategy only — consistent with QM9 per-strategy ANOVA
+            if 'strategy' in ds_nds.columns:
+                ds_nds = ds_nds[ds_nds['strategy'] == 'legacy']
             ds_nds = ds_nds.dropna(subset=['nds'])
             if len(ds_nds) < 10:
                 continue
@@ -1202,13 +1204,6 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             rep_counts = ds_nds.groupby('rep').size()
             ss_rep = (rep_counts * (rep_means - grand_mean) ** 2).sum()
 
-            # Strategy as a factor (if available)
-            ss_strategy = 0
-            if has_strategy:
-                strat_means = ds_nds.groupby('strategy')['nds'].mean()
-                strat_counts = ds_nds.groupby('strategy').size()
-                ss_strategy = (strat_counts * (strat_means - grand_mean) ** 2).sum()
-
             interaction_means = ds_nds.groupby(['model', 'rep'])['nds'].mean()
             interaction_counts = ds_nds.groupby(['model', 'rep']).size()
             ss_interaction = 0
@@ -1222,16 +1217,11 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 'eta2_model': (ss_model / total_ss) * 100,
                 'eta2_rep': (ss_rep / total_ss) * 100,
                 'eta2_interaction': (ss_interaction / total_ss) * 100,
+                'eta2_residual': ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100,
                 'n_models': ds_nds['model'].nunique(),
                 'n_reps': ds_nds['rep'].nunique(),
                 'n': len(ds_nds),
             }
-            if has_strategy:
-                result['eta2_strategy'] = (ss_strategy / total_ss) * 100
-                result['eta2_residual'] = ((total_ss - ss_model - ss_rep - ss_strategy - ss_interaction) / total_ss) * 100
-                result['n_strategies'] = ds_nds['strategy'].nunique()
-            else:
-                result['eta2_residual'] = ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100
             anova_results[dataset] = result
 
         if anova_results:
@@ -1240,15 +1230,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             for i, (dataset, result) in enumerate(anova_results.items()):
                 ax = axes[i]
-                if has_strategy:
-                    factors = ['Model', 'Representation', 'Strategy', 'Interaction']
-                    values = [result['eta2_model'], result['eta2_rep'],
-                              result['eta2_strategy'], result['eta2_interaction']]
-                    colors = [ANOVA_FACTOR_COLORS[f] for f in factors]
-                else:
-                    factors = ['Model', 'Representation', 'Interaction']
-                    values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
-                    colors = [ANOVA_FACTOR_COLORS[f] for f in factors]
+                factors = ['Model', 'Representation', 'Interaction']
+                values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
+                colors = [ANOVA_FACTOR_COLORS[f] for f in factors]
                 ax.bar(factors, values, color=colors)
                 ax.set_ylabel('Variance Explained (η², %)')
                 ax.set_title(f'{dataset}', fontweight='bold')
@@ -1256,7 +1240,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
 
-            plt.suptitle('Validation: ANOVA Variance Decomposition (Robustness)', fontweight='bold', y=1.02)
+            plt.suptitle('Validation: ANOVA Variance Decomposition (Robustness, Gaussian)',
+                         fontweight='bold', y=1.02)
             plt.tight_layout()
             plt.savefig(output_dir / 'fig_validation_anova.png', dpi=300, bbox_inches='tight')
             plt.close()
@@ -1270,14 +1255,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                     'Model_η²': round(result['eta2_model'], 1),
                     'Rep_η²': round(result['eta2_rep'], 1),
                 }
-                if 'eta2_strategy' in result:
-                    row['Strategy_η²'] = round(result['eta2_strategy'], 1)
                 row['Interaction_η²'] = round(result['eta2_interaction'], 1)
                 row['Residual_η²'] = round(result['eta2_residual'], 1)
                 row['n_models'] = result['n_models']
                 row['n_reps'] = result['n_reps']
-                if 'n_strategies' in result:
-                    row['n_strategies'] = result['n_strategies']
                 row['n'] = result['n']
                 rows.append(row)
             pd.DataFrame(rows).to_csv(output_dir / 'table_validation_anova.csv', index=False)
