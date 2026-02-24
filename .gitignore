@@ -12,3 +12,4 @@ slurm_scripts_anova/
 slurm_scripts_uncertainty/
 scripts/test_runtime_scaling.sh
 paper.md
+paper.tex
