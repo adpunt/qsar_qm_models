@@ -784,11 +784,18 @@ def load_uncertainty_data(results_dir):
                 #   uncertainty_{strategy}_{rep}_{model}_uncertainty_values.csv
                 #   anova_{strategy}_{rep}_{model}_uncertainty_values.csv
                 if 'strategy' not in df.columns:
-                    parts = f.stem.replace('_uncertainty_values', '').split('_')
-                    if len(parts) >= 2 and parts[0] in ('uncertainty', 'anova'):
-                        candidate = parts[1]
-                        if candidate in VALID_STRATEGIES:
-                            df['strategy'] = STRATEGY_NORMALIZE.get(candidate, candidate)
+                    stem_clean = f.stem.replace('_uncertainty_values', '')
+                    prefix = None
+                    if stem_clean.startswith('uncertainty_'):
+                        prefix = 'uncertainty_'
+                    elif stem_clean.startswith('anova_'):
+                        prefix = 'anova_'
+                    if prefix:
+                        rest = stem_clean[len(prefix):]
+                        for s in sorted(VALID_STRATEGIES, key=len, reverse=True):
+                            if rest.startswith(s + '_'):
+                                df['strategy'] = STRATEGY_NORMALIZE.get(s, s)
+                                break
 
                 all_data.append(df)
             except Exception as e:
