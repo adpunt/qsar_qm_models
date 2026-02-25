@@ -57,7 +57,7 @@ Outputs:
 #        * Candidates: 'hetero', 'valprop', 'outlier'
 #
 #   3. PRIMARY_REP: Which representation for main figures?
-#      - Currently 'pdv' (physics-based descriptors)
+#      - Currently 'continuous_pdv' (continuous physics-based descriptors)
 #      - REVIEW: Does this generalize? Check SNS shows same pattern.
 #
 #   4. SUPPLEMENTARY_REP: Which rep for supplementary validation?
@@ -76,8 +76,8 @@ Outputs:
 # Primary choices (change these based on results)
 PRIMARY_STRATEGY = 'legacy'      # REVIEW: Main example strategy
 CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
-PRIMARY_REP = 'pdv'              # REVIEW: Main representation
-SUPPLEMENTARY_REP = 'ecfp4'      # RDKit topological fingerprint (path-based, NOT Morgan/ECFP circular)
+PRIMARY_REP = 'continuous_pdv'   # Continuous PDV (replaces binary PDV)
+SUPPLEMENTARY_REP = 'ecfp4'      # ECFP4 is more robust and representative of QSAR practice
 
 # All strategies for completeness checks
 ALL_STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
@@ -95,7 +95,7 @@ GENERATE_SUPPLEMENTARY = True
 #     comparison in Part 1 deep dives.
 #
 # Reps EXCLUDED from ANOVA:
-#   - sns: Spearman rho = 0.90 with topological FP across 14 models (both binary
+#   - sns: Spearman rho = 0.90 with ecfp4 across 14 models (both substructure
 #     fingerprints). Kept for supplementary per-rep analysis.
 #   - randomized_smiles: Incomplete data coverage across models.
 #
@@ -122,28 +122,12 @@ ANOVA_MODELS_EXCLUDE = {
 } | GLOBAL_MODELS_EXCLUDE
 
 ANOVA_REPS_EXCLUDE = {
-    'sns',                # Incomplete coverage + redundancy handled by resolve_rep_redundancy
+    'sns',                # Redundant with ecfp4 (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
+    'pdv',                # Replaced by continuous_pdv
+    'morgan',             # Redundant with ecfp4 (rho = 0.995)
 }
-
-# Redundancy groups: sets of reps that may be highly correlated.
-# Within each group, if pairwise Spearman rho > REP_REDUNDANCY_THRESHOLD,
-# the best performer (highest mean NDS) is kept and the rest are excluded.
-# 'preference' overrides performance for the pdv group (user prefers continuous).
-REP_REDUNDANCY_THRESHOLD = 0.85
-REP_REDUNDANCY_GROUPS = [
-    {
-        'name': 'fingerprints',
-        'members': ['morgan', 'ecfp4', 'sns'],
-        'preference': None,  # keep best performer
-    },
-    {
-        'name': 'pdv',
-        'members': ['pdv', 'continuous_pdv'],
-        'preference': 'continuous_pdv',  # always prefer continuous
-    },
-]
 
 import argparse
 import pandas as pd
@@ -340,96 +324,15 @@ MODEL_LABELS = {
 }
 
 REP_LABELS = {
-    'pdv': 'PDV',
-    'continuous_pdv': 'PDV (cont.)',
-    'ecfp4': 'Topological',
-    'morgan': 'ECFP4',
+    'pdv': 'PDV (binary)',
+    'continuous_pdv': 'PDV',
+    'ecfp4': 'ECFP4',
     'sns': 'SNS',
     'smiles': 'SMILES',
     'randomized_smiles': 'R-SMILES',
     'mhggnn': 'MHG-GNN',
     'mol2vec': 'Mol2Vec',
 }
-
-def resolve_rep_redundancy(nds_df):
-    """Data-driven ANOVA rep exclusion based on pairwise Spearman correlation.
-
-    For each REP_REDUNDANCY_GROUPS entry:
-    - Compute pairwise Spearman rho between members present in nds_df
-    - If any pair exceeds REP_REDUNDANCY_THRESHOLD, resolve the group:
-      - If 'preference' is set, keep that rep and exclude the rest
-      - Otherwise keep the best performer (highest mean NDS = least degradation)
-    - Adds excluded reps to ANOVA_REPS_EXCLUDE (global)
-
-    Returns set of newly excluded reps (for logging).
-    """
-    global ANOVA_REPS_EXCLUDE
-    newly_excluded = set()
-
-    # Mean NDS per rep (across all models and strategies)
-    mean_nds_per_rep = nds_df.groupby('rep')['nds'].mean()
-
-    for group in REP_REDUNDANCY_GROUPS:
-        name = group['name']
-        members = [m for m in group['members'] if m in nds_df['rep'].unique()]
-        preference = group['preference']
-
-        if len(members) < 2:
-            continue
-
-        # Build NDS profiles per rep: keyed by (model, strategy)
-        profiles = {}
-        for rep in members:
-            rdata = nds_df[nds_df['rep'] == rep]
-            profile = {}
-            for _, row in rdata.iterrows():
-                key = (row['model'], row.get('strategy', 'legacy'))
-                profile[key] = row['nds']
-            profiles[rep] = profile
-
-        # Check all pairwise correlations
-        correlated_pairs = []
-        for i, r1 in enumerate(members):
-            for r2 in members[i+1:]:
-                shared = sorted(set(profiles[r1].keys()) & set(profiles[r2].keys()))
-                if len(shared) < 5:
-                    continue
-                v1 = [profiles[r1][k] for k in shared]
-                v2 = [profiles[r2][k] for k in shared]
-                rho, _ = stats.spearmanr(v1, v2)
-                print(f"  Rep redundancy: {r1} vs {r2}: rho={rho:.3f} (n={len(shared)})")
-                if rho > REP_REDUNDANCY_THRESHOLD:
-                    correlated_pairs.append((r1, r2, rho))
-
-        if not correlated_pairs:
-            print(f"  Group '{name}': no pairs exceed threshold ({REP_REDUNDANCY_THRESHOLD})")
-            continue
-
-        # All members involved in any correlated pair
-        correlated_members = set()
-        for r1, r2, _ in correlated_pairs:
-            correlated_members.add(r1)
-            correlated_members.add(r2)
-
-        if preference and preference in correlated_members:
-            # User preference: keep preferred, exclude others
-            to_exclude = correlated_members - {preference}
-            print(f"  Group '{name}': keeping '{preference}' (user preference), "
-                  f"excluding {sorted(to_exclude)}")
-        else:
-            # Keep best performer (highest mean NDS = least negative)
-            perf = {r: mean_nds_per_rep.get(r, float('-inf')) for r in correlated_members}
-            best = max(perf, key=perf.get)
-            to_exclude = correlated_members - {best}
-            perf_str = ', '.join(f"{r}={perf[r]:.4f}" for r in sorted(correlated_members))
-            print(f"  Group '{name}': keeping '{best}' (best NDS), "
-                  f"excluding {sorted(to_exclude)} [{perf_str}]")
-
-        ANOVA_REPS_EXCLUDE |= to_exclude
-        newly_excluded |= to_exclude
-
-    return newly_excluded
-
 
 def get_model_label(model):
     """Get clean display label for model."""
@@ -552,10 +455,6 @@ def _white_text_for_missing(ax, pivot, annot_text):
 # DATA LOADING
 # =============================================================================
 
-STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
-KNOWN_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero',
-                    'heteroscedastic', 'value_proportional'}
-
 def load_anova_data(results_dir):
     """Load all anova_*.csv files, deduplicating appended runs."""
     results_dir = Path(results_dir)
@@ -567,15 +466,9 @@ def load_anova_data(results_dir):
         try:
             df = pd.read_csv(f)
             # Parse filename: anova_{strategy}_{rep}_{model}.csv
-            # Strategy may be multi-word (value_proportional) or full name (heteroscedastic)
-            rest = f.stem[len('anova_'):]
-            strategy = None
-            for s in sorted(KNOWN_STRATEGIES, key=len, reverse=True):
-                if rest.startswith(s + '_'):
-                    strategy = STRATEGY_NORMALIZE.get(s, s)
-                    break
-            if strategy:
-                df['strategy'] = strategy
+            parts = f.stem.split('_')
+            if len(parts) >= 4 and parts[0] == 'anova':
+                df['strategy'] = parts[1]
             df['source_file'] = f.name
             all_data.append(df)
         except Exception as e:
@@ -637,7 +530,7 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
     Prints a summary and saves detailed gap report to CSV.
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
-    EXPECTED_REPS = {'ecfp4', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec', 'morgan'}
+    EXPECTED_REPS = {'ecfp4', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec'}
     EXPECTED_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero'}
 
     # Only audit ANOVA-included data
@@ -997,7 +890,7 @@ def _normalize_validation_names(df):
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
     }
     val_rep_map = {
-        'ECFP4': 'morgan', 'Topological': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
+        'ECFP4': 'ecfp4', 'PDV': 'continuous_pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
         'SMILES': 'smiles',
     }
@@ -1806,7 +1699,7 @@ def calculate_coverage(y_true, y_pred, uncertainty, k=1):
     return np.mean(within_interval)
 
 
-def wilcoxon_paired_test(nds_df, model_base, model_variant, rep='pdv', strategy='legacy'):
+def wilcoxon_paired_test(nds_df, model_base, model_variant, rep=None, strategy='legacy'):
     """
     Wilcoxon signed-rank test for paired model comparison.
 
@@ -1817,6 +1710,8 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep='pdv', strategy=
     Returns:
         dict with statistic, p_value, and interpretation
     """
+    if rep is None:
+        rep = PRIMARY_REP
     # Pair across all shared conditions (rep × strategy) for sufficient n
     base_data = nds_df[nds_df['model'] == model_base]
     var_data = nds_df[nds_df['model'] == model_variant]
@@ -1851,7 +1746,7 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep='pdv', strategy=
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': n, 'error': str(e)}
 
 
-def calculate_kendalls_w(nds_df, rep='pdv'):
+def calculate_kendalls_w(nds_df, rep=None):
     """
     Calculate Kendall's W (coefficient of concordance) for ranking consistency.
 
@@ -1866,6 +1761,8 @@ def calculate_kendalls_w(nds_df, rep='pdv'):
         dict with W statistic, p_value, and interpretation
     """
     # Filter to single representation
+    if rep is None:
+        rep = PRIMARY_REP
     df = nds_df[nds_df['rep'] == rep] if 'rep' in nds_df.columns else nds_df
 
     if len(df) == 0:
@@ -2587,7 +2484,7 @@ def create_figure1(df, nds_df, output_dir):
     ax_a = fig.add_subplot(gs[0])
 
     key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost']
-    pdv_data = df[(df['rep'] == 'pdv') & (df['strategy'] == 'legacy')]
+    pdv_data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == 'legacy')]
 
     # Plot key models only (no grey background lines)
 
@@ -2614,7 +2511,7 @@ def create_figure1(df, nds_df, output_dir):
 
     if len(nds_df) > 0:
         # Filter to PDV only - don't mix representations
-        nds_pdv = nds_df[nds_df['rep'] == 'pdv']
+        nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP]
         if len(nds_pdv) == 0:
             # Fallback to most common rep
             nds_pdv = nds_df
@@ -2628,7 +2525,7 @@ def create_figure1(df, nds_df, output_dir):
 
         # Create annotations distinguishing missing vs filtered
         annot_text = make_heatmap_annotations(pivot, df, 'model', 'strategy',
-                                               rep_filter='pdv', fmt='.2f')
+                                               rep_filter=PRIMARY_REP, fmt='.2f')
 
         # Rename index/columns to clean labels
         pivot.index = [get_model_label(m) for m in pivot.index]
@@ -2672,7 +2569,7 @@ def create_figure1(df, nds_df, output_dir):
 
     ax_ea.set_xlabel('Noise Level (σ)')
     ax_ea.set_ylabel('R²')
-    ax_ea.set_title('A. Performance Degradation (Topological FP, Gaussian Noise)', fontweight='bold')
+    ax_ea.set_title('A. Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
     ax_ea.legend(loc='lower left', ncol=2)
     ax_ea.set_ylim(-0.1, 1.0)
     ax_ea.spines['top'].set_visible(False)
@@ -2703,7 +2600,7 @@ def create_figure1(df, nds_df, output_dir):
             _white_text_for_missing(ax_eb, pivot, annot_text)
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
-            ax_eb.set_title('B. NDS by Model × Strategy (Topological FP)', fontweight='bold')
+            ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_supp_ecfp4_overview.png', dpi=300, bbox_inches='tight')
@@ -2829,7 +2726,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     fig, axes = plt.subplots(1, 2, figsize=(11, 6))
 
     # Filter to PDV only for consistent comparison (don't mix representations)
-    nds_pdv = nds_df[nds_df['rep'] == 'pdv'] if 'rep' in nds_df.columns else nds_df
+    nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
 
     # Panel A: Heatmap - NDS by model × strategy (PDV only, ANOVA models)
     ax_a = axes[0]
@@ -2912,7 +2809,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
             sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
                         ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             _white_text_for_missing(ax_ea, pivot, annot_text)
-            ax_ea.set_title('A. NDS by Model × Strategy (Topological FP)', fontweight='bold')
+            ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
             ax_ea.set_ylabel('')
 
         # Baseline vs NDS scatter (with model-specific markers)
@@ -2929,7 +2826,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
         ax_eb.margins(x=0.08, y=0.08)
         ax_eb.set_xlabel('Baseline R² (σ=0)')
         ax_eb.set_ylabel('NDS (slope)')
-        ax_eb.set_title('B. Baseline vs Robustness (Topological FP, Gaussian)', fontweight='bold')
+        ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
         ax_eb.axhline(0, color='black', linewidth=0.5)
         ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
                      borderaxespad=0, frameon=False, columnspacing=1.0,
@@ -3285,7 +3182,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
     # Filter to ANOVA-included models for main table
     nds_anova_tbl = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
     if len(nds_anova_tbl) > 0:
-        nds_pdv = nds_anova_tbl[nds_anova_tbl['rep'] == 'pdv'] if 'rep' in nds_anova_tbl.columns else nds_anova_tbl
+        nds_pdv = nds_anova_tbl[nds_anova_tbl['rep'] == PRIMARY_REP] if 'rep' in nds_anova_tbl.columns else nds_anova_tbl
 
         if len(nds_pdv) > 0:
             pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
@@ -3331,7 +3228,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
     }
 
     # Filter to PDV + legacy for fair comparison
-    nds_fair = nds_df[(nds_df['rep'] == 'pdv') & (nds_df['strategy'] == 'legacy')] if 'rep' in nds_df.columns else nds_df
+    nds_fair = nds_df[(nds_df['rep'] == PRIMARY_REP) & (nds_df['strategy'] == 'legacy')] if 'rep' in nds_df.columns else nds_df
 
     rows = []
     wilcoxon_results = []
@@ -3355,7 +3252,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
             var_data = nds_fair[nds_fair['model'] == variant]
             if len(var_data) > 0:
                 # Run Wilcoxon test comparing to base
-                wilcox = wilcoxon_paired_test(nds_df, base_model, variant, rep='pdv', strategy='legacy')
+                wilcox = wilcoxon_paired_test(nds_df, base_model, variant, rep=PRIMARY_REP, strategy='legacy')
                 wilcoxon_results.append({
                     'Family': family,
                     'Comparison': f'{base_model} vs {variant}',
@@ -3669,7 +3566,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
     # Uses PDV + legacy only
     if qm9_df is not None and len(qm9_df) > 0:
         # Filter to PDV + legacy
-        pdv_legacy = qm9_df[(qm9_df['strategy'] == 'legacy') & (qm9_df['rep'] == 'pdv')] if 'strategy' in qm9_df.columns else qm9_df
+        pdv_legacy = qm9_df[(qm9_df['strategy'] == 'legacy') & (qm9_df['rep'] == PRIMARY_REP)] if 'strategy' in qm9_df.columns else qm9_df
 
         sigma_levels = [0.0, 0.3, 0.5, 0.7, 1.0]
         rank_data = {}
@@ -3808,7 +3705,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     """Visualize the model x representation interaction effect.
 
     Panel A: Heatmap — NDS by model × representation (Gaussian strategy).
-    Panel B: Scatter — NDS on topological FP vs NDS on PDV per model.
+    Panel B: Scatter — NDS on ECFP4 vs NDS on PDV per model.
 
     BNN variants use different marker shapes but same color as base model.
     """
@@ -3830,7 +3727,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
-    rep_order = [r for r in ['ecfp4', 'morgan', 'pdv', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
+    rep_order = [r for r in ['ecfp4', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
 
     if len(rep_order) >= 2:
         # Reindex to show all models
@@ -3853,11 +3750,11 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
 
-    # Panel B: Scatter — NDS on topological FP vs NDS on PDV, with legend (not annotations)
+    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
     ax_b = axes[1]
 
     ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['nds'].mean()
-    pdv_nds = nds_legacy[nds_legacy['rep'] == 'pdv'].groupby('model')['nds'].mean()
+    pdv_nds = nds_legacy[nds_legacy['rep'] == 'continuous_pdv'].groupby('model')['nds'].mean()
 
     shared_models_set = set(ecfp4_nds.index) & set(pdv_nds.index)
     # Use MODEL_ORDER for consistent legend ordering
@@ -3890,9 +3787,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         ax_b.legend(loc='upper left', bbox_to_anchor=(1.02, 1.0), fontsize=6,
                     borderaxespad=0, frameon=True, fancybox=False)
 
-    ax_b.set_xlabel('NDS on Topological FP (Gaussian)')
+    ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. Topological FP vs PDV Robustness', fontweight='bold')
+    ax_b.set_title('B. ECFP4 vs PDV (cont.) Robustness', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -3930,8 +3827,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
     if n_panels == 1:
         axes = [axes]
 
-    rep_markers = {'ecfp4': 'o', 'pdv': 's', 'continuous_pdv': 'P',
-                   'smiles': '^', 'mhggnn': 'v', 'mol2vec': 'D', 'morgan': '<'}
+    rep_markers = {'ecfp4': 'o', 'continuous_pdv': 's', 'pdv': 's', 'smiles': '^',
+                   'mhggnn': 'v', 'mol2vec': 'D'}
 
     # First pass: collect all data to compute shared axes
     all_baseline_r2 = []
@@ -3996,7 +3893,7 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                               linestyle='None', markersize=6,
                               markeredgecolor='black', markeredgewidth=0.5,
                               label=REP_LABELS.get(r, r))
-                       for r in ['ecfp4', 'morgan', 'pdv', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
+                       for r in ['ecfp4', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
                        if r in last_mean_nds['rep'].unique()]
 
         # Model color+marker legend — use MODEL_ORDER for grouping
@@ -4111,7 +4008,7 @@ def generate_report(nds_df, excluded_df, output_dir):
         lines.append("=" * 80)
 
         # Filter to PDV + legacy for consistent reporting
-        nds_pdv_legacy = nds_df[(nds_df['rep'] == 'pdv') & (nds_df['strategy'] == 'legacy')]
+        nds_pdv_legacy = nds_df[(nds_df['rep'] == PRIMARY_REP) & (nds_df['strategy'] == 'legacy')]
         if len(nds_pdv_legacy) == 0:
             nds_pdv_legacy = nds_df  # Fallback
 
@@ -4272,14 +4169,6 @@ def main():
         n_marginal = excluded_df['marginal'].sum()
         print(f"    Marginal (0.5 <= R² < {BASELINE_THRESHOLD}): {n_marginal}")
         print(f"    Clearly excluded (R² < 0.5): {len(excluded_df) - n_marginal}")
-
-    # Resolve rep redundancy — data-driven ANOVA exclusion
-    print("\n  --- Rep redundancy resolution ---")
-    newly_excluded = resolve_rep_redundancy(nds_df)
-    if newly_excluded:
-        print(f"  Updated ANOVA_REPS_EXCLUDE: {sorted(ANOVA_REPS_EXCLUDE)}")
-    else:
-        print(f"  No additional reps excluded. ANOVA_REPS_EXCLUDE: {sorted(ANOVA_REPS_EXCLUDE)}")
 
     # Generate figures
     print("\n[3/3] Generating figures...")
