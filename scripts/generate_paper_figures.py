@@ -122,10 +122,28 @@ ANOVA_MODELS_EXCLUDE = {
 } | GLOBAL_MODELS_EXCLUDE
 
 ANOVA_REPS_EXCLUDE = {
-    'sns',                # Redundant with topological FP (rho = 0.90)
+    'sns',                # Incomplete coverage + redundancy handled by resolve_rep_redundancy
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
 }
+
+# Redundancy groups: sets of reps that may be highly correlated.
+# Within each group, if pairwise Spearman rho > REP_REDUNDANCY_THRESHOLD,
+# the best performer (highest mean NDS) is kept and the rest are excluded.
+# 'preference' overrides performance for the pdv group (user prefers continuous).
+REP_REDUNDANCY_THRESHOLD = 0.85
+REP_REDUNDANCY_GROUPS = [
+    {
+        'name': 'fingerprints',
+        'members': ['morgan', 'ecfp4', 'sns'],
+        'preference': None,  # keep best performer
+    },
+    {
+        'name': 'pdv',
+        'members': ['pdv', 'continuous_pdv'],
+        'preference': 'continuous_pdv',  # always prefer continuous
+    },
+]
 
 import argparse
 import pandas as pd
@@ -332,6 +350,86 @@ REP_LABELS = {
     'mhggnn': 'MHG-GNN',
     'mol2vec': 'Mol2Vec',
 }
+
+def resolve_rep_redundancy(nds_df):
+    """Data-driven ANOVA rep exclusion based on pairwise Spearman correlation.
+
+    For each REP_REDUNDANCY_GROUPS entry:
+    - Compute pairwise Spearman rho between members present in nds_df
+    - If any pair exceeds REP_REDUNDANCY_THRESHOLD, resolve the group:
+      - If 'preference' is set, keep that rep and exclude the rest
+      - Otherwise keep the best performer (highest mean NDS = least degradation)
+    - Adds excluded reps to ANOVA_REPS_EXCLUDE (global)
+
+    Returns set of newly excluded reps (for logging).
+    """
+    global ANOVA_REPS_EXCLUDE
+    newly_excluded = set()
+
+    # Mean NDS per rep (across all models and strategies)
+    mean_nds_per_rep = nds_df.groupby('rep')['nds'].mean()
+
+    for group in REP_REDUNDANCY_GROUPS:
+        name = group['name']
+        members = [m for m in group['members'] if m in nds_df['rep'].unique()]
+        preference = group['preference']
+
+        if len(members) < 2:
+            continue
+
+        # Build NDS profiles per rep: keyed by (model, strategy)
+        profiles = {}
+        for rep in members:
+            rdata = nds_df[nds_df['rep'] == rep]
+            profile = {}
+            for _, row in rdata.iterrows():
+                key = (row['model'], row.get('strategy', 'legacy'))
+                profile[key] = row['nds']
+            profiles[rep] = profile
+
+        # Check all pairwise correlations
+        correlated_pairs = []
+        for i, r1 in enumerate(members):
+            for r2 in members[i+1:]:
+                shared = sorted(set(profiles[r1].keys()) & set(profiles[r2].keys()))
+                if len(shared) < 5:
+                    continue
+                v1 = [profiles[r1][k] for k in shared]
+                v2 = [profiles[r2][k] for k in shared]
+                rho, _ = stats.spearmanr(v1, v2)
+                print(f"  Rep redundancy: {r1} vs {r2}: rho={rho:.3f} (n={len(shared)})")
+                if rho > REP_REDUNDANCY_THRESHOLD:
+                    correlated_pairs.append((r1, r2, rho))
+
+        if not correlated_pairs:
+            print(f"  Group '{name}': no pairs exceed threshold ({REP_REDUNDANCY_THRESHOLD})")
+            continue
+
+        # All members involved in any correlated pair
+        correlated_members = set()
+        for r1, r2, _ in correlated_pairs:
+            correlated_members.add(r1)
+            correlated_members.add(r2)
+
+        if preference and preference in correlated_members:
+            # User preference: keep preferred, exclude others
+            to_exclude = correlated_members - {preference}
+            print(f"  Group '{name}': keeping '{preference}' (user preference), "
+                  f"excluding {sorted(to_exclude)}")
+        else:
+            # Keep best performer (highest mean NDS = least negative)
+            perf = {r: mean_nds_per_rep.get(r, float('-inf')) for r in correlated_members}
+            best = max(perf, key=perf.get)
+            to_exclude = correlated_members - {best}
+            perf_str = ', '.join(f"{r}={perf[r]:.4f}" for r in sorted(correlated_members))
+            print(f"  Group '{name}': keeping '{best}' (best NDS), "
+                  f"excluding {sorted(to_exclude)} [{perf_str}]")
+
+        ANOVA_REPS_EXCLUDE |= to_exclude
+        newly_excluded |= to_exclude
+
+    return newly_excluded
+
 
 def get_model_label(model):
     """Get clean display label for model."""
@@ -4174,6 +4272,14 @@ def main():
         n_marginal = excluded_df['marginal'].sum()
         print(f"    Marginal (0.5 <= R² < {BASELINE_THRESHOLD}): {n_marginal}")
         print(f"    Clearly excluded (R² < 0.5): {len(excluded_df) - n_marginal}")
+
+    # Resolve rep redundancy — data-driven ANOVA exclusion
+    print("\n  --- Rep redundancy resolution ---")
+    newly_excluded = resolve_rep_redundancy(nds_df)
+    if newly_excluded:
+        print(f"  Updated ANOVA_REPS_EXCLUDE: {sorted(ANOVA_REPS_EXCLUDE)}")
+    else:
+        print(f"  No additional reps excluded. ANOVA_REPS_EXCLUDE: {sorted(ANOVA_REPS_EXCLUDE)}")
 
     # Generate figures
     print("\n[3/3] Generating figures...")
