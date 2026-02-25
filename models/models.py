@@ -2258,7 +2258,9 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
     save_results(args.filepath, s, iteration, 'mlp_bnn_last', rep, args.sample_size, 
                  metrics, 'default', 'mse')
     
-    if args.uncertainty:
+    # Always Bayesian (dedicated BNN Last function), consistent with train_dnn_model/train_mlp_model
+    is_bayesian = True
+    if args.uncertainty and is_bayesian:
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=y_pred_std,
@@ -2273,7 +2275,7 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
             y_pred_std_calibrated=y_pred_std,
             temperature=1.0
         )
-    
+
     return metrics[3]
 
 def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
