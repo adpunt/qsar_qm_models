@@ -460,15 +460,29 @@ def load_anova_data(results_dir):
     results_dir = Path(results_dir)
     all_data = []
 
+    # Valid strategy names for filename parsing (same as uncertainty loader)
+    VALID_STRATEGIES = {
+        'legacy', 'outlier', 'quantile', 'threshold', 'hetero', 'valprop',
+        'heteroscedastic', 'value_proportional',
+    }
+    STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+
     for f in results_dir.glob("anova_*.csv"):
         if '_uncertainty_values' in f.name:
             continue
         try:
             df = pd.read_csv(f)
             # Parse filename: anova_{strategy}_{rep}_{model}.csv
-            parts = f.stem.split('_')
-            if len(parts) >= 4 and parts[0] == 'anova':
-                df['strategy'] = parts[1]
+            # Use longest-prefix matching to handle multi-word strategies
+            # (e.g., value_proportional, heteroscedastic)
+            rest = f.stem[len('anova_'):]
+            strategy = None
+            for s in sorted(VALID_STRATEGIES, key=len, reverse=True):
+                if rest.startswith(s + '_'):
+                    strategy = STRATEGY_NORMALIZE.get(s, s)
+                    break
+            if strategy:
+                df['strategy'] = strategy
             df['source_file'] = f.name
             all_data.append(df)
         except Exception as e:
