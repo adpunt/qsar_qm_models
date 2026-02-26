@@ -236,6 +236,7 @@ def parse_arguments():
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed (default is 42)")
     parser.add_argument("-n", "--sample-size", type=int, default=10000, help="Sample size per iteration (default is 10000)")
     parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
+    parser.add_argument("--start-iteration", type=int, default=0, help="Starting iteration index (for splitting bootstrapping across parallel jobs)")
     parser.add_argument("--sigma", nargs='*', default=[0.0], help="Standard deviation(s) of artificially added Gaussian noise (default is None)")
     parser.add_argument("--distribution", type=str, default='gaussian', help="Distribution of artificial noise (default is Gaussian)")
     parser.add_argument("--tuning", type=str2bool, default=False, help="Hyperparameter tuning (default is False)")
@@ -1850,7 +1851,7 @@ def main():
         s = float(s)
         print(f"Sigma: {s}")
 
-        for iteration in range(args.bootstrapping):
+        for iteration in range(args.start_iteration, args.start_iteration + args.bootstrapping):
             # Set seeds
             iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
             random.seed(iteration_seed)
