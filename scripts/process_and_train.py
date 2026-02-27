@@ -382,8 +382,8 @@ def write_to_mmap(
 
     if "continuous_pdv" in molecular_representations:
         if continuous_pdv is not None:
-            continuous_pdv_fp16 = continuous_pdv.astype(np.float16)
-            entry += continuous_pdv_fp16.tobytes()
+            continuous_pdv_fp32 = continuous_pdv.astype(np.float32)
+            entry += continuous_pdv_fp32.tobytes()
         else:
             return
 
@@ -1122,9 +1122,9 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             # --- continuous pdv ---
             continuous_pdv = None
             if "continuous_pdv" in molecular_representations:
-                continuous_pdv_bytes = mmap_file.read(400)
+                continuous_pdv_bytes = mmap_file.read(800)
                 if "continuous_pdv" == rep:
-                    continuous_pdv = np.frombuffer(continuous_pdv_bytes, dtype=np.float16)
+                    continuous_pdv = np.frombuffer(continuous_pdv_bytes, dtype=np.float32)
                     feature_vector.append(continuous_pdv)
                     if logging: 
                         print(f"continuous_pdv: {continuous_pdv}")
@@ -1227,7 +1227,10 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             continue
 
     if rep != "graph":
-        x_data = np.vstack(x_data).astype(np.uint8)
+        if rep == "continuous_pdv":
+            x_data = np.vstack(x_data).astype(np.float32)
+        else:
+            x_data = np.vstack(x_data).astype(np.uint8)
     y_data = np.array(y_data, dtype=np.float32)
     y_data_original = np.array(y_data_original, dtype=np.float32)
 
@@ -1792,6 +1795,18 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                                     args.molecular_representations, args.k_domains, s, args.logging
                                 )
                             # ========== END MODIFIED ==========
+
+                            # Z-score X normalization for continuous_pdv (matches investigation)
+                            if rep == "continuous_pdv":
+                                x_mean = np.nanmean(x_train, axis=0)
+                                x_std = np.nanstd(x_train, axis=0)
+                                x_std[x_std == 0] = 1.0
+                                x_train = ((x_train - x_mean) / x_std).astype(np.float32)
+                                x_test = ((x_test - x_mean) / x_std).astype(np.float32)
+                                x_val = ((x_val - x_mean) / x_std).astype(np.float32)
+                                x_train = np.nan_to_num(x_train, 0.0)
+                                x_test = np.nan_to_num(x_test, 0.0)
+                                x_val = np.nan_to_num(x_val, 0.0)
 
                             print(f"model: {model}")
                             print(f"rep: {rep}")

@@ -68,7 +68,7 @@ struct SmilesData {
     target_value: f32,
     sns_buf: [u8; 128],
     pdv_buf: [u8; 25],
-    continuous_pdv_buf: [u8; 400],
+    continuous_pdv_buf: [u8; 800],
     mol2vec_buf: [u8; 300],
     chemberta_buf: [u8; 768],
     mhggnn_buf: [u8; 1024],
@@ -566,9 +566,9 @@ fn read_smiles_data(
         reader.read_exact(&mut pdv_buf).ok()?; 
     }
 
-    let mut continuous_pdv_buf = [0u8; 400];
+    let mut continuous_pdv_buf = [0u8; 800];
     if molecular_representations.contains(&"continuous_pdv".to_string()) {
-        reader.read_exact(&mut continuous_pdv_buf).ok()?; 
+        reader.read_exact(&mut continuous_pdv_buf).ok()?;
     }
 
     let mut mol2vec_buf = [0u8; 300];
@@ -693,7 +693,7 @@ fn write_data(
                 }
             }
 
-            // continuous_pdv (400 bytes)
+            // continuous_pdv (800 bytes, float32)
             if config.molecular_representations.contains(&"continuous_pdv".to_string()) {
                 let continuous_pdv = smiles_data.continuous_pdv_buf;
                 writer.write_all(&continuous_pdv)?;
