@@ -244,6 +244,8 @@ def main():
     parser.add_argument('--reps', nargs='+',
                         default=['ecfp4', 'sns', 'smiles', 'randomized_smiles'],
                         help='Representations to tune')
+    parser.add_argument('--output-suffix', type=str, default='',
+                        help='Suffix for output filename (e.g. "_5k_ecfp4")')
     args = parser.parse_args()
 
     print(f"Loading QM9 (target=homo_lumo_gap, n={args.n_samples})...")
@@ -351,7 +353,7 @@ def main():
     # Save results
     out_dir = os.path.join(os.path.dirname(__file__), 'pdv_investigation')
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, 'svm_tuning_results.json')
+    out_path = os.path.join(out_dir, f'svm_tuning_results{args.output_suffix}.json')
     with open(out_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"\n{'='*70}")
