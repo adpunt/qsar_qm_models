@@ -36,34 +36,60 @@ RDLogger.DisableLog('rdApp.*')
 warnings.filterwarnings('ignore')
 
 
-# ── Data loading ──
+# ── Data loading (matches investigate_pdv.py exactly) ──
+
+QM9_RAW_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'data', 'QM9', 'raw')
+QM9_TARGET_COLS = {
+    'homo_lumo_gap': 'gap',
+    'alpha': 'alpha',
+    'mu': 'mu',
+}
 
 def load_qm9_data(target_name, n_samples, seed):
-    """Load QM9 data, return (smiles_list, targets)."""
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'QM9', 'qm9.csv')
-    if not os.path.exists(csv_path):
-        csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'qm9.csv')
-
+    """Load QM9 from raw CSV + SDF, filtering uncharacterized molecules."""
     import pandas as pd
+
+    csv_path = os.path.join(QM9_RAW_DIR, 'gdb9.sdf.csv')
     df = pd.read_csv(csv_path)
-    print(f"  CSV loaded: {len(df)} molecules")
+    target_col = QM9_TARGET_COLS[target_name]
+    print(f"  CSV loaded: {len(df)} molecules, target column: '{target_col}'")
 
-    target_col = 'gap' if target_name == 'homo_lumo_gap' else target_name
-    if 'is_uncharacterized' in df.columns:
-        n_before = len(df)
-        df = df[df['is_uncharacterized'] == False]
-        print(f"  Excluding {n_before - len(df)} uncharacterized molecules")
+    # Read uncharacterized indices to exclude
+    unchar_path = os.path.join(QM9_RAW_DIR, 'uncharacterized.txt')
+    exclude_indices = set()
+    with open(unchar_path) as f:
+        for line in f.readlines()[4:]:
+            parts = line.strip().split()
+            if parts and parts[0].isdigit():
+                exclude_indices.add(int(parts[0]))
+    print(f"  Excluding {len(exclude_indices)} uncharacterized molecules")
 
-    df = df.dropna(subset=[target_col])
-    print(f"  Valid molecules: {len(df)}")
+    # Get SMILES from SDF
+    sdf_path = os.path.join(QM9_RAW_DIR, 'gdb9.sdf')
+    supplier = Chem.SDMolSupplier(sdf_path, removeHs=True)
 
+    smiles_all = []
+    targets_all = []
+    for i, mol in enumerate(supplier):
+        mol_idx = i + 1  # gdb9 is 1-indexed
+        if mol_idx in exclude_indices:
+            continue
+        if mol is None:
+            continue
+        smi = Chem.MolToSmiles(mol, isomericSmiles=False)
+        if smi and i < len(df):
+            smiles_all.append(smi)
+            targets_all.append(df[target_col].iloc[i])
+
+    print(f"  Valid molecules: {len(smiles_all)}")
+
+    # Shuffle and sample
     rng = np.random.RandomState(seed)
-    idx = rng.choice(len(df), size=min(n_samples, len(df)), replace=False)
-    df = df.iloc[idx].reset_index(drop=True)
-    print(f"  Sampled {len(df)} molecules")
+    indices = rng.permutation(len(smiles_all))[:n_samples]
+    smiles_list = [smiles_all[i] for i in indices]
+    targets = np.array([targets_all[i] for i in indices])
+    print(f"  Sampled {len(smiles_list)} molecules")
 
-    smiles_list = df['smiles'].tolist()
-    targets = df[target_col].values.astype(np.float64)
     return smiles_list, targets
 
 
