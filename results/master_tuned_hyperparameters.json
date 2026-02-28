@@ -317,7 +317,7 @@
   },
   "svm": {
     "ecfp4": {
-      "C": 2.1978452259081998,
+      "C": 1.4216684547891825,
       "gamma": "scale",
       "kernel": "rbf"
     },
@@ -329,19 +329,25 @@
       "coef0": 1.9112915300900768
     },
     "sns": {
-      "C": 2.439103612811617,
+      "C": 1.083821849852903,
       "gamma": "scale",
-      "kernel": "rbf"
+      "kernel": "poly",
+      "degree": 2,
+      "coef0": 2.7125623408534185
     },
     "smiles": {
-      "C": 91.0088413711091,
-      "gamma": "auto",
-      "kernel": "rbf"
+      "C": 0.6704916599016698,
+      "gamma": "scale",
+      "kernel": "poly",
+      "degree": 3,
+      "coef0": 1.2464869137718948
     },
     "randomized_smiles": {
-      "C": 95.75613349985572,
-      "gamma": "scale",
-      "kernel": "rbf"
+      "C": 11.39034244774985,
+      "gamma": "auto",
+      "kernel": "poly",
+      "degree": 4,
+      "coef0": 2.9959799552752573
     }
   },
   "qrf": {
