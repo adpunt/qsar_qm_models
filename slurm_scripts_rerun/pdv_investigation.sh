@@ -19,3 +19,7 @@ cd scripts
 
 echo "=== PDV Binarization Investigation (default hyperparameters, 11 sigma levels) ==="
 python investigate_pdv.py --n-samples 10000 --n-iterations 5 --seed 42
+
+echo ""
+echo "=== Model Comparison v4: RF/XGB/SVM/BNN/VBLL/Gauche(Tanimoto+RBF) ==="
+python investigate_pdv.py --n-samples 10000 --seed 42 --skip-rf --skip-analysis --model-comparison

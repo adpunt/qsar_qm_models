@@ -119,6 +119,7 @@ GLOBAL_MODELS_EXCLUDE = {
 ANOVA_MODELS_EXCLUDE = {
     'qrf',  # Redundant with rf (rho = 0.996)
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # DNN architecture variants (mid-pack, don't answer research questions)
+    'gauche',  # Tanimoto kernel incompatible with continuous PDV (non-binary features)
 } | GLOBAL_MODELS_EXCLUDE
 
 ANOVA_REPS_EXCLUDE = {
