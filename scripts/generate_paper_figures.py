@@ -10,8 +10,7 @@ PART 1: THE WHAT
   Figure 3: Ranking Consistency (heatmaps, cross-dataset)
 
 PART 2: THE WHY
-  Figure 4: DNN Family Comparison (DNN vs BNN variants) — CSV table + R² vs σ plot
-  Figure 5: MLP Family + RF/QRF Comparison — CSV table + R² vs σ plot
+  Figure: NN Family Comparison (DNN, MLP, RF families) — 1×3 panel + NDS CSV
   Figure: Uncertainty Tracks Noise (single-panel: mean uncertainty vs σ)
 
 Calibration (ECE, coverage), unc-error/unc-noise correlations, and
@@ -24,9 +23,10 @@ Outputs:
     fig1_global_overview.png
     fig2_anova_decomposition.png
     fig3_ranking_consistency.png
-    fig4_dnn_family.png / .csv
-    fig5_mlp_rf_comparison.png / .csv
+    fig_nn_family_comparison.png / table_nn_family_nds.csv
     fig_uncertainty_combined.png
+    fig_full_overview_all_strategies.png
+    fig_validation_combined.png
     table1_anova_summary.csv
     table1_supp_simple_effects.csv
     table1_supp_simple_effects_all_reps.csv
@@ -76,7 +76,7 @@ Outputs:
 # Primary choices (change these based on results)
 PRIMARY_STRATEGY = 'legacy'      # REVIEW: Main example strategy
 CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
-PRIMARY_REP = 'continuous_pdv'   # Continuous PDV (replaces binary PDV)
+PRIMARY_REP = 'continuous_pdv'   # Continuous physicochemical descriptors
 SUPPLEMENTARY_REP = 'ecfp4'      # ECFP4 is more robust and representative of QSAR practice
 
 # All strategies for completeness checks
@@ -125,7 +125,7 @@ ANOVA_REPS_EXCLUDE = {
     'sns',                # Redundant with ecfp4 (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
-    'pdv',                # Replaced by continuous_pdv
+    'pdv',                # Binary PDV; continuous_pdv used instead
     'morgan',             # Redundant with ecfp4 (rho = 0.995)
 }
 
@@ -324,7 +324,6 @@ MODEL_LABELS = {
 }
 
 REP_LABELS = {
-    'pdv': 'PDV (binary)',
     'continuous_pdv': 'PDV',
     'ecfp4': 'ECFP4',
     'sns': 'SNS',
@@ -1624,6 +1623,76 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             plt.close()
             print("✓ Saved fig_validation_model_comparison.png")
 
+    # --- Combined validation figure (Panel A: grouped bar, Panel B: transferability scatter) ---
+    # Requires both the grouped bar data and the transferability scatter data
+    if (qm9_nds_df is not None and val_nds_df is not None
+            and 'dataset' in val_nds_df.columns):
+        # Re-compute model_ds for Panel A
+        models_in_val_c = sorted(val_nds_df['model'].unique())
+        if len(models_in_val_c) >= 2:
+            model_ds_c = val_nds_df.pivot_table(values='nds', index='model', columns='dataset', aggfunc='mean')
+            model_ds_c = model_ds_c.dropna(how='all')
+            if qm9_nds_df is not None and len(qm9_nds_df) > 0:
+                qm9_means_c = qm9_nds_df.groupby('model')['nds'].mean()
+                qm9_col_c = qm9_means_c.reindex(model_ds_c.index)
+                model_ds_c.insert(0, 'QM9', qm9_col_c)
+            family_order_c = sort_models_by_family(model_ds_c.index.tolist())
+            model_ds_c = model_ds_c.loc[family_order_c]
+            model_ds_c.index = [get_model_label(m) for m in model_ds_c.index]
+
+            # Re-compute merged for Panel B
+            qm9_mn = qm9_nds_df.groupby('model')['nds'].mean().reset_index().rename(columns={'nds': 'qm9_nds'})
+            ext_mn = val_nds_df.groupby('model')['nds'].mean().reset_index().rename(columns={'nds': 'ext_nds'})
+            merged_c = qm9_mn.merge(ext_mn, on='model', how='inner').dropna(subset=['qm9_nds', 'ext_nds'])
+
+            if len(merged_c) >= 3 and len(model_ds_c) >= 2:
+                fig_comb, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(16, 6))
+
+                # Panel A: grouped bar
+                ml = model_ds_c.index.tolist()
+                dl = model_ds_c.columns.tolist()
+                x_c = np.arange(len(ml))
+                w_c = 0.8 / len(dl)
+                dc = ['#999999', '#0072B2', '#D55E00', '#009E73'][:len(dl)]
+                for i, ds in enumerate(dl):
+                    offset = (i - len(dl) / 2 + 0.5) * w_c
+                    ax_a.bar(x_c + offset, model_ds_c[ds].values, w_c, color=dc[i], label=ds)
+                ax_a.set_xticks(x_c)
+                ax_a.set_xticklabels(ml, rotation=45, ha='right')
+                ax_a.set_ylabel('NDS')
+                ax_a.set_title('A. Model Robustness Across Datasets', fontweight='bold')
+                ax_a.axhline(0, color='black', linewidth=0.5)
+                ax_a.legend(title='Dataset', fontsize=7)
+                ax_a.spines['top'].set_visible(False)
+                ax_a.spines['right'].set_visible(False)
+
+                # Panel B: transferability scatter
+                for _, row in merged_c.iterrows():
+                    color = MODEL_COLORS.get(row['model'], '#333333')
+                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
+                                 edgecolors='black', linewidth=0.5,
+                                 label=get_model_label(row['model']))
+                r_c, p_c = stats.pearsonr(merged_c['qm9_nds'], merged_c['ext_nds'])
+                slope_c, intercept_c = np.polyfit(merged_c['qm9_nds'], merged_c['ext_nds'], 1)
+                xr = np.linspace(merged_c['qm9_nds'].min(), merged_c['qm9_nds'].max(), 100)
+                ax_b.plot(xr, slope_c * xr + intercept_c, '--', color='grey', alpha=0.6, linewidth=1.5)
+                ax_b.set_xlabel('QM9 Mean NDS')
+                ax_b.set_ylabel('External Datasets Mean NDS')
+                ax_b.set_title(f'B. Robustness Transferability (r={r_c:.2f}, p={p_c:.2f})', fontweight='bold')
+                ax_b.axhline(0, color='grey', linewidth=0.3)
+                ax_b.legend(fontsize=7, loc='best', framealpha=0.9)
+                ax_b.spines['top'].set_visible(False)
+                ax_b.spines['right'].set_visible(False)
+                xp = (merged_c['qm9_nds'].max() - merged_c['qm9_nds'].min()) * 0.15
+                yp = (merged_c['ext_nds'].max() - merged_c['ext_nds'].min()) * 0.15
+                ax_b.set_xlim(merged_c['qm9_nds'].min() - xp, merged_c['qm9_nds'].max() + xp)
+                ax_b.set_ylim(merged_c['ext_nds'].min() - yp, merged_c['ext_nds'].max() + yp)
+
+                plt.tight_layout()
+                plt.savefig(output_dir / 'fig_validation_combined.png', dpi=300, bbox_inches='tight')
+                plt.close()
+                print("✓ Saved fig_validation_combined.png")
+
 
 # =============================================================================
 # METRIC CALCULATIONS
@@ -1857,6 +1926,19 @@ def run_anova_decomposition(df, sigma_value=0.3):
     if len(df_sigma) < 10:
         return None
 
+    # Enforce balanced design: restrict to models present in ALL reps
+    models = df_sigma['model'].unique()
+    reps = df_sigma['rep'].unique()
+    cell_presence = df_sigma.groupby(['model', 'rep']).size()
+    valid_models = [m for m in models if all((m, r) in cell_presence.index for r in reps)]
+    dropped = sorted(set(models) - set(valid_models))
+    if dropped:
+        print(f"  ⚠ Performance ANOVA (σ={sigma_value}): dropping {len(dropped)} models "
+              f"with missing reps: {dropped}")
+        df_sigma = df_sigma[df_sigma['model'].isin(valid_models)]
+    print(f"  Performance ANOVA (σ={sigma_value}): {len(valid_models)} models × {len(reps)} reps "
+          f"({len(df_sigma)} rows)")
+
     grand_mean = df_sigma['r2'].mean()
     total_ss = ((df_sigma['r2'] - grand_mean) ** 2).sum()
 
@@ -1923,6 +2005,19 @@ def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
     nds_df = pd.DataFrame(nds_data)
     nds_df = nds_df[~nds_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
     nds_df = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+
+    # Enforce balanced design: restrict to models present in ALL reps
+    models = nds_df['model'].unique()
+    reps = nds_df['rep'].unique()
+    cell_presence = nds_df.groupby(['model', 'rep']).size()
+    valid_models = [m for m in models if all((m, r) in cell_presence.index for r in reps)]
+    dropped = sorted(set(models) - set(valid_models))
+    if dropped:
+        print(f"  ⚠ Robustness ANOVA: dropping {len(dropped)} models "
+              f"with missing reps: {dropped}")
+        nds_df = nds_df[nds_df['model'].isin(valid_models)]
+    print(f"  Robustness ANOVA: {len(valid_models)} models × {len(reps)} reps "
+          f"({len(nds_df)} rows)")
 
     grand_mean = nds_df['nds'].mean()
     total_ss = ((nds_df['nds'] - grand_mean) ** 2).sum()
@@ -2434,55 +2529,7 @@ def create_methods_figure(output_dir):
     plt.close()
     print("✓ Saved fig_methods_noise_strategies.png")
 
-    # Also create a more detailed version showing sigma progression
-    fig2 = plt.figure(figsize=(12, 10))
-    gs = gridspec.GridSpec(6, 4, hspace=0.4, wspace=0.3)
-    sigmas = [0.0, 0.3, 0.6, 1.0]
-
-    for i, strategy in enumerate(strategies):
-        for j, sig in enumerate(sigmas):
-            ax = fig2.add_subplot(gs[i, j])
-
-            if sig == 0.0:
-                y_noisy = y_clean.copy()
-            else:
-                y_noisy = apply_noise(y_clean, sig, strategy)
-
-            detail_bins = np.linspace(min(y_clean.min(), y_noisy.min()),
-                                      max(y_clean.max(), y_noisy.max()), 51)
-            ax.hist(y_clean, bins=detail_bins, alpha=0.15, color=CLEAN_COLOR, density=True)
-            ax.hist(y_clean, bins=detail_bins, density=True,
-                    histtype='step', linewidth=1.5, color=CLEAN_COLOR, alpha=0.7)
-            if sig > 0:
-                ax.hist(y_noisy, bins=detail_bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
-                ax.hist(y_noisy, bins=detail_bins, density=True,
-                        histtype='step', linewidth=1.5, color=STRATEGY_COLORS[strategy], alpha=0.7)
-
-            if j == 0:
-                ax.set_ylabel(STRATEGY_LABELS[strategy], fontsize=9, fontweight='bold')
-            if i == 0:
-                ax.set_title(f'σ = {sig}', fontsize=10)
-            if i == 5:
-                ax.set_xlabel('Normalized Value')
-
-            ax.set_yticks([])
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['left'].set_visible(False)
-
-            if sig > 0:
-                rmse = np.sqrt(np.mean((y_noisy - y_clean)**2))
-                ax.text(0.95, 0.95, f'RMSE={rmse:.2f}', transform=ax.transAxes,
-                        ha='right', va='top', fontsize=7, color='gray')
-
-    fig2.suptitle('Effect of Noise Injection Strategies on Label Distribution',
-                  fontsize=12, fontweight='bold', y=0.98)
-    fig2.text(0.5, 0.02, 'Gray = Clean labels | Colored = After noise injection',
-              ha='center', fontsize=9, style='italic')
-
-    plt.savefig(output_dir / 'fig_methods_noise_strategies_detailed.png', dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close()
-    print("✓ Saved fig_methods_noise_strategies_detailed.png")
+    # Detailed sigma progression version cut (was fig_methods_noise_strategies_detailed.png)
 
 
 # =============================================================================
@@ -2736,277 +2783,103 @@ def create_figure2(df, output_dir):
 # =============================================================================
 
 def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
-    """Figure 3: Ranking consistency across strategies and sigmas. Uses PDV only."""
-    fig, axes = plt.subplots(1, 2, figsize=(11, 6))
+    """Figure 3: Ranking consistency — Baseline R² vs NDS scatter (PDV, Gaussian)."""
+    # Single panel: Scatter - Baseline R² vs NDS (PDV only, legacy strategy)
+    fig, ax = plt.subplots(figsize=(7, 6))
 
-    # Filter to PDV only for consistent comparison (don't mix representations)
     nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
-
-    # Panel A: Heatmap - NDS by model × strategy (PDV only, ANOVA models)
-    ax_a = axes[0]
-
-    if len(nds_pdv) > 0:
-        # Filter to ANOVA-included models for readability
-        nds_pdv_anova = nds_pdv[~nds_pdv['model'].isin(ANOVA_MODELS_EXCLUDE)]
-        pivot = nds_pdv_anova.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-        # Only keep models with data for all strategies
-        pivot = pivot.dropna()
-        if len(pivot) > 0:
-            strat_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                          if c in pivot.columns]
-            pivot = pivot[strat_order]
-            # Sort by family grouping (MODEL_ORDER)
-            family_order = sort_models_by_family(pivot.index.tolist())
-            pivot = pivot.loc[family_order]
-            pivot.index = [get_model_label(m) for m in pivot.index]
-            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in pivot.columns]
-
-            ax_a.set_facecolor('black')
-            sns.heatmap(pivot, annot=True, fmt='.2f', cmap='RdYlGn', vmax=0,
-                        ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
-            ax_a.set_title('A. NDS by Model × Strategy (PDV)', fontweight='bold')
-            ax_a.set_ylabel('')
-
-    # Panel B: Scatter - Baseline R² vs NDS (PDV only, legacy strategy)
-    ax_b = axes[1]
-
     nds_pdv_legacy = nds_pdv[nds_pdv['strategy'] == 'legacy'] if 'strategy' in nds_pdv.columns else nds_pdv
 
     for model in sort_models_by_family(nds_pdv_legacy['model'].unique().tolist()):
         model_data = nds_pdv_legacy[nds_pdv_legacy['model'] == model]
         color = MODEL_COLORS.get(model, '#333333')
         marker = MODEL_MARKERS.get(model, 'o')
-        ax_b.scatter(model_data['baseline_r2'], model_data['nds'],
-                     label=get_model_label(model), color=color, marker=marker, alpha=0.7, s=50)
+        ax.scatter(model_data['baseline_r2'], model_data['nds'],
+                   label=get_model_label(model), color=color, marker=marker, alpha=0.7, s=50)
 
-    # Use data-driven axis limits with generous padding (no fixed range)
-    ax_b.autoscale()
-    ax_b.margins(x=0.08, y=0.08)
-    ax_b.set_xlabel('Baseline R² (σ=0)')
-    ax_b.set_ylabel('NDS (slope)')
-    ax_b.set_title('B. Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
-    ax_b.axhline(0, color='black', linewidth=0.5)
-    ax_b.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
-                borderaxespad=0, frameon=False, columnspacing=1.0,
-                handletextpad=0.5, labelspacing=0.6)
-
-    for ax in axes:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+    ax.autoscale()
+    ax.margins(x=0.08, y=0.08)
+    ax.set_xlabel('Baseline R² (σ=0)')
+    ax.set_ylabel('NDS (slope)')
+    ax.set_title('Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
+    ax.axhline(0, color='black', linewidth=0.5)
+    ax.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
+              borderaxespad=0, frameon=False, columnspacing=1.0,
+              handletextpad=0.5, labelspacing=0.6)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig3_ranking_consistency.png', dpi=300, bbox_inches='tight')
     plt.close()
     print("✓ Saved fig3_ranking_consistency.png")
 
-    # --- ECFP4 variant (Issue C) ---
-    nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4'] if 'rep' in nds_df.columns else nds_df
-    if len(nds_ecfp4) > 0:
-        fig_e, axes_e = plt.subplots(1, 2, figsize=(10, 5))
-
-        # Heatmap across strategies (show all models, with missing/N/A annotations)
-        ax_ea = axes_e[0]
-        strat_list = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                      if c in nds_df['strategy'].unique()]
-        all_models_e3 = sort_models_by_family(nds_ecfp4['model'].unique().tolist())
-        pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-        pivot = pivot.reindex(index=all_models_e3, columns=strat_list)
-        if len(pivot) > 0:
-            annot_text = make_heatmap_annotations(pivot, raw_df, 'model', 'strategy',
-                                                   rep_filter='ecfp4', fmt='.2f')
-            pivot.index = [get_model_label(m) for m in pivot.index]
-            annot_text.index = pivot.index
-            pivot.columns = [STRATEGY_LABELS.get(s, s) for s in strat_list]
-            annot_text.columns = pivot.columns
-
-            ax_ea.set_facecolor('black')
-            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
-                        ax=ax_ea, cbar_kws={'label': 'NDS'}, linewidths=0.5)
-            _white_text_for_missing(ax_ea, pivot, annot_text)
-            ax_ea.set_title('A. NDS by Model × Strategy (ECFP4)', fontweight='bold')
-            ax_ea.set_ylabel('')
-
-        # Baseline vs NDS scatter (with model-specific markers)
-        ax_eb = axes_e[1]
-        nds_ecfp4_leg = nds_ecfp4[nds_ecfp4['strategy'] == 'legacy'] if 'strategy' in nds_ecfp4.columns else nds_ecfp4
-        for model in sort_models_by_family(nds_ecfp4_leg['model'].unique().tolist()):
-            md = nds_ecfp4_leg[nds_ecfp4_leg['model'] == model]
-            color = MODEL_COLORS.get(model, '#333333')
-            marker = MODEL_MARKERS.get(model, 'o')
-            ax_eb.scatter(md['baseline_r2'], md['nds'], label=get_model_label(model),
-                          color=color, marker=marker, alpha=0.7, s=50)
-        # Use data-driven axis limits with generous padding
-        ax_eb.autoscale()
-        ax_eb.margins(x=0.08, y=0.08)
-        ax_eb.set_xlabel('Baseline R² (σ=0)')
-        ax_eb.set_ylabel('NDS (slope)')
-        ax_eb.set_title('B. Baseline vs Robustness (ECFP4, Gaussian)', fontweight='bold')
-        ax_eb.axhline(0, color='black', linewidth=0.5)
-        ax_eb.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), fontsize=7, ncol=3,
-                     borderaxespad=0, frameon=False, columnspacing=1.0,
-                     handletextpad=0.5, labelspacing=0.6)
-
-        for ax in axes_e:
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-
-        plt.tight_layout()
-        plt.savefig(output_dir / 'fig3_supp_ecfp4_ranking.png', dpi=300, bbox_inches='tight')
-        plt.close()
-        print("✓ Saved fig3_supp_ecfp4_ranking.png (supplementary)")
+    # ECFP4 supplementary ranking figure cut (was fig3_supp_ecfp4_ranking.png)
 
 
 # =============================================================================
-# FIGURE 4: DNN FAMILY COMPARISON
+# FIGURE: NN FAMILY COMPARISON (combines old fig4 + fig5)
 # =============================================================================
 
-def create_figure4(df, nds_df, output_dir):
-    """
-    Figure 4: DNN vs BNN variants comparison.
+def create_nn_family_comparison(df, nds_df, output_dir):
+    """Combined NN family comparison: DNN, MLP, and RF families under Gaussian noise.
 
-    REVIEW AFTER RESULTS:
-    - Does BNN consistently beat DNN across strategies?
-    - Is the improvement larger under certain noise types?
-    - Check if CONTRAST_STRATEGY shows different pattern than PRIMARY_STRATEGY
+    1×3 subplot:
+      Panel A: DNN family (DNN, DNN-BNN Full, DNN-BNN Last, DNN-VBLL)
+      Panel B: MLP family (MLP, MLP-BNN Full, MLP-BNN Last, MLP-VBLL)
+      Panel C: RF vs QRF
+    All on PRIMARY_REP, Gaussian strategy only.
     """
     dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']
-
-    # 1x2 layout: R² vs σ for PRIMARY_STRATEGY and CONTRAST_STRATEGY
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    for col, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
-        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
-
-        ax_line = axes[col]
-        data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
-
-        for model in dnn_variants:
-            model_data = data[data['model'] == model]
-            if len(model_data) == 0:
-                continue
-
-            avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = DNN_FAMILY_COLORS.get(model, '#333333')
-            marker = MODEL_MARKERS.get(model, 'o')
-            ax_line.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
-                         label=get_model_label(model), color=color, markersize=5)
-
-        ax_line.set_xlabel('Noise Level (σ)')
-        ax_line.set_ylabel('R²')
-        panel_letter = 'A' if col == 0 else 'B'
-        ax_line.set_title(f'{panel_letter}. R² vs σ ({strategy_label})', fontweight='bold')
-        ax_line.legend(loc='lower left', fontsize=7)
-        ax_line.set_ylim(0.4, 1.0)
-
-    for ax in axes:
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-
-    plt.tight_layout()
-    plt.savefig(output_dir / 'fig4_dnn_family.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✓ Saved fig4_dnn_family.png (showing {PRIMARY_STRATEGY} vs {CONTRAST_STRATEGY})")
-
-    # Output NDS table for DNN family (replaces bar chart panels)
-    dnn_nds_data = nds_df[(nds_df['model'].isin(dnn_variants)) & (nds_df['rep'] == PRIMARY_REP)]
-    if len(dnn_nds_data) > 0:
-        dnn_table = dnn_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-        dnn_table.index = [get_model_label(m) for m in dnn_table.index]
-        dnn_table.columns = [STRATEGY_LABELS.get(s, s) for s in dnn_table.columns]
-        dnn_table.to_csv(output_dir / 'table_fig4_dnn_nds.csv')
-        print("✓ Saved table_fig4_dnn_nds.csv")
-
-    # REVIEW: Check if the pattern holds - does BNN > DNN in both strategies?
-
-
-# =============================================================================
-# FIGURE 5: MLP + RF/QRF COMPARISON
-# =============================================================================
-
-def create_figure5(df, nds_df, output_dir):
-    """
-    Figure 5: MLP variants + RF vs QRF comparison.
-
-    REVIEW AFTER RESULTS:
-    - Does MLP-BNN consistently beat MLP?
-    - Does QRF beat RF?
-    - Is the pattern consistent across strategies?
-    """
     mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']
     rf_models = ['rf', 'qrf']
 
-    # 2x2 layout: top row = MLP variants, bottom row = RF vs QRF
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    strategy = PRIMARY_STRATEGY
+    strategy_label = STRATEGY_LABELS.get(strategy, strategy)
+    data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
-    for col, strategy in enumerate([PRIMARY_STRATEGY, CONTRAST_STRATEGY]):
-        strategy_label = STRATEGY_LABELS.get(strategy, strategy)
-        data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
+    families = [
+        ('A', 'DNN Family', dnn_variants, DNN_FAMILY_COLORS),
+        ('B', 'MLP Family', mlp_variants, MLP_FAMILY_COLORS),
+        ('C', 'RF vs QRF', rf_models, RF_FAMILY_COLORS),
+    ]
 
-        # Top row: MLP variants
-        ax_mlp = axes[0, col]
-        for model in mlp_variants:
+    for idx, (panel, title, models, colors) in enumerate(families):
+        ax = axes[idx]
+        for model in models:
             model_data = data[data['model'] == model]
             if len(model_data) == 0:
                 continue
             avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = MLP_FAMILY_COLORS.get(model, '#333333')
+            color = colors.get(model, '#333333')
             marker = MODEL_MARKERS.get(model, 'o')
-            ax_mlp.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
-                        label=get_model_label(model), color=color, markersize=5)
+            ax.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
+                    label=get_model_label(model), color=color, markersize=5)
 
-        ax_mlp.set_xlabel('Noise Level (σ)')
-        ax_mlp.set_ylabel('R²')
-        panel_letter = 'A' if col == 0 else 'B'
-        ax_mlp.set_title(f'{panel_letter}. MLP R² vs σ ({strategy_label})', fontweight='bold')
-        ax_mlp.legend(loc='lower left', fontsize=6)
-        ax_mlp.set_ylim(0.4, 1.0)
-
-        # Bottom row: RF vs QRF
-        ax_rf = axes[1, col]
-        for model in rf_models:
-            model_data = data[data['model'] == model]
-            if len(model_data) == 0:
-                continue
-            avg = model_data.groupby('sigma')['r2'].mean().reset_index()
-            color = RF_FAMILY_COLORS.get(model, '#333333')
-            marker = MODEL_MARKERS.get(model, 'o')
-            ax_rf.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
-                       label=get_model_label(model), color=color, markersize=5)
-
-        ax_rf.set_xlabel('Noise Level (σ)')
-        ax_rf.set_ylabel('R²')
-        panel_letter = 'C' if col == 0 else 'D'
-        ax_rf.set_title(f'{panel_letter}. RF vs QRF R² vs σ ({strategy_label})', fontweight='bold')
-        ax_rf.legend(loc='lower left', fontsize=6)
-        ax_rf.set_ylim(0.4, 1.0)
-
-    for ax in axes.flat:
+        ax.set_xlabel('Noise Level (σ)')
+        ax.set_ylabel('R²')
+        ax.set_title(f'{panel}. {title} ({strategy_label})', fontweight='bold')
+        ax.legend(loc='lower left', fontsize=7)
+        ax.set_ylim(0.4, 1.0)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig(output_dir / 'fig5_mlp_rf_comparison.png', dpi=300, bbox_inches='tight')
+    plt.savefig(output_dir / 'fig_nn_family_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"✓ Saved fig5_mlp_rf_comparison.png (showing {PRIMARY_STRATEGY} vs {CONTRAST_STRATEGY})")
+    print(f"✓ Saved fig_nn_family_comparison.png ({strategy_label}, {get_rep_label(PRIMARY_REP)})")
 
-    # Output NDS tables for MLP family and RF/QRF (replaces bar chart panels)
-    mlp_nds_data = nds_df[(nds_df['model'].isin(mlp_variants)) & (nds_df['rep'] == PRIMARY_REP)]
-    if len(mlp_nds_data) > 0:
-        mlp_table = mlp_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-        mlp_table.index = [get_model_label(m) for m in mlp_table.index]
-        mlp_table.columns = [STRATEGY_LABELS.get(s, s) for s in mlp_table.columns]
-        mlp_table.to_csv(output_dir / 'table_fig5_mlp_nds.csv')
-        print("✓ Saved table_fig5_mlp_nds.csv")
-
-    rf_nds_data = nds_df[(nds_df['model'].isin(rf_models)) & (nds_df['rep'] == PRIMARY_REP)]
-    if len(rf_nds_data) > 0:
-        rf_table = rf_nds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-        rf_table.index = [get_model_label(m) for m in rf_table.index]
-        rf_table.columns = [STRATEGY_LABELS.get(s, s) for s in rf_table.columns]
-        rf_table.to_csv(output_dir / 'table_fig5_rf_qrf_nds.csv')
-        print("✓ Saved table_fig5_rf_qrf_nds.csv")
-
-    # REVIEW: Does the probabilistic advantage hold under both noise types?
+    # Output NDS table for all three families
+    all_family_models = dnn_variants + mlp_variants + rf_models
+    family_nds = nds_df[(nds_df['model'].isin(all_family_models)) & (nds_df['rep'] == PRIMARY_REP)]
+    if len(family_nds) > 0:
+        nds_table = family_nds.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
+        nds_table = nds_table.reindex([m for m in all_family_models if m in nds_table.index])
+        nds_table.index = [get_model_label(m) for m in nds_table.index]
+        nds_table.columns = [STRATEGY_LABELS.get(s, s) for s in nds_table.columns]
+        nds_table.to_csv(output_dir / 'table_nn_family_nds.csv')
+        print("✓ Saved table_nn_family_nds.csv")
 
 
 # =============================================================================
@@ -3674,41 +3547,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     f.write("  W < 0.5: Weak agreement\n")
                 print(f"✓ Saved table6_kendalls_w.txt (W={kendalls_w:.4f}, n={n_items} models)")
 
-    # Table 7: Strategy Sensitivity Ratio (NDS_strategy / NDS_legacy)
-    # Tests whether certain noise types differentially affect model families
-    # Use ANOVA-included models only
-    nds_anova_sr = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
-    if len(nds_anova_sr) > 0 and 'legacy' in nds_anova_sr['strategy'].values:
-        # Compute mean NDS per model per strategy on PRIMARY_REP
-        nds_primary = nds_anova_sr[nds_anova_sr['rep'] == PRIMARY_REP] if 'rep' in nds_anova_sr.columns else nds_anova_sr
-        pivot = nds_primary.groupby(['model', 'strategy'])['nds'].mean().unstack('strategy')
-
-        if 'legacy' in pivot.columns:
-            ratio_df = pivot.div(pivot['legacy'], axis=0)
-            # Add model family classification
-            tree_models = ['rf', 'xgboost', 'ngboost', 'lgb']
-            nn_models = ['dnn', 'mlp',
-                         'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll',
-                         'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']
-
-            ratio_df['family'] = 'other'
-            ratio_df.loc[ratio_df.index.isin(tree_models), 'family'] = 'tree'
-            ratio_df.loc[ratio_df.index.isin(nn_models), 'family'] = 'nn'
-
-            ratio_df.rename(columns=STRATEGY_LABELS, inplace=True)
-            ratio_df.to_csv(output_dir / 'table7_strategy_sensitivity_ratio.csv')
-            print("✓ Saved table7_strategy_sensitivity_ratio.csv")
-
-            # Summary by family
-            strategy_display = {STRATEGY_LABELS.get(s, s) for s in ALL_STRATEGIES if s != 'legacy'}
-            for family in ['tree', 'nn']:
-                fam_data = ratio_df[ratio_df['family'] == family]
-                if len(fam_data) > 0:
-                    for strat in [s for s in fam_data.columns if s in strategy_display]:
-                        vals = fam_data[strat].dropna()
-                        if len(vals) > 0:
-                            print(f"  {family} {strat}/Gaussian ratio: "
-                                  f"mean={vals.mean():.3f} (range {vals.min():.3f}-{vals.max():.3f})")
+    # Table 7 (sensitivity ratio) cut — sensitivity ratios now reported inline in paper text
 
 
 # =============================================================================
@@ -3803,7 +3642,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. ECFP4 vs PDV (cont.) Robustness', fontweight='bold')
+    ax_b.set_title('B. ECFP4 vs PDV Robustness', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -3837,11 +3676,19 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
     anova_nds = anova_nds[~anova_nds['model'].isin(graph_models)]
 
     n_panels = len(strategies_available)
-    fig, axes = plt.subplots(1, n_panels, figsize=(5.5 * n_panels, 5))
-    if n_panels == 1:
-        axes = [axes]
+    if n_panels > 3:
+        nrows, ncols = 2, 3
+        fig, axes_grid = plt.subplots(nrows, ncols, figsize=(16.5, 10))
+        axes = axes_grid.flatten()[:n_panels]
+        # Hide unused axes
+        for i in range(n_panels, nrows * ncols):
+            axes_grid.flatten()[i].set_visible(False)
+    else:
+        fig, axes = plt.subplots(1, n_panels, figsize=(5.5 * n_panels, 5))
+        if n_panels == 1:
+            axes = [axes]
 
-    rep_markers = {'ecfp4': 'o', 'continuous_pdv': 's', 'pdv': 's', 'smiles': '^',
+    rep_markers = {'ecfp4': 'o', 'continuous_pdv': 's', 'smiles': '^',
                    'mhggnn': 'v', 'mol2vec': 'D'}
 
     # First pass: collect all data to compute shared axes
@@ -3889,10 +3736,17 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
         if shared_ylim:
             ax.set_ylim(shared_ylim)
         ax.set_xlabel('Baseline R² (σ=0)')
-        if idx == 0:
-            ax.set_ylabel('NDS')
+        if n_panels > 3:
+            # 2×3 grid: ylabel on first column only
+            if idx % 3 == 0:
+                ax.set_ylabel('NDS')
+            else:
+                ax.set_ylabel('')
         else:
-            ax.set_ylabel('')
+            if idx == 0:
+                ax.set_ylabel('NDS')
+            else:
+                ax.set_ylabel('')
         ax.set_title(f'{label_prefix}{strategy_label}', fontweight='bold')
         ax.axhline(0, color='black', linewidth=0.5)
         ax.spines['top'].set_visible(False)
@@ -3932,31 +3786,21 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
 
 
 def create_full_overview(nds_df, output_dir):
-    """Scatter plots of ALL model x rep configurations.
+    """Scatter plots of ALL model x rep configurations across all 6 strategies.
 
-    Main figure: one panel per severity tier (Gaussian, Outlier, Threshold).
-    Supplementary: remaining strategies (Quantile, Heteroscedastic, Value-prop).
+    Single 2×3 figure covering all strategies (replaces old main + supp split).
     """
     if len(nds_df) == 0:
         print("⚠ Could not create full overview - no NDS data")
         return
 
-    # Main figure: one strategy per tier (moderate, mild, severe)
+    # Combined 2×3 figure with all 6 strategies
     _plot_full_overview_panels(
         nds_df,
-        strategies=['legacy', 'outlier', 'threshold'],
+        strategies=['legacy', 'outlier', 'threshold', 'quantile', 'hetero', 'valprop'],
         output_dir=output_dir,
-        filename='fig_full_overview.png',
-        panel_labels=['A', 'B', 'C']
-    )
-
-    # Supplementary: remaining strategies
-    _plot_full_overview_panels(
-        nds_df,
-        strategies=['quantile', 'hetero', 'valprop'],
-        output_dir=output_dir,
-        filename='fig_full_overview_supp.png',
-        panel_labels=['A', 'B', 'C']
+        filename='fig_full_overview_all_strategies.png',
+        panel_labels=['A', 'B', 'C', 'D', 'E', 'F']
     )
 
     # Also save the underlying data as a table
@@ -4204,8 +4048,7 @@ def main():
     create_full_overview(nds_df, output_dir)
 
     print("\n--- PART 2: THE WHY ---")
-    create_figure4(qm9_df, nds_df, output_dir)
-    create_figure5(qm9_df, nds_df, output_dir)
+    create_nn_family_comparison(qm9_df, nds_df, output_dir)
     create_uncertainty_figure(unc_df, output_dir)
 
     print("\n--- TABLES ---")

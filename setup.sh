@@ -84,8 +84,9 @@ export PATH="$CONDA_PREFIX/bin:$PATH"
 
 # --- PyTorch Geometric extensions ---
 echo "Installing PyTorch Geometric extensions..."
+TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
 pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
-    -f https://data.pyg.org/whl/torch-2.5.0+cpu.html
+    -f "https://data.pyg.org/whl/torch-${TORCH_VERSION}.html"
 
 # --- Other pip packages ---
 pip install tf-keras
