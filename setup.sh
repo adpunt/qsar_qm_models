@@ -87,6 +87,9 @@ echo "Installing PyTorch Geometric extensions..."
 pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
     -f https://data.pyg.org/whl/torch-2.3.1+cu121.html
 
+# --- Pin numpy to prevent pip upgrades breaking compiled extensions ---
+pip install numpy==1.26.4
+
 # --- Other pip packages ---
 pip install tf-keras
 pip install torchcp
