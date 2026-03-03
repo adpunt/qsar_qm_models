@@ -463,6 +463,9 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
     import torch.nn.functional as F
     from torch.utils.data import DataLoader, TensorDataset
     import torchbnn as bnn
+    import gpytorch
+    from botorch.fit import fit_gpytorch_model
+    import gauche
     from sklearn.svm import SVR
     from sklearn.ensemble import RandomForestRegressor
     from xgboost import XGBRegressor
@@ -708,18 +711,61 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
         model = train_nn_model(model, X_train, y_train_norm, X_val, y_val_norm, criterion)
         return y_denormalize(mc_predict(model, X_test))
 
+    # ── Gauche GP ──
+    class GaucheGP(gpytorch.models.ExactGP):
+        """Exact GP matching the main pipeline's Gauche model."""
+        def __init__(self, train_x, train_y, likelihood, kernel_class):
+            super().__init__(train_x, train_y, likelihood)
+            self.mean_module = gpytorch.means.ConstantMean()
+            self.covar_module = gpytorch.kernels.ScaleKernel(kernel_class())
+
+        def forward(self, x):
+            mean_x = self.mean_module(x)
+            covar_x = self.covar_module(x)
+            return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+    def run_gauche(X_train, y_train_norm, X_val, y_val_norm, X_test, kernel_class):
+        X_tr = np.vstack((X_train, X_val))
+        y_tr = np.hstack((y_train_norm, y_val_norm))
+        x_tensor = torch.from_numpy(X_tr).double()
+        y_tensor = torch.from_numpy(y_tr).double()
+        x_test_tensor = torch.from_numpy(X_test).double()
+
+        likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        model = GaucheGP(x_tensor, y_tensor, likelihood, kernel_class)
+        mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
+        fit_gpytorch_model(mll)
+
+        model.eval()
+        likelihood.eval()
+        with torch.no_grad():
+            preds = model(x_test_tensor)
+            y_pred = preds.mean.numpy()
+        return y_denormalize(y_pred)
+
     # ── Main comparison loop ──
-    methods = ['continuous_raw', 'binary_mean', 'binary_gt0_no_dead']
+    methods = ['continuous_raw', 'binary_mean']
+
+    # Gauche kernel → method compatibility
+    # Tanimoto (fingerprint kernel): only valid on binary features — collapses on continuous
+    # RBF: valid on all PDV variants; run everywhere for comparison
+    GAUCHE_SKIP = {
+        ('gauche_tanimoto', 'continuous_raw'),
+    }
+
+    tanimoto_kernel = gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel
     model_runners = {
         'rf': lambda Xtr, ytr, Xv, yv, Xte: run_rf(Xtr, ytr, Xv, yv, Xte, args.seed),
         'xgboost': lambda Xtr, ytr, Xv, yv, Xte: run_xgboost(Xtr, ytr, Xv, yv, Xte, args.seed),
         'svm': lambda Xtr, ytr, Xv, yv, Xte: run_svm(Xtr, ytr, Xv, yv, Xte),
         'bnn_full': lambda Xtr, ytr, Xv, yv, Xte: run_bnn_full(Xtr, ytr, Xv, yv, Xte, args.seed),
         'vbll': lambda Xtr, ytr, Xv, yv, Xte: run_vbll(Xtr, ytr, Xv, yv, Xte, args.seed),
+        'gauche_tanimoto': lambda Xtr, ytr, Xv, yv, Xte: run_gauche(Xtr, ytr, Xv, yv, Xte, tanimoto_kernel),
+        'gauche_rbf': lambda Xtr, ytr, Xv, yv, Xte: run_gauche(Xtr, ytr, Xv, yv, Xte, gpytorch.kernels.RBFKernel),
     }
 
     print("\n" + "=" * 100)
-    print("MODEL COMPARISON v3: with Y normalization + default hyperparameters (matching ANOVA pipeline)")
+    print("MODEL COMPARISON v4: with Y normalization + default hyperparameters + Gauche GP kernels")
     print(f"  Models: {', '.join(model_runners.keys())}")
     print(f"  PDV variants: {', '.join(methods)}")
     print(f"  Sigma levels: {SIGMA_LEVELS}")
@@ -729,6 +775,9 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
           f"{DEFAULT_PARAMS['dnn']['hidden_size2']}], {DEFAULT_PARAMS['dnn']['activation']}")
     print(f"  BNN Full: torchbnn BayesLinear, prior N(0, 0.1), 100 MC samples")
     print(f"  VBLL: VBLLLayer all layers, ELBO loss, learned noise, 100 MC samples")
+    print(f"  Gauche Tanimoto: fingerprint kernel (binary PDV only)")
+    print(f"  Gauche RBF: standard RBF kernel (all PDV variants)")
+    print(f"  Skipped combos: {sorted(GAUCHE_SKIP)}")
     print("=" * 100)
 
     all_results = []
@@ -763,6 +812,9 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
         print(f"{'─' * 60}")
 
         for model_name, runner in model_runners.items():
+            if (model_name, method) in GAUCHE_SKIP:
+                print(f"  Skipping {model_name} × {method} (incompatible kernel)")
+                continue
             print(f"  Training {model_name}...", end="", flush=True)
             sigma_r2 = {}
 
