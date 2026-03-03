@@ -82,14 +82,11 @@ fi
 unset PYTHONPATH
 export PATH="$CONDA_PREFIX/bin:$PATH"
 
-# --- PyTorch Geometric extensions + torchvision (must match PyTorch version) ---
+# --- PyTorch Geometric extensions (must match PyTorch version) ---
 echo "Installing PyTorch Geometric extensions..."
 TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-TORCH_BASE=$(echo "$TORCH_VERSION" | sed 's/+.*//')
-TORCH_CUDA=$(echo "$TORCH_VERSION" | grep -oP '\+\K.*' || echo "cpu")
-pip install --force-reinstall torch-scatter torch-sparse torch-cluster torch-spline-conv \
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
     -f "https://data.pyg.org/whl/torch-${TORCH_VERSION}.html"
-pip install --force-reinstall torchvision --index-url "https://download.pytorch.org/whl/${TORCH_CUDA}"
 
 # --- Other pip packages ---
 pip install tf-keras
