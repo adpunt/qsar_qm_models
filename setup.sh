@@ -91,7 +91,7 @@ pip install torch-scatter torch-sparse torch-cluster torch-spline-conv \
 pip install numpy==1.26.4
 
 # --- Other pip packages ---
-pip install --force-reinstall --no-deps torchsort
+pip install --force-reinstall --no-deps --no-binary :all: torchsort
 pip install tf-keras
 pip install torchcp
 pip install gensim
