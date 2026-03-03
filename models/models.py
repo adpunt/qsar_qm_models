@@ -38,10 +38,13 @@ from gauche import SIGP, NonTensorialInputs
 from gauche.dataloader import MolPropLoader
 from gauche.dataloader.data_utils import transform_data
 from gauche.kernels.graph_kernels import WeisfeilerLehmanKernel, VertexHistogramKernel
-import torchcp
-from torchcp.regression.predictor import SplitPredictor, ACIPredictor
-from torchcp.classification.score import APS
-from torchcp.regression.score import ABS
+try:
+    import torchcp
+    from torchcp.regression.predictor import SplitPredictor, ACIPredictor
+    from torchcp.classification.score import APS
+    from torchcp.regression.score import ABS
+except ImportError:
+    torchcp = None  # conformal prediction unavailable (torchsort/PyTorch version mismatch)
 from sklearn.isotonic import IsotonicRegression
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
