@@ -465,7 +465,7 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
     import torchbnn as bnn
     import gpytorch
     from botorch.fit import fit_gpytorch_model
-    import gauche
+    from gauche.kernels.fingerprint_kernels.tanimoto_kernel import TanimotoKernel
     from sklearn.svm import SVR
     from sklearn.ensemble import RandomForestRegressor
     from xgboost import XGBRegressor
@@ -753,7 +753,7 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
         ('gauche_tanimoto', 'continuous_raw'),
     }
 
-    tanimoto_kernel = gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel
+    tanimoto_kernel = TanimotoKernel
     model_runners = {
         'rf': lambda Xtr, ytr, Xv, yv, Xte: run_rf(Xtr, ytr, Xv, yv, Xte, args.seed),
         'xgboost': lambda Xtr, ytr, Xv, yv, Xte: run_xgboost(Xtr, ytr, Xv, yv, Xte, args.seed),
