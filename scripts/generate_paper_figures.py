@@ -483,6 +483,20 @@ def load_anova_data(results_dir):
                     break
             if strategy:
                 df['strategy'] = strategy
+
+            # Fix: process_and_train.py with --bayesian-transformation saves
+            # model as base name (dnn/mlp) without the BNN suffix. Infer from filename.
+            if 'model' in df.columns and len(df) > 0:
+                csv_model = df['model'].iloc[0]
+                fname = f.stem
+                if csv_model in ('dnn', 'mlp'):
+                    if '_bnn_full_variational' in fname:
+                        df['model'] = csv_model + '_bnn_full_variational'
+                    elif '_bnn_last' in fname:
+                        df['model'] = csv_model + '_bnn_last'
+                    elif '_bnn_full' in fname and '_bnn_full_variational' not in fname:
+                        df['model'] = csv_model + '_bnn_full'
+
             df['source_file'] = f.name
             all_data.append(df)
         except Exception as e:
@@ -1667,20 +1681,17 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax_a.spines['top'].set_visible(False)
                 ax_a.spines['right'].set_visible(False)
 
-                # Panel B: transferability scatter
+                # Panel B: QM9 vs external NDS scatter (no regression line)
                 for _, row in merged_c.iterrows():
                     color = MODEL_COLORS.get(row['model'], '#333333')
                     ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
                                  edgecolors='black', linewidth=0.5,
                                  label=get_model_label(row['model']))
-                r_c, p_c = stats.pearsonr(merged_c['qm9_nds'], merged_c['ext_nds'])
-                slope_c, intercept_c = np.polyfit(merged_c['qm9_nds'], merged_c['ext_nds'], 1)
-                xr = np.linspace(merged_c['qm9_nds'].min(), merged_c['qm9_nds'].max(), 100)
-                ax_b.plot(xr, slope_c * xr + intercept_c, '--', color='grey', alpha=0.6, linewidth=1.5)
                 ax_b.set_xlabel('QM9 Mean NDS')
                 ax_b.set_ylabel('External Datasets Mean NDS')
-                ax_b.set_title(f'B. Robustness Transferability (r={r_c:.2f}, p={p_c:.2f})', fontweight='bold')
+                ax_b.set_title('B. QM9 vs External Robustness', fontweight='bold')
                 ax_b.axhline(0, color='grey', linewidth=0.3)
+                ax_b.axvline(0, color='grey', linewidth=0.3)
                 ax_b.legend(fontsize=7, loc='best', framealpha=0.9)
                 ax_b.spines['top'].set_visible(False)
                 ax_b.spines['right'].set_visible(False)
