@@ -816,6 +816,19 @@ def load_uncertainty_data(results_dir):
                                 df['strategy'] = STRATEGY_NORMALIZE.get(s, s)
                                 break
 
+                # Fix: process_and_train.py with --bayesian-transformation saves
+                # model as base name (dnn/mlp) without the BNN suffix. Infer from filename.
+                if 'model' in df.columns and len(df) > 0:
+                    csv_model = df['model'].iloc[0]
+                    fname = f.stem
+                    if csv_model in ('dnn', 'mlp'):
+                        if '_bnn_full_variational' in fname:
+                            df['model'] = csv_model + '_bnn_full_variational'
+                        elif '_bnn_last' in fname:
+                            df['model'] = csv_model + '_bnn_last'
+                        elif '_bnn_full' in fname and '_bnn_full_variational' not in fname:
+                            df['model'] = csv_model + '_bnn_full'
+
                 all_data.append(df)
             except Exception as e:
                 print(f"Warning: Could not load {f.name}: {e}")
