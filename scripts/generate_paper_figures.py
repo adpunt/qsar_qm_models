@@ -467,7 +467,7 @@ def load_anova_data(results_dir):
     }
     STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
 
-    for f in results_dir.glob("anova_*.csv"):
+    for f in sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime):
         if '_uncertainty_values' in f.name:
             continue
         try:
@@ -775,7 +775,7 @@ def load_uncertainty_data(results_dir):
     patterns = ["uncertainty_*_uncertainty_values.csv", "*_uncertainty_values.csv"]
 
     for pattern in patterns:
-        for f in results_dir.glob(pattern):
+        for f in sorted(results_dir.glob(pattern), key=lambda p: p.stat().st_mtime):
             try:
                 df = pd.read_csv(f)
                 df['source_file'] = f.name
