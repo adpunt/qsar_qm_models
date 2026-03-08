@@ -1488,6 +1488,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 values='nds', index='rep', columns='dataset', aggfunc='mean')
             pivot_rep['MEAN'] = pivot_rep.mean(axis=1)
             pivot_rep = pivot_rep.sort_values('MEAN', ascending=False)
+            pivot_rep.index = [get_rep_label(r) for r in pivot_rep.index]
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
@@ -3211,7 +3212,11 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
 
             for rep_name in reps_to_compute:
                 if rep_name == 'all':
-                    rep_data = unc_legacy
+                    # Exclude non-ANOVA reps (binary pdv, sns, morgan) from the average
+                    if 'rep' in unc_legacy.columns:
+                        rep_data = unc_legacy[~unc_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
+                    else:
+                        rep_data = unc_legacy
                 else:
                     rep_data = unc_legacy[unc_legacy['rep'] == rep_name]
 
@@ -3473,6 +3478,28 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
                     print("  BNN Unc-Error ρ by strategy:")
                     for strat, rho in bnn_by_strat.items():
                         print(f"    {strat}: {rho:.3f}")
+
+    # Table 4c: Top model×rep Unc-Noise correlations (Gaussian strategy)
+    # Shows specific combinations where uncertainty best detects injected noise
+    if unc_df is not None and len(unc_df) > 0:
+        supp_path = output_dir / 'table4_supp_uncertainty_by_strategy_rep.csv'
+        if supp_path.exists():
+            supp_unc = pd.read_csv(supp_path)
+            gauss_unc = supp_unc[supp_unc['Strategy'] == 'Gaussian']
+            if len(gauss_unc) > 0:
+                table4c_cols = ['Model', 'Rep', 'Unc-Noise ρ', 'Unc-Error ρ', 'ECE',
+                               'Coverage 1σ', 'Coverage 2σ']
+                top_noise = gauss_unc.nlargest(15, 'Unc-Noise ρ')[table4c_cols].copy()
+                # Apply rep labels
+                top_noise['Rep'] = top_noise['Rep'].map(lambda r: get_rep_label(r))
+                top_noise.to_csv(output_dir / 'table4c_top_unc_noise_correlations.csv', index=False)
+                print(f"✓ Saved table4c_top_unc_noise_correlations.csv ({len(top_noise)} rows)")
+
+                # Also save bottom combinations (near-zero/negative) for contrast
+                bottom_noise = gauss_unc.nsmallest(10, 'Unc-Noise ρ')[table4c_cols].copy()
+                bottom_noise['Rep'] = bottom_noise['Rep'].map(lambda r: get_rep_label(r))
+                bottom_noise.to_csv(output_dir / 'table4c_bottom_unc_noise_correlations.csv', index=False)
+                print(f"✓ Saved table4c_bottom_unc_noise_correlations.csv ({len(bottom_noise)} rows)")
 
     # Table 5: Model rankings at specific sigma levels (shows ranking stability)
     # Uses PDV + legacy only
