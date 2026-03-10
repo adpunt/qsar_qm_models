@@ -1704,11 +1704,14 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
             params_source = 'tuning_trial'
         else:
-            params['kernel_name'] = 'Tanimoto'
+            kernel_cli = getattr(args, 'kernel', 'tanimoto').capitalize()
+            if kernel_cli == 'Rbf':
+                kernel_cli = 'RBF'
+            params['kernel_name'] = kernel_cli
             params['outputscale'] = 1.0
             params['likelihood_noise'] = 1e-3
             params_source = 'default'
-    
+
     kernel_map = {
         'Tanimoto': gauche.kernels.fingerprint_kernels.tanimoto_kernel.TanimotoKernel,
         'BraunBlanquet': gauche.kernels.fingerprint_kernels.braun_blanquet_kernel.BraunBlanquetKernel,
@@ -1720,6 +1723,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         'MinMax': gauche.kernels.fingerprint_kernels.minmax_kernel.MinMaxKernel,
         'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
         'Rand': gauche.kernels.fingerprint_kernels.rand_kernel.RandKernel,
+        'RBF': gpytorch.kernels.RBFKernel,
     }
 
     # STEP 1: Split validation for calibration
@@ -1780,8 +1784,9 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             epistemic = None
             aleatoric = None
 
+    model_name = 'gauche_rbf' if params['kernel_name'] == 'RBF' else 'gauche'
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, "gauche", rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
 
     # *** UPDATED: Save with decomposition ***
     if args.uncertainty:
@@ -1791,7 +1796,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name="gauche",
+            model_name=model_name,
             rep=rep,
             sigma_noise=s,
             iteration=iteration,

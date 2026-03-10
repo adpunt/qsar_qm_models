@@ -120,7 +120,11 @@ ANOVA_MODELS_EXCLUDE = {
     'qrf',  # Redundant with rf (rho = 0.996)
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # DNN architecture variants (mid-pack, don't answer research questions)
     'gauche',  # Tanimoto kernel incompatible with continuous PDV (non-binary features)
+    'gauche_rbf',  # RBF GP for PDV only; excluded from cross-rep ANOVA
 } | GLOBAL_MODELS_EXCLUDE
+
+# Models that only have PDV data by design (show N/A for other reps in heatmaps)
+PDV_ONLY_MODELS = {'gauche_rbf'}
 
 ANOVA_REPS_EXCLUDE = {
     'sns',                # Redundant with ecfp4 (rho = 0.90)
@@ -216,6 +220,7 @@ MODEL_COLORS = {
     # SVM / GP — unique
     'svm': '#999999',              # Gray
     'gauche': '#882255',           # Wine
+    'gauche_rbf': '#882255',       # Wine (RBF variant, PDV only)
 }
 
 # Within-family colors for figures that compare variants of the same family.
@@ -256,7 +261,7 @@ UNCERTAINTY_COLORS = {
 MODEL_MARKERS = {
     # Base models
     'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
-    'svm': 'o', 'gauche': 'o',
+    'svm': 'o', 'gauche': 'o', 'gauche_rbf': 's',
     'dnn': 'o', 'mlp': 'o',
     # DNN family variants
     'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
@@ -270,7 +275,7 @@ MODEL_MARKERS = {
 MODEL_ORDER = [
     'rf', 'qrf',
     'xgboost', 'lgb', 'ngboost',
-    'svm', 'gauche',
+    'svm', 'gauche', 'gauche_rbf',
     'dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll',
     'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll',
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
@@ -314,6 +319,7 @@ MODEL_LABELS = {
     # SVM / GP
     'svm': 'SVM',
     'gauche': 'GP',
+    'gauche_rbf': 'GP (RBF)',
     # DNN-BNN variants
     'dnn_bnn_full': 'DNN-BNN (Full)',
     'dnn_bnn_last': 'DNN-BNN (Last)',
@@ -422,7 +428,22 @@ def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=N
                         raw_col = raw_name
                         break
 
-                if (raw_idx, raw_col) in existing_combos:
+                # PDV-only models (e.g. gauche_rbf) show N/A for non-PDV reps
+                is_pdv_only_on_nonpdv = (raw_idx in PDV_ONLY_MODELS and
+                                         columns_col == 'rep' and
+                                         raw_col != 'continuous_pdv')
+                # PDV-only models on non-PDV rep_filter (model×strategy heatmaps)
+                is_pdv_only_wrong_rep = (raw_idx in PDV_ONLY_MODELS and
+                                         rep_filter is not None and
+                                         rep_filter != 'continuous_pdv')
+                # Tanimoto GP is incompatible with continuous PDV
+                is_tanimoto_on_pdv = (raw_idx == 'gauche' and
+                                      ((columns_col == 'rep' and raw_col == 'continuous_pdv') or
+                                       (rep_filter == 'continuous_pdv')))
+
+                if (raw_idx, raw_col) in existing_combos or \
+                   is_pdv_only_on_nonpdv or is_pdv_only_wrong_rep or \
+                   is_tanimoto_on_pdv:
                     annot.loc[idx, col] = 'N/A'
                 else:
                     annot.loc[idx, col] = 'missing'
@@ -1213,7 +1234,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             annot_text.columns = pivot.columns
 
             ax.set_facecolor('black')
-            sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='RdYlGn', center=0,
+            sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='PuOr', center=0,
                         vmin=shared_vmin, vmax=0,
                         ax=ax, cbar_kws={'label': 'NDS'}, linewidths=0.5,
                         linecolor='#333333')
@@ -1469,7 +1490,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_strat, annot=True, fmt='.2f', cmap='RdYlGn', center=0, vmax=0,
+            sns.heatmap(pivot_strat, annot=True, fmt='.2f', cmap='PuOr', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Noise Strategy Robustness Across Validation Datasets', fontweight='bold')
@@ -1492,7 +1513,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
             fig, ax = plt.subplots(figsize=(max(6, 2 * len(datasets)), 4))
             ax.set_facecolor('black')
-            sns.heatmap(pivot_rep, annot=True, fmt='.2f', cmap='RdYlGn', center=0, vmax=0,
+            sns.heatmap(pivot_rep, annot=True, fmt='.2f', cmap='PuOr', center=0, vmax=0,
                         ax=ax, cbar_kws={'label': 'Mean NDS'}, linewidths=0.5,
                         linecolor='#333333')
             ax.set_title('Representation Effect on Robustness (Validation Datasets)', fontweight='bold')
@@ -2244,9 +2265,10 @@ def run_simple_effects_analysis(df, output_dir):
 
     # --- Supplementary: simple effects for ALL reps/models (no ANOVA exclusions) ---
     # This captures trends for SNS, randomized_smiles, conformal, QRF etc.
+    # Still exclude PDV-only models (e.g. gauche_rbf) which lack cross-rep data
     all_rows_full = []
     for strategy in df['strategy'].unique():
-        strategy_df = df[df['strategy'] == strategy]
+        strategy_df = df[(df['strategy'] == strategy) & (~df['model'].isin(PDV_ONLY_MODELS))]
         strategy_label = STRATEGY_LABELS.get(strategy, strategy)
 
         # Performance (R² at σ=0.3) — no exclusions
@@ -2625,7 +2647,7 @@ def create_figure1(df, nds_df, output_dir):
         vals = pivot.values[~np.isnan(pivot.values)]
         center_val = (vals.min() + vals.max()) / 2 if len(vals) > 0 else 0
         ax_b.set_facecolor('black')
-        sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', center=center_val,
+        sns.heatmap(pivot, annot=annot_text, fmt='', cmap='PuOr', center=center_val,
                     ax=ax_b, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         _white_text_for_missing(ax_b, pivot, annot_text)
         ax_b.set_xlabel('Noise Strategy')
@@ -2668,7 +2690,8 @@ def create_figure1(df, nds_df, output_dir):
         if len(nds_ecfp4) > 0:
             all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                               if s in nds_df['strategy'].unique()]
-            all_models_e = sort_models_by_family(nds_df['model'].unique().tolist())
+            all_models_e = sort_models_by_family([m for m in nds_df['model'].unique()
+                                                     if m not in PDV_ONLY_MODELS])
             pivot = nds_ecfp4.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
             pivot = pivot.reindex(index=all_models_e, columns=all_strategies)
 
@@ -2682,7 +2705,7 @@ def create_figure1(df, nds_df, output_dir):
             vals_e = pivot.values[~np.isnan(pivot.values)]
             cv_e = (vals_e.min() + vals_e.max()) / 2 if len(vals_e) > 0 else 0
             ax_eb.set_facecolor('black')
-            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='RdYlGn', center=cv_e,
+            sns.heatmap(pivot, annot=annot_text, fmt='', cmap='PuOr', center=cv_e,
                         ax=ax_eb, cbar_kws={'label': 'NDS'}, linewidths=0.5)
             _white_text_for_missing(ax_eb, pivot, annot_text)
             ax_eb.set_xlabel('Noise Strategy')
@@ -3088,7 +3111,7 @@ def create_uncertainty_figure(unc_df, output_dir):
 # TABLES
 # =============================================================================
 
-def create_tables(nds_df, unc_df, qm9_df, output_dir):
+def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
     """Create all summary tables."""
 
     # Table 2: NDS by model × strategy (PDV only - don't mix representations)
@@ -3132,6 +3155,61 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir):
         pivot_all.rename(columns=STRATEGY_LABELS, inplace=True)
         pivot_all.to_csv(output_dir / 'table2_supp_nds_all_reps.csv')
         print("✓ Saved table2_supp_nds_all_reps.csv (supplementary)")
+
+    # Table: Top NDS configurations (model × rep) with per-strategy columns + external validation
+    if len(nds_anova_tbl) > 0:
+        # Pivot: model×rep with one column per strategy
+        top_pivot = nds_anova_tbl.pivot_table(
+            values='nds', index=['model', 'rep'], columns='strategy', aggfunc='mean')
+        top_pivot.rename(columns=STRATEGY_LABELS, inplace=True)
+
+        gauss_col = STRATEGY_LABELS.get('legacy', 'Gaussian')
+
+        # Add external validation mean NDS if available
+        if val_nds_df is not None and 'dataset' in val_nds_df.columns:
+            val_mean = val_nds_df.pivot_table(
+                values='nds', index=['model', 'rep'], columns='dataset', aggfunc='mean')
+            val_mean['Ext. Mean'] = val_mean.mean(axis=1)
+            top_pivot = top_pivot.join(val_mean[['Ext. Mean']], how='left')
+        else:
+            top_pivot['Ext. Mean'] = np.nan
+
+        # Sort by Gaussian NDS (least negative = most robust)
+        if gauss_col in top_pivot.columns:
+            top_pivot = top_pivot.sort_values(gauss_col, ascending=False)
+
+        # Add display labels
+        top_pivot = top_pivot.reset_index()
+        top_pivot['Model'] = top_pivot['model'].apply(get_model_label)
+        top_pivot['Rep'] = top_pivot['rep'].apply(get_rep_label)
+
+        # Select and order columns
+        strat_cols = [STRATEGY_LABELS.get(s, s) for s in
+                      ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+                      if STRATEGY_LABELS.get(s, s) in top_pivot.columns]
+        out_cols = ['Model', 'Rep'] + strat_cols + ['Ext. Mean']
+        top_configs = top_pivot[out_cols].copy()
+
+        # Save top 15
+        top15 = top_configs.head(15)
+        top15.to_csv(output_dir / 'table_top_nds_configs.csv', index=False)
+        print(f"✓ Saved table_top_nds_configs.csv (top 15 by {gauss_col})")
+
+        # Check if Gaussian ranking differs from other strategies
+        if gauss_col in top_pivot.columns:
+            rank_by_gauss = top_pivot.set_index(['model', 'rep'])[gauss_col].rank(ascending=False)
+            for sc in strat_cols:
+                if sc != gauss_col and sc in top_pivot.set_index(['model', 'rep']).columns:
+                    rank_by_other = top_pivot.set_index(['model', 'rep'])[sc].rank(ascending=False)
+                    common = rank_by_gauss.index.intersection(rank_by_other.index)
+                    if len(common) >= 5:
+                        from scipy.stats import spearmanr
+                        rho, p = spearmanr(rank_by_gauss.loc[common], rank_by_other.loc[common])
+                        print(f"  Rank correlation Gaussian vs {sc}: ρ={rho:.3f} (p={p:.2e})")
+
+        # Save full table (all configs)
+        top_configs.to_csv(output_dir / 'table_all_nds_configs.csv', index=False)
+        print(f"✓ Saved table_all_nds_configs.csv ({len(top_configs)} configs)")
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
@@ -3649,7 +3727,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         annot_text.columns = hm_pivot.columns
 
         ax_a.set_facecolor('black')
-        sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='RdYlGn', vmax=0,
+        sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='PuOr', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         _white_text_for_missing(ax_a, hm_pivot, annot_text)
         ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
@@ -4104,7 +4182,7 @@ def main():
     create_uncertainty_figure(unc_df, output_dir)
 
     print("\n--- TABLES ---")
-    create_tables(nds_df, unc_df, qm9_df, output_dir)
+    create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=val_nds_df)
 
     print("\n--- VALIDATION (GENERALISATION) ---")
     create_validation_figures(validation_df, val_nds_df, nds_df, output_dir)
