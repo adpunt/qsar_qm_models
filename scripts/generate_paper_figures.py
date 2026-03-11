@@ -10,7 +10,7 @@ PART 1: THE WHAT
   Figure 3: Ranking Consistency (heatmaps, cross-dataset)
 
 PART 2: THE WHY
-  Figure: NN Family Comparison (DNN, MLP, RF families) — 1×3 panel + NDS CSV
+  Figure: NN Family Comparison (NN-α, NN-β, RF families) — 1×3 panel + NDS CSV
   Figure: Uncertainty Tracks Noise (single-panel: mean uncertainty vs σ)
 
 Calibration (ECE, coverage), unc-error/unc-noise correlations, and
@@ -118,7 +118,7 @@ GLOBAL_MODELS_EXCLUDE = {
 
 ANOVA_MODELS_EXCLUDE = {
     'qrf',  # Redundant with rf (rho = 0.996)
-    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # DNN architecture variants (mid-pack, don't answer research questions)
+    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # NN-α architecture variants (mid-pack, don't answer research questions)
     'gauche',  # Tanimoto kernel incompatible with continuous PDV (non-binary features)
     'gauche_rbf',  # RBF GP for PDV only; excluded from cross-rep ANOVA
 } | GLOBAL_MODELS_EXCLUDE
@@ -203,16 +203,16 @@ MODEL_COLORS = {
     'xgboost': '#56B4E9',          # Sky blue
     'lgb': '#009E73',              # Teal
     'ngboost': '#D55E00',          # Vermillion
-    # DNN family — all orange (BNN/VBLL variants)
+    # NN-α family — all orange
     'dnn': '#E69F00',
     'dnn_bnn_full': '#E69F00',
     'dnn_bnn_last': '#E69F00',
     'dnn_vbll': '#E69F00',
-    # DNN architecture variants — olive/brown (separate from BNN family)
+    # NN-α architecture variants — olive/brown (excluded from figures)
     'flexible_dnn': '#8B6914',
     'flexible_dnn_256_128_64': '#8B6914',
     'flexible_dnn_512_256': '#8B6914',
-    # MLP family — all pink
+    # NN-β family — all pink
     'mlp': '#CC79A7',
     'mlp_bnn_full': '#CC79A7',
     'mlp_bnn_last': '#CC79A7',
@@ -263,11 +263,11 @@ MODEL_MARKERS = {
     'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
     'svm': 'o', 'gauche': 'o', 'gauche_rbf': 's',
     'dnn': 'o', 'mlp': 'o',
-    # DNN family variants
+    # NN-α family variants
     'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
-    # MLP family variants
+    # NN-β family variants
     'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_vbll': 'D',
-    # DNN architecture variants
+    # NN-α architecture variants
     'flexible_dnn': 'o', 'flexible_dnn_256_128_64': 's', 'flexible_dnn_512_256': '^',
 }
 
@@ -288,9 +288,9 @@ def sort_models_by_family(models):
 
 
 def get_variant_color(model):
-    """Get color distinguishing variants within DNN/MLP families.
+    """Get color distinguishing variants within NN-α/NN-β families.
 
-    For figures where multiple DNN or MLP variants appear together (e.g. uncertainty),
+    For figures where multiple NN-α or NN-β variants appear together (e.g. uncertainty),
     use family-specific colors so variants are visually distinct. Non-family models
     use their standard MODEL_COLORS.
     """
@@ -311,23 +311,23 @@ MODEL_LABELS = {
     'qrf': 'QRF',
     'ngboost': 'NGBoost',
     # Neural networks
-    'dnn': 'DNN',
-    'mlp': 'MLP',
-    'flexible_dnn': 'DNN [128,64]',
-    'flexible_dnn_256_128_64': 'DNN [256,128,64]',
-    'flexible_dnn_512_256': 'DNN [512,256]',
+    'dnn': 'NN-α',
+    'mlp': 'NN-β',
+    'flexible_dnn': 'NN-α [128,64]',
+    'flexible_dnn_256_128_64': 'NN-α [256,128,64]',
+    'flexible_dnn_512_256': 'NN-α [512,256]',
     # SVM / GP
     'svm': 'SVM',
     'gauche': 'GP',
     'gauche_rbf': 'GP (RBF)',
-    # DNN-BNN variants
-    'dnn_bnn_full': 'DNN-BNN (Full)',
-    'dnn_bnn_last': 'DNN-BNN (Last)',
-    'dnn_vbll': 'DNN-VBLL',
-    # MLP-BNN variants
-    'mlp_bnn_full': 'MLP-BNN (Full)',
-    'mlp_bnn_last': 'MLP-BNN (Last)',
-    'mlp_vbll': 'MLP-VBLL',
+    # NN-α Bayesian variants
+    'dnn_bnn_full': 'NN-α Full',
+    'dnn_bnn_last': 'NN-α Last',
+    'dnn_vbll': 'NN-α VBLL',
+    # NN-β Bayesian variants
+    'mlp_bnn_full': 'NN-β Full',
+    'mlp_bnn_last': 'NN-β Last',
+    'mlp_vbll': 'NN-β VBLL',
 }
 
 REP_LABELS = {
@@ -347,7 +347,7 @@ def get_model_label(model):
     if model.lower() in MODEL_LABELS:
         return MODEL_LABELS[model.lower()]
     # Fallback: replace underscores, title case (avoids ugly DNN_BNN_FULL)
-    return model.replace('_', '-').replace('bnn', 'BNN').replace('dnn', 'DNN').replace('mlp', 'MLP').title() if '_' in model else model.upper()
+    return model.replace('_', '-').upper() if '_' in model else model.upper()
 
 def get_rep_label(rep):
     """Get clean display label for representation."""
@@ -527,7 +527,7 @@ def load_anova_data(results_dir):
         combined = pd.concat(all_data, ignore_index=True)
 
         # Normalize model names from CSV conventions to clean internal names.
-        # process_and_train.py saves DNN-BNN variants as 'bnn_full' etc.
+        # process_and_train.py saves NN-α BNN variants as 'bnn_full' etc.
         # VBLL variants saved as '*_full_variational' → renamed to '*_vbll'.
         BNN_NAME_MAP = {
             'bnn_full': 'dnn_bnn_full',
@@ -743,7 +743,7 @@ def audit_uncertainty_completeness(unc_df, output_dir):
 def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
     """Filter out catastrophic training iterations (R² below threshold).
 
-    DNN training on certain representations (e.g. mol2vec) occasionally produces
+    NN-α training on certain representations (e.g. mol2vec) occasionally produces
     catastrophic failures with wildly negative R² (e.g. -63.6). These poison
     mean R² calculations and can flip NDS positive. This function removes
     entire iterations where any sigma level has R² below the threshold.
@@ -946,7 +946,7 @@ def fix_injected_noise(df):
 def _normalize_validation_names(df):
     """Normalize KIRBy naming conventions to match QM9 conventions."""
     val_model_map = {
-        'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',
+        'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',  # KIRBy uses DNN/MLP internally
         'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
         'LightGBM': 'lgb', 'LGBM': 'lgb',
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
@@ -1142,7 +1142,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         print("⚠ No validation NDS data available — skipping validation figures")
         return
 
-    # Filter extreme NDS values (|NDS| > threshold = artifact, e.g. DNN divergence on hERG-Ki)
+    # Filter extreme NDS values (|NDS| > threshold = artifact, e.g. NN-α divergence on hERG-Ki)
     # These are set to NaN so they appear as "N/A" in heatmaps
     val_nds_df = val_nds_df.copy()
     extreme_mask = val_nds_df['nds'].abs() > VALIDATION_NDS_THRESHOLD
@@ -1361,7 +1361,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         prob_pairs = [
             ('rf', 'qrf', 'RF vs QRF'),
         ]
-        # Add DNN/MLP BNN comparisons if available
+        # Add NN-α/NN-β BNN comparisons if available
         for base in ['dnn', 'mlp']:
             for suffix in ['_bnn_full', '_bnn_last', '_bnn_variational']:
                 variant = base + suffix
@@ -2872,11 +2872,11 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
 # =============================================================================
 
 def create_nn_family_comparison(df, nds_df, output_dir):
-    """Combined NN family comparison: DNN, MLP, and RF families under Gaussian noise.
+    """Combined NN family comparison: NN-α, NN-β, and RF families under Gaussian noise.
 
     1×3 subplot:
-      Panel A: DNN family (DNN, DNN-BNN Full, DNN-BNN Last, DNN-VBLL)
-      Panel B: MLP family (MLP, MLP-BNN Full, MLP-BNN Last, MLP-VBLL)
+      Panel A: NN-α family (NN-α, NN-α Full, NN-α Last, NN-α VBLL)
+      Panel B: NN-β family (NN-β, NN-β Full, NN-β Last, NN-β VBLL)
       Panel C: RF vs QRF
     All on PRIMARY_REP, Gaussian strategy only.
     """
@@ -2890,8 +2890,8 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
     families = [
-        ('A', 'DNN Family', dnn_variants, DNN_FAMILY_COLORS),
-        ('B', 'MLP Family', mlp_variants, MLP_FAMILY_COLORS),
+        ('A', 'NN-α Family', dnn_variants, DNN_FAMILY_COLORS),
+        ('B', 'NN-β Family', mlp_variants, MLP_FAMILY_COLORS),
         ('C', 'RF vs QRF', rf_models, RF_FAMILY_COLORS),
     ]
 
@@ -2963,7 +2963,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
     if unc_col is None:
         return False
 
-    # Pre-filter: exclude models with negligible uncertainty (e.g. plain DNN/MLP)
+    # Pre-filter: exclude models with negligible uncertainty (e.g. plain NN-α/NN-β)
     valid_models = []
     for model in filtered['model'].unique():
         mdata = filtered[filtered['model'] == model]
@@ -3214,8 +3214,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'DNN Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']},
-        'MLP Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']},
+        'NN-α Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']},
+        'NN-β Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
     }
 
@@ -3323,7 +3323,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                     if mask.sum() < 100:
                         continue
 
-                    # Skip models with negligible uncertainty (e.g. plain DNN/MLP
+                    # Skip models with negligible uncertainty (e.g. plain NN-α/NN-β
                     # that don't produce meaningful uncertainty estimates)
                     mean_unc = unc_values[mask].mean()
                     if mean_unc < 1e-3:
@@ -4008,15 +4008,15 @@ def generate_report(nds_df, excluded_df, output_dir):
         lines.append(f"\nMost robust model: {mean_nds.index[0]} (NDS = {mean_nds.iloc[0]:.4f})")
         lines.append(f"Least robust model: {mean_nds.index[-1]} (NDS = {mean_nds.iloc[-1]:.4f})")
 
-        # BNN vs DNN comparison
+        # BNN vs NN-α comparison
         dnn_data = nds_pdv_legacy[nds_pdv_legacy['model'] == 'dnn']
         bnn_data = nds_pdv_legacy[nds_pdv_legacy['model'] == 'dnn_bnn_full']
 
         if len(dnn_data) > 0 and len(bnn_data) > 0:
             dnn_nds = dnn_data['nds'].values[0]
             bnn_nds = bnn_data['nds'].values[0]
-            lines.append(f"\nDNN NDS: {dnn_nds:.4f}")
-            lines.append(f"DNN-BNN-full NDS: {bnn_nds:.4f}")
+            lines.append(f"\nNN-α NDS: {dnn_nds:.4f}")
+            lines.append(f"NN-α Full NDS: {bnn_nds:.4f}")
             lines.append(f"Improvement: {(bnn_nds - dnn_nds):.4f}")
 
     report_path = output_dir / 'paper_figures_report.txt'
@@ -4070,7 +4070,7 @@ def main():
         if len(unc_df) < pre_filter_unc:
             print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded models")
 
-    # Filter catastrophic training iterations (e.g. DNN/mol2vec with R² = -63)
+    # Filter catastrophic training iterations (e.g. NN-α/mol2vec with R² = -63)
     qm9_df, catastrophic_log = filter_catastrophic_iterations(qm9_df)
     if len(catastrophic_log) > 0:
         catastrophic_log.to_csv(output_dir / 'filtered_catastrophic_iterations.csv', index=False)
