@@ -114,6 +114,8 @@ GLOBAL_MODELS_EXCLUDE = {
     'conformal_rf_split', 'conformal_qrf_split', 'conformal_dnn_split',
     # Pre-VBLL variational — was identical to last-layer (bug), replaced by VBLL
     'dnn_bnn_variational', 'mlp_bnn_variational',
+    # Last-layer BNN — no significant improvement over base (Wilcoxon p > 0.1)
+    'dnn_bnn_last', 'mlp_bnn_last',
 }
 
 ANOVA_MODELS_EXCLUDE = {
@@ -276,8 +278,8 @@ MODEL_ORDER = [
     'rf', 'qrf',
     'xgboost', 'lgb', 'ngboost',
     'svm', 'gauche', 'gauche_rbf',
-    'dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll',
-    'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll',
+    'dnn', 'dnn_bnn_full', 'dnn_vbll',
+    'mlp', 'mlp_bnn_full', 'mlp_vbll',
     'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
 ]
 
@@ -1363,7 +1365,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         ]
         # Add NN-α/NN-β BNN comparisons if available
         for base in ['dnn', 'mlp']:
-            for suffix in ['_bnn_full', '_bnn_last', '_bnn_variational']:
+            for suffix in ['_bnn_full', '_bnn_variational']:
                 variant = base + suffix
                 if variant in val_nds_df['model'].values:
                     prob_pairs.append((base, variant, f'{base.upper()} vs {variant}'))
@@ -2875,13 +2877,13 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     """Combined NN family comparison: NN-α, NN-β, and RF families under Gaussian noise.
 
     1×3 subplot:
-      Panel A: NN-α family (NN-α, NN-α (Full), NN-α (Last), NN-α (VBLL))
-      Panel B: NN-β family (NN-β, NN-β (Full), NN-β (Last), NN-β (VBLL))
+      Panel A: NN-α family (NN-α, NN-α (Full), NN-α (VBLL))
+      Panel B: NN-β family (NN-β, NN-β (Full), NN-β (VBLL))
       Panel C: RF vs QRF
     All on PRIMARY_REP, Gaussian strategy only.
     """
-    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']
-    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']
+    dnn_variants = ['dnn', 'dnn_bnn_full', 'dnn_vbll']
+    mlp_variants = ['mlp', 'mlp_bnn_full', 'mlp_vbll']
     rf_models = ['rf', 'qrf']
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -3214,8 +3216,8 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
-        'NN-α Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_vbll']},
-        'NN-β Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_bnn_last', 'mlp_vbll']},
+        'NN-α Family': {'base': 'dnn', 'variants': ['dnn_bnn_full', 'dnn_vbll']},
+        'NN-β Family': {'base': 'mlp', 'variants': ['mlp_bnn_full', 'mlp_vbll']},
         'RF Family': {'base': 'rf', 'variants': ['qrf']},
     }
 
