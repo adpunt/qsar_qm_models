@@ -2592,7 +2592,7 @@ def create_figure1(df, nds_df, output_dir):
     # Panel A: R² vs σ for key models on PDV
     ax_a = fig.add_subplot(gs[0])
 
-    key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost']
+    key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost', 'gauche_rbf']
     pdv_data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == 'legacy')]
 
     # Plot key models only (no grey background lines)
@@ -2626,7 +2626,8 @@ def create_figure1(df, nds_df, output_dir):
             nds_pdv = nds_df
 
         # Build full pivot (all models × all strategies) so missing cells appear
-        all_models = sort_models_by_family(nds_df['model'].unique().tolist())
+        # Exclude Tanimoto GP from PDV heatmap (kernel incompatible with continuous features)
+        all_models = sort_models_by_family([m for m in nds_df['model'].unique() if m != 'gauche'])
         all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
                           if s in nds_df['strategy'].unique()]
         pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
@@ -3699,6 +3700,8 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
     # Filter to ANOVA-included reps only; keep ALL models (including QRF) for interaction view
     nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    # Exclude PDV-only models from cross-rep interaction figure
+    nds_legacy = nds_legacy[~nds_legacy['model'].isin(PDV_ONLY_MODELS)]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
