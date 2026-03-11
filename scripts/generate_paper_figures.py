@@ -2611,7 +2611,7 @@ def create_figure1(df, nds_df, output_dir):
     ax_a.set_ylabel('R²')
     ax_a.set_title('A. Performance Degradation (PDV, Gaussian Noise)', fontweight='bold')
     ax_a.legend(loc='lower left', ncol=2)
-    ax_a.set_ylim(-0.1, 1.0)
+    ax_a.set_ylim(0.3, 1.0)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
 
@@ -2681,7 +2681,7 @@ def create_figure1(df, nds_df, output_dir):
     ax_ea.set_ylabel('R²')
     ax_ea.set_title('A. Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
     ax_ea.legend(loc='lower left', ncol=2)
-    ax_ea.set_ylim(-0.1, 1.0)
+    ax_ea.set_ylim(0.3, 1.0)
     ax_ea.spines['top'].set_visible(False)
     ax_ea.spines['right'].set_visible(False)
 
@@ -2911,7 +2911,7 @@ def create_nn_family_comparison(df, nds_df, output_dir):
         ax.set_ylabel('R²')
         ax.set_title(f'{panel}. {title} ({strategy_label})', fontweight='bold')
         ax.legend(loc='lower left', fontsize=7)
-        ax.set_ylim(0.4, 1.0)
+        ax.set_ylim(0.3, 1.0)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
