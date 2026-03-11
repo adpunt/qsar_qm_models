@@ -321,13 +321,13 @@ MODEL_LABELS = {
     'gauche': 'GP',
     'gauche_rbf': 'GP (RBF)',
     # NN-α Bayesian variants
-    'dnn_bnn_full': 'NN-α Full',
-    'dnn_bnn_last': 'NN-α Last',
-    'dnn_vbll': 'NN-α VBLL',
+    'dnn_bnn_full': 'NN-α (Full)',
+    'dnn_bnn_last': 'NN-α (Last)',
+    'dnn_vbll': 'NN-α (VBLL)',
     # NN-β Bayesian variants
-    'mlp_bnn_full': 'NN-β Full',
-    'mlp_bnn_last': 'NN-β Last',
-    'mlp_vbll': 'NN-β VBLL',
+    'mlp_bnn_full': 'NN-β (Full)',
+    'mlp_bnn_last': 'NN-β (Last)',
+    'mlp_vbll': 'NN-β (VBLL)',
 }
 
 REP_LABELS = {
@@ -2875,8 +2875,8 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     """Combined NN family comparison: NN-α, NN-β, and RF families under Gaussian noise.
 
     1×3 subplot:
-      Panel A: NN-α family (NN-α, NN-α Full, NN-α Last, NN-α VBLL)
-      Panel B: NN-β family (NN-β, NN-β Full, NN-β Last, NN-β VBLL)
+      Panel A: NN-α family (NN-α, NN-α (Full), NN-α (Last), NN-α (VBLL))
+      Panel B: NN-β family (NN-β, NN-β (Full), NN-β (Last), NN-β (VBLL))
       Panel C: RF vs QRF
     All on PRIMARY_REP, Gaussian strategy only.
     """
@@ -4016,7 +4016,7 @@ def generate_report(nds_df, excluded_df, output_dir):
             dnn_nds = dnn_data['nds'].values[0]
             bnn_nds = bnn_data['nds'].values[0]
             lines.append(f"\nNN-α NDS: {dnn_nds:.4f}")
-            lines.append(f"NN-α Full NDS: {bnn_nds:.4f}")
+            lines.append(f"NN-α (Full) NDS: {bnn_nds:.4f}")
             lines.append(f"Improvement: {(bnn_nds - dnn_nds):.4f}")
 
     report_path = output_dir / 'paper_figures_report.txt'
