@@ -120,7 +120,6 @@ GLOBAL_MODELS_EXCLUDE = {
 
 ANOVA_MODELS_EXCLUDE = {
     'qrf',  # Redundant with rf (rho = 0.996)
-    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',  # NN-α architecture variants (mid-pack, don't answer research questions)
     'gauche',  # Tanimoto kernel incompatible with continuous PDV (non-binary features)
     'gauche_rbf',  # RBF GP for PDV only; excluded from cross-rep ANOVA
 } | GLOBAL_MODELS_EXCLUDE
@@ -210,10 +209,6 @@ MODEL_COLORS = {
     'dnn_bnn_full': '#E69F00',
     'dnn_bnn_last': '#E69F00',
     'dnn_vbll': '#E69F00',
-    # NN-α architecture variants — olive/brown (excluded from figures)
-    'flexible_dnn': '#8B6914',
-    'flexible_dnn_256_128_64': '#8B6914',
-    'flexible_dnn_512_256': '#8B6914',
     # NN-β family — all pink
     'mlp': '#CC79A7',
     'mlp_bnn_full': '#CC79A7',
@@ -269,8 +264,6 @@ MODEL_MARKERS = {
     'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
     # NN-β family variants
     'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_vbll': 'D',
-    # NN-α architecture variants
-    'flexible_dnn': 'o', 'flexible_dnn_256_128_64': 's', 'flexible_dnn_512_256': '^',
 }
 
 # Canonical ordering for legends — grouped by family, base model first.
@@ -280,7 +273,6 @@ MODEL_ORDER = [
     'svm', 'gauche', 'gauche_rbf',
     'dnn', 'dnn_bnn_full', 'dnn_vbll',
     'mlp', 'mlp_bnn_full', 'mlp_vbll',
-    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
 ]
 
 def sort_models_by_family(models):
@@ -315,21 +307,16 @@ MODEL_LABELS = {
     # Neural networks
     'dnn': 'NN-α',
     'mlp': 'NN-β',
-    'flexible_dnn': 'NN-α [128,64]',
-    'flexible_dnn_256_128_64': 'NN-α [256,128,64]',
-    'flexible_dnn_512_256': 'NN-α [512,256]',
     # SVM / GP
     'svm': 'SVM',
     'gauche': 'GP',
     'gauche_rbf': 'GP (RBF)',
-    # NN-α Bayesian variants
-    'dnn_bnn_full': 'NN-α (Full)',
-    'dnn_bnn_last': 'NN-α (Last)',
-    'dnn_vbll': 'NN-α (VBLL)',
-    # NN-β Bayesian variants
-    'mlp_bnn_full': 'NN-β (Full)',
-    'mlp_bnn_last': 'NN-β (Last)',
-    'mlp_vbll': 'NN-β (VBLL)',
+    # α Bayesian variants
+    'dnn_bnn_full': 'BNN-α',
+    'dnn_vbll': 'VBLL-α',
+    # β Bayesian variants
+    'mlp_bnn_full': 'BNN-β',
+    'mlp_vbll': 'VBLL-β',
 }
 
 REP_LABELS = {
@@ -2877,8 +2864,8 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     """Combined NN family comparison: NN-α, NN-β, and RF families under Gaussian noise.
 
     1×3 subplot:
-      Panel A: NN-α family (NN-α, NN-α (Full), NN-α (VBLL))
-      Panel B: NN-β family (NN-β, NN-β (Full), NN-β (VBLL))
+      Panel A: NN-α family (NN-α, BNN-α, VBLL-α)
+      Panel B: NN-β family (NN-β, BNN-β, VBLL-β)
       Panel C: RF vs QRF
     All on PRIMARY_REP, Gaussian strategy only.
     """
@@ -4018,7 +4005,7 @@ def generate_report(nds_df, excluded_df, output_dir):
             dnn_nds = dnn_data['nds'].values[0]
             bnn_nds = bnn_data['nds'].values[0]
             lines.append(f"\nNN-α NDS: {dnn_nds:.4f}")
-            lines.append(f"NN-α (Full) NDS: {bnn_nds:.4f}")
+            lines.append(f"BNN-α NDS: {bnn_nds:.4f}")
             lines.append(f"Improvement: {(bnn_nds - dnn_nds):.4f}")
 
     report_path = output_dir / 'paper_figures_report.txt'
