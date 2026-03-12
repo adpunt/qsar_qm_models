@@ -227,15 +227,13 @@ MODEL_COLORS = {
 # When variants are shown only against each other, use these to differentiate.
 DNN_FAMILY_COLORS = {
     'dnn': '#333333',              # Dark grey (base/deterministic)
-    'dnn_bnn_full': '#0072B2',     # Blue (full Bayesian)
-    'dnn_bnn_last': '#D55E00',     # Vermillion (last-layer)
-    'dnn_vbll': '#009E73',         # Teal (VBLL)
+    'dnn_bnn_full': '#E69F00',     # Amber (full Bayesian)
+    'dnn_vbll': '#882255',         # Wine (VBLL)
 }
 MLP_FAMILY_COLORS = {
     'mlp': '#333333',              # Dark grey (base/deterministic)
-    'mlp_bnn_full': '#0072B2',     # Blue (full Bayesian)
-    'mlp_bnn_last': '#D55E00',     # Vermillion (last-layer)
-    'mlp_vbll': '#009E73',         # Teal (VBLL)
+    'mlp_bnn_full': '#E69F00',     # Amber (full Bayesian)
+    'mlp_vbll': '#882255',         # Wine (VBLL)
 }
 RF_FAMILY_COLORS = {
     'rf': '#0072B2',               # Blue (base)
@@ -1644,7 +1642,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             n_datasets = len(datasets_list)
             x = np.arange(n_models)
             width = 0.8 / n_datasets
-            dataset_colors = ['#999999', '#0072B2', '#D55E00', '#009E73'][:n_datasets]
+            dataset_colors = ['#6BAED6', '#FC8D59', '#66C2A5', '#B39DDB'][:n_datasets]
             for i, dataset in enumerate(datasets_list):
                 offset = (i - n_datasets / 2 + 0.5) * width
                 values = model_ds[dataset].values
@@ -1694,7 +1692,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 dl = model_ds_c.columns.tolist()
                 x_c = np.arange(len(ml))
                 w_c = 0.8 / len(dl)
-                dc = ['#999999', '#0072B2', '#D55E00', '#009E73'][:len(dl)]
+                dc = ['#6BAED6', '#FC8D59', '#66C2A5', '#B39DDB'][:len(dl)]
                 for i, ds in enumerate(dl):
                     offset = (i - len(dl) / 2 + 0.5) * w_c
                     ax_a.bar(x_c + offset, model_ds_c[ds].values, w_c, color=dc[i], label=ds)
