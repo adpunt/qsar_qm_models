@@ -116,6 +116,8 @@ GLOBAL_MODELS_EXCLUDE = {
     'dnn_bnn_variational', 'mlp_bnn_variational',
     # Last-layer BNN — no significant improvement over base (Wilcoxon p > 0.1)
     'dnn_bnn_last', 'mlp_bnn_last',
+    # Flexible DNN architecture variants — not discussed in paper
+    'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256',
 }
 
 ANOVA_MODELS_EXCLUDE = {
