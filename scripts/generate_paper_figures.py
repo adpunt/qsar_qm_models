@@ -2379,6 +2379,27 @@ def compute_icc_and_redundancy(nds_df, output_dir):
         mp_df.to_csv(output_dir / 'table_supp_model_redundancy.csv', index=False)
         print(f"✓ Saved table_supp_model_redundancy.csv ({len(mp_df)} pairs)")
 
+        # Generate LaTeX table (high-correlation pairs only)
+        high_corr = mp_df[mp_df['spearman_rho'] >= 0.85].copy()
+        if len(high_corr) > 0:
+            lines_tex = []
+            lines_tex.append(r'\begin{tabular}{llrl}')
+            lines_tex.append(r'\toprule')
+            lines_tex.append(r'\textbf{Model A} & \textbf{Model B} & \textbf{$\rho$} & \textbf{Excluded} \\')
+            lines_tex.append(r'\midrule')
+            for _, row in high_corr.iterrows():
+                ma = get_model_label(row['model_a'])
+                mb = get_model_label(row['model_b'])
+                rho = f"{row['spearman_rho']:.3f}"
+                excl = 'Yes' if row['excluded_from_anova'] == 'yes' else ''
+                lines_tex.append(f'{ma} & {mb} & {rho} & {excl} \\\\')
+            lines_tex.append(r'\bottomrule')
+            lines_tex.append(r'\end{tabular}')
+
+            tex_path = output_dir / 'table_supp_model_redundancy.tex'
+            tex_path.write_text('\n'.join(lines_tex))
+            print(f"✓ Saved table_supp_model_redundancy.tex")
+
     # ── Pairwise REP redundancy ──
     reps = sorted(mean_nds['rep'].unique())
     rep_profiles = {}
@@ -2412,6 +2433,25 @@ def compute_icc_and_redundancy(nds_df, output_dir):
         rp_df = pd.DataFrame(rep_pairs).sort_values('spearman_rho', ascending=False)
         rp_df.to_csv(output_dir / 'table_supp_rep_redundancy.csv', index=False)
         print(f"✓ Saved table_supp_rep_redundancy.csv ({len(rp_df)} pairs)")
+
+        # Generate LaTeX table (all rep pairs)
+        lines_tex = []
+        lines_tex.append(r'\begin{tabular}{llrl}')
+        lines_tex.append(r'\toprule')
+        lines_tex.append(r'\textbf{Rep A} & \textbf{Rep B} & \textbf{$\rho$} & \textbf{Excluded} \\')
+        lines_tex.append(r'\midrule')
+        for _, row in rp_df.iterrows():
+            ra = get_rep_label(row['rep_a'])
+            rb = get_rep_label(row['rep_b'])
+            rho = f"{row['spearman_rho']:.3f}"
+            excl = 'Yes' if row['excluded_from_anova'] == 'yes' else ''
+            lines_tex.append(f'{ra} & {rb} & {rho} & {excl} \\\\')
+        lines_tex.append(r'\bottomrule')
+        lines_tex.append(r'\end{tabular}')
+
+        tex_path = output_dir / 'table_supp_rep_redundancy.tex'
+        tex_path.write_text('\n'.join(lines_tex))
+        print(f"✓ Saved table_supp_rep_redundancy.tex")
 
     # ── ICC(1,1) per model pair ──
     # Treats reps as "subjects", compares NDS agreement between two models
@@ -2457,6 +2497,27 @@ def compute_icc_and_redundancy(nds_df, output_dir):
         icc_df = pd.DataFrame(icc_rows).sort_values('icc_1_1', ascending=False)
         icc_df.to_csv(output_dir / 'table_supp_icc.csv', index=False)
         print(f"✓ Saved table_supp_icc.csv ({len(icc_df)} model pairs)")
+
+        # Generate LaTeX table (high-ICC pairs)
+        high_icc_tex = icc_df[icc_df['icc_1_1'] >= 0.7].copy()
+        if len(high_icc_tex) > 0:
+            lines_tex = []
+            lines_tex.append(r'\begin{tabular}{llrr}')
+            lines_tex.append(r'\toprule')
+            lines_tex.append(r'\textbf{Model A} & \textbf{Model B} & \textbf{ICC(1,1)} & \textbf{Mean $|\Delta$NDS$|$} \\')
+            lines_tex.append(r'\midrule')
+            for _, row in high_icc_tex.iterrows():
+                ma = get_model_label(row['model_a'])
+                mb = get_model_label(row['model_b'])
+                icc_val = f"{row['icc_1_1']:.3f}"
+                mad = f"{row['mean_abs_nds_diff']:.4f}"
+                lines_tex.append(f'{ma} & {mb} & {icc_val} & {mad} \\\\')
+            lines_tex.append(r'\bottomrule')
+            lines_tex.append(r'\end{tabular}')
+
+            tex_path = output_dir / 'table_supp_icc.tex'
+            tex_path.write_text('\n'.join(lines_tex))
+            print(f"✓ Saved table_supp_icc.tex")
 
         high_icc = icc_df[icc_df['icc_1_1'] > 0.9].head(10)
         if len(high_icc) > 0:
@@ -3981,6 +4042,31 @@ def generate_report(nds_df, excluded_df, output_dir):
     if len(excluded_df) > 0:
         excluded_df.to_csv(output_dir / 'excluded_configs.csv', index=False)
         lines.append(f"\n  Full exclusion list saved to excluded_configs.csv")
+
+        # Generate LaTeX summary table
+        excl_summary = excluded_df.groupby(['model', 'rep']).size().reset_index(name='n_excluded')
+        excl_pivot = excl_summary.pivot_table(values='n_excluded', index='model', columns='rep', fill_value=0)
+        excl_pivot.index = [get_model_label(m) for m in excl_pivot.index]
+        excl_pivot.columns = [get_rep_label(r) for r in excl_pivot.columns]
+        excl_pivot['Total'] = excl_pivot.sum(axis=1)
+        excl_pivot = excl_pivot.sort_values('Total', ascending=False)
+
+        lines_tex = []
+        cols = list(excl_pivot.columns)
+        col_fmt = 'l' + 'r' * len(cols)
+        lines_tex.append(r'\begin{tabular}{' + col_fmt + '}')
+        lines_tex.append(r'\toprule')
+        lines_tex.append(r'\textbf{Model} & ' + ' & '.join(f'\\textbf{{{c}}}' for c in cols) + r' \\')
+        lines_tex.append(r'\midrule')
+        for model_label, row in excl_pivot.iterrows():
+            vals = ' & '.join(str(int(v)) if v > 0 else '--' for v in row.values)
+            lines_tex.append(f'{model_label} & {vals} \\\\')
+        lines_tex.append(r'\bottomrule')
+        lines_tex.append(r'\end{tabular}')
+
+        tex_path = output_dir / 'table_supp_excluded_configs.tex'
+        tex_path.write_text('\n'.join(lines_tex))
+        print(f"✓ Saved table_supp_excluded_configs.tex")
 
     if len(nds_df) > 0:
         lines.append("\n" + "=" * 80)
