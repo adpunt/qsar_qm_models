@@ -950,6 +950,9 @@ def _normalize_validation_names(df):
         'LightGBM': 'lgb', 'LGBM': 'lgb',
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
         'VBLL-Full': 'dnn_vbll',
+        # NN-β family from KIRBy validation (MLP base, hidden=32, 2 hidden layers)
+        'MLP-BNN-Full': 'mlp_bnn_full',
+        'MLP-VBLL-Full': 'mlp_vbll',
     }
     val_rep_map = {
         'ECFP4': 'ecfp4', 'PDV': 'continuous_pdv', 'SNS': 'sns',
