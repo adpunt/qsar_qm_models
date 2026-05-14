@@ -15,7 +15,7 @@ eval "$("$MAMBA_EXE" shell hook --shell bash)"
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 cd /data/stat-cadd/scat9264/KIRBy
-. ../qsar_qm_models/setup.sh
+. setup.sh
 cd tests
 
 python alternative_data_noise_robustness.py \
