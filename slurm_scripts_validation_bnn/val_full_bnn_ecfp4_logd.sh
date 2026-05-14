@@ -21,6 +21,14 @@ cd /data/stat-cadd/scat9264/KIRBy
 git pull
 cd tests
 
+# Defensive env top-up — only runs if package is missing in env_test.
+python -c "import noiseInject" 2>/dev/null || \
+    pip install --no-deps -e /data/stat-cadd/scat9264/NoiseInject 2>/dev/null || \
+    pip install --no-deps -e /data/stat-ecr/scat9264/NoiseInject 2>/dev/null || \
+    echo "WARN: could not locate NoiseInject source — install manually"
+python -c "from kirby.representations.molecular import create_pdv" 2>/dev/null || \
+    pip install --no-deps -e /data/stat-cadd/scat9264/KIRBy 2>/dev/null
+
 python alternative_data_noise_robustness.py \
     --datasets logd \
     --models BNN-Full \

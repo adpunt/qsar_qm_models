@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=val_FULL_BNN_sns_logd
+#SBATCH --job-name=val_DNN_mhg_gnn_pretrained_herg
 #SBATCH --output=slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -30,9 +30,9 @@ python -c "from kirby.representations.molecular import create_pdv" 2>/dev/null |
     pip install --no-deps -e /data/stat-cadd/scat9264/KIRBy 2>/dev/null
 
 python alternative_data_noise_robustness.py \
-    --datasets logd \
-    --models BNN-Full \
-    --reps SNS \
-    --results-root results/validation_rerun/sns_logd
+    --datasets herg_ki \
+    --models DNN \
+    --reps MHG-GNN-pretrained \
+    --results-root results/validation_rerun/mhg_gnn_pretrained_herg
 
-echo "Done: BNN-Full x SNS x logd"
+echo "Done: DNN x MHG-GNN-pretrained x herg_ki"
