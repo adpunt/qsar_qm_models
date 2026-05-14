@@ -79,8 +79,14 @@ CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
 PRIMARY_REP = 'continuous_pdv'   # Continuous physicochemical descriptors
 SUPPLEMENTARY_REP = 'ecfp4'      # ECFP4 is more robust and representative of QSAR practice
 
-# All strategies for completeness checks
-ALL_STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+# Canonical ordering for all noise strategies. Use this everywhere instead of
+# re-typing the literal list — keeps text/table/figure orderings in sync.
+# Supervisor preference (Hetero last, matches the explanatory paragraph order):
+#   Gaussian → Outlier → Quantile → Threshold → Value-Prop. → Heteroscedastic
+STRATEGY_ORDER = ['legacy', 'outlier', 'quantile', 'threshold', 'valprop', 'hetero']
+
+# All strategies for completeness checks (legacy alias — order-insensitive)
+ALL_STRATEGIES = STRATEGY_ORDER
 
 # Flag to generate supplementary figures
 GENERATE_SUPPLEMENTARY = True
@@ -569,7 +575,7 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
     EXPECTED_REPS = {'ecfp4', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec'}
-    EXPECTED_STRATEGIES = {'legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero'}
+    EXPECTED_STRATEGIES = set(STRATEGY_ORDER)
 
     # Only audit ANOVA-included data
     anova_df = df[
@@ -936,9 +942,14 @@ def _normalize_validation_names(df):
     """Normalize KIRBy naming conventions to match QM9 conventions."""
     val_model_map = {
         'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',  # KIRBy uses DNN/MLP internally
-        'GP': 'gauche', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
+        # Validation GP is sklearn GaussianProcessRegressor with an RBF + WhiteKernel
+        # composite, run on PDV only. Semantically that's gauche_rbf (RBF GP on PDV),
+        # NOT gauche (Tanimoto GP on fingerprints). Conflating them in figures would
+        # mix two different models.
+        'GP': 'gauche_rbf', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
         'LightGBM': 'lgb', 'LGBM': 'lgb',
         'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
+        'VBLL-Full': 'dnn_vbll',
     }
     val_rep_map = {
         'ECFP4': 'ecfp4', 'PDV': 'continuous_pdv', 'SNS': 'sns',
@@ -1200,8 +1211,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 continue
 
             pivot = ds_data.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
-            col_order = [c for c in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-                         if c in pivot.columns]
+            col_order = [c for c in STRATEGY_ORDER if c in pivot.columns]
             if not col_order:
                 continue
             pivot = pivot[col_order]
@@ -1464,7 +1474,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
     # --- Figure: Strategy comparison across datasets ---
     if val_nds_df is not None and 'dataset' in val_nds_df.columns and 'strategy' in val_nds_df.columns:
-        strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+        strategies = [s for s in STRATEGY_ORDER
                       if s in val_nds_df['strategy'].unique()]
         if len(strategies) >= 2:
             # Heatmap: mean NDS by strategy × dataset (averaged across models and reps)
@@ -2579,8 +2589,25 @@ def create_methods_figure(output_dir):
 
         return y + noise
 
-    strategies = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+    strategies = list(STRATEGY_ORDER)
     sigma = 0.5  # Representative noise level
+
+    # Pre-compute one bin grid wide enough to contain every panel's noisy
+    # distribution. Without this, recomputing bins per panel from
+    # (y_clean ∪ y_noisy) shifts bin edges between panels — re-binning the
+    # SAME y_clean against shifted edges then produces visibly different
+    # "clean" outlines across panels even though the data is identical.
+    # Save/restore RNG state so each strategy gets a reproducible draw and
+    # the real plotting loop below sees the same RNG as before this fix.
+    rng_state = np.random.get_state()
+    all_y = [y_clean]
+    for strategy in strategies:
+        np.random.set_state(rng_state)
+        all_y.append(apply_noise(y_clean, sigma, strategy))
+    np.random.set_state(rng_state)
+    lo = min(arr.min() for arr in all_y)
+    hi = max(arr.max() for arr in all_y)
+    bins = np.linspace(lo, hi, 51)
 
     # Create 2x3 figure
     fig, axes = plt.subplots(2, 3, figsize=(10, 6))
@@ -2589,10 +2616,6 @@ def create_methods_figure(output_dir):
     for i, strategy in enumerate(strategies):
         ax = axes[i]
         y_noisy = apply_noise(y_clean, sigma, strategy)
-
-        # Use common bins for both distributions
-        all_vals = np.concatenate([y_clean, y_noisy])
-        bins = np.linspace(all_vals.min(), all_vals.max(), 51)
 
         # Filled histograms: very transparent so overlap is visible
         ax.hist(y_clean, bins=bins, alpha=0.15, color=CLEAN_COLOR, density=True)
@@ -2678,7 +2701,7 @@ def create_figure1(df, nds_df, output_dir):
         # Build full pivot (all models × all strategies) so missing cells appear
         # Exclude Tanimoto GP from PDV heatmap (kernel incompatible with continuous features)
         all_models = sort_models_by_family([m for m in nds_df['model'].unique() if m != 'gauche'])
-        all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+        all_strategies = [s for s in STRATEGY_ORDER
                           if s in nds_df['strategy'].unique()]
         pivot = nds_pdv.pivot_table(values='nds', index='model', columns='strategy', aggfunc='mean')
         pivot = pivot.reindex(index=all_models, columns=all_strategies)
@@ -2739,7 +2762,7 @@ def create_figure1(df, nds_df, output_dir):
     if len(nds_df) > 0:
         nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4']
         if len(nds_ecfp4) > 0:
-            all_strategies = [s for s in ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+            all_strategies = [s for s in STRATEGY_ORDER
                               if s in nds_df['strategy'].unique()]
             all_models_e = sort_models_by_family([m for m in nds_df['model'].unique()
                                                      if m not in PDV_ONLY_MODELS])
@@ -3235,8 +3258,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
         top_pivot['Rep'] = top_pivot['rep'].apply(get_rep_label)
 
         # Select and order columns
-        strat_cols = [STRATEGY_LABELS.get(s, s) for s in
-                      ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
+        strat_cols = [STRATEGY_LABELS.get(s, s) for s in STRATEGY_ORDER
                       if STRATEGY_LABELS.get(s, s) in top_pivot.columns]
         out_cols = ['Model', 'Rep'] + strat_cols + ['Ext. Mean']
         top_configs = top_pivot[out_cols].copy()
@@ -3980,7 +4002,7 @@ def create_full_overview(nds_df, output_dir):
     # Combined 2×3 figure with all 6 strategies
     _plot_full_overview_panels(
         nds_df,
-        strategies=['legacy', 'outlier', 'threshold', 'quantile', 'hetero', 'valprop'],
+        strategies=list(STRATEGY_ORDER),
         output_dir=output_dir,
         filename='fig_full_overview_all_strategies.png',
         panel_labels=['A', 'B', 'C', 'D', 'E', 'F']
