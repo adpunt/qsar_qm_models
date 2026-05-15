@@ -22,9 +22,12 @@ git pull
 cd /data/stat-cadd/scat9264/KIRBy/tests
 python /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_validation_rerun/merge_results.py
 
-# Generate figures
+# Generate figures. Both --qm9-dir and --validation-dir given as absolute
+# paths — the script's default --qm9-dir='../results' assumes cwd=scripts/,
+# which we don't honor here (we run python from the repo root).
 cd /data/stat-cadd/scat9264/qsar_qm_models
 python scripts/generate_paper_figures.py \
+    --qm9-dir /data/stat-cadd/scat9264/qsar_qm_models/results \
     --validation-dir /data/stat-cadd/scat9264/KIRBy/tests/results/validation
 
 echo "Done: generate_paper_figures"
