@@ -361,6 +361,28 @@ DATASET_MARKERS = {
     'hERG-Ki': 'D',
 }
 
+# Canonical order + display labels for the three external validation datasets.
+# Used in every per-dataset panel layout so figures and paper.tex captions stay
+# in sync (alphabetical sort gives ChEMBL → Caco2 → LogD, which mismatches the
+# paper's narrative order LogD → Caco-2 → hERG).
+VALIDATION_DATASET_ORDER = [
+    'OpenADMET-LogD',
+    'OpenADMET-Caco2_Efflux',
+    'ChEMBL-hERG-Ki',
+]
+VALIDATION_DATASET_LABELS = {
+    'OpenADMET-LogD': 'LogD',
+    'OpenADMET-Caco2_Efflux': 'Caco-2 Efflux',
+    'ChEMBL-hERG-Ki': 'hERG K$_i$',
+}
+
+
+def _order_validation_datasets(datasets):
+    """Sort a dataset iterable into VALIDATION_DATASET_ORDER, appending any unknowns."""
+    known = [d for d in VALIDATION_DATASET_ORDER if d in datasets]
+    extras = [d for d in datasets if d not in VALIDATION_DATASET_ORDER]
+    return known + sorted(extras)
+
 BASELINE_THRESHOLD = 0.6
 VALIDATION_BASELINE_THRESHOLD = 0.3  # External datasets are harder; lower threshold
 CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
@@ -1219,9 +1241,11 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     n_datasets = len(datasets)
     val_nds_primary = val_nds_df[val_nds_df['rep'] == PRIMARY_REP] if 'rep' in val_nds_df.columns else val_nds_df
     if n_datasets > 0 and 'dataset' in val_nds_df.columns and len(val_nds_primary) > 0:
-        # textwidth-wide; height proportional so rows of model labels stay legible
+        # textwidth-wide; height tuned so 13 model rows + colorbar fit legibly.
+        # Previous 0.55× ratio crushed the cells and made annotations overlap
+        # with the colorbar.
         fig, axes = plt.subplots(1, n_datasets,
-                                 figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.55),
+                                 figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.95),
                                  squeeze=False)
         axes = axes[0]
         panel_letters = ['(a)', '(b)', '(c)', '(d)']
@@ -1236,7 +1260,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             NDS_CLIP = 2.0
             shared_vmin = -NDS_CLIP
 
-        for i, dataset in enumerate(sorted(datasets)):
+        for i, dataset in enumerate(_order_validation_datasets(datasets)):
             ax = axes[i]
             ds_data = val_nds_primary[val_nds_primary['dataset'] == dataset]
             if len(ds_data) == 0:
@@ -1275,7 +1299,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                         linecolor='#333333')
             _white_text_for_missing(ax, pivot_display, annot_text)
             letter = panel_letters[i] if i < len(panel_letters) else f'({i})'
-            ax.set_title(f'{letter} {dataset}', fontweight='bold')
+            label = VALIDATION_DATASET_LABELS.get(dataset, dataset)
+            ax.set_title(f'{letter} {label}', fontweight='bold')
             if i > 0:
                 ax.set_ylabel('')
 
@@ -1288,7 +1313,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     # Filter to legacy strategy so the ANOVA mirrors the QM9 per-strategy design.
     if 'dataset' in val_nds_df.columns and 'model' in val_nds_df.columns and 'rep' in val_nds_df.columns:
         anova_results = {}
-        for dataset in sorted(datasets):
+        for dataset in _order_validation_datasets(datasets):
             ds_nds = val_nds_df[val_nds_df['dataset'] == dataset].copy()
             ds_nds = ds_nds[~ds_nds['rep'].isin(ANOVA_REPS_EXCLUDE)]
             # Use legacy strategy only — consistent with QM9 per-strategy ANOVA
@@ -1347,7 +1372,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 if i == 0:
                     ax.set_ylabel('Variance Explained (η², %)')
                 letter = panel_letters[i] if i < len(panel_letters) else f'({i})'
-                ax.set_title(f'{letter} {dataset}', fontweight='bold')
+                label = VALIDATION_DATASET_LABELS.get(dataset, dataset)
+                ax.set_title(f'{letter} {label}', fontweight='bold')
                 ax.set_ylim(0, 100)
                 ax.tick_params(axis='x', rotation=30)
                 ax.spines['top'].set_visible(False)
@@ -1721,6 +1747,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         if len(models_in_val_c) >= 2:
             model_ds_c = val_nds_df.pivot_table(values='nds', index='model', columns='dataset', aggfunc='mean')
             model_ds_c = model_ds_c.dropna(how='all')
+            # Reorder external dataset columns to the canonical paper order
+            # before prepending QM9, so legends read QM9 → LogD → Caco-2 → hERG.
+            ext_cols = _order_validation_datasets(model_ds_c.columns.tolist())
+            model_ds_c = model_ds_c[ext_cols]
             if qm9_nds_df is not None and len(qm9_nds_df) > 0:
                 qm9_means_c = qm9_nds_df.groupby('model')['nds'].mean()
                 qm9_col_c = qm9_means_c.reindex(model_ds_c.index)
@@ -1728,6 +1758,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             family_order_c = sort_models_by_family(model_ds_c.index.tolist())
             model_ds_c = model_ds_c.loc[family_order_c]
             model_ds_c.index = [get_model_label(m) for m in model_ds_c.index]
+            # Use friendly display labels for the dataset legend (LogD, Caco-2 Efflux, hERG K_i).
+            model_ds_c.columns = [VALIDATION_DATASET_LABELS.get(c, c) for c in model_ds_c.columns]
 
             # Re-compute merged for Panel B
             qm9_mn = qm9_nds_df.groupby('model')['nds'].mean().reset_index().rename(columns={'nds': 'qm9_nds'})
