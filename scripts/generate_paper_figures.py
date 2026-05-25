@@ -1241,13 +1241,14 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     n_datasets = len(datasets)
     val_nds_primary = val_nds_df[val_nds_df['rep'] == PRIMARY_REP] if 'rep' in val_nds_df.columns else val_nds_df
     if n_datasets > 0 and 'dataset' in val_nds_df.columns and len(val_nds_primary) > 0:
-        # textwidth-wide; height tuned so 13 model rows + colorbar fit legibly.
-        # Previous 0.55× ratio crushed the cells and made annotations overlap
-        # with the colorbar.
-        fig, axes = plt.subplots(1, n_datasets,
-                                 figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.95),
+        # Stack panels vertically — three 6-column heatmaps + colorbars don't fit
+        # in 6.5" of textwidth (annotations overlap the colorbar). Each panel
+        # gets full textwidth so 5-char cell labels render cleanly.
+        per_panel_h = 0.32 * TEXTWIDTH_IN  # ~2.1" tall per heatmap → 13 rows × ~0.15"
+        fig, axes = plt.subplots(n_datasets, 1,
+                                 figsize=(TEXTWIDTH_IN, per_panel_h * n_datasets),
                                  squeeze=False)
-        axes = axes[0]
+        axes = axes[:, 0]
         panel_letters = ['(a)', '(b)', '(c)', '(d)']
 
         # Compute shared color scale across all datasets for uniform comparison
