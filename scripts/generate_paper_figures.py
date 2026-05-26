@@ -1244,7 +1244,16 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         # Stack panels vertically — three 6-column heatmaps + colorbars don't fit
         # in 6.5" of textwidth (annotations overlap the colorbar). Each panel
         # gets full textwidth so 5-char cell labels render cleanly.
-        per_panel_h = 0.32 * TEXTWIDTH_IN  # ~2.1" tall per heatmap → 13 rows × ~0.15"
+        # Height: ≥0.25" per model row so 10pt labels + cell annotations don't
+        # overlap. Caco-2 has up to 13 rows → ~3.25" of plot area + title/xticks.
+        ordered_datasets = _order_validation_datasets(datasets)
+        max_rows = 0
+        for ds in ordered_datasets:
+            ds_models = val_nds_primary[val_nds_primary['dataset'] == ds]['model'].nunique()
+            max_rows = max(max_rows, ds_models)
+        row_h = 0.26   # inches per heatmap row
+        chrome_h = 1.1  # title + x ticks + axes padding per panel
+        per_panel_h = max(max_rows * row_h + chrome_h, 0.5 * TEXTWIDTH_IN)
         fig, axes = plt.subplots(n_datasets, 1,
                                  figsize=(TEXTWIDTH_IN, per_panel_h * n_datasets),
                                  squeeze=False)
