@@ -170,12 +170,12 @@ plt.rcParams.update({
     'figure.dpi': 300,
     'font.family': 'sans-serif',
     'font.sans-serif': ['DejaVu Sans', 'Arial', 'Helvetica'],
-    'font.size': 10,
-    'axes.labelsize': 10,
-    'axes.titlesize': 10,
-    'xtick.labelsize': 9,
-    'ytick.labelsize': 9,
-    'legend.fontsize': 9,
+    'font.size': 11,
+    'axes.labelsize': 11,
+    'axes.titlesize': 11.5,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'legend.fontsize': 10,
     'axes.linewidth': 0.8,
     'legend.frameon': False,
     'lines.linewidth': 1.5,
@@ -3200,7 +3200,7 @@ def create_nn_family_comparison(df, nds_df, output_dir):
 
     # textwidth-wide 1×3 panel; single shared legend below all three panels
     # (per-panel legends were redundant and ate plot area).
-    fig, axes = plt.subplots(1, 3, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.42),
+    fig, axes = plt.subplots(1, 3, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.52),
                              sharey=True)
     strategy = PRIMARY_STRATEGY
     strategy_label = STRATEGY_LABELS.get(strategy, strategy)
@@ -3238,11 +3238,12 @@ def create_nn_family_comparison(df, nds_df, output_dir):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-    # Single combined legend below the panels
+    # Single combined legend below the panels, wrapped to 2 rows so 8 entries
+    # are not crushed into a single full-width strip (kept legend text legible).
     fig.legend(all_handles, all_labels, loc='lower center',
-               bbox_to_anchor=(0.5, -0.04), ncol=len(all_labels),
+               bbox_to_anchor=(0.5, -0.06), ncol=4,
                frameon=False, columnspacing=1.0, handletextpad=0.4)
-    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    plt.tight_layout(rect=[0, 0.10, 1, 1])
     plt.savefig(output_dir / 'fig_nn_family_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved fig_nn_family_comparison.png ({strategy_label}, {get_rep_label(PRIMARY_REP)})")
@@ -3315,7 +3316,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
                 break
 
     if any_decomposition:
-        fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.45),
+        fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.52),
                                          sharex=True)
     else:
         fig, ax_a = plt.subplots(1, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.6))
@@ -3412,9 +3413,9 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             labels = labels + ['Aleatoric', 'Epistemic']
             ncol = min(len(labels), 5)
         fig.legend(handles, labels, loc='lower center',
-                   bbox_to_anchor=(0.5, -0.05), ncol=ncol,
+                   bbox_to_anchor=(0.5, -0.06), ncol=ncol,
                    frameon=False, columnspacing=1.0, handletextpad=0.4)
-    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    plt.tight_layout(rect=[0, 0.09, 1, 1])
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     return True
