@@ -218,7 +218,7 @@ MODEL_COLORS = {
     'qrf': '#0072B2',              # Blue (RF variant)
     'xgboost': '#56B4E9',          # Sky blue
     'lgb': '#009E73',              # Teal
-    'ngboost': '#D55E00',          # Vermillion
+    'ngboost': '#D55E00',          # Vermillion (Wong; colorblind-safe vs green)
     # NN-α family — all orange
     'dnn': '#E69F00',
     'dnn_bnn_full': '#E69F00',
@@ -256,7 +256,7 @@ RF_FAMILY_COLORS = {
 # Unique colors for the uncertainty figure (9 models, all visually distinct)
 UNCERTAINTY_COLORS = {
     'qrf':           '#E69F00',    # Amber
-    'ngboost':       '#D55E00',    # Vermillion
+    'ngboost':       '#D55E00',    # Vermillion (Wong; colorblind-safe)
     'gauche':        '#882255',    # Wine
     'dnn_bnn_full':  '#0072B2',    # Blue
     'dnn_bnn_last':  '#56B4E9',    # Sky blue
@@ -270,7 +270,7 @@ UNCERTAINTY_COLORS = {
 # Base model = circle, BNN Full = square, BNN Last = triangle, VBLL = diamond.
 MODEL_MARKERS = {
     # Base models
-    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
+    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': '^',
     'svm': 'o', 'gauche': 'o', 'gauche_rbf': 's',
     'dnn': 'o', 'mlp': 'o',
     # NN-α family variants
@@ -1743,7 +1743,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                        color=dataset_colors[i], label=dataset)
             ax.set_xticks(x)
             ax.set_xticklabels(model_labels, rotation=45, ha='right')
-            ax.set_ylabel('NDS (less negative = more robust)')
+            ax.set_ylabel('NDS')
             ax.set_title('Model Robustness Across Datasets', fontweight='bold')
             ax.axhline(0, color='black', linewidth=0.5)
             ax.legend(title='Dataset')
@@ -1815,9 +1815,13 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 # Use get_variant_color so RF and QRF are visually distinct
                 # (MODEL_COLORS maps both to the family blue).
                 for _, row in merged_c.iterrows():
-                    color = get_variant_color(row['model'])
-                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
-                                 edgecolors='black', linewidth=0.5,
+                    # Cross-model scatter: use the shared palette + markers so
+                    # RF/QRF differ by shape (both blue) and NGBoost stays its
+                    # own colour (get_variant_color collided QRF with NGBoost).
+                    color = MODEL_COLORS.get(row['model'], '#333333')
+                    marker = MODEL_MARKERS.get(row['model'], 'o')
+                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, marker=marker,
+                                 s=100, zorder=5, edgecolors='black', linewidth=0.5,
                                  label=get_model_label(row['model']))
                 ax_b.set_xlabel('QM9 Mean NDS')
                 ax_b.set_ylabel('External Datasets Mean NDS')
@@ -3256,9 +3260,9 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     # Single combined legend below the panels, wrapped to 2 rows so 8 entries
     # are not crushed into a single full-width strip (kept legend text legible).
     fig.legend(all_handles, all_labels, loc='lower center',
-               bbox_to_anchor=(0.5, -0.06), ncol=4,
+               bbox_to_anchor=(0.5, 0.01), ncol=4,
                frameon=False, columnspacing=1.0, handletextpad=0.4)
-    plt.tight_layout(rect=[0, 0.10, 1, 1])
+    plt.tight_layout(rect=[0, 0.06, 1, 1])
     plt.savefig(output_dir / 'fig_nn_family_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved fig_nn_family_comparison.png ({strategy_label}, {get_rep_label(PRIMARY_REP)})")
@@ -3363,7 +3367,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     if not any_decomposition:
         ax_a.set_xlabel('Injected Noise Level (σ)')
-    ax_a.set_ylabel('Mean Predicted Uncertainty')
+        ax_a.set_ylabel('Mean Predicted Uncertainty')
     ax_a.set_title('a) Total Uncertainty vs Noise Level', fontweight='bold')
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
@@ -3410,7 +3414,6 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
                      markersize=3, linewidth=1.0, alpha=0.8)
 
         ax_b.set_xlabel('Injected Noise Level (σ)')
-        ax_b.set_ylabel('Mean Uncertainty Component')
         ax_b.set_title('b) Aleatoric vs Epistemic Decomposition', fontweight='bold')
         ax_b.spines['top'].set_visible(False)
         ax_b.spines['right'].set_visible(False)
@@ -3432,6 +3435,10 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
         fig.legend(handles, labels, loc='lower center',
                    bbox_to_anchor=(0.5, -0.06), ncol=ncol,
                    frameon=False, columnspacing=1.0, handletextpad=0.4)
+    # Shared y-label for the stacked panels (per-panel labels overlap; the
+    # panel titles + caption distinguish total vs aleatoric/epistemic).
+    if any_decomposition:
+        fig.supylabel('Mean Uncertainty')
     plt.tight_layout(rect=[0, 0.09, 1, 1])
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
@@ -4117,7 +4124,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
             ev, pv = ecfp4_nds[m], pdv_nds[m]
             color = MODEL_COLORS.get(m, '#333333')
             marker = MODEL_MARKERS.get(m, 'o')
-            ax_b.scatter(ev, pv, color=color, marker=marker, s=60, zorder=3,
+            ax_b.scatter(ev, pv, color=color, marker=marker, s=60, zorder=3, alpha=0.75,
                          label=get_model_label(m), edgecolors='white', linewidths=0.3)
 
         # Compute and annotate rho
