@@ -3323,7 +3323,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     if any_decomposition:
         fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.52),
-                                         sharex=True)
+                                         sharex=True, gridspec_kw={'wspace': 0.28})
     else:
         fig, ax_a = plt.subplots(1, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.6))
 
@@ -3353,7 +3353,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
     ax_a.set_xlabel('Injected Noise Level (σ)')
     ax_a.set_ylabel('Mean Predicted Uncertainty')
-    ax_a.set_title('A. Total Uncertainty vs Noise Level', fontweight='bold')
+    ax_a.set_title('A. Total Uncertainty', fontweight='bold')
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
     # Per-axis legend deferred — built as a single shared legend below the
@@ -3400,7 +3400,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
         ax_b.set_xlabel('Injected Noise Level (σ)')
         ax_b.set_ylabel('Mean Uncertainty Component')
-        ax_b.set_title('B. Aleatoric vs Epistemic Decomposition', fontweight='bold')
+        ax_b.set_title('B. Aleatoric vs Epistemic', fontweight='bold')
         ax_b.spines['top'].set_visible(False)
         ax_b.spines['right'].set_visible(False)
 
