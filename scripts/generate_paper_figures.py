@@ -144,6 +144,7 @@ ANOVA_REPS_EXCLUDE = {
 }
 
 import argparse
+import time
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -525,9 +526,14 @@ def load_anova_data(results_dir):
     }
     STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
 
-    for f in sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime):
+    anova_files = sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime)
+    total_mb = sum(p.stat().st_size for p in anova_files) / 1e6
+    print(f"  load_anova_data: {len(anova_files)} anova_*.csv files, {total_mb:.0f} MB total", flush=True)
+    for i, f in enumerate(anova_files):
         if '_uncertainty_values' in f.name:
             continue
+        if i % 50 == 0 and i > 0:
+            print(f"    ...read {i}/{len(anova_files)} files", flush=True)
         try:
             df = pd.read_csv(f)
             # Parse filename: anova_{strategy}_{rep}_{model}.csv
@@ -4421,13 +4427,24 @@ def main():
     print("GENERATING PAPER FIGURES")
     print("=" * 80)
 
-    # Load data
-    print("\n[1/3] Loading data...")
+    # Load data (timed + flushed so the SLURM log shows exactly which step is slow)
+    print("\n[1/3] Loading data...", flush=True)
+    _t = time.time()
     qm9_df = load_anova_data(args.qm9_dir)
+    print(f"  ✓ load_anova_data: {time.time()-_t:.1f}s "
+          f"({len(qm9_df) if qm9_df is not None else 0} rows)", flush=True)
+
+    _t = time.time()
     unc_df = load_uncertainty_data(args.qm9_dir)
+    print(f"  ✓ load_uncertainty_data: {time.time()-_t:.1f}s "
+          f"({len(unc_df) if unc_df is not None else 0} rows)", flush=True)
     if unc_df is not None:
         unc_df = fix_injected_noise(unc_df)
+
+    _t = time.time()
     validation_df = load_validation_data(args.validation_dir)
+    print(f"  ✓ load_validation_data: {time.time()-_t:.1f}s "
+          f"({len(validation_df) if validation_df is not None else 0} rows)", flush=True)
 
     if qm9_df is None:
         print("ERROR: No QM9 ANOVA data found!")
@@ -4527,9 +4544,10 @@ def main():
     print("=" * 80)
 
     # Calculate NDS
-    print("\n[2/3] Calculating metrics...")
+    print("\n[2/3] Calculating metrics...", flush=True)
+    _t = time.time()
     nds_df, excluded_df = calculate_nds(qm9_df)
-    print(f"  NDS calculated: {len(nds_df)} configs")
+    print(f"  NDS calculated: {len(nds_df)} configs (in {time.time()-_t:.1f}s)", flush=True)
     print(f"  Excluded (baseline R² < {BASELINE_THRESHOLD}): {len(excluded_df)} configs")
     if len(excluded_df) > 0 and 'marginal' in excluded_df.columns:
         n_marginal = excluded_df['marginal'].sum()
