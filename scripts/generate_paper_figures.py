@@ -1842,10 +1842,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     # to defend that claim. Once DATASET_N_TRAIN is filled in, the outputs
     # (table_validation_size_effect.csv, fig_validation_size_effect.png) are the
     # artefacts to cite in the rebuttal letter / supplement.
-    compute_validation_size_effect(qm9_nds_df, val_nds_df, qm9_df, output_dir)
+    compute_validation_size_effect(qm9_nds_df, val_nds_df, output_dir)
 
 
-def compute_validation_size_effect(qm9_nds_df, val_nds_df, qm9_df, output_dir):
+def compute_validation_size_effect(qm9_nds_df, val_nds_df, output_dir):
     """Test whether NDS depends on training-set size, partialing out task difficulty.
 
     Builds a (model × dataset) panel of (mean_NDS, baseline_R², log N_train) and:
