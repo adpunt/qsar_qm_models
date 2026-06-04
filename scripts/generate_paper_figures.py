@@ -1386,7 +1386,6 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
                 colors = [ANOVA_FACTOR_COLORS[f if f != 'Rep' else 'Representation'] for f in factors]
                 ax.bar(factors, values, color=colors)
-                ax.set_ylabel('Variance Explained (η², %)')
                 letter = panel_letters[i] if i < len(panel_letters) else f'({i})'
                 label = VALIDATION_DATASET_LABELS.get(dataset, dataset)
                 ax.set_title(f'{letter} {label}', fontweight='bold')
@@ -1395,6 +1394,8 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.spines['top'].set_visible(False)
                 ax.spines['right'].set_visible(False)
 
+            # Single shared y-label — per-panel labels overlap on short stacked panels.
+            fig.supylabel('Variance Explained (η², %)')
             plt.tight_layout()
             plt.savefig(output_dir / 'fig_validation_anova.png', dpi=300, bbox_inches='tight')
             plt.close()
