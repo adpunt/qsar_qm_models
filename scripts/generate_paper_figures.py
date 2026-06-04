@@ -218,7 +218,7 @@ MODEL_COLORS = {
     'qrf': '#0072B2',              # Blue (RF variant)
     'xgboost': '#56B4E9',          # Sky blue
     'lgb': '#009E73',              # Teal
-    'ngboost': '#D55E00',          # Vermillion (Wong; colorblind-safe vs green)
+    'ngboost': '#D55E00',          # Vermillion
     # NN-α family — all orange
     'dnn': '#E69F00',
     'dnn_bnn_full': '#E69F00',
@@ -250,13 +250,13 @@ MLP_FAMILY_COLORS = {
 }
 RF_FAMILY_COLORS = {
     'rf': '#0072B2',               # Blue (base)
-    'qrf': '#D55E00',              # Vermillion (quantile variant)
+    'qrf': '#AA4499',              # Purple (quantile variant; distinct from NGBoost vermillion)
 }
 
 # Unique colors for the uncertainty figure (9 models, all visually distinct)
 UNCERTAINTY_COLORS = {
     'qrf':           '#E69F00',    # Amber
-    'ngboost':       '#D55E00',    # Vermillion (Wong; colorblind-safe)
+    'ngboost':       '#D55E00',    # Vermillion
     'gauche':        '#882255',    # Wine
     'dnn_bnn_full':  '#0072B2',    # Blue
     'dnn_bnn_last':  '#56B4E9',    # Sky blue
@@ -270,7 +270,7 @@ UNCERTAINTY_COLORS = {
 # Base model = circle, BNN Full = square, BNN Last = triangle, VBLL = diamond.
 MODEL_MARKERS = {
     # Base models
-    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': '^',
+    'rf': 'o', 'qrf': 'D', 'xgboost': 'o', 'lgb': 'o', 'ngboost': 'o',
     'svm': 'o', 'gauche': 'o', 'gauche_rbf': 's',
     'dnn': 'o', 'mlp': 'o',
     # NN-α family variants
@@ -1815,13 +1815,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 # Use get_variant_color so RF and QRF are visually distinct
                 # (MODEL_COLORS maps both to the family blue).
                 for _, row in merged_c.iterrows():
-                    # Cross-model scatter: use the shared palette + markers so
-                    # RF/QRF differ by shape (both blue) and NGBoost stays its
-                    # own colour (get_variant_color collided QRF with NGBoost).
-                    color = MODEL_COLORS.get(row['model'], '#333333')
-                    marker = MODEL_MARKERS.get(row['model'], 'o')
-                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, marker=marker,
-                                 s=100, zorder=5, edgecolors='black', linewidth=0.5,
+                    color = get_variant_color(row['model'])
+                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
+                                 edgecolors='black', linewidth=0.5,
                                  label=get_model_label(row['model']))
                 ax_b.set_xlabel('QM9 Mean NDS')
                 ax_b.set_ylabel('External Datasets Mean NDS')
