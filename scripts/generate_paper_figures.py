@@ -1264,7 +1264,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                                  figsize=(TEXTWIDTH_IN, per_panel_h * n_datasets),
                                  squeeze=False)
         axes = axes[:, 0]
-        panel_letters = ['(a)', '(b)', '(c)', '(d)']
+        panel_letters = ['a)', 'b)', 'c)', 'd)']
 
         # Compute shared color scale across all datasets for uniform comparison
         all_nds_vals = val_nds_primary['nds'].dropna().values
@@ -1373,11 +1373,12 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             anova_results[dataset] = result
 
         if anova_results:
-            fig, axes = plt.subplots(1, len(anova_results),
-                                     figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.45),
+            # Stacked vertically (portrait page): one full-width panel per dataset.
+            fig, axes = plt.subplots(len(anova_results), 1,
+                                     figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.30 * len(anova_results)),
                                      squeeze=False, sharey=True)
-            axes = axes[0]
-            panel_letters = ['(a)', '(b)', '(c)', '(d)']
+            axes = axes[:, 0]
+            panel_letters = ['a)', 'b)', 'c)', 'd)']
 
             for i, (dataset, result) in enumerate(anova_results.items()):
                 ax = axes[i]
@@ -1385,8 +1386,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 values = [result['eta2_model'], result['eta2_rep'], result['eta2_interaction']]
                 colors = [ANOVA_FACTOR_COLORS[f if f != 'Rep' else 'Representation'] for f in factors]
                 ax.bar(factors, values, color=colors)
-                if i == 0:
-                    ax.set_ylabel('Variance Explained (η², %)')
+                ax.set_ylabel('Variance Explained (η², %)')
                 letter = panel_letters[i] if i < len(panel_letters) else f'({i})'
                 label = VALIDATION_DATASET_LABELS.get(dataset, dataset)
                 ax.set_title(f'{letter} {label}', fontweight='bold')
@@ -1799,9 +1799,14 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax_a.set_xticks(x_c)
                 ax_a.set_xticklabels(ml, rotation=45, ha='right')
                 ax_a.set_ylabel('NDS')
-                ax_a.set_title('A. Model Robustness Across Datasets', fontweight='bold')
+                ax_a.set_title('a) Model Robustness Across Datasets', fontweight='bold')
                 ax_a.axhline(0, color='black', linewidth=0.5)
-                ax_a.legend(title='Dataset', loc='best', ncol=len(dl))
+                # Bars hang below 0 — open headroom above it and put the legend
+                # there so it never lands on the data.
+                _ymin = ax_a.get_ylim()[0]
+                ax_a.set_ylim(_ymin, abs(_ymin) * 0.34)
+                ax_a.legend(title='Dataset', loc='upper center', ncol=len(dl),
+                            framealpha=0.9, fontsize=9)
                 ax_a.spines['top'].set_visible(False)
                 ax_a.spines['right'].set_visible(False)
 
@@ -1815,7 +1820,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                                  label=get_model_label(row['model']))
                 ax_b.set_xlabel('QM9 Mean NDS')
                 ax_b.set_ylabel('External Datasets Mean NDS')
-                ax_b.set_title('B. QM9 vs External Robustness', fontweight='bold')
+                ax_b.set_title('b) QM9 vs External Robustness', fontweight='bold')
                 ax_b.axhline(0, color='grey', linewidth=0.3)
                 ax_b.axvline(0, color='grey', linewidth=0.3)
                 # Multi-column legend below panel B so it stays within textwidth
@@ -2849,11 +2854,11 @@ def create_methods_figure(output_dir):
     hi = max(arr.max() for arr in all_y)
     bins = np.linspace(lo, hi, 51)
 
-    # Create 2x3 figure (textwidth-wide so panels render at 1:1 scale)
-    fig, axes = plt.subplots(2, 3, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.6))
+    # 3x2 grid (portrait page: 3 rows tall rather than 3 columns wide)
+    fig, axes = plt.subplots(3, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.95))
     axes = axes.flatten()
 
-    panel_labels = ['(a)', '(b)', '(c)', '(d)', '(e)', '(f)']
+    panel_labels = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)']
 
     for i, strategy in enumerate(strategies):
         ax = axes[i]
@@ -2876,8 +2881,10 @@ def create_methods_figure(output_dir):
         ax.spines['right'].set_visible(False)
         ax.spines['left'].set_visible(False)
 
+        # Add vertical headroom so the RMSE annotation clears the histogram bars.
+        ax.set_ylim(top=ax.get_ylim()[1] * 1.30)
         rmse = np.sqrt(np.mean((y_noisy - y_clean)**2))
-        ax.text(0.95, 0.95, f'RMSE={rmse:.2f}', transform=ax.transAxes,
+        ax.text(0.97, 0.96, f'RMSE={rmse:.2f}', transform=ax.transAxes,
                 ha='right', va='top')
 
         # Panel label (a), (b), ... in upper-left, outside the title.
@@ -2924,7 +2931,7 @@ def create_figure1(df, nds_df, output_dir):
 
     ax_a.set_xlabel('Noise Level (σ)')
     ax_a.set_ylabel('R²')
-    ax_a.set_title('A. Performance Degradation (PDV, Gaussian Noise)', fontweight='bold')
+    ax_a.set_title('a) Performance Degradation (PDV, Gaussian Noise)', fontweight='bold')
     ax_a.legend(loc='lower left', ncol=2)
     ax_a.set_ylim(0.3, 1.0)
     ax_a.spines['top'].set_visible(False)
@@ -2968,7 +2975,7 @@ def create_figure1(df, nds_df, output_dir):
         _white_text_for_missing(ax_b, pivot, annot_text)
         ax_b.set_xlabel('Noise Strategy')
         ax_b.set_ylabel('Model')
-        ax_b.set_title('B. NDS by Model × Strategy (PDV)', fontweight='bold')
+        ax_b.set_title('b) NDS by Model × Strategy (PDV)', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_global_overview.png', dpi=300, bbox_inches='tight')
@@ -2994,7 +3001,7 @@ def create_figure1(df, nds_df, output_dir):
 
     ax_ea.set_xlabel('Noise Level (σ)')
     ax_ea.set_ylabel('R²')
-    ax_ea.set_title('A. Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
+    ax_ea.set_title('a) Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
     ax_ea.legend(loc='lower left', ncol=2)
     ax_ea.set_ylim(0.3, 1.0)
     ax_ea.spines['top'].set_visible(False)
@@ -3026,7 +3033,7 @@ def create_figure1(df, nds_df, output_dir):
             _white_text_for_missing(ax_eb, pivot, annot_text)
             ax_eb.set_xlabel('Noise Strategy')
             ax_eb.set_ylabel('Model')
-            ax_eb.set_title('B. NDS by Model × Strategy (ECFP4)', fontweight='bold')
+            ax_eb.set_title('b) NDS by Model × Strategy (ECFP4)', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig(output_dir / 'fig1_supp_ecfp4_overview.png', dpi=300, bbox_inches='tight')
@@ -3101,8 +3108,8 @@ def create_figure2(df, output_dir):
         ax.set_ylim(0, 100)
 
     # Single shared legend on the top panel only (factors are identical across A and B).
-    _plot_anova_panel(axes[0], perf_results, 'A. Performance (R² at σ=0.3)', show_legend=True)
-    _plot_anova_panel(axes[1], robust_results, 'B. Robustness (NDS)', show_legend=False)
+    _plot_anova_panel(axes[0], perf_results, 'a) Performance (R² at σ=0.3)', show_legend=True)
+    _plot_anova_panel(axes[1], robust_results, 'b) Robustness (NDS)', show_legend=False)
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
@@ -3206,16 +3213,17 @@ def create_nn_family_comparison(df, nds_df, output_dir):
 
     # textwidth-wide 1×3 panel; single shared legend below all three panels
     # (per-panel legends were redundant and ate plot area).
-    fig, axes = plt.subplots(1, 3, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.52),
-                             sharey=True)
+    # Stacked vertically (portrait page): three full-width panels.
+    fig, axes = plt.subplots(3, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 1.05),
+                             sharex=True)
     strategy = PRIMARY_STRATEGY
     strategy_label = STRATEGY_LABELS.get(strategy, strategy)
     data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == strategy)]
 
     families = [
-        ('A', 'NN-α Family', dnn_variants, DNN_FAMILY_COLORS),
-        ('B', 'NN-β Family', mlp_variants, MLP_FAMILY_COLORS),
-        ('C', 'RF vs QRF', rf_models, RF_FAMILY_COLORS),
+        ('a', 'NN-α Family', dnn_variants, DNN_FAMILY_COLORS),
+        ('b', 'NN-β Family', mlp_variants, MLP_FAMILY_COLORS),
+        ('c', 'RF vs QRF', rf_models, RF_FAMILY_COLORS),
     ]
 
     all_handles = []
@@ -3236,10 +3244,10 @@ def create_nn_family_comparison(df, nds_df, output_dir):
                 all_handles.append(line)
                 all_labels.append(label)
 
-        ax.set_xlabel('Noise Level (σ)')
-        if idx == 0:
-            ax.set_ylabel('R²')
-        ax.set_title(f'{panel}. {title}', fontweight='bold')
+        if idx == len(families) - 1:
+            ax.set_xlabel('Noise Level (σ)')
+        ax.set_ylabel('R²')
+        ax.set_title(f'{panel}) {title}', fontweight='bold')
         ax.set_ylim(0.3, 1.0)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
@@ -3322,8 +3330,9 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
                 break
 
     if any_decomposition:
-        fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.52),
-                                         sharex=True, gridspec_kw={'wspace': 0.28})
+        # Stacked vertically (portrait page): each panel gets full textwidth.
+        fig, (ax_a, ax_b) = plt.subplots(2, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.9),
+                                         sharex=True)
     else:
         fig, ax_a = plt.subplots(1, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.6))
 
@@ -3351,9 +3360,10 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
                     label=get_model_label(model), color=color,
                     markersize=4, linewidth=1.2, alpha=0.8)
 
-    ax_a.set_xlabel('Injected Noise Level (σ)')
+    if not any_decomposition:
+        ax_a.set_xlabel('Injected Noise Level (σ)')
     ax_a.set_ylabel('Mean Predicted Uncertainty')
-    ax_a.set_title('A. Total Uncertainty', fontweight='bold')
+    ax_a.set_title('a) Total Uncertainty vs Noise Level', fontweight='bold')
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
     # Per-axis legend deferred — built as a single shared legend below the
@@ -3400,7 +3410,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
 
         ax_b.set_xlabel('Injected Noise Level (σ)')
         ax_b.set_ylabel('Mean Uncertainty Component')
-        ax_b.set_title('B. Aleatoric vs Epistemic', fontweight='bold')
+        ax_b.set_title('b) Aleatoric vs Epistemic Decomposition', fontweight='bold')
         ax_b.spines['top'].set_visible(False)
         ax_b.spines['right'].set_visible(False)
 
@@ -4086,7 +4096,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         sns.heatmap(hm_pivot, annot=annot_text, fmt='', cmap='PuOr', vmax=0,
                     ax=ax_a, cbar_kws={'label': 'NDS'}, linewidths=0.5)
         _white_text_for_missing(ax_a, hm_pivot, annot_text)
-        ax_a.set_title('A. Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
+        ax_a.set_title('a) Model × Rep Interaction (Gaussian NDS)', fontweight='bold')
         ax_a.set_ylabel('')
 
     # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
@@ -4131,7 +4141,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
-    ax_b.set_title('B. ECFP4 vs PDV Robustness', fontweight='bold')
+    ax_b.set_title('b) ECFP4 vs PDV Robustness', fontweight='bold')
 
     for ax in axes:
         ax.spines['top'].set_visible(False)
