@@ -1,4 +1,5 @@
 #!/bin/bash
+# Regenerates all paper figures. Runs on the short partition.
 #SBATCH --job-name=paper_figs
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
