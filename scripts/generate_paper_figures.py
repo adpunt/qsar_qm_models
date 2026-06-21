@@ -294,6 +294,42 @@ def sort_models_by_family(models):
     return sorted(models, key=lambda m: (order_map.get(m, len(MODEL_ORDER)), m))
 
 
+def _to_colmajor(items, ncol):
+    """Reorder a reading-order (row-major) sequence into the column-major order
+    matplotlib needs so a multi-column legend DISPLAYS left-to-right, top-to-bottom.
+
+    matplotlib fills legends column-major (down column 0, then column 1, ...),
+    which scrambles a logically-ordered handle list. Passing the output of this
+    helper restores intuitive reading order. Same permutation must be applied to
+    both handles and labels.
+    """
+    n = len(items)
+    if ncol <= 1 or n == 0:
+        return list(items)
+    nrow = -(-n // ncol)  # ceil
+    out = []
+    for c in range(ncol):
+        for r in range(nrow):
+            idx = r * ncol + c
+            if idx < n:
+                out.append(items[idx])
+    return out
+
+
+def _ordered_legend(target, ncol, **kwargs):
+    """Draw a legend on `target` (Axes or Figure) whose entries read left-to-right,
+    top-to-bottom across `ncol` columns (countering matplotlib's column-major fill).
+    Collects the current axes handles/labels when `target` is an Axes."""
+    import matplotlib.axes
+    if isinstance(target, matplotlib.axes.Axes):
+        handles, labels = target.get_legend_handles_labels()
+    else:  # Figure — caller must have set labels via plot()
+        handles, labels = target.axes[0].get_legend_handles_labels()
+    handles = _to_colmajor(handles, ncol)
+    labels = _to_colmajor(labels, ncol)
+    return target.legend(handles, labels, ncol=ncol, **kwargs)
+
+
 def get_variant_color(model):
     """Get color distinguishing variants within NN-α/NN-β families.
 
@@ -1537,7 +1573,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax.spines['right'].set_visible(False)
                 ax.set_ylim(effective_floor - 0.05, 1.05)
                 # Legend on every panel so each panel's models are labeled
-                ax.legend(fontsize=6, ncol=2, loc='lower left', framealpha=0.9)
+                _ordered_legend(ax, 2, fontsize=6, loc='lower left', framealpha=0.9)
 
             if filtered_models:
                 safe_name_f = dataset.replace('/', '_').replace(' ', '_')
@@ -1825,9 +1861,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax_b.axhline(0, color='grey', linewidth=0.3)
                 ax_b.axvline(0, color='grey', linewidth=0.3)
                 # Multi-column legend below panel B so it stays within textwidth
-                ax_b.legend(loc='upper center', bbox_to_anchor=(0.5, -0.18),
-                            ncol=5, frameon=False, columnspacing=0.8,
-                            handletextpad=0.3)
+                _ordered_legend(ax_b, 5, loc='upper center', bbox_to_anchor=(0.5, -0.18),
+                                frameon=False, columnspacing=0.8,
+                                handletextpad=0.3)
                 ax_b.spines['top'].set_visible(False)
                 ax_b.spines['right'].set_visible(False)
                 xp = (merged_c['qm9_nds'].max() - merged_c['qm9_nds'].min()) * 0.15
@@ -2933,7 +2969,7 @@ def create_figure1(df, nds_df, output_dir):
     ax_a.set_xlabel('Noise Level (σ)')
     ax_a.set_ylabel('R²')
     ax_a.set_title('a) Performance Degradation (PDV, Gaussian Noise)', fontweight='bold')
-    ax_a.legend(loc='lower left', ncol=2)
+    _ordered_legend(ax_a, 2, loc='lower left')
     ax_a.set_ylim(0.3, 1.0)
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
@@ -3003,7 +3039,7 @@ def create_figure1(df, nds_df, output_dir):
     ax_ea.set_xlabel('Noise Level (σ)')
     ax_ea.set_ylabel('R²')
     ax_ea.set_title('a) Performance Degradation (ECFP4, Gaussian Noise)', fontweight='bold')
-    ax_ea.legend(loc='lower left', ncol=2)
+    _ordered_legend(ax_ea, 2, loc='lower left')
     ax_ea.set_ylim(0.3, 1.0)
     ax_ea.spines['top'].set_visible(False)
     ax_ea.spines['right'].set_visible(False)
@@ -3181,9 +3217,9 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     ax.set_ylabel('NDS (slope)')
     ax.set_title('Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
     ax.axhline(0, color='black', linewidth=0.5)
-    ax.legend(loc='upper left', bbox_to_anchor=(0.0, -0.15), ncol=4,
-              borderaxespad=0, frameon=False, columnspacing=1.0,
-              handletextpad=0.5, labelspacing=0.6)
+    _ordered_legend(ax, 4, loc='upper left', bbox_to_anchor=(0.0, -0.15),
+                    borderaxespad=0, frameon=False, columnspacing=1.0,
+                    handletextpad=0.5, labelspacing=0.6)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
@@ -3227,8 +3263,7 @@ def create_nn_family_comparison(df, nds_df, output_dir):
         ('c', 'RF vs QRF', rf_models, RF_FAMILY_COLORS),
     ]
 
-    all_handles = []
-    all_labels = []
+    handle_by_model = {}
     for idx, (panel, title, models, colors) in enumerate(families):
         ax = axes[idx]
         for model in models:
@@ -3240,10 +3275,7 @@ def create_nn_family_comparison(df, nds_df, output_dir):
             marker = MODEL_MARKERS.get(model, 'o')
             line, = ax.plot(avg['sigma'], avg['r2'], marker=marker, linestyle='-',
                             label=get_model_label(model), color=color, markersize=5)
-            label = get_model_label(model)
-            if label not in all_labels:
-                all_handles.append(line)
-                all_labels.append(label)
+            handle_by_model.setdefault(model, line)
 
         if idx == len(families) - 1:
             ax.set_xlabel('Noise Level (σ)')
@@ -3253,11 +3285,23 @@ def create_nn_family_comparison(df, nds_df, output_dir):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-    # Single combined legend below the panels, wrapped to 2 rows so 8 entries
-    # are not crushed into a single full-width strip (kept legend text legible).
+    # matplotlib fills multi-column legends COLUMN-major (top-to-bottom, then
+    # the next column). To line up matched α/β pairs on each row, put the α
+    # family in the left column and the β family in the right column, then pass
+    # handles column-by-column (all of col-0, then all of col-1) with ncol=2:
+    #   row0: NN-α   | NN-β
+    #   row1: BNN-α  | BNN-β
+    #   row2: VBLL-α | VBLL-β
+    #   row3: RF     | QRF
+    alpha_col = ['dnn', 'dnn_bnn_full', 'dnn_vbll', 'rf']
+    beta_col = ['mlp', 'mlp_bnn_full', 'mlp_vbll', 'qrf']
+    ordered_models = [m for m in alpha_col if m in handle_by_model] + \
+                     [m for m in beta_col if m in handle_by_model]
+    all_handles = [handle_by_model[m] for m in ordered_models]
+    all_labels = [get_model_label(m) for m in ordered_models]
     fig.legend(all_handles, all_labels, loc='lower center',
-               bbox_to_anchor=(0.5, 0.01), ncol=4,
-               frameon=False, columnspacing=1.0, handletextpad=0.4)
+               bbox_to_anchor=(0.5, 0.01), ncol=2,
+               frameon=False, columnspacing=3.0, handletextpad=0.4)
     plt.tight_layout(rect=[0, 0.06, 1, 1])
     plt.savefig(output_dir / 'fig_nn_family_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
@@ -3428,6 +3472,9 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
             handles = handles + style_handles
             labels = labels + ['Aleatoric', 'Epistemic']
             ncol = min(len(labels), 5)
+        # Reorder so the legend reads left-to-right (matplotlib fills column-major).
+        handles = _to_colmajor(handles, ncol)
+        labels = _to_colmajor(labels, ncol)
         fig.legend(handles, labels, loc='lower center',
                    bbox_to_anchor=(0.5, -0.06), ncol=ncol,
                    frameon=False, columnspacing=1.0, handletextpad=0.4)
@@ -4139,9 +4186,9 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         # Multi-column legend below the panel so it stays inside textwidth
         # (previously hung off the right, which forced \textwidth scaling
         # to shrink the whole figure).
-        ax_b.legend(loc='upper center', bbox_to_anchor=(0.5, -0.20),
-                    ncol=5, frameon=False, columnspacing=0.8,
-                    handletextpad=0.4, borderaxespad=0)
+        _ordered_legend(ax_b, 5, loc='upper center', bbox_to_anchor=(0.5, -0.20),
+                        frameon=False, columnspacing=0.8,
+                        handletextpad=0.4, borderaxespad=0)
 
     ax_b.set_xlabel('NDS on ECFP4 (Gaussian)')
     ax_b.set_ylabel('NDS on PDV (Gaussian)')
@@ -4277,7 +4324,8 @@ def _plot_full_overview_panels(nds_df, strategies, output_dir, filename, panel_l
                                 markeredgecolor='black', markeredgewidth=0.5,
                                 label=get_model_label(m))
                          for m in models_present]
-        axes[-1].legend(handles=rep_handles + model_handles, loc='upper right', fontsize=6,
+        axes[-1].legend(handles=_to_colmajor(rep_handles + model_handles, 2),
+                        loc='upper right', fontsize=6,
                         title='Rep / Model', title_fontsize=7, ncol=2)
 
     fig.suptitle('Baseline Performance vs Noise Robustness (ANOVA Configurations)',
