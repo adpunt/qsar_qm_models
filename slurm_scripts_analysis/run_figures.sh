@@ -1,11 +1,12 @@
 #!/bin/bash
-# Regenerates all paper figures. Runs on the short partition.
+# Regenerates all paper figures. Runs on the long partition (short is heavily
+# backlogged; long shares the same nodes and a 2h job fits its 30-day cap).
 #SBATCH --job-name=paper_figs
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=02:00:00
-#SBATCH --partition=short
+#SBATCH --partition=long
 #SBATCH --mem=128G
 #SBATCH --output=/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/figs-%j.out
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
