@@ -3302,7 +3302,10 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     fig.legend(all_handles, all_labels, loc='lower center',
                bbox_to_anchor=(0.5, 0.01), ncol=2,
                frameon=False, columnspacing=3.0, handletextpad=0.4)
-    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    # The paired 2-column legend is 4 rows tall; reserve enough bottom margin so
+    # it clears panel c's x-axis ticks and "Noise Level (σ)" title (6% overlapped
+    # them). bbox_inches='tight' on save trims any surplus whitespace.
+    plt.tight_layout(rect=[0, 0.20, 1, 1])
     plt.savefig(output_dir / 'fig_nn_family_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
     print(f"✓ Saved fig_nn_family_comparison.png ({strategy_label}, {get_rep_label(PRIMARY_REP)})")
