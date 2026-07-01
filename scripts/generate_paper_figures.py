@@ -1022,6 +1022,42 @@ def fix_injected_noise(df):
     return df
 
 
+# σ levels for the within-σ uncertainty–noise correlation (per-sample tracking).
+# Reported SEPARATELY, never averaged across σ or across noise strategies.
+# σ=0.0 is the clean control (expect ρ≈0/undefined — no noise injected); 0.3 (moderate)
+# and 0.6 (high) are the real per-sample tests.
+WITHIN_SIGMA_LEVELS = [0.0, 0.3, 0.6]
+
+
+def within_sigma_unc_noise_rho(model_data, unc_values, base_mask,
+                               sigma_levels=WITHIN_SIGMA_LEVELS, min_points=100):
+    """Per-σ Spearman ρ between predicted uncertainty and |injected_noise|.
+
+    The pooled correlation (all σ stacked together) measures the POPULATION-level trend:
+    uncertainty AND |injected_noise| both rise with σ, so pooling makes the points a
+    staircase and Spearman reports that shared σ ramp — the Kolmar effect — as a strong
+    positive value, NOT per-sample detection. Computing ρ within each σ slice isolates
+    whether uncertainty actually tracks the per-sample noise draw εᵢ.
+
+    Returns {sigma: {'rho', 'p', 'n'}} for each requested σ. Fully disaggregated —
+    the caller must NOT average across σ (or across strategies).
+    """
+    out = {s: {'rho': np.nan, 'p': np.nan, 'n': 0} for s in sigma_levels}
+    if 'injected_noise' not in model_data.columns or 'sigma' not in model_data.columns:
+        return out
+    noise_mag = np.abs(model_data['injected_noise'].values)
+    sigmas = model_data['sigma'].values
+    for s in sigma_levels:
+        m = base_mask & np.isclose(sigmas, s, atol=1e-6) & np.isfinite(noise_mag)
+        n = int(m.sum())
+        out[s]['n'] = n
+        if n > min_points:
+            rho, p = stats.spearmanr(unc_values[m], noise_mag[m])
+            out[s]['rho'] = rho
+            out[s]['p'] = p
+    return out
+
+
 def _normalize_validation_names(df):
     """Normalize KIRBy naming conventions to match QM9 conventions."""
     val_model_map = {
@@ -3747,13 +3783,17 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                     # Uncertainty-error correlation
                     unc_err_corr, _ = stats.spearmanr(unc_values[mask], errors[mask])
 
-                    # Uncertainty-noise correlation (if available)
+                    # Uncertainty-noise correlation, POOLED across σ (population-level /
+                    # Kolmar trend — kept only for comparison, do NOT report as per-sample).
                     unc_noise_corr = np.nan
                     if 'injected_noise' in model_data.columns:
                         noise_mag = np.abs(model_data['injected_noise'].values)
                         noise_mask = mask & np.isfinite(noise_mag)
                         if noise_mask.sum() > 100:
                             unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
+
+                    # Within-σ per-sample correlation (the honest metric) — each σ separate.
+                    per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, mask)
 
                     # Coverage at 1σ and 2σ intervals
                     # IMPORTANT: Use y_true_noisy (normalized space) with y_pred_mean (normalized space)
@@ -3820,17 +3860,22 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                         if len(epis_valid) > 10:
                             mean_epis = epis_valid.mean()
 
-                    unc_metrics.append({
+                    row = {
                         'Model': model,
                         'Unc-Error ρ': unc_err_corr,
-                        'Unc-Noise ρ': unc_noise_corr,
+                        'Unc-Noise ρ (pooled)': unc_noise_corr,
                         'ECE': ece,
                         'Coverage 1σ': cov_1sigma,
                         'Coverage 2σ': cov_2sigma,
                         'Mean Uncertainty': unc_values[mask].mean(),
                         'Mean Aleatoric': mean_alea,
                         'Mean Epistemic': mean_epis,
-                    })
+                    }
+                    # Per-σ within-slice ρ + slice size n, each σ kept separate.
+                    for s in WITHIN_SIGMA_LEVELS:
+                        row[f'Unc-Noise ρ σ={s}'] = per_sigma_noise[s]['rho']
+                        row[f'Unc-Noise n σ={s}'] = per_sigma_noise[s]['n']
+                    unc_metrics.append(row)
 
                 if unc_metrics:
                     unc_metrics_df = pd.DataFrame(unc_metrics).sort_values('Unc-Error ρ', ascending=False)
@@ -3888,12 +3933,16 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
 
                         unc_err_corr, _ = stats.spearmanr(unc_values[valid], errors[valid])
 
+                        # POOLED across σ (population-level / Kolmar trend — comparison only).
                         unc_noise_corr = np.nan
                         if 'injected_noise' in model_data.columns:
                             noise_mag = np.abs(model_data['injected_noise'].values)
                             noise_mask = valid & np.isfinite(noise_mag)
                             if noise_mask.sum() > 100:
                                 unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
+
+                        # Within-σ per-sample correlation (honest metric) — each σ separate.
+                        per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, valid)
 
                         # ECE: binned calibration error
                         pred_m = unc_values[valid]
@@ -3940,19 +3989,24 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                             if len(epis_valid) > 10:
                                 mean_epis = epis_valid.mean()
 
-                        all_unc_rows.append({
+                        strat_row = {
                             'Strategy': STRATEGY_LABELS.get(strategy, strategy),
                             'Rep': rep,
                             'Model': get_model_label(model),
                             'Unc-Error ρ': unc_err_corr,
-                            'Unc-Noise ρ': unc_noise_corr,
+                            'Unc-Noise ρ (pooled)': unc_noise_corr,
                             'ECE': ece,
                             'Coverage 1σ': cov_1sigma,
                             'Coverage 2σ': cov_2sigma,
                             'Mean Uncertainty': unc_values[valid].mean(),
                             'Mean Aleatoric': mean_alea,
                             'Mean Epistemic': mean_epis,
-                        })
+                        }
+                        # Per-σ within-slice ρ + slice size n, each σ kept separate.
+                        for s in WITHIN_SIGMA_LEVELS:
+                            strat_row[f'Unc-Noise ρ σ={s}'] = per_sigma_noise[s]['rho']
+                            strat_row[f'Unc-Noise n σ={s}'] = per_sigma_noise[s]['n']
+                        all_unc_rows.append(strat_row)
 
             if all_unc_rows:
                 unc_full_df = pd.DataFrame(all_unc_rows)
@@ -3974,23 +4028,29 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                         print(f"    {strat}: {rho:.3f}")
 
     # Table 4c: Top model×rep Unc-Noise correlations (Gaussian strategy)
-    # Shows specific combinations where uncertainty best detects injected noise
+    # Shows specific combinations where uncertainty best detects injected noise.
+    # Ranked by the within-σ per-sample ρ at σ=0.3 (moderate — the primary real test),
+    # NOT the pooled ρ (which just reflects the population-level σ trend). The pooled and
+    # all per-σ columns are carried alongside for the paper Table 7 reframing (plan §9).
+    # NOTE: sort key (σ=0.3) is provisional — revisit with the user once numbers are in.
     if unc_df is not None and len(unc_df) > 0:
         supp_path = output_dir / 'table4_supp_uncertainty_by_strategy_rep.csv'
         if supp_path.exists():
             supp_unc = pd.read_csv(supp_path)
             gauss_unc = supp_unc[supp_unc['Strategy'] == 'Gaussian']
-            if len(gauss_unc) > 0:
-                table4c_cols = ['Model', 'Rep', 'Unc-Noise ρ', 'Unc-Error ρ', 'ECE',
-                               'Coverage 1σ', 'Coverage 2σ']
-                top_noise = gauss_unc.nlargest(15, 'Unc-Noise ρ')[table4c_cols].copy()
+            rank_col = 'Unc-Noise ρ σ=0.3'
+            if len(gauss_unc) > 0 and rank_col in gauss_unc.columns:
+                per_sigma_cols = [c for c in gauss_unc.columns if c.startswith('Unc-Noise ')]
+                table4c_cols = (['Model', 'Rep'] + per_sigma_cols
+                                + ['Unc-Error ρ', 'ECE', 'Coverage 1σ', 'Coverage 2σ'])
+                top_noise = gauss_unc.nlargest(15, rank_col)[table4c_cols].copy()
                 # Apply rep labels
                 top_noise['Rep'] = top_noise['Rep'].map(lambda r: get_rep_label(r))
                 top_noise.to_csv(output_dir / 'table4c_top_unc_noise_correlations.csv', index=False)
-                print(f"✓ Saved table4c_top_unc_noise_correlations.csv ({len(top_noise)} rows)")
+                print(f"✓ Saved table4c_top_unc_noise_correlations.csv ({len(top_noise)} rows, ranked by {rank_col})")
 
                 # Also save bottom combinations (near-zero/negative) for contrast
-                bottom_noise = gauss_unc.nsmallest(10, 'Unc-Noise ρ')[table4c_cols].copy()
+                bottom_noise = gauss_unc.nsmallest(10, rank_col)[table4c_cols].copy()
                 bottom_noise['Rep'] = bottom_noise['Rep'].map(lambda r: get_rep_label(r))
                 bottom_noise.to_csv(output_dir / 'table4c_bottom_unc_noise_correlations.csv', index=False)
                 print(f"✓ Saved table4c_bottom_unc_noise_correlations.csv ({len(bottom_noise)} rows)")
