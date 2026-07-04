@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from scipy.integrate import trapezoid
+from scipy.optimize import curve_fit
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -246,7 +247,70 @@ def calculate_all_metrics(df, sigma_high=0.6, sigma_max_for_auc=0.6):
         else:
             metrics['auc'] = np.nan
             metrics['auc_normalized'] = np.nan
-        
+
+        # ================================================================
+        # CURVE-SHAPE, BASELINE-DECOUPLED METRICS (A-E)
+        # Computed over the FULL sigma grid on the retention curve
+        # ret(sigma) = R2(sigma) / R2(0), so every curve starts at ~1.0
+        # and the summaries describe SHAPE, not absolute performance.
+        # ================================================================
+        # Average across iterations first -> one clean point per sigma
+        full = group.groupby('sigma')['r2'].mean().reset_index().sort_values('sigma')
+        sig_arr = full['sigma'].values.astype(float)
+        r2_arr = full['r2'].values.astype(float)
+        base = r2_arr[np.isclose(sig_arr, 0.0)][0] if np.any(np.isclose(sig_arr, 0.0)) else np.nan
+        shape_keys = ['auc_norm', 'half_life', 'sigma_80', 'decay_lambda',
+                      'weibull_tau', 'weibull_beta', 'slope_early', 'slope_late']
+        if len(sig_arr) >= 4 and not np.isnan(base) and base > 0.1:
+            ret = r2_arr / base                      # retention curve (starts at 1.0)
+            srange = sig_arr.max() - sig_arr.min()
+
+            # --- B: normalize-then-integrate (mean fractional retention) ---
+            metrics['auc_norm'] = trapezoid(ret, sig_arr) / srange if srange > 0 else np.nan
+
+            # --- C: half-life / sigma_80 (sigma where retention crosses target) ---
+            def _crossing(target):
+                below = np.where(ret <= target)[0]
+                if len(below) == 0:
+                    return np.nan            # censored: never crosses within grid
+                j = below[0]
+                if j == 0:
+                    return sig_arr[0]
+                x0, x1, y0, y1 = sig_arr[j-1], sig_arr[j], ret[j-1], ret[j]
+                return x1 if y1 == y0 else x0 + (target - y0) * (x1 - x0) / (y1 - y0)
+            metrics['half_life'] = _crossing(0.5)
+            metrics['sigma_80'] = _crossing(0.8)
+
+            # --- D1: exponential decay rate  ret = exp(-lambda*sigma) ---
+            ret_pos = np.clip(ret, 1e-3, None)
+            try:
+                popt, _ = curve_fit(lambda s, lam: np.exp(-lam * s), sig_arr, ret_pos,
+                                    p0=[1.0], maxfev=10000, bounds=(0, np.inf))
+                metrics['decay_lambda'] = float(popt[0])
+            except Exception:
+                metrics['decay_lambda'] = np.nan
+
+            # --- D2: Weibull/stretched-exp  ret = exp(-(sigma/tau)^beta) ---
+            try:
+                def _weib(s, tau, beta):
+                    return np.exp(-np.power(np.clip(s, 0, None) / tau, beta))
+                popt, _ = curve_fit(_weib, sig_arr, ret_pos, p0=[0.5, 1.5],
+                                    maxfev=10000, bounds=([1e-3, 0.1], [np.inf, 10.0]))
+                metrics['weibull_tau'] = float(popt[0])
+                metrics['weibull_beta'] = float(popt[1])
+            except Exception:
+                metrics['weibull_tau'] = np.nan
+                metrics['weibull_beta'] = np.nan
+
+            # --- E: early (<=0.3) vs late (>=0.3) slope of RAW R2 ---
+            early = full[full['sigma'] <= 0.3]
+            late = full[full['sigma'] >= 0.3]
+            metrics['slope_early'] = stats.linregress(early['sigma'], early['r2'])[0] if len(early) >= 2 else np.nan
+            metrics['slope_late'] = stats.linregress(late['sigma'], late['r2'])[0] if len(late) >= 2 else np.nan
+        else:
+            for _k in shape_keys:
+                metrics[_k] = np.nan
+
         # Store individual sigma values for later analysis
         for sig in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]:
             sigma_val = group[np.abs(group['sigma'] - sig) < 0.05]
@@ -291,6 +355,14 @@ def compare_rankings(metrics_df, top_n=20):
         'absolute_drop': ('asc', 'Absolute Drop'),  # Lower = better
         'auc': ('desc', 'AUC'),
         'auc_normalized': ('desc', 'Normalized AUC'),
+        # --- A-E: curve-shape, baseline-decoupled ---
+        'auc_norm': ('desc', 'B: Retention AUC'),         # higher = more retained
+        'half_life': ('desc', 'C: Half-life σ½'),          # higher = more robust
+        'sigma_80': ('desc', 'C: σ80'),
+        'decay_lambda': ('asc', 'D1: Decay rate λ'),       # lower = slower decay
+        'weibull_tau': ('desc', 'D2: Weibull τ'),          # higher = breaks later
+        'slope_early': ('desc', 'E: Early slope'),         # less negative = better
+        'slope_late': ('desc', 'E: Late slope'),
         'baseline_r2': ('desc', 'Baseline R²'),
         'r2_high': ('desc', 'R² at High Noise'),
     }
@@ -344,14 +416,17 @@ def calculate_rank_correlations(metrics_df):
     print("RANK CORRELATIONS BETWEEN METRICS")
     print("="*80)
     
-    metrics_to_compare = ['retention_pct', 'nsi', 'nsi_relative', 'absolute_drop', 
-                          'auc', 'auc_normalized', 'baseline_r2', 'r2_high']
-    
+    metrics_to_compare = ['retention_pct', 'nsi', 'nsi_relative', 'absolute_drop',
+                          'auc', 'auc_normalized',
+                          'auc_norm', 'half_life', 'sigma_80', 'decay_lambda',
+                          'weibull_tau', 'weibull_beta', 'slope_early', 'slope_late',
+                          'baseline_r2', 'r2_high']
+
     available = [m for m in metrics_to_compare if m in metrics_df.columns]
-    
+
     # Create correlation matrix
     corr_matrix = pd.DataFrame(index=available, columns=available, dtype=float)
-    
+
     for m1 in available:
         for m2 in available:
             valid = metrics_df.dropna(subset=[m1, m2])
@@ -360,10 +435,25 @@ def calculate_rank_correlations(metrics_df):
                 corr_matrix.loc[m1, m2] = corr
             else:
                 corr_matrix.loc[m1, m2] = np.nan
-    
+
     print("\nSpearman Rank Correlations:")
     print(corr_matrix.round(3).to_string())
-    
+
+    # ------------------------------------------------------------------
+    # KEY DIAGNOSTIC: dependence on predictive performance.
+    # A good curve-shape metric ranks robustness WITHOUT just re-ranking
+    # baseline R². So |Spearman(metric, baseline_r2)| should be LOW.
+    # ------------------------------------------------------------------
+    if 'baseline_r2' in available:
+        print("\n" + "-"*60)
+        print("DEPENDENCE ON BASELINE R²  (|rho| low = well decoupled)")
+        print("-"*60)
+        dep = (corr_matrix['baseline_r2'].drop('baseline_r2', errors='ignore')
+               .abs().sort_values())
+        for m, v in dep.items():
+            flag = "  <-- decoupled" if v < 0.3 else ("  <-- performance-driven" if v > 0.6 else "")
+            print(f"  {m:<16} |rho_baseline| = {v:.3f}{flag}")
+
     return corr_matrix
 
 
