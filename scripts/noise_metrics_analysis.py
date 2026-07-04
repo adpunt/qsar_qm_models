@@ -381,8 +381,14 @@ def compare_rankings(metrics_df, top_n=20):
         ranked = valid.sort_values(metric, ascending=ascending).reset_index(drop=True)
         ranked['rank'] = range(1, len(ranked) + 1)
         
-        rankings[metric] = ranked[['config', 'model', 'representation', metric, 'rank', 
-                                   'baseline_r2', 'r2_high', 'retention_pct', 'nsi']].head(top_n)
+        # Dedupe columns: metric may also be one of the fixed display columns
+        # (e.g. retention_pct/nsi/baseline_r2), which would create a duplicate
+        # column and make row[metric] return a Series -> format crash.
+        _wanted = ['config', 'model', 'representation', metric, 'rank',
+                   'baseline_r2', 'r2_high', 'retention_pct', 'nsi']
+        _seen = set()
+        _cols = [c for c in _wanted if c in ranked.columns and not (c in _seen or _seen.add(c))]
+        rankings[metric] = ranked[_cols].head(top_n)
     
     return rankings
 
