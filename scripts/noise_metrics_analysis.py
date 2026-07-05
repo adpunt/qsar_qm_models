@@ -716,7 +716,10 @@ def calculate_composite_metrics(metrics_df):
         if comp not in df.columns:
             continue
         
-        top = df.nlargest(10, comp)[['config', comp, 'baseline_r2', 'r2_high', 'retention_pct']]
+        _wanted = ['config', comp, 'baseline_r2', 'r2_high', 'retention_pct']
+        _seen = set()
+        _cols = [c for c in _wanted if c in df.columns and not (c in _seen or _seen.add(c))]
+        top = df.nlargest(10, comp)[_cols]
         
         print(f"\n--- {comp} ---")
         for i, (_, row) in enumerate(top.iterrows(), 1):
