@@ -155,17 +155,31 @@ def calculate_all_metrics(df, sigma_high=0.6, sigma_max_for_auc=0.6):
     print(f"\nCalculating metrics (σ_high={sigma_high}, σ_max_auc={sigma_max_for_auc})")
     
     metrics_list = []
-    
-    for (model, rep), group in df.groupby(['model', 'representation']):
+
+    # NEVER pool across noise strategies. If the data carries a 'strategy'
+    # column (final anova_* data), each (model, rep, strategy) gets its own
+    # degradation curve. Screening data has no strategy col -> model x rep.
+    group_keys = ['model', 'representation']
+    has_strategy = 'strategy' in df.columns and df['strategy'].notna().any()
+    if has_strategy:
+        group_keys = ['model', 'representation', 'strategy']
+
+    for keys, group in df.groupby(group_keys):
+        if has_strategy:
+            model, rep, strategy = keys
+        else:
+            model, rep = keys
+            strategy = None
         group = group.sort_values('sigma')
-        
+
         if len(group) < 3:
             continue
-        
+
         metrics = {
             'model': model,
             'representation': rep,
-            'config': format_config(model, rep),
+            'strategy': strategy,
+            'config': format_config(model, rep) + (f"/{strategy}" if strategy else ''),
         }
         
         # Baseline performance at σ=0
@@ -1005,14 +1019,101 @@ def generate_summary_report(metrics_df, output_dir):
 # MAIN
 # ============================================================================
 
-def main(results_dir="../results"):
-    """Main analysis"""
+def load_final_paper_data(results_dir="../results"):
+    """Load the FINAL paper per-sigma data from anova_*.csv (all 6 strategies).
+
+    Mirrors generate_paper_figures.load_anova_data: strategy parsed from the
+    filename, model names normalized, appended runs deduplicated. Keeps the
+    'strategy' column so downstream grouping never pools across noise types.
+    """
+    print("\n" + "="*80)
+    print("LOADING FINAL PAPER DATA (anova_*.csv)")
+    print("="*80)
+    results_dir = Path(results_dir)
+
+    VALID_STRATEGIES = ['value_proportional', 'heteroscedastic', 'legacy',
+                        'outlier', 'quantile', 'threshold', 'hetero', 'valprop']
+    STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+    BNN_NAME_MAP = {
+        'bnn_full': 'dnn_bnn_full', 'bnn_last': 'dnn_bnn_last',
+        'bnn_variational': 'dnn_bnn_variational',
+        'bnn_full_variational': 'dnn_vbll',
+        'dnn_bnn_full_variational': 'dnn_vbll',
+        'mlp_bnn_full_variational': 'mlp_vbll',
+    }
+    # Conformal wrappers + pre-VBLL variational duplicates (match paper scope)
+    EXCLUDE = {'dnn_bnn_variational', 'mlp_bnn_variational'}
+
+    files = sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime)
+    files = [f for f in files if '_uncertainty_values' not in f.name]
+    print(f"Found {len(files)} anova_*.csv files")
+
+    all_data = []
+    for f in files:
+        try:
+            df = pd.read_csv(f)
+            rest = f.stem[len('anova_'):]
+            strategy = None
+            for s in sorted(VALID_STRATEGIES, key=len, reverse=True):
+                if rest.startswith(s + '_'):
+                    strategy = STRATEGY_NORMALIZE.get(s, s)
+                    break
+            df['strategy'] = strategy
+            if 'model' in df.columns and len(df) > 0:
+                csv_model = df['model'].iloc[0]
+                if csv_model in ('dnn', 'mlp'):
+                    if '_bnn_full_variational' in f.stem:
+                        df['model'] = csv_model + '_bnn_full_variational'
+                    elif '_bnn_last' in f.stem:
+                        df['model'] = csv_model + '_bnn_last'
+                    elif '_bnn_full' in f.stem:
+                        df['model'] = csv_model + '_bnn_full'
+            all_data.append(df)
+        except Exception as e:
+            print(f"Warning: {f.name}: {e}")
+
+    if not all_data:
+        print("ERROR: No anova_*.csv files found!")
+        return pd.DataFrame()
+
+    combined = pd.concat(all_data, ignore_index=True)
+    combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
+    if 'representation' not in combined.columns and 'rep' in combined.columns:
+        combined = combined.rename(columns={'rep': 'representation'})
+    combined = combined[~combined['model'].isin(EXCLUDE)]
+    combined = combined[combined['model'].astype(str).str.contains('conformal') == False]
+
+    # Deduplicate appended runs (keep last), then average iterations per sigma
+    dedup = ['model', 'representation', 'strategy', 'sigma', 'iteration']
+    if all(c in combined.columns for c in dedup):
+        combined = combined.drop_duplicates(subset=dedup, keep='last')
+    combined = combined[combined['r2'] > -10]
+
+    results = (combined.groupby(['model', 'representation', 'strategy', 'sigma'])
+               .agg(r2=('r2', 'mean'),
+                    rmse=('rmse', 'mean') if 'rmse' in combined.columns else ('r2', 'mean'),
+                    mae=('mae', 'mean') if 'mae' in combined.columns else ('r2', 'mean'),
+                    n_seeds=('iteration', 'count') if 'iteration' in combined.columns else ('r2', 'count'))
+               .reset_index())
+
+    print(f"Loaded {len(results)} rows | models={results['model'].nunique()} "
+          f"reps={results['representation'].nunique()} "
+          f"strategies={sorted(results['strategy'].dropna().unique())}")
+    return results
+
+
+def main(results_dir="../results", data_source="screening"):
+    """Main analysis. data_source: 'screening' (phase0c) or 'final' (anova_*)."""
     print("="*80)
     print("NOISE ROBUSTNESS METRIC COMPARISON ANALYSIS")
+    print(f"(data source: {data_source})")
     print("="*80)
-    
+
     # Load data
-    df = load_screening_results(results_dir)
+    if data_source == 'final':
+        df = load_final_paper_data(results_dir)
+    else:
+        df = load_screening_results(results_dir)
     if len(df) == 0:
         print("ERROR: No data loaded!")
         return
@@ -1105,5 +1206,7 @@ def main(results_dir="../results"):
 
 if __name__ == "__main__":
     import sys
-    results_dir = sys.argv[1] if len(sys.argv) > 1 else "../results"
-    main(results_dir)
+    argv = [a for a in sys.argv[1:] if a != '--final']
+    data_source = 'final' if '--final' in sys.argv else 'screening'
+    results_dir = argv[0] if argv else "../results"
+    main(results_dir, data_source=data_source)
