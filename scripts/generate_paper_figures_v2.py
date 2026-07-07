@@ -23,14 +23,14 @@ Outputs:
     fig1_global_overview.png
     fig2_anova_decomposition.png
     fig3_ranking_consistency.png
-    fig_nn_family_comparison.png / table_nn_family_nds.csv
+    fig_nn_family_comparison.png / table_nn_family_auc.csv
     fig_uncertainty_combined.png
     fig_validation_combined.png
     table1_anova_summary.csv (auc_norm ANOVA — primary robustness metric)
     table_supp_weibull_anova.csv (weibull_beta ANOVA — supplementary failure-sharpness)
     table1_supp_simple_effects.csv
     table1_supp_simple_effects_all_reps.csv
-    table2_nds_by_strategy.csv
+    table2_auc_by_strategy.csv
     table3_probabilistic_comparison.csv
     table4_uncertainty_metrics.csv (ECE, coverage, correlations, aleatoric/epistemic)
     table4_supp_uncertainty_by_strategy_rep.csv (same metrics × all strategies/reps)
@@ -53,7 +53,7 @@ Outputs:
 #      - Currently 'hetero' (heteroscedastic) - chosen arbitrarily
 #      - REVIEW: Which strategy shows most different behavior? Check:
 #        * Does ranking change significantly under this strategy?
-#        * Is the effect size (NDS difference) meaningful?
+#        * Is the effect size (auc_norm difference) meaningful?
 #        * Candidates: 'hetero', 'valprop', 'outlier'
 #
 #   3. PRIMARY_REP: Which representation for main figures?
@@ -95,9 +95,9 @@ GENERATE_SUPPLEMENTARY = True
 # ANOVA DESIGN — Curated models/reps for balanced, non-redundant design
 # =============================================================================
 # Models EXCLUDED from ANOVA (remain in the full study for other analyses):
-#   - conformal_*: Wrappers around base models; NDS Spearman rho > 0.99 with
+#   - conformal_*: Wrappers around base models; auc_norm Spearman rho > 0.99 with
 #     their base models. Kept for Part 2 uncertainty analysis.
-#   - qrf: NDS rho = 0.996 with rf. Kept for probabilistic vs deterministic
+#   - qrf: auc_norm rho = 0.996 with rf. Kept for probabilistic vs deterministic
 #     comparison in Part 1 deep dives.
 #
 # Reps EXCLUDED from ANOVA:
@@ -1081,7 +1081,7 @@ def _normalize_validation_names(df):
         'SMILES': 'smiles',
     }
     # Map directory names → display names for datasets
-    # herg_fluid is classification (no r2), excluded from regression NDS analysis
+    # herg_fluid is classification (no r2), excluded from regression auc_norm analysis
     val_dataset_map = {
         'openadmet_logd': 'OpenADMET-LogD',
         'openadmet_caco2': 'OpenADMET-Caco2_Efflux',
@@ -1172,7 +1172,7 @@ def load_validation_data(validation_dir):
     return None
 
 
-def calculate_validation_nds(validation_df):
+def calculate_validation_auc(validation_df):
     """Convert validation data into robustness-metric format (auc_norm).
 
     The KIRBy validation script outputs:
@@ -1199,22 +1199,22 @@ def calculate_validation_nds(validation_df):
             break
 
     if metric_col is not None and not has_sigma:
-        nds_df = validation_df.rename(columns={metric_col: 'auc_norm'})
-        if 'baseline_r2' not in nds_df.columns:
-            nds_df['baseline_r2'] = np.nan
-        if 'dataset' not in nds_df.columns:
-            nds_df['dataset'] = 'validation'
+        auc_df = validation_df.rename(columns={metric_col: 'auc_norm'})
+        if 'baseline_r2' not in auc_df.columns:
+            auc_df['baseline_r2'] = np.nan
+        if 'dataset' not in auc_df.columns:
+            auc_df['dataset'] = 'validation'
         # Apply baseline R² filtering (lower threshold for external datasets)
-        if 'baseline_r2' in nds_df.columns:
-            low_baseline = nds_df['baseline_r2'] < VALIDATION_BASELINE_THRESHOLD
+        if 'baseline_r2' in auc_df.columns:
+            low_baseline = auc_df['baseline_r2'] < VALIDATION_BASELINE_THRESHOLD
             n_filtered = low_baseline.sum()
             if n_filtered > 0:
                 print(f"  ⚠ Filtering {n_filtered} validation configs with baseline R² < {VALIDATION_BASELINE_THRESHOLD}:")
-                for _, row in nds_df[low_baseline].iterrows():
+                for _, row in auc_df[low_baseline].iterrows():
                     print(f"    {row.get('model','?')}/{row.get('rep','?')}/{row.get('strategy','?')} "
                           f"on {row.get('dataset','?')}: baseline_r2={row['baseline_r2']:.3f}")
-                nds_df = nds_df[~low_baseline].copy()
-        return nds_df
+                auc_df = auc_df[~low_baseline].copy()
+        return auc_df
 
     # Per-sigma format (has sigma and r2 columns): compute auc_norm from scratch
     if 'sigma' in validation_df.columns and 'r2' in validation_df.columns:
@@ -1222,7 +1222,7 @@ def calculate_validation_nds(validation_df):
         if 'dataset' in validation_df.columns:
             group_cols = ['dataset'] + group_cols
 
-        nds_results = []
+        auc_results = []
         for keys, group in validation_df.groupby(group_cols):
             if not isinstance(keys, tuple):
                 keys = (keys,)
@@ -1242,15 +1242,62 @@ def calculate_validation_nds(validation_df):
             row.update({'auc_norm': _retention_auc_norm(sig, r2, baseline),
                         'weibull_tau': wt, 'weibull_beta': wb,
                         'baseline_r2': baseline})
-            nds_results.append(row)
+            auc_results.append(row)
 
-        if nds_results:
-            return pd.DataFrame(nds_results)
+        if auc_results:
+            return pd.DataFrame(auc_results)
 
     return None
 
 
-def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir):
+def _two_way_eta2_unbalanced(df, resp_col, f1='model', f2='rep'):
+    """Type-I sequential (model → rep → model×rep) η² via OLS.
+
+    For UNBALANCED / missing-cell designs (e.g. the external validation sets:
+    ~7 models × 3 reps with gaps) the simple balanced sum-of-squares formula
+    over-counts and yields a nonsensical NEGATIVE residual. This computes the
+    partition sequentially from nested OLS fits so the residual is pure
+    within-cell variance and always ≥ 0 (and the four shares sum to 100%).
+    The paper already states Type-I SS, so this is method-consistent.
+    Returns an η² dict (same keys as the balanced helper) or None.
+    """
+    d = df.dropna(subset=[resp_col, f1, f2])
+    y = d[resp_col].to_numpy(dtype=float)
+    n = len(y)
+    if n < 4:
+        return None
+    total_ss = float(((y - y.mean()) ** 2).sum())
+    if total_ss == 0:
+        return None
+
+    def _rss(*factors):
+        # residual SS after OLS of y on intercept + dummy-encoded factors
+        X = np.ones((n, 1))
+        for f in factors:
+            dm = pd.get_dummies(f, drop_first=True).to_numpy(dtype=float)
+            if dm.shape[1]:
+                X = np.hstack([X, dm])
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        return float(((y - X @ beta) ** 2).sum())
+
+    m = d[f1].astype(str)
+    r = d[f2].astype(str)
+    cell = m.str.cat(r, sep='|')
+    rss_m = _rss(m)        # intercept + model
+    rss_mr = _rss(m, r)    # + rep
+    rss_full = _rss(cell)  # saturated cell means → within-cell residual
+    return {
+        'eta2_model': (total_ss - rss_m) / total_ss * 100,
+        'eta2_rep': (rss_m - rss_mr) / total_ss * 100,
+        'eta2_interaction': (rss_mr - rss_full) / total_ss * 100,
+        'eta2_residual': rss_full / total_ss * 100,
+        'n_models': d[f1].nunique(),
+        'n_reps': d[f2].nunique(),
+        'n': n,
+    }
+
+
+def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir):
     """Generate all validation-related figures and tables.
 
     Validation data (LogD, Caco2_Efflux, hERG-Ki) is integrated into the paper
@@ -1260,50 +1307,50 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
     - fig_validation_overview.png: robustness heatmap per dataset (like Figure 1B)
     - fig_validation_anova.png: η² decomposition on validation datasets
     - fig_validation_combined.png: Panel A grouped bars + Panel B QM9-vs-external scatter
-    - table_validation_nds.csv: Full auc_norm table across datasets
+    - table_validation_auc.csv: Full auc_norm table across datasets
     - table_validation_anova.csv: Validation ANOVA statistics
     - table_validation_probabilistic.csv: RF vs QRF (and BNN pairs) per dataset
     """
-    if val_nds_df is None or len(val_nds_df) == 0:
+    if val_auc_df is None or len(val_auc_df) == 0:
         print("⚠ No validation robustness data available — skipping validation figures")
         return
 
     # Filter artifact auc_norm values (e.g. NN-α divergence on hERG-Ki drives
     # retention strongly negative). These are set to NaN → "N/A" in heatmaps.
-    val_nds_df = val_nds_df.copy()
-    extreme_mask = ((val_nds_df['auc_norm'] < VALIDATION_AUC_LOW) |
-                    (val_nds_df['auc_norm'] > VALIDATION_AUC_HIGH))
+    val_auc_df = val_auc_df.copy()
+    extreme_mask = ((val_auc_df['auc_norm'] < VALIDATION_AUC_LOW) |
+                    (val_auc_df['auc_norm'] > VALIDATION_AUC_HIGH))
     if extreme_mask.any():
         n_extreme = extreme_mask.sum()
         print(f"  ⚠ Filtering {n_extreme} artifact validation auc_norm values "
               f"(outside [{VALIDATION_AUC_LOW}, {VALIDATION_AUC_HIGH}]):")
-        for _, row in val_nds_df[extreme_mask].iterrows():
+        for _, row in val_auc_df[extreme_mask].iterrows():
             ds = row.get('dataset', '?')
             print(f"    {row['model']}/{row.get('rep','?')}/{row.get('strategy','?')} "
                   f"on {ds}: auc_norm={row['auc_norm']:.2f}")
-        val_nds_df.loc[extreme_mask, 'auc_norm'] = np.nan
+        val_auc_df.loc[extreme_mask, 'auc_norm'] = np.nan
 
-    datasets = val_nds_df['dataset'].unique() if 'dataset' in val_nds_df.columns else ['validation']
-    print(f"  Validation datasets: {sorted(datasets)}, {len(val_nds_df)} configs total")
+    datasets = val_auc_df['dataset'].unique() if 'dataset' in val_auc_df.columns else ['validation']
+    print(f"  Validation datasets: {sorted(datasets)}, {len(val_auc_df)} configs total")
 
-    # --- Table: Validation NDS (cross-dataset comparison) ---
-    if 'dataset' in val_nds_df.columns:
-        pivot = val_nds_df.pivot_table(
+    # --- Table: Validation auc_norm (cross-dataset comparison) ---
+    if 'dataset' in val_auc_df.columns:
+        pivot = val_auc_df.pivot_table(
             values='auc_norm', index=['model', 'rep'], columns='dataset', aggfunc='mean'
         )
         pivot['MEAN'] = pivot.mean(axis=1)
         pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
         pivot = pivot.sort_values('MEAN', ascending=False)
-        pivot.to_csv(output_dir / 'table_validation_nds.csv')
-        print("✓ Saved table_validation_nds.csv")
+        pivot.to_csv(output_dir / 'table_validation_auc.csv')
+        print("✓ Saved table_validation_auc.csv")
 
         # Diagnostic: save full per-model/rep/strategy/dataset breakdown for inspection
         diag_cols = ['dataset', 'model', 'rep', 'strategy', 'auc_norm']
-        if 'baseline_r2' in val_nds_df.columns:
+        if 'baseline_r2' in val_auc_df.columns:
             diag_cols.append('baseline_r2')
-        diag_df = val_nds_df[diag_cols].sort_values(['dataset', 'model', 'rep', 'strategy'])
-        diag_df.to_csv(output_dir / 'table_validation_nds_full.csv', index=False)
-        print(f"✓ Saved table_validation_nds_full.csv ({len(diag_df)} rows)")
+        diag_df = val_auc_df[diag_cols].sort_values(['dataset', 'model', 'rep', 'strategy'])
+        diag_df.to_csv(output_dir / 'table_validation_auc_full.csv', index=False)
+        print(f"✓ Saved table_validation_auc_full.csv ({len(diag_df)} rows)")
 
         # Flag low-retention individual configs for investigation (auc_norm < 0.3)
         extreme = diag_df[diag_df['auc_norm'] < 0.3].copy() if 'auc_norm' in diag_df.columns else pd.DataFrame()
@@ -1313,17 +1360,17 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 bl = f", baseline_r2={row['baseline_r2']:.3f}" if 'baseline_r2' in row and pd.notna(row['baseline_r2']) else ""
                 print(f"    {row['model']}/{row['rep']}/{row['strategy']} on {row['dataset']}: auc_norm={row['auc_norm']:.3f}{bl}")
     else:
-        val_nds_df.to_csv(output_dir / 'table_validation_nds.csv', index=False)
-        print("✓ Saved table_validation_nds.csv")
+        val_auc_df.to_csv(output_dir / 'table_validation_auc.csv', index=False)
+        print("✓ Saved table_validation_auc.csv")
 
-    # --- Figure: Validation NDS heatmap per dataset ---
+    # --- Figure: Validation auc_norm heatmap per dataset ---
     # Show a single representation (PRIMARY_REP = continuous_pdv) so the figure
-    # represents an actual configuration rather than a cross-rep mean. NDS is
+    # represents an actual configuration rather than a cross-rep mean. auc_norm is
     # near rep-invariant (see ANOVA: representation η² for robustness is small),
     # so PDV is a defensible single choice and the rep is named in the title.
     n_datasets = len(datasets)
-    val_nds_primary = val_nds_df[val_nds_df['rep'] == PRIMARY_REP] if 'rep' in val_nds_df.columns else val_nds_df
-    if n_datasets > 0 and 'dataset' in val_nds_df.columns and len(val_nds_primary) > 0:
+    val_auc_primary = val_auc_df[val_auc_df['rep'] == PRIMARY_REP] if 'rep' in val_auc_df.columns else val_auc_df
+    if n_datasets > 0 and 'dataset' in val_auc_df.columns and len(val_auc_primary) > 0:
         # Stack panels vertically — three 6-column heatmaps + colorbars don't fit
         # in 6.5" of textwidth (annotations overlap the colorbar). Each panel
         # gets full textwidth so 5-char cell labels render cleanly.
@@ -1332,7 +1379,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         ordered_datasets = _order_validation_datasets(datasets)
         max_rows = 0
         for ds in ordered_datasets:
-            ds_models = val_nds_primary[val_nds_primary['dataset'] == ds]['model'].nunique()
+            ds_models = val_auc_primary[val_auc_primary['dataset'] == ds]['model'].nunique()
             max_rows = max(max_rows, ds_models)
         row_h = 0.26   # inches per heatmap row
         chrome_h = 1.1  # title + x ticks + axes padding per panel
@@ -1350,7 +1397,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
         for i, dataset in enumerate(_order_validation_datasets(datasets)):
             ax = axes[i]
-            ds_data = val_nds_primary[val_nds_primary['dataset'] == dataset]
+            ds_data = val_auc_primary[val_auc_primary['dataset'] == dataset]
             if len(ds_data) == 0:
                 continue
 
@@ -1405,49 +1452,24 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
     # --- Figure: Validation ANOVA (η² decomposition: Model × Rep, legacy strategy only) ---
     # Filter to legacy strategy so the ANOVA mirrors the QM9 per-strategy design.
-    if 'dataset' in val_nds_df.columns and 'model' in val_nds_df.columns and 'rep' in val_nds_df.columns:
+    if 'dataset' in val_auc_df.columns and 'model' in val_auc_df.columns and 'rep' in val_auc_df.columns:
         anova_results = {}
         for dataset in _order_validation_datasets(datasets):
-            ds_nds = val_nds_df[val_nds_df['dataset'] == dataset].copy()
-            ds_nds = ds_nds[~ds_nds['rep'].isin(ANOVA_REPS_EXCLUDE)]
+            ds_auc = val_auc_df[val_auc_df['dataset'] == dataset].copy()
+            ds_auc = ds_auc[~ds_auc['rep'].isin(ANOVA_REPS_EXCLUDE)]
             # Use legacy strategy only — consistent with QM9 per-strategy ANOVA
-            if 'strategy' in ds_nds.columns:
-                ds_nds = ds_nds[ds_nds['strategy'] == 'legacy']
-            ds_nds = ds_nds.dropna(subset=['auc_norm'])
-            if len(ds_nds) < 10:
+            if 'strategy' in ds_auc.columns:
+                ds_auc = ds_auc[ds_auc['strategy'] == 'legacy']
+            ds_auc = ds_auc.dropna(subset=['auc_norm'])
+            if len(ds_auc) < 10:
                 continue
 
-            grand_mean = ds_nds['auc_norm'].mean()
-            total_ss = ((ds_nds['auc_norm'] - grand_mean) ** 2).sum()
-            if total_ss == 0:
+            # Type-I sequential SS (unbalanced-safe): the external sets have
+            # missing model×rep cells, so the balanced formula gave negative
+            # residual η². This partitions correctly (residual ≥ 0, shares sum 100%).
+            result = _two_way_eta2_unbalanced(ds_auc, 'auc_norm')
+            if result is None:
                 continue
-
-            model_means = ds_nds.groupby('model')['auc_norm'].mean()
-            model_counts = ds_nds.groupby('model').size()
-            ss_model = (model_counts * (model_means - grand_mean) ** 2).sum()
-
-            rep_means = ds_nds.groupby('rep')['auc_norm'].mean()
-            rep_counts = ds_nds.groupby('rep').size()
-            ss_rep = (rep_counts * (rep_means - grand_mean) ** 2).sum()
-
-            interaction_means = ds_nds.groupby(['model', 'rep'])['auc_norm'].mean()
-            interaction_counts = ds_nds.groupby(['model', 'rep']).size()
-            ss_interaction = 0
-            for (model, rep), count in interaction_counts.items():
-                if model in model_means.index and rep in rep_means.index:
-                    cell_mean = interaction_means[(model, rep)]
-                    expected = model_means[model] + rep_means[rep] - grand_mean
-                    ss_interaction += count * (cell_mean - expected) ** 2
-
-            result = {
-                'eta2_model': (ss_model / total_ss) * 100,
-                'eta2_rep': (ss_rep / total_ss) * 100,
-                'eta2_interaction': (ss_interaction / total_ss) * 100,
-                'eta2_residual': ((total_ss - ss_model - ss_rep - ss_interaction) / total_ss) * 100,
-                'n_models': ds_nds['model'].nunique(),
-                'n_reps': ds_nds['rep'].nunique(),
-                'n': len(ds_nds),
-            }
             anova_results[dataset] = result
 
         if anova_results:
@@ -1497,7 +1519,7 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             print("✓ Saved table_validation_anova.csv")
 
     # --- Probabilistic comparison on validation datasets ---
-    if 'dataset' in val_nds_df.columns:
+    if 'dataset' in val_auc_df.columns:
         prob_pairs = [
             ('rf', 'qrf', 'RF vs QRF'),
         ]
@@ -1505,23 +1527,23 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         for base in ['dnn', 'mlp']:
             for suffix in ['_bnn_full', '_bnn_variational']:
                 variant = base + suffix
-                if variant in val_nds_df['model'].values:
+                if variant in val_auc_df['model'].values:
                     prob_pairs.append((base, variant, f'{base.upper()} vs {variant}'))
 
         rows = []
         for base, variant, label in prob_pairs:
             for dataset in sorted(datasets):
-                ds_nds = val_nds_df[val_nds_df['dataset'] == dataset]
-                base_nds = ds_nds[ds_nds['model'] == base]['auc_norm'].mean()
-                var_nds = ds_nds[ds_nds['model'] == variant]['auc_norm'].mean()
-                if np.isfinite(base_nds) and np.isfinite(var_nds):
+                ds_auc = val_auc_df[val_auc_df['dataset'] == dataset]
+                base_auc = ds_auc[ds_auc['model'] == base]['auc_norm'].mean()
+                var_auc = ds_auc[ds_auc['model'] == variant]['auc_norm'].mean()
+                if np.isfinite(base_auc) and np.isfinite(var_auc):
                     rows.append({
                         'Dataset': dataset,
                         'Comparison': label,
-                        'Base AUC_norm': base_nds,
-                        'Variant AUC_norm': var_nds,
-                        'Δ AUC_norm': var_nds - base_nds,
-                        'Variant Better': var_nds > base_nds,
+                        'Base AUC_norm': base_auc,
+                        'Variant AUC_norm': var_auc,
+                        'Δ AUC_norm': var_auc - base_auc,
+                        'Variant Better': var_auc > base_auc,
                     })
 
         if rows:
@@ -1530,19 +1552,19 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
 
     # --- Combined validation figure (Panel A: grouped bar, Panel B: transferability scatter) ---
     # Requires both the grouped bar data and the transferability scatter data
-    if (qm9_nds_df is not None and val_nds_df is not None
-            and 'dataset' in val_nds_df.columns):
+    if (qm9_auc_df is not None and val_auc_df is not None
+            and 'dataset' in val_auc_df.columns):
         # Re-compute model_ds for Panel A
-        models_in_val_c = sorted(val_nds_df['model'].unique())
+        models_in_val_c = sorted(val_auc_df['model'].unique())
         if len(models_in_val_c) >= 2:
-            model_ds_c = val_nds_df.pivot_table(values='auc_norm', index='model', columns='dataset', aggfunc='mean')
+            model_ds_c = val_auc_df.pivot_table(values='auc_norm', index='model', columns='dataset', aggfunc='mean')
             model_ds_c = model_ds_c.dropna(how='all')
             # Reorder external dataset columns to the canonical paper order
             # before prepending QM9, so legends read QM9 → LogD → Caco-2 → hERG.
             ext_cols = _order_validation_datasets(model_ds_c.columns.tolist())
             model_ds_c = model_ds_c[ext_cols]
-            if qm9_nds_df is not None and len(qm9_nds_df) > 0:
-                qm9_means_c = qm9_nds_df.groupby('model')['auc_norm'].mean()
+            if qm9_auc_df is not None and len(qm9_auc_df) > 0:
+                qm9_means_c = qm9_auc_df.groupby('model')['auc_norm'].mean()
                 qm9_col_c = qm9_means_c.reindex(model_ds_c.index)
                 model_ds_c.insert(0, 'QM9', qm9_col_c)
             family_order_c = sort_models_by_family(model_ds_c.index.tolist())
@@ -1552,9 +1574,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             model_ds_c.columns = [VALIDATION_DATASET_LABELS.get(c, c) for c in model_ds_c.columns]
 
             # Re-compute merged for Panel B
-            qm9_mn = qm9_nds_df.groupby('model')['auc_norm'].mean().reset_index().rename(columns={'auc_norm': 'qm9_nds'})
-            ext_mn = val_nds_df.groupby('model')['auc_norm'].mean().reset_index().rename(columns={'auc_norm': 'ext_nds'})
-            merged_c = qm9_mn.merge(ext_mn, on='model', how='inner').dropna(subset=['qm9_nds', 'ext_nds'])
+            qm9_mn = qm9_auc_df.groupby('model')['auc_norm'].mean().reset_index().rename(columns={'auc_norm': 'qm9_auc'})
+            ext_mn = val_auc_df.groupby('model')['auc_norm'].mean().reset_index().rename(columns={'auc_norm': 'ext_auc'})
+            merged_c = qm9_mn.merge(ext_mn, on='model', how='inner').dropna(subset=['qm9_auc', 'ext_auc'])
 
             if len(merged_c) >= 3 and len(model_ds_c) >= 2:
                 # Stack panels vertically so each gets full textwidth.
@@ -1582,12 +1604,12 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                 ax_a.spines['top'].set_visible(False)
                 ax_a.spines['right'].set_visible(False)
 
-                # Panel B: QM9 vs external NDS scatter (no regression line).
+                # Panel B: QM9 vs external auc_norm scatter (no regression line).
                 # Use get_variant_color so RF and QRF are visually distinct
                 # (MODEL_COLORS maps both to the family blue).
                 for _, row in merged_c.iterrows():
                     color = get_variant_color(row['model'])
-                    ax_b.scatter(row['qm9_nds'], row['ext_nds'], color=color, s=100, zorder=5,
+                    ax_b.scatter(row['qm9_auc'], row['ext_auc'], color=color, s=100, zorder=5,
                                  edgecolors='black', linewidth=0.5,
                                  label=get_model_label(row['model']))
                 ax_b.set_xlabel('QM9 Mean AUC$_{norm}$')
@@ -1599,10 +1621,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
                                 handletextpad=0.3)
                 ax_b.spines['top'].set_visible(False)
                 ax_b.spines['right'].set_visible(False)
-                xp = (merged_c['qm9_nds'].max() - merged_c['qm9_nds'].min()) * 0.15
-                yp = (merged_c['ext_nds'].max() - merged_c['ext_nds'].min()) * 0.15
-                ax_b.set_xlim(merged_c['qm9_nds'].min() - xp, merged_c['qm9_nds'].max() + xp)
-                ax_b.set_ylim(merged_c['ext_nds'].min() - yp, merged_c['ext_nds'].max() + yp)
+                xp = (merged_c['qm9_auc'].max() - merged_c['qm9_auc'].min()) * 0.15
+                yp = (merged_c['ext_auc'].max() - merged_c['ext_auc'].min()) * 0.15
+                ax_b.set_xlim(merged_c['qm9_auc'].min() - xp, merged_c['qm9_auc'].max() + xp)
+                ax_b.set_ylim(merged_c['ext_auc'].min() - yp, merged_c['ext_auc'].max() + yp)
 
                 plt.tight_layout()
                 plt.savefig(output_dir / 'fig_validation_combined.png', dpi=300, bbox_inches='tight')
@@ -1731,7 +1753,7 @@ def calculate_coverage(y_true, y_pred, uncertainty, k=1):
     return np.mean(within_interval)
 
 
-def wilcoxon_paired_test(nds_df, model_base, model_variant, rep=None, strategy='legacy'):
+def wilcoxon_paired_test(auc_df, model_base, model_variant, rep=None, strategy='legacy'):
     """
     Wilcoxon signed-rank test for paired model comparison.
 
@@ -1745,8 +1767,8 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep=None, strategy='
     if rep is None:
         rep = PRIMARY_REP
     # Pair across all shared conditions (rep × strategy) for sufficient n
-    base_data = nds_df[nds_df['model'] == model_base]
-    var_data = nds_df[nds_df['model'] == model_variant]
+    base_data = auc_df[auc_df['model'] == model_base]
+    var_data = auc_df[auc_df['model'] == model_variant]
 
     if len(base_data) == 0 or len(var_data) == 0:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': 0}
@@ -1756,23 +1778,23 @@ def wilcoxon_paired_test(nds_df, model_base, model_variant, rep=None, strategy='
     var_keyed = var_data.set_index(['rep', 'strategy'])['auc_norm']
     shared_keys = base_keyed.index.intersection(var_keyed.index)
 
-    base_nds = base_keyed.loc[shared_keys].values
-    var_nds = var_keyed.loc[shared_keys].values
+    base_auc = base_keyed.loc[shared_keys].values
+    var_auc = var_keyed.loc[shared_keys].values
 
     n = len(shared_keys)
     if n < 5:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': n}
 
     try:
-        stat, p_val = stats.wilcoxon(base_nds, var_nds, alternative='two-sided')
+        stat, p_val = stats.wilcoxon(base_auc, var_auc, alternative='two-sided')
         return {
             'statistic': stat,
             'p_value': p_val,
             'significant': p_val < 0.05,
             'n': n,
-            'base_mean': np.mean(base_nds),
-            'var_mean': np.mean(var_nds),
-            'improvement': np.mean(var_nds) - np.mean(base_nds)
+            'base_mean': np.mean(base_auc),
+            'var_mean': np.mean(var_auc),
+            'improvement': np.mean(var_auc) - np.mean(base_auc)
         }
     except Exception as e:
         return {'statistic': np.nan, 'p_value': np.nan, 'significant': False, 'n': n, 'error': str(e)}
@@ -2045,8 +2067,8 @@ def run_simple_effects_analysis(df, output_dir):
                     'n': r['n'],
                 })
 
-        # --- Robustness simple effects (NDS) ---
-        nds_data = []
+        # --- Robustness simple effects (auc_norm) ---
+        auc_data = []
         for (model, rep, iteration), group in strategy_df.groupby(['model', 'rep', 'iteration']):
             group = group.sort_values('sigma')
             if len(group) < 3:
@@ -2058,15 +2080,15 @@ def run_simple_effects_analysis(df, output_dir):
                 continue
             auc = _retention_auc_norm(sig, r2, float(base_arr[0]))
             if np.isfinite(auc):
-                nds_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'auc_norm': auc})
+                auc_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'auc_norm': auc})
 
-        if len(nds_data) >= 10:
-            nds_df = pd.DataFrame(nds_data)
-            nds_df = nds_df[~nds_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
-            nds_df = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+        if len(auc_data) >= 10:
+            auc_df = pd.DataFrame(auc_data)
+            auc_df = auc_df[~auc_df['rep'].isin(ANOVA_REPS_EXCLUDE)]
+            auc_df = auc_df[~auc_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
 
             # Simple effect of model at each representation
-            model_at_rep = run_simple_effects(nds_df, 'auc_norm', 'rep', 'model')
+            model_at_rep = run_simple_effects(auc_df, 'auc_norm', 'rep', 'model')
             for r in model_at_rep:
                 all_rows.append({
                     'Strategy': strategy_label,
@@ -2080,7 +2102,7 @@ def run_simple_effects_analysis(df, output_dir):
                 })
 
             # Simple effect of representation at each model
-            rep_at_model = run_simple_effects(nds_df, 'auc_norm', 'model', 'rep')
+            rep_at_model = run_simple_effects(auc_df, 'auc_norm', 'model', 'rep')
             for r in rep_at_model:
                 all_rows.append({
                     'Strategy': strategy_label,
@@ -2141,8 +2163,8 @@ def run_simple_effects_analysis(df, output_dir):
                     'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
                 })
 
-        # Robustness (NDS) — no exclusions
-        nds_data = []
+        # Robustness (auc_norm) — no exclusions
+        auc_data = []
         for (model, rep, iteration), group in strategy_df.groupby(['model', 'rep', 'iteration']):
             group = group.sort_values('sigma')
             if len(group) < 3:
@@ -2154,17 +2176,17 @@ def run_simple_effects_analysis(df, output_dir):
                 continue
             auc = _retention_auc_norm(sig, r2, float(base_arr[0]))
             if np.isfinite(auc):
-                nds_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'auc_norm': auc})
+                auc_data.append({'model': model, 'rep': rep, 'iteration': iteration, 'auc_norm': auc})
 
-        if len(nds_data) >= 10:
-            nds_df_full = pd.DataFrame(nds_data)
-            for r in run_simple_effects(nds_df_full, 'auc_norm', 'rep', 'model'):
+        if len(auc_data) >= 10:
+            auc_df_full = pd.DataFrame(auc_data)
+            for r in run_simple_effects(auc_df_full, 'auc_norm', 'rep', 'model'):
                 all_rows_full.append({
                     'Strategy': strategy_label, 'Analysis': 'Robustness',
                     'Type': 'Model effect', 'Within': r['group'],
                     'eta2': r['eta2'], 'F': r['f_stat'], 'p': r['p_value'], 'n': r['n'],
                 })
-            for r in run_simple_effects(nds_df_full, 'auc_norm', 'model', 'rep'):
+            for r in run_simple_effects(auc_df_full, 'auc_norm', 'model', 'rep'):
                 all_rows_full.append({
                     'Strategy': strategy_label, 'Analysis': 'Robustness',
                     'Type': 'Rep effect', 'Within': r['group'],
@@ -2189,7 +2211,7 @@ def run_simple_effects_analysis(df, output_dir):
 # SUPPLEMENTARY: ICC AND PAIRWISE REDUNDANCY TABLES
 # =============================================================================
 
-def compute_icc_and_redundancy(nds_df, output_dir):
+def compute_icc_and_redundancy(auc_df, output_dir):
     """Compute ICC(1,1) for all model pairs and pairwise Spearman redundancy.
 
     Outputs three supplementary CSVs:
@@ -2199,20 +2221,20 @@ def compute_icc_and_redundancy(nds_df, output_dir):
 
     These tables justify which models/reps were excluded from the ANOVA.
     """
-    if len(nds_df) == 0:
+    if len(auc_df) == 0:
         print("⚠ No auc_norm data for ICC computation")
         return
 
-    strategies = [s for s in ALL_STRATEGIES if s in nds_df['strategy'].unique()]
+    strategies = [s for s in ALL_STRATEGIES if s in auc_df['strategy'].unique()]
 
-    # Build NDS pivot: mean NDS per (model, rep, strategy)
-    mean_nds = nds_df.groupby(['model', 'rep', 'strategy'])['auc_norm'].mean().reset_index()
+    # Build auc_norm pivot: mean auc_norm per (model, rep, strategy)
+    mean_auc = auc_df.groupby(['model', 'rep', 'strategy'])['auc_norm'].mean().reset_index()
 
     # ── Pairwise MODEL redundancy using full (rep x strategy) vectors ──
-    models = sorted(mean_nds['model'].unique())
+    models = sorted(mean_auc['model'].unique())
     model_profiles = {}
     for model in models:
-        mdata = mean_nds[mean_nds['model'] == model]
+        mdata = mean_auc[mean_auc['model'] == model]
         profile = {}
         for _, row in mdata.iterrows():
             profile[(row['rep'], row['strategy'])] = row['auc_norm']
@@ -2264,10 +2286,10 @@ def compute_icc_and_redundancy(nds_df, output_dir):
             print(f"✓ Saved table_supp_model_redundancy.tex")
 
     # ── Pairwise REP redundancy ──
-    reps = sorted(mean_nds['rep'].unique())
+    reps = sorted(mean_auc['rep'].unique())
     rep_profiles = {}
     for rep in reps:
-        rdata = mean_nds[mean_nds['rep'] == rep]
+        rdata = mean_auc[mean_auc['rep'] == rep]
         profile = {}
         for _, row in rdata.iterrows():
             profile[(row['model'], row['strategy'])] = row['auc_norm']
@@ -2317,16 +2339,16 @@ def compute_icc_and_redundancy(nds_df, output_dir):
         print(f"✓ Saved table_supp_rep_redundancy.tex")
 
     # ── ICC(1,1) per model pair ──
-    # Treats reps as "subjects", compares NDS agreement between two models
-    overall_nds = mean_nds.groupby(['model', 'rep'])['auc_norm'].mean().reset_index()
+    # Treats reps as "subjects", compares auc_norm agreement between two models
+    overall_auc = mean_auc.groupby(['model', 'rep'])['auc_norm'].mean().reset_index()
     icc_rows = []
 
     for i, m1 in enumerate(models):
         for m2 in models[i+1:]:
-            m1_data = overall_nds[overall_nds['model'] == m1][['rep', 'auc_norm']].rename(
-                columns={'auc_norm': 'nds_m1'})
-            m2_data = overall_nds[overall_nds['model'] == m2][['rep', 'auc_norm']].rename(
-                columns={'auc_norm': 'nds_m2'})
+            m1_data = overall_auc[overall_auc['model'] == m1][['rep', 'auc_norm']].rename(
+                columns={'auc_norm': 'auc_m1'})
+            m2_data = overall_auc[overall_auc['model'] == m2][['rep', 'auc_norm']].rename(
+                columns={'auc_norm': 'auc_m2'})
             merged = m1_data.merge(m2_data, on='rep')
 
             if len(merged) < 2:
@@ -2334,7 +2356,7 @@ def compute_icc_and_redundancy(nds_df, output_dir):
 
             n = len(merged)
             k = 2
-            data = merged[['nds_m1', 'nds_m2']].values
+            data = merged[['auc_m1', 'auc_m2']].values
             grand_mean = data.mean()
             row_means = data.mean(axis=1)
             bms = k * ((row_means - grand_mean) ** 2).sum() / (n - 1)
@@ -2345,15 +2367,15 @@ def compute_icc_and_redundancy(nds_df, output_dir):
             else:
                 icc = (bms - wms) / (bms + (k - 1) * wms)
 
-            mad = np.mean(np.abs(merged['nds_m1'] - merged['nds_m2']))
+            mad = np.mean(np.abs(merged['auc_m1'] - merged['auc_m2']))
 
             icc_rows.append({
                 'model_a': m1, 'model_b': m2,
                 'n_shared_reps': n,
                 'icc_1_1': icc,
-                'mean_abs_nds_diff': mad,
-                'mean_nds_a': merged['nds_m1'].mean(),
-                'mean_nds_b': merged['nds_m2'].mean(),
+                'mean_abs_auc_diff': mad,
+                'mean_auc_a': merged['auc_m1'].mean(),
+                'mean_auc_b': merged['auc_m2'].mean(),
             })
 
     if icc_rows:
@@ -2373,7 +2395,7 @@ def compute_icc_and_redundancy(nds_df, output_dir):
                 ma = get_model_label(row['model_a'])
                 mb = get_model_label(row['model_b'])
                 icc_val = f"{row['icc_1_1']:.3f}"
-                mad = f"{row['mean_abs_nds_diff']:.4f}"
+                mad = f"{row['mean_abs_auc_diff']:.4f}"
                 lines_tex.append(f'{ma} & {mb} & {icc_val} & {mad} \\\\')
             lines_tex.append(r'\bottomrule')
             lines_tex.append(r'\end{tabular}')
@@ -2387,7 +2409,7 @@ def compute_icc_and_redundancy(nds_df, output_dir):
             print("  High ICC pairs (>0.9, candidates for ANOVA exclusion):")
             for _, r in high_icc.iterrows():
                 print(f"    {r['model_a']} <-> {r['model_b']}: "
-                      f"ICC={r['icc_1_1']:.3f}, MAD={r['mean_abs_nds_diff']:.4f}")
+                      f"ICC={r['icc_1_1']:.3f}, MAD={r['mean_abs_auc_diff']:.4f}")
 
 
 # =============================================================================
@@ -2512,7 +2534,7 @@ def create_methods_figure(output_dir):
 # FIGURE 1: GLOBAL OVERVIEW
 # =============================================================================
 
-def create_figure1(df, nds_df, output_dir):
+def create_figure1(df, auc_df, output_dir):
     """Figure 1: Global Overview - R² vs σ line plot + robustness heatmap."""
     # Stack panels vertically so each one gets full textwidth — same rationale
     # as Figs 2/3: side-by-side at \textwidth squeezed the heatmap and legend.
@@ -2545,22 +2567,22 @@ def create_figure1(df, nds_df, output_dir):
     ax_a.spines['top'].set_visible(False)
     ax_a.spines['right'].set_visible(False)
 
-    # Panel B: NDS heatmap (model × strategy) - PDV ONLY to avoid mixing representations
+    # Panel B: auc_norm heatmap (model × strategy) - PDV ONLY to avoid mixing representations
     ax_b = fig.add_subplot(gs[1])
 
-    if len(nds_df) > 0:
+    if len(auc_df) > 0:
         # Filter to PDV only - don't mix representations
-        nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP]
-        if len(nds_pdv) == 0:
+        auc_pdv = auc_df[auc_df['rep'] == PRIMARY_REP]
+        if len(auc_pdv) == 0:
             # Fallback to most common rep
-            nds_pdv = nds_df
+            auc_pdv = auc_df
 
         # Build full pivot (all models × all strategies) so missing cells appear
         # Exclude Tanimoto GP from PDV heatmap (kernel incompatible with continuous features)
-        all_models = sort_models_by_family([m for m in nds_df['model'].unique() if m != 'gauche'])
+        all_models = sort_models_by_family([m for m in auc_df['model'].unique() if m != 'gauche'])
         all_strategies = [s for s in STRATEGY_ORDER
-                          if s in nds_df['strategy'].unique()]
-        pivot = nds_pdv.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
+                          if s in auc_df['strategy'].unique()]
+        pivot = auc_pdv.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
         pivot = pivot.reindex(index=all_models, columns=all_strategies)
 
         # Create annotations distinguishing missing vs filtered
@@ -2616,14 +2638,14 @@ def create_figure1(df, nds_df, output_dir):
     ax_ea.spines['right'].set_visible(False)
 
     ax_eb = axes_e[1]
-    if len(nds_df) > 0:
-        nds_ecfp4 = nds_df[nds_df['rep'] == 'ecfp4']
-        if len(nds_ecfp4) > 0:
+    if len(auc_df) > 0:
+        auc_ecfp4 = auc_df[auc_df['rep'] == 'ecfp4']
+        if len(auc_ecfp4) > 0:
             all_strategies = [s for s in STRATEGY_ORDER
-                              if s in nds_df['strategy'].unique()]
-            all_models_e = sort_models_by_family([m for m in nds_df['model'].unique()
+                              if s in auc_df['strategy'].unique()]
+            all_models_e = sort_models_by_family([m for m in auc_df['model'].unique()
                                                      if m not in PDV_ONLY_MODELS])
-            pivot = nds_ecfp4.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
+            pivot = auc_ecfp4.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
             pivot = pivot.reindex(index=all_models_e, columns=all_strategies)
 
             annot_text = make_heatmap_annotations(pivot, df, 'model', 'strategy',
@@ -2799,17 +2821,17 @@ def create_figure2(df, output_dir):
 # FIGURE 3: RANKING CONSISTENCY
 # =============================================================================
 
-def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
+def create_figure3(auc_df, validation_df, val_auc_df, raw_df, output_dir):
     """Figure 3: Ranking consistency — Baseline R² vs robustness scatter (PDV, Gaussian)."""
     # Single panel sized to textwidth so labels stay 10pt on the page.
     fig, ax = plt.subplots(figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.85))
 
-    nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
-    nds_pdv_legacy = nds_pdv[nds_pdv['strategy'] == 'legacy'] if 'strategy' in nds_pdv.columns else nds_pdv
+    auc_pdv = auc_df[auc_df['rep'] == PRIMARY_REP] if 'rep' in auc_df.columns else auc_df
+    auc_pdv_legacy = auc_pdv[auc_pdv['strategy'] == 'legacy'] if 'strategy' in auc_pdv.columns else auc_pdv
 
     all_base, all_auc = [], []
-    for model in sort_models_by_family(nds_pdv_legacy['model'].unique().tolist()):
-        model_data = nds_pdv_legacy[nds_pdv_legacy['model'] == model]
+    for model in sort_models_by_family(auc_pdv_legacy['model'].unique().tolist()):
+        model_data = auc_pdv_legacy[auc_pdv_legacy['model'] == model]
         color = MODEL_COLORS.get(model, '#333333')
         marker = MODEL_MARKERS.get(model, 'o')
         ax.scatter(model_data['baseline_r2'], model_data['auc_norm'],
@@ -2854,7 +2876,7 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
 # FIGURE: NN FAMILY COMPARISON (combines old fig4 + fig5)
 # =============================================================================
 
-def create_nn_family_comparison(df, nds_df, output_dir):
+def create_nn_family_comparison(df, auc_df, output_dir):
     """Combined NN family comparison: NN-α, NN-β, and RF families under Gaussian noise.
 
     1×3 subplot:
@@ -2929,16 +2951,16 @@ def create_nn_family_comparison(df, nds_df, output_dir):
     plt.close()
     print(f"✓ Saved fig_nn_family_comparison.png ({strategy_label}, {get_rep_label(PRIMARY_REP)})")
 
-    # Output NDS table for all three families
+    # Output auc_norm table for all three families
     all_family_models = dnn_variants + mlp_variants + rf_models
-    family_nds = nds_df[(nds_df['model'].isin(all_family_models)) & (nds_df['rep'] == PRIMARY_REP)]
-    if len(family_nds) > 0:
-        nds_table = family_nds.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
-        nds_table = nds_table.reindex([m for m in all_family_models if m in nds_table.index])
-        nds_table.index = [get_model_label(m) for m in nds_table.index]
-        nds_table.columns = [STRATEGY_LABELS.get(s, s) for s in nds_table.columns]
-        nds_table.to_csv(output_dir / 'table_nn_family_nds.csv')
-        print("✓ Saved table_nn_family_nds.csv")
+    family_auc = auc_df[(auc_df['model'].isin(all_family_models)) & (auc_df['rep'] == PRIMARY_REP)]
+    if len(family_auc) > 0:
+        auc_table = family_auc.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
+        auc_table = auc_table.reindex([m for m in all_family_models if m in auc_table.index])
+        auc_table.index = [get_model_label(m) for m in auc_table.index]
+        auc_table.columns = [STRATEGY_LABELS.get(s, s) for s in auc_table.columns]
+        auc_table.to_csv(output_dir / 'table_nn_family_auc.csv')
+        print("✓ Saved table_nn_family_auc.csv")
 
 
 # =============================================================================
@@ -3147,32 +3169,32 @@ def create_uncertainty_figure(unc_df, output_dir):
 # TABLES
 # =============================================================================
 
-def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
+def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
     """Create all summary tables."""
 
-    # Table 2: NDS by model × strategy (PDV only - don't mix representations)
+    # Table 2: auc_norm by model × strategy (PDV only - don't mix representations)
     # Filter to ANOVA-included models for main table
-    nds_anova_tbl = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
-    if len(nds_anova_tbl) > 0:
-        nds_pdv = nds_anova_tbl[nds_anova_tbl['rep'] == PRIMARY_REP] if 'rep' in nds_anova_tbl.columns else nds_anova_tbl
+    auc_anova_tbl = auc_df[~auc_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+    if len(auc_anova_tbl) > 0:
+        auc_pdv = auc_anova_tbl[auc_anova_tbl['rep'] == PRIMARY_REP] if 'rep' in auc_anova_tbl.columns else auc_anova_tbl
 
-        if len(nds_pdv) > 0:
-            pivot = nds_pdv.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
+        if len(auc_pdv) > 0:
+            pivot = auc_pdv.pivot_table(values='auc_norm', index='model', columns='strategy', aggfunc='mean')
             pivot['MEAN'] = pivot.mean(axis=1)
             pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
             pivot_labeled = pivot.rename(columns=STRATEGY_LABELS)
 
-            # Variant A: ranked by mean NDS
+            # Variant A: ranked by mean auc_norm
             variant_a = pivot_labeled.sort_values('MEAN', ascending=False)
-            variant_a.to_csv(output_dir / 'table2_nds_by_strategy_pdv.csv')
-            print("✓ Saved table2_nds_by_strategy_pdv.csv (ranked by mean)")
+            variant_a.to_csv(output_dir / 'table2_auc_by_strategy_pdv.csv')
+            print("✓ Saved table2_auc_by_strategy_pdv.csv (ranked by mean)")
 
-            # Variant B: ranked by Gaussian NDS
+            # Variant B: ranked by Gaussian auc_norm
             gauss_col = STRATEGY_LABELS.get('legacy', 'Gaussian')
             if gauss_col in pivot_labeled.columns:
                 variant_b = pivot_labeled.sort_values(gauss_col, ascending=False)
-                variant_b.to_csv(output_dir / 'table2_nds_by_gaussian_pdv.csv')
-                print("✓ Saved table2_nds_by_gaussian_pdv.csv (ranked by Gaussian)")
+                variant_b.to_csv(output_dir / 'table2_auc_by_gaussian_pdv.csv')
+                print("✓ Saved table2_auc_by_gaussian_pdv.csv (ranked by Gaussian)")
 
             # Variant C: per-strategy ranks and mean rank
             strategy_cols = [c for c in pivot.columns if c not in ('MEAN', 'STD')]
@@ -3180,17 +3202,17 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
             rank_df = rank_df.rename(columns=STRATEGY_LABELS)
             rank_df['Mean_Rank'] = rank_df.mean(axis=1)
             rank_df = rank_df.sort_values('Mean_Rank')
-            rank_df.to_csv(output_dir / 'table2_nds_ranks_pdv.csv')
-            print("✓ Saved table2_nds_ranks_pdv.csv (per-strategy ranks)")
+            rank_df.to_csv(output_dir / 'table2_auc_ranks_pdv.csv')
+            print("✓ Saved table2_auc_ranks_pdv.csv (per-strategy ranks)")
 
         # Also save full table with all reps for supplementary (ANOVA models only)
-        pivot_all = nds_anova_tbl.pivot_table(values='auc_norm', index=['model', 'rep'], columns='strategy', aggfunc='mean')
+        pivot_all = auc_anova_tbl.pivot_table(values='auc_norm', index=['model', 'rep'], columns='strategy', aggfunc='mean')
         pivot_all['MEAN'] = pivot_all.mean(axis=1)
         pivot_all['STD'] = pivot_all.drop(columns=['MEAN']).std(axis=1)
         pivot_all = pivot_all.sort_values('MEAN', ascending=False)
         pivot_all.rename(columns=STRATEGY_LABELS, inplace=True)
-        pivot_all.to_csv(output_dir / 'table2_supp_nds_all_reps.csv')
-        print("✓ Saved table2_supp_nds_all_reps.csv (supplementary)")
+        pivot_all.to_csv(output_dir / 'table2_supp_auc_all_reps.csv')
+        print("✓ Saved table2_supp_auc_all_reps.csv (supplementary)")
 
     # Table 3: Probabilistic comparison with Wilcoxon tests (PDV + legacy)
     prob_comparisons = {
@@ -3200,14 +3222,14 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
     }
 
     # Filter to PDV + legacy for fair comparison
-    nds_fair = nds_df[(nds_df['rep'] == PRIMARY_REP) & (nds_df['strategy'] == 'legacy')] if 'rep' in nds_df.columns else nds_df
+    auc_fair = auc_df[(auc_df['rep'] == PRIMARY_REP) & (auc_df['strategy'] == 'legacy')] if 'rep' in auc_df.columns else auc_df
 
     rows = []
     wilcoxon_results = []
 
     for family, config in prob_comparisons.items():
         base_model = config['base']
-        base_data = nds_fair[nds_fair['model'] == base_model]
+        base_data = auc_fair[auc_fair['model'] == base_model]
 
         if len(base_data) > 0:
             rows.append({
@@ -3221,10 +3243,10 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
             })
 
         for variant in config['variants']:
-            var_data = nds_fair[nds_fair['model'] == variant]
+            var_data = auc_fair[auc_fair['model'] == variant]
             if len(var_data) > 0:
                 # Run Wilcoxon test comparing to base
-                wilcox = wilcoxon_paired_test(nds_df, base_model, variant, rep=PRIMARY_REP, strategy='legacy')
+                wilcox = wilcoxon_paired_test(auc_df, base_model, variant, rep=PRIMARY_REP, strategy='legacy')
                 wilcoxon_results.append({
                     'Family': family,
                     'Comparison': f'{base_model} vs {variant}',
@@ -3625,28 +3647,28 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
 
     # Table 6: Kendall's W for ranking consistency across strategies
     # Use ANOVA-included models only for consistency with other analyses
-    nds_anova = nds_df[~nds_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
-    if len(nds_anova) > 0:
+    auc_anova = auc_df[~auc_df['model'].isin(ANOVA_MODELS_EXCLUDE)]
+    if len(auc_anova) > 0:
         # Get rankings per strategy
-        strategies = nds_anova['strategy'].unique()
+        strategies = auc_anova['strategy'].unique()
         if len(strategies) > 1:
-            models = nds_anova['model'].unique()
+            models = auc_anova['model'].unique()
 
             # First pass: find models present in ALL strategies
-            model_nds_by_strategy = {}
+            model_auc_by_strategy = {}
             for strategy in strategies:
-                strat_data = nds_anova[nds_anova['strategy'] == strategy]
-                model_nds_by_strategy[strategy] = strat_data.groupby('model')['auc_norm'].mean()
+                strat_data = auc_anova[auc_anova['strategy'] == strategy]
+                model_auc_by_strategy[strategy] = strat_data.groupby('model')['auc_norm'].mean()
 
             valid_models = [m for m in models
-                           if all(m in model_nds_by_strategy[s].index for s in strategies)]
+                           if all(m in model_auc_by_strategy[s].index for s in strategies)]
 
             if len(valid_models) > 2:
                 # Second pass: rank only valid models within each strategy
                 rank_matrix = []
                 for strategy in strategies:
-                    nds_vals = model_nds_by_strategy[strategy].loc[valid_models]
-                    ranks = nds_vals.rank(ascending=False)  # Higher auc_norm = more robust = rank 1
+                    auc_vals = model_auc_by_strategy[strategy].loc[valid_models]
+                    ranks = auc_vals.rank(ascending=False)  # Higher auc_norm = more robust = rank 1
                     rank_matrix.append(ranks.values)
 
                 rank_matrix = np.array(rank_matrix)  # shape: (n_strategies, n_models)
@@ -3689,7 +3711,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
 # INTERACTION FIGURE (Issue D)
 # =============================================================================
 
-def create_interaction_figure(nds_df, raw_df, output_dir):
+def create_interaction_figure(auc_df, raw_df, output_dir):
     """Visualize the model x representation interaction effect.
 
     Panel A: Heatmap — auc_norm by model × representation (Gaussian strategy).
@@ -3697,15 +3719,15 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     BNN variants use different marker shapes but same color as base model.
     """
-    if len(nds_df) == 0:
+    if len(auc_df) == 0:
         print("⚠ Could not create interaction figure - no auc_norm data")
         return
 
-    nds_legacy = nds_df[nds_df['strategy'] == 'legacy'] if 'strategy' in nds_df.columns else nds_df
+    auc_legacy = auc_df[auc_df['strategy'] == 'legacy'] if 'strategy' in auc_df.columns else auc_df
     # Filter to ANOVA-included reps only; keep ALL models (including QRF) for interaction view
-    nds_legacy = nds_legacy[~nds_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
+    auc_legacy = auc_legacy[~auc_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
     # Exclude PDV-only models from cross-rep interaction figure
-    nds_legacy = nds_legacy[~nds_legacy['model'].isin(PDV_ONLY_MODELS)]
+    auc_legacy = auc_legacy[~auc_legacy['model'].isin(PDV_ONLY_MODELS)]
 
     # Stack panels vertically: heatmap (A) and scatter (B) each get the full
     # textwidth so cell annotations and legends stay legible at print scale.
@@ -3714,8 +3736,8 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
     # Panel A: Heatmap — auc_norm by model × representation (Gaussian strategy)
     ax_a = axes[0]
 
-    # Get mean NDS per model x rep (Gaussian strategy)
-    pivot = nds_legacy.pivot_table(values='auc_norm', index='model', columns='rep', aggfunc='mean')
+    # Get mean auc_norm per model x rep (Gaussian strategy)
+    pivot = auc_legacy.pivot_table(values='auc_norm', index='model', columns='rep', aggfunc='mean')
 
     # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
@@ -3723,7 +3745,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     if len(rep_order) >= 2:
         # Reindex to show all models
-        all_models_int = sort_models_by_family(nds_legacy['model'].unique().tolist())
+        all_models_int = sort_models_by_family(auc_legacy['model'].unique().tolist())
         hm_pivot = pivot.reindex(index=all_models_int, columns=rep_order)
         hm_pivot = hm_pivot.dropna(how='all')
 
@@ -3745,13 +3767,13 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
         ax_a.set_title('a) Model × Rep Interaction (Gaussian AUC$_{norm}$)', fontweight='bold')
         ax_a.set_ylabel('')
 
-    # Panel B: Scatter — NDS on ECFP4 vs NDS on PDV, with legend (not annotations)
+    # Panel B: Scatter — auc_norm on ECFP4 vs auc_norm on PDV, with legend (not annotations)
     ax_b = axes[1]
 
-    ecfp4_nds = nds_legacy[nds_legacy['rep'] == 'ecfp4'].groupby('model')['auc_norm'].mean()
-    pdv_nds = nds_legacy[nds_legacy['rep'] == 'continuous_pdv'].groupby('model')['auc_norm'].mean()
+    ecfp4_auc = auc_legacy[auc_legacy['rep'] == 'ecfp4'].groupby('model')['auc_norm'].mean()
+    pdv_auc = auc_legacy[auc_legacy['rep'] == 'continuous_pdv'].groupby('model')['auc_norm'].mean()
 
-    shared_models_set = set(ecfp4_nds.index) & set(pdv_nds.index)
+    shared_models_set = set(ecfp4_auc.index) & set(pdv_auc.index)
     # Use MODEL_ORDER for consistent legend ordering
     shared_models = [m for m in MODEL_ORDER if m in shared_models_set]
     # Append any models not in MODEL_ORDER (shouldn't happen, but safe)
@@ -3759,15 +3781,15 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 
     if len(shared_models) >= 3:
         for m in shared_models:
-            ev, pv = ecfp4_nds[m], pdv_nds[m]
+            ev, pv = ecfp4_auc[m], pdv_auc[m]
             color = MODEL_COLORS.get(m, '#333333')
             marker = MODEL_MARKERS.get(m, 'o')
             ax_b.scatter(ev, pv, color=color, marker=marker, s=60, zorder=3, alpha=0.75,
                          label=get_model_label(m), edgecolors='white', linewidths=0.3)
 
         # Compute and annotate rho
-        e_vals = [ecfp4_nds[m] for m in shared_models]
-        p_vals = [pdv_nds[m] for m in shared_models]
+        e_vals = [ecfp4_auc[m] for m in shared_models]
+        p_vals = [pdv_auc[m] for m in shared_models]
         rho, p = stats.spearmanr(e_vals, p_vals)
         ax_b.text(0.05, 0.95, f'Spearman ρ = {rho:.2f} (p = {p:.3f})',
                   transform=ax_b.transAxes, fontsize=8, va='top',
@@ -3803,7 +3825,7 @@ def create_interaction_figure(nds_df, raw_df, output_dir):
 # REPORT
 # =============================================================================
 
-def generate_report(nds_df, excluded_df, output_dir):
+def generate_report(auc_df, excluded_df, output_dir):
     """Generate text report summarizing findings."""
     lines = []
     lines.append("=" * 80)
@@ -3823,7 +3845,7 @@ def generate_report(nds_df, excluded_df, output_dir):
 
     lines.append(f"\nRobustness baseline R² gate: {ROBUSTNESS_BASELINE_THRESHOLD} "
                  f"(auc_norm is baseline-decoupled; looser than the {BASELINE_THRESHOLD} performance gate)")
-    lines.append(f"Robustness (auc_norm) calculated for {len(nds_df)} configurations")
+    lines.append(f"Robustness (auc_norm) calculated for {len(auc_df)} configurations")
     lines.append(f"Excluded {len(excluded_df)} configurations (baseline R² < {ROBUSTNESS_BASELINE_THRESHOLD})")
 
     # Save excluded configs CSV for reference
@@ -3856,31 +3878,31 @@ def generate_report(nds_df, excluded_df, output_dir):
         tex_path.write_text('\n'.join(lines_tex))
         print(f"✓ Saved table_supp_excluded_configs.tex")
 
-    if len(nds_df) > 0:
+    if len(auc_df) > 0:
         lines.append("\n" + "=" * 80)
         lines.append("KEY FINDINGS (PDV representation, Gaussian strategy)")
         lines.append("=" * 80)
 
         # Filter to PDV + legacy for consistent reporting
-        nds_pdv_legacy = nds_df[(nds_df['rep'] == PRIMARY_REP) & (nds_df['strategy'] == 'legacy')]
-        if len(nds_pdv_legacy) == 0:
-            nds_pdv_legacy = nds_df  # Fallback
+        auc_pdv_legacy = auc_df[(auc_df['rep'] == PRIMARY_REP) & (auc_df['strategy'] == 'legacy')]
+        if len(auc_pdv_legacy) == 0:
+            auc_pdv_legacy = auc_df  # Fallback
 
         # Most robust model
-        mean_nds = nds_pdv_legacy.groupby('model')['auc_norm'].mean().sort_values(ascending=False)
-        lines.append(f"\nMost robust model: {mean_nds.index[0]} (auc_norm = {mean_nds.iloc[0]:.4f})")
-        lines.append(f"Least robust model: {mean_nds.index[-1]} (auc_norm = {mean_nds.iloc[-1]:.4f})")
+        mean_auc = auc_pdv_legacy.groupby('model')['auc_norm'].mean().sort_values(ascending=False)
+        lines.append(f"\nMost robust model: {mean_auc.index[0]} (auc_norm = {mean_auc.iloc[0]:.4f})")
+        lines.append(f"Least robust model: {mean_auc.index[-1]} (auc_norm = {mean_auc.iloc[-1]:.4f})")
 
         # BNN vs NN-α comparison
-        dnn_data = nds_pdv_legacy[nds_pdv_legacy['model'] == 'dnn']
-        bnn_data = nds_pdv_legacy[nds_pdv_legacy['model'] == 'dnn_bnn_full']
+        dnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn']
+        bnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn_bnn_full']
 
         if len(dnn_data) > 0 and len(bnn_data) > 0:
-            dnn_nds = dnn_data['auc_norm'].values[0]
-            bnn_nds = bnn_data['auc_norm'].values[0]
-            lines.append(f"\nNN-α auc_norm: {dnn_nds:.4f}")
-            lines.append(f"BNN-α auc_norm: {bnn_nds:.4f}")
-            lines.append(f"Improvement: {(bnn_nds - dnn_nds):.4f}")
+            dnn_auc = dnn_data['auc_norm'].values[0]
+            bnn_auc = bnn_data['auc_norm'].values[0]
+            lines.append(f"\nNN-α auc_norm: {dnn_auc:.4f}")
+            lines.append(f"BNN-α auc_norm: {bnn_auc:.4f}")
+            lines.append(f"Improvement: {(bnn_auc - dnn_auc):.4f}")
 
     report_path = output_dir / 'paper_figures_report.txt'
     with open(report_path, 'w') as f:
@@ -4028,8 +4050,8 @@ def main():
     # Calculate robustness metrics (auc_norm primary, weibull_beta supplementary)
     print("\n[2/3] Calculating metrics...", flush=True)
     _t = time.time()
-    nds_df, excluded_df = calculate_robustness(qm9_df)
-    print(f"  Robustness calculated: {len(nds_df)} configs (in {time.time()-_t:.1f}s)", flush=True)
+    auc_df, excluded_df = calculate_robustness(qm9_df)
+    print(f"  Robustness calculated: {len(auc_df)} configs (in {time.time()-_t:.1f}s)", flush=True)
     print(f"  Excluded from robustness (baseline R² < {ROBUSTNESS_BASELINE_THRESHOLD}): {len(excluded_df)} configs")
 
     # Generate figures
@@ -4038,33 +4060,33 @@ def main():
     print("\n--- METHODS FIGURE ---")
     create_methods_figure(output_dir)
 
-    # Process validation data into NDS format
-    val_nds_df = calculate_validation_nds(validation_df)
-    if val_nds_df is not None:
-        print(f"  Validation robustness: {len(val_nds_df)} configs across "
-              f"{val_nds_df['dataset'].nunique() if 'dataset' in val_nds_df.columns else 1} datasets")
+    # Process validation data into auc_norm format
+    val_auc_df = calculate_validation_auc(validation_df)
+    if val_auc_df is not None:
+        print(f"  Validation robustness: {len(val_auc_df)} configs across "
+              f"{val_auc_df['dataset'].nunique() if 'dataset' in val_auc_df.columns else 1} datasets")
 
     print("\n--- PART 1: THE WHAT ---")
-    create_figure1(qm9_df, nds_df, output_dir)
+    create_figure1(qm9_df, auc_df, output_dir)
     create_figure2(qm9_df, output_dir)
-    create_figure3(nds_df, validation_df, val_nds_df, qm9_df, output_dir)
-    create_interaction_figure(nds_df, qm9_df, output_dir)
+    create_figure3(auc_df, validation_df, val_auc_df, qm9_df, output_dir)
+    create_interaction_figure(auc_df, qm9_df, output_dir)
 
     print("\n--- PART 2: THE WHY ---")
-    create_nn_family_comparison(qm9_df, nds_df, output_dir)
+    create_nn_family_comparison(qm9_df, auc_df, output_dir)
     create_uncertainty_figure(unc_df, output_dir)
 
     print("\n--- TABLES ---")
-    create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=val_nds_df)
+    create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=val_auc_df)
 
     print("\n--- VALIDATION (GENERALISATION) ---")
-    create_validation_figures(validation_df, val_nds_df, nds_df, output_dir)
+    create_validation_figures(validation_df, val_auc_df, auc_df, output_dir)
 
     print("\n--- SUPPLEMENTARY: ICC & REDUNDANCY ---")
-    compute_icc_and_redundancy(nds_df, output_dir)
+    compute_icc_and_redundancy(auc_df, output_dir)
 
     print("\n--- REPORT ---")
-    generate_report(nds_df, excluded_df, output_dir)
+    generate_report(auc_df, excluded_df, output_dir)
 
     print("\n" + "=" * 80)
     print(f"COMPLETE - All outputs in {output_dir}")
