@@ -1343,9 +1343,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
         axes = axes[:, 0]
         panel_letters = ['a)', 'b)', 'c)', 'd)']
 
-        # Fixed [0, 1] color scale: auc_norm is a retention fraction
-        # (1 = no degradation, 0 = full collapse). Higher = more robust.
-        AUC_VMIN, AUC_VMAX = 0.0, 1.0
+        # Colour scale spans the full valid auc_norm band so negatives (model
+        # degrades below useless under noise) and slightly->1 (mild noise helped)
+        # are not collapsed to one colour. Higher = more robust.
+        AUC_VMIN, AUC_VMAX = VALIDATION_AUC_LOW, VALIDATION_AUC_HIGH
 
         for i, dataset in enumerate(_order_validation_datasets(datasets)):
             ax = axes[i]
@@ -1379,7 +1380,9 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             pivot_display.columns = pivot.columns
             annot_text.columns = pivot.columns
 
-            ax.set_facecolor('black')
+            # Grey (not black) for N/A cells so they don't blur into the darkest
+            # viridis purple used for strongly-negative auc_norm.
+            ax.set_facecolor('#808080')
             sns.heatmap(pivot_display, annot=annot_text, fmt='', cmap='viridis',
                         vmin=AUC_VMIN, vmax=AUC_VMAX,
                         ax=ax, cbar_kws={'label': 'AUC$_{norm}$'}, linewidths=0.5,
@@ -1391,6 +1394,10 @@ def create_validation_figures(validation_df, val_nds_df, qm9_nds_df, output_dir)
             if i > 0:
                 ax.set_ylabel('')
 
+        # Disclose the single-representation restriction (only tree models were run
+        # on the external datasets under this rep).
+        fig.suptitle(f'Robustness (AUC$_{{norm}}$) on {get_rep_label(PRIMARY_REP)} representation',
+                     fontsize=11, fontweight='bold', y=1.005)
         plt.tight_layout()
         plt.savefig(output_dir / 'fig_validation_overview.png', dpi=300, bbox_inches='tight')
         plt.close()
@@ -1836,6 +1843,7 @@ def run_anova_decomposition(df, sigma_value=0.3):
         'eta2_interaction': (ss_interaction / total_ss) * 100,
         'eta2_residual': (ss_residual / total_ss) * 100,
         'n': len(df_sigma),
+        'n_models': len(valid_models),
     }
 
 
@@ -1899,6 +1907,7 @@ def _metric_two_way_anova(metric_df, metric_col, label='Metric'):
         'eta2_interaction': (ss_interaction / total_ss) * 100,
         'eta2_residual': (ss_residual / total_ss) * 100,
         'n': len(metric_df),
+        'n_models': len(valid_models),
     }
 
 
@@ -2567,7 +2576,7 @@ def create_figure1(df, nds_df, output_dir):
 
         # Sequential colormap over the data range (higher auc_norm = more robust)
         vals = pivot.values[~np.isnan(pivot.values)]
-        vmn, vmx = (vals.min(), vals.max()) if len(vals) > 0 else (0.0, 1.0)
+        vmn, vmx = 0.4, 1.0  # shared anchor so PDV/ECFP4 panels are colour-comparable
         ax_b.set_facecolor('black')
         sns.heatmap(pivot, annot=annot_text, fmt='', cmap='viridis', vmin=vmn, vmax=vmx,
                     ax=ax_b, cbar_kws={'label': 'AUC$_{norm}$'}, linewidths=0.5)
@@ -2625,7 +2634,7 @@ def create_figure1(df, nds_df, output_dir):
             annot_text.columns = pivot.columns
 
             vals_e = pivot.values[~np.isnan(pivot.values)]
-            vmn_e, vmx_e = (vals_e.min(), vals_e.max()) if len(vals_e) > 0 else (0.0, 1.0)
+            vmn_e, vmx_e = 0.4, 1.0  # shared anchor with PDV panel for comparability
             ax_eb.set_facecolor('black')
             sns.heatmap(pivot, annot=annot_text, fmt='', cmap='viridis', vmin=vmn_e, vmax=vmx_e,
                         ax=ax_eb, cbar_kws={'label': 'AUC$_{norm}$'}, linewidths=0.5)
@@ -2684,26 +2693,34 @@ def create_figure2(df, output_dir):
             return
 
         x = np.arange(len(strats))
-        width = 0.25
+        width = 0.2
 
         model_vals = [results[s]['eta2_model'] for s in strats]
         rep_vals = [results[s]['eta2_rep'] for s in strats]
         int_vals = [results[s]['eta2_interaction'] for s in strats]
+        # Residual (unexplained/noise) — plotted so Outlier/Hetero, which are
+        # residual-dominated under auc_norm, don't read as "nothing explains it".
+        res_vals = [results[s].get('eta2_residual', np.nan) for s in strats]
 
-        ax.bar(x - width, model_vals, width, label='Model',
+        ax.bar(x - 1.5 * width, model_vals, width, label='Model',
                color=ANOVA_FACTOR_COLORS['Model'])
-        ax.bar(x, rep_vals, width, label='Representation',
+        ax.bar(x - 0.5 * width, rep_vals, width, label='Representation',
                color=ANOVA_FACTOR_COLORS['Representation'])
-        ax.bar(x + width, int_vals, width, label='Interaction',
+        ax.bar(x + 0.5 * width, int_vals, width, label='Interaction',
                color=ANOVA_FACTOR_COLORS['Interaction'])
+        ax.bar(x + 1.5 * width, res_vals, width, label='Residual',
+               color='#bdbdbd')
 
+        # Disclose the model set each ANOVA was computed on (perf 11 vs robust 9).
+        n_models = results[strats[0]].get('n_models')
+        panel_title = f'{title} — {n_models} models' if n_models else title
         ax.set_ylabel('Variance Explained (η², %)')
-        ax.set_title(title, fontweight='bold')
+        ax.set_title(panel_title, fontweight='bold')
         ax.set_xticks(x)
         labels = [STRATEGY_LABELS.get(s, s) for s in strats]
         ax.set_xticklabels(labels, rotation=45, ha='right')
         if show_legend:
-            ax.legend(loc='upper right', ncol=3)
+            ax.legend(loc='upper right', ncol=4, fontsize=8)
         ax.set_ylim(0, 100)
 
     # Single shared legend on the top panel only (factors are identical across A and B).
@@ -2790,19 +2807,35 @@ def create_figure3(nds_df, validation_df, val_nds_df, raw_df, output_dir):
     nds_pdv = nds_df[nds_df['rep'] == PRIMARY_REP] if 'rep' in nds_df.columns else nds_df
     nds_pdv_legacy = nds_pdv[nds_pdv['strategy'] == 'legacy'] if 'strategy' in nds_pdv.columns else nds_pdv
 
+    all_base, all_auc = [], []
     for model in sort_models_by_family(nds_pdv_legacy['model'].unique().tolist()):
         model_data = nds_pdv_legacy[nds_pdv_legacy['model'] == model]
         color = MODEL_COLORS.get(model, '#333333')
         marker = MODEL_MARKERS.get(model, 'o')
         ax.scatter(model_data['baseline_r2'], model_data['auc_norm'],
                    label=get_model_label(model), color=color, marker=marker, alpha=0.7, s=50)
+        all_base.extend(model_data['baseline_r2'].tolist())
+        all_auc.extend(model_data['auc_norm'].tolist())
 
-    ax.autoscale()
-    ax.margins(x=0.08, y=0.08)
+    # Tight y-range so the flatness (the whole point) fills the panel instead of
+    # being squeezed under a 1.0 reference line. auc_norm here ~[0.78, 0.86].
+    if all_auc:
+        ylo, yhi = min(all_auc), max(all_auc)
+        pad = max((yhi - ylo) * 0.25, 0.02)
+        ax.set_ylim(ylo - pad, yhi + pad)
+    ax.margins(x=0.08)
     ax.set_xlabel('Baseline R² (σ=0)')
     ax.set_ylabel('AUC$_{norm}$')
-    ax.set_title('Baseline vs Robustness (PDV, Gaussian)', fontweight='bold')
-    ax.axhline(1.0, color='grey', linewidth=0.5, linestyle='--')  # perfect retention
+    ax.set_title('Robustness is decoupled from baseline accuracy (PDV, Gaussian)',
+                 fontweight='bold', fontsize=10)
+
+    # State the decoupling quantitatively instead of leaving it to the eye.
+    if len(all_base) >= 3:
+        _rho, _p = stats.spearmanr(all_base, all_auc)
+        _ns = 'n.s.' if _p >= 0.05 else f'p={_p:.1e}'
+        ax.text(0.03, 0.95, f'Spearman ρ = {_rho:.2f} ({_ns})',
+                transform=ax.transAxes, fontsize=8, va='top',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85))
     _ordered_legend(ax, 4, loc='upper left', bbox_to_anchor=(0.0, -0.15),
                     borderaxespad=0, frameon=False, columnspacing=1.0,
                     handletextpad=0.5, labelspacing=0.6)
