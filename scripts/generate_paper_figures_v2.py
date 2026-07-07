@@ -2848,10 +2848,11 @@ def create_figure3(auc_df, validation_df, val_auc_df, raw_df, output_dir):
     ax.margins(x=0.08)
     ax.set_xlabel('Baseline R² (σ=0)')
     ax.set_ylabel('AUC$_{norm}$')
-    ax.set_title('Robustness is decoupled from baseline accuracy (PDV, Gaussian)',
+    ax.set_title('Baseline accuracy vs. robustness (PDV, Gaussian)',
                  fontweight='bold', fontsize=10)
 
-    # State the decoupling quantitatively instead of leaving it to the eye.
+    # Report the observed correlation honestly (this is the model-mean relationship,
+    # not the metric-level baseline-independence — that argument lives in the text).
     if len(all_base) >= 3:
         _rho, _p = stats.spearmanr(all_base, all_auc)
         _ns = 'n.s.' if _p >= 0.05 else f'p={_p:.1e}'
