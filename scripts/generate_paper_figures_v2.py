@@ -423,6 +423,17 @@ def _order_validation_datasets(datasets):
     return known + sorted(extras)
 
 BASELINE_THRESHOLD = 0.6
+# auc_norm is a RETENTION FRACTION (R²(σ)/R²(0)), decoupled from baseline by
+# construction — so it stays meaningful well below the 0.6 performance gate that
+# NDS needed (a noisy slope at low baseline). Use a looser gate for the robustness
+# metric so baseline-poor-but-well-sampled configs (e.g. BNN/NGBoost on mol2vec,
+# mhggnn) are still analysed instead of dropped from the cross-rep ANOVA.
+ROBUSTNESS_BASELINE_THRESHOLD = 0.3
+# Minimum iterations per (model, rep) cell for a model to enter the balanced
+# two-way robustness ANOVA. Guards against readmitting pathologically sparse
+# cells (e.g. VBLL on mol2vec/mhggnn survives only 1-3 iters after catastrophic
+# divergence) that would destabilise the η² decomposition.
+MIN_CELL_ITERS = 5
 VALIDATION_BASELINE_THRESHOLD = 0.3  # External datasets are harder; lower threshold
 CATASTROPHIC_R2_THRESHOLD = -0.5  # Per-iteration R² below this = training failure
 # auc_norm outside this band = artifact (model divergence pushes it strongly
@@ -1625,7 +1636,7 @@ def _retention_weibull(sig, r2, base):
         return np.nan, np.nan
 
 
-def calculate_robustness(df, baseline_threshold=BASELINE_THRESHOLD):
+def calculate_robustness(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
     """Robustness metrics for each model-rep-strategy combination.
 
     Replaces the old NDS slope. Primary metric is auc_norm (normalised retention
@@ -1634,8 +1645,8 @@ def calculate_robustness(df, baseline_threshold=BASELINE_THRESHOLD):
     Returns:
         robust_df: DataFrame with columns model, rep, strategy, auc_norm,
             weibull_beta, weibull_tau, baseline_r2, n_sigma (configs above threshold)
-        excluded_df: all excluded configs (baseline R² < threshold), with a
-            'marginal' column (True if baseline in [0.5, threshold))
+        excluded_df: all excluded configs (baseline R² < threshold; columns
+            model, rep, strategy, baseline)
     """
     results = []
     excluded = []
@@ -1659,7 +1670,6 @@ def calculate_robustness(df, baseline_threshold=BASELINE_THRESHOLD):
             excluded.append({
                 'model': model, 'rep': rep, 'strategy': strategy,
                 'baseline': baseline,
-                'marginal': baseline >= 0.5,
             })
             continue
 
@@ -1844,15 +1854,18 @@ def _metric_two_way_anova(metric_df, metric_col, label='Metric'):
     if len(metric_df) < 10:
         return None
 
-    # Enforce balanced design: restrict to models present in ALL reps
+    # Enforce balanced design: a model must have an ADEQUATELY SAMPLED cell
+    # (>= MIN_CELL_ITERS iterations) on every rep. Presence alone isn't enough —
+    # a 1-iter cell would bias the SS decomposition.
     models = metric_df['model'].unique()
     reps = metric_df['rep'].unique()
-    cell_presence = metric_df.groupby(['model', 'rep']).size()
-    valid_models = [m for m in models if all((m, r) in cell_presence.index for r in reps)]
+    cell_sizes = metric_df.groupby(['model', 'rep']).size()
+    valid_models = [m for m in models
+                    if all(cell_sizes.get((m, r), 0) >= MIN_CELL_ITERS for r in reps)]
     dropped = sorted(set(models) - set(valid_models))
     if dropped:
-        print(f"  ⚠ {label} ANOVA: dropping {len(dropped)} models "
-              f"with missing reps: {dropped}")
+        print(f"  ⚠ {label} ANOVA: dropping {len(dropped)} models with a rep cell "
+              f"under {MIN_CELL_ITERS} valid iters: {dropped}")
         metric_df = metric_df[metric_df['model'].isin(valid_models)]
     print(f"  {label} ANOVA: {len(valid_models)} models × {len(reps)} reps "
           f"({len(metric_df)} rows)")
@@ -1889,7 +1902,7 @@ def _metric_two_way_anova(metric_df, metric_col, label='Metric'):
     }
 
 
-def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
+def run_robustness_anova(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
     """Two-way (model × rep) ANOVA on per-iteration auc_norm (primary metric)."""
     rows = []
     for (model, rep, iteration), group in df.groupby(['model', 'rep', 'iteration']):
@@ -1907,7 +1920,7 @@ def run_robustness_anova(df, baseline_threshold=BASELINE_THRESHOLD):
     return _metric_two_way_anova(pd.DataFrame(rows), 'auc_norm', 'Robustness')
 
 
-def run_weibull_anova(df, baseline_threshold=BASELINE_THRESHOLD):
+def run_weibull_anova(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
     """Two-way (model × rep) ANOVA on per-iteration weibull_beta (supplementary).
 
     weibull_beta captures HOW the retention curve fails (β>1 delayed cliff,
@@ -3775,22 +3788,10 @@ def generate_report(nds_df, excluded_df, output_dir):
     else:
         lines.append("Catastrophic iterations filtered: 0")
 
-    lines.append(f"\nBaseline R² threshold: {BASELINE_THRESHOLD}")
+    lines.append(f"\nRobustness baseline R² gate: {ROBUSTNESS_BASELINE_THRESHOLD} "
+                 f"(auc_norm is baseline-decoupled; looser than the {BASELINE_THRESHOLD} performance gate)")
     lines.append(f"Robustness (auc_norm) calculated for {len(nds_df)} configurations")
-    lines.append(f"Excluded {len(excluded_df)} configurations (baseline R² < {BASELINE_THRESHOLD})")
-
-    if len(excluded_df) > 0 and 'marginal' in excluded_df.columns:
-        marginal = excluded_df[excluded_df['marginal'] == True]
-        clearly_excluded = excluded_df[excluded_df['marginal'] == False]
-        lines.append(f"\n  Marginal exclusions (0.5 <= R² < {BASELINE_THRESHOLD}): {len(marginal)}")
-        lines.append(f"  Clearly excluded (R² < 0.5): {len(clearly_excluded)}")
-
-        if len(marginal) > 0:
-            lines.append(f"\n  --- MARGINAL EXCLUSIONS (would pass at 0.5 threshold) ---")
-            marginal_sorted = marginal.sort_values('baseline', ascending=False)
-            for _, row in marginal_sorted.iterrows():
-                lines.append(f"    {row['model']:25s} {row['rep']:20s} {row['strategy']:12s}  "
-                             f"R²={row['baseline']:.3f}")
+    lines.append(f"Excluded {len(excluded_df)} configurations (baseline R² < {ROBUSTNESS_BASELINE_THRESHOLD})")
 
     # Save excluded configs CSV for reference
     if len(excluded_df) > 0:
@@ -3996,11 +3997,7 @@ def main():
     _t = time.time()
     nds_df, excluded_df = calculate_robustness(qm9_df)
     print(f"  Robustness calculated: {len(nds_df)} configs (in {time.time()-_t:.1f}s)", flush=True)
-    print(f"  Excluded (baseline R² < {BASELINE_THRESHOLD}): {len(excluded_df)} configs")
-    if len(excluded_df) > 0 and 'marginal' in excluded_df.columns:
-        n_marginal = excluded_df['marginal'].sum()
-        print(f"    Marginal (0.5 <= R² < {BASELINE_THRESHOLD}): {n_marginal}")
-        print(f"    Clearly excluded (R² < 0.5): {len(excluded_df) - n_marginal}")
+    print(f"  Excluded from robustness (baseline R² < {ROBUSTNESS_BASELINE_THRESHOLD}): {len(excluded_df)} configs")
 
     # Generate figures
     print("\n[3/3] Generating figures...")
