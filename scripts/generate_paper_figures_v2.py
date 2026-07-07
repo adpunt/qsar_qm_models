@@ -27,7 +27,6 @@ Outputs:
     fig_uncertainty_combined.png
     fig_validation_combined.png
     table1_anova_summary.csv (auc_norm ANOVA — primary robustness metric)
-    table_supp_weibull_anova.csv (weibull_beta ANOVA — supplementary failure-sharpness)
     table1_supp_simple_effects.csv
     table1_supp_simple_effects_all_reps.csv
     table2_auc_by_strategy.csv
@@ -150,7 +149,6 @@ import numpy as np
 from pathlib import Path
 from scipy import stats
 from scipy.integrate import trapezoid
-from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import seaborn as sns
@@ -1180,7 +1178,7 @@ def calculate_validation_auc(validation_df):
     - summary.csv: pre-computed scalar per config
 
     The per-sigma path is the one KIRBy actually produces; it computes auc_norm
-    (and weibull_beta) from the retention curve exactly like the QM9 pipeline.
+    from the retention curve exactly like the QM9 pipeline.
     A 'dataset' column is added. The output column is 'auc_norm'.
     """
     if validation_df is None or len(validation_df) == 0:
@@ -1237,10 +1235,8 @@ def calculate_validation_auc(validation_df):
             baseline = float(base_arr[0])
             if baseline < VALIDATION_BASELINE_THRESHOLD:
                 continue
-            wt, wb = _retention_weibull(sig, r2, baseline)
             row = dict(zip(group_cols, keys))
             row.update({'auc_norm': _retention_auc_norm(sig, r2, baseline),
-                        'weibull_tau': wt, 'weibull_beta': wb,
                         'baseline_r2': baseline})
             auc_results.append(row)
 
@@ -1648,32 +1644,15 @@ def _retention_auc_norm(sig, r2, base):
     return float(trapezoid(ret, sig) / srange) if srange > 0 else np.nan
 
 
-def _retention_weibull(sig, r2, base):
-    """Fit retention ≈ exp(-(σ/τ)^β); return (tau, beta).
-
-    Supplementary shape descriptor. beta>1 = delayed cliff (holds then collapses),
-    beta<1 = early collapse (fast then plateaus). tau is the σ scale of decay.
-    """
-    ret = np.clip(r2 / base, 1e-3, None)
-    try:
-        p, _ = curve_fit(
-            lambda s, tau, beta: np.exp(-np.power(np.clip(s, 0, None) / tau, beta)),
-            sig, ret, p0=[0.5, 1.5], maxfev=10000,
-            bounds=([1e-3, 0.1], [np.inf, 10.0]))
-        return float(p[0]), float(p[1])
-    except Exception:
-        return np.nan, np.nan
-
-
 def calculate_robustness(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
     """Robustness metrics for each model-rep-strategy combination.
 
     Replaces the old NDS slope. Primary metric is auc_norm (normalised retention
-    AUC, higher = more robust); supplementary is weibull_beta (failure sharpness).
+    AUC, higher = more robust).
 
     Returns:
         robust_df: DataFrame with columns model, rep, strategy, auc_norm,
-            weibull_beta, weibull_tau, baseline_r2, n_sigma (configs above threshold)
+            baseline_r2, n_sigma (configs above threshold)
         excluded_df: all excluded configs (baseline R² < threshold; columns
             model, rep, strategy, baseline)
     """
@@ -1703,15 +1682,12 @@ def calculate_robustness(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
             continue
 
         auc_norm = _retention_auc_norm(sig, r2, baseline)
-        weibull_tau, weibull_beta = _retention_weibull(sig, r2, baseline)
 
         results.append({
             'model': model,
             'rep': rep,
             'strategy': strategy,
             'auc_norm': auc_norm,
-            'weibull_beta': weibull_beta,
-            'weibull_tau': weibull_tau,
             'baseline_r2': baseline,
             'n_sigma': len(sig),
         })
@@ -1950,28 +1926,6 @@ def run_robustness_anova(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
             rows.append({'model': model, 'rep': rep, 'iteration': iteration, 'auc_norm': auc})
     return _metric_two_way_anova(pd.DataFrame(rows), 'auc_norm', 'Robustness')
 
-
-def run_weibull_anova(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
-    """Two-way (model × rep) ANOVA on per-iteration weibull_beta (supplementary).
-
-    weibull_beta captures HOW the retention curve fails (β>1 delayed cliff,
-    β<1 early collapse) — an axis orthogonal to auc_norm's "how much is retained".
-    Reported as a supplementary analysis alongside the auc_norm ANOVA.
-    """
-    rows = []
-    for (model, rep, iteration), group in df.groupby(['model', 'rep', 'iteration']):
-        group = group.sort_values('sigma')
-        if len(group) < 4:      # Weibull fits 2 params — needs enough points
-            continue
-        sig = group['sigma'].values.astype(float)
-        r2 = group['r2'].values.astype(float)
-        base_arr = r2[np.isclose(sig, 0.0)]
-        if len(base_arr) == 0 or base_arr[0] < baseline_threshold:
-            continue
-        _, beta = _retention_weibull(sig, r2, float(base_arr[0]))
-        if np.isfinite(beta):
-            rows.append({'model': model, 'rep': rep, 'iteration': iteration, 'weibull_beta': beta})
-    return _metric_two_way_anova(pd.DataFrame(rows), 'weibull_beta', 'Weibull β')
 
 
 def run_simple_effects(df, response_col, group_col, factor_col):
@@ -2777,30 +2731,6 @@ def create_figure2(df, output_dir):
     anova_table = pd.DataFrame(rows)
     anova_table.to_csv(output_dir / 'table1_anova_summary.csv', index=False)
     print("✓ Saved table1_anova_summary.csv")
-
-    # --- Supplementary: Weibull β (failure-sharpness) ANOVA ---
-    # Parallel single-metric ANOVA on the orthogonal "how it fails" axis.
-    weibull_results = {}
-    for strategy in strategies:
-        wb = run_weibull_anova(df[df['strategy'] == strategy])
-        if wb:
-            weibull_results[strategy] = wb
-    if weibull_results:
-        wb_rows = []
-        for s in strat_order:
-            if s not in weibull_results:
-                continue
-            r = weibull_results[s]
-            wb_rows.append({
-                'Strategy': STRATEGY_LABELS.get(s, s),
-                'WeibullB_Model_η²': r['eta2_model'],
-                'WeibullB_Rep_η²': r['eta2_rep'],
-                'WeibullB_Interaction_η²': r['eta2_interaction'],
-                'WeibullB_Residual_η²': r['eta2_residual'],
-                'n': r['n'],
-            })
-        pd.DataFrame(wb_rows).to_csv(output_dir / 'table_supp_weibull_anova.csv', index=False)
-        print("✓ Saved table_supp_weibull_anova.csv (supplementary — failure sharpness)")
 
     # Log ANOVA design decisions
     print(f"\n  ANOVA design:")
@@ -4048,7 +3978,7 @@ def main():
             print(f"  Sigmas: {sorted(validation_df['sigma'].unique())}")
     print("=" * 80)
 
-    # Calculate robustness metrics (auc_norm primary, weibull_beta supplementary)
+    # Calculate robustness metrics (auc_norm)
     print("\n[2/3] Calculating metrics...", flush=True)
     _t = time.time()
     auc_df, excluded_df = calculate_robustness(qm9_df)
