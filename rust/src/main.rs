@@ -620,6 +620,7 @@ fn write_data(
     max_sequence_length: usize,
     data_count: usize,
     log_writes: bool,
+    apply_noise: bool,
 ) -> io::Result<()> {
     for index in 0..data_count {
         if let Some(smiles_data) = read_smiles_data(
@@ -738,9 +739,15 @@ fn write_data(
                 }
             }
 
-            // Add noise to label
+            // Add noise to label.
+            // `apply_noise` is true ONLY for the training split. The noise map is
+            // keyed by TRAINING index (0..train_count), and this loop restarts its
+            // counter at 0 for every split — so applying it to val/test handed each
+            // held-out molecule the noise drawn for the training molecule at the same
+            // position. That corrupted the held-out labels (contrary to the Methods)
+            // and attached the corruption to the wrong molecules.
             let mut property_value = smiles_data.target_value;
-            if config.noise {
+            if config.noise && apply_noise {
                 if let Some(&artificial_noise) = noise_map.get(&index) {
                     property_value += artificial_noise;
                 } else {
@@ -1018,6 +1025,7 @@ fn preprocess_data(
         max_sequence_length,
         config.train_count,
         config.logging,
+        true,   // apply_noise
     )?;
     remove_file(&train_file_path)?;
     rename(&train_file_new_path, &train_file_path)?;
@@ -1044,6 +1052,7 @@ fn preprocess_data(
         max_sequence_length,
         config.val_count,
         config.logging,
+        false,   // apply_noise
     )?;
     remove_file(&val_file_path)?;
     rename(&val_file_new_path, &val_file_path)?;
@@ -1070,6 +1079,7 @@ fn preprocess_data(
         max_sequence_length,
         config.test_count,
         config.logging,
+        false,   // apply_noise
     )?;
     remove_file(&test_file_path)?;
     rename(&test_file_new_path, &test_file_path)?;
