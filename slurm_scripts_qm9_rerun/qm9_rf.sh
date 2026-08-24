@@ -4,14 +4,14 @@
 # random forest
 # ============================================================================
 # Array task -> (strategy, representation).
-#   6 strategies x 5 representations = 30 tasks
+#   6 strategies x 6 representations = 36 tasks
 #   each task = 11 noise levels x 10 replicates = 110 training runs
 #
 # REQUIRES the rebuilt rust binary (the held-out-noise fix). Run
 # `cargo build --release` in /data/stat-cadd/scat9264/qsar_qm_models/rust FIRST -- see RUNBOOK.
 #
 # --account and --partition are LIVE STATE; pass them at submit time:
-#   sbatch --account=<acct> --partition=medium --array=0-29%5 qm9_rf.sh
+#   sbatch --account=<acct> --partition=medium --array=0-35%5 qm9_rf.sh
 #
 # Resubmit only failed indices:
 #   sbatch --account=<acct> --partition=medium --array=3,17 qm9_rf.sh
@@ -47,7 +47,7 @@ fi
 cd scripts
 
 STRATS=(legacy value_proportional quantile threshold heteroscedastic outlier)
-REPS=(ecfp4 continuous_pdv smiles mhggnn mol2vec)
+REPS=(ecfp4 continuous_pdv smiles mhggnn mol2vec sns)
 
 n_rep=${#REPS[@]}
 n_tasks=$(( ${#STRATS[@]} * n_rep ))

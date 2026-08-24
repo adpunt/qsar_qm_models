@@ -1,28 +1,28 @@
 #!/bin/bash
 # ============================================================================
-# QM9 re-run — model: lgb
-# LightGBM
+# QM9 re-run — model: flexible_dnn
+# architecture variant, not discussed in the paper
 # ============================================================================
 # Array task -> (strategy, representation).
-#   6 strategies x 6 representations = 36 tasks
+#   6 strategies x 5 representations = 30 tasks
 #   each task = 11 noise levels x 10 replicates = 110 training runs
 #
 # REQUIRES the rebuilt rust binary (the held-out-noise fix). Run
 # `cargo build --release` in /data/stat-cadd/scat9264/qsar_qm_models/rust FIRST -- see RUNBOOK.
 #
 # --account and --partition are LIVE STATE; pass them at submit time:
-#   sbatch --account=<acct> --partition=medium --array=0-35%5 qm9_lgb.sh
+#   sbatch --account=<acct> --partition=medium --array=0-29%5 qm9_flexible_dnn.sh
 #
 # Resubmit only failed indices:
-#   sbatch --account=<acct> --partition=medium --array=3,17 qm9_lgb.sh
+#   sbatch --account=<acct> --partition=medium --array=3,17 qm9_flexible_dnn.sh
 # ============================================================================
-#SBATCH --job-name=qm9_lgb
-#SBATCH --output=qm9_lgb_%A_%a.out
+#SBATCH --job-name=qm9_flexible_dnn
+#SBATCH --output=qm9_flexible_dnn_%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=23:59:00
+#SBATCH --time=35:59:00
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
 #SBATCH --mail-type=FAIL
 
@@ -47,7 +47,7 @@ fi
 cd scripts
 
 STRATS=(legacy value_proportional quantile threshold heteroscedastic outlier)
-REPS=(ecfp4 continuous_pdv smiles mhggnn mol2vec sns)
+REPS=(ecfp4 continuous_pdv smiles mhggnn mol2vec)
 
 n_rep=${#REPS[@]}
 n_tasks=$(( ${#STRATS[@]} * n_rep ))
@@ -71,14 +71,14 @@ case "$strat" in
   *)                  tag="$strat" ;;
 esac
 
-OUT="../results/anova_${tag}_${rep}_lgb.csv"
+OUT="../results/anova_${tag}_${rep}_flexible_dnn.csv"
 
-echo "=== task $i: model=lgb strategy=$strat rep=$rep"
+echo "=== task $i: model=flexible_dnn strategy=$strat rep=$rep"
 echo "=== out: $OUT"
 echo "=== started: $(date)"
 
 python -u process_and_train.py -d QM9 -t homo_lumo_gap \
-    -m lgb \
+    -m flexible_dnn \
     -r "$rep" \
     --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
     --noise-strategy "$strat" \

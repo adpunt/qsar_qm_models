@@ -27,14 +27,49 @@ and σ = 0 is one eleventh of the cost.
 
 | | |
 |---|---|
-| Models | 11 ANOVA models, plus QRF and the RBF Gaussian process |
-| Representations | ECFP4, continuous PDV, SMILES, MHG-GNN, Mol2vec (the five the ANOVA uses; binary PDV and SNS are excluded by the figure script, so running them is wasted compute) |
+| Models | 11 ANOVA models, plus QRF and both Gaussian processes |
+| Representations | ECFP4, continuous PDV, SMILES, MHG-GNN, Mol2vec, SNS |
 | Strategies | 6 |
 | Noise levels | 11 (0.0 to 1.0) |
 | Replicates | 10 |
 
-**13 array scripts × 30 tasks = 390 tasks**, each 110 training runs — **42,900
-training runs** in total.
+**14 array scripts, 480 tasks**, each 110 training runs — **52,800 training
+runs** in total.
+
+### What is in, and what is deliberately out
+
+**In, beyond the ANOVA roster:**
+
+- **SNS.** Excluded from the variance decomposition as redundant with ECFP4
+  (ρ = 0.90), but it is still *reported*: `generate_paper_figures_v2.py:2313`
+  prints SNS specifically and `:4065` slices on it, because
+  `table1_supp_simple_effects_all_reps.csv` is deliberately built with no
+  exclusions (`:2251`). Leaving it out would have left that table short.
+- **QRF.** Dropped from the ANOVA as redundant with RF for accuracy (ρ = 0.996),
+  but it is the strongest error-ranker in the uncertainty results.
+- **Both Gaussian processes.** `gauche_rbf` (RBF) on all six representations, so
+  one consistent kernel finally spans every representation and the GP can enter
+  the cross-representation ANOVA. `gauche` (Tanimoto) on the two **binary
+  fingerprint** representations only — Tanimoto is undefined on continuous
+  features. Together these are the RBF-versus-Tanimoto comparison, which
+  separates "the GP is good" from "the kernel suits this representation".
+
+**Out by default, behind `--include-excluded`:** the conformal wrappers
+(ρ > 0.99 with their base models), the last-layer BNNs (no significant gain over
+base), the pre-VBLL variational BNNs (identical to last-layer — a bug), and the
+flexible-DNN architecture variants. `GLOBAL_MODELS_EXCLUDE` drops all of these
+from **every** figure, so re-running them produces files nothing reads. They
+survive only in the no-exclusions supplementary table. Turning them on adds 8
+scripts and 240 tasks:
+
+```bash
+python generate_scripts.py --include-excluded     # 22 scripts, 720 tasks
+```
+
+**Out permanently:** binary `pdv` (superseded by continuous PDV, and dropped
+after direct comparison), `morgan` (ρ = 0.995 with ECFP4), and
+`randomized_smiles` (incomplete coverage). All three are in
+`ANOVA_REPS_EXCLUDE`.
 
 One task per (strategy, representation), one script per model. Model and
 representation are the two factors of the variance decomposition, so neither can
@@ -122,18 +157,19 @@ sacct -j <jobid> --format=JobID,JobName%22,State,Elapsed,MaxRSS
 ```bash
 # Tier 1 — the ANOVA roster, tree and deterministic models
 for s in qm9_rf qm9_xgboost qm9_lgb qm9_svm qm9_ngboost qm9_dnn qm9_mlp; do
-    sbatch --account=$ACCT --partition=$PART --array=0-29%5 $s.sh
+    sbatch --account=$ACCT --partition=$PART --array=0-35%5 $s.sh
 done
 
 # Tier 2 — the Bayesian networks
 for s in qm9_dnn_bnn_full qm9_mlp_bnn_full \
          qm9_dnn_bnn_full_variational qm9_mlp_bnn_full_variational; do
-    sbatch --account=$ACCT --partition=$PART --array=0-29%4 $s.sh
+    sbatch --account=$ACCT --partition=$PART --array=0-35%4 $s.sh
 done
 
-# Tier 3 — outside the ANOVA: uncertainty and the Gaussian process
-sbatch --account=$ACCT --partition=$PART --array=0-29%5 qm9_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-29%4 qm9_gauche_rbf.sh
+# Tier 3 — outside the ANOVA: uncertainty and both Gaussian processes
+sbatch --account=$ACCT --partition=$PART --array=0-35%5 qm9_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-35%4 qm9_gauche_rbf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-11%4 qm9_gauche.sh   # 12 tasks: fingerprints only
 ```
 
 ## 6. Monitor and resubmit
@@ -152,16 +188,18 @@ runs, so use it rather than counting files by hand:
 cd /data/stat-cadd/scat9264/qsar_qm_models/scripts
 python -c "
 import glob, re, collections
-want_reps = ['ecfp4','continuous_pdv','smiles','mhggnn','mol2vec']
+want_reps = ['ecfp4','continuous_pdv','smiles','mhggnn','mol2vec','sns']
 want_strat = ['legacy','valprop','quantile','threshold','hetero','outlier']
 models = ['rf','xgboost','lgb','svm','ngboost','dnn','mlp','dnn_bnn_full','mlp_bnn_full',
           'dnn_bnn_full_variational','mlp_bnn_full_variational','qrf','gauche_rbf']
+fp_only = {'gauche': ['ecfp4','sns']}   # Tanimoto GP: binary fingerprints only
 have = set()
 for f in glob.glob('../results/anova_*.csv'):
     m = re.match(r'.*anova_(\w+?)_(ecfp4|continuous_pdv|smiles|mhggnn|mol2vec)_(.+)\.csv', f)
     if m: have.add(m.groups())
 miss = [(s,r,mo) for s in want_strat for r in want_reps for mo in models if (s,r,mo) not in have]
-print(f'{len(have)} present, {len(miss)} missing of {len(want_strat)*len(want_reps)*len(models)}')
+miss += [(s,r,'gauche') for s in want_strat for r in fp_only['gauche'] if (s,r,'gauche') not in have]
+print(f'{len(have)} present, {len(miss)} missing of {len(want_strat)*(len(want_reps)*len(models)+len(fp_only["gauche"]))}')
 for x in miss[:20]: print('  missing', x)
 "
 ```

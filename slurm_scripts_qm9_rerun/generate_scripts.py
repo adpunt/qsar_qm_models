@@ -31,25 +31,57 @@ One array TASK per (strategy, representation); one SCRIPT per model.
 import argparse
 from pathlib import Path
 
-# label -> (extra CLI flags, tier, hours, note)
+# Representation sets.
+#   ANOVA_REPS  the five the variance decomposition uses.
+#   ALL_REPS    adds SNS, which is excluded from the ANOVA as redundant with
+#               ECFP4 but IS still reported -- generate_paper_figures_v2.py:2313
+#               prints SNS specifically, and :4065 slices on it, because
+#               table1_supp_simple_effects_all_reps.csv deliberately runs with no
+#               exclusions (:2251).
+#   FP_REPS     binary fingerprints only. The Tanimoto kernel is defined on
+#               binary vectors, so the Tanimoto GP can only run here.
+ANOVA_REPS = ['ecfp4', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec']
+ALL_REPS = ANOVA_REPS + ['sns']
+FP_REPS = ['ecfp4', 'sns']
+
+# label -> (extra CLI flags, tier, hours, note, reps)
 # The label is the filename suffix and MUST match what the figure script parses:
 # generate_paper_figures_v2.py:592-615 maps '<base>_bnn_full_variational' to the
 # VBLL models, so that spelling is load-bearing.
 MODELS = {
-    'rf':                       ('-m rf',                                             1, 23, 'random forest'),
-    'xgboost':                  ('-m xgboost',                                        1, 23, ''),
-    'lgb':                      ('-m lgb',                                            1, 23, 'LightGBM'),
-    'svm':                      ('-m svm',                                            1, 35, 'RBF kernel on every representation'),
-    'ngboost':                  ('-m ngboost -u True',                                1, 47, 'slowest tree model; emits per-molecule uncertainty'),
-    'dnn':                      ('-m dnn',                                            1, 35, ''),
-    'mlp':                      ('-m mlp',                                            1, 35, ''),
-    'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True',     2, 47, 'BNN-alpha'),
-    'mlp_bnn_full':             ('-m mlp --bayesian-transformation full -u True',     2, 47, 'BNN-beta'),
-    'dnn_bnn_full_variational': ('-m dnn --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-alpha (figure script reads this as dnn_vbll)'),
-    'mlp_bnn_full_variational': ('-m mlp --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-beta (figure script reads this as mlp_vbll)'),
-    # Outside the ANOVA roster, but needed:
-    'qrf':                      ('-m qrf -u True',                                    3, 23, 'not in the ANOVA (rho 0.996 with rf) but the best error-ranker'),
-    'gauche_rbf':               ('-m gauche --kernel rbf -u True',                    3, 47, 'RBF GP on EVERY rep, so the GP can finally enter the cross-rep ANOVA'),
+    'rf':                       ('-m rf',        1, 23, 'random forest', ALL_REPS),
+    'xgboost':                  ('-m xgboost',   1, 23, '', ALL_REPS),
+    'lgb':                      ('-m lgb',       1, 23, 'LightGBM', ALL_REPS),
+    'svm':                      ('-m svm',       1, 35, 'RBF kernel on every representation', ALL_REPS),
+    'ngboost':                  ('-m ngboost -u True', 1, 47, 'slowest tree model; emits per-molecule uncertainty', ALL_REPS),
+    'dnn':                      ('-m dnn',       1, 35, '', ALL_REPS),
+    'mlp':                      ('-m mlp',       1, 35, '', ALL_REPS),
+    'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True', 2, 47, 'BNN-alpha', ALL_REPS),
+    'mlp_bnn_full':             ('-m mlp --bayesian-transformation full -u True', 2, 47, 'BNN-beta', ALL_REPS),
+    'dnn_bnn_full_variational': ('-m dnn --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-alpha (figure script reads this as dnn_vbll)', ALL_REPS),
+    'mlp_bnn_full_variational': ('-m mlp --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-beta (figure script reads this as mlp_vbll)', ALL_REPS),
+    # Outside the ANOVA roster, but they feed figures and supplementary tables:
+    'qrf':        ('-m qrf -u True', 3, 23, 'not in the ANOVA (rho 0.996 with rf) but the best error-ranker', ALL_REPS),
+    'gauche_rbf': ('-m gauche --kernel rbf -u True', 3, 47, 'RBF GP on EVERY rep, so the GP can finally enter the cross-rep ANOVA', ALL_REPS),
+    'gauche':     ('-m gauche --kernel tanimoto -u True', 3, 47,
+                   'Tanimoto GP. Only defined on BINARY fingerprints, so ecfp4/sns only. '
+                   'This is the RBF-vs-Tanimoto head-to-head; the figure script gives it its '
+                   'own colour and marker and labels it GP', FP_REPS),
+}
+
+# Excluded from EVERY figure by GLOBAL_MODELS_EXCLUDE, so re-running them
+# produces files nothing reads. They survive only in
+# table1_supp_simple_effects_all_reps.csv, which runs with no exclusions.
+# Off by default; --include-excluded turns them on.
+EXCLUDED_MODELS = {
+    'conformal_rf':             ('-m conformal --cp-base-model rf -u True',  4, 35, 'conformal wrapper (rho > 0.99 with rf)', ANOVA_REPS),
+    'conformal_qrf':            ('-m conformal --cp-base-model qrf -u True', 4, 35, 'conformal wrapper', ANOVA_REPS),
+    'conformal_dnn':            ('-m conformal --cp-base-model dnn -u True', 4, 47, 'conformal wrapper', ANOVA_REPS),
+    'dnn_bnn_last':             ('-m dnn --bayesian-transformation last -u True', 4, 47, 'last-layer BNN (no significant gain over base)', ANOVA_REPS),
+    'mlp_bnn_last':             ('-m mlp --bayesian-transformation last -u True', 4, 47, 'last-layer BNN', ANOVA_REPS),
+    'dnn_bnn_variational':      ('-m dnn --bayesian-transformation variational -u True', 4, 47, 'pre-VBLL variational (was identical to last-layer, a bug)', ANOVA_REPS),
+    'mlp_bnn_variational':      ('-m mlp --bayesian-transformation variational -u True', 4, 47, 'pre-VBLL variational', ANOVA_REPS),
+    'flexible_dnn':             ('-m flexible_dnn', 4, 35, 'architecture variant, not discussed in the paper', ANOVA_REPS),
 }
 
 # ANOVA representations. 'pdv' (binary) and 'sns' are excluded by the figure
@@ -168,41 +200,51 @@ def main():
                          'a reported result.')
     ap.add_argument('--throttle', type=int, default=5)
     ap.add_argument('--models', nargs='+', default=None, help='Subset of model labels.')
+    ap.add_argument('--include-excluded', action='store_true',
+                    help='Also generate the model variants that GLOBAL_MODELS_EXCLUDE drops from '
+                         'every figure (conformal wrappers, last-layer and pre-VBLL variational '
+                         'BNNs, flexible DNN). They feed only the no-exclusions supplementary '
+                         'table. Off by default because the files nothing reads.')
     ap.add_argument('--out-dir', default=str(Path(__file__).parent))
     args = ap.parse_args()
 
     out = Path(args.out_dir)
-    n_tasks = len(STRATEGIES) * len(REPS)
     n_sig = len(SIGMAS.split())
-    chosen = {k: v for k, v in MODELS.items() if not args.models or k in args.models}
+    pool = dict(MODELS)
+    if args.include_excluded:
+        pool.update(EXCLUDED_MODELS)
+    chosen = {k: v for k, v in pool.items() if not args.models or k in args.models}
 
     written = []
-    for model, (flags, tier, hours, note) in chosen.items():
+    grand = 0
+    for model, (flags, tier, hours, note, reps) in chosen.items():
+        n_tasks = len(STRATEGIES) * len(reps)
+        grand += n_tasks
         script_name = f'qm9_{model}.sh'
         (out / script_name).write_text(TEMPLATE.format(
             model=model, note=note or model, jobslug=model,
             cpus=8, mem='128G', hours=hours, flags=flags,
             qsar_dir=QSAR_DIR, sigmas=SIGMAS, boot=args.bootstrapping,
-            strategies=' '.join(STRATEGIES), reps=' '.join(REPS),
-            n_st=len(STRATEGIES), n_rep=len(REPS), n_tasks=n_tasks,
+            strategies=' '.join(STRATEGIES), reps=' '.join(reps),
+            n_st=len(STRATEGIES), n_rep=len(reps), n_tasks=n_tasks,
             n_sig=n_sig, runs=n_sig * args.bootstrapping,
             last=n_tasks - 1, throttle=args.throttle, script_name=script_name))
         (out / script_name).chmod(0o755)
-        written.append((tier, script_name, model, hours))
+        written.append((tier, script_name, model, hours, n_tasks, len(reps)))
 
-    total = len(written) * n_tasks
-    print(f"Wrote {len(written)} array scripts, {n_tasks} tasks each = {total} tasks")
+    print(f"Wrote {len(written)} array scripts, {grand} tasks total")
     print(f"Each task: {n_sig} noise levels x {args.bootstrapping} replicates "
           f"= {n_sig * args.bootstrapping} training runs")
-    print(f"Grid total: {total * n_sig * args.bootstrapping:,} training runs")
+    print(f"Grid total: {grand * n_sig * args.bootstrapping:,} training runs")
     for tier, name in [(1, 'ANOVA roster — tree and deterministic'),
                        (2, 'ANOVA roster — Bayesian networks'),
-                       (3, 'outside the ANOVA (uncertainty + GP)')]:
+                       (3, 'outside the ANOVA but feeding figures/supplementary'),
+                       (4, 'excluded from every figure — only with --include-excluded')]:
         rows = [w for w in written if w[0] == tier]
         if rows:
             print(f"\n  Tier {tier} ({name}):")
-            for _, nm, m, h in rows:
-                print(f"    {nm:34s} {m:26s} --time={h}:59:00")
+            for _, nm, m, h, nt, nr in rows:
+                print(f"    {nm:36s} {m:26s} {nr} reps  {nt:3d} tasks  --time={h}:59:00")
 
 
 if __name__ == '__main__':
