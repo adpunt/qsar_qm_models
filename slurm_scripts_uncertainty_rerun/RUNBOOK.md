@@ -8,8 +8,10 @@
 - **(B) Does the model learn *where* the data is unreliable?**
   Measured on **test** molecules against the noise scale their region receives.
   Five of the six strategies corrupt some molecules far more than others, so
-  there is a pattern to learn. Gaussian (`legacy`) hits everything equally and
-  is the **control** — if a signal appears there too, the analysis is wrong.
+  there is a pattern to learn. Gaussian (`legacy`) hits every molecule equally,
+  so its pattern is flat and the question-B correlation is **undefined, not
+  zero** — it is a degenerate arm here, not the control. See the analysis
+  section for what the control actually is.
 
 Both come out of one set of jobs. Question B costs nothing extra; the only added
 compute is the out-of-fold folds, and only for the seven models that emit a
@@ -38,9 +40,10 @@ The σ = 0 model was trained on completely clean labels but saw the same label
 distribution, so its correlation is exactly the confound. Report the difference,
 not the raw number.
 
-`legacy` (Gaussian) is the second control: it gives every molecule the same noise
-scale, so `noise_pattern` is flat and the correlation is undefined by
-construction. If a Gaussian arm ever shows a signal, the analysis is wrong.
+`legacy` (Gaussian) gives every molecule the same noise scale, so `noise_pattern`
+is flat and the question-B correlation is **undefined rather than zero**. That
+makes it a degenerate arm for question B, not a control — a control has to
+produce a number. Gaussian's role is in question A and as the leakage check.
 
 **Scope:** 3 datasets × 7 models × 4 representations × 6 strategies × 11 noise
 levels × 5 scaffold folds. 7 array scripts, 72 tasks each, **504 tasks**.
@@ -154,33 +157,59 @@ git push
 
 ## 2. Update the server
 
+**The three commits are on DIFFERENT branches. A bare `git pull` will pull the wrong
+one.** Check out explicitly:
+
+| Repo | Branch | Commit |
+|---|---|---|
+| `NoiseInject` | `main` | `42b5fac` |
+| `KIRBy` | `similarity-metrics-study` | `00166dd` |
+| `qsar_qm_models` | `additional_reps` | `9d7db67` |
+
 ```bash
 ssh gateway.arc.ox.ac.uk
 ssh arc-login
 
-cd /data/stat-cadd/scat9264/NoiseInject   && git pull --ff-only
-cd /data/stat-cadd/scat9264/KIRBy         && git pull --ff-only
-cd /data/stat-cadd/scat9264/qsar_qm_models && git pull --ff-only
+cd /data/stat-cadd/scat9264/NoiseInject
+git fetch origin && git checkout main && git pull --ff-only origin main
+
+cd /data/stat-cadd/scat9264/KIRBy
+git fetch origin && git checkout similarity-metrics-study \
+  && git pull --ff-only origin similarity-metrics-study
+
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git fetch origin && git checkout additional_reps \
+  && git pull --ff-only origin additional_reps
 ```
 
-**If `NoiseInject` is not installed editable from that path the patch will not
-take effect.** Check, and reinstall if needed:
+Confirm you have the right commits before going further:
+
+```bash
+cd /data/stat-cadd/scat9264/NoiseInject      && git log --oneline -1   # 42b5fac
+cd /data/stat-cadd/scat9264/KIRBy            && git log --oneline -1   # 00166dd
+cd /data/stat-cadd/scat9264/qsar_qm_models   && git log --oneline -1   # 9d7db67
+```
+
+> If `git checkout` refuses because of local modifications, `git stash` first —
+> do NOT force. The KIRBy and qsar checkouts on the cluster may carry local edits.
+
+**`NoiseInject` must be installed editable from the checkout you just pulled**, or the
+patch has no effect and every task silently runs the old injector:
 
 ```bash
 export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
 eval "$("$MAMBA_EXE" shell hook --shell bash)"
 micromamba activate env_test
 python -c "import noiseInject, inspect; print(inspect.getfile(noiseInject))"
-python -c "from noiseInject import NoiseInjectorRegression as N; print(hasattr(N, 'inject_verbose'))"
-# must print True. If False:
+python -c "from noiseInject import NoiseInjectorRegression as N; print(hasattr(N,'inject_verbose'))"
+# must print True. If False, or if the path is not the checkout you just pulled:
 pip install --no-deps -e /data/stat-cadd/scat9264/NoiseInject
 ```
 
-> There are two KIRBy checkouts on the cluster — `/data/stat-cadd/…/KIRBy`
-> (what the qsar job scripts use) and `/data/stat-ecr/…/KIRBy` (what KIRBy's own
-> scripts use). These job scripts use **stat-cadd**. Confirm that is the live one
-> before submitting; if not, change `KIRBY_DIR` in `generate_scripts.py` and
-> regenerate.
+> There are two KIRBy checkouts on the cluster — `/data/stat-cadd/…/KIRBy` (what the
+> qsar job scripts use, and what these scripts use) and `/data/stat-ecr/…/KIRBy` (what
+> KIRBy's own scripts use). Confirm stat-cadd is the live one; if not, change
+> `KIRBY_DIR` in `generate_scripts.py` and re-run it.
 
 ## 3. Preflight — do not skip this
 
@@ -298,12 +327,25 @@ What is informative:
   track the injected noise (all three columns are in the output);
 - whether **uncertainty adds anything on top of it** — is the residual divided by
   the uncertainty a better detector of a corrupted label than the residual alone;
-- uncertainty against `noise_scale` (the noisy *region*), which the model can
-  learn from other molecules — unlike the individual draw.
+- uncertainty against the noisy *region* — but note `noise_scale` is exactly
+  `sigma x noise_pattern` for every strategy, so at a fixed noise level the two
+  rank molecules **identically** (measured: Spearman 1.000). It is question B's
+  statistic under another name, and it needs the same σ = 0 subtraction. Do not
+  report it as a separate unsubtracted question-A result.
 
-Report a permutation null with every number: shuffle `injected_noise` within
-(fold, sigma, strategy) a few hundred times. Under Gaussian the observed value
-must sit inside that null; if it does not, the cross-fitting is leaking.
+Report a permutation null with every number, and **state it precisely** — the
+naive version fires on clean data. The residual is `(y_true − y_pred) + epsilon`,
+so it *contains* the epsilon you are correlating against. Permuting the epsilon
+column while leaving the residual as computed therefore compares a residual that
+contains the real epsilon against a shuffled one, and declares a leak on a
+simulation that has none (measured: observed rho +0.62, that null's 95% band
+[−0.04, +0.04]).
+
+The correct null: permute `injected_noise` within
+(dataset, model, rep, strategy, split, fold, sigma) **and recompute the residual
+from the permuted epsilon**, so observed and null both carry the same additive
+term (measured on the same simulation: null mean +0.60, band [+0.58, +0.62],
+observed +0.62 sits inside — correctly showing no leakage).
 
 **Question B — does the model learn where the data is unreliable?**
 
@@ -319,8 +361,28 @@ further guards:
   control for B is σ = 0 *within the same strategy*. Keep `legacy` for question A
   and for the leakage check.
 
+**Two further guards, both free:**
+
+- **A foreign-pattern placebo.** For a run under strategy *s*, compute the same
+  baselined effect against every *other* strategy's pattern. The model was never
+  exposed to those, so a real effect should be largest against its own pattern.
+  Rows join across tasks on (dataset, fold, sample_idx).
+- **The cross-strategy pattern correlation matrix**, per dataset, printed before
+  any "N strategies agree" claim. It is a pure function of the labels and costs
+  nothing. Heteroscedastic and value-proportional are the extreme case (Spearman
+  1.000) but they are not the only overlap — on Caco-2 outlier and threshold sit
+  at 0.82, and on LogD threshold and heteroscedastic at 0.61. The number of
+  genuinely independent noise geometries is nearer two or three than five, and it
+  differs per dataset.
+
 **Never treat heteroscedastic and value-proportional as independent** — they rank
 molecules identically.
+
+**The sham ceiling is precomputed.** `noise_pattern_pred` is the pattern computed
+from the model's *predicted* label, written on every row. It has to be computed
+inside the run because quantile and outlier need the training distribution, which
+is not recoverable from the output once `--oof-outer-folds 1` leaves folds 1–4
+without training rows.
 
 ## Cost and the one thing to decide
 

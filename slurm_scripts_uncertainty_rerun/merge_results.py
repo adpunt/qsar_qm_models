@@ -77,20 +77,46 @@ def _small_concat(root: Path, pattern: str, out_path: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--root', required=True)
+    ap.add_argument('--expected-oof-folds', type=int, default=5,
+                    help='The --oof-folds the jobs were submitted with. Cells whose '
+                         'cross-fitting was truncated below this are flagged TRUNCATED_OOF.')
     ap.add_argument('--parquet', action='store_true',
                     help='Write partitioned Parquet instead of one big CSV (needs pyarrow).')
     args = ap.parse_args()
     root = Path(args.root)
+    expected_oof = args.expected_oof_folds
     out = root / '_merged'
     out.mkdir(parents=True, exist_ok=True)
 
     print("Small tables:")
     _small_concat(root, '*/*/all_results.csv', out / 'all_results.csv')
+    # A task killed by the wall clock never writes all_results.csv -- only the
+    # per-fold checkpoint. Collect those separately so nothing is invisible.
+    _small_concat(root, '*/*/all_results_partial.csv', out / 'all_results_partial.csv')
     _small_concat(root, '*/*/summary.csv', out / 'summary.csv')
 
     unc_files = [f for f in sorted(root.glob('*/*/*_uncertainty_values.csv'))
                  if '_merged' not in f.parts]
     print(f"\nUncertainty: {len(unc_files)} task files, streaming")
+
+    # A single header is written and every later chunk appended, so the column
+    # set MUST be identical for every chunk. Task files can legitimately differ
+    # (a task whose out-of-fold block was skipped has fewer columns), and
+    # appending a narrower chunk under a wider header silently shifts every
+    # column after the missing one. Build the union up front and reindex.
+    COLUMNS = []
+    for f in unc_files:
+        try:
+            cols = list(pd.read_csv(f, nrows=0).columns)
+        except Exception:
+            continue
+        for c in cols:
+            if c not in COLUMNS:
+                COLUMNS.append(c)
+    COLUMNS += [c for c in ('task_model', 'task_dataset', 'task_rep', 'task_strategy')
+                if c not in COLUMNS]
+    print(f"  column union across task files: {len(COLUMNS)} columns")
+    _ragged = set()
 
     big = out / 'uncertainty.csv'
     if big.exists():
@@ -98,7 +124,8 @@ def main():
 
     # coverage counters, accumulated per file so nothing large is ever resident
     cov = defaultdict(lambda: {'test_rows': 0, 'oof_rows': 0, 'oof_finite': 0,
-                               'folds': set(), 'sigmas': set(), 'files': 0})
+                               'folds': set(), 'sigmas': set(), 'files': 0,
+                               'oof_folds_min': None})
     header_written = False
     total_rows = 0
     pq_writer = None
@@ -115,6 +142,10 @@ def main():
                 continue
             for k, v in meta.items():
                 chunk[k] = v
+            missing = [c for c in COLUMNS if c not in chunk.columns]
+            if missing:
+                _ragged.add((f.name, tuple(missing)))
+            chunk = chunk.reindex(columns=COLUMNS)
 
             key = (meta['task_dataset'], chunk['model'].iloc[0] if 'model' in chunk else meta['task_model'],
                    meta['task_rep'], meta['task_strategy'])
@@ -127,6 +158,15 @@ def main():
                 c['oof_rows'] += len(oof)
                 if 'uncertainty' in oof:
                     c['oof_finite'] += int(oof['uncertainty'].notna().sum())
+                # A cross-fitting pass where some inner folds failed is written
+                # as a normal block; the only marker is this column.
+                if 'oof_folds_ok' in oof and len(oof):
+                    v = pd.to_numeric(oof['oof_folds_ok'], errors='coerce')
+                    v = v[v >= 0]
+                    if len(v):
+                        m = int(v.min())
+                        c['oof_folds_min'] = m if c['oof_folds_min'] is None \
+                            else min(c['oof_folds_min'], m)
             if 'fold' in chunk:
                 c['folds'].update(chunk['fold'].dropna().unique().tolist())
             if 'sigma' in chunk:
@@ -148,6 +188,10 @@ def main():
 
     if pq_writer is not None:
         pq_writer.close()
+    if _ragged:
+        print(f"  NOTE {len(_ragged)} task file(s) were missing columns and were padded:")
+        for name, miss in sorted(_ragged)[:10]:
+            print(f"    {name}: missing {list(miss)}")
     print(f"  wrote {total_rows:,} rows to "
           f"{'uncertainty.parquet' if args.parquet else 'uncertainty.csv'}")
 
@@ -160,17 +204,20 @@ def main():
                 for st in EXPECTED_STRATEGIES:
                     c = cov.get((ds, model, rep, st)) or cov.get((ds, slug, rep, st))
                     if c is None:
-                        status, t, o, of, nf, ns = 'MISSING', 0, 0, 0, 0, 0
+                        status, t, o, of, nf, ns, okf = 'MISSING', 0, 0, 0, 0, 0, None
                     else:
                         t, o, of = c['test_rows'], c['oof_rows'], c['oof_finite']
                         nf, ns = len(c['folds']), len(c['sigmas'])
+                        okf = c['oof_folds_min']
                         status = ('NO_OOF' if o == 0 else
                                   'OOF_ALL_NAN' if of == 0 else
+                                  'TRUNCATED_OOF' if (okf is not None and okf < expected_oof) else
                                   'PARTIAL_FOLDS' if nf < 5 else
                                   'PARTIAL_SIGMAS' if ns < 11 else 'OK')
                     rows.append({'dataset': ds, 'model': model, 'rep': rep, 'strategy': st,
                                  'test_rows': t, 'oof_rows': o, 'oof_finite': of,
-                                 'folds': nf, 'sigmas': ns, 'status': status})
+                                 'folds': nf, 'sigmas': ns,
+                                 'oof_folds_min': okf, 'status': status})
     covdf = pd.DataFrame(rows)
     covdf.to_csv(out / 'coverage.csv', index=False)
     print(f"\ncoverage.csv: {len(covdf)} expected cells")

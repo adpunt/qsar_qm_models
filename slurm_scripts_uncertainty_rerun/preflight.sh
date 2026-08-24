@@ -26,10 +26,11 @@
 #SBATCH --time=00:30:00
 
 set -uo pipefail
+OOF=3        # fold count used by the section-5 smoke run; checks below compare against it
 
 export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
 eval "$("$MAMBA_EXE" shell hook --shell bash)"
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"   # guarded: set -u is on
 
 cd /data/stat-cadd/scat9264/KIRBy
 . /data/stat-cadd/scat9264/qsar_qm_models/setup.sh
@@ -141,7 +142,16 @@ from noiseInject import NoiseInjectorRegression as NI
 
 DATASETS = ['logd', 'caco2', 'herg_ki']
 REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']
+# Read the strategy list from the GENERATED scripts, not from the module: after
+# --drop-strategies the two differ and the printed indices would be wrong.
+import re as _re, glob as _glob
+_sh = sorted(_glob.glob('/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_*.sh'))
 STRATS = m.STRATEGIES
+if _sh:
+    _mm = _re.search(r'^STRATS=\((.*?)\)', open(_sh[0]).read(), _re.M)
+    if _mm:
+        STRATS = _mm.group(1).split()
+        print(f"  (strategy list read from {_sh[0].split('/')[-1]}: {STRATS})")
 
 labels = {}
 df = m.download_openadmet()
@@ -211,10 +221,10 @@ OUT=$(mktemp -d)
 python -u alternative_data_noise_robustness.py \
     --datasets herg_ki --models NGBoost --reps ECFP4 \
     --strategies outlier --sigmas 0.0 1.0 \
-    --unc-strategies all --oof-folds 3 \
+    --unc-strategies all --oof-folds "$OOF" \
     --results-root "$OUT" || { echo "FAIL: end-to-end run errored"; exit 1; }
 
-python - "$OUT" <<'PY'
+python - "$OUT" "$OOF" <<'PY'
 import sys, glob, pandas as pd
 root = sys.argv[1]
 f = glob.glob(f"{root}/**/*_uncertainty_values.csv", recursive=True)
@@ -241,9 +251,10 @@ if pat.nunique() <= 1 and d['strategy'].iloc[0] != 'legacy':
     print("FAIL: noise_pattern is constant - the question-B confound control is unusable"); sys.exit(1)
 if tr['uncertainty'].notna().sum() == 0:
     print("FAIL: every out-of-fold uncertainty is blank"); sys.exit(1)
-if (tr['oof_folds_ok'] < 5).any():
+want = int(sys.argv[2])
+if (tr['oof_folds_ok'] < want).any():
     print(f"WARN: some out-of-fold passes were truncated "
-          f"(min {int(tr['oof_folds_ok'].min())}/5 inner folds)")
+          f"(min {int(tr['oof_folds_ok'].min())}/{want} inner folds)")
 print(f"  OK    noise_pattern varies ({pat.nunique()} distinct); "
       f"{tr['uncertainty'].notna().sum()} finite out-of-fold uncertainties")
 PY

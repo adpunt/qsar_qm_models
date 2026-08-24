@@ -70,7 +70,7 @@ if [ -z "${SLURM_JOB_PARTITION:-}" ]; then
     echo "ERROR: no partition. Submit with --partition=medium (see RUNBOOK step 4)."; exit 2
 fi
 
-echo "=== task $SLURM_ARRAY_TASK_ID: model=MLP-VBLL-Full dataset=$ds rep=$rep strategy=$st"
+echo "=== task $i: model=MLP-VBLL-Full dataset=$ds rep=$rep strategy=$st"
 echo "=== out: $OUT"
 echo "=== started: $(date)"
 
@@ -81,6 +81,8 @@ python -u alternative_data_noise_robustness.py \
     --strategies "$st" \
     --unc-strategies all \
     --oof-folds 5 \
+    --oof-outer-folds 1 \
+    --threshold-quantile 0.1 \
     --results-root "$OUT"
 
 status=$?

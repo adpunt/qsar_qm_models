@@ -127,7 +127,7 @@ if [ -z "${{SLURM_JOB_PARTITION:-}}" ]; then
     echo "ERROR: no partition. Submit with --partition=medium (see RUNBOOK step 4)."; exit 2
 fi
 
-echo "=== task $SLURM_ARRAY_TASK_ID: model={model} dataset=$ds rep=$rep strategy=$st"
+echo "=== task $i: model={model} dataset=$ds rep=$rep strategy=$st"
 echo "=== out: $OUT"
 echo "=== started: $(date)"
 
@@ -207,7 +207,7 @@ def main():
             datasets=' '.join(DATASETS),
             reps=' '.join(f'"{r}"' for r in REPS),
             strategies=' '.join(strategies),
-            n_ds=len(DATASETS), n_rep=len(REPS), n_st=len(STRATEGIES),
+            n_ds=len(DATASETS), n_rep=len(REPS), n_st=len(strategies),
             n_tasks=n_tasks, last=n_tasks - 1, throttle=args.throttle,
             script_name=script_name, gp_args=gp_args, gp_line='',
             extra_args=extra_args)
