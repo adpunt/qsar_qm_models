@@ -141,7 +141,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done and sourced | §13 chats A, B |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
-| 5 | Gaussian-process kernel question | ✅ **answered and decided 2026-08-26** (§10b.2) | §13 chat C |
+| 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
 | 7 | Uncertainty machinery in KIRBy (out-of-fold, recorded noise, confound control) | 🟠 built, 9 defects fixed, **never submitted, never reviewed with the author** | §13 chat F |
 | 8 | QM9 job scripts | 🟠 written, superseded by the redesign before they ran | §13 chat G |
@@ -561,9 +561,11 @@ full set of results from the unpatched code.
 > all. See §2.8f. The storage defect below is real, it damages the geometry, and fixing it was right.
 > It is not what produced the numbers in the paper.
 
-**Found 2026-08-25 from the harvested clean-data results, then confirmed in the code.** This is the
-largest single defect in the study. It is a data-preparation bug, it has never been a robustness
-result, and it invalidates a family of the paper's conclusions.
+**Found 2026-08-25 from the harvested clean-data results, then confirmed in the code.** ~~This is
+the largest single defect in the study.~~ It is a data-preparation bug and it has never been a
+robustness result. It damages the geometry — how far apart two molecules sit stops tracking how
+different their properties are — and fixing it was right. **It is not what produced the near-zero
+scores; §2.8f is.** Measured, the fix changes prediction by less than the run-to-run wobble.
 
 #### What the defect is, in plain terms
 
@@ -664,8 +666,9 @@ layout is only correct if the writer, the reader and the Rust record move at onc
 
 | Change | Where |
 |---|---|
-| The per-molecule rescaling is gone; each builder returns the model's own values as 32-bit floats, and so do its failure paths, so a molecule that cannot be embedded still writes a full-width record | `scripts/process_and_train.py` — `chemberta_fingerprint`, `mhggnn_fingerprint`, `mol2vec_fingerprint` |
-| The record widened: mol2vec 300→1200 bytes, ChemBERTa 768→3072, MHG-GNN 1024→4096, read back as float32 | the writer and reader in `process_and_train.py`, and the buffers in `rust/src/main.rs` |
+| The per-molecule rescaling is gone; each builder returns the model's own values as 32-bit floats, and so do its failure paths, so a molecule that cannot be embedded still writes a full-width record | `scripts/process_and_train.py` — `chemberta_fingerprint`, `mhggnn_fingerprint` |
+| The record widened: ChemBERTa 768→3072 bytes, MHG-GNN 1024→4096, read back as float32 | the writer and reader in `process_and_train.py`, and the buffers in `rust/src/main.rs` |
+| **mol2vec deleted outright** and **one-hot SMILES refused by name**, checked at the top of `main()` before a molecule is read so a job cannot print a complaint and exit 0 | `process_and_train.py` (`DROPPED_REPS`), `rust/src/main.rs` |
 | Per-feature standardisation, fitted on the training split and applied to validation and test with the training constants. The existing block is reused rather than copied; the representations it covers are read off one list, `CONTINUOUS_REPS` | `process_and_train.py` |
 | **Avalon added** — 2048 bits packed to 256 bytes, computed in Python and passed through Rust exactly like the other pass-through fingerprints. Binary, so it needs no float storage and no standardisation | both pipelines |
 | **ChemBERTa needed no builder** — it was already implemented and wired on the QM9 side and had simply never produced a usable result. §13.7 read as though both new representations were new code; only Avalon was | — |
@@ -1165,7 +1168,7 @@ I verified the five highest-severity findings myself, in the source, before writ
 | **ECFP4** | **not a circular fingerprint at all** — `rdk_fingerprint_mol` (`rust/src/main.rs:22`, called at `:822`) binds `RDKFingerprintMol`, RDKit's Daylight-style **topological path** fingerprint | a genuine Morgan radius-2 fingerprint via `GetMorganGenerator(radius=2, fpSize=2048)` | ❌ **different family** |
 | **PDV** | `pdv` is **binarised** — `(pdv > 0).astype(np.uint8)` then packed (`process_and_train.py:377`). The real one is the separate `continuous_pdv` | continuous descriptors, standardised | ❌ the merge layer must map to `continuous_pdv` |
 | **SNS** | counts computed (`sub_counts=True`) then **thrown away** — `np.array(sns_fp, dtype=np.uint8)` then `packbits` makes every nonzero a 1 (`:366-371`) | raw counts, then standardised | ❌ binary vs standardised counts |
-| **MHG-GNN / mol2vec** | per-molecule min-max to 8 bits, never standardised (§2.8c) | full precision, no quantisation | ❌ see §2.8c |
+| **MHG-GNN / ChemBERTa** | ~~per-molecule min-max to 8 bits, never standardised~~ ✅ **FIXED 2026-08-26** — 32-bit floats, standardised per feature on the training split, so both pipelines now build the same features (§2.8c). mol2vec had the same defect and has been deleted | full precision, no quantisation, standardised | ✅ **now agrees** |
 
 **The fingerprint one is the most serious thing found in this whole audit.** `paper.tex:203`
 describes ECFP4 as *"circular substructures with radius r=2"*. On QM9 that is false — it is a
@@ -1195,6 +1198,46 @@ the features.
 | **Quantile forest trees** | 300 | 100 | Changes the quantile estimates, which are that model's deliverable |
 | **Stochastic passes** | **100** | **30** | The paper says 100 |
 | **Gaussian process** | default kernel Tanimoto; uncapped | RBF; capped at 2,000 molecules | Different kernel *and* different training-set size |
+
+#### 2.10 🔴 FOUND AND FIXED 2026-08-26 — Sort & Slice on QM9 was trained on PERMUTED features
+
+**The most damaging thing found in the whole audit, and a previous session had checked it and
+concluded the opposite.**
+
+The substructure fingerprint's training molecules were queued by iterating the training indices.
+The record writer iterates positions in **ascending** order. On reaching a training molecule it
+popped the next molecule off that queue, overwrote the current one with it, and computed the
+fingerprint from the popped molecule — while the label, the canonical SMILES and every other
+representation in that record came from the row's own position.
+
+**The scaffold splitter does not return its indices in ascending order.** I checked by running it
+rather than reading it. So the two orders diverge almost immediately:
+
+| molecules | training rows | rows holding ANOTHER molecule's fingerprint |
+|---|---|---|
+| 500 | 400 | **383 (95.8%)** |
+| 2,000 | 1,600 | **1,584 (99.0%)** |
+
+**This is not bias, it is destruction.** Features and labels no longer correspond, so the model is
+fitting noise. Every Sort & Slice result on QM9 to date is meaningless — not degraded, meaningless.
+
+**Scope, checked rather than assumed.** The corruption is confined to this one representation: the
+molecule variable is set to `None` immediately afterwards, and the descriptor vector, the
+fingerprint and the learned embeddings are all built from the row's own canonical SMILES. Training
+rows only.
+
+**The fix is a deletion.** The queue was only ever needed to FIT the substructure vocabulary, which
+happens before the writing loop; the featuriser is an ordinary function of one molecule. Both
+writers now featurise the row's own molecule.
+
+**Guarded.** `scripts/audit_representation_identity.py` refits the featuriser on the very molecules
+the pipeline used and compares row by row, so a return of this fails loudly rather than silently.
+
+**Why it survived.** An earlier session examined exactly this and recorded that "the QM9 path
+queues and consumes in the same ascending order and is correct". That conclusion was reached by
+reading the code. It is wrong, and one line of execution — printing whether the splitter's indices
+are sorted — settles it. The note never reached this document, so nothing here needed correcting,
+but the lesson is the same one this project keeps paying for: **reading is not checking.**
 
 #### 3.4.3a 🔴 FOUND AND FIXED 2026-08-26 — the two sides scaled features differently
 
@@ -1637,6 +1680,12 @@ much noise was actually delivered. Every row, both pipelines:
 `split` · `record_index` · `canonical_smiles` · `y_clean_raw` · `epsilon_raw` ·
 `noise_type` · `unit_dose` · `delivered_dose_in_label_units` · `delivered_dose_as_fraction_of_label_spread` ·
 `affected_molecule_fraction` · `standardisation_mean` · `standardisation_sd` · `seed`
+
+✅ **`gp_collapsed` added 2026-08-26 (chat C).** A Gaussian process that cannot use its features
+returns one constant for every molecule. That still writes a score, and the score reads as a weak
+representation rather than a failed fit — which is how the two learned embeddings were written off
+(§2.8f). Every Gaussian-process row now says whether its fit collapsed. `gp_fit_method`, added by
+chat E, says which optimiser produced it.
 
 The molecule identifier matters as much as the dose columns: the current `sample_idx` is a row
 position, so rows cannot be linked to molecules or matched across replicates — which is
@@ -2374,9 +2423,15 @@ replays and paired on the replicate seed:
 | mol2vec | 0.8677 | 0.0087 | +0.8590 | 10 |
 | PDV | *(Tanimoto undefined)* | 0.8890 | — | 10 |
 
-Where the features are binary the two kernels are indistinguishable. Where they are the two learned
-embeddings the radial basis collapses — and that is the rescaling defect in §2.8c, verified in the
-source at `process_and_train.py:971-975` and `:828-831`, not a property of the kernel.
+Where the features are binary the two kernels are indistinguishable.
+
+> ⚠️ **CORRECTED 2026-08-26 (chat C).** This section read the radial basis collapsing on the two
+> learned embeddings as the rescaling defect in §2.8c. **It was not.** Those two cells are failed
+> fits: the kernel was never told how far apart counts as far, so on features whose distances run to
+> a thousand it had nothing to learn from and returned a constant (§2.8f). Measured after the fix,
+> the two kernels agree on the *damaged* features too — largest gap 0.040 across twelve paired
+> measurements. The decision below is unaffected and is better supported than it was: the two kernels
+> now agree everywhere, not only on binary features.
 
 **What this means for the design:**
 
@@ -2686,7 +2741,7 @@ Specifically, in every chat:
 |---|---|---|---|
 | **A** | Noise redesign in Rust | — | ✅ **DONE 2026-08-26** |
 | **B** | Noise redesign in the Python injector, and the cross-check | A, for the spec | ✅ **yes** — the specification is settled, so it can be written alongside A |
-| **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
+| **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **DONE 2026-08-26** — and it found the real cause of the near-zero embedding scores (§2.8f) |
 | **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **DONE 2026-08-26** |
 | **E** | Cross-pipeline parity | — | ✅ **DONE 2026-08-26** |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
@@ -2964,7 +3019,10 @@ destroyed the shared scale, the two should stop tracking each other. Reported as
 zero means distance tells you nothing. Every replicate is shown; nothing is averaged.
 
 600 QM9 molecules per replicate, scaffold split, about 480 to learn from
-(`results/embedding_storage_retest/qm9_kernel_retest.csv`).
+(`results/embedding_storage_retest/qm9_kernel_retest.csv`). **mol2vec appears in these tables
+because it was measured before it was deleted on 2026-08-26. It is out of the study and out of the
+code; the rows are kept because they are the only ones that can be checked against the cluster's
+pre-fix numbers.**
 
 | Representation | Old storage | New storage | Typical distance, old → new |
 |---|---|---|---|
@@ -2977,16 +3035,16 @@ zero means distance tells you nothing. Every replicate is shown; nothing is aver
 two molecules sat told you essentially nothing about how their properties differed — 0.02 to 0.06,
 against 0.11 to 0.15 once stored properly. Every replicate moves the same way.
 
-⚠️ **mol2vec is not damaged by this measure, and §2.8c above assumes both learned embeddings were
-damaged equally.** Its three replicates are 0.140, 0.170, 0.102 before and 0.128, 0.168, 0.092
-after — the same numbers. Whatever ruins mol2vec's radial-basis score on the cluster, this
-measurement does not show the per-molecule stretch destroying its geometry the way it destroys
-MHG-GNN's. The claim that the two embeddings fail for one shared reason should not be repeated until
-the model fits settle it.
+⚠️ **The two learned embeddings were NOT damaged equally, and §2.8c assumes they were.** mol2vec's
+three replicates are 0.140, 0.170, 0.102 before and 0.128, 0.168, 0.092 after — the same numbers.
+The per-molecule stretch destroyed MHG-GNN's geometry and left mol2vec's alone. What ruined both
+their scores on the cluster was the failed fit in §2.8f, which is common to both and has nothing to
+do with storage.
 
-#### 🔴 Measured 2026-08-26 — the kernel gap was the FIT, not the features
+#### ✅ Measured 2026-08-26 — the kernel gap was the FIT, not the features
 
-**This overturns §10b.2 and it downgrades §2.8c. Read it before repeating either.**
+**This overturns §10b.2 and it downgrades §2.8c. Read it before repeating either. The cause is
+written up as §2.8f and the fix is in the pipeline.**
 
 36 fits, none collapsed, 600 QM9 molecules per replicate, about 480 to learn from, scaffold split,
 three replicates. Same molecules and same split within every row, so the only thing that differs
@@ -3044,21 +3102,20 @@ damaged features reach 0.68 to 0.76.
 
 **Three consequences.**
 
-1. **The Gaussian process cannot enter the variance decomposition until this is fixed.** §10b.2's
-   decision — one kernel, every representation, in the decomposition beside the support vector
-   machine — is sound and is if anything better supported now, because with a workable width the two
-   kernels agree everywhere rather than only on binary features. But run it as the code stands and
-   any representation whose distances are far from 1 returns a collapsed fit.
-2. **Every Gaussian-process number in the study is suspect, not only the two embeddings.** Whether a
-   fit converged depended on how far that representation's typical distances sat from 0.7. Nothing
-   recorded whether a fit collapsed.
-3. **The fix is small and belongs with the model, not with a chat's scope line.** Set the width from
-   the median distance between training molecules before fitting, and record the spread of the
-   predictions so a collapsed fit is visible instead of silent.
+1. ✅ **Fixed, and the Gaussian process can now enter the variance decomposition.** §2.8f has the
+   fix and the proof in the real pipeline. §10b.2's decision — one kernel, every representation,
+   beside the support vector machine — is sound and better supported than before, because with a
+   workable width the two kernels agree everywhere rather than only on binary features.
+2. 🔴 **Every Gaussian-process number in the study is suspect, not only the two embeddings.** Whether
+   a fit converged depended on how far that representation's typical distances sat from 0.7, and
+   nothing recorded whether one had collapsed. **This is a re-run, not a fix**, and the re-run is
+   what §13 is for.
+3. ✅ **`gp_collapsed` is now written on every Gaussian-process row** (§5.2), so this cannot recur
+   silently.
 
-**§2.8c is overstated and needs rewriting.** It calls the storage defect "the largest single defect
-in the study" and attributes the whole 0.89 gap to it. The storage defect is real, it damages the
-geometry, and fixing it is right. It is not what produced those numbers.
+✅ **§2.8c has been corrected.** It called the storage defect "the largest single defect in the
+study" and attributed the whole 0.89 gap to it. The storage defect is real, it damages the geometry,
+and fixing it was right. It is not what produced those numbers.
 
 **The broken first attempt is kept** at
 `results/embedding_storage_retest/qm9_kernel_retest_BROKEN_FIT.csv`. Three scores — the ones you get
@@ -3090,7 +3147,7 @@ cd /data/stat-cadd/scat9264/qsar_qm_models     # confirm the live checkout first
 git pull
 cd rust && cargo build --release && cd ../scripts
 
-for rep in mhggnn mol2vec chemberta avalon continuous_pdv; do
+for rep in mhggnn chemberta avalon continuous_pdv ecfp4 sns; do
   sbatch --account=stat-cadd --job-name=gp_$rep --time=47:00:00 \
     --output=../logs/gp_postfix_$rep.out --wrap="
       cd \$SLURM_SUBMIT_DIR && python -u process_and_train.py -d QM9 -t homo_lumo_gap \
@@ -3138,9 +3195,11 @@ standardised today (`:1800-1809`), and it is the best-performing cell in the stu
 **Then re-test.** Whether the rescaling defect is what breaks the radial basis on the two learned
 embeddings has to be measured after the fix, not assumed. That is the deliverable of this chat.
 
-**🔴 TODO:** which additional embedding to add, if any. Candidates and reasoning are in §13.4.
+✅ **It was measured, and the answer was no** — see the top of this chat's entry and §2.8f. The
+prompt below is kept as the record of what was asked for; **do not re-run it.** It names mol2vec,
+which no longer exists, and it assumes the storage defect is the cause, which it is not.
 
-> **Prompt.** Fix the learned-embedding storage defect in `scripts/process_and_train.py` and re-test
+> **Prompt (historical — superseded).** Fix the learned-embedding storage defect in `scripts/process_and_train.py` and re-test
 > the Gaussian process afterwards. The defect is documented in `RERUN_PLAN.md` §2.8c: each molecule's
 > embedding vector is min-max rescaled using that molecule's own minimum and maximum before being
 > stored as bytes, which destroys comparability between molecules. It affects three representations,
@@ -3705,18 +3764,18 @@ for the validation data?"*
 
 | | QM9 pipeline | Experimental pipeline |
 |---|---|---|
-| Embedding values as the model produces them | ❌ each molecule rescaled to fill 0–255 using its own smallest and largest value, then stored as bytes | ✅ returned as ordinary decimal numbers, no rescaling, no quantisation (`KIRBy/src/kirby/representations/molecular.py` — mol2vec `:1565`, MHG-GNN `:2074`, ChemBERTa `:2201`) |
-| Features put on a common scale before the model | ❌ only PDV (`process_and_train.py:1800-1809`) | ✅ every representation, fitted on the training fold and applied to the rest (`alternative_data_noise_robustness.py:882-884` for the tree and kernel models, `:967-970` for the neural ones) |
+| Embedding values as the model produces them | ✅ **fixed 2026-08-26** (was: each molecule rescaled to fill 0–255 using its own smallest and largest value, then stored as bytes) | ✅ returned as ordinary decimal numbers, no rescaling, no quantisation (`KIRBy/src/kirby/representations/molecular.py` — mol2vec `:1565`, MHG-GNN `:2074`, ChemBERTa `:2201`) |
+| Features put on a common scale before the model | ✅ **fixed 2026-08-26** — `CONTINUOUS_REPS` covers PDV, MHG-GNN and ChemBERTa (was: PDV only) | ✅ every representation, fitted on the training fold and applied to the rest (`alternative_data_noise_robustness.py:882-884` for the tree and kernel models, `:967-970` for the neural ones) |
 
 **Three consequences.**
 
-1. **The experimental results for the learned embeddings are trustworthy. The QM9 ones are not.**
-   The paper's claim that learned embeddings are weak comes from QM9, which is the side with the
-   defect.
-2. **The fix is a port, not a design.** Copy what the experimental pipeline already does.
-3. **The Gaussian process comparison on the two embeddings has to be re-measured, not argued.** The
-   0.87-against-−0.02 gap is *attributed* to this defect. That attribution is an inference. Chat C
-   measures it — `scripts/retest_embedding_kernels.py`, which scores the same molecules, the same
+1. **The paper's claim that learned embeddings are weak comes from QM9 and cannot stand.** But the
+   reason is not the one this section gives: the QM9 numbers behind it are failed Gaussian-process
+   fits (§2.8f), not badly stored features. Both are now fixed and the claim needs re-testing from
+   scratch.
+2. ✅ **The fix was a port, not a design** — what the experimental pipeline already did. Done.
+3. ✅ **Measured, and the attribution was wrong.** The 0.87-against-−0.02 gap was *attributed* to
+   this defect. It is a failed fit (§2.8f). Chat C measured it — `scripts/retest_embedding_kernels.py`, which scores the same molecules, the same
    scaffold split and the same seeds under both storage schemes so the difference is the storage and
    nothing else. Result in §2.8c.
 
@@ -3824,9 +3883,17 @@ earlier reading of it here had the ranking upside down and is corrected above.
   storage defect (§13.6).
 - **mol2vec is the weakest learned representation** and was cut from three of the four pools.
 
-#### ✅ SETTLED 2026-08-26 — the representation set
+#### ✅ SETTLED 2026-08-26 — the representation set, and ✅ IMPLEMENTED the same day
 
 *"Drop SMILES from the list, add Avalon and ChemBERTa."*
+
+**State of the code, 2026-08-26 (chat C).** Avalon builds and runs in both pipelines. ChemBERTa was
+already implemented on the QM9 side and unusable because of the storage defect; it now produces
+results for the first time in the study. mol2vec is **deleted** — Python pipeline, Rust record,
+storage guard, hybrid source list. One-hot and randomized SMILES still build, because removing the
+tokenizer means editing the record layout and the vocabulary handling, so they are **refused by
+name** at the top of `main()` instead: a job asking for one exits non-zero before a molecule is
+read. Verified both ways.
 
 **The six representations for the re-run, both studies:**
 
@@ -3840,7 +3907,7 @@ earlier reading of it here had the ranking upside down and is corrected above.
 | Sort & Slice | — | fingerprint, collision-free circular | unchanged — **fixed in place**, it is a colleague's method and the paper describes it as the collision-free counterpart to ECFP4 |
 
 **Out:** mol2vec (0.803, the weakest learned representation, cut from three of four pruning pools)
-and one-hot SMILES.
+and one-hot SMILES. Both are now enforced in the code, not just recorded here.
 
 Scores are from KIRBy's own survey on 9,978 QM9 molecules under five-fold scaffold-group CV, best of
 five models. They rank representations; they do not transfer as numbers to this study.
