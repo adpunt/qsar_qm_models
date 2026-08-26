@@ -155,6 +155,25 @@ GP_DEFAULTS = {
     # gpytorch ExactGP. Recorded in the results as gp_fit_method, never silent.
     'fallback_adam_lr': 0.1,
     'fallback_adam_iters': 100,
+    # Start the RBF lengthscale at the median distance between training
+    # molecules instead of gpytorch's default of ~0.69.
+    #
+    # Measured 2026-08-26: typical distances between molecules run from 17 (PDV)
+    # to 1,100 (the learned embeddings). At a lengthscale of 0.69 every molecule
+    # is effectively infinitely far from every other, the kernel matrix is the
+    # identity, the marginal likelihood is flat and there is no gradient to
+    # follow. The fit returns a constant and scores whatever that constant
+    # happens to score -- which is what produced R2 = -0.0158 for MHG-GNN and
+    # +0.0087 for mol2vec in results/gp_kernel_harvest/qm9/. Started from the
+    # median distance, those same features reach 0.68 to 0.76.
+    'init_lengthscale_from_data': True,
+    # Molecules sampled to estimate that median. The median is stable well below
+    # the full training set and the pairwise distance matrix is O(n^2).
+    'lengthscale_probe_n': 500,
+    # A fit whose predictions vary by less than this fraction of the training
+    # label spread has collapsed to a constant. It is recorded, not silently
+    # scored (RERUN_PLAN.md 0.6, failure mode 9).
+    'collapse_fraction': 0.05,
 }
 
 
@@ -223,6 +242,97 @@ BAYESIAN_DEFAULTS = {
 
 
 # ---------------------------------------------------------------------------
+# Feature standardisation -- WHICH representations get scaled
+#
+# This is not a model parameter, so no parameter diff could ever have caught it,
+# and the two pipelines had silently diverged:
+#
+#   QM9           standardised only the continuous representations and fed
+#                 fingerprints to the models as raw 0/1 bits
+#   experimental  standardised EVERY representation unconditionally, in both its
+#                 tree path and its neural path
+#
+# For trees that is irrelevant -- they are scale-invariant. For the support
+# vector machine and the Gaussian process, both of which measure distances with
+# a radial kernel, it changes the model completely.
+#
+# MEASURED TWICE, and the size differs a great deal between the two, so quote
+# whichever matches the dataset you are talking about.
+#
+#   QM9, 2,000 molecules, scaffold split, Morgan fingerprint, RBF SVM:
+#       raw 0/1 bits    R2 = +0.815, +0.809, +0.832   (seeds 0,1,2)
+#       standardised    R2 = +0.320, +0.124, +0.182
+#       cost of standardising   -0.50, -0.69, -0.65
+#
+#   hERG, all 1,415 molecules, 5-fold scaffold split, ECFP4, same SVM:
+#       raw 0/1 bits    R2 = +0.5335
+#       standardised    R2 = +0.4570
+#       cost of standardising   -0.077, and every one of the five folds agrees
+#
+# The DIRECTION is the same on both and on every fold. The SIZE is not: about
+# 0.6 on QM9 against about 0.08 on hERG. Do not carry the QM9 figure over to the
+# experimental datasets -- QM9's gap is far more predictable to begin with, so
+# there is more to lose, and its molecules are small enough that the fingerprints
+# are much sparser than drug-like ones.
+#
+# Standardising a sparse binary fingerprint gives the rare bits huge magnitudes
+# and lets them dominate every distance, which is why it hurts kernel methods.
+# The QM9 behaviour is the correct one and the experimental side aligns to it.
+#
+# To reverse this decision, change this one set.
+# ---------------------------------------------------------------------------
+
+# THE RULE IS KEYED ON THE FEATURES, NOT ON THE NAME.
+#
+# A name-keyed list cannot work here, and trying one was a mistake worth
+# recording: `pdv` on QM9 is the BINARISED descriptor vector, while `PDV` on the
+# experimental side is the CONTINUOUS one. Same name, opposite answer. That is
+# the same trap as the fingerprint being the wrong function -- names in this
+# project do not identify features.
+#
+# So the decision is made from the matrix itself:
+#     binary (every value 0 or 1)  ->  never standardised
+#     anything else                ->  standardised, train-only
+#
+# This is self-correcting. When the binarised descriptor vector is replaced by
+# the continuous one, and when the substructure counts stop being flattened to
+# presence bits, the rule follows the data without anyone remembering to edit a
+# list.
+STANDARDISE_BINARY_FEATURES = False
+
+
+def is_binary_matrix(X):
+    """True if every value is 0 or 1. Sampled -- a full scan of a large
+    fingerprint matrix is wasteful and the first rows settle it."""
+    import numpy as np
+    X = np.asarray(X)
+    sample = X[:min(len(X), 512)]
+    finite = sample[np.isfinite(sample)]
+    if finite.size == 0:
+        return False
+    return bool(np.isin(finite, (0, 1)).all())
+
+
+def should_standardise(X, rep_name=None):
+    """Should these features be standardised before the model sees them?
+
+    MEASURED on 2,000 QM9 molecules, scaffold split, Morgan fingerprint, support
+    vector machine with a radial kernel:
+        raw 0/1 bits   R2 = +0.815, +0.809, +0.832   (seeds 0, 1, 2)
+        standardised   R2 = +0.320, +0.124, +0.182
+    Standardising a sparse binary fingerprint gives its rare bits huge
+    magnitudes and lets them dominate every distance, which wrecks anything
+    kernel-based. Trees are unaffected either way.
+
+    NOT YET MEASURED: substructure COUNTS. They are stored as presence bits
+    today, so this returns False for them; once that is fixed they become
+    non-binary and this will start standardising them. Measure it then --
+    sparse counts may have the same problem as sparse bits.
+    """
+    return not (is_binary_matrix(X) and not STANDARDISE_BINARY_FEATURES)
+
+
+# ---------------------------------------------------------------------------
 # Uncertainty reporting
 # ---------------------------------------------------------------------------
 
@@ -273,6 +383,7 @@ def spec_dict():
         'neural': NEURAL_DEFAULTS,
         'bayesian': BAYESIAN_DEFAULTS,
         'uncertainty': UNCERTAINTY_DEFAULTS,
+        'standardise_binary_features': STANDARDISE_BINARY_FEATURES,
     }
 
 

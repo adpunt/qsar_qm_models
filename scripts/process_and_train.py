@@ -118,6 +118,18 @@ bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smil
 # (models/models.py RBFKernel), so without this the widest few dimensions decide
 # every distance and the rest are invisible. Read the reader's dtype choice and the
 # standardisation block off this list so they cannot drift apart.
+# Which representations get standardised is now shared with the experimental
+# pipeline (models/model_defaults.py). The two had diverged: this side scaled
+# only the continuous ones, the other scaled everything including binary
+# fingerprints, which costs an RBF-kernel SVM about 0.6 R-squared.
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'models'))
+from model_defaults import should_standardise, is_binary_matrix
+
+# Kept only for the handful of places that still ask "is this a continuous
+# representation by name". The standardisation decision itself is made from the
+# FEATURES -- `pdv` means the binarised vector here and the continuous one on
+# the experimental side, so no name-keyed list can be right for both.
 CONTINUOUS_REPS = ('continuous_pdv', 'chemberta', 'mhggnn')
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
@@ -1099,6 +1111,13 @@ def load_custom_model(model_path):
 # DELETED from the Rust side on 2026-08-26 (the author does not trust it), so the
 # guard below is now what stops the next one rather than that one
 # (RERUN_PLAN.md §2.7, §5.6).
+# Dropped from the study on 2026-08-26 when the representation set was settled:
+# PDV, MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. mol2vec has been deleted
+# outright. One-hot SMILES still builds -- pulling out the tokenizer would mean
+# editing the record layout and the vocabulary handling -- so it is refused by
+# name instead, which is what stops a job running it by accident.
+DROPPED_REPS = {"smiles", "randomized_smiles"}
+
 PARSEABLE_REPS = {
     "randomized_smiles", "sns", "pdv", "continuous_pdv",
     "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
@@ -1116,6 +1135,15 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     molecule at all, and representation identity can only be audited by reading
     the featuriser source.
     """
+    dropped = [r for r in molecular_representations if r in DROPPED_REPS]
+    if dropped:
+        raise RuntimeError(
+            f"representation(s) {sorted(dropped)} were dropped from the study on 2026-08-26. "
+            f"The set is: PDV (continuous_pdv), MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. "
+            f"mol2vec is gone from the code entirely; one-hot SMILES still builds but is not part "
+            f"of the study, so running it would produce results with nowhere to go."
+        )
+
     unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
     if unreadable:
         raise RuntimeError(
@@ -1343,10 +1371,16 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 f"offset."
             )
 
-        if rep in CONTINUOUS_REPS:
-            x_data = np.vstack(x_data).astype(np.float32)
-        else:
-            x_data = np.vstack(x_data).astype(np.uint8)
+        # This is a STORAGE dtype decision, not standardisation. It used to be
+        # keyed on a name list, which meant an unlisted representation carrying
+        # values above 255 would WRAP silently on the cast -- a count of 256
+        # reading back as absent. Decide it from the values instead: the narrow
+        # type is used only when it provably cannot lose anything.
+        x_stacked = np.vstack(x_data)
+        fits_uint8 = (np.isfinite(x_stacked).all()
+                      and np.all(x_stacked >= 0) and np.all(x_stacked <= 255)
+                      and np.array_equal(x_stacked, np.round(x_stacked)))
+        x_data = x_stacked.astype(np.uint8 if fits_uint8 else np.float32)
     y_data = np.array(y_data, dtype=np.float32)
     y_data_original = np.array(y_data_original, dtype=np.float32)
 
@@ -2032,7 +2066,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
                             # Per-feature standardisation, fitted on the TRAINING split only
                             # and applied to validation and test with the training constants.
-                            if rep in CONTINUOUS_REPS:
+                            if should_standardise(x_train, rep):
                                 x_mean = np.nanmean(x_train, axis=0)
                                 x_std = np.nanstd(x_train, axis=0)
                                 x_std[x_std == 0] = 1.0
