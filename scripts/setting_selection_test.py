@@ -74,6 +74,15 @@ REPORTING_LEVEL = 0.5      # RERUN_PLAN.md section 13.1 open item 5 -- the stand
 POOL_SEED = 11
 MODELS = ['LGBM', 'RF', 'Ridge']
 N_THREADS = int(os.environ.get('SETTING_SELECTION_THREADS', '2'))
+
+# Taken from models/model_defaults.py, the file both training pipelines read, so this
+# screen tests the models the cluster will actually run. Copied rather than imported
+# because that module pulls in the whole training stack.
+RF_DEFAULTS = dict(n_estimators=100, max_depth=None, min_samples_leaf=1,
+                   min_samples_split=2, max_features=0.3, bootstrap=True)
+LGBM_DEFAULTS = dict(n_estimators=100, learning_rate=0.1, num_leaves=31, max_depth=-1,
+                     subsample=1.0, colsample_bytree=1.0, min_child_samples=20,
+                     reg_alpha=0.0, reg_lambda=0.0)
 # The exact-dose sensitivity pass runs only where the confound it controls for exists:
 # the conditions whose per-run delivered dose is wobbliest (NOISE_DESIGN.md 5.1b).
 EXACT_DOSE_CONDITIONS = ['Gaussian', 'Student-t nu=5', 'Student-t nu=3', 'Laplace',
@@ -353,15 +362,27 @@ def scaffold_split(group_ids, n_total, rng, test_frac=0.2):
 
 
 def build_models(seed):
-    # n_jobs is pinned, not left at -1. This is a shared machine: at a load average of
-    # 42 on 8 cores, one LightGBM fit with n_jobs=-1 took 410 seconds against the ~2
-    # seconds it needs unloaded, because every fit spawned eight threads to fight over
-    # the same cores. Fixed threads make the run predictable and the timings comparable
-    # between conditions, which matters when the conditions are what is being compared.
+    """The two tree models take the pipeline's OWN shared defaults.
+
+    `models/model_defaults.py` is where both training pipelines now get their forest and
+    boosting settings, so a screen that invents its own is screening a different model
+    from the one the cluster will run. The forest there is 100 trees at
+    `max_features=0.3`; the earlier pilots used 150 trees at scikit-learn's default of
+    every feature, which is both unfaithful and, on 178 descriptors, about three times
+    the work per split -- this test's single largest cost on a machine it has to share.
+    Ridge has no entry there; it is the cheap linear reference the pilots used, kept at
+    alpha = 1.0 for continuity with them.
+
+    n_jobs is pinned rather than left at -1. This is a shared machine: at a load average
+    of 42 on 8 cores one LightGBM fit with n_jobs=-1 took 410 seconds against the ~2
+    seconds it needs unloaded, because every fit spawned eight threads to fight over the
+    same cores.
+    """
+    rf = dict(RF_DEFAULTS)
+    lgbm = dict(LGBM_DEFAULTS)
     return {
-        'LGBM': lgb.LGBMRegressor(n_estimators=300, verbose=-1, random_state=seed,
-                                  n_jobs=N_THREADS),
-        'RF': RandomForestRegressor(n_estimators=150, n_jobs=N_THREADS, random_state=seed),
+        'LGBM': lgb.LGBMRegressor(random_state=seed, verbose=-1, n_jobs=N_THREADS, **lgbm),
+        'RF': RandomForestRegressor(random_state=seed, n_jobs=N_THREADS, **rf),
         'Ridge': Ridge(alpha=1.0),
     }
 
@@ -504,7 +525,17 @@ def self_check(X, y, scaffs):
 
 
 # --------------------------------------------------------------- the run
-def run(X, y, scaffs, rescale_to_exact_dose, conditions=None):
+def run(X, y, scaffs, rescale_to_exact_dose, conditions=None,
+        rows_path=None, shape_path=None):
+    """Every replicate is written to disk the moment it finishes.
+
+    This machine is shared and its load average has been over a hundred while this test
+    was running. A run that holds everything in memory until the end is a run whose
+    results are unreachable if it is interrupted, and this one was interrupted at five
+    hours with seven replicates computed and nothing on disk. Appending per replicate
+    means the analysis can be run against whatever has landed, and a restart resumes
+    from the cache rather than from nothing.
+    """
     t0 = time.time()
     rows, shape_rows = [], []
 
@@ -578,6 +609,16 @@ def run(X, y, scaffs, rescale_to_exact_dose, conditions=None):
                         r2=r2_score(yte, mdl.predict(Xb)), r2_clean=base[mn],
                     ))
             print(f"  [rep {rep}] level {level} done ({time.time() - t0:.0f}s)", flush=True)
+
+        # Append this replicate before starting the next one.
+        if rows_path is not None:
+            done = [r for r in rows if r['replicate'] == rep]
+            pd.DataFrame(done).to_csv(rows_path, mode='a', index=False,
+                                      header=not os.path.exists(rows_path))
+        if shape_path is not None and shape_rows:
+            pd.DataFrame([r for r in shape_rows if r['replicate'] == rep]).to_csv(
+                shape_path, mode='a', index=False, header=not os.path.exists(shape_path))
+            shape_rows = [r for r in shape_rows if r['replicate'] != rep]
 
     return pd.DataFrame(rows), pd.DataFrame(shape_rows)
 
@@ -851,7 +892,12 @@ def main():
     if args.self_check:
         return
 
-    df, shape = run(X, y, scaffs, rescale_to_exact_dose=False)
+    os.makedirs(os.path.dirname(OUT_ROWS), exist_ok=True)
+    for path in (OUT_ROWS, OUT_SHAPE):
+        if os.path.exists(path):
+            os.remove(path)
+    df, shape = run(X, y, scaffs, rescale_to_exact_dose=False,
+                    rows_path=OUT_ROWS, shape_path=OUT_SHAPE)
 
     # Guard 9: assert the row count, a condition that produced no rows must fail loudly.
     expected = len(CONDITIONS) * len(LEVELS) * len(MODELS) * N_REPLICATES
@@ -866,14 +912,12 @@ def main():
     LEVELS = [max(saved)]
     df_exact, shape_exact = run(
         X, y, scaffs, rescale_to_exact_dose=True,
-        conditions=[c for c in CONDITIONS if c[0] in EXACT_DOSE_CONDITIONS])
+        conditions=[c for c in CONDITIONS if c[0] in EXACT_DOSE_CONDITIONS],
+        rows_path=OUT_ROWS, shape_path=OUT_SHAPE)
     LEVELS = saved
 
-    df = pd.concat([df, df_exact], ignore_index=True)
-    shape = pd.concat([shape, shape_exact], ignore_index=True)
-    os.makedirs(os.path.dirname(OUT_ROWS), exist_ok=True)
-    df.to_csv(OUT_ROWS, index=False)
-    shape.to_csv(OUT_SHAPE, index=False)
+    df = pd.read_csv(OUT_ROWS)
+    shape = pd.read_csv(OUT_SHAPE)
     print(f"\nwrote {OUT_ROWS} ({len(df)} rows) and {OUT_SHAPE}", flush=True)
 
     primary = df[df.dose_mode == 'algebraic']

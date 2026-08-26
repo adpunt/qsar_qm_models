@@ -251,6 +251,16 @@ across conditions rather than special-casing one. Concretely, gate 1 of `RERUN_P
 2. the **mean** realised dose over at least 20 seeds is within tolerance of `τ`, and of every other
    condition's.
 
+⚠️ **Twenty seeds is not enough, and the gate built on it failed at random.** Measured by chat G on
+2026-08-26 against 3,200 real QM9 training labels with real scaffold groups: the per-run spread of
+the delivered dose is 1.3% for Gaussian, **3.9% for grouped-shifted and 6.9% for Student-t ν = 3**.
+Over twenty seeds those two conditions' means therefore wander by ±0.9% and ±1.5%, and the 3% flat-
+dose criterion is breached by sampling noise alone — it reported a 3.39% spread and failed, on labels
+where 400 seeds put grouped-shifted at **+0.03% ± 0.19%**, exactly on target. The gate now averages
+**200 seeds** and the same labels give 1.29%. The companion gate that checks Student-t nests Gaussian
+at ν → ∞ had the same defect in sharper form — it compared a *single* draw against a single draw, so
+it failed about a quarter of the time — and now averages 50. Both are in `rust/src/main.rs`.
+
 The per-run spread — roughly ±5% for grouped-shifted on QM9 — is then a number the Methods states,
 not a check that fails.
 
@@ -1231,6 +1241,58 @@ noise-robustness benchmark has established it.
 ⚠️ Same caveats as §5.3b: QM9 has no real assay limit, so censoring here is imposed rather
 than observed, and clipping the top of the range removes label range as well as corrupting
 values. Both need confirming on the experimental datasets, where censoring is real.
+
+### 5.6 ✅ The two new conditions, verified on real labels — chat G, 2026-08-26
+
+`scripts/setting_selection_test.py --self-check`, on the training half of a 4,000-molecule QM9
+subsample: 3,200 labels, 1,416 scaffold groups after rule 2, label spread 1.299 eV.
+
+**Every condition delivers what it was asked for.** Mean realised dose over 24 draws, as a fraction
+of target, at each of the three levels tested (identical across levels, as the algebra requires —
+the scale map is linear in the knob):
+
+| Condition | Realised ÷ target − 1 | Per-run SD |
+|---|---|---|
+| Gaussian | −0.00% | 0.91% |
+| Student-t ν = 10 | +0.36% | 1.20% |
+| Student-t ν = 5 | −0.38% | 1.98% |
+| Student-t ν = 3 | +1.33% | **16.18%** |
+| Laplace | −0.82% | 2.00% |
+| Outlier p = 1% | +0.48% | 1.57% |
+| Outlier p = 5% | +0.04% | 2.03% |
+| Outlier p = 10% | +0.21% | 1.86% |
+| Grouped — wider | +0.36% | 1.74% |
+| Grouped — shifted | +0.46% | 4.28% |
+| Skewed draw *(proposed)* | −0.14% | 2.53% |
+
+**Grouped — shifted does what it was added to do.** Its per-run mean label shift ranges from −0.117
+to +0.085 eV against a target dose of 0.650, while Gaussian's ranges only −0.024 to +0.029 — a
+one-directional push about four times larger, at matched amount. Over 24 seeds the shift averages
+−0.003 eV, so the condition is zero-mean in the population and directional in every run, which is
+exactly the specification. **Do not "fix" the per-run shift.**
+
+**One number to expect and not be alarmed by.** The empirical between-group share of variance comes
+out **0.766**, not the nominal ρ = 0.62. That is rule 2 working: once acyclic molecules are
+singletons, a singleton group's "group mean" carries its own within-molecule term, which inflates the
+measured between-group share. The parameter is still the sourced 0.62.
+
+**Grouped — wider hits the fraction it is given.** 0.200 of *molecules* affected against a requested
+0.2, using the molecule-fraction selection rule rather than counting groups.
+
+### 5.7 🔵 The skewed draw — a chat G proposal, not yet in either injector
+
+§13.3 of `RERUN_PLAN.md` rejected a skewed *draw* for the three experimental datasets, on the sound
+argument that log-scale potency error is symmetric. The condition below exists to measure what that
+rejection costs on QM9, which is computed rather than measured and so has no assay to justify any
+shape. **It is implemented only in the local screen.** If it does not separate from Gaussian at
+matched amount, it never needs to enter either injector.
+
+> Centred Gamma: `ε = ((g − a)/√a)·τ` with `g ~ Gamma(a, 1)`. Mean zero, variance `τ²`, skewness
+> `2/√a`. At `a = 1` the sample skewness on real labels came out **+2.26** against the target +2.00,
+> with a mean shift of −0.017 eV on a dose of 0.650.
+
+One parameter, exact dose match in the population, and it nests nothing — which is the point: it is
+the only condition in the set that is asymmetric *by draw* rather than by mechanism.
 
 ### 5.4 🔴 Two analysis errors of mine, recorded so they do not resurface
 

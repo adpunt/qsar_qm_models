@@ -3334,6 +3334,71 @@ type are worth cluster time — and whether a skewed condition is needed (§13.3
 contamination fractions. Run every setting and there are nine conditions, not six — the largest
 single multiplier on the grid, larger than the replicate count.
 
+**🔵 IN PROGRESS 2026-08-26.** The harness is `scripts/setting_selection_test.py`, committed. What
+it has already established is below; the accuracy verdict per setting is the run itself and lands in
+§13.9.
+
+##### What this test does that the earlier pilots did not
+
+- **The replicate spread is the real one.** `scripts/pilot_noise_arms.py` and
+  `scripts/noise_range_finding.py` both hold the molecule subsample, the scaffold split and the
+  model seeds fixed across replicates, so their only source of variation is the noise draw. The real
+  pipeline re-derives all of it per replicate — `iteration_seed` (`process_and_train.py:1871`) seeds
+  a `torch.randperm` shuffle inside `split_qm9` (`:609-631`). The decision rule here is "the effect
+  must clear the replicate spread", so it was being run against the wrong denominator. Every
+  replicate now draws a fresh subsample and a fresh split.
+- **It screens the models the cluster will run.** The two tree models take their settings from
+  `models/model_defaults.py`, the file both pipelines now read — 100 trees at `max_features = 0.3`,
+  not the pilots' 150 trees at scikit-learn's every-feature default.
+- **It reports what it could have detected.** Every contrast carries the smallest true difference it
+  would find at 80% power. The differences at stake are known to be under 0.02 R², so a null result
+  without the test's own resolution beside it says nothing.
+- **The accuracy floor is declared, not silent** — guard 8 of §0.6. Every verdict is computed with
+  and without it, and the run says so if the two disagree.
+
+##### 🔴 Two launch gates in the Rust injector failed at random — found here, fixed
+
+Running the new harness's labels through `rust_processor --self-test` (3,200 real QM9 training
+labels, real scaffold groups) failed two of chat A's gates on data where the injector is in fact
+correct. Both were under-powered rather than wrong, and both are now fixed and committed:
+
+| Gate | Why it failed | Fix |
+|---|---|---|
+| Flat dose across noise types | Averaged **20 seeds**. Per-run dose spread is 1.3% for Gaussian but **3.9% for grouped-shifted and 6.9% for Student-t ν = 3**, so their means wander by ±0.9% and ±1.5% and the 3% spread criterion is breached by sampling noise alone. It reported 3.39% and failed, on labels where 400 seeds put grouped-shifted at **+0.03% ± 0.19%** — exactly on target | 200 seeds. Same labels now give a 1.29% spread, and every condition passes |
+| Student-t nests Gaussian at ν → ∞ | Compared **one** Gaussian draw against **one** t draw. Two independent draws wobble by ~1.8% against a 2% threshold, so it fails about a quarter of the time; it reported +2.21% | Averaged over 50 seeds: mean dose gap +0.38%, tail fractions 0.29% vs 0.28% |
+
+**A launch gate that fails at random is worse than no gate, because the next person turns it off.**
+Both fixes are in `rust/src/main.rs`; `cargo test --release` passes 15 + 4 tests.
+
+##### 🔴 Rule 2 of `NOISE_DESIGN.md` §2a applies to the SPLIT, not only to the noise
+
+The empty Murcko scaffold is a third of QM9. The rule that acyclic molecules become singleton groups
+was written for the noise; it matters just as much for the split, because a splitter that treats them
+as one group can put that whole chemical class on one side. Measured here, on the same subsample:
+clean R² of **0.83 / 0.79 / −0.40** (LightGBM / random forest / ridge) against the **0.92 / 0.92 /
+0.90** the range-finding run reports. Splitting on the singleton-corrected grouping restores it and
+holds the largest group under 4% of molecules.
+
+⚠️ **And a related finding the real run has to expect.** Even with that corrected, one replicate in
+twelve handed ridge a scaffold split it could not fit at all — **clean R² = −16.99**. That is not a
+bug; it is what a linear model does on a genuinely disjoint scaffold split. It is also exactly the
+situation guard 8 exists for, and it is a live risk for the catastrophic-run filter in the real
+analysis: a filter that silently deletes such replicates biases unstable configurations upward.
+
+##### An inconsistency in §13.1's cost table, found while pricing the options
+
+The stage 0 row is priced at **1,482 runs**, which is 78 × 19 × 1 — the *same nineteen*
+level-conditions as stage 1, i.e. three noise types plus the clean level. Its description says
+"Gaussian and censoring", which is thirteen conditions and **1,014 runs**. The pricing is the
+coherent one, because stage 0 is reused as replicate 0 of stage 1 and that reuse only works if it
+runs the same conditions; the description is what is wrong. This bears directly on open item 3 —
+which noise types run at full grid in stage 1.
+
+The 78 combinations are 13 models × 6 representations. `slurm_scripts_qm9_rerun/RUNBOOK.md` says 14
+models (11 for the decomposition, plus the quantile forest and *two* Gaussian processes) — that
+count predates §10b.2, which keeps Tanimoto as **evidence on two fingerprint representations rather
+than a second model in the roster**. 13 is right; the runbook line is stale.
+
 > **Prompt.** Run a short local test on real QM9 to decide how many settings of each noise type earn
 > cluster time. The candidate settings are in `NOISE_DESIGN.md` §2: Student-t at ν = 10, 5 and 3, and
 > Outlier at 1%, 5% and 10%. Existing local scripts to build on: `scripts/pilot_noise_arms.py`,
