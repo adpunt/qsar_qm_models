@@ -1374,10 +1374,19 @@ NoiseInjectorRegression(strategy=..., distribution=..., random_state=..., **para
 - `unit_dose(scales, **p) -> G` — `√(mean(scale²)) × shape_unit_sd`; `solved = τ / G`
 - `inject_verbose(y, dose, groups=, reference=) -> InjectionResult` — carries every provenance field
   in `RERUN_PLAN.md` §5.2, and unpacks as `(y_noisy, noise_scale, epsilon)` for existing callers
-- `noise_scale(y, dose, reference=, groups=)` — **keep this surface.** It scores held-out molecules
-  against the pattern the *training* labels were exposed to, and the uncertainty confound control is
-  built on it. Under the new set it is constant for the three shape-only conditions, so the "where is
-  the noise" question is **undefined** there rather than answered with zero; the result flags that
+- `noise_scale(y, dose, reference=, groups=, reference_groups=)` — **keep this surface.** It scores
+  held-out molecules against the pattern the *training* labels were exposed to, and the uncertainty
+  confound control is built on it. Two references, and **both are needed**: `reference` fixes any
+  label cut-point (censoring's limit), and `reference_groups` fixes *which groups were selected*.
+  Without the second the selection is re-run over the held-out molecules' own groups and picks a
+  different set — measured on a 40-group split, two of the eight groups corrupted in training went
+  unmarked — so question B would be scored against an injection that never happened, for exactly the
+  conditions §3.2 identifies as the only ones with a pattern to find.
+
+  Under the new set the scale is constant for the three shape-only conditions **and for
+  grouped-shifted**, whose group offsets are all drawn from one distribution, so every molecule is
+  equally affected and what differs by group is the direction rather than a magnitude. For those
+  four the "where is the noise" question is **undefined**, not zero, and the result says so
   (`scale_is_degenerate`) instead of returning a silent constant
 - `CONDITIONS` — one registry name per run condition (`gaussian`, `student_t_nu5`, `grouped_shifted`,
   `outlier_p05`, `censoring_25`, …), so a job script, a results row and a figure label agree

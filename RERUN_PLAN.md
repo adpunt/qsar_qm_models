@@ -2760,11 +2760,41 @@ the `effective_n` formula wrong in *both* (§2.3a, applied in all three 2026-08-
 reporting a limit at its clean baseline, censoring encoding its fraction twice so a "level 0" run
 still clipped, and the Python solver matching the first moment (§2.3b).
 
+**A fifth, found on the close-out pass, and it is the worst of them.** `noise_scale` re-ran the
+group selection over whatever group array it was handed, so the pattern a *held-out* molecule was
+scored against described a different set of groups from the one training was actually corrupted in
+— measured on a 40-group split, two of eight corrupted groups went unmarked. That is question B,
+for exactly the conditions §3.2 identifies as the only ones with a pattern to find. Fixed by a
+`reference_groups` argument, wired through both runners, and pinned by a test that fails if it is
+dropped. Also on that pass: `grouped_shifted` returned a constant per-molecule scale while
+reporting `scale_is_degenerate` as False — the flag now agrees with the array.
+
 **One more, found while reading the pipeline rather than by the gate.** The confound control's
 "level-invariant noise pattern" was not level-invariant: the scale map drew from the same generator
 as the noise, so recomputing it gave a different pattern each time and the zero-noise subtraction
 compared two different patterns. Fixed in `noiseInject` — the selection now draws from a separately
 seeded generator (§3.3).
+
+**Verification, all run locally on the close-out pass 2026-08-26.**
+
+| Check | Result |
+|---|---|
+| `pytest tests/` in `NoiseInject` | **55 pass** |
+| `python scripts/crosscheck_injectors.py` | **342/342**, on all 133,885 real QM9 labels |
+| The gate actually fails | sabotaging the dose solver → **40 of 154 fail, exit code 1**; a condition present in one implementation but not the other → fails **by name**, not silently skipped |
+| `tests/smoke/smoke_nine_fixes.py` | all pass |
+| `tests/smoke/smoke_uncertainty_patch.py` | all pass, including out-of-fold error exceeding in-sample by 59% and censoring's confound-subtracted effect of −0.656 |
+| `tests/experiments/noise/_smoke_noisy_search.py` | sections 1–5 pass. **Section 6 fails for an unrelated reason** — it asserts on a SQLite `result_db` that is not written at all any more, including for its own *clean* run, and `~/.cache/kirby/` has no `result_db` either. `find_best_hybrid.py` and `hybrid.py` are being changed by another chat. Not noise |
+| Held-out labels bit-identical across every level | ✅ every condition; the caller's training array is not mutated either |
+| Determinism across processes | ✅ identical seeds and identical draws under three `PYTHONHASHSEED` values — `zlib.crc32`, not `hash()`, which python randomises per process |
+| The solved scale hits the target exactly | worst relative error **2.2e-16** across levels 0.01–3.0 × the label spread |
+| The shapes are the distributions they claim | Kolmogorov–Smirnov against the theoretical law: gaussian p = 0.56, Student-t ν = 10/5/3 p = 0.51/0.45/0.52. Laplace read p = 0.002 on one seed and was checked over twelve — 1 of 12 below 0.05, exactly chance, with mean, spread, skew and kurtosis all on theory. Not a defect |
+| Hostile inputs | a constant label column, a single label, one single group, a negative dose, a censored fraction of 1.0 — each either handled and recorded, or refused |
+
+**`noise_spec.py`'s two guaranteed properties, which chat B's prompt named** — a fresh generator per
+call, and one realisation over the whole label column subset per fold — **are both intact**, checked
+directly. The pipeline does not go through that module and never had the second; that is measured
+and handed to you in §3.3a rather than changed unilaterally.
 
 **🔴 Left broken deliberately, and this is chat B's one incomplete edge.** The breaking change
 raises `ValueError` on the old strategy names wherever they are still used. Inside this study,
