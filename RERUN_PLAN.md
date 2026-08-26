@@ -2797,6 +2797,13 @@ call, and one realisation over the whole label column subset per fold — **are 
 directly. The pipeline does not go through that module and never had the second; that is measured
 and handed to you in §3.3a rather than changed unilaterally.
 
+**🔴 One more for chat F, found in `noiseInject/uncertainty.py` on the close-out pass.** The comment
+beside the pooled uncertainty-noise correlation read *"this pooled value is the paper's
+noise-tracking metric"* — which is failure mode 1 in §0.6, endorsed in the package's own source. The
+false claim is gone and the two values are now labelled so neither can be reported under the other's
+description, but **which one the paper reports is chat F's and chat J's**, not chat B's. The
+per-level `unc_noise_rho` already exists in `per_sigma_df` and is the one §3.5 established.
+
 **🔴 Left broken deliberately, and this is chat B's one incomplete edge.** The breaking change
 raises `ValueError` on the old strategy names wherever they are still used. Inside this study,
 everything is updated. Outside it, **ten KIRBy scripts belonging to other studies still name them**:
