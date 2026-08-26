@@ -1219,6 +1219,56 @@ it lands on QM9 and the experimental datasets at once. ⚠️ **It invalidates e
 and quantile-forest result, QM9's included.** Everything is being re-run, so the cost is zero, but
 this is a change to the main study and not only an alignment.
 
+#### ✅ 3.4.4f SETTLED 2026-08-26 — the paper reports RAW uncertainty
+
+The author could not choose from argument — *"I don't know the right thing to do. Can you test
+which works the best?"* — so `scripts/parity_test_calibration.py` measured it. 3,000 QM9 molecules,
+70/15/15 scaffold split, 3 seeds, four uncertainty models, noise levels 0 / 0.5 / 1.0, 36 fits,
+with the rule fixed in the docstring before the run. Numbers from
+`results/parity_tests/calibration_n3000.csv`.
+
+**Calibration works in the narrow sense.** The multiplier moved test coverage closer to nominal in
+**all twelve** model × noise-level cells, sometimes dramatically — the Gaussian process goes from
+0.864 to 0.682 against a nominal 0.683. No fit hit the `[0.1, 10]` bound.
+
+**And it is still the wrong number to lead with, for a reason that is not a matter of taste.** The
+multiplier is refitted at each noise level, so calibrated coverage is nominal at each level *by
+construction*. The span of coverage **across** noise levels collapses:
+
+| | raw, σ = 0 / 0.5 / 1.0 | span | calibrated | span |
+|---|---|---|---|---|
+| NGBoost | 0.546 → 0.876 → 0.978 | **0.432** | 0.637 → 0.658 → 0.686 | 0.049 |
+| quantile forest | 0.799 → 0.929 → 0.956 | **0.157** | 0.740 → 0.733 → 0.737 | **0.006** |
+| Gaussian process | 0.864 → 0.857 → 0.840 | 0.025 | 0.682 → 0.668 → 0.643 | 0.039 |
+| Bayesian network | 0.628 → 0.642 → 0.603 | 0.039 | 0.681 → 0.714 → 0.723 | 0.043 |
+
+The raw column says something: NGBoost's and the quantile forest's intervals become far too wide as
+noise rises. The calibrated column says nothing, because it was fitted not to. **Any claim about
+how uncertainty *responds* to noise must be read off raw, or it is circular.**
+
+**The multiplier is not a property of the model either.** For NGBoost it goes 1.20 → 0.56 → 0.37
+across noise levels — a spread of 0.83 against a seed spread of 0.07, twelve times over — and every
+one of the three seeds shows the same monotone collapse, so it is systematic rather than noise. The
+quantile forest is five times its seed spread. A correction that has to be refitted per condition
+is a per-run fudge.
+
+**Both rank-based uncertainty questions are unaffected**, confirmed rather than assumed: the maximum
+difference in Spearman(uncertainty, |error|) across all 36 fits was exactly **0.0**.
+
+**The honest caveat, which belongs in the paper.** Raw coverage *is* poor — the Gaussian process
+sits at 0.86 against a nominal 0.68, the quantile forest reaches 0.96. That is the finding, not a
+failure to report. Say it, and report the calibrated column beside it as what a single post-hoc
+multiplier would buy.
+
+⚠️ **A defect in the instrument, found after the run and worth recording.** The script carried two
+operationalisations of "does the multiplier drift materially" and **they disagreed on this data**:
+a relative test (drift greater than three times the seed spread) flagged NGBoost and the quantile
+forest, while an absolute ceiling of 1.0 — a number written into the code without justification —
+passed everything. Neither was chosen silently. The script now prints both and takes the tie-break
+from the flatness table above, which does not depend on either threshold. A second defect in the
+same file: re-running the report against a saved CSV reported "every fit failed", because an empty
+`failed` cell reads back as `NaN` rather than `''`. Both fixed.
+
 #### 3.4.4d The quantile forest cannot be fitted in the local environment
 
 `quantile_forest` 1.4.1 and scikit-learn 1.3.2 disagree on a constructor parameter, and every fit
@@ -1369,7 +1419,7 @@ two have been applied and one is answered by measurement:
 |---|---|---|---|
 | ~~**Forest feature sampling**~~ | ✅ **SETTLED 2026-08-26 by measurement — `0.3` on both.** Re-run at the author's request against a decision rule fixed before the run; see §3.4.4e. Applied in the shared spec | — |
 | ~~**Early stopping**~~ ✅ **SETTLED 2026-08-26 — roll back, both sides.** Applied in `train_nn` and in the experimental trainer, both reading `NEURAL_DEFAULTS['training']`. Proven on a real run: the DNN stopped at epoch 23 and restored epoch 13. The improvement test was aligned at the same time — QM9 required a 0.01 absolute drop in a **summed** validation loss, so its threshold scaled with the batch count | Keep the last epoch, or roll back to the best? | QM9 counts twenty epochs of no improvement and then returns *that* epoch's weights. The experimental side snapshots and restores the best. Those twenty extra epochs are spent memorising injected corruption, and more of it at higher noise — so **QM9's neural degradation curves are steeper for a procedural reason, pointing the same way as the finding** | **Roll back, both sides.** It is what almost everyone means by early stopping. Caveat: it means selecting on validation labels, which under decision 2 would be noisy — but that is correct, since nobody gets clean labels when deciding when to stop |
-| **Uncertainty calibration** | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
+| ~~**Uncertainty calibration**~~ ✅ **SETTLED 2026-08-26 by measurement — RAW as primary**, calibrated kept as a labelled secondary. See §3.4.4f. Set in the shared spec as `UNCERTAINTY_DEFAULTS['primary_column']`; the figure script must now name the column it reads (chat J) | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
 | **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | ✅ **SETTLED 2026-08-26 — standardise.** Approved as part of chat C's plan and implemented: `CONTINUOUS_REPS` in `process_and_train.py` now covers PDV and all three learned embeddings, fitted on the training split. It changes every embedding number, which is why it is recorded here rather than left implicit |
 
 **Decision 4 — sign off the noise design.**
@@ -2469,7 +2519,7 @@ Specifically, in every chat:
 | **B** | Noise redesign in the Python injector, and the cross-check | A, for the spec | ✅ **yes** — the specification is settled, so it can be written alongside A |
 | **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
 | **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **DONE 2026-08-26** |
-| **E** | Cross-pipeline parity | — | ✅ **yes** — but check what another session already did |
+| **E** | Cross-pipeline parity | — | ✅ **DONE 2026-08-26** |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
 | **G** | Local test: which noise settings earn their place | A | ✅ **yes** — it tests the settings, not the implementation |
 | **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ + B C E G + §13.1 | ❌ blocked |
@@ -2812,7 +2862,46 @@ still carry the pre-redesign CLI flags, so chat H regenerates them. The environm
 
 ---
 
-#### Chat E — Cross-pipeline parity
+#### Chat E — Cross-pipeline parity ✅ DONE 2026-08-26
+
+**Delivered.** Parity is now structural rather than checked: `models/model_defaults.py` is the one
+copy of every shared default and **both pipelines import it** (§3.4.5). One edit moves both studies
+— demonstrated by the forest change, after which both reported the new hash `67f1b96564b9` from a
+single line.
+
+| | Executed check | Result |
+|---|---|---|
+| parity | both pipelines resolve one spec | ✅ same hash, at import **and** in the results files they write |
+| the fix cannot be silently removed | `--self-test` | ✅ exits 1 on a changed learning rate and on a changed tree count, restores the file |
+| library drift | effective parameters vs a recorded baseline | ✅ 0 differences |
+| QM9 end to end | forest and neural, provenance columns | ✅ |
+| experimental end to end | hERG, 10 rows | ✅ same spec hash as QM9 |
+| neural change | a real run | ✅ stopped at epoch 23, **restored epoch 13** |
+
+**Six differences fixed that the hand audit never listed** (§3.4.4c): batch size 64 vs 32; QM9
+returning the last epoch; an improvement test comparing a *summed* validation loss against an
+absolute tolerance; a Gaussian-process `outputscale` computed and never applied; NGBoost's
+distribution and score passed on one side only; and a Gaussian-process fallback that existed on one
+side and not the other, recorded nowhere.
+
+**Two settings decided by measurement, not argument**, each against a rule fixed before the run:
+forest feature sampling → `0.3` on both (§3.4.4e), and raw uncertainty as the primary column
+(§3.4.4f). Both contradicted a prior recommendation; both are quoted from the CSVs in
+`results/parity_tests/`.
+
+**Found on the way, and the most consequential thing in this chat: §2.8e**, a segfault that kills
+every Gaussian-process task on both pipelines wherever the boosting libraries share a process with
+PyTorch. Not fixed in the pipelines — the right fix depends on the cluster — but it is now
+detected by the preflight instead of being invisible.
+
+**Handed to chat J:** name the uncertainty column the analysis reads, never pool rows with
+different `gp_fit_method`, and carry `spec_hash` into captions.
+
+**Still open, and not this chat's:** the three representation-identity defects in §3.4.1. No
+parameter diff can see them; they are printed at the end of every audit run so they cannot be
+forgotten.
+
+<details><summary>Original brief</summary>
 
 🔴 **The author reports this is being worked on in another session. Re-assess its state before
 starting; do not duplicate it.**
@@ -2851,6 +2940,8 @@ remove the Gaussian-process cap, and repeat seeds on the experimental side.
 > warning. Three alignment choices are the author's and are listed in §4 decision 3b — ask once,
 > recommend, and do everything else meanwhile. Finish by wiring the audit into the preflight so a
 > drifted parameter or a missing package stops the queue. Do not touch `paper.tex`.
+
+</details>
 
 ---
 

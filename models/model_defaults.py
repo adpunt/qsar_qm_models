@@ -228,7 +228,29 @@ BAYESIAN_DEFAULTS = {
 
 UNCERTAINTY_DEFAULTS = {
     # Which column the analysis treats as "the model's uncertainty".
-    # Set by scripts/parity_test_calibration.py -- see RERUN_PLAN.md section 3.4.3.
+    #
+    # 'raw' -- MEASURED, by scripts/parity_test_calibration.py, 36 fits.
+    # Calibration does work in the narrow sense: it moved test coverage closer
+    # to nominal in all twelve model x noise-level cells. But the multiplier is
+    # REFITTED at each noise level, so calibrated coverage is nominal at each
+    # level by construction, and the span of coverage ACROSS noise levels
+    # collapses:
+    #     NGBoost   raw 0.546 -> 0.876 -> 0.978 (span 0.432)
+    #               cal 0.637 -> 0.658 -> 0.686 (span 0.049)
+    #     QRF       raw 0.799 -> 0.929 -> 0.956 (span 0.157)
+    #               cal 0.740 -> 0.733 -> 0.737 (span 0.006)
+    # The raw column says these models' intervals become far too wide as noise
+    # rises. The calibrated column says nothing, because it was fitted not to.
+    # Anything the paper claims about how uncertainty RESPONDS to noise has to
+    # be read off raw, or it is circular.
+    #
+    # Both rank-based uncertainty questions are unaffected either way: the
+    # maximum difference in Spearman(uncertainty, |error|) across all 36 fits
+    # was exactly 0.0.
+    #
+    # Honest caveat that belongs in the paper: raw coverage IS poor. The
+    # Gaussian process sits at 0.86 against a nominal 0.68, the quantile forest
+    # reaches 0.96. That is the finding, not a failure to report.
     'primary_column': 'raw',
     # Temperature calibration: one multiplier fitted by Gaussian negative log
     # likelihood on a carve-out of validation (scripts/utils.py:323).

@@ -294,7 +294,10 @@ NOMINAL_1SD, NOMINAL_2SD = 0.6827, 0.9545
 
 
 def report(df):
-    ok = df[df.failed == ''] if 'failed' in df else df
+    # An empty 'failed' cell reads back from CSV as NaN, not '', so comparing
+    # against '' silently dropped every successful row when the report was run
+    # on a saved file rather than in the same process.
+    ok = df[df.failed.isna() | (df.failed == '')] if 'failed' in df else df
     if not len(ok):
         print('every fit failed — nothing to report')
         return pd.DataFrame()
@@ -338,24 +341,64 @@ def report(df):
     print('  confirms the multiplier cannot change either rank-based answer'
           if d.max() < 1e-9 else '  ⚠ ranking moved — investigate')
 
+    # Is calibrated coverage flat across noise levels? It is fitted to be
+    # nominal at each level, so if it is, then "coverage versus noise level" --
+    # something the paper reports -- is uninformative when read off that column.
+    print('\n' + '=' * 78)
+    print('IS CALIBRATED COVERAGE FLAT BY CONSTRUCTION?')
+    print('=' * 78)
+    spans = {}
+    for model, g in ok.groupby('model'):
+        raw = g.groupby('sigma').cov_raw_1sd.mean()
+        cal = g.groupby('sigma').cov_cal_1sd.mean()
+        spans[model] = (raw.max() - raw.min(), cal.max() - cal.min())
+        print(f'  {model:8s} raw coverage across noise levels '
+              + ' '.join(f'{v:.3f}' for v in raw)
+              + f'  (span {spans[model][0]:.3f})')
+        print(f'  {"":8s} calibrated                       '
+              + ' '.join(f'{v:.3f}' for v in cal)
+              + f'  (span {spans[model][1]:.3f})')
+
     print('\n' + '=' * 78)
     print('VERDICT against the rule fixed before the run')
     print('=' * 78)
     all_closer = bool(piv.cal_closer.all())
-    drifts = {m: (g.groupby('sigma').temperature.mean().max()
-                  - g.groupby('sigma').temperature.mean().min())
-              for m, g in ok.groupby('model')}
-    worst_drift = max(drifts.values())
-    print(f'  calibrated closer to nominal in every model x noise level: {all_closer}')
-    print(f'  largest drift of the multiplier across noise levels: {worst_drift:.2f}')
-    if all_closer and worst_drift <= 1.0:
-        print('  => CALIBRATED is defensible as the primary number.')
+    print(f'  1. calibrated closer to nominal in every model x noise level: {all_closer}')
+
+    # "Does it drift materially" has two readings, and on 2026-08-26 they
+    # DISAGREED on the same data. Both are printed; neither is silently chosen.
+    drifters = []
+    for model, g in ok.groupby('model'):
+        by_sigma = g.groupby('sigma').temperature.mean()
+        drift = by_sigma.max() - by_sigma.min()
+        seed_sd = g.groupby('sigma').temperature.std().mean()
+        if drift > 3 * max(seed_sd, 1e-9):
+            drifters.append((model, drift, seed_sd))
+    worst = max((g.groupby('sigma').temperature.mean().max()
+                 - g.groupby('sigma').temperature.mean().min())
+                for _, g in ok.groupby('model'))
+    print(f'  2a. relative test - drift larger than 3x the seed spread: '
+          f'{len(drifters)} model(s) drift'
+          + (': ' + ', '.join(f'{m} ({d:.2f} vs {s:.2f})' for m, d, s in drifters)
+             if drifters else ''))
+    print(f'  2b. absolute test - largest drift {worst:.2f} against an arbitrary '
+          f'ceiling of 1.0: {"pass" if worst <= 1.0 else "fail"}')
+
+    print()
+    if not all_closer:
+        print('  => RAW as primary: the multiplier does not even transfer.')
+    elif drifters:
+        print('  => RAW as primary, calibrated as a clearly-labelled secondary.')
+        print('     Criterion 1 passes decisively and criterion 2a fails, so the')
+        print('     two readings conflict. The tie-break is not a threshold: the')
+        print('     multiplier is REFITTED at each noise level, so calibrated')
+        print('     coverage is nominal at each level BY CONSTRUCTION -- see the')
+        print('     flatness table above. Anything the paper says about how')
+        print('     uncertainty responds to noise has to be read off the RAW')
+        print('     column, or it is circular. Both rank-based questions are')
+        print('     unaffected either way.')
     else:
-        print('  => RAW as primary; calibrated kept as a labelled secondary column.')
-        if not all_closer:
-            bad = piv[~piv.cal_closer]
-            print('     it failed to transfer here:')
-            print(bad[['cov_raw_1sd', 'cov_cal_1sd']].round(4).to_string())
+        print('  => CALIBRATED is defensible as the primary number.')
     return piv.reset_index()
 
 

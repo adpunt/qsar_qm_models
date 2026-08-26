@@ -23,3 +23,6 @@ research_archive/**/*.xml
 # data/QM9/ by scripts/crosscheck_injectors.py, so they are derived, not source.
 scratchpad_crosscheck/
 rust/reference/target/
+
+# Derived feature caches for the parity tests - regenerate with the scripts
+results/parity_tests/_cache/

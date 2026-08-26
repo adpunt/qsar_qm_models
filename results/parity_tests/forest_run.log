@@ -1,0 +1,169 @@
+[KeOps] Warning : CUDA libraries not found or could not be loaded; Switching to CPU only.
+{
+  "python": "3.11.7",
+  "sklearn": "1.3.2",
+  "numpy": "1.26.4",
+  "scipy": "1.16.3",
+  "rdkit": "2022.09.5",
+  "xgboost": "2.1.4",
+  "lightgbm": "4.6.0",
+  "ngboost": "0.3.12.post2",
+  "quantile_forest": "1.4.1",
+  "torch": "2.2.2",
+  "gpytorch": "1.14.3",
+  "gauche": "0.1.6",
+  "botorch": "0.16.1",
+  "torchbnn": 1.2,
+  "threads": "unset"
+}
+
+NOTE quantile forest is EMULATED here: fit failed: ValueError: Invalid parameter 'monotonic_cst' for estimator DecisionTreeRegressor(max_features=1.0, random_state=0). Valid parameters are: ['ccp_alpha', 'criterion', 'max_depth', 'max_features', 'max_leaf_nodes', 'min_impurity_decrease', 'min_samples_leaf', 'min_samples_split', 'min_weight_fraction_leaf', 'random_state', 'splitter'].
+
+molecules 10000   label SD 1.3438 eV   scaffolds 841
+  descriptors  (10000, 208)
+  morgan       (10000, 2048)
+
+seed 0: train 8004  test 1996
+  descriptors sigma=0.0 RF  max_features=sqrt  R2=0.9202     4.9s
+  descriptors sigma=0.0 QRF max_features=sqrt  R2=0.9214  width=0.800 cov=0.715    22.2s
+  descriptors sigma=0.0 RF  max_features=0.3   R2=0.9294    18.8s
+  descriptors sigma=0.0 QRF max_features=0.3   R2=0.9280  width=0.678 cov=0.667    71.6s
+  descriptors sigma=0.0 RF  max_features=1.0   R2=0.9250    46.5s
+  descriptors sigma=0.0 QRF max_features=1.0   R2=0.9244  width=0.647 cov=0.640   160.4s
+  descriptors sigma=0.5 RF  max_features=sqrt  R2=0.9036     3.9s
+  descriptors sigma=0.5 QRF max_features=sqrt  R2=0.8980  width=1.638 cov=0.933    21.3s
+  descriptors sigma=0.5 RF  max_features=0.3   R2=0.9113    14.9s
+  descriptors sigma=0.5 QRF max_features=0.3   R2=0.9028  width=1.586 cov=0.935    58.7s
+  descriptors sigma=0.5 RF  max_features=1.0   R2=0.9012    39.5s
+  descriptors sigma=0.5 QRF max_features=1.0   R2=0.8917  width=1.552 cov=0.918   117.1s
+  morgan      sigma=0.0 RF  max_features=sqrt  R2=0.8592     5.5s
+  morgan      sigma=0.0 QRF max_features=sqrt  R2=0.8741  width=1.168 cov=0.716    22.2s
+  morgan      sigma=0.0 RF  max_features=0.3   R2=0.8937    23.4s
+  morgan      sigma=0.0 QRF max_features=0.3   R2=0.8912  width=0.715 cov=0.575    74.0s
+  morgan      sigma=0.0 RF  max_features=1.0   R2=0.8837    62.5s
+  morgan      sigma=0.0 QRF max_features=1.0   R2=0.8779  width=0.622 cov=0.513   280.3s
+  morgan      sigma=0.5 RF  max_features=sqrt  R2=0.8439     4.6s
+  morgan      sigma=0.5 QRF max_features=sqrt  R2=0.8420  width=1.668 cov=0.849    19.1s
+  morgan      sigma=0.5 RF  max_features=0.3   R2=0.8816    27.3s
+  morgan      sigma=0.5 QRF max_features=0.3   R2=0.8669  width=1.281 cov=0.794    75.1s
+  morgan      sigma=0.5 RF  max_features=1.0   R2=0.8669    74.6s
+  morgan      sigma=0.5 QRF max_features=1.0   R2=0.8538  width=1.260 cov=0.762   207.2s
+
+seed 1: train 8069  test 1931
+  descriptors sigma=0.0 RF  max_features=sqrt  R2=0.9282     1.9s
+  descriptors sigma=0.0 QRF max_features=sqrt  R2=0.9331  width=0.814 cov=0.768     9.7s
+  descriptors sigma=0.0 RF  max_features=0.3   R2=0.9368     6.0s
+  descriptors sigma=0.0 QRF max_features=0.3   R2=0.9367  width=0.689 cov=0.732    26.7s
+  descriptors sigma=0.0 RF  max_features=1.0   R2=0.9325    26.9s
+  descriptors sigma=0.0 QRF max_features=1.0   R2=0.9320  width=0.659 cov=0.685    69.4s
+  descriptors sigma=0.5 RF  max_features=sqrt  R2=0.9040     1.9s
+  descriptors sigma=0.5 QRF max_features=sqrt  R2=0.9017  width=1.685 cov=0.961    10.1s
+  descriptors sigma=0.5 RF  max_features=0.3   R2=0.9180     7.2s
+  descriptors sigma=0.5 QRF max_features=0.3   R2=0.9071  width=1.597 cov=0.962    34.6s
+  descriptors sigma=0.5 RF  max_features=1.0   R2=0.9093    33.1s
+  descriptors sigma=0.5 QRF max_features=1.0   R2=0.8979  width=1.563 cov=0.950   113.0s
+  morgan      sigma=0.0 RF  max_features=sqrt  R2=0.8592     7.4s
+  morgan      sigma=0.0 QRF max_features=sqrt  R2=0.8742  width=1.155 cov=0.763    28.0s
+  morgan      sigma=0.0 RF  max_features=0.3   R2=0.9003    25.4s
+  morgan      sigma=0.0 QRF max_features=0.3   R2=0.8978  width=0.666 cov=0.588    77.2s
+  morgan      sigma=0.0 RF  max_features=1.0   R2=0.8892    85.0s
+  morgan      sigma=0.0 QRF max_features=1.0   R2=0.8742  width=0.591 cov=0.539   207.0s
+  morgan      sigma=0.5 RF  max_features=sqrt  R2=0.8433     5.1s
+  morgan      sigma=0.5 QRF max_features=sqrt  R2=0.8398  width=1.692 cov=0.888    20.9s
+  morgan      sigma=0.5 RF  max_features=0.3   R2=0.8713    26.5s
+  morgan      sigma=0.5 QRF max_features=0.3   R2=0.8544  width=1.244 cov=0.791    81.1s
+  morgan      sigma=0.5 RF  max_features=1.0   R2=0.8541    70.3s
+  morgan      sigma=0.5 QRF max_features=1.0   R2=0.8208  width=1.194 cov=0.754   223.4s
+
+seed 2: train 8747  test 1253
+  descriptors sigma=0.0 RF  max_features=sqrt  R2=0.9315     2.9s
+  descriptors sigma=0.0 QRF max_features=sqrt  R2=0.9293  width=0.769 cov=0.780    13.0s
+  descriptors sigma=0.0 RF  max_features=0.3   R2=0.9301    10.0s
+  descriptors sigma=0.0 QRF max_features=0.3   R2=0.9302  width=0.617 cov=0.666    32.8s
+  descriptors sigma=0.0 RF  max_features=1.0   R2=0.9217    30.7s
+  descriptors sigma=0.0 QRF max_features=1.0   R2=0.9211  width=0.575 cov=0.619   103.0s
+  descriptors sigma=0.5 RF  max_features=sqrt  R2=0.9114     3.2s
+  descriptors sigma=0.5 QRF max_features=sqrt  R2=0.8996  width=1.761 cov=0.978    12.4s
+  descriptors sigma=0.5 RF  max_features=0.3   R2=0.9077     9.6s
+  descriptors sigma=0.5 QRF max_features=0.3   R2=0.8941  width=1.667 cov=0.971    32.8s
+  descriptors sigma=0.5 RF  max_features=1.0   R2=0.9029    35.6s
+  descriptors sigma=0.5 QRF max_features=1.0   R2=0.8874  width=1.640 cov=0.962    98.5s
+  morgan      sigma=0.0 RF  max_features=sqrt  R2=0.8513     5.4s
+  morgan      sigma=0.0 QRF max_features=sqrt  R2=0.8603  width=1.282 cov=0.836    24.0s
+  morgan      sigma=0.0 RF  max_features=0.3   R2=0.8945    30.1s
+  morgan      sigma=0.0 QRF max_features=0.3   R2=0.8741  width=0.702 cov=0.641    76.8s
+  morgan      sigma=0.0 RF  max_features=1.0   R2=0.8725    65.4s
+  morgan      sigma=0.0 QRF max_features=1.0   R2=0.8471  width=0.545 cov=0.508   146.4s
+  morgan      sigma=0.5 RF  max_features=sqrt  R2=0.8372     3.6s
+  morgan      sigma=0.5 QRF max_features=sqrt  R2=0.8293  width=1.822 cov=0.936    13.0s
+  morgan      sigma=0.5 RF  max_features=0.3   R2=0.8677    18.8s
+  morgan      sigma=0.5 QRF max_features=0.3   R2=0.8392  width=1.330 cov=0.848    54.4s
+  morgan      sigma=0.5 RF  max_features=1.0   R2=0.8480    54.2s
+  morgan      sigma=0.5 QRF max_features=1.0   R2=0.8235  width=1.256 cov=0.807   197.9s
+
+==============================================================================
+PAIRED DIFFERENCES vs max_features='sqrt' (QM9 today)
+==============================================================================
+QRF descriptors sigma=0.0  0.3   vs sqrt   delta R2 = +0.0037   wins 3/3   range +0.0009 .. +0.0066
+QRF descriptors sigma=0.0  1.0   vs sqrt   delta R2 = -0.0021   wins 1/3   range -0.0082 .. +0.0030
+QRF descriptors sigma=0.5  0.3   vs sqrt   delta R2 = +0.0015   wins 2/3   range -0.0055 .. +0.0054
+QRF descriptors sigma=0.5  1.0   vs sqrt   delta R2 = -0.0074   wins 0/3   range -0.0122 .. -0.0038
+QRF morgan      sigma=0.0  0.3   vs sqrt   delta R2 = +0.0181   wins 3/3   range +0.0138 .. +0.0236
+QRF morgan      sigma=0.0  1.0   vs sqrt   delta R2 = -0.0032   wins 1/3   range -0.0132 .. +0.0037
+QRF morgan      sigma=0.5  0.3   vs sqrt   delta R2 = +0.0164   wins 3/3   range +0.0099 .. +0.0249
+QRF morgan      sigma=0.5  1.0   vs sqrt   delta R2 = -0.0044   wins 1/3   range -0.0190 .. +0.0117
+RF  descriptors sigma=0.0  0.3   vs sqrt   delta R2 = +0.0055   wins 2/3   range -0.0014 .. +0.0092
+RF  descriptors sigma=0.0  1.0   vs sqrt   delta R2 = -0.0002   wins 2/3   range -0.0098 .. +0.0048
+RF  descriptors sigma=0.5  0.3   vs sqrt   delta R2 = +0.0060   wins 2/3   range -0.0038 .. +0.0140
+RF  descriptors sigma=0.5  1.0   vs sqrt   delta R2 = -0.0019   wins 1/3   range -0.0086 .. +0.0053
+RF  morgan      sigma=0.0  0.3   vs sqrt   delta R2 = +0.0396   wins 3/3   range +0.0345 .. +0.0432
+RF  morgan      sigma=0.0  1.0   vs sqrt   delta R2 = +0.0252   wins 3/3   range +0.0212 .. +0.0300
+RF  morgan      sigma=0.5  0.3   vs sqrt   delta R2 = +0.0321   wins 3/3   range +0.0281 .. +0.0377
+RF  morgan      sigma=0.5  1.0   vs sqrt   delta R2 = +0.0149   wins 3/3   range +0.0108 .. +0.0230
+
+==============================================================================
+MEAN FIT SECONDS
+==============================================================================
+family  rep          setting
+QRF     descriptors  0.3         42.9
+                     1.0        110.3
+                     sqrt        14.8
+        morgan       0.3         73.1
+                     1.0        210.4
+                     sqrt        21.2
+RF      descriptors  0.3         11.1
+                     1.0         35.4
+                     sqrt         3.1
+        morgan       0.3         25.2
+                     1.0         68.7
+                     sqrt         5.3
+
+==============================================================================
+QUANTILE FOREST — interval width and coverage at 1 sd (nominal 0.68)
+==============================================================================
+                           interval_width  coverage_1sd
+rep         sigma setting                              
+descriptors 0.0   0.3              0.6613        0.6884
+                  1.0              0.6271        0.6479
+                  sqrt             0.7946        0.7544
+            0.5   0.3              1.6168        0.9561
+                  1.0              1.5848        0.9431
+                  sqrt             1.6949        0.9575
+morgan      0.0   0.3              0.6942        0.6014
+                  1.0              0.5861        0.5202
+                  sqrt             1.2017        0.7716
+            0.5   0.3              1.2850        0.8113
+                  1.0              1.2364        0.7741
+                  sqrt             1.7275        0.8910
+
+==============================================================================
+DECISION RULE: win or tie on descriptors under noise, and do not lose on Morgan;
+               ties inside the seed spread go to the faster setting.
+==============================================================================
+  0.3    descriptors-under-noise ok=True   morgan ok=True   mean delta over all cells +0.0154
+  1.0    descriptors-under-noise ok=False   morgan ok=False   mean delta over all cells +0.0026
+  sqrt   is the baseline (delta 0 by construction)
+
+wrote /Users/apunt/repos/qsar_qm_models/results/parity_tests/forest_max_features_n10000.csv
+wrote /Users/apunt/repos/qsar_qm_models/results/parity_tests/forest_max_features_n10000_paired.csv
+total 3732s
