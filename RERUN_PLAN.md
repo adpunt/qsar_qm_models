@@ -148,6 +148,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 9 | Uncertainty job scripts | 🟠 written, superseded, and point at a possibly stale checkout | §13 chat G |
 | 10 | Parity audit script | 🟠 written; its literals were still being verified when the last session ended | §13 chat E |
 | 11 | Noise redesign in the pipelines | ✅ **BOTH DONE 2026-08-26** — Rust (chat A) and Python (chat B). The two are held together by an executable gate: `scripts/crosscheck_injectors.py`, 342 checks on all 133,885 real QM9 labels and real Murcko scaffold groups. Dose spread across conditions: **1.16% in Rust, 0.40% in Python**, against 0.49×–2.00× before | §13 chats A ✅, B ✅ |
+| 12b | The pipeline ignored the injector's exit code | ✅ **found and fixed 2026-08-26 (chat D, close-out pass)** — every hard failure in the Rust half wrote to a pipe nobody read, and a run that died partway trained on a noised training split against clean held-out splits. Gate: `scripts/test_failure_propagation.py` (§2.8g) | §13 chat D ✅ |
 | 12a | Records could be written short, and an unparseable SMILES crashed the binary | ✅ **fixed 2026-08-26 (chat D)** — all-or-nothing records, a null-pointer check RDKit's binding needed, and the reader now refuses to guess (§2.7) | §13 chat D ✅ |
 | 12 | Per-molecule rescaling of learned embeddings | ✅ **fixed 2026-08-26 (chat C)** — storage, widths and standardisation, with a guard that fails if any of the three is removed (§2.8c) | done |
 | 13 | Concurrent-task configuration race | ✅ **fixed 2026-08-26 (chat D)** — the configuration file is named per task and the binary has no default path; guarded by `scripts/test_config_isolation.py` (gate 10) and a test in `rust/tests/writer_guards.rs` | §13 chat D ✅ |
@@ -921,6 +922,45 @@ zero noise (`results/embedding_storage_retest/gp_fix_check.csv`):
 
 **Settings:** `init_lengthscale_from_data`, `lengthscale_probe_n`, `collapse_fraction` in
 `models/model_defaults.py`. **New results column:** `gp_collapsed`.
+
+### 2.8g ✅ FIXED 2026-08-26 (chat D) — every guard in the Rust half was decorative
+
+**Found on the close-out pass, after the author asked for another look. This is the most
+consequential thing chat D found, and it invalidates the confidence of everything above it that
+was said before it was fixed.**
+
+`process_and_run` ran the injector with `subprocess.Popen`, called `communicate()`, printed
+stdout and stderr — and **never looked at the return code**. It then reopened the memory-mapped
+files and trained on whatever was on disk.
+
+So every hard failure the redesign added wrote to a pipe nobody read: chat A's dose gates and
+molecule-identity assertion, the held-out checks, chat D's featurisation abort and truncated-record
+error, the configuration that will not open, and a segmentation fault alike. The binary refused;
+the pipeline did not notice.
+
+**It is worse than a lost message.** `preprocess_data` renames the rewritten training file over
+the original **before** it processes val and test. A run that dies partway therefore leaves the
+training split noised and the held-out splits clean — and the pipeline trains and scores on that
+combination without complaint, producing numbers that look entirely reasonable and are not.
+
+**Two more layers underneath.** The noise-level handler printed only `if logging:` — off by
+default — and then `continue`. A noise level that failed produced **no rows and no message**.
+That is precisely the shape of jobs `12822693` / `12822694` (§2.8d), sitting unnoticed in the QM9
+pipeline. The per-(representation, model) handler printed but carried on.
+
+**Fixed.** The return code is checked and raises with the injector's stderr attached. The
+noise-level handler always reports, with a traceback, regardless of `--logging`, and records the
+cell. `main` ends by listing every `(noise level, replicate)` that produced no rows and exits
+non-zero, so a run that lost cells cannot be mistaken for one that did not.
+
+**Gate:** `python scripts/test_failure_propagation.py` runs the real pipeline with an injector
+substituted for one that always exits 3, and asserts the run stops, names the exit code, reports
+the level without `--logging`, and calls its own results incomplete. Verified 2026-08-26: the
+pipeline exits 1 with `the noise injector exited 3 for noise level 0.4, replicate 0`.
+
+**What this means for the other chats.** Any claim of the form "the run refuses to finish if X"
+made before this fix was true of the *binary* and false of the *pipeline*. Chat H should assume
+no Rust-side guard was ever enforced end to end until this commit.
 
 ### 2.9 The Methods figure does not show the experiment
 
@@ -2198,6 +2238,10 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
    rather than returning silently wrong features. `cargo test --test writer_guards` and
    `python scripts/test_record_alignment.py`.
 9. **Every new column is populated** in a smallest-possible end-to-end run.
+9c. ✅ **A failure in the injector stops the run.** `python scripts/test_failure_propagation.py`.
+    Until 2026-08-26 the pipeline never inspected the injector's return code, so every gate in
+    this list that the Rust half enforces was reported to a pipe nobody read (§2.8g). **No
+    Rust-side gate was enforced end to end before that commit.**
 9b. ✅ **The interpreter can build what the job asks for.** `python scripts/check_environment.py
     --models <what this job runs>`, wired into the job template; runbook §1b runs it under both
     cluster interpreters and diffs them (§2.8d).

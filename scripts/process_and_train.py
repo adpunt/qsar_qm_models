@@ -1892,6 +1892,25 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
 
+    # The return code was never looked at. Everything the injector refuses to do
+    # -- a failed dose gate, a molecule it could not fingerprint, a truncated
+    # record, a configuration it could not open, a segmentation fault -- was
+    # reported to a pipe nobody read, and this function carried straight on to
+    # reopen the files and train on whatever was on disk. Every hard failure in
+    # the Rust half was decorative until this check existed.
+    #
+    # It is worse than a missed message: preprocess_data renames the rewritten
+    # training file over the original BEFORE it processes val and test, so a run
+    # that dies partway leaves train noised and the held-out splits not, which
+    # trains and scores without complaint.
+    if proc_a.returncode != 0:
+        raise RuntimeError(
+            f"the noise injector exited {proc_a.returncode} for noise level {s}, "
+            f"replicate {iteration}, file_no {file_no}. The memory-mapped files may be "
+            f"half-rewritten, so nothing downstream of this point is trustworthy.\n"
+            f"--- stderr ---\n{(stderr or '').strip()[-4000:]}"
+        )
+
     # The injector asserts its own gates and dies on any of them. A failure here is
     # a confounded run, so it must stop the pipeline rather than be trained on.
     if proc_a.returncode != 0:
@@ -2179,6 +2198,10 @@ def main():
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
+    # Every (noise level, replicate) that did not complete. A run that loses
+    # cells must not look like a run that did not.
+    failed_cells = []
+
     level_time = time.time()
     for s in args.noise_level:
         s = float(s)
@@ -2214,8 +2237,16 @@ def main():
             try: 
                 process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups)
             except Exception as e:
-                if logging:
-                    print(f"Error at noise level {s}: {e}")
+                # This used to print only `if logging`, which is off by default,
+                # and then `continue`. A noise level that failed produced no rows
+                # and no message: the same shape as the two Gaussian-process jobs
+                # that ran to completion and wrote nothing (RERUN_PLAN.md §2.8d).
+                # It is always reported now, with a traceback, and the run is
+                # remembered so the job cannot exit 0 having lost cells.
+                print(f"ERROR at noise level {s}, replicate {iteration}: "
+                      f"{type(e).__name__}: {e}", flush=True)
+                traceback.print_exc()
+                failed_cells.append((s, iteration, f"{type(e).__name__}: {e}"))
                 continue
 
         current_time = time.time()
@@ -2223,6 +2254,16 @@ def main():
         level_time = current_time
 
     print(f"Time for total run: {time.time() - start_time}")
+
+    if failed_cells:
+        print(f"\nERROR: {len(failed_cells)} of "
+              f"{len(args.noise_level) * args.repetitions} (noise level, replicate) cells "
+              f"failed and produced no rows:")
+        for level, rep, msg in failed_cells:
+            print(f"  noise level {level}, replicate {rep}: {msg}")
+        print("The results file is INCOMPLETE. Exiting non-zero so the scheduler and the "
+              "runbook's resubmit step can see it.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
