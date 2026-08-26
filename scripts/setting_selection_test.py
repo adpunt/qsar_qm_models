@@ -583,6 +583,15 @@ def run(X, y, scaffs, rescale_to_exact_dose, conditions=None):
 
 
 # --------------------------------------------------------------- analysis
+# Guard 8 of RERUN_PLAN.md section 0.6: a filter that is not random with respect to the
+# question. Whole replicates below an accuracy floor bias unstable configurations
+# upward, and this project's pipelines apply such a filter without declaring it. So:
+# declare it, report every verdict WITH and WITHOUT, and say so when the two disagree.
+# The floor is on the CLEAN baseline, so it is fixed before any noise is added and
+# cannot depend on the condition being judged.
+CLEAN_R2_FLOOR = 0.0
+
+
 def paired_table(df, a, b, level, model):
     """Paired difference a − b within replicate. Returns None if the pairing is broken."""
     sa = df[(df.condition == a) & (df.level == level) & (df.model == model)].set_index('replicate')
@@ -604,108 +613,151 @@ def paired_table(df, a, b, level, model):
         replicate_wobble_sd=wobble,
         ratio_to_wobble=float(abs(d.mean()) / wobble) if wobble > 0 else np.nan,
         wilcoxon_p=p,
+        # What this many replicates could have detected: the smallest true difference
+        # the contrast would find at 80% power, two-sided, alpha 0.05. Without it a null
+        # cannot be told apart from a test that was never able to see anything -- and
+        # the differences at stake here are known to be small.
+        min_detectable_delta=float(2.8 * d.std(ddof=1) / np.sqrt(len(reps))),
     )
 
 
-def analyse(df, shape):
-    print("\n" + "=" * 108)
-    print("QM9 / PDV. Noise on training labels only, scored on clean test labels.")
-    print(f"{N_REPLICATES} replicates, each a fresh subsample and a fresh scaffold split.")
-    print("Every condition delivers the SAME amount of noise at a given level.")
-    print("=" * 108)
-
-    # -- realised dose, guard 5 -----------------------------------------------
-    print("\n--- delivered amount, by condition (guard 5: it must be equal across conditions) ---")
-    for level in LEVELS:
-        s = df[df.level == level].groupby('condition').realised_dose.agg(['mean', 'std'])
-        worst = (s['mean'] - level).abs().max()
-        print(f"  level {level}: realised {s['mean'].min():.4f}–{s['mean'].max():.4f}, "
-              f"largest departure from target {worst:+.4f} "
-              f"({'within' if worst <= DOSE_TOL * level else 'OUTSIDE'} tolerance)")
-        heavy = s.loc[[c for c in s.index if 'nu=3' in c or 'nu=5' in c]]
-        for c, r in heavy.iterrows():
-            print(f"      {c}: per-run dose SD {r['std']:.4f} — report the population dose, "
-                  f"not this (NOISE_DESIGN.md 5.1b)")
-
-    # -- clean baselines, guard 4 --------------------------------------------
-    print("\n--- clean baseline R2, mean over replicates (guard 4: the denominator, always shown) ---")
-    b = df.groupby('model').r2_clean.agg(['mean', 'std'])
-    for m in MODELS:
-        print(f"  {m:<6} {b.loc[m, 'mean']:.4f} +- {b.loc[m, 'std']:.4f}")
-
-    # -- accuracy per condition ----------------------------------------------
-    print("\n--- R2 per condition, mean +- SD over replicates (never averaged across conditions) ---")
-    for level in LEVELS:
-        print(f"\n  level {level} x label spread")
-        header = "  " + f"{'condition':<20}" + "".join(f"{m:>22}" for m in MODELS)
-        print(header)
-        for name in CONDITION_NAMES:
-            cells = []
-            for m in MODELS:
-                s = df[(df.level == level) & (df.condition == name) & (df.model == m)].r2
-                cells.append(f"{s.mean():.4f}+-{s.std(ddof=1):.4f}")
-            print("  " + f"{name:<20}" + "".join(f"{c:>22}" for c in cells))
-
-    # -- the decision statistic ----------------------------------------------
-    contrasts = []
+def build_contrasts(frame):
+    """Every ladder contrast: each rung against the reference, and against the previous."""
+    rows = []
     for ladder, chain in LADDERS.items():
         for i in range(1, len(chain)):
-            for level in LEVELS:
+            for level in sorted(frame.level.unique()):
                 for m in MODELS:
-                    # against the reference (first in the chain)
-                    r = paired_table(df, chain[i], chain[0], level, m)
+                    r = paired_table(frame, chain[i], chain[0], level, m)
                     if r:
-                        r['ladder'] = ladder
-                        r['kind'] = 'vs reference'
-                        contrasts.append(r)
-                    # against the previous rung
+                        r['ladder'], r['kind'] = ladder, 'vs reference'
+                        rows.append(r)
                     if i > 1:
-                        r = paired_table(df, chain[i], chain[i - 1], level, m)
+                        r = paired_table(frame, chain[i], chain[i - 1], level, m)
                         if r:
-                            r['ladder'] = ladder
-                            r['kind'] = 'vs previous setting'
-                            contrasts.append(r)
-    cdf = pd.DataFrame(contrasts)
+                            r['ladder'], r['kind'] = ladder, 'vs previous setting'
+                            rows.append(r)
+    return pd.DataFrame(rows)
 
-    print("\n" + "=" * 108)
-    print("THE DECISION STATISTIC: paired difference against the replicate-to-replicate wobble.")
-    print("A difference smaller than the run-to-run wobble is not a setting worth cluster time.")
-    print("=" * 108)
-    for kind in ['vs reference', 'vs previous setting']:
-        print(f"\n### {kind}")
-        sub = cdf[cdf.kind == kind]
-        for level in LEVELS:
-            tag = "  (the QM9 reporting level)" if level == REPORTING_LEVEL else ""
-            print(f"\n  level {level}{tag}")
-            print("  " + f"{'contrast':<40}{'model':<7}{'mean dR2':>11}{'SD':>9}"
-                  f"{'wobble':>9}{'|d|/wobble':>12}{'p':>9}")
-            for _, r in sub[sub.level == level].iterrows():
-                mark = "  *" if (r.ratio_to_wobble > 1 and r.wilcoxon_p < 0.05) else ""
-                print("  " + f"{r.contrast:<40}{r.model:<7}{r.mean_delta_r2:>+11.4f}"
-                      f"{r.sd_delta_r2:>9.4f}{r.replicate_wobble_sd:>9.4f}"
-                      f"{r.ratio_to_wobble:>12.2f}{r.wilcoxon_p:>9.3f}{mark}")
 
-    # -- verdict per setting --------------------------------------------------
-    print("\n" + "=" * 108)
-    print("VERDICT PER SETTING (proposed rule: earns full grid if |mean dR2| exceeds the")
-    print("replicate wobble for at least one model at the reporting level, with paired p < 0.05)")
-    print("=" * 108)
-    verdicts = []
+def verdict_table(cdf):
+    """The recommendation, one row per setting. Recommends; does not decide."""
+    out = []
     for name in CONDITION_NAMES:
         if name == 'Gaussian':
             continue
-        rows_here = cdf[(cdf.contrast.str.startswith(name + ' ')) & (cdf.kind == 'vs reference')]
-        at_report = rows_here[rows_here.level == REPORTING_LEVEL]
-        passes_report = at_report[(at_report.ratio_to_wobble > 1) & (at_report.wilcoxon_p < 0.05)]
-        anywhere = rows_here[(rows_here.ratio_to_wobble > 1) & (rows_here.wilcoxon_p < 0.05)]
-        v = ('EARNS FULL GRID' if len(passes_report)
-             else ('separates only at higher levels' if len(anywhere) else 'REDUNDANT with its reference'))
-        biggest = at_report.mean_delta_r2.abs().max() if len(at_report) else np.nan
-        verdicts.append(dict(condition=name, verdict=v,
-                             largest_abs_delta_at_reporting_level=biggest,
-                             models_passing_at_reporting_level=len(passes_report),
-                             models_passing_at_any_level=len(anywhere)))
-        print(f"  {name:<20} {v:<34} largest |dR2| at level {REPORTING_LEVEL}: {biggest:.4f}")
+        here = cdf[(cdf.contrast.str.startswith(name + ' ')) & (cdf.kind == 'vs reference')]
+        at_report = here[here.level == REPORTING_LEVEL]
+        passes = at_report[(at_report.ratio_to_wobble > 1) & (at_report.wilcoxon_p < 0.05)]
+        anywhere = here[(here.ratio_to_wobble > 1) & (here.wilcoxon_p < 0.05)]
+        v = ('EARNS FULL GRID' if len(passes)
+             else ('separates only above the reporting level' if len(anywhere)
+                   else 'REDUNDANT with its reference'))
+        out.append(dict(
+            condition=name, verdict=v,
+            largest_abs_delta_at_reporting_level=(at_report.mean_delta_r2.abs().max()
+                                                  if len(at_report) else np.nan),
+            smallest_detectable_delta=(at_report.min_detectable_delta.min()
+                                       if len(at_report) else np.nan),
+            models_passing_at_reporting_level=len(passes),
+            models_passing_at_any_level=len(anywhere)))
+    return pd.DataFrame(out)
+
+
+def analyse(df, shape):
+    print("\n" + "=" * 116)
+    print("QM9 / PDV. Noise on training labels only, scored on clean test labels.")
+    print(f"{df.replicate.nunique()} replicates, each a fresh subsample and a fresh scaffold split.")
+    print("Every condition delivers the SAME amount of noise at a given level.")
+    print("=" * 116)
+
+    # -- the declared filter, guard 8 -----------------------------------------
+    bad = df[df.r2_clean < CLEAN_R2_FLOOR][['replicate', 'model', 'r2_clean']].drop_duplicates()
+    print(f"\n--- declared filter (guard 8): replicate x model cells whose CLEAN baseline R2 "
+          f"is below {CLEAN_R2_FLOOR} ---")
+    if len(bad):
+        for _, r in bad.iterrows():
+            print(f"  replicate {int(r.replicate)}, {r.model}: clean R2 = {r.r2_clean:.4f} — a "
+                  f"scaffold split this model cannot fit at all, so every contrast in that cell "
+                  f"is arithmetic on a broken baseline")
+        print(f"  {len(bad)} cell(s) of {df.replicate.nunique() * len(MODELS)} excluded from the "
+              f"contrasts. Every verdict is reported with and without them.")
+    else:
+        print("  none")
+    kept = df[df.r2_clean >= CLEAN_R2_FLOOR]
+
+    # -- realised dose, guard 5 -----------------------------------------------
+    print("\n--- delivered amount, by condition (guard 5: equal across conditions) ---")
+    for level in sorted(df.level.unique()):
+        s = df[df.level == level].groupby('condition').realised_dose.agg(['mean', 'std'])
+        worst = (s['mean'] - level).abs().max()
+        print(f"  level {level}: realised {s['mean'].min():.4f}–{s['mean'].max():.4f}, largest "
+              f"departure from target {worst:+.4f} "
+              f"({'within' if worst <= DOSE_TOL * level else 'OUTSIDE'} tolerance)")
+        for c in [c for c in s.index if 'nu=3' in c or 'nu=5' in c or 'shifted' in c]:
+            print(f"      {c}: per-run dose SD {s.loc[c, 'std']:.4f} — the POPULATION dose is "
+                  f"what is fixed, not this (NOISE_DESIGN.md 5.1b, rule 3 of 2a)")
+
+    # -- clean baselines, guard 4 ---------------------------------------------
+    print("\n--- clean baseline R2 per replicate (guard 4: the denominator, always shown) ---")
+    b = df.groupby('model').r2_clean.agg(['mean', 'std', 'min', 'max'])
+    for m in MODELS:
+        print(f"  {m:<6} {b.loc[m, 'mean']:+.4f} +- {b.loc[m, 'std']:.4f}   "
+              f"range {b.loc[m, 'min']:+.4f} to {b.loc[m, 'max']:+.4f}")
+
+    # -- accuracy per condition -----------------------------------------------
+    print("\n--- R2 per condition, mean +- SD over replicates (never averaged across conditions) ---")
+    for level in sorted(kept.level.unique()):
+        print(f"\n  level {level} x label spread")
+        print("  " + f"{'condition':<20}" + "".join(f"{m:>24}" for m in MODELS))
+        for name in CONDITION_NAMES:
+            cells = []
+            for m in MODELS:
+                s = kept[(kept.level == level) & (kept.condition == name) & (kept.model == m)].r2
+                cells.append(f"{s.mean():.4f}+-{s.std(ddof=1):.4f}" if len(s) else "—")
+            print("  " + f"{name:<20}" + "".join(f"{c:>24}" for c in cells))
+
+    # -- the decision statistic -----------------------------------------------
+    cdf = build_contrasts(kept)
+    cdf_unfiltered = build_contrasts(df)
+
+    print("\n" + "=" * 116)
+    print("THE DECISION STATISTIC: paired difference against the replicate-to-replicate wobble.")
+    print("A difference smaller than the run-to-run wobble is not a setting worth cluster time.")
+    print("'detectable' is the smallest true difference this many replicates could have found.")
+    print("=" * 116)
+    for kind in ['vs reference', 'vs previous setting']:
+        print(f"\n### {kind}")
+        sub = cdf[cdf.kind == kind]
+        for level in sorted(kept.level.unique()):
+            tag = "  (the QM9 reporting level)" if level == REPORTING_LEVEL else ""
+            print(f"\n  level {level}{tag}")
+            print("  " + f"{'contrast':<42}{'model':<7}{'mean dR2':>11}{'SD':>9}"
+                  f"{'wobble':>9}{'|d|/wobble':>12}{'p':>9}{'detectable':>12}")
+            for _, r in sub[sub.level == level].iterrows():
+                mark = "  *" if (r.ratio_to_wobble > 1 and r.wilcoxon_p < 0.05) else ""
+                print("  " + f"{r.contrast:<42}{r.model:<7}{r.mean_delta_r2:>+11.4f}"
+                      f"{r.sd_delta_r2:>9.4f}{r.replicate_wobble_sd:>9.4f}"
+                      f"{r.ratio_to_wobble:>12.2f}{r.wilcoxon_p:>9.3f}"
+                      f"{r.min_detectable_delta:>12.4f}{mark}")
+
+    # -- verdict per setting --------------------------------------------------
+    print("\n" + "=" * 116)
+    print("VERDICT PER SETTING (proposed rule: earns full grid if |mean dR2| exceeds the")
+    print("replicate wobble for at least one model at the reporting level, with paired p < 0.05)")
+    print("=" * 116)
+    verdicts = verdict_table(cdf)
+    other = verdict_table(cdf_unfiltered).set_index('condition')
+    for _, r in verdicts.iterrows():
+        alt = other.loc[r.condition, 'verdict'] if r.condition in other.index else r.verdict
+        flag = "" if alt == r.verdict else f"   <-- WITHOUT the filter: {alt}"
+        print(f"  {r.condition:<20} {r.verdict:<42} largest |dR2| at level {REPORTING_LEVEL}: "
+              f"{r.largest_abs_delta_at_reporting_level:.4f}   (could have seen "
+              f"{r.smallest_detectable_delta:.4f}){flag}")
+    disagree = [r.condition for _, r in verdicts.iterrows()
+                if r.condition in other.index and other.loc[r.condition, 'verdict'] != r.verdict]
+    print(f"\n  The declared filter changes the verdict for: {', '.join(disagree)}"
+          if disagree else "\n  The declared filter changes no verdict. Guard 8 satisfied.")
 
     # -- label-side shape -----------------------------------------------------
     print("\n--- label-side shape at the reporting level (distinguishable in the LABELS?) ---")
@@ -721,8 +773,7 @@ def analyse(df, shape):
               f"{r.share_of_variance_on_worst_5pct:>18.1%}{r.median_abs_error:>12.4f}"
               f"{r.skewness:>10.2f}{r.mean_shift:>+12.4f}")
 
-    return cdf, pd.DataFrame(verdicts)
-
+    return cdf, verdicts
 
 def compute_costs(verdicts):
     """Price each option against RERUN_PLAN.md section 13.1."""
