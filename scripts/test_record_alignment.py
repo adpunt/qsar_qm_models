@@ -1,0 +1,146 @@
+#!/usr/bin/env python
+"""The reader half of verification gate 8 (RERUN_PLAN.md §2.7, §8).
+
+`parse_mmap` walks a packed byte stream with no delimiters and no per-record
+length. If a record is written short, every field after it is decoded from the
+wrong offset — and until now the function ended in a bare `except: continue`,
+which stepped over the exception and kept going with an offset that could never
+be recovered. Whole replicates came out wildly negative and were deleted by the
+catastrophic-run filter; this is one of the things that could produce that.
+
+Three properties are asserted here, each one failing if the corresponding guard
+is removed:
+
+  1. a short record raises rather than returning silently wrong features;
+  2. a well-formed file is consumed exactly, to the last byte;
+  3. a representation the writer emits and the reader cannot step over is
+     refused by name, instead of shifting every later field by its width.
+
+Run it directly:  python scripts/test_record_alignment.py
+"""
+
+import io
+import os
+import struct
+import sys
+import traceback
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from process_and_train import parse_mmap  # noqa: E402
+
+FP_BYTES = 256
+
+
+def record(smiles, y_clean, y_written, fingerprint=None, short=False):
+    """One ECFP4-only record, in the exact layout the Rust writer produces."""
+    b = smiles.encode()
+    out = struct.pack("I", len(b)) + b          # isomeric SMILES
+    out += struct.pack("I", len(b)) + b          # canonical SMILES
+    out += struct.pack("f", y_clean)             # raw label
+    out += struct.pack("f", y_written)           # written (standardised) label
+    if fingerprint is None:
+        fingerprint = bytes(FP_BYTES)
+    out += fingerprint[: FP_BYTES // 2] if short else fingerprint
+    return out
+
+
+def make_file(records):
+    return io.BytesIO(b"".join(records))
+
+
+def parse(buf, count, reps=("ecfp4",), rep="ecfp4"):
+    buf.seek(0)
+    return parse_mmap(buf, count, rep, list(reps), 1, 0.0, False)
+
+
+def check(name, fn):
+    try:
+        fn()
+    except AssertionError as e:
+        print(f"  FAIL  {name}: {e}")
+        return False
+    except Exception:
+        print(f"  FAIL  {name}: unexpected error")
+        traceback.print_exc()
+        return False
+    print(f"  OK    {name}")
+    return True
+
+
+def a_well_formed_file_parses_and_is_consumed_exactly():
+    fps = [bytes([(i * 7 + j) % 256 for j in range(FP_BYTES)]) for i in range(5)]
+    recs = [record(f"C{'C' * i}O", 4.0 + i, 0.1 * i, fps[i]) for i in range(5)]
+    x, y, y_orig = parse(make_file(recs), 5)
+    assert x.shape == (5, FP_BYTES * 8), f"unexpected feature shape {x.shape}"
+    assert len(y) == 5 and len(y_orig) == 5
+    assert np.allclose(y_orig, [4.0, 5.0, 6.0, 7.0, 8.0]), y_orig
+    # The bits must be the ones written, not a shifted neighbour's.
+    expected = np.unpackbits(np.frombuffer(fps[3], dtype=np.uint8), bitorder="little")
+    assert np.array_equal(x[3], expected), "record 3 did not decode to its own fingerprint"
+
+
+def a_short_record_raises_instead_of_misaligning():
+    recs = [record(f"C{'C' * i}O", 4.0 + i, 0.1 * i) for i in range(5)]
+    # Record 2 is 128 bytes short — exactly what the deleted `continue`
+    # statements produced when a molecule could not be fingerprinted.
+    recs[2] = record("CCCO", 6.0, 0.2, short=True)
+    try:
+        parse(make_file(recs), 5)
+    except RuntimeError as e:
+        msg = str(e)
+        assert "entry" in msg or "consumed" in msg, f"unhelpful message: {msg}"
+        return
+    raise AssertionError(
+        "a short record was parsed without complaint — the reader is silently "
+        "misaligned from record 2 onwards"
+    )
+
+
+def trailing_bytes_are_not_ignored():
+    recs = [record(f"C{'C' * i}O", 4.0 + i, 0.1 * i) for i in range(4)]
+    recs.append(b"\x00" * 32)  # a fragment the record count does not account for
+    try:
+        parse(make_file(recs), 4)
+    except RuntimeError as e:
+        assert "consumed" in str(e), f"unhelpful message: {e}"
+        return
+    raise AssertionError("32 unread bytes were left at the end and nothing said so")
+
+
+def a_representation_with_no_reader_is_refused_by_name():
+    recs = [record(f"C{'C' * i}O", 4.0 + i, 0.1 * i) for i in range(3)]
+    try:
+        # `morgan` was deleted from the Rust writer on 2026-08-26, so it now
+        # stands for any representation the writer might emit that this reader has
+        # never had a branch for it.
+        parse(make_file(recs), 3, reps=("morgan", "ecfp4"))
+    except RuntimeError as e:
+        assert "morgan" in str(e), f"the message must name the representation: {e}"
+        return
+    raise AssertionError("an unreadable representation was accepted silently")
+
+
+def main():
+    print("record alignment (RERUN_PLAN.md gate 8)")
+    results = [
+        check("a well-formed file parses and is consumed exactly",
+              a_well_formed_file_parses_and_is_consumed_exactly),
+        check("a short record raises instead of misaligning",
+              a_short_record_raises_instead_of_misaligning),
+        check("trailing bytes are not ignored",
+              trailing_bytes_are_not_ignored),
+        check("a representation with no reader is refused by name",
+              a_representation_with_no_reader_is_refused_by_name),
+    ]
+    if not all(results):
+        print("\nFAIL: the reader can be silently misaligned")
+        return 1
+    print("\nOK: the reader cannot be silently misaligned")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

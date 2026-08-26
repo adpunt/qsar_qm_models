@@ -1,6 +1,14 @@
 # QM9 re-run — runbook
 
-## Why every QM9 result above zero noise is invalid
+> ⚠️ **PARTLY SUPERSEDED (2026-08-24). Do not submit these scripts as they stand.**
+> The noise scheme is being replaced (`NOISE_DESIGN.md`), so the six noise types and the
+> eleven-level ladder below are both out of date, and the completeness check at the end globs
+> for names that will no longer exist. Several code changes must also land before any of this
+> runs — see `RERUN_PLAN.md` §5.1.
+>
+> What is still good and should be carried across when the scripts are regenerated: the reasoning
+> about which models and representations are in and out, the tier ordering, the one-task-first
+> discipline, and the archive step.
 
 The noise map is keyed by **training** index, and `write_data` restarted its
 counter for each split — so validation and test molecules were handed the noise
@@ -101,6 +109,45 @@ Confirm the fix is in the binary you just built:
 ```bash
 grep -n "apply_noise" rust/src/main.rs | head    # flag + 3 call sites (true/false/false)
 ```
+
+## 1b. Audit the interpreters — both of them
+
+Two Gaussian-process jobs (`12822693`, `12822694`) ran to completion on
+2026-08-19 and produced nothing. The interpreter was missing `gpytorch`, so the
+experiment list came out empty, five folds looped over nothing, and the job then
+crashed reading its own empty output. Fourteen minutes of queue time to discover
+a missing package (`RERUN_PLAN.md` §2.8d).
+
+There are **two** interpreters on the cluster and they are not the same. Run the
+probe under each and compare, before anything is submitted:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/scripts
+
+# (a) the environment the job scripts activate
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh && cd scripts
+python check_environment.py 2>&1 | tee ~/env_jobenv.txt
+
+# (b) the one the two dead jobs actually used
+/data/stat-cadd/scat9264/py311-kirby/bin/python check_environment.py 2>&1 | tee ~/env_kirby.txt
+
+# what differs
+diff <(sed -n '/^packages/,/^$/p' ~/env_jobenv.txt) \
+     <(sed -n '/^packages/,/^$/p' ~/env_kirby.txt)
+```
+
+Both must end `OK: everything requested can be constructed`. The probe
+constructs each model rather than importing its package, and fits the two that
+import cleanly and fail on contact — the quantile forest against an older
+scikit-learn is the live example.
+
+**Jobs are submitted by script, never with `--wrap`.** The two dead jobs were
+`--wrap` submissions with no output path: they inherited whatever interpreter
+happened to be active, and there was no log to say which. Every script in this
+directory activates its environment explicitly and every one names its output
+file.
 
 ## 2. Archive the current results before anything overwrites them
 

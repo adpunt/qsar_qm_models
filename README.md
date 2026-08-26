@@ -184,6 +184,30 @@ For questions or issues, please open a GitHub issue or reach out to the reposito
 
 ### Installing PyTorch Geometric (macOS / Linux, CPU-only)
 
+> **The four companion packages are optional, and installing the wrong build of them
+> breaks `import torch_geometric` outright.**
+>
+> `torch-scatter`, `torch-sparse`, `torch-cluster` and `torch-spline-conv` ship compiled
+> extensions linked against one specific libtorch. If they do not match the installed
+> PyTorch, loading them raises `OSError: Symbol not found`. `torch_geometric.typing`
+> catches that and disables them — but `nn/conv/gravnet_conv.py` catches only
+> `ImportError`, so the `OSError` escapes and the whole package fails to import, taking
+> `scripts/process_and_train.py` with it.
+>
+> Nothing in this project uses the operators they provide (`GCNConv`, `GINConv`,
+> `GATv2Conv` and the pooling functions are all pure PyTorch), so `torch_geometric` alone
+> is enough. If you hit that error:
+>
+> ```bash
+> python -m pip uninstall -y torch-scatter torch-sparse torch-cluster torch-spline-conv
+> python -c "import torch_geometric; print(torch_geometric.__version__)"
+> ```
+>
+> `python scripts/check_environment.py` detects this exact condition and names the fix.
+> Note that the wheel index below is pinned to **torch 2.5.1** — match it to your actual
+> torch version, or skip the four packages.
+
+
 After activating your micromamba environment (e.g., `micromamba activate py_rust_env`), install the PyTorch Geometric dependencies using the official wheel index:
 
 ```bash

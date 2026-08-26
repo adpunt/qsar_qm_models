@@ -143,6 +143,16 @@ fi
 
 cd scripts
 
+# The interpreter has to be able to BUILD what this job is about to ask for.
+# Jobs 12822693 and 12822694 (2026-08-19) ran to completion and produced nothing
+# because gpytorch was missing: the experiment list came out empty, five folds
+# looped over nothing, and the job crashed reading its own empty output. This
+# costs seconds and answers that before the queue does (RERUN_PLAN.md §2.8d).
+python check_environment.py --models {model} || {{
+    echo "ERROR: this interpreter cannot build model '{model}'. See the output above."
+    exit 2
+}}
+
 STRATS=({strategies})
 REPS=({reps})
 

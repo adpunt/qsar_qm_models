@@ -14,8 +14,18 @@ instruction.
 
 **What stands beside it.** `NOISE_DESIGN.md` — the sourced specification of the new noise scheme.
 Its core rule, that the noise level becomes the amount actually delivered, you approved on
-2026-08-21; what remains open there is narrower than "sign-off" (§4). `REVISION_GUIDE.md` is
-**not** a live reference — it gets scrapped and rewritten at step 3 of your process (§0.1).
+2026-08-21; **one item is open there and it is whether Laplace is queued** (§4 Decision 4, §13.5).
+
+**Which document owns what.** This file owns what gets *run* and in what order — the staged design,
+the replicate counts, the representation set, the job scripts, the analysis, the decisions still
+open. `NOISE_DESIGN.md` owns what the noise *is* — the conditions, the algebra, the parameters,
+their sources, the level grids, and the checks that are properties of the noise scheme. Neither
+restates the other; where a fact is needed on both sides it lives in its owner and the other points
+at it. `scripts/check_bib_and_docs.py` fails if the two start restating each other again.
+
+`REVISION_GUIDE.md` is **already gone** — it was scrapped rather than kept, as step 3 of your
+process (§0.1) said it would be. Everything that had to survive it is §10b. Do not go looking for
+the file; §1927 below describes what was in it.
 
 **Start at §0.6** if you read nothing else — the thirteen failure modes and the assertion that stops each recurring.
 
@@ -63,7 +73,7 @@ What can we say about uncertainty in these contexts?"*
 | **The noise level becomes the noise actually delivered** | 2026-08-21 | *"Fine lets do Noise SD, add it to the next steps doc, make sure to cite kolmar and make sure that ends up in the paper (add a note)"* — this is the dose-matching rule. It is approved, and it must appear in the Methods with the Kolmar & Grulke citation |
 | **Censoring is in** | 2026-08-24 | *"OH censoring is fascinating yes definitely include that"* |
 | **Keep all six of the old noise types — do not cut them for redundancy** | 2026-08-21 | *"My goal is not to prove these strategies unique. That's not my paper."* Superseded in effect by the redesign, which replaces rather than cuts — but the reasoning matters: redundancy is a *finding*, never a reason to hide data |
-| **A skewed-noise experiment on the highlighted models only** | 2026-08-21 | *"let's add a set of experiments — not for all combinations — for models that are being highlighted (and their reps) — try picking from a skewed distribution of values"*. The redesign's heavy-tailed types satisfy this; say so rather than treating it as a new request |
+| **A skewed-noise experiment on the highlighted models only** | 2026-08-21 | *"let's add a set of experiments — not for all combinations — for models that are being highlighted (and their reps) — try picking from a skewed distribution of values"*. ⚠️ **This row used to say the heavy-tailed types satisfy the request. They do not** — Student-t and Laplace are symmetric, and heavy-tailed is not skewed. The request is met by **censoring** and by the new **grouped-shifted** condition, both one-directional by construction. Corrected 2026-08-26; the full argument is §13.3 |
 | **The aleatoric/epistemic split gets BUILT, to industry standard** | 2026-08-20 and 2026-08-21 | *"I'm not dropping it. How do other real papers do it (with evidence, not hallucinated)"* → *"I NEED THESE RESULTS AND I WANT TO IMPLEMENT THEM BY INDUSTRY STANDARDS"* → *"there's some faulty code that must be DELETED and REPLACED. get over it"*. Three separate refusals. See §4 |
 | **The uncertainty experiment: three questions, one run** | 2026-08-23 | Approved with *"Okay yes make those changes, smoke test them."* See §3.1 |
 | **The three headline numbers, and how they work together** | 2026-08-20 | *"auc_norm needs to take into account baseline performance at higher sigmas. the r2 at sigma=0.6 is a bit of a sanity check on auc_norm. Obviously other noise levels exist, but it catches a few cases."* Not a metric replacement — make the baseline visible beside the retention number |
@@ -138,13 +148,16 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 9 | Uncertainty job scripts | 🟠 written, superseded, and point at a possibly stale checkout | §13 chat G |
 | 10 | Parity audit script | 🟠 written; its literals were still being verified when the last session ended | §13 chat E |
 | 11 | Noise redesign in the pipelines | 🟢 **Rust done 2026-08-26** (chat A) — deleted, built, 14 gates passing, verified on 4,000 real QM9 molecules. Python is chat B's | §13 chats A ✅, B |
-| 12 | Per-molecule rescaling of learned embeddings | 🔴 found, not fixed; affects **three** representations, not two (§2.8c) | §13 chat C |
-| 13 | Concurrent-task configuration race | 🔴 found, not fixed — launch blocker (§2.8a) | §13 chat D |
+| 12a | Records could be written short, and an unparseable SMILES crashed the binary | ✅ **fixed 2026-08-26 (chat D)** — all-or-nothing records, a null-pointer check RDKit's binding needed, and the reader now refuses to guess (§2.7) | §13 chat D ✅ |
+| 12 | Per-molecule rescaling of learned embeddings | ✅ **fixed 2026-08-26 (chat C)** — storage, widths and standardisation, with a guard that fails if any of the three is removed (§2.8c) | done |
+| 13 | Concurrent-task configuration race | ✅ **fixed 2026-08-26 (chat D)** — the configuration file is named per task and the binary has no default path; guarded by `scripts/test_config_isolation.py` (gate 10) and a test in `rust/tests/writer_guards.rs` | §13 chat D ✅ |
 | 14 | Aleatoric/epistemic decomposition | 🔴 spec written, not built; 4 further defects found (§5.5) | §13 chat I |
 | 15 | The five never-built analyses | 🔴 none built (§0.4) | §13 chat J |
 | 16 | Figure script consolidation to one file | 🔴 not started (§5.4) | §13 chat J |
-| 17 | Environment missing three model families | 🔴 found, not fixed (§2.8d, §3.4) | §13 chat D |
+| 17 | Environment missing three model families | 🟢 **mostly done 2026-08-26 (chat D)** — the loud-failure half was already in KIRBy (`333f005`); `scripts/check_environment.py` now probes any interpreter and is wired into the job template; the local `torch_geometric` import is fixed. **One open finding for you: three packages need a newer scikit-learn than is installed** (§2.8d) | §13 chat D ✅ |
 | 18 | Paper-side fixes needing no compute | 🔴 not started — **deliberately parked**, see §12 | parked |
+| 19 | The two documents had drifted apart | ✅ **done 2026-08-26** (chat K). Ownership rule stated, ten disagreements resolved, two of them a document contradicting itself. Guarded by `scripts/check_bib_and_docs.py` | §13 chat K ✅ |
+| 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
 
 ---
 
@@ -244,9 +257,10 @@ apparent severity ordering is entirely explained by that, with rank correlation 
 eleven models individually.
 
 One of them is outright degenerate. The threshold rule fires when the raw label exceeds 1.0, and
-it is applied to electronvolts. **Verified this session from the raw data: the smallest HOMO–LUMO
+it is applied to electronvolts. **Verified from the raw data: the smallest HOMO–LUMO
 gap in QM9 is 0.669 eV, and 99.99925% of the 133,885 molecules clear the cut** — ten molecules
-in the whole dataset escape it. On QM9 threshold noise is plain Gaussian noise at double strength.
+in the whole dataset escape it. (`NOISE_DESIGN.md` §2 owns this figure and carries the same
+values; it is repeated here only because the argument of this section depends on it.) On QM9 threshold noise is plain Gaussian noise at double strength.
 Had the pipeline stayed in Hartree the same cut would have caught nothing at all. (Two earlier
 documents disagreed here, quoting 2.08 eV and 100%; that was the first 10,000 molecules in file
 order, and the pipeline samples at random from the whole set. The whole-set figure is the one
@@ -337,22 +351,58 @@ the real noise levels did. The control failed in the direction that manufactures
 pipeline as it stands.** The experimental pipeline can answer it, because it was rebuilt to
 (§3.2). Whether QM9 gets the same treatment is decision 1 in §4.
 
-### 2.7 Two silent corruption risks in the file writer
+### 2.7 ✅ FIXED 2026-08-26 (chat D) — three ways the record stream could go wrong
 
-Neither is known to have fired; both are silent if they do, and both are cheap to guard.
+Two were known and one was not. All three are now closed, and each is held by a check that
+fails if the fix is removed: `rust/tests/writer_guards.rs` and
+`scripts/test_record_alignment.py` (gate 8).
 
-- **Truncated records.** Inside the ECFP4 block of `write_data` there are two `continue`
-  statements — one when the fingerprint is not 2048 bits, one when the molecule fails to parse.
-  Both sit *after* the earlier fields of that record have been written and *before* the label is
-  written. If either fires the file holds a short record and **every molecule after it is read at
-  the wrong offset**. The Python reader's bare `except: continue`
-  (`process_and_train.py:1224-1227`) swallows the resulting misparse. This could account for some
-  of the wildly negative runs currently being filtered out.
-- **Index drift.** `read_all_target_values` (`rust/src/main.rs:173-191`) pushes only successfully
-  parsed records, while the noise map is keyed by loop position. A SMILES shorter than 5 or longer
-  than 300 characters is rejected, so one rejection shifts every later target against its index.
-  Not live on QM9 — the minimum SMILES length there is 6 — but live on the ADME sets, where `CCO`
-  is plausible.
+**What was actually there, re-read in the working tree rather than taken from this document.**
+The write order had moved since this section was first written: the label is written *before*
+the ECFP4 block, and the fingerprint is the **last** field in the record. The consequence was
+unchanged — the two `continue` statements in the ECFP4 block fired after the rest of the record
+was on disk, so the record came out 256 bytes short and every molecule after it was read at the
+wrong offset.
+
+1. **Truncated records.** Fixed by deciding the fingerprint *before* any byte of the record is
+   written. `prepare_ecfp4` returns the 256-byte block and, on failure, the reason; the failure
+   path writes 256 zero bytes so the record stays full length, records the molecule in
+   `featurisation_failures_{file_no}.csv`, and the run then **refuses to finish** unless
+   `--allow-featurisation-failures` is passed. Alignment is preserved and the condition is loud —
+   a zero fingerprint can never reach a model as though it were real features.
+
+2. **🔴 An unparseable SMILES did not take the error branch — it killed the process.**
+   Found while writing the test for (1), and not previously recorded anywhere. RDKit's
+   `SmilesToMol` returns a **null pointer** for a SMILES it cannot parse; the binding
+   (`rdkit-sys-0.4.12/wrapper/src/ro_mol.cc:18`) wraps that null in a shared pointer and returns
+   it as `Ok`. Only a thrown C++ exception becomes `Err`. So the old `Err(_) => continue` branch
+   was unreachable for the ordinary bad-SMILES case: `rdk_fingerprint_mol` dereferenced null and
+   the process died with **SIGSEGV, no message and no partial output**. Confirmed by feeding
+   `this-is-not-a-smiles` to the built binary — exit 139. Fixed with a null check in
+   `prepare_ecfp4`. Not live on QM9, where every SMILES comes from the dataset; live on the ADME
+   sets. Worth knowing for the resubmit-failed-indices workflow in the runbook: a task that hit
+   this would die with signal 11 and be resubmitted straight back into the same crash.
+
+3. **Index drift → truncation.** `read_all_target_values` no longer exists; chat A replaced it
+   with `read_train_labels` (`rust/src/main.rs`), which changed the failure from a shifted index
+   to a silent `break` — a short label vector, so the noise plan would cover fewer molecules than
+   the file holds. Now a hard error naming the record index and the expected count.
+
+4. **The Python reader guessed.** `parse_mmap`'s bare `except: continue` is gone. These records
+   have no delimiters, so once a read has gone wrong the offset is unrecoverable and `continue`
+   only stops anyone finding out. It now raises, naming the entry and the byte offset. Two
+   assertions were added after the loop: the file must be consumed **exactly**, and the parsed row
+   count must equal the record count.
+
+5. **🔴 A representation the writer emits and the reader has never read.** Found by the new
+   consumption assertion. The Rust writer emits 256 bytes for `morgan`; `parse_mmap` has no
+   branch for it and never had one, and `-r` takes any string with no `choices` list. Any run
+   including `morgan` was misaligned by 256 bytes per record from the label onward. The reader now
+   refuses an unknown representation **by name** (`PARSEABLE_REPS`) rather than silently stepping
+   over the wrong number of bytes. ✅ `morgan` itself has since been deleted from the Rust writer
+   (2026-08-26) — it was a leftover of the `avalon` work: the Python side never wrote it into the
+   input file and it was not in `bit_vectors`. The reader's guard stays, because it is what would
+   catch the next one.
 
 ### 2.8 The analysis throws away the replicate spread
 
@@ -368,43 +418,48 @@ Additional file 10 reports a residual of 0.0.
 The QM9 variance decomposition itself is fine — `run_robustness_anova` (`:2068`) groups by model,
 representation and replicate, so its residual is real.
 
-### 2.8a 🔴 LAUNCH BLOCKER — concurrent tasks overwrite each other's configuration
+### 2.8a ✅ FIXED 2026-08-26 (chat D) — concurrent tasks overwrote each other's configuration
 
-**Found 2026-08-25. Nothing in any document records this, and the run instructions actively
-trigger it.**
+**Found 2026-08-25. Nothing in any document recorded it, and the run instructions actively
+triggered it.**
 
-`process_and_train.py:1623` writes `config.json` with a **relative** path. `rust/src/main.rs:1139`
-reads `config.json` with a **relative** path. Every job script does `cd scripts` first. So every
-task running from the same checkout reads and writes **one shared file**.
-
-The job scripts are array jobs, and the run instructions tell you to submit them at four to six
-concurrent tasks.
+`process_and_train.py` wrote `config.json` with a **relative** path and `rust/src/main.rs` read
+`config.json` with a **relative** path. Every job script does `cd scripts` first, and the job
+scripts are array jobs the runbook tells you to submit at four to six concurrent tasks. So every
+task on a node read and wrote **one shared file**.
 
 What the shared file carries: `sample_size`, `train_count`, `test_count`, `val_count`,
-`molecular_representations`, whether noise is on — **and `file_no`**.
+`molecular_representations`, whether noise is on — **and `file_no`**. That last field is the
+serious one: the binary uses it to choose which memory-mapped files to open and rewrite. If task
+A's binary read task B's configuration, **it opened and overwrote task B's training data**. Not a
+wrong number in one cell — two tasks silently corrupting each other's inputs, with no error
+raised by either.
 
-That last field is the serious one. The binary uses it to choose which memory-mapped files to open
-and rewrite. If task A's binary reads task B's configuration, **it opens and overwrites task B's
-training data**. This is not a wrong number in one cell; it is two tasks silently corrupting each
-other's inputs, with no error raised by either.
+It also fits the evidence. 245 whole replicates were deleted by the catastrophic-run filter,
+concentrated in specific model and representation pairs — the signature of a record stream read
+at the wrong offset, which is what happens when the representation list in the configuration does
+not match the file being read.
 
-It also fits the evidence. 245 whole replicates have been deleted by the catastrophic-run filter,
-concentrated in specific model and representation pairs — exactly the signature of a record stream
-being read at the wrong offset, which is what happens when the representation list in the
-configuration does not match the file being read.
+**The fix.** The configuration is written to `config_{file_no}.json` and the path is passed to
+the binary as `--config`. The argument is **required and has no default**: a default would let a
+stale caller fall back to the shared file, which is the defect. The file is removed in the same
+`finally` block that already removes the memory-mapped files, so 110 invocations per task do not
+leave 110 files behind. Everything else the binary touches was already keyed by `file_no` — the
+mmaps, the scaffold groups, the noise manifest and the provenance file — so nothing else needed
+changing. `run_qm_qsar_models.py` had a second copy of the same pattern; it is superseded and
+cannot run against the current binary, but it was given the per-task name anyway.
 
-**Not established: whether it has actually fired.** It requires two tasks to be between writing
-the configuration and reading it at the same moment, which is a short window per task but a window
-that opens once per noise level per replicate — 110 times per task. With five concurrent tasks
-over a multi-day run, assume it has.
+**The check (gate 10).** `scripts/test_config_isolation.py`. Two binaries are launched
+concurrently in one directory, each handed its own configuration naming its own files, its own
+representation and its own payload byte; each must come out with its own data intact and no
+shared `config.json` may appear. A second, instant half greps the tree for any remaining fixed
+`config.json`, so the gate fails even without running anything. `--end-to-end` additionally runs
+two real `process_and_train.py` tasks side by side.
 
-**Fix, and it is small.** Make the configuration path unique per task — include `file_no` in the
-filename and pass that name to the binary as an argument, exactly as the memory-mapped files
-already do. Alternatively give each task its own working directory. **Do not raise concurrency
-until this is fixed.**
-
-**Check whether it has been firing** before dismissing it: the deleted-replicate list is on the
-cluster, and if those failures cluster in time rather than in configuration, that is the race
+**Still worth knowing:** whether it ever fired. It needs two tasks between writing the
+configuration and reading it at the same moment — a short window per task, but one that opens
+once per noise level per replicate, 110 times per task. The deleted-replicate list is on the
+cluster; if those failures cluster in time rather than in configuration, that was this race
 rather than a modelling problem.
 
 ### 2.8b The uncertainty re-run points at the wrong copy of KIRBy
@@ -422,7 +477,7 @@ picks the one the evidence says is stale. **Confirm before submitting**, or 504 
 an old checkout — which, since the whole point of that run is a patched injector, would produce a
 full set of results from the unpatched code.
 
-### 2.8c 🔴 The learned embeddings are rescaled per molecule, and it has been destroying them
+### 2.8c ✅ FIXED 2026-08-26 (chat C) — the learned embeddings were rescaled per molecule
 
 **Found 2026-08-25 from the harvested clean-data results, then confirmed in the code.** This is the
 largest single defect in the study. It is a data-preparation bug, it has never been a robustness
@@ -520,8 +575,35 @@ decomposition, every embedding sentence in the Results and Conclusion, and the k
 itself on those two representations — the kernel answer in §10b.2 is established only where the
 features are correctly scaled.
 
+#### ✅ What chat C actually did, 2026-08-26
 
-### 2.8d The two experimental Gaussian-process jobs ran to completion and produced nothing
+All three changes landed together, because the radial basis needs all three and because the record
+layout is only correct if the writer, the reader and the Rust record move at once.
+
+| Change | Where |
+|---|---|
+| The per-molecule rescaling is gone; each builder returns the model's own values as 32-bit floats, and so do its failure paths, so a molecule that cannot be embedded still writes a full-width record | `scripts/process_and_train.py` — `chemberta_fingerprint`, `mhggnn_fingerprint`, `mol2vec_fingerprint` |
+| The record widened: mol2vec 300→1200 bytes, ChemBERTa 768→3072, MHG-GNN 1024→4096, read back as float32 | the writer and reader in `process_and_train.py`, and the buffers in `rust/src/main.rs` |
+| Per-feature standardisation, fitted on the training split and applied to validation and test with the training constants. The existing block is reused rather than copied; the representations it covers are read off one list, `CONTINUOUS_REPS` | `process_and_train.py` |
+| **Avalon added** — 2048 bits packed to 256 bytes, computed in Python and passed through Rust exactly like the other pass-through fingerprints. Binary, so it needs no float storage and no standardisation | both pipelines |
+| **ChemBERTa needed no builder** — it was already implemented and wired on the QM9 side and had simply never produced a usable result. §13.7 read as though both new representations were new code; only Avalon was | — |
+| Avalon and ChemBERTa wired into the experimental runner, reusing `create_avalon` and `create_chemberta`, which were already written | `KIRBy/tests/alternative_data_noise_robustness.py`, `ALL_REPS` |
+
+**The guard: `scripts/test_embedding_storage.py`.** Five sections, every one of them executed rather
+than matched against the source. It writes two molecules whose vectors differ by a known factor
+through the real writer and requires the factor to survive the round trip; it reads the Rust buffer
+widths out of the Rust source and requires the Python reader to agree; it requires every builder to
+return floats on its failure path; it requires the standardisation constants to come from the
+training split, caught by the test split's mean *not* being zero. The fifth section runs the
+retired storage through the first section's own assertion and requires that assertion to **fail** —
+so the guard cannot be quietly watered down until it can no longer go red.
+
+**The Rust half is in commit `d25bcb0`** — it was swept in with chat A's noise redesign, which was
+committed while both chats had the same file open. Nothing was lost, but the message on that commit
+does not mention it.
+
+
+### 2.8d ✅ MOSTLY FIXED 2026-08-26 (chat D) — the two Gaussian-process jobs that produced nothing
 
 Both failed on 2026-08-19 (`12822693`, `12822694`), after eight and six minutes. The output
 directories were created and are **empty** for all three datasets.
@@ -552,52 +634,51 @@ head -30 slurm-12822693.out | grep -i "warning\|gauche\|gpytorch\|botorch"
 grep -m1 "model-rep configs" slurm-12822693.out      # reads "0 model-rep configs" if this is it
 ```
 
-**Two defects to fix before resubmitting.**
+**Two defects, both now closed (chat D, 2026-08-26).**
 
-1. **A missing optional dependency silently produces an empty run.** Requesting a model that
-   cannot be built should stop the job at once, not run five folds over an empty list and then
-   crash on its own empty output. This is guard 9 — a condition that produces no rows must fail
-   loudly.
-2. **The environment is not pinned in the submission.** These were submitted with `--wrap` and no
-   output path, so they inherited whatever interpreter was active. The preflight has to assert
-   that every requested model can actually be constructed in the environment the job will use.
+1. ✅ **A missing optional dependency silently produced an empty run.** Already fixed in KIRBy
+   before this chat opened — `tests/alternative_data_noise_robustness.py` raises rather than
+   running five folds over an empty list (commit `333f005`, "fail loudly when a task produces
+   nothing"). This is guard 9.
 
-**Nothing is lost.** These were coverage for the kernel question, and that question is answered on
-QM9 (§10b.2). Resubmit once the environment is fixed.
+2. ✅ **The environment is now asserted, and the interpreter is pinned.**
+   `scripts/check_environment.py` names the interpreter it is speaking for, prints every relevant
+   package version, **constructs** each requested model rather than merely importing its package,
+   and additionally *fits* the two that import cleanly and fail on contact. It is wired into the
+   job template (`slurm_scripts_qm9_rerun/generate_scripts.py`) so a task dies in seconds rather
+   than after five folds, and §1b of the runbook has the copy-paste block that runs it under both
+   cluster interpreters and diffs them. The two dead jobs were `--wrap` submissions with no output
+   path, so they inherited whatever interpreter was active and left no log saying which; the
+   runbook now states that jobs are submitted by script, never by `--wrap`.
 
-### 2.8e The Sort & Slice fingerprint stores presence where it computes counts
+**🔴 One finding for you, and it is not mine to decide.** The probe also checks whether each
+package's own declared requirements are satisfied, because pip never re-checks that after the
+fact. On this laptop three of them are not:
 
-**Proved 2026-08-26 against the published reference**, not asserted. The reference is Markus
-Dablander's own repository for the 2024 Journal of Cheminformatics paper. Its featuriser defaults
-to `sub_counts=True`, and the line that builds the vector sums a one-hot encoding **once per
-occurrence** — so element *k* is the number of times substructure *k* occurs.
+| package | declares | installed |
+|---|---|---|
+| `quantile-forest` 1.4.1 | `scikit-learn>=1.5` | 1.3.2 |
+| `ngboost` 0.5.8 | `scikit-learn>=1.6,<2.0` | 1.3.2 |
+| `torchcp` 1.2.1 | `scikit-learn>=1.5.0` | 1.3.2 |
 
-**The computation here is a faithful port.** A difference comparison of the two function bodies
-found exactly one non-comment difference, a null-molecule guard.
+The quantile forest is not merely unsupported, it is **broken**: it imports and constructs
+perfectly and then `fit()` raises `Invalid parameter 'monotonic_cst'`. So the quantile forest and
+the conformal models cannot be verified on this laptop at all, and NGBoost is running outside its
+supported range. Three of those are uncertainty models, which is where the paper's second question
+lives.
 
-**The storage throws the counts away.** `process_and_train.py:366-371` casts to `uint8` and calls
-`np.packbits`, which reduces every feature to one bit. The count vector becomes a presence vector.
-So the models have trained on the `sub_counts=False` variant while the code asks for `True`.
+Two ways out, and the choice is yours because it changes numbers, not just tooling:
 
-**Measured on 20,000 real QM9 molecules: 21.8% of the information-bearing entries are wrong, and
-98.8% of held-out molecules carry at least one wrong feature.**
+- **Upgrade scikit-learn to ≥1.6.** One environment, everything supported. But tree defaults have
+  moved between 1.3 and 1.6, so every forest and every boosted model would need re-running rather
+  than merely re-checking — which the re-run is doing anyway, so the cost may be zero if it
+  happens *before* launch and nothing after.
+- **Downgrade `quantile-forest` to a 1.3.x that supports scikit-learn 1.3.** Smaller, but it
+  changes the quantile estimator, and if only the laptop is downgraded it creates exactly the
+  cross-environment divergence §3.4 exists to eliminate.
 
-The paper describes a binary vector, which matches what was stored — but not what the featuriser
-was configured to produce. Either the storage or the configuration has to change; they currently
-disagree with each other.
-
-**Fix:** store counts, one byte per feature — 1024 bytes rather than 128 — and clip at 255 instead
-of letting the cast wrap.
-
-**Two related defects, both latent rather than fired.**
-
-- A count that is an exact multiple of 256 wraps to zero and records as **absent**. It cannot fire
-  on QM9, where the largest count observed is 8, because those molecules have at most nine heavy
-  atoms. Untested on drug-like molecules.
-- On the ADME code path the training molecules are queued in one order and consumed in another, so
-  each row would receive a different molecule's fingerprint. **Verified not fired: no job script
-  passes `-d ADME` at all.** The QM9 path queues and consumes in the same ascending order and is
-  correct. I checked this specifically rather than accepting the report.
+Run §1b of the runbook on the cluster before deciding — this may be a laptop-only problem, and
+whether it is changes the answer.
 
 ### 2.9 The Methods figure does not show the experiment
 
@@ -637,12 +718,12 @@ Consequences that follow:
   against each other on the same labels. There is already a working Rust reference at
   `rust/reference/noise_arms.rs` that agrees with an independent Python version to within half a
   percent (`NOISE_DESIGN.md` §5.1b).
-- ⚠️ **The noise design does not currently cover the Python injector at all.** Checked: the
-  strings `NoiseInject`, `noiseInject` and `core.py` appear nowhere in `NOISE_DESIGN.md`. Its
-  delete list and its build steps name `rust/src/main.rs` only. So as written it specifies the
-  QM9 half and is silent on the half that produces the three experimental datasets *and* every
-  uncertainty number. That gap needs closing before sign-off, not after — it is the same
-  omission that let the two implementations drift in the first place.
+- ✅ **The noise design now covers both injectors.** It used to name `rust/src/main.rs` and nothing
+  else, which left the half that produces the three experimental datasets *and* every uncertainty
+  number unspecified — the same omission that let the two implementations drift in the first place.
+  Closed 2026-08-26 (`8de0eed`): `NOISE_DESIGN.md` §6.0a names both implementations and their
+  callers, §6.1 puts the six superseded Python strategies and `calibrate_sigma` on the delete list,
+  §6.2 step 6 specifies the Python build, and §6.3 items 6–8 make agreement between the two a gate.
 - The standardisation defect (§2.4) is a QM9-only problem.
 - The validation-noise defect (§2.5) exists in both, and is already fixed in one.
 - The uncertainty machinery — out-of-fold scoring, recorded noise, the confound controls — exists
@@ -1051,7 +1132,7 @@ two have been applied and one is answered by measurement:
 | **Forest feature sampling** | `sqrt`, every feature, or 30%? | Measured at production scale (§3.4.4b). Representation-dependent: `sqrt` is fine on descriptors and bad on fingerprints | **30% on both.** The only setting that wins or ties everywhere. **Changes QM9 too**, so it invalidates every forest result — but everything is being re-run |
 | **Early stopping** | Keep the last epoch, or roll back to the best? | QM9 counts twenty epochs of no improvement and then returns *that* epoch's weights. The experimental side snapshots and restores the best. Those twenty extra epochs are spent memorising injected corruption, and more of it at higher noise — so **QM9's neural degradation curves are steeper for a procedural reason, pointing the same way as the finding** | **Roll back, both sides.** It is what almost everyone means by early stopping. Caveat: it means selecting on validation labels, which under decision 2 would be noisy — but that is correct, since nobody gets clean labels when deciding when to stop |
 | **Uncertainty calibration** | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
-| **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Today only the descriptor vector is standardised. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | **Standardise.** The alternative has already produced one false conclusion. It changes every embedding number, so it is your call |
+| **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | ✅ **SETTLED 2026-08-26 — standardise.** Approved as part of chat C's plan and implemented: `CONTINUOUS_REPS` in `process_and_train.py` now covers PDV and all three learned embeddings, fitted on the training split. It changes every embedding number, which is why it is recorded here rather than left implicit |
 
 **Decision 4 — sign off the noise design.**
 `NOISE_DESIGN.md` §7 still has Laplace open. My view: include it. It is one extra condition on
@@ -1083,7 +1164,7 @@ commit, because each of them changes what a noise level means.
 |---|---|---|
 | 1 | ✅ **DONE 2026-08-26** — deleted the five superseded noise types and the six unreachable distribution variants, plus the four functions that served them | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.1 |
 | 2 | ✅ **DONE 2026-08-26** — dose solver, three shapes, five targeting rules (the shifted grouped condition of §13.3 included) | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.2, §6.2a |
-| 3 | Implement the identical specification in Python and cross-check it against Rust on the same labels | `NoiseInject/noiseInject/core.py` |
+| 3 | Implement the identical specification in Python and cross-check it against Rust on the same labels — **the specification is `NOISE_DESIGN.md` §6.2 step 6, the deletions are its §6.1, and the cross-check is its §6.3 items 6–8**; do not work from a paraphrase | `NoiseInject/noiseInject/core.py` |
 | 4 | ✅ **DONE 2026-08-26** — standardisation constants come from the clean training labels; `generate_aggregate_stats` no longer takes the noise at all | `rust/src/main.rs`, `generate_aggregate_stats` |
 | 5 | Validation split gets its own independently drawn noise (decision 2) — **still the author's call (§13.5)**. The code is now shaped for it: `write_data` takes an `apply_noise` flag and a `NoisePlan`, so it is one extra plan built over the validation labels | `rust/src/main.rs`, `preprocess_data` |
 | 6 | ✅ **DONE 2026-08-26** — recorded per molecule where it is drawn, never reconstructed. See §5.2 and `NOISE_DESIGN.md` §6.2a | `rust/src/main.rs`, `write_noise_manifest` + the provenance writer in `preprocess_data`; `scripts/process_and_train.py`, `record_noise_manifest` |
@@ -1336,11 +1417,14 @@ dose-matched.
 
 | Dataset | Axis | Levels |
 |---|---|---|
-| QM9 | fraction of the label spread — there is no assay error to anchor to | 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5 |
-| LogD | log units | 0, 0.15, 0.3, 0.5, 0.75, 1.0 |
-| Caco-2 | log units | 0, 0.1, 0.2, 0.35, 0.5, 0.7 |
-| hERG | log units | 0, 0.15, 0.3, 0.54, 0.8, 1.1 |
-| Censoring, all datasets | fraction of labels clipped | 0, 10, 20, 25, 30, 40, 50% |
+| QM9 | fraction of the label spread — there is no assay error to anchor to | **`NOISE_DESIGN.md` §6.4** |
+| LogD, Caco-2, hERG | log units, each anchored to that endpoint's published assay error | **`NOISE_DESIGN.md` §6.4** |
+| Censoring, all datasets | fraction of labels clipped | **`NOISE_DESIGN.md` §6.4** |
+
+**The numbers are deliberately not repeated here.** They were, and the two documents disagreed
+about them for a fortnight. §6.4 of the design owns every level grid; this section owns what the
+grids are *for*. Seven levels on QM9 and six on each experimental dataset is what the cost
+arithmetic in §13.1 assumes.
 
 Each experimental grid brackets one unit of real assay error for that endpoint and runs to about
 twice it. Report the fraction-of-spread alongside, because one unit of real error is 0.13 of the
@@ -1519,6 +1603,19 @@ Gate 2 is chat B's (`scripts/crosscheck_injectors.py`). Gates 6 and 9 need a tra
 chat H's. Gates 8, 10 and 11 are chat D's. Each of chat A's gates was checked by removing the fix
 and confirming the gate fails.
 
+**One more gate, and it costs a second — chat K, 2026-08-26.** It guards the documents and the
+bibliography rather than the noise, which is why it sits outside the numbered list:
+
+```
+python3 scripts/check_bib_and_docs.py
+```
+
+It fails if a cited key is undefined, if two entries collide on one key, if a source named in
+`NOISE_DESIGN.md` § Sources has no bibliography entry, if one of the five rejected sources in
+§4a reappears, or if a single-owned fact — the level grids, the noise-type count, the
+threshold-degeneracy figure — starts appearing in both documents again. It reports the outstanding
+`\bibliography` line in `paper.tex` (§9.1) as a pending manuscript edit rather than a failure.
+
 1. ✅ **The dose is flat across noise types.** At one target, on the real training labels, every
    type must deliver the same measured amount. This is the single check that proves the confound
    is gone. If it fails, the entire re-run is confounded and worthless.
@@ -1548,12 +1645,21 @@ and confirming the gate fails.
 7. ✅ **Student-t reduces to Gaussian in the limit.** At 200 degrees of freedom the two must be
    indistinguishable — checked on both the delivered dose and the tail fraction, inside
    `--self-test`.
-8. **A short record no longer desyncs the file.** Feed a molecule that fails the fingerprint check
-   and confirm the reader stays aligned.
+8. ✅ **A short record no longer desyncs the file.** Implemented both sides (chat D):
+   `rust/tests/writer_guards.rs` feeds the binary a molecule RDKit cannot parse and asserts the
+   file is still the exact sum of its records' expected lengths;
+   `scripts/test_record_alignment.py` hand-builds a short record and asserts the reader raises
+   rather than returning silently wrong features. `cargo test --test writer_guards` and
+   `python scripts/test_record_alignment.py`.
 9. **Every new column is populated** in a smallest-possible end-to-end run.
-10. **Two tasks running at once do not corrupt each other.** Launch two tasks concurrently from
-    one checkout with different representations, and confirm each reads its own configuration and
-    its own data files (§2.8a). **This gate did not exist and the defect it catches is live.**
+9b. ✅ **The interpreter can build what the job asks for.** `python scripts/check_environment.py
+    --models <what this job runs>`, wired into the job template; runbook §1b runs it under both
+    cluster interpreters and diffs them (§2.8d).
+10. ✅ **Two tasks running at once do not corrupt each other.** Implemented (chat D):
+    `python scripts/test_config_isolation.py` launches two binaries concurrently in one directory
+    with different representations and asserts each keeps its own data, plus an instant static
+    half that fails if a fixed `config.json` reappears anywhere in the tree. `--end-to-end` runs
+    two real pipeline tasks side by side (§2.8a).
 11. **The checkout being used is the live one.** Confirm which copy of KIRBy the cluster actually
     updates before submitting anything against it (§2.8b).
 
@@ -1599,22 +1705,47 @@ least three places, which is what guard 12 exists to prevent — one script gene
 *and* its caption, so prose and table cannot drift apart again.
 
 
-### 9.1 The bibliography is broken, and this one is urgent
+### 9.1 ✅ The bibliography — fixed on the repository side, one line left for you
 
-Flagged in the revision guide and **verified this session, worse than recorded there.**
+**Rebuilt 2026-08-26 (chat K).** The state recorded here before was measured weeks earlier and had
+drifted in both directions: the manuscript was in better shape than it said, and `citations.bib`
+was in worse shape.
 
-`paper.tex:694` reads `\bibliography{sn-bibliography}`. **There is no `sn-bibliography.bib` in the
-repository.** Your bibliography is `citations.bib`. As it stands every citation in the manuscript
-renders as `[?]`.
+#### 🔴 The one thing left, and it is yours because it is in `paper.tex`
 
-Separately, the paper cites 51 keys and `citations.bib` defines 180, but **seven cited keys are
-not among them**. The guide caught two of these; there are five more:
+`paper.tex:694` reads `\bibliography{sn-bibliography}`. **There is no `sn-bibliography.bib`
+anywhere in the repository** — the bibliography is `citations.bib`. Every citation in the master
+build is unresolved as a result: `_build_paper/paper.aux:128` carries `\bibdata{sn-bibliography}`
+and `_build_paper/paper.log` warns on all 51 cited keys.
 
-`Fang2022` · `Islam2019` · `jorner2021` · `Mustapha2016` · `Rogers2010` · `Song2022` · `Wolpert1997`
+```
+paper.tex:694    \bibliography{sn-bibliography}   ->   \bibliography{citations}
+```
 
-Four of those are load-bearing in the Introduction — the extended-connectivity fingerprint
-reference, the no-free-lunch theorem, the learning-with-noisy-labels review, and the
-diminishing-returns result. None of this depends on any re-run.
+⚠️ **Do not make the same change to `paper_inline_bbl.tex`.** That file is the submission build and
+deliberately inlines the compiled `.bbl` instead of running BibTeX; its own comment at `:695-696`
+says so, and its `paper_inline_bbl.bbl` already resolves all 51 keys. Only the master `paper.tex`
+build is broken.
+
+#### What the earlier note got wrong
+
+- **Not seven undefined keys — one, and it was a case mismatch.** `Fang2022`, `jorner2021`,
+  `Mustapha2016`, `Song2022` and `Wolpert1997` had all been added to `citations.bib` since this
+  section was written. `Islam2019` was never missing: its entry at `citations.bib:589` opens
+  `@article {Islam2019,` with a space, which a naive key scan misses and BibTeX accepts. Only
+  `Rogers2010` was nominally unresolved — the entry key was `rogers2010`. Traditional BibTeX
+  matches keys case-insensitively so it resolved; biber would not have. **Renamed to `Rogers2010`.**
+- **A collision nothing had recorded.** `Xu2019` was defined twice, on two *different* papers — the
+  L_DMI noise-robust loss function and "How Powerful are Graph Neural Networks?". BibTeX silently
+  keeps the first, so a future `\citep{Xu2019}` for the graph-network paper would have cited the
+  loss-function paper instead, with no warning. **Split into `Xu2019dmi` and `Xu2019gin`**, leaving
+  no bare `Xu2019`, so any such citation now fails loudly instead of resolving to the wrong source.
+
+#### The guard
+
+`scripts/check_bib_and_docs.py` asserts all of this and fails the run if any of it regresses —
+including the one line above, which it reports as an outstanding manuscript edit rather than a
+hard failure so it turns green on its own once you make the change.
 
 ### 9.2 The writing principles — keep these, they are not about numbers
 
@@ -1666,7 +1797,7 @@ Nothing here is started. Steps 1 and 2 are the only ones that need you.
 | # | Step | Blocked on |
 |---|---|---|
 | 1 | Settle the five open decisions in §4 (the sixth was withdrawn — already decided 2026-08-14) | you |
-| 2 | Sign off `NOISE_DESIGN.md` | you |
+| 2 | **One decision, not a document.** `NOISE_DESIGN.md` §7 is down to a single open item — whether Laplace is queued as a condition. The dose-matching rule was approved 2026-08-21; the positive-control question and the level grids were closed 2026-08-26. Context for the Laplace call is §4 Decision 4 and §13.5 | you |
 | 3 | **Do NOT blanket-cancel the Gaussian-process jobs.** I previously said to kill job range 12822669–12822694. That was wrong: you submitted them deliberately on 2026-08-19 to settle a live question — *"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* Their zero-noise rows answer that question whatever happens to the noise scheme, because no noise is drawn there. **Let the zero-noise point land, harvest the kernel comparison, then cancel the rest.** Check state first: `sacct -j 12822669-12822694 --format=JobID,JobName%24,State,Elapsed` | you |
 | 4 | Archive the current results before anything overwrites them — they are the only record of what the paper claims today | — |
 | 5 | Delete and build the noise scheme in Rust (§5.1 items 1–4) | 2 |
@@ -1691,8 +1822,9 @@ the first needs fixing or the verification has to move to the cluster.
 
 ## 10b. Carried forward from the revision guide
 
-Salvaged 2026-08-25 by reading `REVISION_GUIDE.md` directly. The guide gets scrapped at step 3 of
-your process; everything below had to come out first. The verified literature quotes went into
+Salvaged 2026-08-25 by reading `REVISION_GUIDE.md` directly, before it was scrapped at step 3 of
+your process. **The file no longer exists**, so this section is the only surviving copy of what is
+below. The verified literature quotes went into
 `NOISE_DESIGN.md` §4b, and the two literature passes are reconciled in §4a there.
 
 ### 10b.1 Six claims that were asserted and then withdrawn — and why that keeps happening
@@ -2080,11 +2212,11 @@ Specifically, in every chat:
 | **A** | Noise redesign in Rust | — | ✅ **DONE 2026-08-26** |
 | **B** | Noise redesign in the Python injector, and the cross-check | A, for the spec | ✅ **yes** — the specification is settled, so it can be written alongside A |
 | **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
-| **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **yes** |
+| **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **DONE 2026-08-26** |
 | **E** | Cross-pipeline parity | — | ✅ **yes** — but check what another session already did |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
 | **G** | Local test: which noise settings earn their place | A | ✅ **yes** — it tests the settings, not the implementation |
-| **H** | Job scripts, preflight, gates, launch | A B C D E G + §13.1 | ❌ blocked |
+| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ + B C E G + §13.1 | ❌ blocked |
 | **I** | The uncertainty decomposition build | F | ❌ blocked on F's findings |
 | **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
 | **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
@@ -2204,7 +2336,51 @@ corruption whichever fold it lands in.
 
 ---
 
-#### Chat C — Embedding storage, and the Gaussian-process re-test
+#### Chat C — Embedding storage, and the Gaussian-process re-test ✅ DONE 2026-08-26
+
+**What landed** is in §2.8c. Beyond the three storage changes: Avalon was added to both pipelines,
+Avalon and ChemBERTa were wired into the experimental runner, the guard is
+`scripts/test_embedding_storage.py`, and the measurement is
+`scripts/retest_embedding_kernels.py`. **The noise scheme was not touched** — no change to
+`NOISE_DESIGN.md` was needed or made.
+
+**Confirming it at full size on the cluster.** The local measurement is at a few thousand molecules;
+the harvest is at ten thousand, so only the paired difference transfers. These reproduce the harvest
+cell for cell, post-fix. Rebuild the binary first — the record widened, so an old binary reads every
+field after the embedding at the wrong offset.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models     # confirm the live checkout first (§2.8b)
+git pull
+cd rust && cargo build --release && cd ../scripts
+
+for rep in mhggnn mol2vec chemberta avalon continuous_pdv; do
+  sbatch --account=stat-cadd --job-name=gp_$rep --time=47:00:00 \
+    --output=../logs/gp_postfix_$rep.out --wrap="
+      cd \$SLURM_SUBMIT_DIR && python -u process_and_train.py -d QM9 -t homo_lumo_gap \
+        -m gauche --kernel rbf -u True -r $rep \
+        -n 10000 -b 10 -s scaffold --normalize True \
+        --noise-level 0.0 --noise-shape gaussian --noise-targeting uniform \
+        -f ../results/gp_kernel_postfix/anova_gaussian_${rep}_gauche_rbf.csv"
+done
+```
+
+Then compare against `results/gp_kernel_harvest/qm9/`, zero-noise rows only, paired on the replicate
+index. **Do not treat the six noise-type files there as six independent samples** — at zero noise
+they replay the same run (§10b.2, constraint 1).
+
+**Two things this chat found that belong to other chats.**
+
+- **The `morgan` representation is wired in Rust and not in Python.** `rust/src/main.rs` carries a
+  `morgan_buf`, reads it and writes it, but `process_and_train.py` neither builds nor writes it. Ask
+  for it today and every record after the first is read at the wrong offset. It is half of the
+  repair §5.6 describes; the other half of that section, collapsing the two descriptor-vector names
+  into one, changes the same record layout. **Both should be done in one pass over that layout, and
+  neither is assigned to a chat.**
+- **This botorch cannot fit the pipeline's Gaussian process.** `fit_gpytorch_mll` refuses a bare
+  gpytorch model in botorch 0.16 (*'Gauche' object has no attribute 'transform_inputs'*), which is
+  what `models/models.py` calls. Whether the cluster interpreter has an older botorch decides
+  whether that model can run at all — an environment question, chat D (§2.8d).
 
 **Does:** removes the per-molecule rescaling from all three learned embeddings, stores them as
 32-bit floats, adds per-feature standardisation before the model, then re-tests the radial-basis
@@ -2241,51 +2417,44 @@ embeddings has to be measured after the fix, not assumed. That is the deliverabl
 
 ---
 
-#### Chat D — Infrastructure: the configuration race, the writer guards, the environment
+#### Chat D ✅ DONE 2026-08-26 — Infrastructure: the configuration race, the writer guards, the environment
 
-**Does:** three unrelated defects that all silently produce wrong or missing results.
+All three defects are fixed and each is held by a check that fails if the fix is removed. Details
+in §2.7, §2.8a and §2.8d; the gates are §8 items 8, 9b and 10.
 
-**1. The configuration race (§2.8a) — launch blocker.** `process_and_train.py:1623` writes
-`config.json` by relative path; `rust/src/main.rs:1139` reads it by relative path; every job does
-`cd scripts` first; the array jobs run several tasks at once.
+**What was delivered**
 
-**The fix is smaller than the defect looks, and this was checked in the source 2026-08-26.** The
-memory-mapped files are already named `train_{file_no}.mmap` and `file_no` is
-`(iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF` (`:1875`) — effectively unique per task, so
-*those* do not collide. **Only the configuration file has a fixed name.** Write
-`config_{file_no}.json` and pass the path to the binary as an argument; the binary currently
-hard-codes the name. Remove the file when the task ends so they do not accumulate.
+1. **The configuration race (§2.8a).** `config_{file_no}.json`, passed to the binary as a
+   **required** `--config` with no default, and removed with the memory-mapped files.
+   Gate: `scripts/test_config_isolation.py`.
+2. **The writer guards (§2.7).** All-or-nothing records; a failed fingerprint is written as 256
+   zero bytes, listed in `featurisation_failures_{file_no}.csv`, and stops the run unless
+   explicitly allowed. `read_train_labels` errors instead of truncating. `parse_mmap` raises with
+   the entry and byte offset instead of guessing, and asserts the file was consumed exactly.
+   Gates: `rust/tests/writer_guards.rs`, `scripts/test_record_alignment.py`.
+3. **The environment (§2.8d).** `scripts/check_environment.py`, wired into the job template and
+   into runbook §1b for both cluster interpreters. The local `torch_geometric` import is fixed, so
+   the QM9 pipeline runs on the laptop and every other chat can verify locally.
 
-Two variants considered and rejected: a per-task working directory breaks the relative paths to
-`../results`; passing every field on the command line is cleaner in principle but a much larger
-change for no extra safety.
+**Two things found that were not in the brief, and both were worse than what was**
 
-**2. The file-writer guards (§2.7).** Two `continue` statements inside the fingerprint block sit
-after the earlier fields of a record are written and before the label is written, so a short record
-desynchronises every molecule after it — and the reader's bare `except: continue`
-(`:1224-1227`) swallows the resulting misparse. Separately, `read_all_target_values`
-(`rust/src/main.rs:173-191`) pushes only successfully parsed records while the noise map is keyed by
-loop position, so one rejected molecule shifts every later target against its index.
+- **An unparseable SMILES killed the process rather than taking the error branch.** RDKit's
+  binding returns a null pointer as `Ok`, so the fingerprint call dereferenced null: SIGSEGV, no
+  message, no partial output. The old `Err(_) => continue` branch was unreachable for the ordinary
+  bad-SMILES case. Verified at exit 139 and fixed (§2.7 item 2).
+- **`morgan` was written by the Rust writer and has never been read by the Python reader.** Any run
+  including it was misaligned by 256 bytes per record. The reader now refuses an unknown
+  representation by name, and `morgan` has since been deleted from the writer — it was a leftover
+  of the `avalon` work (§2.7 item 5).
 
-**3. The environment (§2.8d, §3.4).** Two experimental Gaussian-process jobs ran to completion and
-produced nothing: the interpreter was missing `gpytorch`, `torchbnn` and `quantile_forest`, and the
-pipeline skipped them with a warning. Also: the local environment cannot import `torch_geometric`,
-so the QM9 pipeline cannot be run on this laptop at all — that blocks local verification for every
-other chat.
+**One decision left with you** (§2.8d): `quantile-forest`, `ngboost` and `torchcp` all declare a
+newer scikit-learn than the 1.3.2 installed, and the quantile forest is outright broken by it —
+it constructs and then fails inside `fit()`. Upgrade scikit-learn before launch, or downgrade the
+quantile forest. Run runbook §1b on the cluster first; this may be a laptop-only problem.
 
-> **Prompt.** Fix three infrastructure defects, all documented in `RERUN_PLAN.md`. First, §2.8a — the
-> shared configuration file. `config.json` is written by relative path in
-> `scripts/process_and_train.py:1623` and read by relative path in `rust/src/main.rs:1139`, and the
-> array jobs run several tasks in the same directory, so one task's binary can read another task's
-> configuration and then open and rewrite that task's memory-mapped training data. The recommended
-> fix is in §13.2 chat D: give the configuration file a unique name per task and pass the path to the
-> binary as an argument. Check the reasoning there before choosing a different approach; the
-> memory-mapped files are already uniquely named and do not need changing. Then add a check that
-> fails: run two tasks concurrently from one checkout with different representations and confirm each
-> reads its own configuration. Second, §2.7 — the two silent corruption risks in the file writer.
-> Third, §2.8d and §3.4 — audit both cluster interpreters and the local one, make a requested model
-> that cannot be constructed a hard failure rather than a skipped warning, and fix the local
-> `torch_geometric` import so the pipeline can be verified locally at all. Do not touch `paper.tex`.
+**Scope note.** `slurm_scripts_qm9_rerun/*.sh` were not hand-edited — they are generated, and they
+still carry the pre-redesign CLI flags, so chat H regenerates them. The environment guard went into
+`generate_scripts.py`, where it will land in every regenerated script.
 
 ---
 
@@ -2508,24 +2677,45 @@ noise type as arguments and ignores both.
 > descriptor-only marker with them. Every guard must be an assertion that fails the run, not a
 > comment. Do not touch `paper.tex` — record what it needs instead.
 
-#### Chat K — Sync the two documents, and fix the bibliography
+#### Chat K — ✅ DONE 2026-08-26 — sync the two documents, and fix the bibliography
 
-**Does:** two housekeeping jobs that both cost nothing and both block later work if left.
+**Both jobs are finished.** What follows is the record; the prompt that ran it is kept at the end.
 
-**1. The two design documents disagree.** `NOISE_DESIGN.md` and this plan were written at different
-times and have drifted. Known differences: the count and structure of the noise types (§13.3); the
-level grids appear in both with slightly different wording; the Python injector is specified in this
-plan and absent from the design document; the Gaussian-process decision and the staged run design
-are in this plan only. **The design document is the specification and this plan is the process** —
-where they disagree, the design document wins on what the noise is, and this plan wins on what gets
-run and in what order. Neither should restate the other; each should point at it.
+**1. The two documents now have an owner per fact.** The rule is stated in the opening of this file
+and in `NOISE_DESIGN.md`'s header: **the design owns what the noise IS** — conditions, algebra,
+parameters, sources, level grids, and the checks that are properties of the noise scheme — and
+**this plan owns what gets RUN and in what order**. Ten disagreements were resolved; two of them
+were a document contradicting *itself*:
 
-**2. The bibliography (§13.8).** The manuscript points at a file that does not exist, seven cited
-keys are undefined, and twenty-two of the redesign's sources are missing from the bibliography.
-Sources, quotes and access routes are already collected in `NOISE_DESIGN.md` §4a–4b.
+| Was | Now |
+|---|---|
+| §1 of the design proposed level ladders that its own §6.4 superseded, and this plan restated the grids a third time | §6.4 owns every grid. §1 keeps the axis rule; §6.1 of this plan points |
+| §0.3 of this plan said the heavy-tailed types satisfy the skewed-noise request; §13.3 said plainly that they do not | §0.3 corrected — the request is met by censoring and grouped-shifted, both one-directional |
+| The design's opening said six state documents had been deleted; all six are on disk | Corrected, and it now points at §11. `REVISION_GUIDE.md` is the one that is genuinely gone |
+| §7 of the design had three open items; two were answerable | Positive-control question closed (censoring *is* the label-keyed condition, §3.2); grids closed (the range-finding run set them). **Laplace is the only open item left** |
+| The design's status said nothing was implemented | Chat A built the Rust half; the header and §6.5 now say what is built and what is not |
+| The design's delete list reached into the figure script | Moved out — §5.4 of this plan owns those, chat J executes them |
+| §6.5 of the design was a second, different ordering of the whole re-run | Retitled to the noise-scheme build order; §10 of this plan owns the run order |
+| The threshold-degeneracy figure was quoted at two precisions | One value in both: 99.99925% and 0.669 eV |
+| The design did not cover the Python injector | Already closed by `8de0eed`; §3 of this plan updated to stop describing it as open |
+| §13.3's grouped-condition table restated the design's algebra | Replaced by a pointer to §2 and §2a |
 
-> **Prompt.** Two housekeeping jobs. First, bring `NOISE_DESIGN.md` and `RERUN_PLAN.md` into
-> agreement. They were written at different times and have drifted — the noise type count and
+**2. The bibliography is fixed on the repository side.** 25 entries added, a key collision split, the
+rejected-source blocklist made executable. Details and the corrections to what this section used to
+claim are in §13.8; the one remaining line, which is yours because it is in `paper.tex`, is §9.1.
+
+**The guard.** `scripts/check_bib_and_docs.py` — it fails if a cited key goes undefined, if two
+entries collide on a key, if a source in the design's Sources list has no entry, if a rejected
+source reappears, or if the two documents start restating each other's facts. Each check was
+confirmed to fail by removing the fix it guards.
+
+**Verified by a real build**, not only by the script: `paper.tex` copied to a scratch directory with
+the one-line change applied, then `pdflatex → bibtex → pdflatex → pdflatex`. **51 of 51 citations
+resolved, zero BibTeX warnings**, against 92 undefined-citation warnings in the repository's own
+`_build_paper/paper.log`.
+
+> **Prompt (as issued).** Two housekeeping jobs. First, bring `NOISE_DESIGN.md` and `RERUN_PLAN.md`
+> into agreement. They were written at different times and have drifted — the noise type count and
 > structure, the level grids, the Python injector, the Gaussian-process decision and the staged run
 > design. Read both in full first. The design document is the specification of what the noise *is*;
 > the plan is the process of what gets *run*. Where they disagree, decide which one owns the fact,
@@ -2569,14 +2759,16 @@ real measurement variance sits between laboratories — and that describes labor
 differing from one another. That is an offset, not a widening. The condition and the evidence for it
 did not match.
 
-**So there are two mechanisms, both real, both separately sourced, and they are now two conditions:**
+**So there are two mechanisms, both real, both separately sourced, and they are now two conditions**
+— one where the affected scaffold groups get a *wider* error still centred on the truth, and one
+where they get a *shifted* error. Both are dose-matched, so they deliver the same total amount of
+noise and can be compared directly.
 
-| Condition | What happens | Source |
-|---|---|---|
-| **Grouped — wider** | Molecules in some scaffold groups get a larger error, still centred on the true value | Within-laboratory error must be multiplied by about three to reach between-laboratory error (Avdeef 2019; corroborated by Llinàs & Avdeef 2019 and Kalliokoski et al. 2013) |
-| **Grouped — shifted** | Molecules in some scaffold groups have their labels pushed in one direction by a constant | 62% of measurement variance sits between laboratories (Bentz et al. 2013, Table 7) |
-
-Both are dose-matched, so they deliver the same total amount of noise and can be compared directly.
+**The two conditions, their algebra and their parameters live in `NOISE_DESIGN.md` §2 and §2a**,
+which owns what the noise is. They were written there on 2026-08-26 (`8de0eed`) along with the two
+rules the real Murcko scaffolds force — select groups by molecule fraction, and do not treat the
+empty scaffold as a group. This section is the record of *why* the second condition was added and
+is not the place to look up how it works.
 
 **Why this is worth one extra condition.** The study's emerging result is that error pushing in one
 direction hurts far more than error that scatters. Censoring shows that at the level of the whole
@@ -2664,7 +2856,9 @@ for the validation data?"*
 2. **The fix is a port, not a design.** Copy what the experimental pipeline already does.
 3. **The Gaussian process comparison on the two embeddings has to be re-measured, not argued.** The
    0.87-against-−0.02 gap is *attributed* to this defect. That attribution is an inference. Chat C
-   measures it.
+   measures it — `scripts/retest_embedding_kernels.py`, which scores the same molecules, the same
+   scaffold split and the same seeds under both storage schemes so the difference is the storage and
+   nothing else. Result in §2.8c.
 
 ### 13.7 🔴 TODO — an additional embedding, on the evidence
 
@@ -2798,7 +2992,11 @@ at six, so the grid does not grow.
 
 **Two things that follow, and neither is optional.**
 
-**1. Both new representations depend on chat C.** ChemBERTa is already implemented in this pipeline
+**1. Both new representations depend on chat C.** ✅ **Done 2026-08-26.** One correction to what
+follows: both are new to the representation *set*, but only Avalon was new to the *code*. ChemBERTa
+was already built and wired on the QM9 side and needed the storage fix and nothing else; Avalon was
+written for the QM9 pipeline and wired into the experimental one, where `create_avalon` already
+existed. ChemBERTa is already implemented in this pipeline
 but carries the same per-molecule rescaling defect as the other learned representations, so it is
 unusable until that is fixed. Avalon is an ordinary RDKit fingerprint and needs adding to both
 pipelines; it is binary, so it needs no rescaling and no standardisation.
@@ -2813,22 +3011,59 @@ pipelines; it is binary, so it needs no rescaling and no standardisation.
 
 `paper.tex:203` describes the representations and must be rewritten for the new set.
 
-### 13.8 Citations for the paper — make them reachable
+### 13.8 ✅ DONE — citations for the paper are reachable
 
-The author asked that the sources be easy to use when the paper edits happen.
+The author asked that the sources be easy to use when the paper edits happen. **Done 2026-08-26
+(chat K): 25 entries added to `citations.bib`, and `NOISE_DESIGN.md`'s Sources list now carries the
+BibTeX key beside every source**, so a paper pass can cite straight from the evidence document
+without looking anything up.
 
-**State, checked 2026-08-26.** The manuscript points at a bibliography file that does not exist, so
-every citation currently renders as an unresolved marker (§9.1). Separately, of the sources the
-noise redesign relies on, **ten are already in `citations.bib` and twenty-two are not**:
+**The count in the earlier version of this section was wrong in a way worth recording**, because it
+is the same failure mode as guard 12 — a name matched, so the source was assumed present. Three of
+the ten sources listed as "already in `citations.bib`" had no entry at all; the name matched a
+co-author or an unrelated paper:
 
-- **Present:** Heid, Huber, Kalliokoski, Kolmar, Kramer, Landrum, Niu, Riniker, Song, Zhao.
-- **Missing:** Alvarez Baron, Avdeef, Benet, Bentz, Hampel, Horwitz, Kell, Krüger, Lange,
-  Larregieu, Llinàs, Lloyd, O'Hagan, Prieto, Sato, Srinivasan, Svensson, Wenlock, and Tukey.
+| Listed as present | Actually |
+|---|---|
+| **Kalliokoski** | Appeared only as a co-author on `Kramer2012`. This is the pIC50 = 0.68 anchor and the √2 pairing correction |
+| **Niu** | Absent. This is §4a's recommended logD source, and the one that removes the dependence on a figure that failed verification |
+| **Zhao** | Absent. The only Zhao entry was `zhao2025`, an unrelated preprint. Zhao **2017** is the published precedent for the fraction-of-spread axis in `NOISE_DESIGN.md` §1 |
 
-Bentz is the most important of the missing ones — it carries both the between-laboratory finding for
-the Background and the Caco-2 error figure.
+Genuinely present and reused rather than duplicated: `Heid2023`, `Kolmar2021`, `Kramer2012`,
+`Song2022`, `huber1964robust`, `landrum2024`.
 
-**Task, and it needs no compute:** point the manuscript at the right bibliography file, add the
-twenty-two missing entries, and add the seven cited keys that are not defined anywhere (§9.1). The
-verbatim quotes and access routes are already collected in `NOISE_DESIGN.md` §4b, and the
-reconciliation between the two literature passes is §4a. Nothing else needs writing.
+**What was added.** All 25 carry metadata taken from Crossref DOI content negotiation, or from the
+publisher record where no DOI exists. The full list with keys is `NOISE_DESIGN.md` § Sources.
+
+Four had no usable metadata anywhere in the repository and were looked up:
+
+- **Svensson et al. 2025** → *Artificial Intelligence in the Life Sciences* 7:100128,
+  doi:10.1016/j.ailsci.2025.100128. Peer-reviewed and open access. **Reading it corrected a number
+  in the design**: the claim was "25–63% censored in ten of fifteen assays"; Table 1 says eight of
+  fifteen in that band and thirteen of fifteen with any censoring. Fixed in `NOISE_DESIGN.md` §3.5,
+  §5.3b and §5.5.
+- **Tukey** → Tukey JW (1960), *A survey of sampling from contaminated distributions*, in Olkin (ed.),
+  *Contributions to Probability and Statistics*, Stanford University Press, 448–485. This is the
+  source of the conventional contamination scale factor of 3.
+- **Hampel 2001** → ETH Zürich Seminar für Statistik Research Report 94,
+  doi:10.3929/ethz-a-004158597. **An institutional research report, not a peer-reviewed article.**
+  Added with that status stated, because it is the source of the 1–10% contamination fraction and
+  the document's rule is peer-reviewed primary sources. No peer-reviewed version carries the
+  sentence verbatim.
+- **Assay Guidance Manual** → the *Assay Operations for SAR Support* chapter, NCBI Bookshelf
+  NBK91994, PMID 22553866.
+
+**Three author-attribution errors were found and fixed while building the entries**, all in
+`NOISE_DESIGN.md`'s Sources list: Zhao 2017 was credited to "Zhao Y, Wang J" rather than Zhao Linlin
+and Wang Wenyi; Sato 2018 was given six authors in one place and eleven in another when it has four;
+and Bruneau & McElroy was dated by its online-first year rather than its 2006 issue.
+
+**The blocklist is now enforced, not just written down.** `NOISE_DESIGN.md` §4a lists five sources
+that were traced to source and rejected — Matsson 2019 (no such paper), Pham-The 2013 (no
+reproducibility experiment), Lanevskij & Didziapetris 2019 as a Caco-2 log-unit source (unit error),
+Lee 2017 as a Caco-2 standard-deviation source, and the Fagerholm preprint. Nothing stopped one
+being re-added by a later pass. `scripts/check_bib_and_docs.py` now fails the run if any of them
+appears in `citations.bib`, and the same names are repeated in a comment block at the head of the
+added entries.
+
+🔴 **Still outstanding, and it is the author's:** the one-line `\bibliography` change in §9.1.
