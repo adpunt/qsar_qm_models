@@ -3612,6 +3612,110 @@ remove the Gaussian-process cap, and repeat seeds on the experimental side.
 
 ---
 
+#### Chat L — Work through all 151 audit candidates 🔴 TODO
+
+**Does:** finishes the full audit of both pipelines run on 2026-08-26. Every candidate gets a
+verdict. **All of them, cosmetic included — the author's instruction.**
+
+**Where everything is.** `research_archive/audit_2026_08_26/`:
+
+| file | what it holds |
+|---|---|
+| `unverified.json` | **111 candidates nobody has looked at.** 79 non-cosmetic, of which **8 are top severity**; 32 cosmetic |
+| `confirmed_35.json` | the 40 that were checked, minus the 5 disproved — with each reviewer's reasoning |
+| `refuted_5.json` | the 5 disproved, kept so they are not re-raised |
+| `synthesis.md` | the run's own summary |
+
+**Three are already fixed and need no further work:** the scrambled substructure fingerprint
+(§2.10), the neural-network setting that matched no branch, and the feature-scaling divergence
+(§3.4.3a).
+
+**Start here.** One of the eight unchecked top-severity candidates is *another scrambling fault* of
+the same class as §2.10 — the QM9 graph models are said to index the unshuffled dataset with
+indices computed on the shuffled one. If true, every graph model has been trained on molecules that
+do not match their labels. Check that one first.
+
+**Read the existing verdicts sceptically.** Every reviewer returned "certain", with no gradation at
+all, which is not what honest checking looks like. The surviving list contains plain duplicates —
+three entries for one fingerprint fault, two for one graph-model error — so the true count is lower
+than 35. And the audit ran against a tree that was changing underneath it, so at least one finding
+was marked disproved only because its fix had landed mid-run; the feature-scaling fault is real
+despite being marked disproved.
+
+> **Prompt.** Finish the audit of both training pipelines. Every candidate in
+> `research_archive/audit_2026_08_26/unverified.json` needs a verdict — all 111, including the 32
+> marked cosmetic, because the author has asked for all of them. `confirmed_35.json` and
+> `refuted_5.json` hold the ones already judged; re-check those too rather than trusting them,
+> because every reviewer claimed certainty, the list contains duplicates, and one finding was marked
+> disproved only because its fix landed while the reviewer was reading.
+>
+> Check each one by **reading the line and then running something that proves it**. This project has
+> repeatedly recorded faults as verified-correct on the strength of a reading, and been wrong: the
+> scrambled fingerprint had been examined and passed by an earlier session while 99% of its training
+> rows carried another molecule's features. One line of execution settled it. Prefer a check that
+> executes over an argument about what the code says.
+>
+> Start with the eight rated top severity, and within those with the claim that the QM9 graph models
+> index the unshuffled dataset with shuffled indices — that is the same class of fault as the one
+> already found and would void every graph-model result.
+>
+> Fix what is real, in both pipelines where it applies, and give each fix a check that fails if the
+> fix is removed. Anything that is a genuine decision for the author: ask once, recommend, and get on
+> with everything else. Record what you find in `RERUN_PLAN.md` and delete the entries you have
+> closed from `unverified.json` so the file always shows what is left. Do not touch `paper.tex`.
+
+---
+
+#### Chat M — Three loose ends: the cluster, sparse counts, and the QM9 job scripts 🔴 TODO
+
+Three unrelated items, grouped because each is small and none belongs to another chat.
+
+**1. The cluster checks — needs the author, one command.** Nothing here can be answered from a
+laptop. `scripts/server_audit.sh` asks all of it in one run and writes one file.
+
+**2. Sparse counts under scaling — unmeasured, and it goes live the moment the count storage is
+fixed.** Whether features are scaled is decided from the matrix itself: anything whose values are
+all 0 or 1 is left alone, everything else is scaled (`models/model_defaults.py`,
+`should_standardise`). The substructure fingerprint is stored as presence bits today, so it reads
+as binary and is left alone. When chat A restores real counts it stops being binary and this rule
+will begin scaling it — and sparse counts may suffer the same harm as sparse bits, which was
+measured at 0.077 on hERG and about 0.6 on QM9 for a support vector machine with a radial kernel.
+Nobody has measured the counts case.
+
+**3. The QM9 job scripts cannot start.** The generated scripts are not kept in version control, and
+the local copies have been deleted. **The generator that makes them is still stale:**
+`slurm_scripts_qm9_rerun/generate_scripts.py` emits `--sigma` and `--noise-strategy` at `:245-246`,
+both of which `scripts/process_and_train.py:421-427` refuses by name, and it still lists the old six
+noise names at `:90` when the program now accepts uniform, grouped_wide, grouped_shift, outlier and
+censoring. Regenerating from it reproduces the breakage.
+
+> **Prompt.** Three loose ends, none of which belongs to another chat.
+>
+> First, the cluster. Ask the author to run `scripts/server_audit.sh` on the cluster and send back
+> `~/server_audit_report.txt` — it takes about five minutes and answers every question that cannot be
+> answered from a laptop: which checkout is live, whether the two interpreters match, whether every
+> model can be built, whether the quantile forest fits, whether the Gaussian process still crashes
+> now that the thread guard is in, and whether the two pipelines agree. Read the file, act on what it
+> says, and record the answers in `RERUN_PLAN.md` so those questions are closed rather than open.
+>
+> Second, measure whether sparse counts should be scaled. Today the substructure fingerprint is
+> stored as presence bits, so it reads as binary and is left unscaled; when chat A restores real
+> counts the rule in `models/model_defaults.py` will start scaling it, and nobody knows whether that
+> helps or hurts. Measure it the same way the binary case was measured — a support vector machine
+> with a radial kernel, on hERG and on QM9, scaled against unscaled, with the decision rule written
+> down before the run. Then set the rule accordingly and say what it cost.
+>
+> Third, make the QM9 job scripts runnable. The generator at
+> `slurm_scripts_qm9_rerun/generate_scripts.py` still emits settings the program refuses by name and
+> still lists retired noise names. Fix the generator, not the generated files — they are not kept in
+> version control and are regenerated from it. Then prove it: generate one script and run a single
+> task end to end at a small molecule count. A generator that produces a script nobody has executed
+> is not finished.
+>
+> Do not touch `paper.tex`.
+
+---
+
 #### Chat F — Uncertainty machinery, reviewed with the author
 
 🔴 **TODO. This is a conversation, not a task**, at the author's explicit request: *"I am not
