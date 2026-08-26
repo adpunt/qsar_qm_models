@@ -1884,14 +1884,14 @@ Specifically, in every chat:
 | **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
 | **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **yes** |
 | **E** | Cross-pipeline parity | — | ✅ **yes** — but check what another session already did |
-| **F** | Uncertainty machinery, reviewed with the author | — | ❌ a conversation, not a task. Agenda below, no prompt |
+| **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
 | **G** | Local test: which noise settings earn their place | A | ✅ **yes** — it tests the settings, not the implementation |
 | **H** | Job scripts, preflight, gates, launch | A B C D E G + §13.1 | ❌ blocked |
-| **I** | The uncertainty decomposition build | F | ❌ blocked on F |
+| **I** | The uncertainty decomposition build | F | ❌ blocked on F's findings |
 | **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
 | **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
 
-**Six can start immediately and run unattended: A, B, C, D, E, G, K** (seven, counting K). They touch
+**Eight can start immediately and run unattended: A, B, C, D, E, F, G, K.** They touch
 different files. The one overlap to watch: A and B both change what the noise means, and C changes
 how features are stored — if two of them land at once, the person merging needs to re-run the checks
 in §8 rather than trusting either in isolation.
@@ -2109,6 +2109,39 @@ we need to go over it 1:1 before the plan is finalized."*
 7. 🔴 **Decision: does the uncertainty question run on QM9, or only on the three experimental
    datasets?** (§4 decision 1.)
 8. 🔴 **Decision: do validation labels carry their own noise?** (§4 decision 2, restated in §13.5.)
+
+**This chat has real work in it, not just discussion.** Items 5 and 6 are unambiguous bugs and get
+fixed in the same session. Items 1–4 are the material to bring to the author. Items 7 and 8 are the
+author's calls.
+
+> **Prompt.** Audit the uncertainty machinery end to end and fix what is unambiguously broken, then
+> report the rest for a decision. The author has had repeated trouble with this part of the project
+> and does not trust its current state, so **read the code rather than the summaries** — in this
+> repository and in the KIRBy repository, which is where the machinery actually lives.
+>
+> Start from what is right, because it matters that it is not re-litigated: the uncertainty-versus-
+> noise correlation is computed within each noise level rather than pooled across levels, that was
+> the author's own fix, and it works. `RERUN_PLAN.md` §3.5 says where it is. Verify it still does what
+> its docstring claims.
+>
+> Then establish, from the code, four things and write each into `RERUN_PLAN.md`: what actually feeds
+> that correlation on each of the two pipelines and whether it is real data or a reconstruction; what
+> the three uncertainty questions are and whether the run plan and the runbook can answer all three
+> (§7.0, Q4–Q6 — one of them is currently in neither); whether each of the nine defects the earlier
+> review claims to have fixed is genuinely fixed *in behaviour*, not just present as a matching line
+> in the source, because the regression test for several of them works by searching the file rather
+> than running it; and whether the confound control does what it is meant to.
+>
+> Fix these two outright, with a check that fails if the fix is removed. First, the placebo check on
+> training rows never fires — its guard tests a dictionary key that is not written until thirteen
+> lines later, so it is false on every pass and every training row writes a blank. It appears twice,
+> in both runners. Second, the two silent no-ops in the same writer, described in §3.1b: a run that
+> omits the zero-noise level writes no uncertainty at all without complaining, and only one noise
+> condition is written unless a flag is passed.
+>
+> Two decisions belong to the author and are in §4, decisions 1 and 2. Ask once, give a
+> recommendation, and do everything that does not depend on the answer meanwhile. Do not touch
+> `paper.tex`.
 
 ---
 
@@ -2483,6 +2516,48 @@ earlier reading of it here had the ranking upside down and is corrected above.
   The paper's claim that learned embeddings are weak is a QM9 claim, from the pipeline with the
   storage defect (§13.6).
 - **mol2vec is the weakest learned representation** and was cut from three of the four pools.
+
+#### 🔴 The representation set — where it stands 2026-08-26
+
+**Fixed:** Sort & Slice stays. It is a colleague's method and the paper describes it as the
+collision-free counterpart to ECFP4, so it is in regardless of redundancy.
+
+**Author is minded to:** drop mol2vec, add Avalon and ChemBERTa.
+
+**Open:** whether raw SMILES stays. Two things bear on it.
+
+The paper makes two claims about SMILES and both are load-bearing rather than incidental. It is the
+representation where **model choice explains the most variance in robustness — over 91%, against 72%
+for the descriptor vector**, and it is the representation that **gains most from making a neural
+network Bayesian**. Both numbers are from the contaminated runs and are being regenerated, but the
+shape of the claim is what matters: SMILES is the extreme end of the paper's own spectrum.
+
+That spectrum is the interpretable axis underneath the first research question — **how much chemistry
+is pre-computed into the representation before the model sees it.** A one-hot character matrix is
+the zero point: no chemistry at all, so the model has to supply everything. Cutting it removes the
+zero point and leaves the axis with no anchor.
+
+Adding ChemBERTa makes that stronger rather than redundant. It reads the same SMILES string and has
+learned chemistry from pretraining, so **SMILES against ChemBERTa is a controlled pair — same input,
+one raw and one learned.** No other pair in the set gives that.
+
+**Nothing in the model roster depends on raw SMILES.** The sequence models that require it are not in
+the eleven-model roster and no job script runs them, so cutting SMILES would not orphan a model.
+
+**Learned sequential embeddings, if one is wanted.** These are the models that read a SMILES string
+and return a vector. On QM9: SMI-TED 0.826, SELFormer 0.818, ChemBERTa 0.812, ChemBERT 0.788,
+MolFormer 0.772. SMI-TED is best but is not implemented in the QM9 pipeline; SELFormer reads a
+different string format. **ChemBERTa is within 0.014 of the best and is already implemented in both
+repositories**, so it is the only one available without new code.
+
+#### The two candidate sets
+
+| | Seven representations | Six representations |
+|---|---|---|
+| | ECFP4, descriptor vector, Sort & Slice, **Avalon**, MHG-GNN, **ChemBERTa**, SMILES | ECFP4, descriptor vector, Sort & Slice, **Avalon**, MHG-GNN, **ChemBERTa** |
+| Families | 3 fingerprints, 1 descriptor, 1 learned graph, 1 learned sequence, 1 raw string | 3 fingerprints, 1 descriptor, 1 learned graph, 1 learned sequence |
+| Cost | +17% on the whole grid against the current six | same as now |
+| What it buys | keeps the zero point of the chemistry axis, and the raw-against-learned pair | cheaper |
 
 🔴 **The decision.** Add one transformer embedding, add none, or swap one out for one. The cheapest
 option by a wide margin is ChemBERTa, because it is already implemented in **both** repositories and
