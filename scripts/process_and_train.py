@@ -2123,6 +2123,23 @@ def main():
     start_time = time.time()
     args = parse_arguments()
 
+    # Refuse a dropped representation BEFORE any work starts.
+    #
+    # parse_mmap raises on one too, but that raise happens inside the per-model
+    # loop, whose `except Exception` prints the message and moves on. A job asking
+    # only for a dropped representation would print an error, produce no rows, and
+    # exit 0 -- which in an array job of hundreds of tasks is indistinguishable
+    # from success (RERUN_PLAN.md 0.6, failure mode 9). Fail here instead, before
+    # a single molecule is read.
+    dropped = sorted(set(args.molecular_representations) & DROPPED_REPS)
+    if dropped:
+        raise SystemExit(
+            f"\nERROR: {dropped} were dropped from the study on 2026-08-26.\n"
+            f"The set is: continuous_pdv (PDV), mhggnn, avalon, ecfp4, chemberta, sns.\n"
+            f"mol2vec no longer exists in the code. One-hot SMILES still builds, but it is\n"
+            f"not part of the study, so this job would produce results with nowhere to go.\n"
+        )
+
     # Prepare for communication with Rust
     env = os.environ.copy()
     env["RUST_BACKTRACE"] = "1"  # Enable Rust backtraces for debugging
