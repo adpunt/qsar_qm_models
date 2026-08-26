@@ -1118,7 +1118,54 @@ historical:
 | **Provenance columns on every results row** | a CSV could not be traced to the parameters behind it | `spec_version`, `spec_hash`, `gp_fit_method` on both sides. Appending to a file with the old header is now a hard error rather than ragged rows |
 | **Stale job-script headers corrected** | `unc_gp.sh` still advertised the 2,000-molecule cap and four scripts still said 30 stochastic passes | Six files |
 
-**Still outstanding on that side:** the feature-sampling setting, pending the measurement below.
+#### ✅ 3.4.4e SETTLED 2026-08-26 — the forest feature setting is 0.3, on both pipelines
+
+Re-measured this session at production scale by `scripts/parity_test_forest.py`, because the
+author's recollection was that the earlier recommendation had talked them out of `sqrt` rather
+than measured them out of it. **The decision rule was fixed in the script's docstring before the
+run**, so the answer could not be rationalised afterwards: take the setting that wins or ties on
+the descriptor vector *under noise* and does not lose on Morgan; ties inside the seed spread go to
+the faster one.
+
+10,000 QM9 molecules, 80/20 scaffold split (which is what the tree models effectively get, since
+they stack validation back into training), 3 seeds, clean and at half a label spread, ordinary
+forest and quantile forest, 72 fits. Paired against `sqrt`, from
+`results/parity_tests/forest_max_features_n10000_paired.csv`:
+
+| | 0.3 vs `sqrt`, clean | 0.3 vs `sqrt`, noised | 1.0 vs `sqrt`, clean | 1.0 vs `sqrt`, noised |
+|---|---|---|---|---|
+| forest, Morgan | **+0.040 (3/3)** | **+0.032 (3/3)** | +0.025 (3/3) | +0.015 (3/3) |
+| forest, descriptors | +0.0055 (2/3) | +0.0060 (2/3) | −0.0002 (2/3) | −0.0019 (1/3) |
+| quantile forest, Morgan | **+0.018 (3/3)** | **+0.016 (3/3)** | −0.0032 (1/3) | −0.0044 (1/3) |
+| quantile forest, descriptors | +0.0037 (3/3) | +0.0015 (2/3) | −0.0021 (1/3) | **−0.0074 (0/3)** |
+
+**`0.3` passes both clauses of the rule. `1.0` fails both.** So neither pipeline was right: `sqrt`
+is QM9's value and loses badly on the fingerprint, and `1.0` — what the experimental side has been
+taking silently by omission — is the *worst* option under noise on the descriptor vector, the
+paper's primary representation and the regime the paper is about.
+
+**A second result, not asked for and worth having.** `0.3` also gives the quantile forest much
+better-calibrated intervals, and intervals are that model's whole deliverable. Coverage at one
+standard deviation on clean descriptors, against a nominal 0.683:
+
+| setting | descriptors | Morgan |
+|---|---|---|
+| `sqrt` | 0.754 — far too wide | 0.772 |
+| **0.3** | **0.688** | 0.601 |
+| 1.0 | 0.648 — too narrow | 0.520 |
+
+**Cost.** Per fit, about 3.5× `sqrt` and about 3× cheaper than `1.0` (forest, mean seconds:
+descriptors 3.1 / 11.1 / 35.4; Morgan 5.3 / 25.2 / 68.7 for sqrt / 0.3 / 1.0).
+
+**Difference from the earlier benchmark.** That one put `0.3` and `sqrt` level on descriptors
+(+0.002); this one has `0.3` ahead by +0.0055 clean and +0.0060 noised. Same conclusion, and the
+two runs differ in that this one drops the molecules QM9's authors flag as uncharacterised and uses
+the 80/20 the tree models actually see. Neither difference is large enough to matter to the choice.
+
+**Applied** in `models/model_defaults.py` v1.1.0 (`67f1b96564b9`), which both pipelines import, so
+it lands on QM9 and the experimental datasets at once. ⚠️ **It invalidates every existing forest
+and quantile-forest result, QM9's included.** Everything is being re-run, so the cost is zero, but
+this is a change to the main study and not only an alignment.
 
 #### 3.4.4d The quantile forest cannot be fitted in the local environment
 
@@ -1268,8 +1315,8 @@ two have been applied and one is answered by measurement:
 
 | # | Question | Context | My recommendation |
 |---|---|---|---|
-| **Forest feature sampling** | `sqrt`, every feature, or 30%? | Measured at production scale (§3.4.4b). Representation-dependent: `sqrt` is fine on descriptors and bad on fingerprints | **30% on both.** The only setting that wins or ties everywhere. **Changes QM9 too**, so it invalidates every forest result — but everything is being re-run |
-| **Early stopping** | Keep the last epoch, or roll back to the best? | QM9 counts twenty epochs of no improvement and then returns *that* epoch's weights. The experimental side snapshots and restores the best. Those twenty extra epochs are spent memorising injected corruption, and more of it at higher noise — so **QM9's neural degradation curves are steeper for a procedural reason, pointing the same way as the finding** | **Roll back, both sides.** It is what almost everyone means by early stopping. Caveat: it means selecting on validation labels, which under decision 2 would be noisy — but that is correct, since nobody gets clean labels when deciding when to stop |
+| ~~**Forest feature sampling**~~ | ✅ **SETTLED 2026-08-26 by measurement — `0.3` on both.** Re-run at the author's request against a decision rule fixed before the run; see §3.4.4e. Applied in the shared spec | — |
+| ~~**Early stopping**~~ ✅ **SETTLED 2026-08-26 — roll back, both sides.** Applied in `train_nn` and in the experimental trainer, both reading `NEURAL_DEFAULTS['training']`. Proven on a real run: the DNN stopped at epoch 23 and restored epoch 13. The improvement test was aligned at the same time — QM9 required a 0.01 absolute drop in a **summed** validation loss, so its threshold scaled with the batch count | Keep the last epoch, or roll back to the best? | QM9 counts twenty epochs of no improvement and then returns *that* epoch's weights. The experimental side snapshots and restores the best. Those twenty extra epochs are spent memorising injected corruption, and more of it at higher noise — so **QM9's neural degradation curves are steeper for a procedural reason, pointing the same way as the finding** | **Roll back, both sides.** It is what almost everyone means by early stopping. Caveat: it means selecting on validation labels, which under decision 2 would be noisy — but that is correct, since nobody gets clean labels when deciding when to stop |
 | **Uncertainty calibration** | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
 | **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | ✅ **SETTLED 2026-08-26 — standardise.** Approved as part of chat C's plan and implemented: `CONTINUOUS_REPS` in `process_and_train.py` now covers PDV and all three learned embeddings, fitted on the training split. It changes every embedding number, which is why it is recorded here rather than left implicit |
 

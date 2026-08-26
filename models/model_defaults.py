@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.0.0'
+SPEC_VERSION = '1.1.0'
 
 
 # ---------------------------------------------------------------------------
@@ -51,24 +51,39 @@ SPEC_VERSION = '1.0.0'
 # ---------------------------------------------------------------------------
 
 SKLEARN_DEFAULTS = {
-    # sklearn.ensemble.RandomForestRegressor
+    # sklearn.ensemble.RandomForestRegressor.
+    # max_features 0.3 -- MEASURED, not chosen. QM9 used 'sqrt' and the
+    # experimental side used the library's 1.0 by omission, so this had to be
+    # resolved in one direction. scripts/parity_test_forest.py settled it on
+    # 10,000 QM9 molecules, scaffold split, 3 seeds, clean and at half a label
+    # spread of noise, with the decision rule fixed before the run:
+    #   Morgan       0.3 beats 'sqrt' by +0.040 clean and +0.032 noised, 3/3
+    #                seeds each. 45 of 2048 mostly-zero bits rarely lands on
+    #                anything informative.
+    #   descriptors  0.3 beats 'sqrt' by +0.0055 clean and +0.0060 noised.
+    #   1.0          the experimental side's silent default is the WORST option
+    #                under noise on descriptors, losing every seed.
+    # Cost: about 3.5x 'sqrt', about 3x cheaper than 1.0.
     'rf': {
         'n_estimators': 100,
         'max_depth': None,
         'min_samples_leaf': 1,
         'min_samples_split': 2,
-        'max_features': 'sqrt',
+        'max_features': 0.3,
         'bootstrap': True,
     },
     # quantile_forest.RandomForestQuantileRegressor.
     # 300 trees, not 100: the quantile estimate IS this model's deliverable and
     # 100 trees give a noisy one. Everything else matches the ordinary forest.
+    # 0.3 also gives this model much better-calibrated intervals on clean
+    # descriptors -- coverage at 1 sd is 0.688 against a nominal 0.683, where
+    # 'sqrt' is far too wide at 0.754 and 1.0 too narrow at 0.648.
     'qrf': {
         'n_estimators': 300,
         'max_depth': None,
         'min_samples_leaf': 1,
         'min_samples_split': 2,
-        'max_features': 'sqrt',
+        'max_features': 0.3,
         'bootstrap': True,
     },
     # xgboost.XGBRegressor. learning_rate is the one that bit: unset does NOT
@@ -270,6 +285,12 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------------------
 # CHANGE LOG
 # ---------------------------------------------------------------------------
+# 1.1.0  2026-08-26  Forest max_features 'sqrt' -> 0.3, on BOTH pipelines,
+#                    decided by scripts/parity_test_forest.py against a rule
+#                    fixed before the run. INVALIDATES every existing forest and
+#                    quantile-forest result, including QM9's -- everything is
+#                    being re-run, so the cost is zero, but it is a change to the
+#                    main study and not only an alignment.
 # 1.0.0  2026-08-26  Created (Chat E, cross-pipeline parity). Values transcribed
 #                    from the QM9 pipeline's `params_source == 'default'`
 #                    branches, which is the path every job in
