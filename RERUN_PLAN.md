@@ -765,6 +765,30 @@ rather than 0 — nothing is known to be broken, but nothing is confirmed workin
 preflight must never report a pass it did not observe. The job scripts already run it on a
 compute node, which is the only place its answer means anything.
 
+**✅ Confirmed green on a compute node, 2026-08-26.** `env_test`
+(`/data/stat-cadd/scat9264/conda_envs/env_test`, Python 3.10) builds 21 of the 22 job-generator
+model labels, with NGBoost and the quantile forest also *fitting*. Every declared requirement is
+satisfied; scikit-learn is 1.6.1. The sixteen login-node failures were the mapping artefact
+above and none of them was real.
+
+**🟠 One real failure, and it blocks nothing.** `conformal` fails with a true ABI mismatch —
+`torchsort/isotonic_cpu...so: undefined symbol: _ZNK3c105Error4whatEv`. `torchcp` imports
+`torchsort`, and `torchsort` was compiled against a different libtorch than the installed
+`2.3.1+cu121`. It does not block the re-run: the three conformal variants live in
+`EXCLUDED_MODELS` in `generate_scripts.py`, off unless `--include-excluded` is passed, because
+`GLOBAL_MODELS_EXCLUDE` drops them from every figure. Note that `models/models.py` catches this
+one in a bare `except ImportError` and sets `torchcp = None`, so without the probe a conformal
+job would have started, run, and failed later on a null reference. If conformal is ever wanted:
+`pip install --force-reinstall --no-cache-dir --no-binary :all: torchsort` rebuilds it against
+the installed torch.
+
+**A gap the compute-node run exposed in the guard itself.** Five labels the generator can emit —
+`conformal_rf`, `conformal_qrf`, `conformal_dnn`, `dnn_bnn_variational`, `mlp_bnn_variational` —
+were unknown to the probe, so an `--include-excluded` task would have been stopped by the guard
+for the guard's own reason. Added, and `python scripts/check_environment.py --audit-roster` now
+cross-checks the probe's roster against the generator's two model tables so it cannot drift
+again. Verified to fail when a label is removed.
+
 **🟠 A second finding, now downgraded.** The probe also checks whether each package's own
 declared requirements are satisfied, because pip never re-checks that after the fact. On the
 laptop three of them are not — but `env.yml` pins `scikit-learn=1.6.1`, which satisfies all

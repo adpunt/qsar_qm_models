@@ -54,6 +54,16 @@ QM9_MODELS = {
     "mlp_bnn_full_variational": ("torchbnn", None),
     "conformal": ("torchcp", None),
     "graph": ("torch_geometric", None),
+    # The EXCLUDED_MODELS labels from generate_scripts.py. They are off by
+    # default (--include-excluded turns them on) but the job template passes the
+    # label straight through, so an unknown one would fail the task with
+    # "unknown model name" -- a guard blocking a job for the guard's own reason.
+    # --audit-roster keeps this list honest.
+    "conformal_rf": ("torchcp", None),
+    "conformal_qrf": ("torchcp", None),
+    "conformal_dnn": ("torchcp", None),
+    "dnn_bnn_variational": ("torchbnn", None),
+    "mlp_bnn_variational": ("torchbnn", None),
 }
 
 # Packages worth reporting a version for whatever was asked.
@@ -349,6 +359,42 @@ def check_validation(failures):
     print()
 
 
+def audit_roster():
+    """Every label generate_scripts.py can emit must be a key of QM9_MODELS.
+
+    The job template passes the model label straight to --models, so a label
+    this file does not know would stop the task with "unknown model name" --
+    the guard blocking a job for the guard's own reason rather than for
+    anything wrong with the environment.
+    """
+    import re
+    here = os.path.dirname(os.path.abspath(__file__))
+    gen = os.path.join(here, "..", "slurm_scripts_qm9_rerun", "generate_scripts.py")
+    if not os.path.isfile(gen):
+        print(f"FAIL: cannot find {gen}")
+        return 1
+
+    text = open(gen).read()
+    labels = []
+    for block in ("MODELS", "EXCLUDED_MODELS"):
+        m = re.search(block + r" = \{(.*?)\n\}", text, re.S)
+        if not m:
+            print(f"FAIL: cannot parse {block} out of generate_scripts.py")
+            return 1
+        labels += re.findall(r"^\s*'([a-z0-9_]+)':", m.group(1), re.M)
+
+    unknown = [l for l in labels if l not in QM9_MODELS]
+    if unknown:
+        print(f"FAIL: the job generator can emit {len(unknown)} model label(s) this probe "
+              f"does not know: {sorted(unknown)}")
+        print("      Add them to QM9_MODELS, or the guard will block those jobs for its "
+              "own reason.")
+        return 1
+
+    print(f"OK: all {len(labels)} job-generator model labels are known to this probe")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -356,7 +402,13 @@ def main():
                     help="Only check these models. Default: the whole QM9 roster.")
     ap.add_argument("--validation", action="store_true",
                     help="Also check the KIRBy validation roster.")
+    ap.add_argument("--audit-roster", action="store_true",
+                    help="Check that every model the job generator can emit is known here, "
+                         "and exit. Nothing is imported.")
     args = ap.parse_args()
+
+    if args.audit_roster:
+        return audit_roster()
 
     report_versions()
 
