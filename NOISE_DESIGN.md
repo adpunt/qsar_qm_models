@@ -1325,6 +1325,12 @@ error doing twelve times more damage than any shape effect, at the level of the 
 Grouped-shifted shows it at the level of a chemical family. Two independent demonstrations of one
 effect, which is what §13.3 of `RERUN_PLAN.md` argued the second grouped condition would buy.
 
+**And the delivered-dose wobble was not smearing it.** Student-t ν = 3's per-run dose spread reaches
+17% at level 1.5, so a second pass rescaled every draw to *exactly* the target amount. Nothing moved:
+every condition except grouped-shifted stays within 0.048 R² of Gaussian at ratios to the wobble of
+1.04 or less, while grouped-shifted holds at −0.111, −0.094 and −0.312 (2.1×, 2.6×, 4.4×, all
+*p* ≤ 0.002).
+
 **The skewed draw (§5.7) does not earn implementation.** Nothing at the reporting level; −0.045 R² for
 the random forest alone at level 1.5 and nothing for the other two. §13.3's rejection of a skewed
 draw stands, and this measures what it costs: one model out of three, at the top of the grid only.

@@ -907,20 +907,38 @@ def main():
         cdf, verdicts = analyse(df[df.dose_mode == 'algebraic'],
                                 shape[shape.dose_mode == 'algebraic'])
         cdf.to_csv(OUT_ROWS.replace('.csv', '_contrasts.csv'), index=False)
-        ex = df[df.dose_mode == 'exact']
+        # The SAME declared filter as the main analysis (guard 8). It is keyed on the
+        # CLEAN baseline, so it is fixed before any noise is added; leaving it off here
+        # while applying it there was making the two blocks disagree about the same
+        # model on the same replicate.
+        ex = df[(df.dose_mode == 'exact') & (df.r2_clean >= CLEAN_R2_FLOOR)]
         if len(ex):
             top = ex.level.max()
             print("\n--- sensitivity: the same contrasts with the dose rescaled to exactly "
                   "the target ---")
+            print("  Guard 4: the difference is never shown without the two means it is a "
+                  "difference of.")
+            print("  " + f"{'condition':<20}{'model':<7}{'mean dR2':>11}{'this':>11}"
+                  f"{'Gaussian':>11}{'|d|/wobble':>12}{'t p':>8}")
+            broken = []
             for name in CONDITION_NAMES:
                 if name == 'Gaussian':
                     continue
                 for m in MODELS:
                     r = paired_table(ex, name, 'Gaussian', top, m)
-                    if r:
-                        print(f"  level {top} {name:<20}{m:<7}"
-                              f"{r['mean_delta_r2']:>+10.4f}  |d|/wobble "
-                              f"{r['ratio_to_wobble']:>6.2f}  p={r['wilcoxon_p']:.3f}")
+                    if not r:
+                        continue
+                    print("  " + f"{name:<20}{m:<7}{r['mean_delta_r2']:>+11.4f}"
+                          f"{r['subject_mean_r2']:>+11.3f}{r['reference_mean_r2']:>+11.3f}"
+                          f"{r['ratio_to_wobble']:>12.2f}{r['paired_t_p']:>8.3f}")
+                    if min(r['subject_mean_r2'], r['reference_mean_r2']) < 0:
+                        broken.append(f"{name}/{m}")
+            if broken:
+                print(f"\n  ⚠ Negative mean R2 in: {', '.join(sorted(set(broken)))}. At the top of "
+                      f"the level grid the linear model diverges on some replicates, so a "
+                      f"difference between two divergences means nothing. Those rows are NOT "
+                      f"filtered out — filtering on the outcome is what guard 8 forbids — but they "
+                      f"carry no evidence, and the sensitivity check rests on the tree models.")
         compute_costs(verdicts)
         return
 

@@ -3651,6 +3651,22 @@ contrast isolates **direction**, and direction is worth 0.10 to 0.31 R² where e
 independent mechanism at the level of a chemical family rather than the whole dataset** — which is
 precisely the argument §13.3 made for running both forms, now with evidence behind it.
 
+#### The dose wobble was not driving any of it
+
+Student-t ν = 3 has a per-run delivered-dose spread of 17% at level 1.5, which raises the obvious
+question of whether the flat result is really a smeared one. A second pass at level 1.5 rescaled each
+draw to *exactly* the target amount, removing that nuisance entirely, and the picture is unchanged:
+
+| Condition (exact dose, level 1.5) | LightGBM | Random forest | Ridge |
+|---|---|---|---|
+| Student-t ν = 5 | +0.001 | −0.038 | −0.040 |
+| Student-t ν = 3 | −0.010 | −0.023 | −0.048 |
+| Laplace | −0.009 | −0.006 | −0.036 |
+| Outlier p = 10% | −0.010 | −0.023 | −0.037 |
+| **Grouped-shifted** | **−0.111 (2.13×, p = 0.002)** | **−0.094 (2.58×, p = 0.002)** | **−0.312 (4.38×, p < 0.001)** |
+
+Every ratio to the wobble outside the last row is at or below 1.04, and every *p* is ≥ 0.074.
+
 #### The skewed draw does not earn implementation — §13.3's rejection holds
 
 Nothing at the reporting level (largest 0.0055, ratio 0.27). At level 1.5 it reaches −0.0445 for the
