@@ -644,9 +644,15 @@ def paired_table(df, a, b, level, model):
     d = sa.loc[reps].r2.values - sb.loc[reps].r2.values
     wobble = float(sb.loc[reps].r2.std(ddof=1))
     try:
-        p = float(stats.wilcoxon(d).pvalue)
+        p_signed_rank = float(stats.wilcoxon(d).pvalue)
     except ValueError:
-        p = np.nan
+        p_signed_rank = np.nan
+    # A paired t-test as well, and it is the one the verdict rule uses. The signed-rank
+    # test floors at 2/2^n, so at five replicates it CANNOT return p < 0.05 whatever the
+    # data -- at five replicates it called a 0.053 R2 difference "not significant"
+    # because five points cannot be significant, not because the difference was small.
+    # Both are reported; the distribution-free one is the check on the parametric one.
+    p_t = float(stats.ttest_rel(sa.loc[reps].r2.values, sb.loc[reps].r2.values).pvalue)
     return dict(
         contrast=f"{a} − {b}", level=level, model=model, n_replicates=len(reps),
         mean_delta_r2=float(d.mean()), sd_delta_r2=float(d.std(ddof=1)),
@@ -654,7 +660,9 @@ def paired_table(df, a, b, level, model):
         subject_mean_r2=float(sa.loc[reps].r2.mean()),
         replicate_wobble_sd=wobble,
         ratio_to_wobble=float(abs(d.mean()) / wobble) if wobble > 0 else np.nan,
-        wilcoxon_p=p,
+        wilcoxon_p=p_signed_rank,
+        signed_rank_floor=float(2 / 2 ** len(reps)),
+        paired_t_p=p_t,
         # What this many replicates could have detected: the smallest true difference
         # the contrast would find at 80% power, two-sided, alpha 0.05. Without it a null
         # cannot be told apart from a test that was never able to see anything -- and
@@ -690,8 +698,8 @@ def verdict_table(cdf):
             continue
         here = cdf[(cdf.contrast.str.startswith(name + ' ')) & (cdf.kind == 'vs reference')]
         at_report = here[here.level == REPORTING_LEVEL]
-        passes = at_report[(at_report.ratio_to_wobble > 1) & (at_report.wilcoxon_p < 0.05)]
-        anywhere = here[(here.ratio_to_wobble > 1) & (here.wilcoxon_p < 0.05)]
+        passes = at_report[(at_report.ratio_to_wobble > 1) & (at_report.paired_t_p < 0.05)]
+        anywhere = here[(here.ratio_to_wobble > 1) & (here.paired_t_p < 0.05)]
         v = ('EARNS FULL GRID' if len(passes)
              else ('separates only above the reporting level' if len(anywhere)
                    else 'REDUNDANT with its reference'))
@@ -792,6 +800,9 @@ def analyse(df, shape):
     print("THE DECISION STATISTIC: paired difference against the replicate-to-replicate wobble.")
     print("A difference smaller than the run-to-run wobble is not a setting worth cluster time.")
     print("'detectable' is the smallest true difference this many replicates could have found.")
+    floor = 2 / 2 ** kept.replicate.nunique()
+    print(f"'t p' decides; 'rank p' is the distribution-free check on it and cannot fall below "
+          f"{floor:.4f} at {kept.replicate.nunique()} replicates.")
     print("=" * 116)
     for kind in ['vs reference', 'vs previous setting']:
         print(f"\n### {kind}")
@@ -800,12 +811,12 @@ def analyse(df, shape):
             tag = "  (the QM9 reporting level)" if level == REPORTING_LEVEL else ""
             print(f"\n  level {level}{tag}")
             print("  " + f"{'contrast':<42}{'model':<7}{'mean dR2':>11}{'SD':>9}"
-                  f"{'wobble':>9}{'|d|/wobble':>12}{'p':>9}{'detectable':>12}")
+                  f"{'wobble':>9}{'|d|/wobble':>12}{'t p':>8}{'rank p':>8}{'detectable':>12}")
             for _, r in sub[sub.level == level].iterrows():
-                mark = "  *" if (r.ratio_to_wobble > 1 and r.wilcoxon_p < 0.05) else ""
+                mark = "  *" if (r.ratio_to_wobble > 1 and r.paired_t_p < 0.05) else ""
                 print("  " + f"{r.contrast:<42}{r.model:<7}{r.mean_delta_r2:>+11.4f}"
                       f"{r.sd_delta_r2:>9.4f}{r.replicate_wobble_sd:>9.4f}"
-                      f"{r.ratio_to_wobble:>12.2f}{r.wilcoxon_p:>9.3f}"
+                      f"{r.ratio_to_wobble:>12.2f}{r.paired_t_p:>8.3f}{r.wilcoxon_p:>8.3f}"
                       f"{r.min_detectable_delta:>12.4f}{mark}")
 
     # -- verdict per setting --------------------------------------------------
