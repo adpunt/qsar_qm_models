@@ -68,6 +68,34 @@ VERSION_REPORT = [
 PYG_COMPANIONS = ["torch_scatter", "torch_sparse", "torch_cluster", "torch_spline_conv"]
 
 
+# Loader failures come in two flavours and they need opposite responses.
+#   "undefined symbol" / "Symbol not found"  -> the extension was compiled
+#       against a different libtorch. The package is wrong for this
+#       environment and removing it is the fix.
+#   "failed to map segment" / "cannot allocate memory" -> the loader could not
+#       mmap the file. The package is FINE; the machine would not give it
+#       address space. On a login node this is routine for a CUDA torch build,
+#       where libtorch_cuda.so and libcublasLt.so are over a gigabyte between
+#       them. Uninstalling here would break a working environment.
+_ABI_MARKERS = ("undefined symbol", "symbol not found")
+_RESOURCE_MARKERS = (
+    "failed to map segment",
+    "cannot allocate memory",
+    "cannot enable executable stack",
+    "cannot allocate version reference table",
+)
+
+
+def classify_loader_error(text):
+    """'abi', 'resource', or None if it is neither."""
+    low = str(text).lower()
+    if any(m in low for m in _RESOURCE_MARKERS):
+        return "resource"
+    if any(m in low for m in _ABI_MARKERS):
+        return "abi"
+    return None
+
+
 def _version(name):
     try:
         import importlib.metadata as md
@@ -93,33 +121,53 @@ def report_versions():
 
 
 def check_pyg_companions():
-    """A companion installed but built against a different libtorch.
+    """Can the torch_geometric companion packages load, and if not, why not.
 
-    torch_geometric.typing catches this and disables the package, but
-    nn/conv/gravnet_conv.py catches only ImportError and a broken shared object
+    An ABI mismatch here is fatal in a way that is easy to miss:
+    torch_geometric.typing catches it and disables the package, but
+    nn/conv/gravnet_conv.py catches only ImportError, and a broken shared object
     raises OSError -- so `import torch_geometric` dies and takes the whole QM9
-    pipeline with it. The packages are optional; removing them turns the OSError
-    into the ImportError that gravnet_conv already handles.
+    pipeline with it. Removing the packages turns the OSError into the
+    ImportError gravnet_conv already handles, and nothing here uses their
+    operators.
+
+    But a package that cannot be MAPPED is a different thing entirely and must
+    not get the same advice. See classify_loader_error.
     """
-    broken = []
+    abi, resource = [], []
     for name in PYG_COMPANIONS:
         if importlib.util.find_spec(name) is None:
             continue  # absent is fine, and is the state we want
         try:
             importlib.import_module(name)
         except Exception as e:
-            broken.append((name, f"{type(e).__name__}: {e}"))
+            kind = classify_loader_error(e)
+            entry = (name, f"{type(e).__name__}: {str(e).splitlines()[0]}")
+            (resource if kind == "resource" else abi).append(entry)
 
-    if broken:
+    if resource:
+        print("WARN: torch_geometric companions could not be loaded, but the environment")
+        print("      is not the problem -- the loader could not map them into memory.")
+        for name, err in resource:
+            print(f"      {name}: {err}")
+        print()
+        print("      Do NOT uninstall anything on the strength of this. Re-run inside a")
+        print("      job allocation, where there is address space for a CUDA torch build:")
+        print("        srun --account=<acct> --partition=short --mem=32G --pty \\")
+        print("             python scripts/check_environment.py")
+        print()
+
+    if abi:
         print("FAIL: torch_geometric companion packages are installed but cannot load.")
         print("      They were built against a different libtorch than the installed torch.")
-        for name, err in broken:
-            print(f"      {name}: {err.splitlines()[0]}")
+        for name, err in abi:
+            print(f"      {name}: {err}")
         print()
         print("      This project uses none of the operators they provide. Remove them:")
         print("        python -m pip uninstall -y " + " ".join(n.replace("_", "-") for n in PYG_COMPANIONS))
         print()
-    return not broken
+
+    return not abi
 
 
 # Models that import and construct cleanly and then fail on contact. The
@@ -214,16 +262,24 @@ def check_declared_requirements(failures, models):
     print()
 
 
-def probe(name, fn, failures):
+def probe(name, fn, failures, resource_failures=None):
     try:
         fn()
         print(f"  OK    {name}")
     except Exception as e:
-        print(f"  FAIL  {name}: {type(e).__name__}: {e}")
+        first = str(e).splitlines()[0]
+        if classify_loader_error(e) == "resource" and resource_failures is not None:
+            # Not a verdict on the environment: the machine would not give the
+            # library address space. Counted separately so a login-node run does
+            # not read as sixteen broken models.
+            print(f"  ---   {name}: could not be mapped into memory ({first})")
+            resource_failures.append(name)
+            return
+        print(f"  FAIL  {name}: {type(e).__name__}: {first}")
         failures.append(name)
 
 
-def check_qm9(models, failures):
+def check_qm9(models, failures, resource_failures):
     print("QM9 roster (models/models.py imports every backend unguarded, so this")
     print("also proves the module itself is importable in this interpreter)")
 
@@ -243,10 +299,10 @@ def check_qm9(models, failures):
                 cls = getattr(mod, attr)
                 cls()  # constructed, not merely imported
 
-        probe(f"{model:<16s} ({module_name})", _build, failures)
+        probe(f"{model:<16s} ({module_name})", _build, failures, resource_failures)
 
         if model in FIT_PROBES:
-            probe(f"{model:<16s} fits", FIT_PROBES[model], failures)
+            probe(f"{model:<16s} fits", FIT_PROBES[model], failures, resource_failures)
     print()
 
 
@@ -305,21 +361,42 @@ def main():
     report_versions()
 
     failures = []
+    resource_failures = []
     if not check_pyg_companions():
         failures.append("torch_geometric companions")
 
     requested = args.models if args.models else sorted(QM9_MODELS)
     check_declared_requirements(failures, requested)
 
-    check_qm9(requested, failures)
+    check_qm9(requested, failures, resource_failures)
 
     if args.validation:
         check_validation(failures)
+
+    if resource_failures:
+        print(f"INCONCLUSIVE: {len(resource_failures)} model(s) could not be loaded because")
+        print("the loader ran out of address space, not because anything is missing:")
+        print("  " + ", ".join(sorted(resource_failures)))
+        print()
+        print("This is what a CUDA build of torch does on a LOGIN NODE -- libtorch_cuda.so")
+        print("and libcublasLt.so are over a gigabyte between them, and login nodes cap")
+        print("memory per user. It says nothing about whether the job would work.")
+        print("Re-run inside an allocation, which is where the job scripts run it anyway:")
+        print("  srun --account=<acct> --partition=short --mem=32G --pty \\")
+        print("       python scripts/check_environment.py")
+        print()
 
     if failures:
         print(f"FAIL: {len(failures)} check(s) failed in {sys.executable}")
         print("Do NOT submit jobs against this interpreter until they are fixed.")
         return 1
+
+    if resource_failures:
+        # Deliberately non-zero: nothing is known to be broken, but nothing is
+        # confirmed working either, and a preflight must not report a pass it
+        # did not observe.
+        print(f"NOT PROVEN in {sys.executable} -- rerun in an allocation (see above).")
+        return 3
 
     print(f"OK: everything requested can be constructed in {sys.executable}")
     return 0

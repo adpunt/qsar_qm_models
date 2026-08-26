@@ -746,6 +746,22 @@ grep -m1 "model-rep configs" slurm-12822693.out      # reads "0 model-rep config
    path, so they inherited whatever interpreter was active and left no log saying which; the
    runbook now states that jobs are submitted by script, never by `--wrap`.
 
+**⚠️ The probe told the author to uninstall working packages, and that was my bug.**
+Run on the login node on 2026-08-26 the probe reported sixteen model failures and advised
+removing the four torch_geometric companions. Every one of those errors was
+`failed to map segment from shared object` — the loader could not *mmap* the library, which is
+what a CUDA build of torch does on a login node, where `libtorch_cuda.so` and `libcublasLt.so`
+are over a gigabyte between them and memory is capped per user. Nothing was missing: `lgb`, `rf`,
+`svm`, `xgboost`, `ngboost` and `qrf` all passed, and the companions match their torch
+(`2.3.1+cu121` both sides, installed by `setup.sh`).
+
+The probe now classifies loader errors. `undefined symbol` / `Symbol not found` is an ABI
+mismatch and still says to remove the package; `failed to map segment` / `cannot allocate memory`
+is reported as **inconclusive**, with the instruction to re-run inside an allocation, and exits 3
+rather than 0 — nothing is known to be broken, but nothing is confirmed working either, and a
+preflight must never report a pass it did not observe. The job scripts already run it on a
+compute node, which is the only place its answer means anything.
+
 **🟠 A second finding, now downgraded.** The probe also checks whether each package's own
 declared requirements are satisfied, because pip never re-checks that after the fact. On the
 laptop three of them are not — but `env.yml` pins `scikit-learn=1.6.1`, which satisfies all
