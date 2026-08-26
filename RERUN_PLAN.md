@@ -147,7 +147,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 8 | QM9 job scripts | 🟠 written, superseded by the redesign before they ran | §13 chat G |
 | 9 | Uncertainty job scripts | 🟠 written, superseded, and point at a possibly stale checkout | §13 chat G |
 | 10 | Parity audit script | 🟠 written; its literals were still being verified when the last session ended | §13 chat E |
-| 11 | Noise redesign in the pipelines | 🟢 **Rust done 2026-08-26** (chat A) — deleted, built, 14 gates passing, verified on 4,000 real QM9 molecules. Python is chat B's | §13 chats A ✅, B |
+| 11 | Noise redesign in the pipelines | ✅ **BOTH DONE 2026-08-26** — Rust (chat A) and Python (chat B). The two are held together by an executable gate: `scripts/crosscheck_injectors.py`, 342 checks on all 133,885 real QM9 labels and real Murcko scaffold groups. Dose spread across conditions: **1.16% in Rust, 0.40% in Python**, against 0.49×–2.00× before | §13 chats A ✅, B ✅ |
 | 12a | Records could be written short, and an unparseable SMILES crashed the binary | ✅ **fixed 2026-08-26 (chat D)** — all-or-nothing records, a null-pointer check RDKit's binding needed, and the reader now refuses to guess (§2.7) | §13 chat D ✅ |
 | 12 | Per-molecule rescaling of learned embeddings | ✅ **fixed 2026-08-26 (chat C)** — storage, widths and standardisation, with a guard that fails if any of the three is removed (§2.8c) | done |
 | 13 | Concurrent-task configuration race | ✅ **fixed 2026-08-26 (chat D)** — the configuration file is named per task and the binary has no default path; guarded by `scripts/test_config_isolation.py` (gate 10) and a test in `rust/tests/writer_guards.rs` | §13 chat D ✅ |
@@ -270,7 +270,65 @@ that applies.)
 noise type solves for, not a knob each type interprets differently. That is the core of
 `NOISE_DESIGN.md`.
 
-### 2.3 Nothing was ever checking that the two injectors agreed
+### 2.3 ✅ CLOSED 2026-08-26 — the gate now exists
+
+**The check is `scripts/crosscheck_injectors.py`** and it runs both implementations on the same
+labels, the same target, the same scaffold groups and the same seeds, then compares realised dose,
+unit dose, the fraction of labels off by more than three times the dose, the median error, the
+worst-hit 5%'s share of the noise energy, and the realised affected-molecule fraction. It exits
+non-zero on any failure and is the artefact chat H wires into the preflight (§8 gate 2).
+
+**It cannot be element-wise, and that is deliberate.** Rust's `StdRng` and numpy's generator produce
+different streams, so identical draws are impossible; a check written that way would fail for a
+reason that does not matter and would then be turned off, which is worse than no check.
+
+It found four real disagreements before it passed, none of which would have been noticed otherwise:
+
+1. **The `effective_n` formula was wrong for grouped-shifted, in BOTH implementations** — it used
+   the group *count* where the group term is averaged over *molecules*, so a few large groups
+   dominate. On real QM9 scaffolds the effective count is **189 against a count of 30,313**, a factor
+   of 160, and the dose tolerance derived from it was 0.79% where it should have been 9.6%. Fixed in
+   `NoiseInject/noiseInject/core.py` and `rust/reference/noise_arms.rs`. 🔴 **Still to apply in
+   `rust/src/main.rs`** — see §2.3a.
+2. **Censoring at a fraction of zero reported the largest label as the assay limit.** There is no
+   limit at the clean baseline. Fixed in the reference.
+3. **Censoring encoded its fraction twice** — once in the condition name, once in the level — so a
+   "level 0" run still clipped and the clean baseline was not clean. Now one condition whose level
+   *is* the fraction, and the name is derived, matching chat A.
+4. The old Python dose solver matched the **first** moment; see §2.3b.
+
+The original point stands and is why the gate is permanent: two independent implementations drifted
+apart on a constant and on how cut-points are computed, and nothing noticed for the life of the
+project.
+
+### 2.3a 🔴 FOR CHAT A — one fix from the cross-check to apply in `rust/src/main.rs`
+
+`effective_n` for `GroupedShift` (`rust/src/main.rs:757-767`) divides `rho²` by the number of
+scaffold groups. The group-level term is averaged over **molecules**, not over groups, so the right
+denominator is `(Σ n_g)² / Σ n_g²` — the effective group count. Measured on the real QM9 scaffold
+assignment: 189, against a group count of 30,313.
+
+The consequence is not a wrong number in a results row; it is a **gate that fails runs it should
+pass**. `dose_tolerance` derives its tolerance from `effective_n`, so the pipeline currently expects
+grouped-shifted's realised dose to land within 0.79% when its true sampling spread is 9.6%.
+
+The corrected form is in `rust/reference/noise_arms.rs` (`effective_n`, the `GroupedShifted` branch)
+and in `noiseInject.NoiseInjectorRegression._effective_group_count`.
+
+### 2.3b The Python dose solver matched the wrong moment
+
+`calibrate_sigma` (`NoiseInject/noiseInject/calibration.py:16`), reached through
+`KIRBy/src/kirby/noise_spec.py:124-141`, binary-searched for the scale that made **mean |Δy| / SD**
+hit a target — the *first* moment. R² and RMSE are second-moment quantities, so the second moment is
+what has to be matched. At identical root-mean-square noise, mean|ε|/RMS is **0.797 for a Gaussian
+but 0.642 for Student-t at ν = 3**, so calibrating that way handed the heavy-tailed conditions up to
+**24% more actual noise at the same nominal level** — the same confound as §2.2, in the half of the
+study nobody had looked at. It also re-used one injector across all twenty of its iterations, so the
+objective it searched drew fresh noise every time.
+
+Deleted. The closed-form solver replaces it: exact, deterministic, and identical to the Rust side.
+
+### 2.3c The original finding, kept for the reasoning
 
 **Not a defect to fix.** The two places where the Rust and Python injectors were found to
 disagree — the value-proportional factor and the quantile cut-points — are both in noise types the
@@ -840,10 +898,10 @@ apparatus.
 | Independent repeats of the whole experiment | **10** | **none** — 5 folds only, every model pinned to one seed | The experimental variance decomposition has no true replicate term |
 | Out-of-fold scoring of training molecules | no | yes | QM9 cannot ask the uncertainty question at all (§2.6) |
 | Inner split grouped by scaffold | no — validation is halved by position, and `scaffold` appears **zero** times in `models/models.py` | yes, `GroupKFold`, with a logged fall back to random when a fold has too few scaffolds | QM9's calibration set sits on a different split geometry from its test set |
-| The injected noise recorded per molecule | no — reconstructed by regression, and now identically zero | yes | The exact draw **does** exist in Rust (`main.rs:200`, `:275`, `:442`) and is simply never written. This is a serialisation change, not a redesign |
+| The injected noise recorded per molecule | ✅ recorded (chat A) | ✅ recorded, and now with the full provenance beside it (chat B) | Done on both sides. Every result row carries `unit_dose_g`, `solved_scale`, `target_dose_label_units`, `realised_dose_label_units`, `realised_dose_fraction_of_spread`, `mean_epsilon`, `affected_molecule_fraction`, `effective_n` and the clean standardisation constants — under **the same column names in both pipelines**, checked by the cross-check |
 | Per-molecule noise scale recorded | no — computed then discarded (`main.rs:309-317`) | yes | Same serialisation change |
 | Held-out noise scale computed against the *training* cut-points | no | yes | Follows once QM9 records a scale at all |
-| The level-invariant noise pattern (the confound control) | no — appears nowhere | yes | Without it the zero-noise subtraction cannot be formed on QM9 |
+| The level-invariant noise pattern (the confound control) | no — appears nowhere | ✅ yes, and **it is now genuinely level-invariant** | Chat B found it was not. The scale map drew from the same generator as the noise, so the "pattern" moved every time it was recomputed and the zero-noise subtraction compared two different patterns. The selection is now drawn from a separately seeded generator, re-seeded per call, so it is a deterministic function of (seed, groups, parameters) and identical at every level including zero |
 | The placebo check on training rows | no | **blank — see §3.1a** | Two-line fix in the experimental runner |
 | Validation labels carry their own noise | no | yes, on by default | The headline asymmetry, and one day old rather than architectural — before the held-out fix QM9 noised *both* held-out splits |
 | Validation kept out of the training set | no — seven model families merge it | yes | §2.5 |
@@ -1668,9 +1726,20 @@ than notes that reassure. Two commands run them:
 cd rust && cargo test --release
 ```
 
-Gate 2 is chat B's (`scripts/crosscheck_injectors.py`). Gates 6 and 9 need a training run and are
-chat H's. Gates 8, 10 and 11 are chat D's. Each of chat A's gates was checked by removing the fix
-and confirming the gate fails.
+**Gate 2 is now executable too — chat B, 2026-08-26.** One more command, and it needs no cluster
+time either:
+
+```
+# the two injectors agree: 342 checks on all 133,885 real QM9 labels
+python scripts/crosscheck_injectors.py
+```
+
+It also covers gates 1, 4 and 5 on the Python side, and it found four real disagreements before it
+passed — including an `effective_n` formula that was wrong in **both** implementations (§2.3, §2.3a).
+Its dose-matching check was verified to fail, on 8 of 10 conditions, when the solver is removed.
+
+Gates 6 and 9 need a training run and are chat H's. Gates 8, 10 and 11 are chat D's. Each of chat
+A's gates was checked by removing the fix and confirming the gate fails.
 
 **One more gate, and it costs a second — chat K, 2026-08-26.** It guards the documents and the
 bibliography rather than the noise, which is why it sits outside the numbered list:
@@ -1696,9 +1765,14 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
    correct code on a small dataset and pass a broken solver on a large one.
    **Measured on 4,000 real QM9 molecules with real Murcko groups:** mean delivered dose over 20
    seeds within 0.74% of target for every condition, spread between conditions **1.27%**.
-2. **The two injectors agree.** Same labels, same seed, same target — Rust and Python within the
-   tolerance in `NOISE_DESIGN.md` §5.1b (half a percent, except the heaviest-tailed Student-t
-   where sampling variability is 2.2% and is expected).
+2. ✅ **The two injectors agree.** Same labels, same target, same scaffold groups, same seeds.
+   **Executable: `python scripts/crosscheck_injectors.py`** — 342 checks on all 133,885 real QM9
+   labels, exits non-zero on any failure. It compares statistics rather than individual draws,
+   because the two languages' generators produce different streams and a check written as an
+   element-wise comparison would fail for a reason that does not matter and would then be turned
+   off. Tolerances are **derived per condition** from its fourth moment and its effective number of
+   independent contributions, not kept as a list of "unstable conditions" that would need editing
+   whenever a condition is added.
 3. ✅ **Held-out labels are untouched.** The clean-label column must be bit-identical across every
    noise level. This is the check that caught the original bug.
    `held_out_labels_are_bit_identical_across_levels` compares the written held-out labels bit for
@@ -2360,10 +2434,37 @@ name. A job script written against the old scheme must not run silently under th
 the level means something different. **The thirty existing SLURM script directories all use the old
 flags and will now fail loudly** — they are rebuilt in chat H (§5.3).
 
+**How to re-run everything chat A claims, in three commands.** None of it needs the cluster, and
+none of it needs the Python training stack.
+
+```
+cd rust && cargo test --release --test noise_gates          # 14 gates over real mmap files
+./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
+python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
+python scripts/test_injector_wiring.py                      # the Python driver's helpers
+```
+
+Last run 2026-08-26 against the tree at this commit: 14 gates pass; the self-test passes on all
+133,885 QM9 labels and on 4,000 with real Murcko groups; the cross-check passes on all 17
+conditions at k = 0.25, 0.5 and 1.0; the wiring test passes 20 checks. Every one was falsified by
+removing the fix it guards.
+
+**The Python driver is covered without the training stack.** `process_and_train.py` cannot be
+imported on a machine without `torch_geometric`, so the three helpers chat A added to it were only
+ever read. `scripts/test_injector_wiring.py` lifts them out with `ast` and runs them — the
+acyclic-singleton rule (`NOISE_DESIGN.md` §2a rule 2), the manifest CSV and its §5.2 columns, and
+the retired-flag refusal. Falsified by collapsing the acyclic molecules back into one group, which
+is what the rule exists to prevent.
+
 **Still open, and not chat A's:** whether the validation split gets its own independently drawn
 noise (§5.1 item 5, §13.5 — the author's), the ECFP4 truncation and index-drift guards (§5.1 item
 7, chat D), whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way), and the
 `affected_molecule_fraction` convention above.
+
+**Not covered locally, and only chat H can cover it:** the injector has never run inside a real
+training job. Gate 6 (the clean-label run reproduces the old zero-noise numbers) and gate 9 (every
+new column populated end to end) need one, and they are chat H's first act — not a gap in chat A,
+but the reason chat A's green does not by itself license a launch.
 
 **⚠️ A note for whoever merges.** Commit `d25bcb0`, which carries this work, also contains chat D's
 `--config` change (the configuration race, §2.8a) — it was uncommitted in the working tree when
@@ -2427,6 +2528,44 @@ corruption whichever fold it lands in.
 > drift apart in the first place. Finally, build the cross-check: same labels, same seed, same target,
 > both implementations, agreement within the tolerance in `NOISE_DESIGN.md` §5.1b. It must be a test
 > that fails, wired into the preflight, not a note. Do not touch `paper.tex`.
+
+---
+
+#### ✅ Chat B — DONE 2026-08-26
+
+**What landed.**
+
+| Where | What |
+|---|---|
+| `NoiseInject` **1.0.0** | The six regression strategies and both regression calibrators deleted. Built: three shapes, five targeting rules, the closed-form dose solver, a `CONDITIONS` registry, and `InjectionResult` carrying the provenance every results row needs. 58 tests pass; the dose-matching check was verified to **fail on 8 of 10 conditions** when the solver is removed. Examples, both notebooks and the README move with it |
+| `NOISE_DESIGN.md` | §6.0a names both implementations and their callers; §6.1–6.3 cover the Python half; §2a gives the grouped-shifted algebra and the two rules the real scaffolds force |
+| `scripts/crosscheck_injectors.py` | Gate 2. 342 checks on all 133,885 real QM9 labels and real Murcko scaffold groups |
+| `rust/reference/` | Now buildable by anyone — it had no `Cargo.toml`, so gate 2 was unrunnable. Censoring and grouped-shifted added; `--json`, `--groups` and `--seeds` added |
+| `KIRBy` | `noise_spec.py` and `alternative_data_noise_robustness.py` moved to the new conditions, with the provenance columns written per level; both smoke tests updated |
+
+**The headline number.** Dose spread across every condition at one setting: **1.16% in Rust, 0.40%
+in Python.** Before the redesign it was 0.49× to 2.00×, i.e. 308%.
+
+**Four defects the cross-check found**, none of which any single implementation would have shown —
+the `effective_n` formula wrong in *both* (§2.3a, still to apply in `rust/src/main.rs`), censoring
+reporting a limit at its clean baseline, censoring encoding its fraction twice so a "level 0" run
+still clipped, and the Python solver matching the first moment (§2.3b).
+
+**One more, found while reading the pipeline rather than by the gate.** The confound control's
+"level-invariant noise pattern" was not level-invariant: the scale map drew from the same generator
+as the noise, so recomputing it gave a different pattern each time and the zero-noise subtraction
+compared two different patterns. Fixed in `noiseInject` — the selection now draws from a separately
+seeded generator (§3.3).
+
+**🔴 Left broken deliberately, and this is chat B's one incomplete edge.** The breaking change
+raises `ValueError` on the old strategy names wherever they are still used. Inside this study,
+everything is updated. Outside it, **ten KIRBy scripts belonging to other studies still name them**:
+`cox2_noise_robustness.py`, `drd2_noise_robustness.py`, `esol_noise_robustness.py`,
+`hybrid_noise_robustness.py`, `qm9_graphs_noise_robustness.py`, `noise_mitigation_advanced.py`,
+`noise_mitigation_extended.py`, `complexity_theory_experiments.py`, `phase3_analysis.py`,
+`phase4_analysis.py`, plus `tests/experiments/complexity/c10_noise_robustness.py`. They fail loudly
+rather than silently producing a wrong number, which is the right failure mode, but they are not
+this paper's and were not fixed. **Your call whether they matter.**
 
 ---
 
@@ -2762,6 +2901,21 @@ integration. The paired significance test is *worse* than not built: it takes a 
 noise type as arguments and ignores both.
 
 **Cannot start before the new columns exist**, because it is being rebuilt against them.
+
+**Handed over from chat E — three requirements the parity work created, not optional:**
+
+1. **Name the uncertainty column you read.** The script currently prefers the calibrated column
+   wherever one exists and says nothing, so QM9 reports calibrated uncertainties and the three
+   experimental datasets report raw ones under one heading. Read
+   `models/model_defaults.py` → `UNCERTAINTY_DEFAULTS['primary_column']`, and print which column
+   every figure used.
+2. **Read `gp_fit_method` before comparing any Gaussian-process row.** Both pipelines now record
+   whether botorch or the Adam fallback actually fitted the model. Those are different
+   optimisations, and on at least one interpreter here botorch refuses the model class outright, so
+   a mixed set of rows is possible. Rows fitted differently must not be pooled silently.
+3. **Carry `spec_version` and `spec_hash` through to every figure caption or table footnote.** They
+   are on every results row now. A figure that mixes two spec hashes is mixing two different models
+   and must say so or refuse.
 
 > **Prompt.** Collapse the figure and table generation to a single script and build the five analyses
 > that were asked for and never written. The change map is `RERUN_PLAN.md` §5.4 and the five analyses

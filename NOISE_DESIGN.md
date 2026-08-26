@@ -862,8 +862,20 @@ Every noise type landed within **±1.5%** of the requested dose at k = 0.2 and k
 ### 5.1b ✅ A Rust reference implementation exists, builds, and agrees with Python
 
 `rust/reference/noise_arms.rs` — self-contained (no RDKit, no memmap, no pipeline), builds
-clean against `rand 0.9` / `rand_distr 0.5`. It implements all five dose-matched noise types plus
-the dose solver, and exists to prove the design before `rust/src/main.rs` is touched.
+clean against `rand 0.9` / `rand_distr 0.5`. It exists to prove the design before
+`rust/src/main.rs` is touched, and to be the fixed point the Python injector is checked against.
+
+**Updated 2026-08-26 (chat B).** It had **no `Cargo.toml`**, so nobody but its author could build
+it and §6.3 item 6 was unrunnable; there is one now, and the directory is tracked. It also
+implemented only the five dose-matched types — **censoring and grouped-shifted have been added**,
+so the gate covers every condition rather than most of them. `--json`, `--groups <file>` and
+`--seeds N` were added so both implementations run on the same labels and the same group
+assignment and are compared automatically:
+
+```
+cd rust/reference && cargo build --release
+python scripts/crosscheck_injectors.py          # exits non-zero on any failure
+```
 
 Run against all 133,885 real QM9 labels, realised versus target dose:
 
@@ -996,20 +1008,23 @@ mismatch and the dose gap on three levels.
 40, 50%. The pipeline's roster started at 10%, so the negative control for the one condition
 that is not zero-mean was silently absent. **Fixed.**
 
-**2. ⚠️ `affected_molecule_fraction` means two different things — this needs one owner.**
-For the conditions with no selection rule (gaussian, Student-t, Laplace, grouped-shifted)
-the pipeline records **1.0**, since every molecule is affected. The reference records
-**0.0**, meaning "no targeting applies". Both are defensible readings of the name; they
-cannot both go in the column.
+**2. ✅ SETTLED 2026-08-26 (chat B) — `affected_molecule_fraction` is 1.0 where nothing selects.**
+Chat A raised this and left it for whoever merged the three implementations. For the conditions
+with no selection rule (gaussian, Student-t, Laplace, grouped-shifted) the pipeline recorded
+**1.0**, since every molecule is affected; the reference recorded **0.0**, meaning "no targeting
+applies". Both read the name defensibly and they cannot share a column.
 
-The pipeline's reading is the one the design needs. Failure mode 6 in `RERUN_PLAN.md` §0.6
-guards by asserting the affected fraction "is neither near zero nor near one" — under the
-reference's convention every uniform condition reads as zero and trips a guard meant to catch
-a *degenerate* condition. **Recommendation: 1.0.** Not changed unilaterally, because
-`scripts/crosscheck_injectors.py` compares this column against the Python injector and a
-one-sided change would break that gate. Whoever merges A, B and the Python side settles it in
-one edit across all three. Until then the cross-check compares the column only where
-something actually selects, and asserts the pipeline's 1.0 separately.
+**1.0 everywhere.** It is the truthful reading — every molecule does receive noise — and the
+alternative left the Python injector disagreeing with *itself*: grouped-shifted, which also
+perturbs every molecule, already recorded 1.0 while the shape-only conditions recorded 0.0.
+Changed in `rust/reference/noise_arms.rs` and `noiseInject`; the pipeline already agreed, so all
+three now match and the cross-check compares the column on every condition rather than only where
+something selects.
+
+One consequence to carry into the figure script: **failure mode 6 in `RERUN_PLAN.md` §0.6 must be
+scoped to conditions that have a cut-point.** Its guard asserts the affected fraction "is neither
+near zero nor near one", which catches a degenerate *threshold* rule — but a uniform condition
+legitimately reads 1.0 and would trip it.
 
 **3. Without a group file the two behave differently on purpose.** The reference falls back
 to 2,000 synthetic clusters; the pipeline refuses, because grouped noise over invented groups
@@ -1410,12 +1425,29 @@ the guard for the *class* the original held-out bug belonged to, not for that on
 
 ### 6.3 VERIFY (phase 3, before any cluster time)
 
-**Status, chat A 2026-08-26.** Items 1, 2, 3, 5, 7 and 8 are implemented as checks that fail the
-build, and they pass. Item 6 is chat B's. Item 4 needs a training run and is chat H's.
+**Status, chat A 2026-08-26 — closed out.** Items 1, 2, 3, 5, 7 and 8 are implemented as checks
+that fail rather than notes that reassure, and they pass. Item 6 is chat B's. Item 4 needs a
+training run and is chat H's.
+
+Four commands re-run the lot, none of them needing the cluster or the Python training stack:
+
+```
+cd rust && cargo test --release --test noise_gates          # 14 gates over real mmap files
+./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
+python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
+python scripts/test_injector_wiring.py                      # the Python driver's helpers
+```
+
+The last of those exists because `process_and_train.py` cannot be imported without
+`torch_geometric`, so the helpers that write the scaffold-group file and the manifest were only
+ever read. It lifts them out with `ast` and runs them, including §2a rule 2 — falsified by
+collapsing the acyclic molecules back into one group.
 
 | Check | Where | Runs as |
 |---|---|---|
-| 1, 2, 5, 7 — dose against the reference, flatness across conditions, the ν→∞ limit, exact zero | `rust/src/main.rs`, `self_test` | `rust_processor --self-test <labels> [--scaffold-file <groups>]`, exits non-zero on failure. **This is the preflight command** |
+| 1 — the pipeline against the reference implementation | `scripts/crosscheck_pipeline_reference.py` | exits non-zero on disagreement **and on incomplete coverage**; see §5.1d |
+| 2, 5, 7 — flatness across conditions, the ν→∞ limit, exact zero | `rust/src/main.rs`, `self_test` | `rust_processor --self-test <labels> [--scaffold-file <groups>]`, exits non-zero on failure. **This is the preflight command** |
+| The Python driver's helpers — the acyclic-singleton rule, the manifest columns, the retired-flag refusal | `scripts/test_injector_wiring.py` | runs without the training stack |
 | 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, and manifest completeness | `rust/tests/noise_gates.rs` — 14 gates over real mmap files | `cargo test --release` |
 
 Each was checked by removing the fix and confirming the check fails. Reverting the standardisation
