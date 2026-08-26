@@ -757,13 +757,28 @@ fn build_noise_plan(
         NoiseTargeting::GroupedShift {
             group_variance_share,
         } => {
-            let rho = group_variance_share;
+            // NOT the group count. The group-level term is averaged over MOLECULES,
+            // so a few large scaffold groups dominate it: the effective number of
+            // independent group contributions is (Σ n_g)² / Σ n_g². On the real QM9
+            // scaffold assignment that is 189 against a group count of 30,313 — a
+            // factor of 160.
+            //
+            // Using the raw count overstates the precision of the delivered dose by
+            // that factor, which does not put a wrong number in a results row: it
+            // makes `dose_tolerance` demand 0.79% where the true sampling spread is
+            // 9.6%, so the flat-dose gate fails runs that were never defective.
+            // Found by chat B's cross-check (RERUN_PLAN.md §2.3a); the same formula
+            // is in rust/reference/noise_arms.rs and in noiseInject.
+            let rho = group_variance_share as f64;
             let ids = group_ids.as_ref().expect("grouped shift requires groups");
-            let mut uniq = ids.clone();
-            uniq.sort_unstable();
-            uniq.dedup();
-            let n_groups = uniq.len().max(1) as f32;
-            1.0 / (rho * rho / n_groups + (1.0 - rho) * (1.0 - rho) / n as f32)
+            let mut sizes: HashMap<u32, f64> = HashMap::new();
+            for gi in ids.iter() {
+                *sizes.entry(*gi).or_insert(0.0) += 1.0;
+            }
+            let total: f64 = sizes.values().sum();
+            let sum_sq: f64 = sizes.values().map(|c| c * c).sum();
+            let eff_groups = if sum_sq > 0.0 { total * total / sum_sq } else { 1.0 };
+            (1.0 / (rho * rho / eff_groups + (1.0 - rho) * (1.0 - rho) / n as f64)) as f32
         }
         _ => {
             let s2: f32 = scales.iter().map(|s| s * s).sum();

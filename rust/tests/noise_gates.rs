@@ -119,7 +119,14 @@ fn fixture(tag: &str) -> Fixture {
         "normalize": true,
         "uncertainty": false,
     });
-    fs::write(dir.join("config.json"), serde_json::to_string(&config).unwrap()).unwrap();
+    // Named per task, not "config.json". The binary has no default for --config:
+    // a shared fixed name is what let concurrent array tasks read each other's
+    // configuration and rewrite each other's training data (RERUN_PLAN.md §2.8a).
+    fs::write(
+        dir.join(format!("config_{}.json", file_no)),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
 
     // Scaffold groups, keyed by canonical SMILES: twenty groups over the training
     // molecules, deliberately uneven so the affected-molecule fraction cannot be
@@ -164,6 +171,8 @@ impl Fixture {
         cmd.current_dir(&self.dir)
             .arg("--seed")
             .arg("42")
+            .arg("--config")
+            .arg(format!("config_{}.json", self.file_no))
             .arg("--model")
             .arg("rf");
         for a in args {
@@ -545,6 +554,88 @@ fn grouped_wide_measures_the_affected_molecule_fraction() {
         affected,
         requested
     );
+}
+
+/// The shifted grouped condition's precision is set by the EFFECTIVE number of
+/// scaffold groups, not the raw count.
+///
+/// The group-level offset is averaged over molecules, so a few large groups dominate
+/// it: the effective count is (sum n_g)^2 / sum n_g^2. On the real QM9 assignment that
+/// is 189 against a raw count of 30,313 — a factor of 160.
+///
+/// Getting this wrong does not put a wrong number in a results row. It makes
+/// `dose_tolerance` demand a precision the condition cannot deliver, so the flat-dose
+/// gate fails runs that were never defective — and it fails them intermittently, by
+/// seed, which is the worst way for a gate to be wrong. Found by chat B's cross-check
+/// (RERUN_PLAN.md §2.3a).
+///
+/// The fixture's groups are deliberately lopsided: 3 groups hold half the molecules
+/// and 17 hold the other half, so the raw count (20) and the effective count (~10.2)
+/// are far apart and the two formulas cannot be confused for one another.
+#[test]
+fn grouped_shift_precision_uses_the_effective_group_count() {
+    let f = fixture("effgroups");
+    ok(&f.run(&[
+        "--noise-targeting",
+        "grouped_shift",
+        "--noise-shape",
+        "gaussian",
+        "--noise-level",
+        "0.5",
+    ]));
+    let m = f.manifest();
+    let got = m["effective_n"].as_f64().unwrap();
+
+    // sizes: 3 groups of ~67, 17 of ~12, over 400 molecules
+    let n = 400.0f64;
+    let mut sizes = vec![0.0f64; 20];
+    for i in 0..400usize {
+        let g = if i < 200 { i % 3 } else { 3 + (i % 17) };
+        sizes[g] += 1.0;
+    }
+    let sum_sq: f64 = sizes.iter().map(|c| c * c).sum();
+    let eff_groups = n * n / sum_sq;
+    let rho = 0.62f64;
+    let expected = 1.0 / (rho * rho / eff_groups + (1.0 - rho) * (1.0 - rho) / n);
+    let raw_count_answer = 1.0 / (rho * rho / 20.0 + (1.0 - rho) * (1.0 - rho) / n);
+
+    assert!(
+        (got / expected - 1.0).abs() < 0.02,
+        "effective_n is {:.2}; the effective group count ({:.2} groups) gives {:.2}",
+        got,
+        eff_groups,
+        expected
+    );
+    assert!(
+        (got / raw_count_answer - 1.0).abs() > 0.2,
+        "effective_n is {:.2}, which is what the RAW group count gives ({:.2}) — the \
+         group term is averaged over molecules, so a few large groups dominate it",
+        got,
+        raw_count_answer
+    );
+
+    // and the tolerance that comes out of it must actually admit the condition's spread
+    let mut delivered = Vec::new();
+    for seed in ["11", "22", "33", "44", "55", "66", "77", "88"] {
+        let mut cmd = Command::new(BIN);
+        f.reset();
+        let out = cmd
+            .current_dir(&f.dir)
+            .args(["--seed", seed, "--config", &format!("config_{}.json", f.file_no)])
+            .args(["--model", "rf", "--noise-targeting", "grouped_shift"])
+            .args(["--noise-level", "0.5"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "the flat-dose gate rejected seed {} — the tolerance does not admit this \
+             condition's own sampling spread:\n{}",
+            seed,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        delivered.push(f.manifest()["delivered_dose_in_label_units"].as_f64().unwrap());
+    }
+    assert_eq!(delivered.len(), 8);
 }
 
 /// Censoring is one-directional. It is the only type that biases labels rather than

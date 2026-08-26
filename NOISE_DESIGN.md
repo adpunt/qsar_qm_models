@@ -1432,7 +1432,7 @@ training run and is chat H's.
 Four commands re-run the lot, none of them needing the cluster or the Python training stack:
 
 ```
-cd rust && cargo test --release --test noise_gates          # 14 gates over real mmap files
+cd rust && cargo test --release --test noise_gates          # 15 gates over real mmap files
 ./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
 python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
 python scripts/test_injector_wiring.py                      # the Python driver's helpers
@@ -1448,7 +1448,7 @@ collapsing the acyclic molecules back into one group.
 | 1 — the pipeline against the reference implementation | `scripts/crosscheck_pipeline_reference.py` | exits non-zero on disagreement **and on incomplete coverage**; see §5.1d |
 | 2, 5, 7 — flatness across conditions, the ν→∞ limit, exact zero | `rust/src/main.rs`, `self_test` | `rust_processor --self-test <labels> [--scaffold-file <groups>]`, exits non-zero on failure. **This is the preflight command** |
 | The Python driver's helpers — the acyclic-singleton rule, the manifest columns, the retired-flag refusal | `scripts/test_injector_wiring.py` | runs without the training stack |
-| 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, and manifest completeness | `rust/tests/noise_gates.rs` — 14 gates over real mmap files | `cargo test --release` |
+| 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, manifest completeness, and the effective group count | `rust/tests/noise_gates.rs` — 15 gates over real mmap files | `cargo test --release` |
 
 Each was checked by removing the fix and confirming the check fails. Reverting the standardisation
 order fails `standardisation_uses_the_clean_training_spread`. Re-applying noise to the held-out

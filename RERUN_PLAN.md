@@ -289,7 +289,7 @@ It found four real disagreements before it passed, none of which would have been
    dominate. On real QM9 scaffolds the effective count is **189 against a count of 30,313**, a factor
    of 160, and the dose tolerance derived from it was 0.79% where it should have been 9.6%. Fixed in
    `NoiseInject/noiseInject/core.py` and `rust/reference/noise_arms.rs`. 🔴 **Still to apply in
-   `rust/src/main.rs`** — see §2.3a.
+   `rust/src/main.rs`** — ✅ applied 2026-08-26, see §2.3a.
 2. **Censoring at a fraction of zero reported the largest label as the assay limit.** There is no
    limit at the clean baseline. Fixed in the reference.
 3. **Censoring encoded its fraction twice** — once in the condition name, once in the level — so a
@@ -301,7 +301,7 @@ The original point stands and is why the gate is permanent: two independent impl
 apart on a constant and on how cut-points are computed, and nothing noticed for the life of the
 project.
 
-### 2.3a 🔴 FOR CHAT A — one fix from the cross-check to apply in `rust/src/main.rs`
+### 2.3a ✅ APPLIED 2026-08-26 — the effective group count, in `rust/src/main.rs`
 
 `effective_n` for `GroupedShift` (`rust/src/main.rs:757-767`) divides `rho²` by the number of
 scaffold groups. The group-level term is averaged over **molecules**, not over groups, so the right
@@ -314,6 +314,18 @@ grouped-shifted's realised dose to land within 0.79% when its true sampling spre
 
 The corrected form is in `rust/reference/noise_arms.rs` (`effective_n`, the `GroupedShifted` branch)
 and in `noiseInject.NoiseInjectorRegression._effective_group_count`.
+
+✅ **Applied to `rust/src/main.rs` 2026-08-26,** and the three implementations now agree. Chat B was
+right about the consequence and understated how bad it was: on the 4,000-molecule fixture the old
+formula demanded 3.4% where the condition's own spread is 6.85%, so the gate was passing **only by
+luck of seed 42** and would have failed intermittently, by seed, once the real run started. That is
+the worst way for a gate to be wrong — it looks like a data problem, not a gate problem.
+
+Guarded by `grouped_shift_precision_uses_the_effective_group_count` in `rust/tests/noise_gates.rs`,
+on a fixture whose groups are deliberately lopsided so the raw count (20) and the effective count
+(10.2) cannot be confused. It asserts the answer matches the effective count, asserts it does *not*
+match the raw count, and then runs eight seeds through the flat-dose gate to confirm the tolerance
+admits the condition's real spread. Falsified by reverting to the raw count.
 
 ### 2.3b The Python dose solver matched the wrong moment
 
@@ -2411,7 +2423,14 @@ reads as zero and trips a guard meant to catch a degenerate condition — but th
 compared against the Python injector by chat B's gate, so a one-sided change would break that.
 **Whoever merges A, B and the Python side settles it in one edit across all three.**
 
-**Ten more gates** came out of doing the work: the ν ≤ 2 refusal, a mismatched scaffold file
+**One defect chat B's cross-check found in this work, now fixed (§2.3a):** the shifted grouped
+condition's `effective_n` divided by the raw scaffold-group count instead of the effective one. It
+put no wrong number in a results row — it made the flat-dose gate demand a precision the condition
+cannot deliver, so the gate was passing only by luck of seed and would have failed intermittently
+once the real run started. Applied, and guarded by a regression test that asserts the answer matches
+the effective count and does *not* match the raw one.
+
+**Eleven more gates** came out of doing the work: the ν ≤ 2 refusal, a mismatched scaffold file
 refused rather than silently degraded to uniform noise, a short record stream stopped rather than
 shifting every molecule's noise by one, censoring's direction, the affected-molecule fraction
 measured rather than assumed, manifest completeness, and seed reproducibility.
@@ -2438,15 +2457,15 @@ flags and will now fail loudly** — they are rebuilt in chat H (§5.3).
 none of it needs the Python training stack.
 
 ```
-cd rust && cargo test --release --test noise_gates          # 14 gates over real mmap files
+cd rust && cargo test --release --test noise_gates          # 15 gates over real mmap files
 ./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
 python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
 python scripts/test_injector_wiring.py                      # the Python driver's helpers
 ```
 
-Last run 2026-08-26 against the tree at this commit: 14 gates pass; the self-test passes on all
+Last run 2026-08-26 against the tree at this commit: **15 gates pass; the self-test passes on all
 133,885 QM9 labels and on 4,000 with real Murcko groups; the cross-check passes on all 17
-conditions at k = 0.25, 0.5 and 1.0; the wiring test passes 20 checks. Every one was falsified by
+conditions at k = 0.25, 0.5 and 1.0; the wiring test passes 20 checks.** Every one was falsified by
 removing the fix it guards.
 
 **The Python driver is covered without the training stack.** `process_and_train.py` cannot be
@@ -2547,7 +2566,7 @@ corruption whichever fold it lands in.
 in Python.** Before the redesign it was 0.49× to 2.00×, i.e. 308%.
 
 **Four defects the cross-check found**, none of which any single implementation would have shown —
-the `effective_n` formula wrong in *both* (§2.3a, still to apply in `rust/src/main.rs`), censoring
+the `effective_n` formula wrong in *both* (§2.3a, applied in all three 2026-08-26), censoring
 reporting a limit at its clean baseline, censoring encoding its fraction twice so a "level 0" run
 still clipped, and the Python solver matching the first moment (§2.3b).
 
