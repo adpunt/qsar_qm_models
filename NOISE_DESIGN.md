@@ -957,6 +957,12 @@ measurements put that rule's range at 6.7–55.1%. And grouped-shifted's per-run
 matching §2a rule 3's "roughly ±5%" — which is why the gate is on the mean and on the
 construction, not on one realisation.
 
+#### What `affected_molecule_fraction` means → §5.1d finding 2
+
+`rust/reference/noise_arms.rs` and `noiseInject` both carry a code comment pointing here for
+this. It is one section further down: the convention is **1.0 wherever nothing selects**, and
+the write-up is finding 2 of §5.1d.
+
 #### The tolerance is derived, not chosen
 
 The half a percent quoted above is not a universal constant — it is what 133,885 Gaussian draws
@@ -1459,8 +1465,7 @@ dose — the original confound, reproduced on demand.
 1. ✅ **Against the reference implementation.** `rust/reference/noise_arms.rs` reproduces every
    dose to within ±0.5% (±2.2% for Student-t ν=3, which is sampling variability — §5.1b).
    The pipeline must match it. **Executable: `scripts/crosscheck_pipeline_reference.py`**,
-   which exits non-zero on any disagreement and on incomplete coverage. Results and the one
-   open convention question in §5.1d.
+   which exits non-zero on any disagreement and on incomplete coverage. Results in §5.1d.
 2. **Dose is flat across noise types.** At a fixed target, realised dose must be identical
    for every type. This is the single check that proves the confound is gone.
 3. **Held-out labels are untouched.** Assert `y_true` is bit-identical across every noise
@@ -1469,14 +1474,29 @@ dose — the original confound, reproduced on demand.
    so R² must match the existing σ=0 numbers.
 5. **Student-t reduces to Gaussian at large ν.** At ν = 200 the results must be
    indistinguishable from the Gaussian type.
-6. **The two implementations agree.** Same labels, same target, same group assignment, same seed —
-   Rust and Python compared on realised dose, unit dose `G`, the fraction of labels off by more than
-   3τ, the median absolute error, the worst-hit 5%'s share of the total noise energy, and the
-   realised affected-molecule fraction. Tolerances: mean dose over ≥ 20 seeds within **0.5%** of
-   target and of each other; **3%** for Student-t ν = 3, where the fourth moment is infinite and the
-   sample statistic is unstable by construction (§5.1b); shape diagnostics within 10% relative.
-   Grouped-shifted reports its per-run spread rather than being held to the per-run tolerance (§2a
-   rule 3). Executable: `scripts/crosscheck_injectors.py`, which exits non-zero on any failure.
+6. ✅ **The two implementations agree.** Same labels, same target, same group assignment, same
+   seeds — Rust and Python compared on realised dose, unit dose `G`, the fraction of labels off by
+   more than 3τ, the median absolute error, the worst-hit 5%'s share of the total noise energy, and
+   the realised affected-molecule fraction.
+
+   **The dose tolerance is DERIVED per condition, not fixed.** `dose_tolerance` — the same function
+   in `rust/src/main.rs`, `rust/reference/noise_arms.rs` and `noiseInject` — takes three standard
+   errors of a root-mean-square estimate from the condition's own fourth moment and its effective
+   number of independent contributions, floored at the half a percent §5.1b quotes for the full QM9
+   column, with a flat 15% for Student-t at ν ≤ 4 where the fourth moment is infinite and the sample
+   kurtosis is itself meaningless. The cross-check then divides by √seeds for a mean, and by
+   √(2/seeds) for a difference between two independent means.
+
+   An earlier draft of this item fixed the numbers at 0.5%, relaxed to 3% for Student-t ν = 3 and
+   grouped-shifted. That is a hand-kept list of exceptions: it needs editing whenever a condition is
+   added and silently stops covering the new one. Deriving it also *found* something — the effective
+   count for grouped-shifted was being taken as the group count when the group term is averaged over
+   molecules (§2a rule 3, `RERUN_PLAN.md` §2.3a).
+
+   Executable: **`python scripts/crosscheck_injectors.py`**, which exits non-zero on any failure.
+   Verified to do so: sabotaging the dose solver fails 40 of 154 checks with exit code 1, and a
+   condition present in one implementation but not the other fails by name rather than being
+   silently skipped.
 7. **Zero dose records exactly zero** — not a small number. The negative control the old
    reconstruction never had.
 8. **The recorded noise reconstructs the label exactly**: `y_clean + epsilon == y_noisy`, every

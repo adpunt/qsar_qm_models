@@ -63,11 +63,11 @@ DETERMINISTIC_G = {
     'grouped_shifted',
 }
 
-# Conditions with no selection rule: the shape is applied to every molecule. There is
-# nothing to compare in an "affected fraction" here -- it is 1.0 by definition, and
-# the two implementations record that definition differently (see the convention note
-# in NOISE_DESIGN.md 5.1d). The column carries real content only where something
-# chooses who gets hit, and there the two are compared.
+# Conditions with no selection rule: the shape is applied to every molecule, so the
+# affected fraction is 1.0. All three implementations record it that way as of
+# 2026-08-26 (NOISE_DESIGN.md 5.1c), so the column is compared like any other AND the
+# value is pinned, because "no targeting applies -> 0.0" is a defensible reading of the
+# name that would silently reintroduce the disagreement.
 NO_SELECTION = {'gaussian', 'student_t_nu10', 'student_t_nu5', 'student_t_nu3', 'laplace',
                 'grouped_shifted'}
 
@@ -244,13 +244,12 @@ def main():
                 continue
             if key == 'affected_molecule_fraction':
                 if cond in NO_SELECTION:
-                    # nothing selects here, so instead of comparing conventions,
-                    # assert the pipeline records the only truthful value
-                    if abs(a - 1.0) > 1e-6:
-                        bad.append(f"a condition with no selection rule reports "
-                                   f"{a:.4f} of molecules affected, not 1.0")
-                    continue
-                if abs(a - b) > tolerance:
+                    # both must say 1.0, not merely agree with each other
+                    for who, v in (('the pipeline', a), ('the reference', b)):
+                        if abs(v - 1.0) > 1e-6:
+                            bad.append(f"{who} reports {v:.4f} of molecules affected "
+                                       f"for a condition with no selection rule, not 1.0")
+                elif abs(a - b) > tolerance:
                     bad.append(f"{key} {a:.4f} vs {b:.4f}")
             elif rel(a, b) > tolerance:
                 bad.append(f"{key} differs by {rel(a, b) * 100:.1f}%")
