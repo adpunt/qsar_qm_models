@@ -1911,14 +1911,22 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             f"--- stderr ---\n{(stderr or '').strip()[-4000:]}"
         )
 
-    # The injector asserts its own gates and dies on any of them. A failure here is
-    # a confounded run, so it must stop the pipeline rather than be trained on.
-    if proc_a.returncode != 0:
-        raise RuntimeError(
-            f"noise injection failed (exit {proc_a.returncode}) at level {s}: {stderr.strip()}"
-        )
-
     record_noise_manifest(args, manifest_path, iteration, file_no, s)
+
+    # The noise the injector RECORDED, read back before a single model is fitted.
+    # Only when the out-of-fold pass is on: it is the only consumer, and reading
+    # the file otherwise would refuse older provenance for no reason.
+    noise_record = None
+    if getattr(args, 'oof_folds', 0) > 1:
+        noise_record = TrainingNoiseRecord.load(
+            provenance_path, manifest_path, scaffold_groups, s,
+            censor_side=getattr(args, 'censor_side', None))
+        print(f"[oof] read the recorded noise for "
+              f"{len(noise_record.splits['train']['epsilon_raw'])} training and "
+              f"{len(noise_record.splits['val']['epsilon_raw'])} validation molecules "
+              f"from {provenance_path} "
+              f"(standardisation mean {noise_record.std_mean:.6g}, "
+              f"sd {noise_record.std_sd:.6g})")
 
     # Close the write-mode files before reopening in read mode
     for f in files.values():
