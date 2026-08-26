@@ -149,6 +149,34 @@ happened to be active, and there was no log to say which. Every script in this
 directory activates its environment explicitly and every one names its output
 file.
 
+### 1c. Parity audit — REQUIRED before submitting anything
+
+Both pipelines now read every shared default from one file,
+`models/model_defaults.py`, instead of each restating its own. This confirms
+they resolve the same copy of it, that every model can still be built with the
+libraries installed here, and that no estimator default has moved under a
+library upgrade:
+
+```bash
+export QSAR_QM_MODELS_ROOT=/data/stat-cadd/scat9264/qsar_qm_models
+export KIRBY_ROOT=/data/stat-cadd/scat9264/KIRBy
+python "$QSAR_QM_MODELS_ROOT/scripts/audit_pipeline_parity.py" --strict
+```
+
+Must exit 0. Run it under **both** interpreters from §1b — a parameter that
+builds correctly in one and not the other is exactly the failure this catches.
+
+Read the closing section of its output too. It lists the differences no
+automated diff can see, and three of them are still open: the QM9 `ecfp4` is a
+path fingerprint rather than a circular one, `pdv` is binarised, and `sns`
+discards its counts. None of those is a parameter, so nothing here or in any
+preflight will ever catch them.
+
+The uncertainty preflight (`slurm_scripts_uncertainty_rerun/preflight.sh`) runs
+this same audit as its check 0. There is no QM9-side preflight script yet —
+building one is Chat H's item; until then this step is manual and must not be
+skipped.
+
 ## 2. Archive the current results before anything overwrites them
 
 They are the only record of what the paper claims today, and the revision guide

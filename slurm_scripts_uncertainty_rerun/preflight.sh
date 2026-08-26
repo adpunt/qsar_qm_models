@@ -36,6 +36,19 @@ cd /data/stat-cadd/scat9264/KIRBy
 . /data/stat-cadd/scat9264/qsar_qm_models/setup.sh
 cd tests
 
+echo "############ 0. the two pipelines build the SAME models"
+# Both pipelines read qsar_qm_models/models/model_defaults.py. This confirms
+# they resolve the SAME copy of it, that every model can still be constructed
+# with the libraries installed here, and that no estimator default has drifted
+# under a library upgrade. It is the check that would have caught XGBoost
+# training at three times the step size on one side.
+export QSAR_QM_MODELS_ROOT=/data/stat-cadd/scat9264/qsar_qm_models
+export KIRBY_ROOT=/data/stat-cadd/scat9264/KIRBy
+python -u "$QSAR_QM_MODELS_ROOT/scripts/audit_pipeline_parity.py" --strict \
+  || { echo "FAIL: the two pipelines do not agree, or this environment cannot build a model."
+       echo "      Nothing below matters until this passes. Do NOT submit."; exit 1; }
+
+echo
 echo "############ 1. the patched pipeline imports, and has the new flags"
 python -u alternative_data_noise_robustness.py --help 2>&1 \
   | grep -E -- "--strategies|--unc-strategies|--oof-folds" \

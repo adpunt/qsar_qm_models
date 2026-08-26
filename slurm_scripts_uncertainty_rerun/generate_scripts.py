@@ -41,11 +41,11 @@ MODELS = {
     # fit count by (1 + oof_folds) and nothing here has been timed on ARC.
     'QRF':            (1, 8,  '128G', 36, 'quantile spread; strongest error-ranker in existing results'),
     'NGBoost':        (1, 8,  '128G', 47, '500 estimators; slowest of the tree models by far'),
-    'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, capped at 2000 training points'),
-    'BNN-Full':       (2, 8,  '128G', 47, '30 stochastic forward passes'),
-    'VBLL-Full':      (2, 8,  '128G', 47, '30 stochastic forward passes'),
-    'MLP-BNN-Full':   (2, 8,  '128G', 47, '30 stochastic forward passes'),
-    'MLP-VBLL-Full':  (2, 8,  '128G', 47, '30 stochastic forward passes'),
+    'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)'),
+    'BNN-Full':       (2, 8,  '128G', 47, '100 stochastic forward passes'),
+    'VBLL-Full':      (2, 8,  '128G', 47, '100 stochastic forward passes'),
+    'MLP-BNN-Full':   (2, 8,  '128G', 47, '100 stochastic forward passes'),
+    'MLP-VBLL-Full':  (2, 8,  '128G', 47, '100 stochastic forward passes'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
 REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']

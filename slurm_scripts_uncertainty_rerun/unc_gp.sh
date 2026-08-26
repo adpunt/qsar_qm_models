@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # Uncertainty re-run — model: GP
-# gauche ExactGP, RBF kernel, capped at 2000 training points
+# gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)
 # ============================================================================
 # Array task -> (dataset, representation, strategy).
 #   3 datasets x 4 reps x 6 strategies = 72 tasks

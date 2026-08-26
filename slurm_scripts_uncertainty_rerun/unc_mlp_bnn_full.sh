@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # Uncertainty re-run — model: MLP-BNN-Full
-# 30 stochastic forward passes
+# 100 stochastic forward passes
 # ============================================================================
 # Array task -> (dataset, representation, strategy).
 #   3 datasets x 4 reps x 6 strategies = 72 tasks

@@ -20,22 +20,54 @@ import torch
 from torch_geometric.data import Data
 from rdkit import Chem
 
-def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default', loss_function='mse'):
-    """
-    Save results to a CSV file with loss function tracking
-    """
-    if filepath:
-        file_exists = os.path.isfile(filepath)
+RESULT_COLUMNS = ["sigma", "iteration", "model", "rep", "sample_size", "mae",
+                  "mse", "rmse", "r2", "pearson_corr", "params_source",
+                  "loss_function", "spec_version", "spec_hash", "gp_fit_method"]
 
-        with open(filepath, mode='a', newline='') as f:
-            writer = csv.writer(f)
-            
-            # Write header if the file is new
-            if not file_exists:
-                writer.writerow(["sigma", "iteration", "model", "rep", "sample_size", "mae", "mse", "rmse", "r2", "pearson_corr", "params_source", "loss_function"])
-            
-            # Save the results
-            writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1], metrics[2], metrics[3], metrics[4], params_source, loss_function])
+
+def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default',
+                 loss_function='mse', gp_fit_method=''):
+    """
+    Save results to a CSV file with loss function tracking.
+
+    Three provenance columns were added on 2026-08-26 (Chat E, RERUN_PLAN.md
+    section 5.2): the version and content hash of models/model_defaults.py, so a
+    row can always be traced to the parameters that produced it, and which
+    optimiser actually fitted the Gaussian process -- the Adam fallback is a
+    different fit and used to leave no trace on disk.
+
+    Appending to a file written with the OLD header would produce ragged rows
+    that read back silently wrong, so that is a hard error rather than a
+    surprise three months later.
+    """
+    if not filepath:
+        return
+
+    file_exists = os.path.isfile(filepath)
+    if file_exists:
+        with open(filepath, newline='') as f:
+            header = next(csv.reader(f), [])
+        if header and header != RESULT_COLUMNS:
+            missing = [c for c in RESULT_COLUMNS if c not in header]
+            raise RuntimeError(
+                f"{filepath} was written with a different column set and cannot "
+                f"be appended to. Missing: {missing}. Move or delete the old "
+                f"file -- appending would produce rows that do not line up with "
+                f"the header.")
+
+    try:
+        from model_defaults import SPEC_VERSION, spec_hash
+        spec_version, spec = SPEC_VERSION, spec_hash()
+    except Exception:
+        spec_version, spec = '', ''
+
+    with open(filepath, mode='a', newline='') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(RESULT_COLUMNS)
+        writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1],
+                         metrics[2], metrics[3], metrics[4], params_source,
+                         loss_function, spec_version, spec, gp_fit_method])
 
 def calculate_regression_metrics(y_test, prediction, logging=False):
     mae = mean_absolute_error(y_test, prediction)

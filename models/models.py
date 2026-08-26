@@ -56,6 +56,18 @@ from grakel.kernels import WeisfeilerLehman, VertexHistogram
 from utils import * 
 from loss_functions import *
 
+# The shared parameter spec. models/ is on sys.path when process_and_train.py
+# runs from scripts/, but not when this module is imported from the repo root
+# (the parity audit does that), so resolve it from this file's own location.
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from model_defaults import (
+    SPEC_VERSION, BAYESIAN_DEFAULTS, GP_DEFAULTS, NEURAL_DEFAULTS,
+    SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, provenance_columns, sklearn_params,
+    spec_hash,
+)
+
 # TODO: reorder imports
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1363,12 +1375,9 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             params['bootstrap'] = trial.suggest_categorical('bootstrap', [True, False])
             params_source = 'tuning_trial'
         else:
-            params['max_depth'] = None
-            params['max_features'] = 'sqrt'
-            params['min_samples_leaf'] = 1
-            params['min_samples_split'] = 2
-            params['n_estimators'] = 300 if model_type == 'qrf' else 100
-            params['bootstrap'] = True
+            # Shared with the experimental pipeline via models/model_defaults.py.
+            # Do not restate the numbers here -- that is how the two drifted.
+            params = sklearn_params('qrf' if model_type == 'qrf' else 'rf')
             params_source = 'default'
 
     if model_type == 'rf':
@@ -1449,9 +1458,7 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
                 params['coef0'] = trial.suggest_float('coef0', 0.0, 10.0)
             params_source = 'tuning_trial'
         else:
-            params['C'] = 1.0
-            params['gamma'] = 'scale'
-            params['kernel'] = 'rbf'
+            params = sklearn_params('svm')
             params_source = 'default'
 
     x_train = np.vstack((x_train, x_val))
@@ -1490,9 +1497,7 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             params['natural_gradient'] = trial.suggest_categorical('natural_gradient', [True, False])
             params_source = 'tuning_trial'
         else:
-            params['learning_rate'] = 0.01
-            params['n_estimators'] = 500
-            params['natural_gradient'] = True
+            params = sklearn_params('ngboost')
             params_source = 'default'
     
     # STEP 1: Split validation for calibration
@@ -1506,9 +1511,14 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         x_val_train = np.vstack((x_train, x_val))
         y_val_train = np.hstack((y_train, y_val))
     
+    # Dist and Score come from the shared spec by NAME, so the experimental
+    # pipeline resolves the same two classes. A tuned-parameter dict has neither
+    # key, so fall back to the spec's own values.
+    _ngb_dist = {'Normal': Normal}[params.get('dist', SKLEARN_DEFAULTS['ngboost']['dist'])]
+    _ngb_score = {'MLE': MLE}[params.get('score', SKLEARN_DEFAULTS['ngboost']['score'])]
     model = NGBRegressor(
-        Dist=Normal,
-        Score=MLE,
+        Dist=_ngb_dist,
+        Score=_ngb_score,
         natural_gradient=params['natural_gradient'],
         n_estimators=params['n_estimators'],
         learning_rate=params['learning_rate'],
@@ -1606,16 +1616,7 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)
             params_source = 'tuning_trial'
         else:
-            params['max_depth'] = 6
-            params['learning_rate'] = 0.1
-            params['subsample'] = 1.0
-            params['n_estimators'] = 100
-            params['colsample_bytree'] = 1.0
-            params['colsample_bylevel'] = 1.0
-            params['min_child_weight'] = 1
-            params['gamma'] = 0.0
-            params['reg_alpha'] = 0.0
-            params['reg_lambda'] = 1.0
+            params = sklearn_params('xgboost')
             params_source = 'default'
 
     if x_val is not None and y_val is not None:
@@ -1657,15 +1658,7 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             params['reg_lambda'] = trial.suggest_float('reg_lambda', 0.0, 1.0)
             params_source = 'tuning_trial'
         else:
-            params['n_estimators'] = 100
-            params['learning_rate'] = 0.1
-            params['num_leaves'] = 31
-            params['max_depth'] = -1
-            params['subsample'] = 1.0
-            params['colsample_bytree'] = 1.0
-            params['min_child_samples'] = 20
-            params['reg_alpha'] = 0.0
-            params['reg_lambda'] = 0.0
+            params = sklearn_params('lightgbm')
             params_source = 'default'
 
     if x_val is not None and y_val is not None:
@@ -1681,6 +1674,40 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     save_results(args.filepath, s, iteration, 'lgb', rep, args.sample_size, metrics)
 
     return metrics[3]
+
+
+def fit_gp_with_fallback(mll, model, likelihood, train_x, train_y):
+    """Fit a GP marginal likelihood, and say which optimiser did it.
+
+    botorch from about 0.12 requires its fitter's argument to be a botorch
+    Model -- it calls transform_inputs -- and `Gauche` is a plain gpytorch
+    ExactGP, so on a newer botorch this raises AttributeError. The experimental
+    pipeline already fell back to a plain gpytorch Adam loop; QM9 did not, so
+    the SAME environment that merely changed the experimental fit would kill
+    every QM9 GP job outright.
+
+    Both pipelines now use this same try/except and both record the answer, so a
+    GP row always says which optimiser produced it.
+
+    Returns 'botorch' or 'adam_fallback'.
+    """
+    try:
+        fit_gpytorch_model(mll)
+        return 'botorch'
+    except Exception as exc:
+        print(f"[gp] botorch fitter refused this model "
+              f"({type(exc).__name__}: {exc}); using the Adam fallback. "
+              f"Recorded as gp_fit_method=adam_fallback.")
+        model.train()
+        likelihood.train()
+        opt = torch.optim.Adam(model.parameters(),
+                               lr=GP_DEFAULTS['fallback_adam_lr'])
+        for _ in range(GP_DEFAULTS['fallback_adam_iters']):
+            opt.zero_grad()
+            loss = -mll(model(train_x), train_y)
+            loss.backward()
+            opt.step()
+        return 'adam_fallback'
 
 
 def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
@@ -1708,8 +1735,8 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             if kernel_cli == 'Rbf':
                 kernel_cli = 'RBF'
             params['kernel_name'] = kernel_cli
-            params['outputscale'] = 1.0
-            params['likelihood_noise'] = 1e-3
+            params['outputscale'] = GP_DEFAULTS['outputscale']
+            params['likelihood_noise'] = GP_DEFAULTS['likelihood_noise']
             params_source = 'default'
 
     kernel_map = {
@@ -1744,9 +1771,15 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
     kernel_class = kernel_map[params['kernel_name']]
     model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
+    # params['outputscale'] used to be computed here and never applied, so the
+    # ScaleKernel actually started at gpytorch's default of softplus(0) ~ 0.693
+    # while the experimental pipeline set 1.0 "to match". Apply it on both sides.
+    if GP_DEFAULTS['apply_outputscale']:
+        model.covar_module.outputscale = params['outputscale']
 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
-    fit_gpytorch_model(mll)
+    gp_fit_method = fit_gp_with_fallback(mll, model, likelihood,
+                                         x_train_tensor, y_train_tensor)
 
     model.eval()
     likelihood.eval()
@@ -1786,7 +1819,8 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     model_name = 'gauche_rbf' if params['kernel_name'] == 'RBF' else 'gauche'
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
-    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, model_name, rep, args.sample_size,
+                 metrics, gp_fit_method=gp_fit_method)
 
     # *** UPDATED: Save with decomposition ***
     if args.uncertainty:
@@ -1810,12 +1844,34 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     return metrics[3]
 
 def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep, 
-             patience=20, tolerance=0.01, domain_labels_train=None, domain_labels_val=None):
+             patience=None, tolerance=None, domain_labels_train=None, domain_labels_val=None):
     """
     Added domain_labels parameters for domain-aware losses
+
+    Early stopping is defined once, in models/model_defaults.py, and shared with
+    the experimental pipeline. Three things changed on 2026-08-26 (Chat E):
+
+      * the best weights are RESTORED. This used to count patience and return
+        whatever the last epoch produced -- up to twenty epochs past the
+        validation optimum, and under injected noise those are twenty epochs
+        spent memorising corrupted labels. It made QM9's neural degradation
+        curves steeper for a procedural reason, and the stochastic uncertainty
+        passes were drawn from the overfitted weights.
+      * the validation loss is a MEAN over batches, not a sum. It was a sum
+        compared against an absolute tolerance of 0.01, so the improvement
+        threshold silently scaled with the number of validation batches.
+      * improvement is strict, and patience matches the experimental side.
     """
+    if patience is None:
+        patience = NEURAL_DEFAULTS['training']['patience']
+    if tolerance is None:
+        tolerance = NEURAL_DEFAULTS['training']['improvement_tolerance']
+    restore_best = NEURAL_DEFAULTS['training']['restore_best_weights']
+
     model.to(device)
     best_loss = float('inf')
+    best_state = None
+    best_epoch = -1
     epochs_no_improve = 0
     
     train_losses = []
@@ -1850,9 +1906,10 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
         # Validation
         model.eval()
         val_loss = 0
+        n_val_batches = 0
         batch_idx = 0
         with torch.no_grad():
-            for X_val, y_val in val_loader:
+            for X_val, y_val in (val_loader or []):
                 X_val, y_val = X_val.to(device), y_val.to(device)
                 val_outputs = model(X_val)
                 
@@ -1864,15 +1921,27 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
                     loss = criterion(val_outputs, y_val)
                 
                 val_loss += loss.item()
+                n_val_batches += 1
                 batch_idx += len(X_val)
+
+        # Mean, not sum: a summed loss makes the improvement threshold depend on
+        # how many validation batches there happen to be.
+        if NEURAL_DEFAULTS['training']['val_loss_reduction'] == 'mean' and n_val_batches:
+            val_loss /= n_val_batches
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
-        # Early stopping check
-        if val_loss < best_loss - tolerance:
+        # Early stopping check. With no validation set there is nothing to stop
+        # on, so train the full epoch budget rather than stopping on a constant.
+        if n_val_batches == 0:
+            pass
+        elif val_loss < best_loss - tolerance:
             best_loss = val_loss
+            best_epoch = epoch
             epochs_no_improve = 0
+            if restore_best:
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
@@ -1880,6 +1949,12 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
                 break
         if epoch % 5 == 0:
             print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+    # Roll back to the best epoch. Without this the model returned is whatever
+    # the patience counter happened to stop on.
+    if restore_best and best_state is not None:
+        model.load_state_dict(best_state)
+        print(f"Restored best weights from epoch {best_epoch} (val loss {best_loss:.6f})")
     
     if args.save_per_epoch_metrics:
         save_per_epoch_metrics(
@@ -1912,8 +1987,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             params['activation'] = trial.suggest_categorical('activation', ['relu', 'tanh', 'softmax'])
             params_source = 'tuning_trial'
         else:
-            params['hidden_size1'], params['hidden_size2'] = 128, 64
-            params['activation'] = 'relu'
+            params['hidden_size1'], params['hidden_size2'] = NEURAL_DEFAULTS['dnn']['hidden_sizes']
+            params['activation'] = NEURAL_DEFAULTS['dnn']['activation']
             params_source = 'default'
 
     activation_map = {'relu': nn.ReLU(), 'tanh': nn.Tanh(), 'softmax': nn.Softmax(dim=1)}
@@ -2528,7 +2603,10 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             params['lr'] = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
             params_source = 'tuning_trial'
         else:
-            params['hidden_size'], params['num_hidden_layers'], params['dropout_rate'], params['lr'] = 128, 2, 0.2, 0.001
+            params['hidden_size'] = NEURAL_DEFAULTS['mlp']['hidden_size']
+            params['num_hidden_layers'] = NEURAL_DEFAULTS['mlp']['num_hidden_layers']
+            params['dropout_rate'] = NEURAL_DEFAULTS['mlp']['dropout_rate']
+            params['lr'] = NEURAL_DEFAULTS['training']['lr']
             params_source = 'default'
 
     # Loss function setup
@@ -3580,12 +3658,17 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         x_test_tensor = torch.from_numpy(x_test).double()
         y_train_tensor = torch.from_numpy(y_full).double()
         
-        likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params.get('likelihood_noise', 1e-3))
+        likelihood = gpytorch.likelihoods.GaussianLikelihood(
+            noise=params.get('likelihood_noise', GP_DEFAULTS['likelihood_noise']))
         kernel_class = kernel_map[params.get('kernel_name', 'Tanimoto')]
         base_model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
-        
+        if GP_DEFAULTS['apply_outputscale']:
+            base_model.covar_module.outputscale = params.get(
+                'outputscale', GP_DEFAULTS['outputscale'])
+
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, base_model)
-        fit_gpytorch_model(mll)
+        gp_fit_method = fit_gp_with_fallback(mll, base_model, likelihood,
+                                             x_train_tensor, y_train_tensor)
         
     elif base_model_type == 'dnn':
         learning_rate = params.pop('learning_rate', 0.001)
