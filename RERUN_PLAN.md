@@ -1035,6 +1035,38 @@ the experimental datasets (§13 chat F).
 
 ---
 
+### 3.3a 🔴 FOR YOU — the experimental pipeline is not fold-independent, and never was
+
+Measured 2026-08-26 (chat B), because chat B's own prompt names this as a property that must be
+preserved.
+
+`KIRBy/src/kirby/noise_spec.py` exists to guarantee two things, and its docstring says so: a fresh
+generator per call, and **one realisation drawn over the whole label column, then subset per fold,
+so a molecule gets the same corruption whichever fold it lands in**. Both are intact there — checked.
+
+**The experimental pipeline does not go through that module.** It imports the injector directly and
+draws over *each fold's* training labels. Measured on a 600-molecule five-fold scaffold split:
+**1,688 of 2,400 molecule-fold pairs received different noise from the same molecule in an earlier
+fold.** The delivered dose is stable (0.27% spread across folds), so the robustness curves are
+unaffected — what changes is what a *molecule* means.
+
+**This is a design choice, not obviously a defect, which is why it is yours.**
+
+| | Draw once over the full column | Draw per fold (what it does now) |
+|---|---|---|
+| A molecule's corruption | a property of the molecule, so rows join on `mol_idx` across folds | differs by fold; joining across folds mixes five realisations |
+| Noise-realisation variance | none — one draw for the whole study at each level | the five folds give five draws, which is real protection against a freak realisation |
+| Matches `noise_spec`'s stated guarantee | yes | no |
+
+**I have not changed it**, because it would alter every experimental number and the argument is
+genuinely two-sided. My recommendation is to **keep the per-fold draw** — with only one replicate
+planned on the uncertainty side (§13.1 stage 3), five independent realisations are worth more than
+cross-fold joinability — and to state it in the Methods in one sentence.
+
+**The one thing that must happen either way:** the per-molecule uncertainty rows carry `fold`, and
+chat J must not average `injected_noise` across folds for a molecule. Under the per-fold draw that
+is averaging five different corruptions. This is failure mode 3 in §0.6 wearing a new hat.
+
 ### 3.4 Cross-pipeline audit — the same name is not the same thing
 
 Audited 2026-08-25 by reading both codebases, with every claim independently re-checked. **29
@@ -2570,12 +2602,17 @@ the unit doses are identical where algebra fixes them, censoring agrees to six d
 the 20-seed mean doses agree within 0.82% (2.53% at ν = 3, whose fourth moment is infinite).
 Details and what it found: `NOISE_DESIGN.md` §5.1d.
 
-⚠️ **One thing it found is not chat A's to settle.** `affected_molecule_fraction` means 1.0 in the
-pipeline and 0.0 in the reference for the conditions with no selection rule. The pipeline's reading
-is the one failure mode 6's guard needs — under the reference's convention every uniform condition
-reads as zero and trips a guard meant to catch a degenerate condition — but the column is also
-compared against the Python injector by chat B's gate, so a one-sided change would break that.
-**Whoever merges A, B and the Python side settles it in one edit across all three.**
+✅ **One thing it found, now settled.** `affected_molecule_fraction` meant 1.0 in the pipeline and
+0.0 in the reference for the conditions with no selection rule. Settled on **1.0** across all three
+implementations on 2026-08-26 — every molecule is perturbed, and the 0.0 reading left the reference
+disagreeing with itself, since grouped-shifted already recorded 1.0. Written up in
+`NOISE_DESIGN.md` §5.1d finding 2 (chat B), with a pointer at §5.1c because that is where the code
+comments in the other two implementations send you. Both cross-checks now compare the column and
+pin it at 1.0, so it cannot drift back.
+
+One knock-on: failure mode 6's guard below says to assert the affected fraction "is neither near
+zero nor near one". That belongs to conditions that **select** — a condition with no selection rule
+is legitimately at one.
 
 **One defect chat B's cross-check found in this work, now fixed (§2.3a):** the shifted grouped
 condition's `effective_n` divided by the raw scaffold-group count instead of the effective one. It
@@ -2631,8 +2668,7 @@ is what the rule exists to prevent.
 
 **Still open, and not chat A's:** whether the validation split gets its own independently drawn
 noise (§5.1 item 5, §13.5 — the author's), the ECFP4 truncation and index-drift guards (§5.1 item
-7, chat D), whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way), and the
-`affected_molecule_fraction` convention above.
+7, chat D), and whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way).
 
 **Not covered locally, and only chat H can cover it:** the injector has never run inside a real
 training job. Gate 6 (the clean-label run reproduces the old zero-noise numbers) and gate 9 (every
@@ -2749,6 +2785,130 @@ Avalon and ChemBERTa were wired into the experimental runner, the guard is
 `scripts/test_embedding_storage.py`, and the measurement is
 `scripts/retest_embedding_kernels.py`. **The noise scheme was not touched** — no change to
 `NOISE_DESIGN.md` was needed or made.
+
+#### ✅ Measured 2026-08-26 — does distance between molecules still mean anything?
+
+**This half needs no model, so nothing an optimiser does can reach it.** For each pair of molecules,
+how far apart are they in the representation, and how different are their properties? If storage has
+destroyed the shared scale, the two should stop tracking each other. Reported as a rank correlation:
+zero means distance tells you nothing. Every replicate is shown; nothing is averaged.
+
+600 QM9 molecules per replicate, scaffold split, about 480 to learn from
+(`results/embedding_storage_retest/qm9_kernel_retest.csv`).
+
+| Representation | Old storage | New storage | Typical distance, old → new |
+|---|---|---|---|
+| **MHG-GNN** | 0.023, 0.059, 0.029 | **0.118, 0.146, 0.109** | 1060 → 37 |
+| ChemBERTa | 0.101, 0.154, 0.101 | 0.170, 0.192, 0.159 | 1140 → 38 |
+| PDV | 0.130, 0.144, 0.123 | 0.175, 0.207, 0.146 | 167 → 17 |
+| mol2vec | 0.140, 0.170, 0.102 | 0.128, 0.168, 0.092 | 638 → 24 |
+
+**MHG-GNN is the representation this defect was destroying.** Under the old storage, how far apart
+two molecules sat told you essentially nothing about how their properties differed — 0.02 to 0.06,
+against 0.11 to 0.15 once stored properly. Every replicate moves the same way.
+
+⚠️ **mol2vec is not damaged by this measure, and §2.8c above assumes both learned embeddings were
+damaged equally.** Its three replicates are 0.140, 0.170, 0.102 before and 0.128, 0.168, 0.092
+after — the same numbers. Whatever ruins mol2vec's radial-basis score on the cluster, this
+measurement does not show the per-molecule stretch destroying its geometry the way it destroys
+MHG-GNN's. The claim that the two embeddings fail for one shared reason should not be repeated until
+the model fits settle it.
+
+#### 🔴 Measured 2026-08-26 — the kernel gap was the FIT, not the features
+
+**This overturns §10b.2 and it downgrades §2.8c. Read it before repeating either.**
+
+36 fits, none collapsed, 600 QM9 molecules per replicate, about 480 to learn from, scaffold split,
+three replicates. Same molecules and same split within every row, so the only thing that differs
+across a row is the storage.
+
+**1. The two ways of measuring similarity now agree — on the DAMAGED features.**
+
+The cluster reported them 0.86 to 0.89 apart on the learned embeddings, and §10b.2 read that gap as
+proof the features were unusable. Give the fit a workable starting point and the gap disappears.
+Twelve pairings, all on the old storage:
+
+| Representation | Straight-line distance | Overlap fraction | Apart by |
+|---|---|---|---|
+| MHG-GNN | 0.680, 0.686, 0.755 | 0.713, 0.706, 0.756 | 0.033, 0.020, 0.001 |
+| ChemBERTa | 0.562, 0.362, 0.630 | 0.585, 0.331, 0.627 | 0.023, 0.031, 0.002 |
+| mol2vec | 0.683, 0.590, 0.754 | 0.661, 0.601, 0.743 | 0.022, 0.011, 0.011 |
+| PDV | 0.709, 0.680, 0.753 | 0.726, 0.696, 0.712 | 0.017, 0.016, 0.040 |
+
+**Largest gap anywhere: 0.040.** The cluster's 0.86–0.89 was the model failing to fit.
+
+**2. The storage fix does not measurably change how well the model predicts.**
+
+Difference between the new storage and the old, per replicate:
+
+| Representation | Replicate 0 | Replicate 1 | Replicate 2 | Reading |
+|---|---|---|---|---|
+| **ChemBERTa** | **+0.076** | **+0.122** | **+0.014** | the only consistent gain |
+| MHG-GNN | +0.053 | −0.060 | +0.039 | sign flips |
+| mol2vec | −0.064 | −0.091 | +0.022 | sign flips |
+| PDV *(reference)* | −0.001 | −0.013 | +0.050 | barely moves, as it should |
+
+Run-to-run variation at this size is around ±0.06, so only ChemBERTa's gain stands clear of it, and
+only just. **PDV is a reference row, not a control**: it was always stored as decimals and
+standardised, so its "old storage" cell is a hypothetical that never ran in the pipeline.
+
+**3. What IS damaged is the geometry, and the fix repairs it** — the model-free measurement above.
+MHG-GNN went from 0.02 to 0.12. Both measurements are sound; they simply answer different questions.
+The per-molecule stretch does destroy comparability between molecules. A Gaussian process with a
+well-chosen width can still recover most of what it needs from what is left.
+
+#### 🔴 NEW DEFECT — the pipeline never sets the width of its similarity function
+
+**Verified 2026-08-26: the word `lengthscale` does not appear anywhere in `models/models.py`.**
+Neither does `ard_num_dims`.
+
+The width stays at the library default of about 0.7, for every representation, every dataset, every
+run. Typical distances between molecules run from 17 to 1,100 depending on the representation. At a
+width of 0.7 every molecule is effectively infinitely far from every other, the similarity matrix
+becomes the identity, the likelihood surface is flat, and there is no gradient to follow. The fit
+returns a single constant and scores whatever that constant happens to score.
+
+That is what produced −0.0158 for MHG-GNN and +0.0087 for mol2vec in
+`results/gp_kernel_harvest/qm9/`. Started from each dataset's own median distance instead, the same
+damaged features reach 0.68 to 0.76.
+
+**Three consequences.**
+
+1. **The Gaussian process cannot enter the variance decomposition until this is fixed.** §10b.2's
+   decision — one kernel, every representation, in the decomposition beside the support vector
+   machine — is sound and is if anything better supported now, because with a workable width the two
+   kernels agree everywhere rather than only on binary features. But run it as the code stands and
+   any representation whose distances are far from 1 returns a collapsed fit.
+2. **Every Gaussian-process number in the study is suspect, not only the two embeddings.** Whether a
+   fit converged depended on how far that representation's typical distances sat from 0.7. Nothing
+   recorded whether a fit collapsed.
+3. **The fix is small and belongs with the model, not with a chat's scope line.** Set the width from
+   the median distance between training molecules before fitting, and record the spread of the
+   predictions so a collapsed fit is visible instead of silent.
+
+**§2.8c is overstated and needs rewriting.** It calls the storage defect "the largest single defect
+in the study" and attributes the whole 0.89 gap to it. The storage defect is real, it damages the
+geometry, and fixing it is right. It is not what produced those numbers.
+
+**The broken first attempt is kept** at
+`results/embedding_storage_retest/qm9_kernel_retest_BROKEN_FIT.csv`. Three scores — the ones you get
+for predicting a single constant — came back sixteen times across four representations and both
+storage schemes. That repetition across cells with nothing in common is the only reason it was
+caught, which is failure mode 9 in §0.6 arriving for the third time in this project.
+
+🔴 **Superseded — the model-fitting half was redone.** The first attempt was measuring its
+own optimiser: three scores — the ones you get for predicting a single constant — came back sixteen
+times across four different representations and both storage schemes. The width of the similarity
+function starts near 0.7 in gpytorch while distances here run from 17 to 1,100, so every molecule
+looked infinitely far from every other and there was no gradient to follow. Now started from each
+dataset's own median distance, with the property values scaled for fitting, and with any fit whose
+predictions are near-constant reported as collapsed rather than as a score. The broken run is kept at
+`results/embedding_storage_retest/qm9_kernel_retest_BROKEN_FIT.csv` as the evidence for that
+diagnosis.
+
+**This is the third time in this project that a fitting or scoring routine failed quietly and
+produced a plausible number** (§0.6 failure mode 9). It failed loudly enough to catch only because
+the same value repeated across cells that had nothing in common.
 
 **Confirming it at full size on the cluster.** The local measurement is at a few thousand molecules;
 the harvest is at ten thousand, so only the paired difference transfers. These reproduce the harvest

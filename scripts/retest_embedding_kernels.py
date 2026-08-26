@@ -225,23 +225,46 @@ def distance_signal(x, y, rng, n_pairs=20000):
 
 
 def fit_gp(x_train, y_train, x_test, kernel_name, iters=150):
-    """The pipeline's Gaussian process class, likelihood noise and kernels.
+    """The pipeline's model class and kernels, fitted by gradient ascent.
 
-    The fit itself is plain gradient ascent on the marginal likelihood rather than
-    the pipeline's botorch call: botorch 0.16 refuses a bare gpytorch model
-    ('Gauche' object has no attribute 'transform_inputs'), so the pipeline's own
-    call cannot run in this environment either. Both storage schemes are fitted by
-    exactly the same routine for the same number of steps, which is what the
-    comparison rests on.
+    Not the pipeline's own fitting call: botorch 0.16 refuses a bare gpytorch
+    model ('Gauche' object has no attribute 'transform_inputs'), so
+    models/models.py cannot run in this environment either.
+
+    Three things here are not optional, and the first run without them produced
+    sixteen cells that were the same three numbers over and over -- the score you
+    get for predicting one constant, which depends on the split and not on the
+    features at all.
+
+    1. The width of the similarity function starts at the median distance between
+       training molecules. gpytorch starts it near 0.7. Distances here run from 17
+       to 1,100, so at the default start every molecule is effectively infinitely
+       far from every other, the similarity matrix is the identity, the likelihood
+       surface is flat and there is no gradient to climb. Both storage schemes get
+       this treatment, each from its OWN distances, so neither is favoured.
+    2. The property values are centred and scaled for fitting, then put back. The
+       pipeline does this too (--normalize True). A constant-mean model fitted
+       against values averaging 6.8 spends its budget finding the mean.
+    3. The spread of the predictions is returned. A fit whose predictions are all
+       but identical has collapsed, and its score is an artefact of the split. It
+       is reported as collapsed rather than as a number.
     """
     x_tr = torch.from_numpy(np.ascontiguousarray(x_train)).double()
     x_te = torch.from_numpy(np.ascontiguousarray(x_test)).double()
-    y_tr = torch.from_numpy(np.ascontiguousarray(y_train)).double()
+
+    y_mean, y_sd = y_train.mean(), y_train.std()
+    y_tr = torch.from_numpy(np.ascontiguousarray((y_train - y_mean) / y_sd)).double()
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=1e-3)
     model = Gauche(x_tr, y_tr, likelihood, KERNELS[kernel_name])
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
+    if kernel_name == 'rbf':
+        with torch.no_grad():
+            sample = x_tr[torch.randperm(len(x_tr))[:200]]
+            median = torch.cdist(sample, sample).flatten().median().item()
+        model.covar_module.base_kernel.lengthscale = max(median, 1e-3)
+
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     model.train()
     likelihood.train()
     optimiser = torch.optim.Adam(model.parameters(), lr=0.1)
@@ -254,7 +277,8 @@ def fit_gp(x_train, y_train, x_test, kernel_name, iters=150):
     model.eval()
     likelihood.eval()
     with torch.no_grad():
-        return model(x_te).mean.numpy()
+        pred = model(x_te).mean.numpy() * y_sd + y_mean
+    return pred, float(np.std(pred))
 
 
 def main():
@@ -315,26 +339,39 @@ def main():
                                             raw[test].astype(np.float64))
 
             for storage, (x_tr, x_te) in variants.items():
+                non_negative = bool(x_tr.min() >= 0)
                 rho, med_d = distance_signal(x_tr, y[train],
                                              np.random.default_rng(seed))
                 print(f"  {storage:8s} distance-vs-label rho = {rho:+.4f}, "
                       f"median distance {med_d:.4g}")
                 for kernel in args.kernels:
+                    if kernel == 'tanimoto' and not non_negative:
+                        # A ratio of overlap to total is undefined once values can
+                        # be negative, and standardising makes them negative. The
+                        # first run returned "matrix not positive definite" here,
+                        # which is the same fact arriving as a crash.
+                        print(f"  {storage:8s} {kernel:9s} not defined on these features")
+                        continue
                     t0 = time.time()
+                    spread = np.nan
                     try:
-                        pred = fit_gp(x_tr, y[train], x_te, kernel, iters=args.iters)
+                        pred, spread = fit_gp(x_tr, y[train], x_te, kernel, iters=args.iters)
                         r2 = r2_score(y[test], pred)
                     except Exception as e:
                         print(f"  {storage:8s} {kernel:9s} FAILED: {e}")
                         r2 = np.nan
                     rows.append(dict(rep=rep, replicate=replicate, storage=storage,
                                      kernel=kernel, r2=r2,
+                                     prediction_spread=round(spread, 4),
+                                     collapsed=bool(spread < 0.05 * float(np.std(y[train]))),
                                      distance_label_rho=round(rho, 4),
                                      median_distance=round(med_d, 4),
                                      n=args.n_molecules,
                                      n_train=len(train), n_test=len(test),
                                      seconds=round(time.time() - t0, 1)))
-                    print(f"  {storage:8s} {kernel:9s} R2 = {r2:+.4f}  ({rows[-1]['seconds']}s)")
+                    flag = "  COLLAPSED — predicted one constant" if rows[-1]['collapsed'] else ""
+                    print(f"  {storage:8s} {kernel:9s} R2 = {r2:+.4f}  "
+                          f"(spread {spread:.3f}, {rows[-1]['seconds']}s){flag}")
 
             pd.DataFrame(rows).to_csv(args.out, index=False)
 
