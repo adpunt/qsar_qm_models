@@ -2798,8 +2798,20 @@ The full audit of both pipelines on 2026-08-26 produced **151 candidate faults**
 areas — model settings, preprocessing, feature handling, noise, uncertainty, and what reaches
 disk. Each non-cosmetic one was to be handed to a separate reviewer told to disprove it.
 
-**The verification was capped at 40. It was my cap, and it means 79 candidates were never
-examined at all.** They are unchecked, not dismissed. Of the 40 that were checked, 35 survived and
+**The verification was capped at 40. It was my cap, and it means 111 candidates were never
+examined at all — 79 of them non-cosmetic, and 8 of those rated at the HIGHEST severity.** They are
+unchecked, not dismissed. All 151 are saved in `research_archive/audit_2026_08_26/`:
+`unverified.json` (the 111), `confirmed_35.json`, `refuted_5.json`, `synthesis.md`.
+
+**One of the eight unchecked top-severity candidates is another scrambling fault**, of the same
+class as §2.10: the QM9 graph models are said to index the unshuffled dataset with indices computed
+on the shuffled one, which would mean every graph model has been trained on molecules that do not
+match their labels. That is unverified and it is the first thing to check.
+
+Caveat on the count: candidates were matched by title, and a few titles differ only in wording
+between a dimension report and the cross-pipeline pass, so a handful of the 111 may already be
+covered by the 40 that were checked. Two are known duplicates of faults already fixed (the
+network-setting one, and the early-stopping-label one). Of the 40 that were checked, 35 survived and
 5 were disproved — but that survival rate should be treated with suspicion: every reviewer returned
 "certain", with no gradation, and the surviving list contains obvious duplicates (three entries for
 the same fingerprint fault, two for the same graph-model unpacking error). The genuine count is
