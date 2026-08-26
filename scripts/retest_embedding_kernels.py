@@ -16,8 +16,17 @@ same scaffold split and the same seeds twice:
   fixed    -- the model's own float values, standardised per feature with constants
               fitted on the training split. What the pipeline does now.
 
-PDV is the control: it was already standardised, so it is the one cell
-that should barely move, and it is the best-performing cell in the study.
+PDV is the reference row, and its two cells mean different things from the
+embeddings'. It was ALWAYS stored as floats and standardised, so its `fixed` cell
+is the real pipeline number (0.8890 in the harvest, the best cell in the study)
+and its `retired` cell is counterfactual -- what the defect would have done to it
+had it been stored the way the embeddings were.
+
+Distance is also reported directly, because the kernel's collapse is a distance
+phenomenon and a number that needs no model fitting is worth having beside one
+that does: how strongly the distance between two molecules tracks the difference
+in their labels. If the storage destroys comparability, that correlation should
+fall towards zero whatever the model does with it afterwards.
 
 The molecule count is far below the cluster's 10,000, so the absolute numbers are
 NOT comparable to the harvest. The paired difference within a row is the result.
@@ -198,6 +207,23 @@ def standardise(x_train, x_test):
     return f(x_train), f(x_test)
 
 
+def distance_signal(x, y, rng, n_pairs=20000):
+    """How strongly does the distance between two molecules track the gap in their
+    labels? Spearman, on random pairs. No model, no fitting -- if the storage has
+    destroyed comparability between molecules this falls towards zero on its own.
+    """
+    from scipy.stats import spearmanr
+    n = len(x)
+    i = rng.integers(0, n, n_pairs)
+    j = rng.integers(0, n, n_pairs)
+    keep = i != j
+    i, j = i[keep], j[keep]
+    d_feat = np.linalg.norm(x[i] - x[j], axis=1)
+    d_label = np.abs(y[i] - y[j])
+    rho = spearmanr(d_feat, d_label).statistic
+    return rho, float(np.median(d_feat))
+
+
 def fit_gp(x_train, y_train, x_test, kernel_name, iters=150):
     """The pipeline's Gaussian process class, likelihood noise and kernels.
 
@@ -235,6 +261,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--n-molecules', type=int, default=2000)
     ap.add_argument('--replicates', type=int, default=3)
+    ap.add_argument('--iters', type=int, default=100,
+                    help='Gradient steps on the marginal likelihood. Identical for both '
+                         'storage schemes, which is what makes the pair comparable.')
     ap.add_argument('--pool', type=int, default=3000,
                     help='Molecules embedded once and cached; replicates subsample it.')
     ap.add_argument('--reps', nargs='*',
@@ -286,16 +315,23 @@ def main():
                                             raw[test].astype(np.float64))
 
             for storage, (x_tr, x_te) in variants.items():
+                rho, med_d = distance_signal(x_tr, y[train],
+                                             np.random.default_rng(seed))
+                print(f"  {storage:8s} distance-vs-label rho = {rho:+.4f}, "
+                      f"median distance {med_d:.4g}")
                 for kernel in args.kernels:
                     t0 = time.time()
                     try:
-                        pred = fit_gp(x_tr, y[train], x_te, kernel)
+                        pred = fit_gp(x_tr, y[train], x_te, kernel, iters=args.iters)
                         r2 = r2_score(y[test], pred)
                     except Exception as e:
                         print(f"  {storage:8s} {kernel:9s} FAILED: {e}")
                         r2 = np.nan
                     rows.append(dict(rep=rep, replicate=replicate, storage=storage,
-                                     kernel=kernel, r2=r2, n=args.n_molecules,
+                                     kernel=kernel, r2=r2,
+                                     distance_label_rho=round(rho, 4),
+                                     median_distance=round(med_d, 4),
+                                     n=args.n_molecules,
                                      n_train=len(train), n_test=len(test),
                                      seconds=round(time.time() - t0, 1)))
                     print(f"  {storage:8s} {kernel:9s} R2 = {r2:+.4f}  ({rows[-1]['seconds']}s)")

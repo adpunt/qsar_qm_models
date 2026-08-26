@@ -255,8 +255,15 @@ def parse_arguments():
     parser.add_argument("-r", "--molecular_representations", nargs='*', help="Molecular representation as a list of strings", required=True)
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed (default is 42)")
     parser.add_argument("-n", "--sample-size", type=int, default=10000, help="Sample size per iteration (default is 10000)")
-    parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
-    parser.add_argument("--start-iteration", type=int, default=0, help="Starting iteration index (for splitting bootstrapping across parallel jobs)")
+    # NOT bootstrapping. Each repetition refits the whole model on a freshly
+    # seeded split; nothing is resampled with replacement. The old name is kept
+    # as an alias so the existing job arrays keep working.
+    parser.add_argument("-b", "--repetitions", "--bootstrapping", dest="repetitions",
+                        type=int, default=1,
+                        help="Independent repetitions per cell, each with its own seed "
+                             "(default 1, i.e. a single fit). The spread across "
+                             "repetitions is the run-to-run variance term in the ANOVA.")
+    parser.add_argument("--start-iteration", type=int, default=0, help="Starting repetition index (for splitting repetitions across parallel jobs)")
     parser.add_argument("--noise-level", nargs='*', default=[0.0],
                         help="Noise level(s) to run. For every noise type except censoring this is the "
                              "dose DELIVERED, read according to --dose-units. For censoring it is the "
@@ -1189,7 +1196,29 @@ def load_custom_model(model_path):
     model.eval()
     return model
 
+# Every representation this reader knows how to step over. The record is a
+# packed byte stream with no delimiters, so a representation the WRITER emits
+# and the reader does not skip shifts the offset of everything after it in that
+# record — silently, and for every molecule. `morgan` was exactly that case: the
+# Rust writer emitted 256 bytes for it and there was never a reader. It was
+# DELETED from the Rust side on 2026-08-26 (the author does not trust it), so the
+# guard below is now what stops the next one rather than that one
+# (RERUN_PLAN.md §2.7, §5.6).
+PARSEABLE_REPS = {
+    "randomized_smiles", "sns", "pdv", "continuous_pdv", "mol2vec",
+    "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
+}
+
+
 def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, s, logging):
+    unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
+    if unreadable:
+        raise RuntimeError(
+            f"no reader for representation(s) {sorted(unreadable)}. The Rust writer may still "
+            f"emit bytes for them, and this reader would then decode every field after them "
+            f"from the wrong offset. Add a reader or drop them from -r."
+        )
+
     x_data = []
     y_data = []
     y_data_original = []
@@ -2154,7 +2183,7 @@ def main():
         s = float(s)
         print(f"Noise level: {s} ({args.noise_targeting} / {args.noise_shape}, units: {args.dose_units})")
 
-        for iteration in range(args.start_iteration, args.start_iteration + args.bootstrapping):
+        for iteration in range(args.start_iteration, args.start_iteration + args.repetitions):
             # Set seeds
             iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
             random.seed(iteration_seed)
