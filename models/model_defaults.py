@@ -155,6 +155,27 @@ GP_DEFAULTS = {
     # gpytorch ExactGP. Recorded in the results as gp_fit_method, never silent.
     'fallback_adam_lr': 0.1,
     'fallback_adam_iters': 100,
+    # Fit the Gaussian process on ONE thread, and only the Gaussian process.
+    #
+    # The two gradient-boosting libraries each load their own copy of the
+    # threading machinery and the neural-network library loads a third. Once all
+    # three are in one process -- which is every job, since both pipelines import
+    # all of them at module level -- a threaded matrix operation inside the
+    # Gaussian process makes the copies collide and the operating system kills
+    # the process outright. No Python error, no traceback, nothing in the log:
+    # the task simply stops, which is indistinguishable from a task that
+    # finished quietly. Measured on this machine: it crashes both with no thread
+    # count set (how the QM9 jobs run) and with both set to 4 (how the
+    # experimental jobs run).
+    #
+    # Limiting threads for the WHOLE job also cures it, but taxes every tree fit
+    # across the entire grid. This limits only the Gaussian-process fit and puts
+    # the setting back afterwards, so nothing else pays.
+    #
+    # Set False only if the environment has been rebuilt so one threading
+    # runtime is present -- install xgboost and lightgbm from the same channel
+    # as pytorch. Confirm with scripts/server_audit.sh before turning it off.
+    'single_thread_fit': True,
     # Start the RBF lengthscale at the median distance between training
     # molecules instead of gpytorch's default of ~0.69.
     #
@@ -373,6 +394,33 @@ UNCERTAINTY_DEFAULTS = {
 # ---------------------------------------------------------------------------
 # Provenance
 # ---------------------------------------------------------------------------
+
+def gp_fit_threads():
+    """Context manager limiting the thread count for a Gaussian-process fit.
+
+    torch is imported lazily so this module stays loadable in an interpreter
+    that has none of the model packages -- the parity audit relies on that.
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def _ctx():
+        if not GP_DEFAULTS.get('single_thread_fit', True):
+            yield
+            return
+        try:
+            import torch
+        except Exception:
+            yield
+            return
+        previous = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            yield
+        finally:
+            torch.set_num_threads(previous)
+    return _ctx()
+
 
 def spec_dict():
     """Everything above, as one plain dictionary."""

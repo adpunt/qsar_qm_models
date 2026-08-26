@@ -17,8 +17,20 @@
 # then send back ~/server_audit_report.txt. Every open server-side item is
 # answered by that one file.
 #
-# It is safe to run on a login node. If your site objects to a five-minute
-# login-node job, submit it instead:
+# IT SOURCES setup.sh, because that is what every job script does. Auditing a
+# bare `conda activate` instead would test an environment nobody runs in -- and
+# that is precisely how jobs 12822693 and 12822694 died: activation failed
+# silently, the job ran in the system Anaconda, found no gpytorch, and wrote
+# nothing. So setup.sh is NOT read-only here: it can create the conda
+# environment, conda-install libstdcxx-ng and pip-install several packages.
+# Where jobs have already run these are satisfied and it is quick.
+#
+#   bash scripts/server_audit.sh --no-setup
+#
+# skips it and audits a bare activation instead: faster, changes nothing, but
+# NOT what the jobs get. Use it only for a quick look.
+#
+# If your site objects to a five-minute login-node job, submit it instead:
 #     sbatch --account=stat-cadd --partition=short --time=00:20:00 \
 #            --output=$HOME/server_audit_%j.out scripts/server_audit.sh
 #
@@ -121,49 +133,106 @@ section "2. THE INTERPRETERS   (runbook 1b)"
 # the interpreter was missing gpytorch. There are two interpreters here and they
 # are not the same one.
 # -----------------------------------------------------------------------------
-JOB_PY=""
-if [ -n "${AUDIT_PYTHON:-}" ]; then
-  JOB_PY="$AUDIT_PYTHON"
-elif [ -x "/data/stat-cadd/scat9264/bin/micromamba" ]; then
-  export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
-  eval "$("$MAMBA_EXE" shell hook --shell bash)" 2>/dev/null
-  if micromamba activate env_test 2>/dev/null; then
-    JOB_PY="$(command -v python)"
-    export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
-  fi
+# EVERY CHECK RUNS THROUGH `. setup.sh`, because that is what the job scripts
+# do. Testing a bare `conda activate` instead would audit an environment nobody
+# runs in -- which is the exact class of mistake that produced the two dead
+# jobs, and it is a mistake this script made until 2026-08-26.
+#
+# setup.sh is NOT read-only. It will create the conda environment if missing,
+# conda-install libstdcxx-ng, and pip-install several packages. On a machine
+# where jobs have already run those are satisfied and it is quick, but be aware
+# this step can reach the network. Pass --no-setup to skip it and audit a bare
+# activation instead; that is faster and changes nothing, but it is NOT what the
+# jobs get.
+#
+# It is sourced in a CHILD shell. setup.sh calls `exit 1` when activation fails,
+# and a sourced exit would kill this audit part-way through with no report.
+USE_SETUP=1
+[ "${1:-}" = "--no-setup" ] && USE_SETUP=0
+
+# The shell preamble that puts a child into the job environment. Resolution order
+# mirrors setup.sh's own (micromamba, then mamba, then conda by `command -v`) --
+# NOT a hard-coded micromamba path, which is what this script wrongly used and
+# which does not exist on this cluster at all.
+if [ "$USE_SETUP" = "1" ]; then
+  ENV_PREAMBLE="cd '$QSAR_ROOT' && . setup.sh >/dev/null 2>&1 || true"
+else
+  ENV_PREAMBLE='
+    if command -v micromamba >/dev/null 2>&1; then eval "$(micromamba shell hook --shell bash)"; micromamba activate env_test
+    elif command -v mamba >/dev/null 2>&1; then . "$(mamba info --base)/etc/profile.d/conda.sh"; conda activate env_test
+    elif command -v conda >/dev/null 2>&1; then . "$(conda info --base)/etc/profile.d/conda.sh"; conda activate env_test
+    fi
+    export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"'
 fi
+[ -n "${AUDIT_PYTHON:-}" ] && ENV_PREAMBLE="true"
+
+# job_exec <args...>  -- run python <args> in the job environment, PRESERVING its
+# exit code. That matters: a segfault shows up as 139 and as nothing else.
+job_exec() {
+  local py="${AUDIT_PYTHON:-python}"
+  bash -c "$ENV_PREAMBLE
+exec \"\$0\" \"\$@\"" "$py" "$@"
+}
+
+# run_job_env <<'PY' ... PY   -- run stdin as python, in the job environment.
+run_job_env() { local c; c="$(cat)"; printf '%s' "$c" | job_exec - 2>&1; }
+
+# Which interpreter does that actually resolve to?
+JOB_PY="$(printf 'import sys;print(sys.executable)' | run_job_env | tail -1)"
 KIRBY_PY="/data/stat-cadd/scat9264/py311-kirby/bin/python"
 
 say ""
-say "  (a) the environment the job scripts activate : ${JOB_PY:-COULD NOT ACTIVATE env_test}"
+say "  setup.sh sourced for every check below: $([ "$USE_SETUP" = 1 ] && echo YES || echo 'NO (--no-setup)')"
+say "  (a) the environment the job scripts activate : ${JOB_PY:-COULD NOT RESOLVE}"
 say "  (b) the one the two dead jobs actually used  : $([ -x "$KIRBY_PY" ] && echo "$KIRBY_PY" || echo 'ABSENT')"
+case "$JOB_PY" in
+  /apps/system/*)
+    say ""
+    say "  🔴 THAT IS THE SYSTEM PYTHON, NOT THE PROJECT ENVIRONMENT."
+    say "     Activation silently failed. This is what killed jobs 12822693 and"
+    say "     12822694: no gpytorch, no quantile_forest, no ngboost, an empty"
+    say "     roster, and a job that exits having written nothing."
+    ;;
+esac
 
-PYTHONS=()
-[ -n "$JOB_PY" ] && PYTHONS+=("$JOB_PY")
-[ -x "$KIRBY_PY" ] && PYTHONS+=("$KIRBY_PY")
-if [ ${#PYTHONS[@]} -eq 0 ]; then
+# The job environment is checked by running python through run_job_env; the
+# second interpreter is checked by its absolute path.
+RUNNERS=("job")
+[ -x "$KIRBY_PY" ] && RUNNERS+=("kirby")
+if [ -z "$JOB_PY" ] && [ ! -x "$KIRBY_PY" ]; then
   say ""
   say "  NO USABLE INTERPRETER FOUND. Everything below is skipped."
-  say "  Fix the environment first: cd $QSAR_ROOT && . setup.sh"
+  say "  Try: cd $QSAR_ROOT && . setup.sh   and read what it prints."
   say ""
   say "Report written to $REPORT"
   exit 1
 fi
+
+# run_py <runner> <<'PY' ... PY
+run_py() {
+  local who="$1"; local code; code="$(cat)"
+  if [ "$who" = "job" ]; then printf '%s' "$code" | run_job_env
+  else printf '%s' "$code" | "$KIRBY_PY" - 2>&1; fi
+}
 
 # -----------------------------------------------------------------------------
 # Everything from here runs under EVERY interpreter found, and the answers are
 # compared. A check that passes in one and fails in the other is the failure
 # mode that produced the two dead jobs.
 # -----------------------------------------------------------------------------
-for PY in "${PYTHONS[@]}"; do
+for WHO in "${RUNNERS[@]}"; do
 
-section "INTERPRETER: $PY"
-say "  python $("$PY" -c 'import sys;print(sys.version.split()[0])' 2>&1 | head -1)"
+if [ "$WHO" = "job" ]; then
+  section "INTERPRETER: the job environment$([ "$USE_SETUP" = 1 ] && echo ' (via . setup.sh)')"
+else
+  section "INTERPRETER: $KIRBY_PY"
+fi
+say "  python $(printf 'import sys;print(sys.version.split()[0])' | run_py "$WHO" | tail -1)"
 
 # --- 3. can every model be constructed -------------------------------------
 say ""
 say "  --- 3. can every model in the roster be CONSTRUCTED (not just imported)?"
-"$PY" - <<'PY' 2>&1 | tee -a "$REPORT"
+run_py "$WHO" <<'PY' | tee -a "$REPORT"
 import importlib
 need = ['sklearn', 'xgboost', 'lightgbm', 'ngboost', 'quantile_forest',
         'gpytorch', 'gauche', 'botorch', 'torch', 'torchbnn', 'torchhk',
@@ -184,7 +253,7 @@ PY
 # --- 4. quantile forest ----------------------------------------------------
 say ""
 say "  --- 4. does the quantile forest FIT? (it imports fine and fails on contact)"
-"$PY" - <<'PY' 2>&1 | tee -a "$REPORT"
+run_py "$WHO" <<'PY' | tee -a "$REPORT"
 try:
     import numpy as np
     from quantile_forest import RandomForestQuantileRegressor
@@ -228,24 +297,46 @@ for _ in range(20):
 print("ok")
 PY
 )
-"$PY" -c "$GPCODE" >/dev/null 2>&1
-GPRC=$?
-if [ $GPRC -eq 0 ]; then
-  say "      OK   the Gaussian process fits with the boosting libraries loaded"
-  say "           (OMP_NUM_THREADS=${OMP_NUM_THREADS:-unset}, MKL_NUM_THREADS=${MKL_NUM_THREADS:-unset})"
-else
-  if [ $GPRC -eq 139 ] || [ $GPRC -eq 134 ]; then WHAT="SEGFAULT (exit $GPRC)"; else WHAT="exit $GPRC"; fi
-  say "      FAIL $WHAT"
-  say "           >>> LAUNCH BLOCKER: every Gaussian-process task dies with no traceback."
-  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 "$PY" -c "$GPCODE" >/dev/null 2>&1
+# Test the thread settings the JOBS actually run under, by name, rather than
+# whatever happens to be in the shell running this audit. The two halves of the
+# study differ here: the QM9 jobs source setup.sh, which sets no thread count at
+# all, while the experimental module pins both to 4 at import. Testing only the
+# ambient setting is how this same check reported OK here and SEGFAULT three
+# lines later in the parity audit -- same question, opposite answers, because
+# they inherited different environments.
+gp_probe() {   # gp_probe "<label>" <env args...>
+  # NOTE: use `-u VAR` to UNSET, never `VAR=` -- setting a thread count to the
+  # empty string is not the same as leaving it unset, and some numerical
+  # libraries fail outright on an empty value. That produced a spurious "exit 1"
+  # in this very check, which would have reported a fault the jobs do not have.
+  local label="$1"; shift
+  if [ "$WHO" = "job" ]; then env "$@" bash -c "$ENV_PREAMBLE
+exec python -c \"\$0\"" "$GPCODE" >/dev/null 2>&1
+  else env "$@" "$KIRBY_PY" -c "$GPCODE" >/dev/null 2>&1; fi
+  local rc=$?
+  if [ $rc -eq 0 ]; then say "      OK   $label"
+  elif [ $rc -eq 139 ] || [ $rc -eq 134 ]; then say "      FAIL $label -- SEGFAULT (exit $rc)"
+  else say "      FAIL $label -- exit $rc"; fi
+  return $rc
+}
+
+gp_probe "as the QM9 jobs run it (no thread count set)" -u OMP_NUM_THREADS -u MKL_NUM_THREADS
+QM9_RC=$?
+gp_probe "as the experimental jobs run it (both pinned to 4)" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
+EXP_RC=$?
+
+if [ $QM9_RC -ne 0 ] || [ $EXP_RC -ne 0 ]; then
+  say "           >>> LAUNCH BLOCKER: those Gaussian-process tasks die with NO traceback,"
+  say "               so in a job array they look like tasks that simply stopped."
+  gp_probe "with both pinned to 1" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
   if [ $? -eq 0 ]; then
-    say "           >>> CURED by OMP_NUM_THREADS=1 MKL_NUM_THREADS=1"
-    say "               (a stop-gap: it costs every tree fit its parallelism. The real fix is"
-    say "                to install xgboost and lightgbm from the same channel as pytorch, so"
-    say "                only ONE threading runtime is loaded.)"
+    say "           >>> CURED by pinning both to 1. That is a stop-gap: it costs every"
+    say "               tree fit its parallelism across the whole grid. The real fix is to"
+    say "               install xgboost and lightgbm from the same channel as pytorch so"
+    say "               only ONE threading runtime is loaded."
   else
-    say "           >>> NOT cured by pinning threads. The environment must be rebuilt so that"
-    say "               only one threading runtime is present."
+    say "           >>> NOT cured by pinning threads. The environment has to be rebuilt"
+    say "               so that only one threading runtime is present."
   fi
 fi
 
@@ -253,7 +344,11 @@ fi
 say ""
 say "  --- 6. do the two pipelines build the SAME models?"
 if [ -f "$QSAR_ROOT/scripts/audit_pipeline_parity.py" ]; then
-  "$PY" "$QSAR_ROOT/scripts/audit_pipeline_parity.py" --strict >>"$REPORT" 2>&1
+  if [ "$WHO" = "job" ]; then
+    job_exec "$QSAR_ROOT/scripts/audit_pipeline_parity.py" --strict >>"$REPORT" 2>&1
+  else
+    "$KIRBY_PY" "$QSAR_ROOT/scripts/audit_pipeline_parity.py" --strict >>"$REPORT" 2>&1
+  fi
   RC=$?
   say "      audit exit code: $RC   (0 = the two pipelines agree and this environment can build every model)"
 else

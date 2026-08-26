@@ -17,6 +17,7 @@ from torch_geometric.nn.inits import glorot, zeros
 import gpytorch
 from typing import Union
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GroupKFold
 from quantile_forest import RandomForestQuantileRegressor
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
@@ -64,8 +65,8 @@ import sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from model_defaults import (
     SPEC_VERSION, BAYESIAN_DEFAULTS, GP_DEFAULTS, NEURAL_DEFAULTS,
-    SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, provenance_columns, sklearn_params,
-    spec_hash,
+    SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, gp_fit_threads, provenance_columns,
+    sklearn_params, spec_hash,
 )
 
 # TODO: reorder imports
@@ -1349,7 +1350,225 @@ def apply_bayesian_transformation_full_variational(model):
     return model
 
 
-def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None):
+# =============================================================================
+# OUT-OF-FOLD SCORING OF THE TRAINING MOLECULES
+# =============================================================================
+#
+# Corruption enters the TRAINING split. Until 2026-08-26 QM9 saved per-molecule
+# uncertainty for test molecules only and `predict(x_train` appeared nowhere in
+# this file, so no training molecule was ever predicted for and the question
+# "does predicted uncertainty find the corrupted labels?" had no data behind it
+# at all (RERUN_PLAN.md §2.6, §3.1).
+#
+# Scoring a training molecule with the model that fitted it does not answer the
+# question either: it measures memorisation. A Gaussian process has zero
+# posterior variance at its own training inputs and a forest has fitted those
+# exact rows. Every training molecule therefore gets its prediction and its
+# uncertainty from a model that never saw ITS label.
+#
+# ONE implementation, shared by every model family, mirroring `_oof_predict` in
+# /Users/apunt/repos/KIRBy/tests/alternative_data_noise_robustness.py so the two
+# producers cannot drift.
+
+
+def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label=''):
+    """Out-of-fold predictions and uncertainties over the molecules a model fits.
+
+    Splits the fit rows into `n_folds` parts, fits on the rest and scores the
+    held-out part, rotating.
+
+    The noise is injected ONCE, by the injector, before any of this, so a molecule
+    carries the same corruption in whichever fold it lands.
+
+    `groups` are the Murcko-scaffold group ids of the fit rows. When supplied the
+    inner split is scaffold-grouped, matching the outer split: without it the fit
+    set contains close analogues of every held-out molecule, so out-of-fold
+    uncertainties come from an interpolation regime while the test set is an
+    extrapolation regime, and the two are not on the same scale.
+
+    `fit_predict(X_fit, y_fit, X_score) -> (mean, std_or_None)`.
+
+    Returns (oof_mean, oof_unc, n_folds_ok). The caller MUST check n_folds_ok: a
+    silently truncated out-of-fold pass looks exactly like a complete one in the
+    output file.
+    """
+    n = len(y_noisy)
+    oof_mean = np.full(n, np.nan)
+    oof_unc = np.full(n, np.nan)
+
+    tag = f"[oof{(' ' + label) if label else ''}]"
+
+    n_groups = len(np.unique(groups)) if groups is not None else 0
+    if groups is not None and n_groups >= n_folds:
+        print(f"      {tag} scaffold-grouped inner split: {n_folds} folds over "
+              f"{n_groups} scaffold groups, {n} molecules", flush=True)
+        splitter = GroupKFold(n_splits=n_folds)
+        folds = [(tr, te) for tr, te in splitter.split(X, y_noisy, groups)]
+    else:
+        # Both fallback branches say so. A fallback nobody is told about is how a
+        # grouped inner split silently becomes a random one.
+        if groups is None:
+            print(f"      {tag} FALLBACK no scaffold groups were supplied — using a "
+                  f"deterministic random split of {n} molecules into {n_folds} folds. "
+                  f"Out-of-fold uncertainty is then measured in an interpolation "
+                  f"regime and is not on the same footing as the test set.",
+                  flush=True)
+        else:
+            print(f"      {tag} FALLBACK only {n_groups} scaffold groups for {n_folds} "
+                  f"folds — using a deterministic random split instead.", flush=True)
+        order = np.random.RandomState(seed).permutation(n)
+        parts = np.array_split(order, n_folds)
+        folds = [(np.setdiff1d(order, held), held) for held in parts]
+
+    n_ok = 0
+    for keep, held in folds:
+        try:
+            m, u = fit_predict(X[keep], y_noisy[keep], X[held])
+        except Exception as e:
+            print(f"      {tag} fold failed: {type(e).__name__}: {e}", flush=True)
+            continue
+        oof_mean[held] = np.asarray(m, dtype=float).ravel()
+        if u is not None:
+            oof_unc[held] = np.asarray(u, dtype=float).ravel()
+        n_ok += 1
+    if n_ok < len(folds):
+        print(f"      {tag} WARNING {n_ok}/{len(folds)} inner folds succeeded",
+              flush=True)
+    return oof_mean, oof_unc, n_ok
+
+
+def _fill_non_finite(values):
+    """Replace non-finite entries with the mean of the finite ones.
+
+    A failed inner fold leaves NaN. The NaN stays in what is WRITTEN, so a reader
+    can see which molecules were not scored; this fill exists only so the shape
+    recomputed from the prediction is defined everywhere. Same policy as KIRBy.
+    """
+    v = np.asarray(values, dtype=float)
+    finite = np.isfinite(v)
+    fill = float(v[finite].mean()) if finite.any() else 0.0
+    return np.where(finite, v, fill)
+
+
+def score_training_molecules_out_of_fold(
+        fit_predict, x_fit, y_fit, train_noise, args, s, rep, iteration,
+        iteration_seed, file_no, model_name,
+        train_slice=slice(None), val_slice=slice(None),
+        y_pred_std_calibrated=None, temperature=None,
+        epistemic_from=None, restore_torch_rng=False):
+    """Score the molecules a model fitted, out of fold, and write their rows.
+
+    `train_slice` / `val_slice` say which provenance rows `x_fit` is made of, in
+    `vstack((x_train, x_val))` order. Seven model families merge validation into
+    training before fitting (RERUN_PLAN.md §2.5) and validation now carries its own
+    independently drawn noise, so those rows are corrupted training rows and belong
+    here on the same footing; a family that holds part of validation back for
+    calibration passes the slice it actually fitted.
+
+    UNITS. Predictions and uncertainties are written in the model's own
+    (standardised) units, exactly as on a test row, so no column changes meaning
+    between splits. `injected_noise`, `noise_scale`, `noise_pattern` and
+    `noise_pattern_pred` are written in RAW label units, bit-identical to the
+    injector's provenance file. `y_true_original` is the raw clean label and
+    `y_true_noisy` is the standardised noisy label -- the same two meanings those
+    columns already carry on a test row.
+
+    Returns the number of inner folds that succeeded, or None when nothing was
+    written.
+    """
+    if train_noise is None:
+        return None
+    n_folds = int(getattr(args, 'oof_folds', 0) or 0)
+    if n_folds <= 1:
+        return None
+    if not getattr(args, 'uncertainty', False):
+        return None
+
+    rows = train_noise.rows(train_slice, val_slice)
+    n = len(y_fit)
+    if len(rows['epsilon_raw']) != n:
+        raise RuntimeError(
+            f"out-of-fold scoring for {model_name}: the model fits {n} rows but the "
+            f"recorded noise covers {len(rows['epsilon_raw'])}. The two must be the "
+            f"same molecules in the same order — anything else attributes one "
+            f"molecule's noise to another, which is the original QM9 defect.")
+
+    groups = rows['group']
+    if np.any(groups < 0):
+        # -1 is 'this molecule was not in the scaffold group map'. Refuse rather
+        # than group every one of them together under the same id.
+        print(f"      [oof {model_name}] {int(np.sum(groups < 0))} of {n} molecules "
+              f"are missing from the scaffold group map; falling back to an "
+              f"ungrouped split.", flush=True)
+        groups = None
+
+    # Neural training consumes the GLOBAL torch generator (weight initialisation
+    # and a shuffled DataLoader). Without this snapshot the extra out-of-fold fits
+    # would advance the stream, so the MAIN model at every later noise level would
+    # be initialised differently and this job's R2 would silently disagree with a
+    # run made without --oof-folds. KIRBy does the same thing.
+    if restore_torch_rng:
+        _tstate = torch.get_rng_state()
+        _cstate = (torch.cuda.get_rng_state_all()
+                   if torch.cuda.is_available() else None)
+    try:
+        oof_mean, oof_unc, n_ok = oof_predict(
+            fit_predict, np.asarray(x_fit), np.asarray(y_fit), n_folds,
+            groups=groups, seed=iteration_seed, label=model_name)
+    finally:
+        if restore_torch_rng:
+            torch.set_rng_state(_tstate)
+            if _cstate is not None:
+                torch.cuda.set_rng_state_all(_cstate)
+
+    if n_ok == 0:
+        print(f"      [oof {model_name}] every inner fold failed — writing no "
+              f"train_oof rows rather than a block of blanks.", flush=True)
+        return 0
+    if not np.isfinite(oof_unc).any():
+        print(f"      [oof {model_name}] the inner fits produced no per-molecule "
+              f"uncertainty — writing no train_oof rows.", flush=True)
+        return n_ok
+
+    # The sham ceiling: the level-free shape recomputed from what the model
+    # PREDICTED rather than from the true label. Computed HERE, after the
+    # out-of-fold values exist. The experimental pipeline put the identical block
+    # ABOVE the block that fills them in, so its guard was false on every pass of
+    # every loop and the column came out empty on every training row it ever wrote.
+    pattern_pred = train_noise.pattern_pred_from_standardised(
+        _fill_non_finite(oof_mean), rows['noise_pattern_raw'])
+
+    save_uncertainty_values(
+        y_pred_mean=oof_mean,
+        y_pred_std=oof_unc,
+        y_true_original=rows['y_clean_raw'],
+        y_true_noisy=rows['y_written'],
+        filepath=args.filepath,
+        model_name=model_name,
+        rep=rep,
+        sigma_noise=s,
+        iteration=iteration,
+        file_no=file_no,
+        y_pred_std_calibrated=y_pred_std_calibrated,
+        temperature=temperature,
+        epistemic_uncertainty=epistemic_from,
+        aleatoric_uncertainty=None,
+        split='train_oof',
+        injected_noise=rows['epsilon_raw'],
+        canonical_smiles=rows['canonical_smiles'],
+        noise_scale=rows['noise_scale_raw'],
+        noise_pattern=rows['noise_pattern_raw'],
+        noise_pattern_pred=pattern_pred,
+        oof_folds_ok=n_ok,
+    )
+    scored = int(np.isfinite(oof_mean).sum())
+    print(f"      [oof {model_name}] wrote {n} train_oof rows "
+          f"({scored} scored, {n - scored} left NaN by a failed fold), "
+          f"{n_ok}/{n_folds} inner folds ok", flush=True)
+    return n_ok
+
+
+def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -1423,8 +1642,25 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                 y_pred_std_calibrated=y_pred_std_calibrated,
                 temperature=temperature,
                 epistemic_uncertainty=epistemic,
-                aleatoric_uncertainty=aleatoric
+                aleatoric_uncertainty=aleatoric,
+                split='test',
             )
+
+            # The TRAINING molecules, scored by forests that never saw their
+            # labels. `x_train`/`y_train` are already the merged train+validation
+            # rows this model actually fitted, in that order, which is exactly
+            # what `rows(slice(None), slice(None))` returns.
+            def _fp(x_fit, y_fit, x_score):
+                inner = RandomForestQuantileRegressor(
+                    random_state=iteration_seed, **params)
+                inner.fit(x_fit, y_fit)
+                iq16, iq50, iq84 = inner.predict(
+                    x_score, quantiles=[0.16, 0.5, 0.84]).T
+                return iq50, (iq84 - iq16) / 2
+
+            score_training_molecules_out_of_fold(
+                _fp, x_train, y_train, train_noise, args, s, rep, iteration,
+                iteration_seed, file_no, model_type)
     else:
         y_pred = model.predict(x_test)
 
@@ -1433,7 +1669,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     return metrics[3]
 
-def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -1475,7 +1711,7 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     return metrics[3]
 
-def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
+def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None, train_noise=None):
     from ngboost import NGBRegressor
     from ngboost.distns import Normal
     from ngboost.scores import MLE
@@ -1576,12 +1812,37 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
             epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric
+            aleatoric_uncertainty=aleatoric,
+            split='test',
         )
-    
+
+        # The TRAINING molecules. `x_val_train` is the training split plus the
+        # FIRST HALF of validation -- the second half is held back for temperature
+        # calibration and was never fitted -- so the recorded-noise rows are sliced
+        # the same way rather than assumed to be everything.
+        _val_used = slice(0, len(x_val) // 2)
+
+        def _fp(x_fit, y_fit, x_score):
+            inner = NGBRegressor(
+                Dist=_ngb_dist,
+                Score=_ngb_score,
+                natural_gradient=params['natural_gradient'],
+                n_estimators=params['n_estimators'],
+                learning_rate=params['learning_rate'],
+                verbose=False,
+                random_state=iteration_seed,
+            )
+            inner.fit(x_fit, y_fit)
+            dist = inner.pred_dist(x_score)
+            return dist.loc, dist.scale
+
+        score_training_molecules_out_of_fold(
+            _fp, x_val_train, y_val_train, train_noise, args, s, rep, iteration,
+            iteration_seed, file_no, 'ngboost', val_slice=_val_used)
+
     return metrics[3]
 
-def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -1634,7 +1895,7 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     return metrics[3]
 
 
-def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None):
+def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -1748,7 +2009,8 @@ def fit_gp_with_fallback(mll, model, likelihood, train_x, train_y):
     """
     init_rbf_lengthscale(model, train_x)
     try:
-        fit_gpytorch_model(mll)
+        with gp_fit_threads():
+            fit_gpytorch_model(mll)
         return 'botorch'
     except Exception as exc:
         print(f"[gp] botorch fitter refused this model "
@@ -1758,15 +2020,16 @@ def fit_gp_with_fallback(mll, model, likelihood, train_x, train_y):
         likelihood.train()
         opt = torch.optim.Adam(model.parameters(),
                                lr=GP_DEFAULTS['fallback_adam_lr'])
-        for _ in range(GP_DEFAULTS['fallback_adam_iters']):
-            opt.zero_grad()
-            loss = -mll(model(train_x), train_y)
-            loss.backward()
-            opt.step()
+        with gp_fit_threads():
+            for _ in range(GP_DEFAULTS['fallback_adam_iters']):
+                opt.zero_grad()
+                loss = -mll(model(train_x), train_y)
+                loss.backward()
+                opt.step()
         return 'adam_fallback'
 
 
-def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None):
+def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None, train_noise=None):
     params = {}
     params_source = 'default'
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
@@ -1897,8 +2160,40 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
             epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric
+            aleatoric_uncertainty=aleatoric,
+            split='test',
         )
+
+        # The TRAINING molecules. A GP has ZERO posterior variance at its own
+        # training inputs, so scoring them with the fitted model would report
+        # confidence that says nothing about the labels -- this family is the
+        # clearest case for why the out-of-fold pass exists at all.
+        _val_used = slice(0, len(x_val) // 2)
+
+        def _fp(x_fit, y_fit, x_score):
+            xt = torch.from_numpy(np.asarray(x_fit)).double()
+            yt = torch.from_numpy(np.asarray(y_fit)).double()
+            xs = torch.from_numpy(np.asarray(x_score)).double()
+            lik = gpytorch.likelihoods.GaussianLikelihood(
+                noise=params['likelihood_noise'])
+            inner = Gauche(xt, yt, lik, kernel_class)
+            if GP_DEFAULTS['apply_outputscale']:
+                inner.covar_module.outputscale = params['outputscale']
+            inner_mll = gpytorch.mlls.ExactMarginalLogLikelihood(lik, inner)
+            fit_gp_with_fallback(inner_mll, inner, lik, xt, yt)
+            inner.eval()
+            lik.eval()
+            with torch.no_grad():
+                preds = inner(xs)
+                return (preds.mean.numpy(),
+                        np.sqrt(np.clip(preds.variance.numpy(), 1e-12, None)))
+
+        # A GP fit runs through torch; snapshot the global generator so the main
+        # result is what it would have been without the out-of-fold pass.
+        score_training_molecules_out_of_fold(
+            _fp, x_train_full, y_train_full, train_noise, args, s, rep, iteration,
+            iteration_seed, file_no, model_name, val_slice=_val_used,
+            restore_torch_rng=True)
 
     return metrics[3]
 
@@ -2037,7 +2332,7 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
         )
 
 def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None, 
-                   domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
+                   domain_labels_train=None, domain_labels_val=None, domain_labels_test=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -2293,6 +2588,57 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     
     save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
+    def _build_dnn_for_fold(n_features, n_fit):
+        """The same network the main path builds, for one inner fold.
+
+        Mirrors STEP 3 and STEP 4 above. It is a separate function rather than a
+        refactor of the main path because the main path's construction order also
+        fixes the random stream the reported result was produced with, and moving
+        it is a change to that result.
+        """
+        from loss_functions import get_loss_function
+        if loss_name == 'heteroscedastic':
+            m = DNNRegressionModel(input_size=n_features,
+                                   hidden_size1=params['hidden_size1'],
+                                   hidden_size2=params['hidden_size2'])
+            m.fc3 = nn.Linear(params['hidden_size2'], 2)
+            m.activation = activation
+            m.to(device)
+            crit = get_loss_function(loss_name)
+        else:
+            m = DNNRegressionModel(input_size=n_features,
+                                   hidden_size1=params['hidden_size1'],
+                                   hidden_size2=params['hidden_size2'])
+            m.activation = activation
+            m.to(device)
+            crit = get_loss_function(loss_name, **loss_kwargs)
+
+        if args.bayesian_transformation == "full":
+            m = apply_bayesian_transformation(m)
+        elif args.bayesian_transformation == "last_layer":
+            m = apply_bayesian_transformation_last_layer(m)
+        elif args.bayesian_transformation == "variational":
+            m = apply_bayesian_transformation_last_layer_variational(m)
+            crit = VBLLLoss(m, n_data=n_fit)
+        elif args.bayesian_transformation == "full_variational":
+            m = apply_bayesian_transformation_full_variational(m)
+            crit = VBLLLoss(m, n_data=n_fit)
+        m.to(device)
+        return m, crit
+
+    def _train_dnn_for_fold(built, x_fit, y_fit, x_es, y_es):
+        m, crit = built
+        xt = torch.tensor(np.asarray(x_fit), dtype=torch.float32).to(device)
+        yt = torch.tensor(np.asarray(y_fit), dtype=torch.float32).view(-1, 1).to(device)
+        xe = torch.tensor(np.asarray(x_es), dtype=torch.float32).to(device)
+        ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
+        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=32, shuffle=True)
+        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=32, shuffle=False)
+        opt = torch.optim.Adam(m.parameters(), lr=0.001)
+        train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
+                 file_no, 'oof_inner', rep)
+        return m
+
     # *** UPDATED: Save uncertainty with decomposition ***
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
@@ -2309,14 +2655,45 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
             epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric
+            aleatoric_uncertainty=aleatoric,
+            split='test',
         )
+
+        # The TRAINING molecules. This family fits on the training split alone --
+        # validation is the early-stopping set, never a fit row -- so only the
+        # training provenance rows are asked for.
+        def _fp(x_fit, y_fit, x_score):
+            # The early-stopping split is carved from THIS fold's own fit rows.
+            # Reusing the outer validation set would early-stop against molecules
+            # sharing scaffolds with the rows being scored, so the out-of-fold
+            # uncertainty would not be on the same extrapolation footing as the
+            # test set.
+            nv = max(1, len(y_fit) // 5)
+            inner_model = _train_dnn_for_fold(
+                _build_dnn_for_fold(x_fit.shape[1], len(y_fit) - nv),
+                x_fit[nv:], y_fit[nv:], x_fit[:nv], y_fit[:nv])
+            inner_model.eval()
+            xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
+            draws = []
+            with torch.no_grad():
+                for _ in range(num_samples):
+                    out = inner_model(xs).cpu().numpy()
+                    if loss_name == 'heteroscedastic':
+                        out = out[:, 0:1]
+                    draws.append(out)
+            draws = np.stack(draws, axis=0)
+            return draws.mean(axis=0).flatten(), draws.std(axis=0).flatten()
+
+        score_training_molecules_out_of_fold(
+            _fp, x_train, y_train, train_noise, args, s, rep, iteration,
+            iteration_seed, file_no, full_model_name,
+            val_slice=None, restore_torch_rng=True)
 
     return metrics[3]
 
 def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val, 
                                args, s, rep, iteration, iteration_seed, file_no, 
-                               y_test_original):
+                               y_test_original, train_noise=None):
     """
     Standalone BNN-Last training that matches phase2_train.py exactly
     """
@@ -2430,7 +2807,7 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
     return metrics[3]
 
 def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
-                            domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
+                            domain_labels_train=None, domain_labels_val=None, domain_labels_test=None, train_noise=None):
     params = {}
     params_source = 'default'
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
@@ -2652,7 +3029,7 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     return metrics[3]
 
 def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial=None,
-                           domain_labels_train=None, domain_labels_val=None, domain_labels_test=None):
+                           domain_labels_train=None, domain_labels_val=None, domain_labels_test=None, train_noise=None):
     params = {}
     params_source = 'default'
 
@@ -2902,6 +3279,60 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     save_results(args.filepath, s, iteration, full_model_name, rep, args.sample_size, metrics, params_source, loss_name)
 
+    def _build_mlp_for_fold(n_features, n_fit):
+        """The same network the main path builds, for one inner fold. Mirrors the
+        model-setup and Bayesian-transformation blocks above."""
+        from loss_functions import get_loss_function
+        if model_type == "mlp":
+            m = MLPRegressor(input_size=n_features, hidden_size=params['hidden_size'],
+                             num_hidden_layers=params['num_hidden_layers'],
+                             dropout_rate=params['dropout_rate'])
+        elif model_type == "residual_mlp":
+            m = ResidualMLP(input_size=n_features, hidden_size=128, num_layers=3)
+        elif model_type == "factorization_mlp":
+            m = FactorizationMLP(input_size=n_features, hidden_size=128, factor_size=16)
+        elif model_type == "mtl":
+            m = MTLRegressionModel(input_size=n_features, hidden_size=128, num_tasks=1)
+
+        if loss_name == 'heteroscedastic':
+            if hasattr(m, 'fc_out'):
+                m.fc_out = nn.Linear(m.fc_out.in_features, 2)
+            elif hasattr(m, 'output_layer'):
+                m.output_layer = nn.Linear(m.output_layer.in_features, 2)
+        elif loss_name == 'evidential':
+            if hasattr(m, 'fc_out'):
+                m.fc_out = nn.Linear(m.fc_out.in_features, 4)
+            elif hasattr(m, 'output_layer'):
+                m.output_layer = nn.Linear(m.output_layer.in_features, 4)
+
+        if args.bayesian_transformation == "full":
+            m = apply_bayesian_transformation(m)
+        elif args.bayesian_transformation == "last_layer":
+            m = apply_bayesian_transformation_last_layer(m)
+        elif args.bayesian_transformation == "variational":
+            m = apply_bayesian_transformation_last_layer_variational(m)
+        elif args.bayesian_transformation == "full_variational":
+            m = apply_bayesian_transformation_full_variational(m)
+        m.to(device)
+
+        crit = get_loss_function(loss_name, **loss_kwargs)
+        if args.bayesian_transformation in ("variational", "full_variational"):
+            crit = VBLLLoss(m, n_data=n_fit)
+        return m, crit
+
+    def _train_mlp_for_fold(built, x_fit, y_fit, x_es, y_es):
+        m, crit = built
+        xt = torch.tensor(np.asarray(x_fit), dtype=torch.float32).to(device)
+        yt = torch.tensor(np.asarray(y_fit), dtype=torch.float32).view(-1, 1).to(device)
+        xe = torch.tensor(np.asarray(x_es), dtype=torch.float32).to(device)
+        ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
+        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=32, shuffle=True)
+        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=32, shuffle=False)
+        opt = torch.optim.Adam(m.parameters(), lr=params['lr'])
+        train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
+                 file_no, 'oof_inner', rep)
+        return m
+
     # STEP 3: Save uncertainty with calibration and decomposition
     if args.uncertainty and is_bayesian:
         save_uncertainty_values(
@@ -2918,12 +3349,38 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
             epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric
+            aleatoric_uncertainty=aleatoric,
+            split='test',
         )
+
+        # The TRAINING molecules. This family fits on the training split alone;
+        # validation is the early-stopping set and the calibration set, never a
+        # fit row.
+        def _fp(x_fit, y_fit, x_score):
+            nv = max(1, len(y_fit) // 5)
+            inner_model = _train_mlp_for_fold(
+                _build_mlp_for_fold(x_fit.shape[1], len(y_fit) - nv),
+                x_fit[nv:], y_fit[nv:], x_fit[:nv], y_fit[:nv])
+            inner_model.eval()
+            xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
+            draws = []
+            with torch.no_grad():
+                for _ in range(num_samples):
+                    out = inner_model(xs).cpu().numpy()
+                    if loss_name in ('heteroscedastic', 'evidential'):
+                        out = out[:, 0:1]
+                    draws.append(out)
+            draws = np.stack(draws, axis=0)
+            return draws.mean(axis=0).flatten(), draws.std(axis=0).flatten()
+
+        score_training_molecules_out_of_fold(
+            _fp, x_train, y_train, train_noise, args, s, rep, iteration,
+            iteration_seed, file_no, full_model_name,
+            val_slice=None, restore_torch_rng=True)
 
     return metrics[3]
 
-def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial=None):
+def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial=None, train_noise=None):
     if model_type not in ["rnn", "gru"] or rep not in ['smiles', 'randomized_smiles']:
         raise ValueError("Invalid model type or representation for RNN/GRU training")
 
@@ -3339,11 +3796,17 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     
     if args.uncertainty:
         total_unc = epistemic if epistemic is not None else np.zeros_like(predictions)
+        # The clean and the noisy label are the SAME array here, and always were:
+        # a graph run has one label column. Under the old writer that made the
+        # regressed-out "injected noise" exactly zero regardless of anything else.
+        # The regression is gone; this is a test-split call, so the recorded noise
+        # is not needed and the column is written as exactly 0.0.
         save_uncertainty_values(
             predictions, total_unc, test_targets, test_targets,
             args.filepath, model_name, 'graph', s, iteration, file_no,
             y_pred_std_calibrated=epistemic, temperature=temperature,
-            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric
+            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric,
+            split='test'
         )
     
     return metrics[3]
@@ -3540,11 +4003,14 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     save_results(args.filepath, s, iteration, 'graph_gp', 'graph', len(test_labels), metrics)
     
     if args.uncertainty:
+        # Same array twice, same reason as train_gnn above. Test split, no
+        # recorded noise needed, injected_noise written as exactly 0.0.
         save_uncertainty_values(
             predictions, total, test_labels, test_labels,
             args.filepath, 'graph_gp', 'graph', s, iteration, file_no,
             y_pred_std_calibrated=total, temperature=temperature,
-            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric
+            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric,
+            split='test'
         )
     
     return metrics[3]
@@ -3628,7 +4094,7 @@ def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3
     return GNNRegressor()
 
 
-def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None):
+def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None, train_noise=None):
     from torchcp.regression.predictor import SplitPredictor, ACIPredictor
     from torchcp.regression.score import ABS
     from torch.utils.data import TensorDataset, DataLoader
@@ -4334,7 +4800,7 @@ def train_meta_weight_net(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Train DNN with Meta-Weight-Net for sample reweighting.
     
@@ -4586,7 +5052,7 @@ def train_dividemix_dnn(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     DivideMix for regression with DNNs.
     Two networks co-teach each other, using GMM to separate clean/noisy samples.
@@ -4862,7 +5328,7 @@ def train_early_learning_regularization(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Early Learning Regularization: weight samples by how consistently 
     they had low loss in early training epochs.
@@ -5088,7 +5554,7 @@ def train_multistage_cleaning(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Multi-stage cleaning: iteratively remove high-loss + high-uncertainty samples.
     
@@ -5276,7 +5742,7 @@ def train_uncertainty_curriculum(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Uncertainty Curriculum: Start training on certain samples,
     gradually add uncertain ones.
@@ -5477,7 +5943,7 @@ def train_confident_learning(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Confident Learning (Northcupt et al. 2021) adapted for regression.
     
@@ -5731,7 +6197,7 @@ def train_small_loss_trick(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Small-Loss Trick (Han et al. 2018) with molecular distance filtering.
     
@@ -5979,7 +6445,7 @@ def train_mentornet(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     MentorNet (Jiang et al. 2018) adapted for molecular regression.
     
@@ -6279,7 +6745,7 @@ def train_contrast_to_divide(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Contrast-to-Divide (Yao et al. 2020) adapted for molecular regression.
     
@@ -6592,7 +7058,7 @@ def train_distance_based_selection(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Distance-Based Selection - pure molecular distance approach.
     
@@ -6864,7 +7330,7 @@ def train_heteroscedastic_gp(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """Heteroscedastic Gaussian Process with learned noise variance"""
     import gpytorch
     from gpytorch.models import ExactGP
@@ -7019,7 +7485,7 @@ def train_evidential_kernel(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """Evidential Kernel: GP predicting evidential parameters"""
     import gpytorch
     from gpytorch.models import ExactGP
@@ -7145,7 +7611,7 @@ def train_ntk_gnn(
     train_loader, test_loader, val_loader, args, s, iteration, file_no,
     y_test_original, trial,
     y_train_noisy=None, y_test_noisy=None, y_val_noisy=None
-):
+, train_noise=None):
     """Neural Tangent Kernel of GNN for molecular graphs"""
     import torch
     import torch.nn as nn
@@ -7350,7 +7816,7 @@ def train_conformal_heteroscedastic(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Conformal Prediction + Heteroscedastic Neural Network (Romano et al. 2019 + novel).
     
@@ -7607,7 +8073,7 @@ def train_mixup(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Mixup for Molecular Regression (Zhang et al. 2018).
     
@@ -7885,7 +8351,7 @@ def train_sam(
     x_train, y_train, x_test, y_test, x_val, y_val,
     args, s, rep, iteration, iteration_seed, file_no, y_test_original,
     trial=None
-):
+, train_noise=None):
     """
     Sharpness-Aware Minimization (Foret et al. 2021).
     

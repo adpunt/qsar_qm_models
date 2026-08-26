@@ -342,6 +342,63 @@ def audit_dumps(prefix):
     return problems
 
 
+def audit_experimental_alignment(n=300):
+    """Do the experimental datasets put row i's features with molecule i?
+
+    Shuffle the input molecules, recompute, and check the rows follow the
+    shuffle. This tests the RESULT, so it does not depend on anyone reading the
+    featuriser correctly -- which matters, because the equivalent QM9 code was
+    read and passed by an earlier check while 99% of its training rows were
+    carrying another molecule's fingerprint.
+    """
+    import importlib.util
+    import os
+    print('\n' + '=' * 78)
+    print('EXPERIMENTAL DATASETS — does row i belong to molecule i?')
+    print('=' * 78)
+    here = Path(os.environ.get('KIRBY_ROOT', REPO.parent / 'KIRBy'))
+    mod_path = here / 'tests' / 'alternative_data_noise_robustness.py'
+    if not mod_path.exists():
+        print(f'  experimental pipeline not found at {mod_path}; skipped')
+        return 0
+    cwd = Path.cwd()
+    try:
+        os.chdir(mod_path.parent)
+        spec = importlib.util.spec_from_file_location('_exp', mod_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        smiles, _ = mod.load_chembl_herg()
+        smiles = list(smiles[:n])
+    except Exception as exc:
+        print(f'  could not load the experimental data: {type(exc).__name__}: {exc}')
+        return 0
+    finally:
+        os.chdir(cwd)
+
+    rng = np.random.RandomState(0)
+    perm = rng.permutation(len(smiles))
+    reps = ['ECFP4', 'PDV', 'SNS']
+    try:
+        os.chdir(mod_path.parent)
+        A = mod.generate_representations(smiles, rep_filter=reps)
+        B = mod.generate_representations([smiles[i] for i in perm], rep_filter=reps)
+    finally:
+        os.chdir(cwd)
+
+    problems = 0
+    for r in reps:
+        a, b = np.asarray(A[r]), np.asarray(B[r])
+        tracking = np.isclose(a[perm], b, atol=1e-5, equal_nan=True).all(axis=1).mean()
+        print(f'  {r:8s} {str(a.shape):14s} rows tracking their molecule: {tracking:6.1%}')
+        if tracking < 0.999:
+            print('    ✗ DEFECT: rows and molecules are misaligned. Features do not')
+            print('              correspond to their labels, which destroys the signal.')
+            problems += 1
+    if not problems:
+        print('  all aligned')
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -349,8 +406,17 @@ def main():
                     help='prefix passed to process_and_train.py --dump-features')
     ap.add_argument('--references-only', action='store_true',
                     help='just show that the reference implementations are distinguishable')
+    ap.add_argument('--experimental-alignment', action='store_true',
+                    help='check that the experimental datasets put each row with '
+                         'its own molecule, by shuffling the input and seeing '
+                         'whether the rows follow')
     ap.add_argument('--strict', action='store_true')
     args = ap.parse_args()
+
+    if args.experimental_alignment:
+        n = audit_experimental_alignment()
+        print(f'\nSUMMARY: {n} problem(s)')
+        return 1 if (args.strict and n) else 0
 
     problems = audit_references()
     if not args.references_only:
