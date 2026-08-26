@@ -69,12 +69,11 @@ struct SmilesData {
     sns_buf: [u8; 128],
     pdv_buf: [u8; 25],
     continuous_pdv_buf: [u8; 800],
-    // The learned embeddings are 32-bit floats, four bytes a dimension: mol2vec
-    // 300 dims, chemberta 768, mhggnn 1024. They used to be one byte a dimension,
+    // The learned embeddings are 32-bit floats, four bytes a dimension:
+    // chemberta 768 dims, mhggnn 1024. They used to be one byte a dimension,
     // min-max rescaled per molecule, which destroyed comparability between
     // molecules (RERUN_PLAN.md 2.8c). These widths and the Python writer's must
     // move together or every record after the first is read at the wrong offset.
-    mol2vec_buf: [u8; 1200],
     chemberta_buf: [u8; 3072],
     mhggnn_buf: [u8; 4096],
     avalon_buf: [u8; 256],
@@ -1467,11 +1466,6 @@ fn read_smiles_data(
         reader.read_exact(&mut continuous_pdv_buf).ok()?;
     }
 
-    let mut mol2vec_buf = [0u8; 1200];
-    if molecular_representations.contains(&"mol2vec".to_string()) {
-        reader.read_exact(&mut mol2vec_buf).ok()?; 
-    }
-
     let mut chemberta_buf = [0u8; 3072];
     if molecular_representations.contains(&"chemberta".to_string()) {
         reader.read_exact(&mut chemberta_buf).ok()?;
@@ -1498,7 +1492,6 @@ fn read_smiles_data(
         sns_buf,
         pdv_buf,
         continuous_pdv_buf,
-        mol2vec_buf,
         chemberta_buf,
         mhggnn_buf,
         avalon_buf,
@@ -1731,15 +1724,6 @@ fn write_data(
                 writer.write_all(&continuous_pdv)?;
                 if log_writes {
                     println!("continuous_pdv: {:?}", continuous_pdv);
-                }
-            }
-
-            // mol2vec (1200 bytes, float32)
-            if config.molecular_representations.contains(&"mol2vec".to_string()) {
-                let mol2vec = smiles_data.mol2vec_buf;
-                writer.write_all(&mol2vec)?;
-                if log_writes {
-                    println!("mol2vec: {:?}", mol2vec);
                 }
             }
 

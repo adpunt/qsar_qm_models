@@ -1676,6 +1676,61 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     return metrics[3]
 
 
+def init_rbf_lengthscale(model, train_x):
+    """Start the RBF lengthscale at the median distance between training molecules.
+
+    gpytorch starts it at softplus(0), about 0.69. Measured 2026-08-26, typical
+    distances between molecules run from 17 on PDV to 1,100 on the learned
+    embeddings. At 0.69 every molecule looks infinitely far from every other, the
+    kernel matrix is the identity, the marginal likelihood is flat, and neither
+    botorch nor Adam has a gradient to follow. The fit returns a constant.
+
+    That is what produced R2 = -0.0158 for MHG-GNN and +0.0087 for mol2vec in
+    results/gp_kernel_harvest/qm9/, and it was read as the representations being
+    unusable. Started here instead, the SAME features reach 0.68 to 0.76.
+
+    Only the RBF kernel has a lengthscale. Tanimoto is a ratio and has none, so
+    this is a no-op there.
+    """
+    if not GP_DEFAULTS['init_lengthscale_from_data']:
+        return None
+
+    base = getattr(model.covar_module, 'base_kernel', None)
+    if base is None or not hasattr(base, 'lengthscale') or base.lengthscale is None:
+        return None
+
+    with torch.no_grad():
+        n = min(GP_DEFAULTS['lengthscale_probe_n'], len(train_x))
+        probe = train_x[torch.randperm(len(train_x))[:n]]
+        median = torch.cdist(probe, probe).flatten().median().item()
+
+    if not np.isfinite(median) or median <= 0:
+        print("[gp] median distance is not usable; leaving the lengthscale at its default")
+        return None
+
+    base.lengthscale = median
+    print(f"[gp] lengthscale started at the median distance between molecules: {median:.4g}")
+    return median
+
+
+def gp_fit_collapsed(y_pred, y_train):
+    """Did the fit give up and predict one constant?
+
+    A Gaussian process that cannot use its features returns the mean everywhere.
+    That still produces a number, and the number looks like a bad result rather
+    than a failed fit -- which is how the two learned embeddings were written off.
+    Never let it pass silently.
+    """
+    spread = float(np.std(y_pred))
+    threshold = GP_DEFAULTS['collapse_fraction'] * float(np.std(y_train))
+    collapsed = spread < threshold
+    if collapsed:
+        print(f"[gp] WARNING: the fit COLLAPSED -- predictions vary by {spread:.4g} "
+              f"against a training label spread of {float(np.std(y_train)):.4g}. "
+              f"This is a failed fit, not a poor representation.")
+    return collapsed, spread
+
+
 def fit_gp_with_fallback(mll, model, likelihood, train_x, train_y):
     """Fit a GP marginal likelihood, and say which optimiser did it.
 
@@ -1691,6 +1746,7 @@ def fit_gp_with_fallback(mll, model, likelihood, train_x, train_y):
 
     Returns 'botorch' or 'adam_fallback'.
     """
+    init_rbf_lengthscale(model, train_x)
     try:
         fit_gpytorch_model(mll)
         return 'botorch'
@@ -1818,9 +1874,12 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             aleatoric = None
 
     model_name = 'gauche_rbf' if params['kernel_name'] == 'RBF' else 'gauche'
+    # A fit that gave up and predicted one constant still produces a number, and
+    # that number reads as a bad representation rather than a failed fit. Record it.
+    collapsed, _ = gp_fit_collapsed(y_pred, y_train_full)
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size,
-                 metrics, gp_fit_method=gp_fit_method)
+                 metrics, gp_fit_method=gp_fit_method, gp_collapsed=int(collapsed))
 
     # *** UPDATED: Save with decomposition ***
     if args.uncertainty:

@@ -22,11 +22,12 @@ from rdkit import Chem
 
 RESULT_COLUMNS = ["sigma", "iteration", "model", "rep", "sample_size", "mae",
                   "mse", "rmse", "r2", "pearson_corr", "params_source",
-                  "loss_function", "spec_version", "spec_hash", "gp_fit_method"]
+                  "loss_function", "spec_version", "spec_hash", "gp_fit_method",
+                  "gp_collapsed"]
 
 
 def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default',
-                 loss_function='mse', gp_fit_method=''):
+                 loss_function='mse', gp_fit_method='', gp_collapsed=''):
     """
     Save results to a CSV file with loss function tracking.
 
@@ -67,7 +68,8 @@ def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='
             writer.writerow(RESULT_COLUMNS)
         writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1],
                          metrics[2], metrics[3], metrics[4], params_source,
-                         loss_function, spec_version, spec, gp_fit_method])
+                         loss_function, spec_version, spec, gp_fit_method,
+                         gp_collapsed])
 
 def calculate_regression_metrics(y_test, prediction, logging=False):
     mae = mean_absolute_error(y_test, prediction)
@@ -91,10 +93,14 @@ def calculate_regression_metrics(y_test, prediction, logging=False):
 # UNCERTAINTY DECOMPOSITION HELPERS
 # ============================================================================
 
+# STUB: aleatoric is hard-coded None below and total is set equal to the model part, so any
+# coverage number computed from that total silently omits observation noise. Rebuilding the
+# split is separate work, specified in RERUN_PLAN.md section 5.5; the correct heteroscedastic
+# version is decompose_uncertainty_sampling_heteroscedastic below (currently has no callers).
 def decompose_uncertainty_sampling(predictions_array, num_samples):
     """
     Decompose uncertainty from sampling-based methods (BNN, ensembles).
-    
+
     Args:
         predictions_array: numpy array of shape (num_samples, num_datapoints)
         num_samples: number of forward passes
@@ -229,33 +235,107 @@ def decompose_uncertainty_vbll(predictions_array, learned_noise_var):
 # SAVE UNCERTAINTY WITH DECOMPOSITION
 # ============================================================================
 
+UNCERTAINTY_COLUMNS = [
+    "model", "representation", "sigma", "iteration", "file_no", "sample_idx",
+    "y_pred_mean", "y_pred_std_uncalibrated", "y_true_original", "y_true_noisy",
+    "injected_noise", "y_pred_std_calibrated", "temperature",
+    "epistemic_uncertainty", "aleatoric_uncertainty",
+    # Added 2026-08-26 (Chat F, agent C). split/canonical_smiles/noise_scale/
+    # noise_pattern/noise_pattern_pred/oof_folds_ok mirror the KIRBy schema so one
+    # analysis module can read both producers.
+    "split", "canonical_smiles", "noise_scale", "noise_pattern",
+    "noise_pattern_pred", "oof_folds_ok",
+]
+
+VALID_SPLITS = ("test", "train_oof")
+
+
+def _per_row_values(value, n, name):
+    """Broadcast a scalar, or validate a per-molecule sequence, to length n.
+
+    Values are passed through WITHOUT dtype coercion so a float64 array reaches the
+    CSV bit-for-bit. None yields NaN for every row.
+    """
+    if value is None:
+        return [np.nan] * n
+    if np.isscalar(value) or isinstance(value, (str, bytes)):
+        return [value] * n
+    seq = np.asarray(value)
+    if seq.ndim == 0:
+        return [seq.item()] * n
+    if len(seq) != n:
+        raise ValueError(
+            f"save_uncertainty_values: '{name}' has length {len(seq)} but there are "
+            f"{n} molecules. A per-molecule column that does not line up with the "
+            f"predictions would be silently mis-attributed.")
+    return list(seq)
+
+
 def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy,
                            filepath, model_name, rep, sigma_noise, iteration, file_no,
                            y_pred_std_calibrated=None, temperature=None,
-                           epistemic_uncertainty=None, aleatoric_uncertainty=None):
+                           epistemic_uncertainty=None, aleatoric_uncertainty=None,
+                           split='test', injected_noise=None, canonical_smiles=None,
+                           noise_scale=None, noise_pattern=None,
+                           noise_pattern_pred=None, oof_folds_ok=None):
     """
-    Save uncertainty values with optional epistemic/aleatoric decomposition.
+    Save per-molecule uncertainty values with optional epistemic/aleatoric decomposition.
 
-    injected_noise is computed as the residual from the normalization transform,
-    recovering the actual noise in normalized space.
+    injected_noise is RECORDED, never reconstructed. Until 2026-08-26 this function
+    regressed the noisy label on the clean one and kept the residuals; held-out labels
+    are no longer noised, so those residuals were identically zero and the column was
+    dead. The regression is gone.
+
+    Args:
+        split: 'test' or 'train_oof'. A 'train_oof' row is scored by a model fitted
+            without that molecule, so y_true_original is the CLEAN label and the label
+            the model was trained on is y_true_original + injected_noise.
+        injected_noise: the value the injector RECORDED for each molecule, written
+            verbatim. When it is omitted, a test row gets exactly 0.0 and a train_oof
+            row raises -- a training row without its recorded noise cannot answer
+            anything about whether uncertainty finds the corrupted labels.
+        canonical_smiles: the molecule identifier. sample_idx is a row position and
+            cannot link a molecule across models or noise levels.
+        noise_scale: per-molecule amount of noise actually applied.
+        noise_pattern: the shape of the noise at a fixed reference level of 1.0,
+            identical at every noise level including zero. Subtracting the zero-level
+            correlation is what removes the label-magnitude confound.
+        noise_pattern_pred: the same shape recomputed from the model's own PREDICTED
+            label, as a ceiling on what counts as detection.
+        oof_folds_ok: how many inner folds produced a value. Test rows get -1.
     """
+    if split not in VALID_SPLITS:
+        raise ValueError(
+            f"save_uncertainty_values: split={split!r} is not one of {VALID_SPLITS}.")
+
     uncertainty_file = filepath.replace('.csv', '_uncertainty_values.csv')
 
-    # Compute correct injected noise via linear regression
-    # y_true_noisy = a * y_true_original + b + noise (a,b are normalization params)
-    # Residuals from this regression = actual noise in normalized space
-    y_orig = np.asarray(y_true_original, dtype=np.float64)
-    y_noisy = np.asarray(y_true_noisy, dtype=np.float64)
-    finite_mask = np.isfinite(y_orig) & np.isfinite(y_noisy)
-    if finite_mask.sum() >= 10:
-        from scipy.stats import linregress
-        slope, intercept, _, _, _ = linregress(y_orig[finite_mask], y_noisy[finite_mask])
-        injected_noise = y_noisy - (slope * y_orig + intercept)
+    n = len(y_pred_mean)
+
+    if injected_noise is None:
+        if split == 'train_oof':
+            raise ValueError(
+                "save_uncertainty_values: split='train_oof' requires injected_noise. "
+                "A training row without the noise the injector recorded for it cannot "
+                "answer whether uncertainty tracks the corruption; it must not be "
+                "reconstructed from the labels.")
+        injected_noise_rows = [0.0] * n
     else:
-        injected_noise = y_noisy - y_orig  # fallback
+        injected_noise_rows = _per_row_values(injected_noise, n, 'injected_noise')
+
+    if oof_folds_ok is None:
+        oof_folds_ok_rows = [-1] * n if split == 'test' else [np.nan] * n
+    else:
+        oof_folds_ok_rows = _per_row_values(oof_folds_ok, n, 'oof_folds_ok')
+
+    smiles_rows = _per_row_values(canonical_smiles, n, 'canonical_smiles')
+    noise_scale_rows = _per_row_values(noise_scale, n, 'noise_scale')
+    noise_pattern_rows = _per_row_values(noise_pattern, n, 'noise_pattern')
+    noise_pattern_pred_rows = _per_row_values(
+        noise_pattern_pred, n, 'noise_pattern_pred')
 
     rows = []
-    for i in range(len(y_pred_mean)):
+    for i in range(n):
         row = {
             'model': model_name,
             'representation': rep,
@@ -267,9 +347,9 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             'y_pred_std_uncalibrated': y_pred_std[i],
             'y_true_original': y_true_original[i],
             'y_true_noisy': y_true_noisy[i],
-            'injected_noise': injected_noise[i]
+            'injected_noise': injected_noise_rows[i]
         }
-        
+
         # Add calibrated values if provided
         if y_pred_std_calibrated is not None:
             row['y_pred_std_calibrated'] = y_pred_std_calibrated[i]
@@ -278,23 +358,39 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             # No calibration - set calibrated = uncalibrated
             row['y_pred_std_calibrated'] = y_pred_std[i]
             row['temperature'] = 1.0
-        
+
         # Add decomposition if provided
         if epistemic_uncertainty is not None:
             row['epistemic_uncertainty'] = epistemic_uncertainty[i]
         else:
             row['epistemic_uncertainty'] = np.nan
-        
+
         if aleatoric_uncertainty is not None:
             row['aleatoric_uncertainty'] = aleatoric_uncertainty[i]
         else:
             row['aleatoric_uncertainty'] = np.nan
-        
+
+        row['split'] = split
+        row['canonical_smiles'] = smiles_rows[i]
+        row['noise_scale'] = noise_scale_rows[i]
+        row['noise_pattern'] = noise_pattern_rows[i]
+        row['noise_pattern_pred'] = noise_pattern_pred_rows[i]
+        row['oof_folds_ok'] = oof_folds_ok_rows[i]
+
         rows.append(row)
-    
-    df = pd.DataFrame(rows)
-    
+
+    df = pd.DataFrame(rows, columns=UNCERTAINTY_COLUMNS)
+
     if os.path.exists(uncertainty_file):
+        with open(uncertainty_file, newline='') as f:
+            header = next(csv.reader(f), [])
+        if header and header != UNCERTAINTY_COLUMNS:
+            missing = [c for c in UNCERTAINTY_COLUMNS if c not in header]
+            raise RuntimeError(
+                f"{uncertainty_file} was written with a different column set and "
+                f"cannot be appended to. Missing: {missing}. Move or delete the old "
+                f"file -- appending would produce rows that do not line up with the "
+                f"header.")
         df.to_csv(uncertainty_file, mode='a', header=False, index=False)
     else:
         df.to_csv(uncertainty_file, mode='w', header=True, index=False)

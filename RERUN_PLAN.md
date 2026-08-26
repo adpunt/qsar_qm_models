@@ -555,6 +555,12 @@ full set of results from the unpatched code.
 
 ### 2.8c ✅ FIXED 2026-08-26 (chat C) — the learned embeddings were rescaled per molecule
 
+> ⚠️ **CORRECTION, 2026-08-26.** What follows calls this "the largest single defect in the study" and
+> blames it for the learned embeddings scoring near zero. **That is wrong.** Those scores came from a
+> different bug — the Gaussian process was never told how far apart is "far", so it could not fit at
+> all. See §2.8f. The storage defect below is real, it damages the geometry, and fixing it was right.
+> It is not what produced the numbers in the paper.
+
 **Found 2026-08-25 from the harvested clean-data results, then confirmed in the code.** This is the
 largest single defect in the study. It is a data-preparation bug, it has never been a robustness
 result, and it invalidates a family of the paper's conclusions.
@@ -827,6 +833,51 @@ depends on whether the **cluster** environment is affected, and that cannot be t
 reports the exit code, and says whether one thread cures it. It is in the uncertainty preflight as
 check 0 and in the QM9 runbook, so the cluster is tested before anything is submitted rather than
 after 500 tasks die quietly. **Run it on the cluster before launching any GP job.**
+
+### 2.8f ✅ FIXED 2026-08-26 (chat C) — the Gaussian process could not fit, and it looked like a bad result
+
+**This is the defect that produced the near-zero scores everyone read as "learned embeddings don't
+work".**
+
+**What it was.** A Gaussian process decides how similar two molecules are from how far apart they
+sit. How far counts as "far" is a number the model must be given, and nothing ever gave it one. It
+stayed at the library default of about 0.7 for every representation and every run. `lengthscale`
+appeared zero times in `models/models.py`; so did `ard_num_dims`.
+
+Real distances between molecules run from 14 to 1,100 depending on the representation. At 0.7 every
+molecule looks infinitely far from every other. There is nothing left to learn from, so the fit gives
+up and predicts one flat number for everything. That still produces a score, and the score looks like
+a weak representation rather than a failed fit.
+
+**What it cost.** `results/gp_kernel_harvest/qm9/` reports −0.0158 for MHG-GNN and +0.0087 for
+mol2vec. Both are failed fits. Nothing recorded that, so they were read as evidence.
+
+**The fix, proved in the real pipeline rather than a test harness.** The width now starts at the
+median distance between training molecules, and any fit that still collapses is written to the
+results as collapsed instead of scored. `process_and_train.py -m gauche --kernel rbf`, 600 molecules,
+zero noise (`results/embedding_storage_retest/gp_fix_check.csv`):
+
+| Representation | Width used | R² | Collapsed | Same cell on the cluster |
+|---|---|---|---|---|
+| MHG-GNN | 36.99 | **0.590** | no | −0.016 |
+| Avalon | 13.89 | **0.536** | no | did not exist |
+| PDV | 17.06 | **0.493** | no | 0.889 at 9,000 molecules |
+| ChemBERTa | 38.59 | **0.474** | no | never ran |
+
+**Three things follow.**
+
+1. **Every Gaussian-process number in the study is suspect, not only the two learned embeddings.**
+   Whether a fit worked depended on how far that representation's distances happened to sit from 0.7,
+   and nothing recorded whether it had.
+2. **The decision to use one kernel everywhere is unaffected, and better supported than before.** It
+   was made because the two kernels agree wherever the features are sane. With a workable width they
+   agree everywhere — largest gap 0.040 across twelve paired measurements, against the 0.86–0.89 that
+   was read as proof the features were unusable.
+3. **The claim that learned embeddings are weak must be re-tested from scratch.** It rests on failed
+   fits.
+
+**Settings:** `init_lengthscale_from_data`, `lengthscale_probe_n`, `collapse_fraction` in
+`models/model_defaults.py`. **New results column:** `gp_collapsed`.
 
 ### 2.9 The Methods figure does not show the experiment
 

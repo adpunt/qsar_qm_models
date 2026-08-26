@@ -35,7 +35,6 @@ import process_and_train as P
 
 # Dimensions and the byte width each representation occupies in one record.
 EMBEDDINGS = {
-    'mol2vec':   (300,  1200),
     'chemberta': (768,  3072),
     'mhggnn':    (1024, 4096),
 }
@@ -73,12 +72,12 @@ def write_records(rep, vectors, targets):
     split = FakeSplit()
     files = {'train': split}
     for i, vec in enumerate(vectors):
-        kwargs = dict(mol2vec=None, chemberta=None, mhggnn=None, avalon=None)
+        kwargs = dict(chemberta=None, mhggnn=None, avalon=None)
         kwargs[rep] = vec
         P.write_to_mmap(
             SMILES, SMILES, None,
             None, None,
-            kwargs['mol2vec'], kwargs['chemberta'], kwargs['mhggnn'], kwargs['avalon'],
+            kwargs['chemberta'], kwargs['mhggnn'], kwargs['avalon'],
             float(targets[i]), 'train', files, [rep], 1, None, 0,
         )
     return split.buf.getvalue()
@@ -150,9 +149,6 @@ check("chemberta: failure path is float32 and full width",
 check("mhggnn: failure path is float32 and full width",
       P.mhggnn_fingerprint(None, dimensions=1024).dtype == np.float32
       and len(P.mhggnn_fingerprint(None, dimensions=1024)) == 1024)
-check("mol2vec: failure path is float32 and full width",
-      P.mol2vec_fingerprint(None, None, 300).dtype == np.float32
-      and len(P.mol2vec_fingerprint(None, None, 300)) == 300)
 check("avalon: builds 2048 bits packed into 256 bytes",
       len(P.avalon_fingerprint('CCO')) == 256
       and P.avalon_fingerprint('CCO').dtype == np.uint8)
@@ -190,7 +186,7 @@ check("no dimension dominates distance after standardising",
 
 # The standardisation must actually be reached by every continuous representation.
 check("every float-stored representation is in CONTINUOUS_REPS",
-      set(P.CONTINUOUS_REPS) == {'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn'},
+      set(P.CONTINUOUS_REPS) == {'continuous_pdv', 'chemberta', 'mhggnn'},
       f"CONTINUOUS_REPS = {P.CONTINUOUS_REPS}")
 
 # ── 5. The comparability check has teeth ───────────────────────────────────
@@ -211,10 +207,10 @@ def retired_storage(vec, dims):
 
 
 rng = np.random.default_rng(20260826)
-base = rng.normal(0.0, 1.0, 300).astype(np.float32)
+base = rng.normal(0.0, 1.0, 768).astype(np.float32)
 FACTOR = 7.0
-old_a = retired_storage(base, 300).astype(np.float64)
-old_b = retired_storage((base * FACTOR).astype(np.float32), 300).astype(np.float64)
+old_a = retired_storage(base, 768).astype(np.float64)
+old_b = retired_storage((base * FACTOR).astype(np.float32), 768).astype(np.float64)
 
 check("retired storage: the two molecules come back identical (the defect)",
       np.array_equal(old_a, old_b),
