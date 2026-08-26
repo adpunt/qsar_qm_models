@@ -896,15 +896,42 @@ all. Note the third row: the experimental pipeline sets **both** `OMP_NUM_THREAD
 nothing. Anyone reaching for a quick thread pin has to set both, and the audit now says which
 combination actually cured it rather than testing one and reporting a misleading failure.
 
-**Not fixed in either pipeline, deliberately.** Pinning to one thread costs every tree fit its
-parallelism across the whole grid, and the real fix is one OpenMP runtime in the environment —
-install `xgboost` and `lightgbm` from the same channel as `pytorch`. Which of those is right
-depends on whether the **cluster** environment is affected, and that cannot be tested from here.
+#### ✅ FIXED 2026-08-27 in BOTH pipelines — and the earlier entry above understated it
 
-**What was done instead:** `scripts/audit_pipeline_parity.py` now runs the fit in a subprocess and
-reports the exit code, and says whether one thread cures it. It is in the uncertainty preflight as
-check 0 and in the QM9 runbook, so the cluster is tested before anything is submitted rather than
-after 500 tasks die quietly. **Run it on the cluster before launching any GP job.**
+⚠️ **Two corrections to what this section said before.**
+
+**First, both pipelines crash, not just the experimental one.** The probe simulated "no thread
+count set" by setting the count to an EMPTY STRING, which some numerical libraries reject outright,
+so the QM9 condition returned a spurious ordinary error instead of the crash. Unset properly:
+
+| condition | result |
+|---|---|
+| no thread count set — **how the QM9 jobs run** | **CRASHES** |
+| both pinned to 4 — how the experimental jobs run | **CRASHES** |
+
+**Second, "the real fix is one runtime in the environment" was wrong.** Three repairs were
+measured, and the cheapest is neither of the two considered before:
+
+| approach | works | cost |
+|---|---|---|
+| limit threads for the whole job | yes | every tree fit loses its parallelism — the reason this was rejected |
+| reorder the imports so the neural library loads first | yes | free, but silently reopens if anyone reorders imports |
+| **limit threads only around the Gaussian-process fit** | **yes** | **11%, and only the Gaussian process pays it** |
+
+Eleven percent because the operation is limited by memory speed rather than cores: 38.5 seconds
+against 34.8 for twenty steps on 2,000 molecules. Nothing else in either study is affected.
+
+**Applied** as `GP_DEFAULTS['single_thread_fit']` in the shared spec, so both pipelines read one
+setting and it cannot drift. It wraps the fit, the fallback loop, **and prediction** — prediction
+solves against the same kernel matrix and can crash the same way — and restores the previous
+thread count afterwards. Set it to `False` once the environment is rebuilt with a single threading
+runtime; `scripts/server_audit.sh` will say when that is true.
+
+**Verified** with the boosting libraries imported first, exactly as both pipelines do, under BOTH
+job thread settings: the fit completes and the thread count is restored.
+
+**Still worth running on the cluster**, because the crash is environment-specific and the fix
+should be confirmed there rather than assumed: `scripts/server_audit.sh`.
 
 ### 2.8f ✅ FIXED 2026-08-26 (chat C) — the Gaussian process could not fit, and it looked like a bad result
 
@@ -1380,6 +1407,28 @@ queues and consumes in the same ascending order and is correct". That conclusion
 reading the code. It is wrong, and one line of execution — printing whether the splitter's indices
 are sorted — settles it. The note never reached this document, so nothing here needed correcting,
 but the lesson is the same one this project keeps paying for: **reading is not checking.**
+
+**✅ THE THREE EXPERIMENTAL DATASETS ARE NOT AFFECTED — tested, not read.** The author asked
+directly. That side builds each row from its own molecule and has no queue to drain, so the fault
+cannot occur there; but since reading is what got this wrong the first time, it was measured
+instead. Shuffle the input molecules, recompute, and check the rows follow the shuffle:
+
+| representation | rows tracking their own molecule |
+|---|---|
+| ECFP4 | 100.0% |
+| PDV | 100.0% |
+| SNS | 100.0% |
+
+So the damage is bounded to QM9 and to that one representation. Nothing on the experimental side
+needs regenerating for this reason. Re-checkable at any time, and it needs no argument about what
+the code says:
+
+```bash
+python scripts/audit_representation_identity.py --experimental-alignment --strict
+```
+
+One limit worth stating: it tests featurisation, not the later fold splitting — though that splits
+by index arrays, so rows and labels move together by construction.
 
 #### 3.4.3a 🔴 FOUND AND FIXED 2026-08-26 — the two sides scaled features differently
 
@@ -2742,6 +2791,31 @@ Two contradictions between those documents are resolved here rather than carried
   new data rather than arguing about the old.
 
 ---
+
+### 11.1 🔴 OPEN — seventy-nine possible faults nobody has checked
+
+The full audit of both pipelines on 2026-08-26 produced **151 candidate faults** across nine
+areas — model settings, preprocessing, feature handling, noise, uncertainty, and what reaches
+disk. Each non-cosmetic one was to be handed to a separate reviewer told to disprove it.
+
+**The verification was capped at 40. It was my cap, and it means 79 candidates were never
+examined at all.** They are unchecked, not dismissed. Of the 40 that were checked, 35 survived and
+5 were disproved — but that survival rate should be treated with suspicion: every reviewer returned
+"certain", with no gradation, and the surviving list contains obvious duplicates (three entries for
+the same fingerprint fault, two for the same graph-model unpacking error). The genuine count is
+smaller than 35 and the genuine total is unknown.
+
+Three of the confirmed ones were re-checked by hand against the source and acted on: the scrambled
+fingerprint (§2.10), the neural-network setting that matched no branch, and the feature-scaling
+divergence (§3.4.3a). **The rest are unactioned.**
+
+One artefact to know about when reading that audit's output: it ran against a tree that was being
+changed underneath it, so at least one finding was marked "disproved" only because the fix had
+landed while the reviewer was reading. The feature-scaling fault is real despite being marked
+disproved.
+
+To resume it, re-run the workflow with a higher cap. The candidate list and every reviewer verdict
+are in the run's own journal file, so nothing has to be regenerated.
 
 ## 12. What is deliberately not in scope
 
