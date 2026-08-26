@@ -1883,6 +1883,7 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
+        n_train_batches = 0
         batch_idx = 0
         
         for X_batch, y_batch in train_loader:
@@ -1901,7 +1902,15 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
+            n_train_batches += 1
             batch_idx += len(X_batch)
+
+        # Both losses are reduced the same way. The validation loss became a
+        # mean so the early-stopping threshold would stop depending on the
+        # batch count; leaving the training loss as a sum would put the two
+        # curves in save_per_epoch_metrics on different scales.
+        if NEURAL_DEFAULTS['training']['val_loss_reduction'] == 'mean' and n_train_batches:
+            train_loss /= n_train_batches
 
         # Validation
         model.eval()

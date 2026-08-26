@@ -65,7 +65,7 @@ BASELINE = 'sqrt'          # what QM9 does today; everything is paired against i
 RF_TREES, QRF_TREES = 100, 300
 
 
-def run(n_molecules, seeds, sigmas, reps):
+def run(n_molecules, seeds, sigmas, reps, incremental_path=None):
     smiles, y, scaffolds = load_qm9(n_molecules)
     print(f'molecules {len(smiles)}   label SD {y.std():.4f} eV   '
           f'scaffolds {len(np.unique(scaffolds))}', flush=True)
@@ -123,6 +123,11 @@ def run(n_molecules, seeds, sigmas, reps):
                           f'R2={rows[-1]["r2"]:.4f}  width={rows[-1]["interval_width"]:.3f} '
                           f'cov={rows[-1]["coverage_1sd"]:.3f}  {rows[-1]["fit_secs"]:6.1f}s',
                           flush=True)
+                    # Written after every fit. A full run is hours on a loaded
+                    # machine; a partial file that can be read beats a complete
+                    # one that never lands.
+                    if incremental_path:
+                        pd.DataFrame(rows).to_csv(incremental_path, index=False)
     return pd.DataFrame(rows)
 
 
@@ -139,7 +144,11 @@ def report(df):
         for setting in piv.columns:
             if setting == BASELINE:
                 continue
-            d = piv[setting] - base
+            # dropna: on a partial run a seed may have the baseline but not yet
+            # the comparison, and a NaN difference would silently count as a loss.
+            d = (piv[setting] - base).dropna()
+            if not len(d):
+                continue
             lines.append(dict(family=family, rep=rep, sigma=sigma, setting=setting,
                               mean_delta=d.mean(), wins=int((d > 0).sum()),
                               n=len(d), lo=d.min(), hi=d.max()))
@@ -259,12 +268,14 @@ def main():
         print(f'\nNOTE quantile forest is EMULATED here: {QRF_UNAVAILABLE_REASON}\n')
 
     t0 = time.time()
-    df = run(args.n_molecules, args.seeds, args.sigmas, args.reps)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stem = args.out or ('forest_max_features'
                         + ('_quick' if args.quick else '')
                         + f'_n{args.n_molecules}')
-    df.to_csv(OUT_DIR / f'{stem}.csv', index=False)
+    out_csv = OUT_DIR / f'{stem}.csv'
+    df = run(args.n_molecules, args.seeds, args.sigmas, args.reps,
+             incremental_path=out_csv)
+    df.to_csv(out_csv, index=False)
     verdict = report(df)
     verdict.to_csv(OUT_DIR / f'{stem}_paired.csv', index=False)
     (OUT_DIR / f'{stem}_env.json').write_text(json.dumps(env_fingerprint(), indent=2))

@@ -46,7 +46,10 @@ def parse_arguments():
     parser.add_argument("-a", "--analysis-only", type=bool, default=False, help="Only visualise molecules based on existing indices (default is False)")
     parser.add_argument("-c", "--clustering-only", type=bool, default=False, help="Only cluster molecules without analysis, useful for bootstrapping (default is False)")
     parser.add_argument("-d", "--dataset", type=str, required=True, help="Dataset to run experiments on")
-    parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
+    parser.add_argument("-b", "--repetitions", "--bootstrapping", dest="repetitions",
+                        type=int, default=1,
+                        help="Independent repetitions per cell, each with its own seed "
+                             "(default 1). Not bootstrapping - nothing is resampled.")
     parser.add_argument("-s", "--split", type=str, default="random", help="Method for splitting data (default is random)")
     parser.add_argument("--determine-cutoff", type=bool, default=False, help="Repeatedly run Butina with different cutoffs to find an optimal one (default is False)")
     parser.add_argument("--shuffle", type=bool, default=True, help="Shuffle the data, required for bootstrapping (default is True)")
@@ -702,7 +705,7 @@ def main():
     if args.dataset == "QM9":
         qm9 = load_qm9_smiles()
 
-    for iteration in range(args.bootstrapping):
+    for iteration in range(args.repetitions):
         # Generate a unique seed for this iteration
         iteration_seed = (args.random_seed ^ (iteration * 0x5DEECE66D)) & 0xFFFFFFFF  # XOR and mask for 32-bit seed
 

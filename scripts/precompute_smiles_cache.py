@@ -9,12 +9,14 @@ import os
 
 # -------------------- Constants --------------------
 parser = argparse.ArgumentParser()
-parser.add_argument("--bootstrapping", type=int, default=20)
+parser.add_argument("--repetitions", "--bootstrapping", dest="repetitions",
+                    type=int, default=20,
+                    help="Independent repetitions per cell (not bootstrapping: nothing is resampled with replacement)")
 parser.add_argument("--random-seed", type=int, default=42)
 parser.add_argument("--sample-size", type=int, default=30000)
 args = parser.parse_args()
 
-BOOTSTRAPPING = args.bootstrapping
+BOOTSTRAPPING = args.repetitions
 RANDOM_SEED = args.random_seed
 SAMPLE_SIZE = args.sample_size
 
