@@ -30,6 +30,7 @@ A static check runs in both: no source file may write a bare `config.json`.
 import argparse
 import json
 import os
+import platform
 import re
 import struct
 import subprocess
@@ -247,9 +248,21 @@ def main():
     ]
 
     if args.end_to_end:
-        with tempfile.TemporaryDirectory(prefix="config_isolation_e2e_") as tmp:
-            results.append(check("two real pipeline tasks run side by side",
-                                 lambda: two_real_tasks(tmp)))
+        if platform.system() == "Darwin":
+            # keopscore (gpytorch -> pykeops) hardcodes /tmp/compiler_version.txt
+            # and /tmp/brew_prefix.txt, writing then deleting them during import.
+            # Two simultaneous imports race and one dies with FileNotFoundError
+            # before any of this project's code runs. Both functions are guarded
+            # by platform.system() == "Darwin", so the cluster is unaffected --
+            # but on a laptop this half can never pass, and it would fail for a
+            # reason that has nothing to do with what it is testing.
+            print("  SKIP  two real pipeline tasks: keopscore races on hardcoded")
+            print("        /tmp files during import, macOS only. Run this half on")
+            print("        the cluster, where that code does not execute.")
+        else:
+            with tempfile.TemporaryDirectory(prefix="config_isolation_e2e_") as tmp:
+                results.append(check("two real pipeline tasks run side by side",
+                                     lambda: two_real_tasks(tmp)))
     else:
         print("  (skipped the two-real-task run; pass --end-to-end to include it)")
 

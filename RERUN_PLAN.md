@@ -533,6 +533,34 @@ shared `config.json` may appear. A second, instant half greps the tree for any r
 `config.json`, so the gate fails even without running anything. `--end-to-end` additionally runs
 two real `process_and_train.py` tasks side by side.
 
+**🔴 AND THE FIX WAS INCOMPLETE — corrected 2026-08-26 on the close-out pass.** This section
+said the memory-mapped files "are already named `train_{file_no}.mmap` and `file_no` is
+effectively unique per task, so *those* do not collide. **Only the configuration file has a fixed
+name.**" That was wrong, and renaming the configuration file while leaving `file_no` alone fixed
+the smaller half of the defect.
+
+`file_no` was `(iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF`. Array tasks differ by
+representation and strategy, **not by seed** — every one of them passes `--random-seed 42`, so
+`iteration_seed` is identical across the whole array. That leaves the microsecond clock as the
+only distinguishing term, and it is not fine-grained enough: consecutive calls to
+`int(time.time() * 1e6)` on this machine return the same value. Measured, for two back-to-back
+calls with the same seed and iteration: **14,391 collisions in 20,000 pairs — 72%.**
+
+Two colliding tasks open the same `train_{file_no}.mmap` and rewrite each other's training data.
+That is the corruption this section is about, and it survived the fix.
+
+`file_no` is only ever a filename token — every use across `process_and_train.py` and
+`models/models.py` is a filename, never a seed — so it is now `uuid.uuid4().int &
+0xFFFFFFFFFFFFFFFF`. 64 bits because the Rust side types it `usize` and a full grid draws about
+4,000 of them; 32 bits would leave roughly a 1-in-500 birthday collision across the run. Measured
+after: **0 collisions in 500,000 draws.** A single-task run before and after produces
+bit-identical accuracy (MAE 0.5017960652047769 at level 0), confirming nothing but the filename
+changed.
+
+**How it was found.** Not by reading — by running two real pipeline tasks side by side, which
+only became possible once the injector's exit code was checked (§2.8g). Before that the resulting
+panic went to a pipe nobody read.
+
 **Still worth knowing:** whether it ever fired. It needs two tasks between writing the
 configuration and reading it at the same moment — a short window per task, but one that opens
 once per noise level per replicate, 110 times per task. The deleted-replicate list is on the
@@ -961,6 +989,56 @@ pipeline exits 1 with `the noise injector exited 3 for noise level 0.4, replicat
 **What this means for the other chats.** Any claim of the form "the run refuses to finish if X"
 made before this fix was true of the *binary* and false of the *pipeline*. Chat H should assume
 no Rust-side guard was ever enforced end to end until this commit.
+
+### 2.8h The close-out audit — what 13 reviewers found in chat D's own work
+
+Run 2026-08-26 at the author's instruction ("look over all the code you touched, look for code
+you should have touched but didn't"). Eight agents reviewed each changed area, five hunted for
+classes of code the same defect could hide in, and **every finding was then handed to a separate
+agent told to refute it**. 106 raised, **34 survived**, 72 refuted.
+
+**Defects chat D introduced or left behind, now fixed:**
+
+1. **`PARSEABLE_REPS` omitted `"graph"`**, so the new unreadable-representation guard rejected
+   every graph run. `-r graph` puts it in `molecular_representations` and `run_qm9_graph_model`
+   passes that straight to `parse_mmap`. A regression introduced with the guard, found by three
+   reviewers independently.
+2. **Every reader guard was swallowed one frame up.** The per-(representation, model)
+   `except Exception` wraps the parse calls *and* the whole model loop, and only printed — so
+   making `parse_mmap` raise instead of `continue` converted a silent skip into a printed line
+   and nothing else; the task still exited 0 with an empty results file. Six reviewers.
+   Data-integrity errors now propagate; the rest are tallied and surfaced.
+3. **`check_environment.py` could report a pass it never observed** — `check_pyg_companions`
+   returned `not abi`, so a memory-mapping failure left no trace and the script exited 0. That is
+   the exact policy the file exists to enforce.
+4. **The interpreter check was near-tautological.** `setup.sh:83` prepends `$CONDA_PREFIX/bin` to
+   `PATH`, so after sourcing it `command -v python` resolves inside the prefix whichever
+   environment was activated. It still catches an unset `CONDA_PREFIX` — the case that actually
+   bit us — but it would have passed a task in the wrong environment. The environment name is
+   asserted too now.
+5. **The zero-vector invariant covered one representation of six.** ChemBERTa, MHG-GNN and Avalon
+   each returned an all-zero vector on any exception, unrecorded. The bad case is not one
+   molecule: `get_chemberta_model()` is called *inside* the try, so on a compute node with a cold
+   cache **every** molecule takes that branch — a whole matrix of zeros, a run that finishes
+   normally, and R² near zero at every noise level, indistinguishable from a real finding that
+   the representation is uninformative. Now recorded and refused, with the same
+   `--allow-featurisation-failures` escape as the Rust side.
+
+**Handed on, not chat D's:**
+
+- The generators emit **retired CLI flags** (`--sigma`, `--noise-strategy`, `--strategies`,
+  `--bayesian-transformation last`) and representations the pipeline now refuses (`smiles` is in
+  `DROPPED_REPS`; `mol2vec` no longer exists). Every generated task would die at argparse.
+  **This is why the stale `.sh` files were deleted rather than left to look usable** — but it
+  also means the generator cannot produce a runnable script today. Chat H, gated on §13.1.
+- `ecfp4` is still not ECFP4 (§3.4.1), carried through chat D's refactor unchanged, and there is
+  still no gate that stops a run producing figures labelled ECFP4 from path-fingerprint features.
+- `extract_smiles_from_mmap` (`scripts/extract_and_cluster_for_domains.py`) is a second reader of
+  the record format that steps over only three of the representations, so it misparses whenever
+  continuous_pdv, chemberta, mhggnn or avalon is present.
+- `load_and_split_polaris` returns unfiltered split indices while skipping molecules it could not
+  write, so `config.train_count` can exceed the records in the file — which chat D's new hard
+  error in `read_train_labels` now turns from silent truncation into an abort.
 
 ### 2.9 The Methods figure does not show the experiment
 

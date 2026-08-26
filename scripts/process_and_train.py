@@ -1141,6 +1141,13 @@ DROPPED_REPS = {"smiles", "randomized_smiles"}
 PARSEABLE_REPS = {
     "randomized_smiles", "sns", "pdv", "continuous_pdv",
     "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
+    # "graph" contributes no bytes to the record -- the graph models read the
+    # dataset object and use parse_mmap only to pull the processed targets back
+    # out. It still has to be listed: `-r graph` puts it in
+    # molecular_representations, run_qm9_graph_model passes that straight in,
+    # and without this entry the guard below rejects every graph run by name.
+    # That regression was introduced with the guard and caught by the audit.
+    "graph",
 }
 
 
@@ -1808,7 +1815,31 @@ def record_noise_manifest(args, manifest_path, iteration, file_no, level):
     return row
 
 
+# Messages raised by the reader guards. A misparse destroys the byte offset, so
+# it cannot be confined to one (representation, model) cell -- it must take the
+# task down rather than be printed and stepped over.
+_INTEGRITY_MARKERS = (
+    "no reader for representation",
+    "malformed record at entry",
+    "consumed",
+    "feature rows from",
+    "decoded to",
+    "misaligned",
+    "SMILES",
+    "alignment",
+)
+
+
+def _is_data_integrity_error(exc):
+    text = str(exc)
+    return any(m in text for m in _INTEGRITY_MARKERS)
+
+
 def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups=None,):
+    # Every (representation, model) that failed for a reason that is NOT a data
+    # integrity problem. Reported at the end so a task cannot finish quietly
+    # having produced fewer rows than it was asked for.
+    failed_pairs = []
     rust_molecular_representations = args.molecular_representations.copy()
     if args.domain_representation and args.domain_representation not in rust_molecular_representations:
         rust_molecular_representations.append(args.domain_representation)
@@ -2128,13 +2159,48 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                             print(f"rep: {rep}")
                             print(f"DEBUG sigma={s}: x_val type={type(x_val)}, shape={x_val.shape if hasattr(x_val, 'shape') else len(x_val)}")
                             print(f"DEBUG sigma={s}: y_val={y_val[:5] if len(y_val) > 0 else 'EMPTY'}")
+                            # The recorded noise only reaches a model once the rows
+                            # it will fit have been shown to BE the molecules the
+                            # noise was recorded for.
+                            if noise_record is not None:
+                                if smiles_train is None or smiles_val is None:
+                                    raise RuntimeError(
+                                        f"the '{rep}' rows reached the models without "
+                                        f"their canonical SMILES, so they cannot be "
+                                        f"shown to be the molecules the noise was "
+                                        f"recorded for. Refusing to score them out of "
+                                        f"fold rather than trusting row position.")
+                                noise_record.check_alignment(
+                                    train=smiles_train, val=smiles_val)
+
                             run_model(
                                 x_train, y_train, x_test, y_test, x_val, y_val,
                                 model, args, iteration_seed, rep, iteration, s,
-                                file_no, y_test_original, domain_labels=domain_labels
+                                file_no, y_test_original, domain_labels=domain_labels,
+                                train_noise=noise_record
                             )
                 except Exception as e:
-                    print(f"Error with {rep} and {model}; more details: {e}")
+                    # This handler wraps the parse AND the whole model loop, and
+                    # it used to only print. Every guard added to the reader --
+                    # the unreadable-representation rejection, the malformed
+                    # record, the leftover bytes, the row-count and ragged-width
+                    # checks, and the out-of-fold alignment assertions -- landed
+                    # here and the task still exited 0 with an empty results
+                    # file. The audit found five reviewers reporting it
+                    # independently: fixing parse_mmap to raise, and then
+                    # swallowing the raise one frame up, changed a silent
+                    # `continue` into a printed line and nothing else.
+                    #
+                    # A misparse is not recoverable and is not per-model: the
+                    # byte offset is gone, so every later representation read
+                    # from the same handles is suspect too. It propagates.
+                    print(f"ERROR with {rep} and {model}: {type(e).__name__}: {e}",
+                          flush=True)
+                    traceback.print_exc()
+                    if isinstance(e, (RuntimeError, ValueError, AssertionError, OSError)) \
+                            and _is_data_integrity_error(e):
+                        raise
+                    failed_pairs.append((rep, model, f"{type(e).__name__}: {e}"))
     finally:
         # Always close and delete files, even if an error occurred
         for key in list(files.keys()):
@@ -2165,6 +2231,17 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             print(f"Error deleting {config_path}: {e}")
 
         gc.collect()
+
+    # Cells that failed for reasons other than data integrity (a model that
+    # would not converge, an out-of-memory, a library error). Not fatal on their
+    # own -- but the caller records them so the job cannot exit 0 having lost
+    # part of the grid it was asked for.
+    if failed_pairs:
+        print(f"WARNING: {len(failed_pairs)} (representation, model) pair(s) produced no rows "
+              f"at noise level {s}, replicate {iteration}:")
+        for rep, model, msg in failed_pairs:
+            print(f"  {rep} / {model}: {msg}")
+    return failed_pairs
 
 def main():
     start_time = time.time()
@@ -2221,7 +2298,28 @@ def main():
             random.seed(iteration_seed)
             np.random.seed(iteration_seed)
             torch.manual_seed(iteration_seed)
-            file_no = (iteration_seed ^ int(time.time() * 1e6)) & 0xFFFFFFFF
+            # A NAME for this task's scratch files, never a seed -- every use of
+            # it is a filename (verified across process_and_train.py and
+            # models/models.py), so randomness here costs no reproducibility.
+            #
+            # It used to be `iteration_seed ^ int(time.time() * 1e6)`, and
+            # RERUN_PLAN.md §2.8a called that "effectively unique per task". It is
+            # not. Array tasks differ by representation and strategy, not by seed,
+            # so they all compute the SAME iteration_seed -- leaving the clock as
+            # the only distinguishing term, and consecutive calls to
+            # `int(time.time() * 1e6)` on this machine return the same value.
+            # Two tasks starting together therefore get the same file_no, open
+            # the same train_<file_no>.mmap, and rewrite each other's training
+            # data: exactly the corruption §2.8a was written about, surviving the
+            # fix that was supposed to close it.
+            #
+            # uuid4 draws from the OS entropy source, so it does not collide
+            # between processes however close together they start.
+            # 64 bits, not 32: the Rust side types file_no as usize, and a
+            # full grid draws roughly 4,000 of these (36 tasks x 110
+            # invocations). At 32 bits that is about a 1-in-500 chance of a
+            # birthday collision across the run; at 64 bits it is negligible.
+            file_no = uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF
 
             files = {
                 "train": open('train_' + str(file_no) + '.mmap', 'wb+'),
@@ -2264,9 +2362,11 @@ def main():
     print(f"Time for total run: {time.time() - start_time}")
 
     if failed_cells:
-        print(f"\nERROR: {len(failed_cells)} of "
-              f"{len(args.noise_level) * args.repetitions} (noise level, replicate) cells "
-              f"failed and produced no rows:")
+        planned = len(args.noise_level) * args.repetitions * \
+            max(1, len(args.molecular_representations) * len(args.models))
+        print(f"\nERROR: {len(failed_cells)} of about {planned} planned "
+              f"(noise level, replicate, representation, model) cells failed and produced "
+              f"no rows:")
         for level, rep, msg in failed_cells:
             print(f"  noise level {level}, replicate {rep}: {msg}")
         print("The results file is INCOMPLETE. Exiting non-zero so the scheduler and the "

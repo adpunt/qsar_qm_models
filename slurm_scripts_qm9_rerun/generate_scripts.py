@@ -147,7 +147,7 @@ case "$PY_PATH" in
     "$CONDA_PREFIX"/*) : ;;
     *)
         echo "ERROR: python is $PY_PATH, which is not inside the activated"
-        echo "       environment ($CONDA_PREFIX). setup.sh did not activate 'env_test'."
+        echo "       environment ($CONDA_PREFIX)."
         case "$PY_PATH" in
             /apps/system/*)
                 echo "       That is the system Anaconda. It has no gpytorch, no"
@@ -156,7 +156,37 @@ case "$PY_PATH" in
         esac
         exit 2 ;;
 esac
+# The test above cannot fail once setup.sh has run: setup.sh:83 prepends
+# $CONDA_PREFIX/bin to PATH, so python resolves inside the prefix whichever
+# environment was activated. It still catches an unset CONDA_PREFIX, which is
+# the case that actually bit us -- but on its own it would pass a task that
+# activated the WRONG environment, so the name is checked too. This literal
+# must track ENV_NAME in setup.sh.
+if [ "$(basename "$CONDA_PREFIX")" != "env_test" ]; then
+    echo "ERROR: the active environment is $(basename "$CONDA_PREFIX"), not env_test"
+    echo "       (CONDA_PREFIX=$CONDA_PREFIX). setup.sh activated the wrong one."
+    exit 2
+fi
 echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
+
+# A private scratch directory per task.
+#
+# Hygiene, not a fix for any known defect here: joblib, matplotlib, numba and
+# the HuggingFace cache all honour TMPDIR, and a fixed-name temp file shared by
+# concurrent array tasks is the defect class that produced the config.json race.
+# This closes the whole class cheaply.
+#
+# It does NOT fix the one instance found while testing: keopscore (gpytorch ->
+# pykeops) hardcodes /tmp/compiler_version.txt and /tmp/brew_prefix.txt, writing
+# and deleting them during import, so two simultaneous imports race and one dies
+# with FileNotFoundError. TMPDIR is ignored by that code. It is guarded by
+# platform.system() == "Darwin", so it cannot fire on this cluster -- it is a
+# macOS-only problem, and it is why the two-task half of
+# scripts/test_config_isolation.py skips on a laptop.
+export TMPDIR="${{TMPDIR:-/tmp}}/qsar_${{SLURM_JOB_ID:-$$}}_${{SLURM_ARRAY_TASK_ID:-0}}"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+
 
 # The binary carries the held-out-noise fix. Refuse to run without it rather
 # than silently regenerating the same invalid results.

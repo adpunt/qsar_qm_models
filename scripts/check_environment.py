@@ -130,7 +130,7 @@ def report_versions():
     print()
 
 
-def check_pyg_companions():
+def check_pyg_companions(resource_failures):
     """Can the torch_geometric companion packages load, and if not, why not.
 
     An ABI mismatch here is fatal in a way that is easy to miss:
@@ -166,6 +166,12 @@ def check_pyg_companions():
         print("        srun --account=<acct> --partition=short --mem=32G --pty \\")
         print("             python scripts/check_environment.py")
         print()
+
+    # Recorded where main can see it. Returning only `not abi` meant a companion
+    # that could not be MAPPED left no trace: the script printed "OK: everything
+    # requested can be constructed" and exited 0, which is exactly the pass-it-
+    # did-not-observe that this file is supposed to refuse. Found by the audit.
+    resource_failures.extend(f"torch_geometric companion: {name}" for name, _ in resource)
 
     if abi:
         print("FAIL: torch_geometric companion packages are installed but cannot load.")
@@ -317,7 +323,7 @@ def check_qm9(models, failures, resource_failures):
     print()
 
 
-def check_validation(failures):
+def check_validation(failures, resource_failures=None):
     """The KIRBy roster, when that checkout is next to this one."""
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
@@ -356,11 +362,11 @@ def check_validation(failures):
                 f"— models needing them would be silently dropped from the run"
             )
 
-    probe("every optional backend importable", _flags, failures)
+    probe("every optional backend importable", _flags, failures, resource_failures)
     print()
 
 
-def check_models_module(failures):
+def check_models_module(failures, resource_failures=None):
     """Import models/models.py for real.
 
     Every backend in that file is imported unguarded at module scope, so this
@@ -378,7 +384,7 @@ def check_models_module(failures):
         importlib.import_module("models.models")
 
     print("deep check")
-    probe("models.models imports", _import, failures)
+    probe("models.models imports", _import, failures, resource_failures)
     print()
 
 
@@ -440,7 +446,7 @@ def main():
 
     failures = []
     resource_failures = []
-    if not check_pyg_companions():
+    if not check_pyg_companions(resource_failures):
         failures.append("torch_geometric companions")
 
     requested = args.models if args.models else sorted(QM9_MODELS)
@@ -449,10 +455,10 @@ def main():
     check_qm9(requested, failures, resource_failures)
 
     if args.deep:
-        check_models_module(failures)
+        check_models_module(failures, resource_failures)
 
     if args.validation:
-        check_validation(failures)
+        check_validation(failures, resource_failures)
 
     if resource_failures:
         print(f"INCONCLUSIVE: {len(resource_failures)} model(s) could not be loaded because")
