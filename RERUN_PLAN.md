@@ -72,12 +72,13 @@ What can we say about uncertainty in these contexts?"*
 | **The paper is fixed by re-running, never by rewording** | 2026-08-23 | *"There is no rewording, there is only re-running."* |
 | **Every table and figure in the paper comes from the figure script** | 2026-08-17 | *"Every single table and figure that is in the paper needs to be derived from the figures script. No exceptions."* |
 | **Averaging is permitted only when every level is shown** | 2026-08-14 | *"averaging is fine if all 6 are shown"* — the precise form of the rule |
-| **Hold one representation constant, and it is the descriptor vector** | 2026-08-19 | Chosen with you, not unilaterally. When comparing models across noise types, one representative representation is held fixed |
+| **Hold one representation constant, and it is PDV** | 2026-08-19 | Chosen with you, not unilaterally. When comparing models across noise types, one representative representation is held fixed |
 | **Do not drop models from the variance decomposition for missing representations** | — | *"Dropping five models from the robustness ANOVA for missing representations is BAD"* — relax the inclusion criterion rather than lose them. And the Bayesian variants were excluded from the **decomposition only**, never from the rest of the results |
 | **No new figures** | — | Standing constraint. Changes are panels and columns on existing figures |
 | **The ranking table must not average across noise types** | 2026-08-14 | Report the reference type, keep the concordance coefficient for the strategy-independence claim, and highlight any type that behaves differently |
 | **The paper is not about choosing a model, and not about choosing a metric** | 2026-08-20 | *"This paper isn't about which metric is the best."* The three numbers assess models from different angles. Watch for drift — §7.3 was edging toward a metric bake-off |
 | **The Gaussian process goes into the variance decomposition, on one kernel everywhere** | 2026-08-26 | *"The kernel is not why the Gaussian process was kept out of the variance decomposition. Commit to the radial basis everywhere and it can go in alongside the support vector machine — which is what those jobs were for."* Settled. Both `gauche` and `gauche_rbf` come out of `ANOVA_MODELS_EXCLUDE`; one model, one kernel, every representation. **Conditional on the embedding rescaling fix (§2.8c)** — see §10b.2 |
+| **The representation set** | 2026-08-26 | *"Drop SMILES from the list, add Avalon and ChemBERTa."* Final six: PDV, MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. Out: mol2vec and one-hot SMILES. Sort & Slice is fixed in place — a colleague's method. See §13.7 |
 | **Ten replicates in stage 1** | 2026-08-26 | *"Let's do the 10 reps for stage 1 then."* Takes the whole staged design to 37% of the old one instead of 26% (§13.1) |
 | **Both forms of grouped noise are run** | 2026-08-26 | *"For the skewed noise lets go with option C."* Groups get wider errors *and*, as a separate condition, groups get shifted errors. See §13.3 |
 | **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
@@ -473,7 +474,7 @@ cluster 2026-08-25.
 | SMILES | 0.806 | 0.803 | binary, no scaling needed |
 | **Graph embedding** | **0.872** | **−0.016** | **no** |
 | **mol2vec** | **0.868** | **0.009** | **no** |
-| Descriptor vector | — | 0.889 | **yes** |
+| PDV | — | 0.889 | **yes** |
 
 The two kernels agree to within 0.004 wherever the features are sane. On the two embeddings the
 gap is 0.88. And the one representation that *is* standardised is the best-performing cell in the
@@ -487,12 +488,12 @@ Three things. The radial basis needs all three.
 molecule's own minimum and maximum are never saved, so the damage cannot be undone downstream.
 Store the embedding values as they come out of the model.
 
-**2. Store as 32-bit floats, not bytes.** The descriptor vector already does exactly this. If byte
+**2. Store as 32-bit floats, not bytes.** PDV already does exactly this. If byte
 storage is kept for size, the scaling must be computed **per feature across the training set** and
 the constants saved — never per molecule.
 
 **3. Standardise per feature before the model sees it.** This is the part that would still be
-missing after fixing 1 and 2. Only the descriptor vector is z-scored today
+missing after fixing 1 and 2. Only PDV is z-scored today
 (`process_and_train.py:1800-1809`); the embeddings are handed over raw.
 
 Point 3 matters because of how the kernel is configured. It is `gpytorch.kernels.RBFKernel` with
@@ -501,13 +502,13 @@ Point 3 matters because of how the kernel is configured. It is `gpytorch.kernels
 embedding dimensions of differing spread, the widest few dominate the distance and the rest are
 invisible. Standardising is what makes a single shared lengthscale a reasonable choice.
 
-That also explains the control case cleanly: the descriptor vector goes through the radial basis
+That also explains the control case cleanly: PDV goes through the radial basis
 at 0.889, the best in the study, **because it is the one representation that gets standardised.**
 
 #### What this overturns
 
 On the Tanimoto evidence the embeddings carry the best signal of any representation except the
-descriptor vector — **better than the fingerprint**. The paper says the opposite everywhere.
+PDV — **better than the fingerprint**. The paper says the opposite everywhere.
 
 All four Bayesian variants fail on exactly these two representations, which is the entire
 48-configuration exclusion list. Every claim that learned embeddings are weak, that they cannot
@@ -763,7 +764,7 @@ its output is written per level, one column each.
 **What it produced.** Recomputed within each level, the paper's uncertainty finding reversed. The
 Gaussian process — the paper's example of a model with an explicit observation-noise term — came out
 at approximately zero at every level, because a single global noise term *cannot* be per-molecule.
-The genuine detector was a Bayesian network on the descriptor vector under subset-targeting noise.
+The genuine detector was a Bayesian network on PDV under subset-targeting noise.
 That is a mechanism-consistent result, not a rescue.
 
 **Three things that must carry into the re-run.**
@@ -1384,9 +1385,12 @@ Conclusion, or a broken bibliography.
 | `:193` | "Experiments that involved tracking uncertainty values were only run once." Most were run ten times |
 | `:571-573`, `:598`, `:660-669`, and throughout | The retired slope metric survives everywhere, including the Conclusion, where it is defined as *the* robustness metric of the paper |
 | `:234-238`, `:300-302`, `:503-528`, `:587`, `:667` | The expected calibration error is defined, tabulated and abbreviated, but you removed it from all three scripts. Those cells cannot be filled |
-| `:462`, `:493` vs `:567` | The descriptor vector is called both the most and the least noise-robust representation in the same section. Whichever the new data says, **one of these sentences is arguing against the other** and the structure has to change, not just the number |
+| `:462`, `:493` vs `:567` | PDV is called both the most and the least noise-robust representation in the same section. Whichever the new data says, **one of these sentences is arguing against the other** and the structure has to change, not just the number |
 | `:464` | Reports that only the variational configurations were excluded on the two embeddings. The fully Bayesian networks failed on exactly the same representations. That omission is load-bearing, because the paper's story is that the full transformation is the robust one |
 | Structure | Results then Conclusion. Journal of Cheminformatics expects a combined Results and discussion, plus Conclusions |
+| `:203` | Describes the representation set. **Rewrite for the new six** — mol2vec and one-hot SMILES are out, Avalon and ChemBERTa are in (§13.7) |
+| `:493` | "For SMILES, model choice explains over 91% of robustness variance, while on PDV, model choice explains 72%." SMILES has been dropped, so this illustration has no representation behind it. The underlying claim survives; the example must be rebuilt from whichever representation now sits at the extreme |
+| `:466` | "SMILES receiving the largest benefits from Bayesian transformations." Same reason — the representation is gone |
 | Bibliography | Broken outright — see §9.1 |
 
 ### Evaporates on regeneration — do not spend time on these now
@@ -1567,7 +1571,7 @@ replays and paired on the replicate seed:
 | SMILES | 0.8062 | 0.8025 | **+0.0037** (sd 0.0015) | 10 |
 | MHG-GNN | 0.8724 | −0.0158 | +0.8882 | 10 |
 | mol2vec | 0.8677 | 0.0087 | +0.8590 | 10 |
-| Descriptor vector | *(Tanimoto undefined)* | 0.8890 | — | 10 |
+| PDV | *(Tanimoto undefined)* | 0.8890 | — | 10 |
 
 Where the features are binary the two kernels are indistinguishable. Where they are the two learned
 embeddings the radial basis collapses — and that is the rescaling defect in §2.8c, verified in the
@@ -1970,7 +1974,7 @@ the radial-basis kernel uses. `process_and_train.py:971-975` (mol2vec), `:828-83
 **`:807-813` (ChemBERTa) — a third representation, not previously recorded.**
 
 **Three changes, and the radial basis needs all three** (§2.8c): stop the per-molecule rescaling;
-store float32; standardise per feature across the training set. Only the descriptor vector is
+store float32; standardise per feature across the training set. Only PDV is
 standardised today (`:1800-1809`), and it is the best-performing cell in the study.
 
 **Then re-test.** Whether the rescaling defect is what breaks the radial basis on the two learned
@@ -2401,7 +2405,7 @@ for the validation data?"*
 | | QM9 pipeline | Experimental pipeline |
 |---|---|---|
 | Embedding values as the model produces them | ❌ each molecule rescaled to fill 0–255 using its own smallest and largest value, then stored as bytes | ✅ returned as ordinary decimal numbers, no rescaling, no quantisation (`KIRBy/src/kirby/representations/molecular.py` — mol2vec `:1565`, MHG-GNN `:2074`, ChemBERTa `:2201`) |
-| Features put on a common scale before the model | ❌ only the descriptor vector (`process_and_train.py:1800-1809`) | ✅ every representation, fitted on the training fold and applied to the rest (`alternative_data_noise_robustness.py:882-884` for the tree and kernel models, `:967-970` for the neural ones) |
+| Features put on a common scale before the model | ❌ only PDV (`process_and_train.py:1800-1809`) | ✅ every representation, fitted on the training fold and applied to the rest (`alternative_data_noise_robustness.py:882-884` for the tree and kernel models, `:967-970` for the neural ones) |
 
 **Three consequences.**
 
@@ -2428,41 +2432,41 @@ signal as the rest. *Nearest twin* is the single representation it most duplicat
 
 | Representation | Solo score | Average similarity | Nearest twin | Similarity to twin |
 |---|---|---|---|---|
-| Graph kernel | 0.745 | 0.814 | Descriptor vector | 0.844 |
-| Descriptor vector | 0.729 | 0.823 | Mordred descriptors | 0.889 |
+| Graph kernel | 0.745 | 0.814 | PDV | 0.844 |
+| PDV | 0.729 | 0.823 | Mordred descriptors | 0.889 |
 | Atom pair | 0.727 | 0.820 | Mordred descriptors | 0.845 |
 | ECFP4 | 0.722 | 0.807 | Avalon | 0.839 |
-| Mordred descriptors | 0.713 | 0.825 | Descriptor vector | 0.889 |
+| Mordred descriptors | 0.713 | 0.825 | PDV | 0.889 |
 | Avalon | 0.704 | 0.808 | ECFP4 | 0.839 |
 | ChemBERT | 0.696 | 0.797 | SMI-TED | 0.831 |
-| GROVER | 0.693 | 0.793 | Descriptor vector | 0.825 |
+| GROVER | 0.693 | 0.793 | PDV | 0.825 |
 | SMI-TED | 0.671 | 0.801 | ChemBERT | 0.831 |
 
 The full run on the cluster covered fifteen representations and ranked them:
-graph kernel .745 · MHG-GNN .744 · ECFP4 .728 · descriptor vector .727 · atom pair .724 ·
+graph kernel .745 · MHG-GNN .744 · ECFP4 .728 · PDV .727 · atom pair .724 ·
 Mordred .721 · Avalon .714 · mol2vec .713 · topological torsion .700 · ChemBERT .696 ·
 GROVER .692 · SMI-TED .690 · ChemBERTa .689 · MolFormer .687 · GraphMVP .655.
 **No pair exceeded 0.9 similarity** — on this dataset the representations genuinely disagree.
 
 #### logD (5,028 molecules)
 
-Mordred .894 · MHG-GNN .889 · descriptor vector .882 · GROVER .868 · Avalon .865 · ECFP4 .860 ·
+Mordred .894 · MHG-GNN .889 · PDV .882 · GROVER .868 · Avalon .865 · ECFP4 .860 ·
 graph kernel .857 · mol2vec .850 · atom pair .848 · SMI-TED .844 · MolFormer .835 ·
 topological torsion .830 · ChemBERT .809 · ChemBERTa .786 · GraphMVP .782.
 
-**Heavily redundant, unlike hERG.** The most similar pair is Mordred and the descriptor vector at
+**Heavily redundant, unlike hERG.** The most similar pair is Mordred and PDV at
 0.967, and the top nine are all above 0.90 with each other. The final pool cut the descriptor
 vector, mol2vec, ChemBERTa, the graph kernel and atom pair.
 
 #### Caco-2
 
-Only one pair above 0.90 — the descriptor vector and Mordred at 0.907. Everything else genuinely
+Only one pair above 0.90 — PDV and Mordred at 0.907. Everything else genuinely
 distinct. Mordred and mol2vec were cut.
 
 #### QM9
 
 Final pool: Mordred, Avalon, SMI-TED, ECFP4, SELFormer, ChemBERTa, mol2vec, ChemBERT, GraphMVP,
-MolFormer. Cut: descriptor vector, GROVER, MHG-GNN, RDKit fingerprint, atom pair, MACCS.
+MolFormer. Cut: PDV, GROVER, MHG-GNN, RDKit fingerprint, atom pair, MACCS.
 The recorded reason is that the redundancy sits in the strong fingerprints, in two tight clusters,
 **not in the pretrained embeddings** — so the cut removed duplicate fingerprints and kept one
 representative of each learned family.
@@ -2475,7 +2479,7 @@ rule as the paper. Scored as fraction of variance explained, higher is better.
 | Representation | Score | ± | Family |
 |---|---|---|---|
 | Mordred descriptors | 0.912 | 0.010 | descriptor |
-| **Descriptor vector** | **0.903** | 0.011 | descriptor |
+| **PDV** | **0.903** | 0.011 | descriptor |
 | GROVER | 0.899 | 0.010 | learned, graph |
 | **MHG-GNN** | **0.889** | 0.033 | learned, graph |
 | **Avalon** | **0.884** | 0.013 | fingerprint |
@@ -2507,7 +2511,7 @@ earlier reading of it here had the ranking upside down and is corrected above.
 - **ChemBERT is the weakest of the transformers.** On QM9 it scores 0.788, *below* mol2vec's 0.803.
   If a transformer is wanted, SMI-TED (0.826), SELFormer (0.818) and ChemBERTa (0.812) all beat it.
 - **Mordred is the strongest single representation on QM9 but adds little as a factor level.** It is
-  the same family as the descriptor vector already in use, and on logD the two agree at 0.967 — the
+  the same family as PDV already in use, and on logD the two agree at 0.967 — the
   most redundant pair in that whole study.
 - **Avalon is the strongest genuinely-new option.** At 0.884 it beats ECFP4 (0.816) on QM9, it is a
   different kind of fingerprint, and on hERG Ki its closest match is ECFP4 at 0.839 — below the
@@ -2517,52 +2521,48 @@ earlier reading of it here had the ranking upside down and is corrected above.
   storage defect (§13.6).
 - **mol2vec is the weakest learned representation** and was cut from three of the four pools.
 
-#### 🔴 The representation set — where it stands 2026-08-26
+#### ✅ SETTLED 2026-08-26 — the representation set
 
-**Fixed:** Sort & Slice stays. It is a colleague's method and the paper describes it as the
-collision-free counterpart to ECFP4, so it is in regardless of redundancy.
+*"Drop SMILES from the list, add Avalon and ChemBERTa."*
 
-**Author is minded to:** drop mol2vec, add Avalon and ChemBERTa.
+**The six representations for the re-run, both studies:**
 
-**Open:** whether raw SMILES stays. Two things bear on it.
+| Representation | QM9 score | Family | Status |
+|---|---|---|---|
+| PDV | 0.903 | physicochemical descriptors | unchanged — the primary representation |
+| MHG-GNN | 0.889 | learned, graph | unchanged |
+| **Avalon** | **0.884** | fingerprint, path and feature based | **NEW** |
+| ECFP4 | 0.816 | fingerprint, circular | unchanged |
+| **ChemBERTa** | **0.812** | learned, sequence | **NEW** |
+| Sort & Slice | — | fingerprint, collision-free circular | unchanged — **fixed in place**, it is a colleague's method and the paper describes it as the collision-free counterpart to ECFP4 |
 
-The paper makes two claims about SMILES and both are load-bearing rather than incidental. It is the
-representation where **model choice explains the most variance in robustness — over 91%, against 72%
-for the descriptor vector**, and it is the representation that **gains most from making a neural
-network Bayesian**. Both numbers are from the contaminated runs and are being regenerated, but the
-shape of the claim is what matters: SMILES is the extreme end of the paper's own spectrum.
+**Out:** mol2vec (0.803, the weakest learned representation, cut from three of four pruning pools)
+and one-hot SMILES.
 
-That spectrum is the interpretable axis underneath the first research question — **how much chemistry
-is pre-computed into the representation before the model sees it.** A one-hot character matrix is
-the zero point: no chemistry at all, so the model has to supply everything. Cutting it removes the
-zero point and leaves the axis with no anchor.
+Scores are from KIRBy's own survey on 9,978 QM9 molecules under five-fold scaffold-group CV, best of
+five models. They rank representations; they do not transfer as numbers to this study.
 
-Adding ChemBERTa makes that stronger rather than redundant. It reads the same SMILES string and has
-learned chemistry from pretraining, so **SMILES against ChemBERTa is a controlled pair — same input,
-one raw and one learned.** No other pair in the set gives that.
+**Why this set.** Four distinct families instead of two overlapping fingerprint families plus a raw
+string. Every member is individually competent on QM9 — the weakest is 0.812, against 0.149 for the
+graph kernel and −0.007 for Uni-Mol, both of which were considered and rejected. Count is unchanged
+at six, so the grid does not grow.
 
-**Nothing in the model roster depends on raw SMILES.** The sequence models that require it are not in
-the eleven-model roster and no job script runs them, so cutting SMILES would not orphan a model.
+**Two things that follow, and neither is optional.**
 
-**Learned sequential embeddings, if one is wanted.** These are the models that read a SMILES string
-and return a vector. On QM9: SMI-TED 0.826, SELFormer 0.818, ChemBERTa 0.812, ChemBERT 0.788,
-MolFormer 0.772. SMI-TED is best but is not implemented in the QM9 pipeline; SELFormer reads a
-different string format. **ChemBERTa is within 0.014 of the best and is already implemented in both
-repositories**, so it is the only one available without new code.
+**1. Both new representations depend on chat C.** ChemBERTa is already implemented in this pipeline
+but carries the same per-molecule rescaling defect as the other learned representations, so it is
+unusable until that is fixed. Avalon is an ordinary RDKit fingerprint and needs adding to both
+pipelines; it is binary, so it needs no rescaling and no standardisation.
 
-#### The two candidate sets
+**2. Every claim the paper makes about SMILES comes out.** There are two, both in §9's
+"survives regeneration" list now:
+- `paper.tex:493` — model choice explains over 91% of robustness variance on SMILES against 72% on
+  PDV. **This was the paper's sharpest single illustration of its central claim**, and there is no
+  longer a representation at that end of the scale. The claim itself survives; the illustration has
+  to be rebuilt from whichever representation now sits at the extreme, which the re-run decides.
+- `paper.tex:466` — SMILES gains most from making a neural network Bayesian.
 
-| | Seven representations | Six representations |
-|---|---|---|
-| | ECFP4, descriptor vector, Sort & Slice, **Avalon**, MHG-GNN, **ChemBERTa**, SMILES | ECFP4, descriptor vector, Sort & Slice, **Avalon**, MHG-GNN, **ChemBERTa** |
-| Families | 3 fingerprints, 1 descriptor, 1 learned graph, 1 learned sequence, 1 raw string | 3 fingerprints, 1 descriptor, 1 learned graph, 1 learned sequence |
-| Cost | +17% on the whole grid against the current six | same as now |
-| What it buys | keeps the zero point of the chemistry axis, and the raw-against-learned pair | cheaper |
-
-🔴 **The decision.** Add one transformer embedding, add none, or swap one out for one. The cheapest
-option by a wide margin is ChemBERTa, because it is already implemented in **both** repositories and
-has never been used — fixing the storage makes it available with no new code. The cost of any
-addition is that it multiplies the whole grid.
+`paper.tex:203` describes the representations and must be rewritten for the new set.
 
 ### 13.8 Citations for the paper — make them reachable
 
