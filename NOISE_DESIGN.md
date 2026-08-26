@@ -120,12 +120,14 @@ perturbed continuous label is nothing but magnitude.
 | 1 | **Gaussian** | Every label nudged by a similar amount | The reference case, and what both direct predecessors used, so results stay comparable to theirs | `τ` | — |
 | 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | ν = 10, 5, 3 |
 | 3 | **Laplace** *(optional, QM9 only)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6 | `τ` | fixed |
-| 4 | **Grouped** | Whole scaffold groups get wider errors | **Best-evidenced of the six.** 62% of real measurement variance is between laboratories (§3.3). The only one where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected fraction ≈ 0.2 |
+| 4a | **Grouped — wider** | Whole scaffold groups get wider errors, still centred on the true value | **Best-evidenced of the set.** Within-laboratory error must be multiplied by about three to reach between-laboratory error (§3.3). The only zero-mean condition where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected **molecule** fraction ≈ 0.2 |
+| 4b | **Grouped — shifted** ✅ | Whole scaffold groups have their labels pushed in one direction by a constant | 62% of real measurement variance sits **between** laboratories (§3.3) — and that describes laboratory *averages* differing, which is an offset, not a widening. Added 2026-08-26; see §2a | `τ` | ρ = 0.62, from the source |
 | 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | p = 1%, 5%, 10%; λ = 3 |
 | 6 | **Censoring** ✅ | Values past the assay limit recorded as the limit | The most *prevalent* real mechanism (§3.5), and the only one that is not zero-mean | **cannot be dose-matched** — separate axis | fraction censored: 10%, 25%, 40% |
 
-Strategies 1–5 are zero-mean and dose-matched. Strategy 6 is neither, which is why it needs
-its own axis and its own figure.
+Strategies 1–5 are dose-matched. 1, 2, 3, 4a and 5 are zero-mean; **4b is zero-mean in
+expectation but not in any one run — that asymmetry is its mechanism, not a defect**. Strategy 6
+is neither dose-matched nor zero-mean, which is why it needs its own axis and its own figure.
 
 ### The exact algebra
 
@@ -134,7 +136,8 @@ its own axis and its own figure.
 | Gaussian | `s = τ` |
 | Student-t, ν d.f. | `s = τ·√((ν−2)/ν)` — **requires ν > 2**, below which the variance is undefined and "same amount of noise" stops meaning anything |
 | Laplace | `s = τ/√2` |
-| Grouped | `s_low = τ / √(1 − f + f·λ²)`, `s_high = λ·s_low`, where `f` is the fraction of **molecules** in affected groups |
+| Grouped — wider | `s_low = τ / √(1 − f + f·λ²)`, `s_high = λ·s_low`, where `f` is the fraction of **molecules** in affected groups |
+| Grouped — shifted | `ε_i = √ρ·τ·b_{g(i)} + √(1−ρ)·τ·e_i`, with `b_g` and `e_i` unit draws from the shape. No solver step — the two variances sum to `τ²` by construction. See §2a |
 | Outlier | `s_base = τ / √(1 + p(λ² − 1))`, contaminated points get `λ·s_base` |
 
 ### Parameter values, each sourced
@@ -158,6 +161,80 @@ its own axis and its own figure.
    assignment**, not assume it equals the group fraction. With evenly-sized simulated
    clusters the two coincide; with real Murcko scaffolds, which are very unevenly sized,
    they will not.
+
+### 2a. Grouped noise — the algebra, and two rules the real scaffolds force
+
+Written 2026-08-26 by chat B, closing the 🔴 TODO left for chats A and B in `RERUN_PLAN.md` §13.3.
+**Both implementations must follow this.**
+
+#### The shifted condition
+
+Every group *g* receives a constant offset; every molecule receives its own error on top.
+
+> `ε_i = √ρ · τ · b_{g(i)}  +  √(1 − ρ) · τ · e_i`,   with `b_g`, `e_i` unit draws from the shape
+
+The two variances sum to `τ²` by construction, so this condition is dose-matched to the same `τ`
+as the other four **without a solver step**. `ρ` is the share of total variance carried by the
+group-level term, and it comes from the source rather than from a judgement: **Bentz et al. (2013)
+Table 7** gives laboratory 62%, laboratory × experiment 20%, residual error 10%, cell line 8%.
+
+**ρ = 0.62.** (Recorded alternative, not taken: 62/92 = 0.674, excluding the cell-line term on the
+grounds that it is not a provenance effect. The difference is well inside the run-to-run spread
+below, so it is not worth an extra condition.)
+
+**Do not centre the offsets.** This condition is not zero-mean in any one run, and that is exactly
+the mechanism under test — the study's emerging result is that error pushing in one direction hurts
+far more than error that scatters. Censoring shows that for a whole dataset; grouped-shifted shows
+it for a chemical family, at matched amount.
+
+It also closes a gap the wider condition has: the affected-group fraction has no published number
+and has to be chosen. Under the shifted version there is nothing to choose.
+
+#### Rule 1 — select groups by molecule fraction, never by group fraction
+
+Real Murcko scaffolds are very unevenly sized, so a fraction of *groups* does not control who gets
+hit. **Measured on the first 10,000 molecules of `data/QM9/raw/gdb9.sdf`** (chat B, 2026-08-26):
+855 distinct scaffolds, **32.2% of molecules share one empty — acyclic — scaffold**, and 523
+scaffolds are singletons. Over 200 draws at a nominal group fraction of 0.2:
+
+| Selection rule | Realised affected molecule fraction | Realised dose (target 1.0) |
+|---|---|---|
+| A fraction of **groups** | 0.067 – 0.551 (SD 0.135) | 0.964 – 1.030 |
+| Until a **molecule** fraction is reached | 0.200 – 0.515 (SD 0.108) | 0.975 – 1.035 |
+
+Dose matching survives either way, because the solver uses the *realised* fraction — but who gets
+hit swings eightfold under the group rule, and that is a property of the condition, not noise in it.
+
+So: shuffle the groups, add them one at a time, skip any group that would take the cumulative
+molecule fraction further from `f` than stopping would, and stop at the closest approach. **Write
+the realised fraction to `affected_molecule_fraction` on every row** (`RERUN_PLAN.md` §5.2 already
+requires the column; nothing populated it).
+
+#### Rule 2 — the empty Murcko scaffold is not a group
+
+Acyclic molecules become **singleton groups**. Otherwise a single offset draw moves a third of QM9
+at once. Measured over 200 draws at ρ = 0.62, target dose 1.0:
+
+| Grouping | Groups | Realised dose | Mean label shift |
+|---|---|---|---|
+| Raw Murcko, one empty group | 855 | 0.795 – 1.493 (**SD 11%**) | −0.63 to +0.75 |
+| Empty scaffold split into singletons | 4,070 | 0.904 – 1.187 (SD 4.6%) | −0.25 to +0.25 |
+
+Also record the group count and the largest group's share of molecules, per dataset and replicate.
+
+#### Rule 3 — the flat-dose gate is about the solved scale, not one realisation
+
+Grouped-shifted has few effective degrees of freedom, so its realised dose cannot meet a ±0.5%
+per-run tolerance on QM9 by construction. **Fix the population dose and record what was
+delivered** — the same ruling already made for Student-t ν = 3 in §5.1b, so the rule stays uniform
+across conditions rather than special-casing one. Concretely, gate 1 of `RERUN_PLAN.md` §8 asserts:
+
+1. `unit_dose × solved_scale == τ` **exactly**, for every dose-matched condition; and
+2. the **mean** realised dose over at least 20 seeds is within tolerance of `τ`, and of every other
+   condition's.
+
+The per-run spread — roughly ±5% for grouped-shifted on QM9 — is then a number the Methods states,
+not a check that fails.
 
 ### What is dropped, and why
 
@@ -1010,6 +1087,26 @@ This is the right split and it is currently unused — `--distribution` is hard-
 are unreachable. Building the redesign on this existing separation means the shape and the
 targeting are independently selectable, which is exactly what dose-matching needs.
 
+### 6.0a The specification has TWO implementations — this document covers both
+
+Added 2026-08-26 by chat B. As written this section named `rust/src/main.rs` and nothing else,
+which is the same omission that let the two injectors drift apart unnoticed for the life of the
+project (`RERUN_PLAN.md` §2.3).
+
+| Implementation | File | Produces |
+|---|---|---|
+| Rust | `rust/src/main.rs` | QM9 — every main-pipeline result |
+| Python | `NoiseInject/noiseInject/core.py` | LogD, Caco-2, hERG — every experimental result **and every uncertainty number** |
+
+The Python side additionally reaches the results through two callers that must move with it:
+`KIRBy/tests/alternative_data_noise_robustness.py` (which imports the injector directly, not
+through `noise_spec`) and `KIRBy/src/kirby/noise_spec.py`.
+
+**Agreement between the two is an enforced gate, not an assumption** — §6.3 item 6, and gate 2 of
+`RERUN_PLAN.md` §8. It cannot be an element-wise check: Rust's `StdRng` and numpy's generator
+produce different streams, so identical draws are impossible and a check written that way would be
+quietly disabled. It compares statistics on the same labels, target, groups and seed.
+
 ### 6.1 DELETE (phase 1, no replacement)
 
 **`rust/src/main.rs`:**
@@ -1027,6 +1124,8 @@ targeting are independently selectable, which is exactly what dose-matching need
 
 | Delete | Why |
 |---|---|
+| **`NoiseInjectorRegression`'s six strategies** — `legacy`, `quantile`, `threshold`, `outlier` (z-score selection), `hetero`, `valprop`, `NoiseInject/noiseInject/core.py:87-211` | Four have a premise that was directly tested and disproved (§3.2); `outlier`'s selection rule is replaced by random selection; `legacy` is replaced by `uniform`/`gaussian`. Full clean break, author's decision 2026-08-26 |
+| **`calibrate_sigma` and `calibrate_multiple_sigmas`**, `NoiseInject/noiseInject/calibration.py:16`, `:82` | A binary search on **mean \|Δy\| / SD** — the *first* moment. The design controls the second. At identical RMS dose, mean\|ε\|/RMS is 0.797 for Gaussian but 0.642 for Student-t ν=3, so calibrating this way hands the heavy-tailed conditions up to **24% more actual noise** at the same nominal level. It also re-uses one injector across its 20 iterations (`:49`, `:67`), so the objective it searches is stochastic. The closed-form solver replaces it: exact, deterministic, and identical to the Rust side. The classification calibrators stay |
 | `scripts/noise_strategy_params.json` | Never passed to the binary (`process_and_train.py:1635` omits `--strategy_params`). A latent trap: if anyone ever wired it up, its `base_sigma: 0.1` would silently flatten every value-proportional curve |
 | `--strategy-params` argument, `process_and_train.py:260` | Dead argument for the dead file |
 | `scripts/generate_paper_figures.py` | The v1 script built on the retired slope metric |
@@ -1071,6 +1170,28 @@ deviation, computed before injection.
 units, realised dose as a fraction of label spread, and the affected-molecule fraction. No
 figure should ever again be un-traceable to the amount of noise actually delivered.
 
+**Step 6 — the same five steps in Python**, in `NoiseInject/noiseInject/core.py`, mirroring the
+Rust separation of shape from targeting so the two stay comparable line by line:
+
+```
+NoiseInjectorRegression(strategy=..., distribution=..., random_state=..., **params)
+
+  distribution  gaussian | student_t (nu > 2, rejected at construction) | laplace
+  strategy      uniform | grouped_wider | grouped_shifted | outlier | censoring
+```
+
+- `scale_map(y, groups, **p) -> (scales, affected_fraction)` — draws only for the two selection rules
+- `unit_dose(scales, **p) -> G` — `√(mean(scale²)) × shape_unit_sd`; `solved = τ / G`
+- `inject_verbose(y, dose, groups=, reference=) -> InjectionResult` — carries every provenance field
+  in `RERUN_PLAN.md` §5.2, and unpacks as `(y_noisy, noise_scale, epsilon)` for existing callers
+- `noise_scale(y, dose, reference=, groups=)` — **keep this surface.** It scores held-out molecules
+  against the pattern the *training* labels were exposed to, and the uncertainty confound control is
+  built on it. Under the new set it is constant for the three shape-only conditions, so the "where is
+  the noise" question is **undefined** there rather than answered with zero; the result flags that
+  (`scale_is_degenerate`) instead of returning a silent constant
+- `CONDITIONS` — one registry name per run condition (`gaussian`, `student_t_nu5`, `grouped_shifted`,
+  `outlier_p05`, `censoring_25`, …), so a job script, a results row and a figure label agree
+
 ### 6.3 VERIFY (phase 3, before any cluster time)
 
 1. **Against the reference implementation.** `rust/reference/noise_arms.rs` reproduces every
@@ -1084,6 +1205,18 @@ figure should ever again be un-traceable to the amount of noise actually deliver
    so R² must match the existing σ=0 numbers.
 5. **Student-t reduces to Gaussian at large ν.** At ν = 200 the results must be
    indistinguishable from the Gaussian type.
+6. **The two implementations agree.** Same labels, same target, same group assignment, same seed —
+   Rust and Python compared on realised dose, unit dose `G`, the fraction of labels off by more than
+   3τ, the median absolute error, the worst-hit 5%'s share of the total noise energy, and the
+   realised affected-molecule fraction. Tolerances: mean dose over ≥ 20 seeds within **0.5%** of
+   target and of each other; **3%** for Student-t ν = 3, where the fourth moment is infinite and the
+   sample statistic is unstable by construction (§5.1b); shape diagnostics within 10% relative.
+   Grouped-shifted reports its per-run spread rather than being held to the per-run tolerance (§2a
+   rule 3). Executable: `scripts/crosscheck_injectors.py`, which exits non-zero on any failure.
+7. **Zero dose records exactly zero** — not a small number. The negative control the old
+   reconstruction never had.
+8. **The recorded noise reconstructs the label exactly**: `y_clean + epsilon == y_noisy`, every
+   condition, every level.
 
 ### 6.4 THE NOISE LEVELS — revised, and this supersedes the old σ ladder
 
