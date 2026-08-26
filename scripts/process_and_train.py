@@ -37,9 +37,20 @@ from gensim.models import word2vec
 from mol2vec.features import mol2alt_sentence, MolSentence, sentences2vec
 
 import sys
-sys.path.append('../models/')
-sys.path.append('../preprocessing/')
-sys.path.append('../results/')
+import torch  # used at module level (device, below) and only ever arrived here
+             # via the `from models import *` star-import a few lines down, which
+             # made this module importable ONLY from the scripts/ directory.
+
+# Anchored to this file, not to the working directory. They were relative
+# ('../models/'), so importing this module from anywhere but scripts/ silently
+# failed to find the package and then died at `device = torch.device(...)` with
+# a bare NameError.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for _sub in ('models', 'preprocessing', 'results'):
+    _p = os.path.join(_ROOT, _sub)
+    if _p not in sys.path:
+        sys.path.append(_p)
 
 from models import *
 from distance_metrics import *
@@ -1387,6 +1398,25 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 f"parsed {len(x_data)} feature rows from {entry_count} records "
                 f"(representation '{rep}')"
             )
+
+        # Every molecule of one representation has the same feature width. A row
+        # that does not is a record read at the wrong offset, and this is the
+        # earliest point it can be named. Without it the mismatch reaches
+        # np.vstack, which reports a shape error with no entry number — and only
+        # when the widths happen to differ. Two misaligned records of the SAME
+        # wrong width would have gone through silently.
+        widths = {len(row) for row in x_data}
+        if len(widths) > 1:
+            first_bad = next(
+                i for i, row in enumerate(x_data) if len(row) != len(x_data[0])
+            )
+            raise RuntimeError(
+                f"entry {first_bad} decoded to {len(x_data[first_bad])} features but entry 0 "
+                f"decoded to {len(x_data[0])} (representation '{rep}'). The record stream is "
+                f"misaligned — a record before this one was written short or read at the wrong "
+                f"offset."
+            )
+
         if rep in CONTINUOUS_REPS:
             x_data = np.vstack(x_data).astype(np.float32)
         else:

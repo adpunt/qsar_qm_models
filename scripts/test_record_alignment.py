@@ -42,7 +42,10 @@ def record(smiles, y_clean, y_written, fingerprint=None, short=False):
     out += struct.pack("f", y_clean)             # raw label
     out += struct.pack("f", y_written)           # written (standardised) label
     if fingerprint is None:
-        fingerprint = bytes(FP_BYTES)
+        # Not zeros: a zero-filled tail makes the next record's length prefix
+        # read as 0, which decodes cleanly and hides the misalignment. Real
+        # fingerprints are not all zeros.
+        fingerprint = bytes((i * 13 + 7) % 256 for i in range(FP_BYTES))
     out += fingerprint[: FP_BYTES // 2] if short else fingerprint
     return out
 
@@ -92,6 +95,7 @@ def a_short_record_raises_instead_of_misaligning():
     except RuntimeError as e:
         msg = str(e)
         assert "entry" in msg or "consumed" in msg, f"unhelpful message: {msg}"
+        assert "misaligned" in msg or "offset" in msg, f"unhelpful message: {msg}"
         return
     raise AssertionError(
         "a short record was parsed without complaint — the reader is silently "

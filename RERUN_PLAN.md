@@ -390,9 +390,15 @@ wrong offset.
 
 4. **The Python reader guessed.** `parse_mmap`'s bare `except: continue` is gone. These records
    have no delimiters, so once a read has gone wrong the offset is unrecoverable and `continue`
-   only stops anyone finding out. It now raises, naming the entry and the byte offset. Two
-   assertions were added after the loop: the file must be consumed **exactly**, and the parsed row
-   count must equal the record count.
+   only stops anyone finding out. It now raises, naming the entry and the byte offset. Three
+   assertions were added after the loop: the file must be consumed **exactly**, the parsed row
+   count must equal the record count, and **every feature row must be the same width**.
+
+   The width check earned its place immediately. Writing the test showed that a short record does
+   not always trip the first two — it can produce rows of differing width that reach `np.vstack`,
+   which reports a shape error naming no entry and only when the widths happen to differ. Two
+   records misaligned to the *same* wrong width would have gone through silently. The width check
+   names the first bad entry before any of that.
 
 5. **🔴 A representation the writer emits and the reader has never read.** Found by the new
    consumption assertion. The Rust writer emits 256 bytes for `morgan`; `parse_mmap` has no
@@ -1040,21 +1046,66 @@ every task of that run. Check before submitting.
 Consequence for the benchmark above: the quantile forest could not be tested. The mechanism should
 carry over from the ordinary forest, but that is an inference and should be labelled as one.
 
-#### 3.4.5 The check is now a script
+#### 3.4.5 ✅ 2026-08-26 — parity is now structural, not checked
 
-`scripts/audit_pipeline_parity.py` builds each model **both ways against the installed libraries**
-and diffs the resulting parameters, so a keyword left unset shows up as whatever the library falls
-back to. That is what catches the learning-rate and feature-sampling cases. It also reports every
-package version, and closes with the differences no automated diff can see.
+The first guard was the table above. It went stale.
+
+The second was `scripts/audit_pipeline_parity.py` in its original form, which restated both
+pipelines' parameters as hand-typed literals. **It went stale inside twenty-four hours**: its
+experimental column still said the quantile forest had 100 trees and that XGBoost left the
+learning rate unset, hours after both were fixed. A checker that restates what it checks is a
+third copy to keep in sync.
+
+**What was built instead.** `models/model_defaults.py` is now the single source of truth for every
+default the two pipelines share — the six tree, kernel and boosting models, the Gaussian process,
+both neural architectures, the training and early-stopping constants, and the Bayesian and
+variational priors. **Both pipelines import it.** `models/models.py` reads it in each of its
+`params_source == 'default'` branches; `alternative_data_noise_robustness.py` resolves the
+`qsar_qm_models` checkout from `$QSAR_QM_MODELS_ROOT`, a sibling directory, or one of the two known
+cluster paths, and **raises if it cannot find one** — no vendored copy and no silent fallback,
+because a second copy going quietly stale is the defect, not the fix. Every uncertainty job script
+already runs `. <qsar_qm_models>/setup.sh`, so the checkout is present by construction.
+
+Drift is now impossible rather than detectable: there is one copy of each number.
+
+**What the audit script does now.**
 
 ```bash
-python scripts/audit_pipeline_parity.py --strict   # wire this into the preflight
+python scripts/audit_pipeline_parity.py --strict      # preflight check 0
+python scripts/audit_pipeline_parity.py --self-test   # proves --strict bites
 ```
 
-**What it cannot see, and what therefore still needs a human:** representation identity. No
+1. Loads the spec **through both pipelines** — importing `models.py` the way QM9 does, and loading
+   the experimental module from its own file the way `preflight.sh` does — and fails unless both
+   report the same content hash.
+2. Builds every model from that spec **with the installed libraries** and diffs the effective
+   parameters against `scripts/model_params_baseline.json`. This is the library-drift check: an
+   upgrade that moves a default we do not pin appears here rather than as a changed result months
+   later.
+3. Asserts the facts a parameter diff cannot see — that ngboost's `MLE` is still `LogScore`, that
+   `natural_gradient` still defaults to `True`, which optimiser will actually fit the Gaussian
+   process, and that **no job script passes `--use_best_params`** (that flag loads hyperparameters
+   from a JSON, which the experimental side cannot do at all, so a job on that path is audited by
+   nothing).
+4. Reports every package version, and closes with the manual checklist.
+
+**Executed 2026-08-26**, on this laptop, against both checkouts:
+
+```
+canonical    models/model_defaults.py           version 1.0.0  hash aa0368c86eb6
+QM9          models/models.py                -> hash aa0368c86eb6   MATCH
+experimental alternative_data_noise_robustness.py -> hash aa0368c86eb6   MATCH
+SUMMARY: 0 problem(s), 0 missing package(s)
+```
+
+`--self-test` perturbs the spec on disk — the XGBoost learning rate back to 0.3, the quantile
+forest back to 100 trees — confirms `--strict` fails on each, and restores the file. That is the
+check that fails if the fix is removed.
+
+**What it still cannot see, and therefore still needs a human:** representation identity. No
 parameter diff would ever have caught the fingerprint being the wrong function — that took reading
-the binding in the crate source. Section 3.4.1 is the manual half and has to be re-checked by hand
-whenever the featurisers change.
+the binding in the crate source. §3.4.1 is the manual half, it is printed at the end of every audit
+run, and it has to be re-checked by hand whenever the featurisers change.
 
 
 ## 4. Decisions I need from you
@@ -1119,10 +1170,14 @@ two have been applied and one is answered by measurement:
   tree count buys +0.003 R², inside the seed spread — the feature setting was doing the work.
 - The forest feature setting moved to decision 3c below, because the benchmark contradicted the
   original instruction.
-- **Repeat seeds on the experimental side remain open and are the one that costs money.** There
-  are none today: one fit per cell, seed pinned. Folds are a partition, not repeats, so nothing
-  there estimates run-to-run variance (§3.3). Without them that variance decomposition has no
-  honest residual term. Three repeats would show the spread.
+- ✅ **Repeat fits on the experimental side — SETTLED 2026-08-26: keep one fit per cell**, seed
+  pinned at 42. The author's call, against my recommendation of three, and it is the cheap
+  direction. **What the paper now has to say, because it is no longer optional:** the experimental
+  variance decomposition has **no estimable residual term**, and no experimental model-vs-model
+  comparison carries a run-to-run error bar. The five folds are a partition, not repeats, so their
+  spread mixes randomness with scaffold difficulty and cannot stand in for one (§3.3). QM9 keeps
+  its ten repetitions, so the two studies are asymmetric here on purpose. Recorded in the audit
+  script's manual checklist so it cannot be forgotten at writing time.
 
 
 **Decision 3c — four alignment calls the audit and the benchmark opened.**
