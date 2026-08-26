@@ -488,12 +488,25 @@ def audit_assumptions():
             return True, f'fits with OMP_NUM_THREADS={threads}'
         how = ('SEGFAULT' if r.returncode in (-11, 139)
                else f'exit {r.returncode}')
-        # Is one thread the cure? That tells the author what to do about it.
-        env = dict(os.environ, OMP_NUM_THREADS='1')
-        r1 = subprocess.run([sys.executable, '-c', code], capture_output=True,
-                            text=True, env=env)
-        cure = ('OMP_NUM_THREADS=1 fixes it'
-                if r1.returncode == 0 else 'OMP_NUM_THREADS=1 does NOT fix it')
+        # What cures it? Try the thread pins together, not just OMP -- the
+        # experimental pipeline sets MKL_NUM_THREADS as well, and pinning one
+        # while the other stays at 4 does nothing. Reporting "OMP=1 does not
+        # fix it" on that basis would send the author the wrong way.
+        pins = [
+            {'OMP_NUM_THREADS': '1'},
+            {'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'},
+            {'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1',
+             'OPENBLAS_NUM_THREADS': '1', 'VECLIB_MAXIMUM_THREADS': '1',
+             'NUMEXPR_NUM_THREADS': '1'},
+        ]
+        cure = 'nothing tried fixes it — the environment needs one OpenMP runtime'
+        for pin in pins:
+            env = dict(os.environ, **pin)
+            if subprocess.run([sys.executable, '-c', code],
+                              capture_output=True, text=True,
+                              env=env).returncode == 0:
+                cure = 'fixed by ' + ' '.join(f'{k}={v}' for k, v in pin.items())
+                break
         return False, (f'{how} with OMP_NUM_THREADS={threads}; {cure}')
     check('Gaussian process fits with boosting loaded', _gp_after_boosting,
           'LAUNCH BLOCKER for every Gaussian-process task on both pipelines. Both '

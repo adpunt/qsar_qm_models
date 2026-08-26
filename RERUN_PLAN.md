@@ -792,11 +792,16 @@ Loading both and then running a threaded linear-algebra kernel crashes.
 | unset (what QM9 does) | **SEGFAULT** |
 | `OMP_NUM_THREADS=4` — what the experimental pipeline already sets at `:3` | **SEGFAULT** |
 | `OMP_NUM_THREADS=2` | **SEGFAULT** |
-| `OMP_NUM_THREADS=1` | ✅ fits |
+| `OMP_NUM_THREADS=1`, from a clean environment | ✅ fits |
+| `OMP_NUM_THREADS=1` **alone**, when `MKL_NUM_THREADS` is already 4 | **SEGFAULT** |
+| `OMP_NUM_THREADS=1` **and** `MKL_NUM_THREADS=1` | ✅ fits |
 | `KMP_DUPLICATE_LIB_OK=TRUE` | **SEGFAULT** — the usual macOS workaround does not help |
 
 So the experimental pipeline's existing thread pin does **not** protect it, and QM9 has no pin at
-all.
+all. Note the third row: the experimental pipeline sets **both** `OMP_NUM_THREADS` and
+`MKL_NUM_THREADS` to 4 (`:3-4`), and pinning only the first while the second stays at 4 does
+nothing. Anyone reaching for a quick thread pin has to set both, and the audit now says which
+combination actually cured it rather than testing one and reporting a misleading failure.
 
 **Not fixed in either pipeline, deliberately.** Pinning to one thread costs every tree fit its
 parallelism across the whole grid, and the real fix is one OpenMP runtime in the environment —
