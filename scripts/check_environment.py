@@ -290,8 +290,9 @@ def probe(name, fn, failures, resource_failures=None):
 
 
 def check_qm9(models, failures, resource_failures):
-    print("QM9 roster (models/models.py imports every backend unguarded, so this")
-    print("also proves the module itself is importable in this interpreter)")
+    print("QM9 roster -- each model's backend is imported and the estimator constructed.")
+    print("NOTE: this does NOT import models/models.py itself. That import costs about a")
+    print("minute, so it is behind --deep and belongs in the preflight, not in every task.")
 
     unknown = [m for m in models if m not in QM9_MODELS]
     if unknown:
@@ -359,6 +360,28 @@ def check_validation(failures):
     print()
 
 
+def check_models_module(failures):
+    """Import models/models.py for real.
+
+    Every backend in that file is imported unguarded at module scope, so this
+    is the single check that proves the training code can start at all. It is
+    NOT part of the per-task guard: it costs about a minute, and 390 tasks
+    paying that is seven CPU-hours to learn something one preflight run
+    establishes once.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+
+    def _import():
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        importlib.import_module("models.models")
+
+    print("deep check")
+    probe("models.models imports", _import, failures)
+    print()
+
+
 def audit_roster():
     """Every label generate_scripts.py can emit must be a key of QM9_MODELS.
 
@@ -402,6 +425,9 @@ def main():
                     help="Only check these models. Default: the whole QM9 roster.")
     ap.add_argument("--validation", action="store_true",
                     help="Also check the KIRBy validation roster.")
+    ap.add_argument("--deep", action="store_true",
+                    help="Also import models/models.py itself (~1 minute). Use in the "
+                         "preflight, not in a per-task guard.")
     ap.add_argument("--audit-roster", action="store_true",
                     help="Check that every model the job generator can emit is known here, "
                          "and exit. Nothing is imported.")
@@ -421,6 +447,9 @@ def main():
     check_declared_requirements(failures, requested)
 
     check_qm9(requested, failures, resource_failures)
+
+    if args.deep:
+        check_models_module(failures)
 
     if args.validation:
         check_validation(failures)

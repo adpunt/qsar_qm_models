@@ -142,13 +142,21 @@ if [ -z "${{CONDA_PREFIX:-}}" ]; then
     echo "ERROR: setup.sh did not activate an environment (CONDA_PREFIX unset)."
     exit 2
 fi
-case "$(command -v python)" in
-    /apps/system/*)
-        echo "ERROR: running the system Anaconda at $(command -v python)."
-        echo "       setup.sh did not activate 'env_test' (ENV_NAME in setup.sh). Refusing to run."
+PY_PATH="$(command -v python)"
+case "$PY_PATH" in
+    "$CONDA_PREFIX"/*) : ;;
+    *)
+        echo "ERROR: python is $PY_PATH, which is not inside the activated"
+        echo "       environment ($CONDA_PREFIX). setup.sh did not activate 'env_test'."
+        case "$PY_PATH" in
+            /apps/system/*)
+                echo "       That is the system Anaconda. It has no gpytorch, no"
+                echo "       quantile_forest and no ngboost, so this job would run,"
+                echo "       find nothing to do, and write no rows." ;;
+        esac
         exit 2 ;;
 esac
-echo "=== interpreter: $(command -v python)  (CONDA_PREFIX=$CONDA_PREFIX)"
+echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
 
 # The binary carries the held-out-noise fix. Refuse to run without it rather
 # than silently regenerating the same invalid results.

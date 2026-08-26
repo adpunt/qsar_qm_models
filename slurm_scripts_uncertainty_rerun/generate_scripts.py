@@ -87,15 +87,40 @@ TEMPLATE = '''#!/bin/bash
 
 set -uo pipefail
 
-export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
-eval "$("$MAMBA_EXE" shell hook --shell bash)"
-# Guarded: under `set -u` an unset CONDA_PREFIX aborts the shell here, before
-# python is ever reached. The reference scripts get away with the unguarded
-# form only because they do not set -u.
-export LD_LIBRARY_PATH="${{CONDA_PREFIX:-}}/lib:${{LD_LIBRARY_PATH:-}}"
-
 cd {kirby_dir}
 . {qsar_dir}/setup.sh
+
+# Activation is not optional. micromamba has never worked on this cluster, so
+# the `export MAMBA_EXE=...` lines that used to sit above `. setup.sh` pointed
+# at a file that does not exist -- and nothing checked. setup.sh falls through
+# to its conda branch; if that also fails, the task carries on in the system
+# Anaconda at /apps/system/..., which has no gpytorch, no quantile_forest and
+# no ngboost. The job then runs, finds nothing to do, and writes no rows. That
+# is what happened to 12822693 and 12822694 (RERUN_PLAN.md section 2.8d).
+if [ -z "${{CONDA_PREFIX:-}}" ]; then
+    echo "ERROR: setup.sh did not activate an environment (CONDA_PREFIX unset)."
+    exit 2
+fi
+PY_PATH="$(command -v python)"
+case "$PY_PATH" in
+    "$CONDA_PREFIX"/*) : ;;
+    *)
+        echo "ERROR: python is $PY_PATH, which is not inside the activated"
+        echo "       environment ($CONDA_PREFIX). setup.sh did not activate 'env_test'."
+        case "$PY_PATH" in
+            /apps/system/*)
+                echo "       That is the system Anaconda. It has no gpytorch, no"
+                echo "       quantile_forest and no ngboost, so this job would run,"
+                echo "       find nothing to do, and write no rows." ;;
+        esac
+        exit 2 ;;
+esac
+echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
+
+# Guarded: under `set -u` an unset CONDA_PREFIX aborts the shell here, before
+# python is ever reached.
+export LD_LIBRARY_PATH="${{CONDA_PREFIX:-}}/lib:${{LD_LIBRARY_PATH:-}}"
+
 cd tests
 
 DATASETS=({datasets})

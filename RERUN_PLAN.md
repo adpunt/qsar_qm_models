@@ -154,7 +154,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 14 | Aleatoric/epistemic decomposition | 🔴 spec written, not built; 4 further defects found (§5.5) | §13 chat I |
 | 15 | The five never-built analyses | 🔴 none built (§0.4) | §13 chat J |
 | 16 | Figure script consolidation to one file | 🔴 not started (§5.4) | §13 chat J |
-| 17 | Environment: jobs were running in the wrong interpreter | 🟢 **root cause found and guarded 2026-08-26 (chat D)** — `micromamba` has never worked on the cluster, so the `MAMBA_EXE` lines in every job script were dead and an unactivated task fell through to the system Anaconda, which has none of the uncertainty packages. Deleted, and the scripts now refuse to start unactivated. Earlier work: — the loud-failure half was already in KIRBy (`333f005`); `scripts/check_environment.py` now probes any interpreter and is wired into the job template; the local `torch_geometric` import is fixed. **One open finding for you: three packages need a newer scikit-learn than is installed** (§2.8d) | §13 chat D ✅ |
+| 17 | Environment: jobs were running in the wrong interpreter | ✅ **found, fixed and confirmed on the cluster 2026-08-26 (chat D)** — `micromamba` has never worked there, so the `MAMBA_EXE` lines in every job script were dead and an unactivated task fell through to the system Anaconda, which has none of the uncertainty packages. Deleted, and the scripts now refuse to start unactivated. `env_test` verified green on a compute node: 21 of 22 model labels build, NGBoost and the quantile forest also fit. The scikit-learn concern was laptop-only. One real failure left, `conformal`, and it blocks nothing (§2.8d) | §13 chat D ✅ |
 | 18 | Paper-side fixes needing no compute | 🔴 not started — **deliberately parked**, see §12 | parked |
 | 19 | The two documents had drifted apart | ✅ **done 2026-08-26** (chat K). Ownership rule stated, ten disagreements resolved, two of them a document contradicting itself. Guarded by `scripts/check_bib_and_docs.py` | §13 chat K ✅ |
 | 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
@@ -185,7 +185,7 @@ executes is not a guard.
 | 10 | **Two implementations of one specification drifting apart** | The two injectors disagreed on a constant and on how cut-points are computed, unnoticed for the life of the project | Cross-check them on the same labels as a launch gate |
 | 11 | **Spending compute on a condition that cannot answer the question** | A noise type whose scale is constant on a given dataset makes the "where is the noise" question undefined there | Preflight computes the scale on the real labels and refuses to queue degenerate conditions |
 | 12 | **One number, two names** | The same values captioned with two different metrics on facing pages; a retired metric surviving in the Conclusion as *the* headline | One script generates every number and its caption. See §5.4 |
-| 13 | **Shared mutable state between concurrent tasks** | Every task reads and writes one configuration file in one directory, including the identifier that selects its data files. Two tasks at once can overwrite each other's inputs, silently (§2.8a) | Make the path unique per task, or give each task its own directory. Gate: run two tasks concurrently and assert each read its own configuration |
+| 13 | **Shared mutable state between concurrent tasks** | Every task read and wrote one configuration file in one directory, including the identifier that selects its data files, so two tasks at once could overwrite each other's inputs silently (§2.8a). ✅ **fixed 2026-08-26** | The path is unique per task and the binary has no default. Gate 10 runs two tasks concurrently and asserts each read its own configuration |
 
 **The pattern underneath nearly all of them:** a quantity was computed at the wrong granularity, or
 recovered instead of recorded, and nothing checked. The re-run fixes the specific instances. Only
@@ -688,7 +688,7 @@ committed while both chats had the same file open. Nothing was lost, but the mes
 does not mention it.
 
 
-### 2.8d ✅ MOSTLY FIXED 2026-08-26 (chat D) — the two Gaussian-process jobs that produced nothing
+### 2.8d ✅ FIXED 2026-08-26 (chat D) — the two Gaussian-process jobs that produced nothing
 
 Both failed on 2026-08-19 (`12822693`, `12822694`), after eight and six minutes. The output
 directories were created and are **empty** for all three datasets.
@@ -3269,14 +3269,47 @@ in §2.7, §2.8a and §2.8d; the gates are §8 items 8, 9b and 10.
   representation by name, and `morgan` has since been deleted from the writer — it was a leftover
   of the `avalon` work (§2.7 item 5).
 
-**One decision left with you** (§2.8d): `quantile-forest`, `ngboost` and `torchcp` all declare a
-newer scikit-learn than the 1.3.2 installed, and the quantile forest is outright broken by it —
-it constructs and then fails inside `fit()`. Upgrade scikit-learn before launch, or downgrade the
-quantile forest. Run runbook §1b on the cluster first; this may be a laptop-only problem.
+**Nothing is left with you.** The scikit-learn concern raised during this chat turned out to be
+laptop-only — `env.yml` pins `scikit-learn=1.6.1` and the cluster has it. `env_test` was verified
+on a compute node on 2026-08-26: 21 of the 22 job-generator model labels build, and NGBoost and
+the quantile forest also fit. The one real failure is `conformal` (a `torchsort` ABI mismatch),
+and it blocks nothing — the conformal variants are in `EXCLUDED_MODELS`, off by default, and
+dropped from every figure (§2.8d).
 
-**Scope note.** `slurm_scripts_qm9_rerun/*.sh` were not hand-edited — they are generated, and they
-still carry the pre-redesign CLI flags, so chat H regenerates them. The environment guard went into
-`generate_scripts.py`, where it will land in every regenerated script.
+**Scope note, corrected on the close-out pass.** The dead activation lines were **not** confined
+to the QM9 generator — the same two lines open every job-script family in the repository. The
+three live generators and the uncertainty preflight are all fixed:
+`slurm_scripts_qm9_rerun/generate_scripts.py`,
+`slurm_scripts_uncertainty_rerun/generate_scripts.py`,
+`slurm_scripts_validation_rerun/generate_scripts.py`, and
+`slurm_scripts_uncertainty_rerun/preflight.sh`. The historical directories
+(`slurm_scripts_mol2vec`, `slurm_scripts_vbll`, `slurm_scripts_gauche_rbf`, and about twenty
+more) still carry them and are deliberately left alone: they are superseded runs, and nothing in
+them should be submitted again.
+
+🔴 **The `.sh` files checked in under `slurm_scripts_qm9_rerun/` are stale in two ways and must
+not be submitted as they stand.** They predate this fix, so they have no activation guard, *and*
+they carry the pre-redesign CLI (`--sigma`, `--noise-strategy`) which `process_and_train.py` no
+longer accepts — it takes `--noise-level`, `--noise-shape` and `--noise-targeting` now. The
+generator's own body still emits the old flags too. Regenerating them, and updating the generator
+to the new CLI, is chat H's, and it is gated on §13.1. What chat D guarantees is only that
+whatever chat H regenerates will carry the activation guard.
+
+**One side effect, disclosed.** `slurm_scripts_validation_rerun/generate_scripts.py` ignores
+`--help` and writes its 87 scripts immediately, into its own directory. Probing it therefore
+regenerated them. Only two of those files are tracked in git and both had hand-added `git pull`
+lines that regeneration would have dropped, so **both were reverted** and are unchanged from
+HEAD. The other 85 have never been in version control; they were rewritten and now carry the
+activation guard, and all 92 files in the directory pass `bash -n`. Nothing was lost, but the two
+tracked scripts are now inconsistent with the other 85 — chat H should regenerate the directory
+deliberately rather than inherit that.
+
+**The guard checks the right thing, not a hardcoded path.** The first version keyed on
+`/apps/system/*`, which is brittle — it would have passed a task that activated the *wrong*
+environment. It now asserts that `command -v python` resolves **inside `$CONDA_PREFIX`**, and
+keeps the system-Anaconda text as an extra hint when that is where it landed. Driven through four
+cases (no activation, system Anaconda, a different environment, correct activation) and it exits
+2, 2, 2, 0.
 
 ---
 

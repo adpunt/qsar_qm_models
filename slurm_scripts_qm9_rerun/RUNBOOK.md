@@ -149,8 +149,12 @@ conda activate env_test
 python -c "import sys; print(sys.executable)"     # must NOT be under /apps/system
 python -m pip check | grep -i scikit-learn || echo "no scikit-learn conflicts"
 
-cd scripts && python check_environment.py
+cd scripts && python check_environment.py --deep
 ```
+
+`--deep` also imports `models/models.py` itself, which is the only check that
+proves the training code can start at all. It costs about a minute, which is why
+it is not in the per-task guard — the tasks run the fast form.
 
 `check_environment.py` names the interpreter, prints every relevant package
 version, **constructs** each model rather than importing its package, and fits
@@ -175,6 +179,13 @@ uncertainty work has used. Check it too if you submit anything against it:
 **Jobs are submitted by script, never with `--wrap`.** The two dead jobs were
 `--wrap` submissions with no output path: they inherited whatever interpreter
 was active and left no log saying which.
+
+> 🔴 **The `.sh` files in this directory are stale — do not submit them as they stand.**
+> They predate the activation guard, and they carry the old CLI (`--sigma`,
+> `--noise-strategy`) that `process_and_train.py` no longer accepts. Regenerate
+> with `python generate_scripts.py` once the generator has been updated to the
+> new noise CLI (chat H, gated on `RERUN_PLAN.md` §13.1). The guard is in the
+> generator, so it lands in whatever is regenerated.
 
 ## 2. Archive the current results before anything overwrites them
 
