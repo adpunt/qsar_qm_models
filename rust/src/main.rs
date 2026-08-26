@@ -1189,8 +1189,24 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
     // mean. One realisation wobbles — grouped-shifted by about 5% on QM9, Student-t
     // at nu=3 by more — and that spread is a number the Methods states rather than a
     // check that fails. The mean is where the confound would show.
-    println!("gate: the mean delivered dose over 20 seeds is flat across noise types");
-    let seeds: Vec<u64> = (0..20u64).map(|i| 1000 + i * 7919).collect();
+    // 200 seeds, not 20. Rule 3 of NOISE_DESIGN.md §2a gates on the MEAN delivered
+    // dose, so the gate's power is set by the standard error of that mean — and two
+    // conditions have per-run dose spreads far too wide for twenty draws to pin it
+    // down. Measured on 3,200 real QM9 training labels with real scaffold groups
+    // (chat G, 2026-08-26): per-run SD is 1.3% for Gaussian but 3.9% for
+    // grouped-shifted and 6.9% for Student-t ν=3, so over twenty seeds their means
+    // wander by ±0.9% and ±1.5% respectively and the 3% spread criterion below is
+    // breached by sampling noise alone — this gate failed at 3.39% on labels where
+    // 400 seeds put grouped-shifted at +0.03% ± 0.19%, i.e. exactly on target. A
+    // launch gate that fails at random is worse than no gate, because the next
+    // person turns it off. Two hundred seeds put every condition's standard error
+    // under 0.5%.
+    const GATE_SEEDS: u64 = 200;
+    println!(
+        "gate: the mean delivered dose over {} seeds is flat across noise types",
+        GATE_SEEDS
+    );
+    let seeds: Vec<u64> = (0..GATE_SEEDS).map(|i| 1000 + i * 7919).collect();
     let level = 0.5f32;
     let target = level * clean_sd;
     let mut means: Vec<(String, f32, f32)> = Vec::new();
@@ -1285,59 +1301,71 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
     }
 
     // Gate 7 — Student-t reduces to Gaussian in the limit.
-    print!("gate: Student-t at nu=200 matches Gaussian ... ");
-    let gauss = build_noise_plan(
-        labels,
-        canonical,
-        &NoiseSpec {
-            shape: NoiseShape::Gaussian,
-            targeting: NoiseTargeting::Uniform,
-            level: 0.5,
-            units: DoseUnits::Spread,
-            seed: 7,
-        },
-        groups,
-    )
-    .unwrap();
-    let t200 = build_noise_plan(
-        labels,
-        canonical,
-        &NoiseSpec {
-            shape: NoiseShape::StudentT { nu: 200.0 },
-            targeting: NoiseTargeting::Uniform,
-            level: 0.5,
-            units: DoseUnits::Spread,
-            seed: 7,
-        },
-        groups,
-    )
-    .unwrap();
-    let tail_g = gauss
-        .epsilon
-        .iter()
-        .filter(|e| e.abs() > 3.0 * gauss.target_dose_label_units)
-        .count() as f32
-        / gauss.epsilon.len() as f32;
-    let tail_t = t200
-        .epsilon
-        .iter()
-        .filter(|e| e.abs() > 3.0 * t200.target_dose_label_units)
-        .count() as f32
-        / t200.epsilon.len() as f32;
-    let dose_gap = (t200.realised_dose_label_units / gauss.realised_dose_label_units - 1.0).abs();
-    if dose_gap <= 0.02 && (tail_t - tail_g).abs() <= 0.005 {
+    //
+    // Averaged over 50 seeds, not compared on one. Two independent draws of a few
+    // thousand labels each carry a per-run dose spread of about 1.3%, so the ratio of
+    // one against the other wobbles by roughly 1.8% and a 2% threshold on a single
+    // seed fails by chance about a quarter of the time — measured on real QM9 labels
+    // (chat G, 2026-08-26), where this gate failed at +2.21% while the nesting itself
+    // is exact. The claim being tested is about the distributions, so the statistic
+    // has to be one too.
+    const NESTING_SEEDS: u64 = 50;
+    print!(
+        "gate: Student-t at nu=200 matches Gaussian, averaged over {} seeds ... ",
+        NESTING_SEEDS
+    );
+    let mut dose_ratios: Vec<f32> = Vec::new();
+    let mut tail_gaps: Vec<f32> = Vec::new();
+    let mut tail_g_mean = 0.0f32;
+    let mut tail_t_mean = 0.0f32;
+    for seed in 0..NESTING_SEEDS {
+        let mk = |shape: NoiseShape| {
+            build_noise_plan(
+                labels,
+                canonical,
+                &NoiseSpec {
+                    shape,
+                    targeting: NoiseTargeting::Uniform,
+                    level: 0.5,
+                    units: DoseUnits::Spread,
+                    seed: 7 + seed * 104_729,
+                },
+                groups,
+            )
+            .unwrap()
+        };
+        let gauss = mk(NoiseShape::Gaussian);
+        let t200 = mk(NoiseShape::StudentT { nu: 200.0 });
+        let tail = |p: &NoisePlan| {
+            p.epsilon
+                .iter()
+                .filter(|e| e.abs() > 3.0 * p.target_dose_label_units)
+                .count() as f32
+                / p.epsilon.len() as f32
+        };
+        let tg = tail(&gauss);
+        let tt = tail(&t200);
+        tail_g_mean += tg / NESTING_SEEDS as f32;
+        tail_t_mean += tt / NESTING_SEEDS as f32;
+        tail_gaps.push(tt - tg);
+        dose_ratios
+            .push(t200.realised_dose_label_units / gauss.realised_dose_label_units - 1.0);
+    }
+    let dose_gap = population_mean(&dose_ratios).abs();
+    let tail_gap = population_mean(&tail_gaps).abs();
+    if dose_gap <= 0.02 && tail_gap <= 0.005 {
         println!(
-            "ok (dose gap {:+.2}%, tail beyond 3x: gaussian {:.2}% vs t {:.2}%)",
+            "ok (mean dose gap {:+.2}%, mean tail beyond 3x: gaussian {:.2}% vs t {:.2}%)",
             dose_gap * 100.0,
-            tail_g * 100.0,
-            tail_t * 100.0
+            tail_g_mean * 100.0,
+            tail_t_mean * 100.0
         );
     } else {
         println!(
-            "FAIL (dose gap {:+.2}%, tail beyond 3x: gaussian {:.2}% vs t {:.2}%)",
+            "FAIL (mean dose gap {:+.2}%, mean tail beyond 3x: gaussian {:.2}% vs t {:.2}%)",
             dose_gap * 100.0,
-            tail_g * 100.0,
-            tail_t * 100.0
+            tail_g_mean * 100.0,
+            tail_t_mean * 100.0
         );
         failures += 1;
     }
