@@ -51,7 +51,7 @@ python -u "$QSAR_QM_MODELS_ROOT/scripts/audit_pipeline_parity.py" --strict \
 echo
 echo "############ 1. the patched pipeline imports, and has the new flags"
 python -u alternative_data_noise_robustness.py --help 2>&1 \
-  | grep -E -- "--strategies|--unc-strategies|--oof-folds" \
+  | grep -E -- "--conditions|--unc-conditions|--oof-folds" \
   || { echo "FAIL: patched flags missing — is KIRBy up to date on this host?"; exit 1; }
 
 echo
@@ -62,20 +62,57 @@ try:
     from noiseInject import NoiseInjectorRegression
 except Exception as e:
     print("FAIL: cannot import noiseInject:", e); sys.exit(1)
-inj = NoiseInjectorRegression(strategy='quantile', random_state=42)
-missing = [m for m in ('noise_scale', 'inject_verbose') if not hasattr(inj, m)]
-if missing:
-    print("FAIL: NoiseInject is the OLD version, missing:", missing)
+try:
+    from noiseInject import CONDITIONS, dose_tolerance   # 1.0.0 or newer
+except Exception as e:
+    print("FAIL: NoiseInject is the OLD version (pre-1.0.0):", e)
     print("      pip install --no-deps -e <path-to-NoiseInject>")
     sys.exit(1)
-y = np.random.RandomState(0).normal(size=200)
-yn, sc, eps = inj.inject_verbose(y, 0.6)
-assert np.allclose(yn, y + eps), "epsilon does not reconstruct the noisy label"
-# and it must reproduce the old draw exactly
-a = NoiseInjectorRegression(strategy='quantile', random_state=42).inject(y, 0.6)
-assert np.array_equal(a, yn), "inject_verbose does not match inject"
-print("OK: noise_scale + inject_verbose present and consistent")
+for gone in ('legacy', 'quantile', 'threshold', 'hetero', 'valprop'):
+    if gone in CONDITIONS:
+        print(f"FAIL: the deleted condition {gone!r} is still reachable"); sys.exit(1)
+inj = NoiseInjectorRegression.from_condition('gaussian', random_state=42)
+missing = [m for m in ('noise_scale', 'inject_verbose', 'scale_map', 'unit_dose')
+           if not hasattr(inj, m)]
+if missing:
+    print("FAIL: NoiseInject is missing:", missing); sys.exit(1)
+y = np.random.RandomState(0).normal(size=2000)
+r = inj.inject_verbose(y, 0.6)
+assert np.array_equal(r.y_clean + r.epsilon, r.y_noisy), \
+    "epsilon does not reconstruct the noisy label exactly"
+assert np.array_equal(
+    NoiseInjectorRegression.from_condition('gaussian', random_state=42).inject(y, 0.6),
+    r.y_noisy), "inject_verbose does not match inject"
+z = inj.inject_verbose(y, 0.0)
+assert np.array_equal(z.epsilon, np.zeros(len(y))), "level 0 is not EXACTLY zero"
+for col in ('noise_type', 'unit_dose_g', 'realised_dose_label_units',
+            'affected_molecule_fraction', 'effective_n', 'seed'):
+    assert r.as_row()[col] is not None, f"provenance column {col} is blank"
+print("OK: the redesigned API is present, the deleted conditions are gone,")
+print("    epsilon reconstructs the label exactly and level 0 is a true zero")
 PY
+[ $? -ne 0 ] && exit 1
+
+echo
+echo "############ 2b. the two injectors agree — RERUN_PLAN.md gate 2"
+# The noise scheme is implemented twice: Rust for QM9, Python for these three
+# datasets and every uncertainty number. They drifted apart once before and
+# nothing noticed. This is the check that fails when they do.
+#
+# It needs the reference implementation built; if cargo is not on the server,
+# that is a REAL gap and it says so rather than passing quietly.
+QSAR=/data/stat-cadd/scat9264/qsar_qm_models
+if [ ! -f "$QSAR/scripts/crosscheck_injectors.py" ]; then
+    echo "FAIL: crosscheck_injectors.py is missing from $QSAR/scripts"
+    exit 1
+fi
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "FAIL: cargo is not available, so the reference implementation cannot be"
+    echo "      built and the two injectors CANNOT be compared. Run the check on a"
+    echo "      machine that has it and paste the result, or install rust here."
+    exit 1
+fi
+( cd "$QSAR" && python scripts/crosscheck_injectors.py --seeds 20 )
 [ $? -ne 0 ] && exit 1
 
 echo
@@ -145,7 +182,7 @@ PY
 [ $? -ne 0 ] && exit 1
 
 echo
-echo "############ 4b. which (dataset, strategy) arms are DEGENERATE"
+echo "############ 4b. which (dataset, condition) pairs are DEGENERATE"
 python - <<'PY'
 import sys, importlib.util, numpy as np
 sys.path.insert(0, '/data/stat-cadd/scat9264/NoiseInject')
@@ -155,7 +192,7 @@ from noiseInject import NoiseInjectorRegression as NI
 
 DATASETS = ['logd', 'caco2', 'herg_ki']
 REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']
-# Read the strategy list from the GENERATED scripts, not from the module: after
+# Read the condition list from the GENERATED scripts, not from the module: after
 # --drop-strategies the two differ and the printed indices would be wrong.
 import re as _re, glob as _glob
 _sh = sorted(_glob.glob('/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_*.sh'))
@@ -164,7 +201,7 @@ if _sh:
     _mm = _re.search(r'^STRATS=\((.*?)\)', open(_sh[0]).read(), _re.M)
     if _mm:
         STRATS = _mm.group(1).split()
-        print(f"  (strategy list read from {_sh[0].split('/')[-1]}: {STRATS})")
+        print(f"  (condition list read from {_sh[0].split('/')[-1]}: {STRATS})")
 
 labels = {}
 df = m.download_openadmet()
@@ -174,22 +211,31 @@ c = next((c for c in df.columns if 'Caco' in c and 'Efflux' in c), None)
 labels['caco2'] = m.load_openadmet_endpoint(df, c, log_transform=True)[1]
 labels['herg_ki'] = m.load_chembl_herg()[1]
 
-print("  distinct noise scales per (dataset, strategy) -- 1 means the arm is CONSTANT")
+print("  distinct noise scales per (dataset, condition) -- 1 means it is CONSTANT,")
+print("  so 'which molecules are unreliable' is UNDEFINED there, not zero")
 print(f"  {'dataset':9s} " + " ".join(f"{s:>10s}" for s in STRATS))
 degenerate = []
 for ds in DATASETS:
     y = labels[ds]
     row = []
     for st in STRATS:
-        n = len(np.unique(np.round(NI(strategy=st, random_state=0).noise_scale(y, 1.0), 12)))
+        n = len(np.unique(np.round(
+            NI.from_condition(st, random_state=0).noise_scale(y, 1.0, reference=y), 12)))
         row.append(f"{n:>10d}")
-        if n == 1 and st != 'legacy':
+        # Constant BY DESIGN for the shape-only conditions and grouped-shifted:
+        # every molecule gets the same scale there, so question B is undefined
+        # rather than answerable. Only flag a condition that should have a pattern.
+        _flat_by_design = st in ('gaussian', 'laplace', 'grouped_shifted') or \
+            st.startswith('student_t')
+        if n == 1 and not _flat_by_design:
             degenerate.append((ds, st))
     print(f"  {ds:9s} " + " ".join(row))
 
 print()
-print("  'legacy' is constant everywhere by design -- Gaussian gives every molecule the")
-print("  same dose. That arm answers question A, not question B.")
+print("  The shape-only conditions (gaussian, student_t_*, laplace) and grouped_shifted")
+print("  are constant everywhere BY DESIGN -- every molecule gets the same scale, so")
+print("  'which molecules are unreliable' is UNDEFINED there, not zero. Those answer")
+print("  question A. grouped_wider and censoring are the ones with a pattern to find.")
 if degenerate:
     print()
     print("  DEGENERATE ARMS (constant noise scale -> question B undefined):")
@@ -211,30 +257,49 @@ else:
 PY
 
 echo
-echo "############ 4c. heteroscedastic vs value-proportional are ONE arm"
-python - <<'PY'
+echo "############ 4c. the conditions differ in SHAPE at a matched amount"
+python - <<'PYEOF'
+# This replaced a check that heteroscedastic and value-proportional ranked
+# molecules identically. They did -- which is why they, and the two other
+# value-keyed conditions, were deleted in noiseInject 1.0.0. The property that
+# has to hold now is the opposite one: every condition delivers the same
+# AMOUNT, so any difference between them is a difference of shape.
 import sys, numpy as np
 sys.path.insert(0, '/data/stat-cadd/scat9264/NoiseInject')
-from noiseInject import NoiseInjectorRegression as NI
-from scipy.stats import spearmanr
-y = np.random.RandomState(0).normal(2.0, 1.2, 3000)
-a = NI(strategy='hetero', random_state=0).noise_scale(y, 1.0)
-b = NI(strategy='valprop', random_state=0).noise_scale(y, 1.0)
-r = spearmanr(a, b).correlation
-print(f"  Spearman(hetero scale, valprop scale) = {r:.8f}")
-print("  Both are strictly increasing in |y|, so they rank molecules IDENTICALLY.")
-print("  For the uncertainty questions they are ONE arm -- never cite them as")
-print("  independent replication. Dropping one reclaims 84 tasks:")
-print("    python generate_scripts.py --drop-strategies hetero")
-PY
+from noiseInject import NoiseInjectorRegression as NI, CONDITIONS, dose_tolerance
+y = np.random.RandomState(0).normal(2.0, 1.2, 20000)
+g = np.random.RandomState(1).randint(0, 400, 20000)
+tau = 0.5 * float(y.std())
+off, tails = [], {}
+for cond, spec in CONDITIONS.items():
+    if spec['strategy'] == 'censoring':
+        continue
+    r = NI.from_condition(cond, random_state=0).inject_verbose(y, tau, groups=g)
+    tol = dose_tolerance(r.epsilon, r.effective_n, nu=spec.get('nu'))
+    if abs(r.realised_dose_label_units / tau - 1) > tol:
+        off.append("%s %+.1f%% (tolerance %.1f%%)" % (
+            cond, 100 * (r.realised_dose_label_units / tau - 1), 100 * tol))
+    tails[cond] = float(np.mean(np.abs(r.epsilon) > 3 * tau))
+if off:
+    print("FAIL: these conditions did not deliver the amount asked for: " + "; ".join(off))
+    sys.exit(1)
+print("  OK    every condition delivers the amount it was asked for.")
+print("        The six it replaced spanned 0.49x to 2.00x at one setting.")
+print("  labels off by more than 3x the dose, at IDENTICAL total noise:")
+for cond, t in sorted(tails.items(), key=lambda kv: kv[1]):
+    print("    %-18s %5.2f%%" % (cond, 100 * t))
+if tails.get('student_t_nu3', 0) <= 3 * tails.get('gaussian', 1):
+    print("FAIL: the conditions no longer differ in shape - nothing to compare")
+    sys.exit(1)
+PYEOF
+[ $? -ne 0 ] && exit 1
 
-echo
 echo "############ 5. one real task, smallest dataset, 2 sigmas — end to end"
 OUT=$(mktemp -d)
 python -u alternative_data_noise_robustness.py \
     --datasets herg_ki --models NGBoost --reps ECFP4 \
-    --strategies outlier --sigmas 0.0 1.0 \
-    --unc-strategies all --oof-folds "$OOF" \
+    --conditions grouped_wider --sigmas 0.0 1.0 \
+    --unc-conditions all --oof-folds "$OOF" \
     --results-root "$OUT" || { echo "FAIL: end-to-end run errored"; exit 1; }
 
 python - "$OUT" "$OOF" <<'PY'
@@ -244,13 +309,13 @@ f = glob.glob(f"{root}/**/*_uncertainty_values.csv", recursive=True)
 if not f:
     print("FAIL: no uncertainty file written"); sys.exit(1)
 d = pd.read_csv(f[0])
-need = {'split','strategy','sigma','fold','uncertainty','noise_scale',
+need = {'split','noise_type','sigma','fold','uncertainty','noise_scale',
         'noise_pattern','injected_noise','oof_folds_ok'}
 miss = need - set(d.columns)
 if miss: print("FAIL: missing columns", miss); sys.exit(1)
 print(f"  OK    {f[0].split('/')[-1]}: {len(d)} rows")
 print(f"  splits    : {sorted(d['split'].unique())}")
-print(f"  strategies: {sorted(d['strategy'].unique())}")
+print(f"  conditions: {sorted(d['noise_type'].unique())}")
 print(f"  folds     : {sorted(d['fold'].unique())}  (must be all 5, not just one)")
 if 'train_oof' not in set(d['split']):
     print("FAIL: no out-of-fold training rows — question A cannot be answered"); sys.exit(1)
@@ -260,8 +325,15 @@ if len(z) and z['injected_noise'].abs().max() != 0:
     print("FAIL: sigma=0 is not a clean control"); sys.exit(1)
 print("  OK    sigma=0 control is exactly zero; out-of-fold training rows present")
 pat = tr['noise_pattern']
-if pat.nunique() <= 1 and d['strategy'].iloc[0] != 'legacy':
-    print("FAIL: noise_pattern is constant - the question-B confound control is unusable"); sys.exit(1)
+# A constant pattern is EXPECTED for the shape-only conditions and for
+# grouped-shifted: every molecule gets the same noise scale there, so question B
+# is undefined rather than answerable. It is a defect only for a condition that
+# is supposed to have a pattern.
+_flat_by_design = {'gaussian', 'laplace', 'grouped_shifted'} | {
+    c for c in d['noise_type'].unique() if str(c).startswith('student_t')}
+if pat.nunique() <= 1 and d['noise_type'].iloc[0] not in _flat_by_design:
+    print(f"FAIL: noise_pattern is constant for {d['noise_type'].iloc[0]} - the "
+          f"question-B confound control is unusable"); sys.exit(1)
 if tr['uncertainty'].notna().sum() == 0:
     print("FAIL: every out-of-fold uncertainty is blank"); sys.exit(1)
 want = int(sys.argv[2])
