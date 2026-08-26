@@ -77,7 +77,6 @@ struct SmilesData {
     mol2vec_buf: [u8; 1200],
     chemberta_buf: [u8; 3072],
     mhggnn_buf: [u8; 4096],
-    morgan_buf: [u8; 256],
     avalon_buf: [u8; 256],
 }
 
@@ -920,6 +919,162 @@ fn assert_noise_plan_gates(plan: &NoisePlan, spec: &NoiseSpec, labels: &[f32]) {
 /// (RERUN_PLAN.md §8 gate 1), plus gates 5 and 7.
 ///
 /// Returns the number of failures.
+/// Median absolute noise — a first-moment shape diagnostic, so it separates
+/// conditions that deliver the same second moment.
+fn median_abs(v: &[f32]) -> f64 {
+    let mut a: Vec<f64> = v.iter().map(|x| x.abs() as f64).collect();
+    a.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    let n = a.len();
+    if n == 0 {
+        return f64::NAN;
+    }
+    if n % 2 == 1 {
+        a[n / 2]
+    } else {
+        0.5 * (a[n / 2 - 1] + a[n / 2])
+    }
+}
+
+/// The worst-hit 5%'s share of the total noise energy: how concentrated the damage
+/// is, at a fixed total amount. This is what actually differs between the conditions
+/// once the dose is matched.
+fn top5_energy_share(v: &[f32]) -> f64 {
+    let mut sq: Vec<f64> = v.iter().map(|x| (*x as f64) * (*x as f64)).collect();
+    sq.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    let total: f64 = sq.iter().sum();
+    if total <= 0.0 {
+        return 0.0;
+    }
+    let k = ((sq.len() as f64) * 0.05).round() as usize;
+    sq[..k.max(1)].iter().sum::<f64>() / total
+}
+
+/// The full condition roster, named exactly as `roster()` in
+/// `rust/reference/noise_arms.rs` and as `noiseInject.CONDITIONS`.
+fn condition_roster(with_groups: bool) -> Vec<(NoiseShape, NoiseTargeting, f32)> {
+    let mut v: Vec<(NoiseShape, NoiseTargeting, f32)> = vec![
+        (NoiseShape::Gaussian, NoiseTargeting::Uniform, f32::NAN),
+        (NoiseShape::StudentT { nu: 10.0 }, NoiseTargeting::Uniform, f32::NAN),
+        (NoiseShape::StudentT { nu: 5.0 }, NoiseTargeting::Uniform, f32::NAN),
+        (NoiseShape::StudentT { nu: 3.0 }, NoiseTargeting::Uniform, f32::NAN),
+        (NoiseShape::Laplace, NoiseTargeting::Uniform, f32::NAN),
+    ];
+    if with_groups {
+        v.push((
+            NoiseShape::Gaussian,
+            NoiseTargeting::GroupedWide { lambda: 3.0, group_fraction: 0.2 },
+            f32::NAN,
+        ));
+        v.push((
+            NoiseShape::Gaussian,
+            NoiseTargeting::GroupedShift { group_variance_share: 0.62 },
+            f32::NAN,
+        ));
+    }
+    for p in [0.01f32, 0.05, 0.10] {
+        v.push((
+            NoiseShape::Gaussian,
+            NoiseTargeting::Outlier { p, lambda: 3.0 },
+            f32::NAN,
+        ));
+    }
+    // The grid of NOISE_DESIGN.md §6.4, zero control included. Censoring at 0% is the
+    // negative control for the one condition that is not zero-mean, and leaving it out
+    // is how the roster silently disagreed with the reference.
+    for pct in [0u32, 10, 20, 25, 30, 40, 50] {
+        v.push((
+            NoiseShape::Gaussian,
+            NoiseTargeting::Censoring { side: CensorSide::Upper },
+            pct as f32 / 100.0,
+        ));
+    }
+    v
+}
+
+/// The self-test's statistics, in the same JSON shape `rust/reference/noise_arms.rs`
+/// emits, so the pipeline can be compared against the reference row by row.
+///
+/// Chat B's `scripts/crosscheck_injectors.py` ties the reference to the Python
+/// injector. This ties the reference to the PIPELINE — without it the pipeline could
+/// drift from both and nothing would notice, which is the exact failure the gate
+/// exists to prevent.
+fn self_test_json(
+    labels: &[f32],
+    groups: Option<&HashMap<String, u32>>,
+    canonical: &[String],
+    k: f32,
+    seeds: u64,
+) {
+    let clean_sd = population_sd(labels);
+    let target = k * clean_sd;
+    let mut rows: Vec<String> = Vec::new();
+
+    for (shape, targeting, censor_level) in condition_roster(groups.is_some()) {
+        let level = if censor_level.is_nan() { k } else { censor_level };
+        let mut delivered: Vec<f32> = Vec::new();
+        let mut last: Option<NoisePlan> = None;
+        let mut spec_used = None;
+        for i in 0..seeds.max(1) {
+            let spec = NoiseSpec {
+                shape,
+                targeting,
+                level,
+                units: DoseUnits::Spread,
+                seed: 1000 + i * 7919,
+            };
+            let plan = match build_noise_plan(labels, canonical, &spec, groups) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            };
+            delivered.push(plan.realised_dose_label_units);
+            spec_used = Some(spec.clone());
+            last = Some(plan);
+        }
+        let plan = last.unwrap();
+        let spec = spec_used.unwrap();
+        let dose_matched = targeting.is_dose_matched();
+        let mean_d = population_mean(&delivered) as f64;
+        let sd_d = population_sd(&delivered) as f64;
+        let thr = if dose_matched {
+            3.0 * target as f64
+        } else {
+            3.0 * plan.realised_dose_label_units as f64
+        };
+        let beyond = plan.epsilon.iter().filter(|e| (e.abs() as f64) > thr).count() as f64
+            / plan.epsilon.len() as f64;
+        let censor_limit = plan.params.get("censor_limit").and_then(|v| v.as_f64());
+        rows.push(format!(
+            r#"{{"condition":"{}","k":{},"dose_matched":{},"target_dose":{},"unit_dose":{},"solved_scale":{},"censoring_limit":{},"delivered_dose":{},"delivered_dose_sd":{},"mean_shift":{},"frac_beyond_3":{},"median_abs":{},"top5_energy_share":{},"affected_molecule_fraction":{},"effective_n":{},"dose_tolerance":{},"seeds":{}}}"#,
+            plan.noise_type,
+            k,
+            dose_matched,
+            if dose_matched { format!("{}", target) } else { "null".to_string() },
+            if plan.unit_dose_g.is_nan() { "null".to_string() } else { format!("{}", plan.unit_dose_g) },
+            if plan.solved_scale.is_nan() { "null".to_string() } else { format!("{}", plan.solved_scale) },
+            censor_limit.map(|v| format!("{}", v)).unwrap_or_else(|| "null".to_string()),
+            mean_d,
+            sd_d,
+            plan.mean_epsilon,
+            beyond,
+            median_abs(&plan.epsilon),
+            top5_energy_share(&plan.epsilon),
+            plan.affected_molecule_fraction,
+            plan.effective_n,
+            dose_tolerance(&spec.shape, &plan.epsilon, plan.effective_n),
+            seeds.max(1),
+        ));
+    }
+    println!(
+        r#"{{"n":{},"label_sd":{},"rows":[{}]}}"#,
+        labels.len(),
+        clean_sd,
+        rows.join(",")
+    );
+}
+
 fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &[String]) -> usize {
     let mut failures = 0usize;
     let clean_sd = population_sd(labels);
@@ -1284,13 +1439,8 @@ fn read_smiles_data(
         reader.read_exact(&mut mhggnn_buf).ok()?;
     }
 
-    let mut morgan_buf = [0u8; 256];
-    if molecular_representations.contains(&"morgan".to_string()) {
-        reader.read_exact(&mut morgan_buf).ok()?;
-    }
-
-    // Avalon: 2048 bits packed to 256 bytes in Python, passed straight through,
-    // exactly like morgan. Binary, so nothing here rescales or standardises it.
+    // Avalon: 2048 bits packed to 256 bytes in Python and passed straight
+    // through. Binary, so nothing here rescales or standardises it.
     let mut avalon_buf = [0u8; 256];
     if molecular_representations.contains(&"avalon".to_string()) {
         reader.read_exact(&mut avalon_buf).ok()?;
@@ -1308,7 +1458,6 @@ fn read_smiles_data(
         mol2vec_buf,
         chemberta_buf,
         mhggnn_buf,
-        morgan_buf,
         avalon_buf,
     })
 }
@@ -1380,6 +1529,17 @@ struct FeaturisationFailure {
 fn prepare_ecfp4(isomeric_smiles: &str) -> (Vec<u8>, Option<String>) {
     let_cxx_string!(smiles_cxx = isomeric_smiles.to_string());
     match smiles_to_mol(&smiles_cxx) {
+        // RDKit's SmilesToMol returns a NULL pointer for a SMILES it cannot
+        // parse, and the binding wraps that null in a shared pointer and hands
+        // it back as Ok — only a thrown C++ exception becomes Err. So the old
+        // code's Err branch was unreachable for the ordinary bad-SMILES case:
+        // the fingerprint call dereferenced null and the process died with
+        // SIGSEGV, no message, no partial output. Verified 2026-08-26 by feeding
+        // "this-is-not-a-smiles" to the built binary (exit 139).
+        Ok(mol) if mol.is_null() => (
+            vec![0u8; 256],
+            Some("RDKit could not parse the SMILES (returned no molecule)".to_string()),
+        ),
         Ok(mol) => {
             let fingerprint = rdk_fingerprint_mol(&mol);
             let cxx_vec_ptr: UniquePtr<CxxVector<u64>> = explicit_bit_vect_to_u64_vec(&fingerprint);
@@ -1402,9 +1562,9 @@ fn prepare_ecfp4(isomeric_smiles: &str) -> (Vec<u8>, Option<String>) {
             }
             (packed_fingerprint, None)
         }
-        Err(_) => (
+        Err(e) => (
             vec![0u8; 256],
-            Some("RDKit could not parse the SMILES".to_string()),
+            Some(format!("RDKit raised an error: {}", e).replace(',', ";")),
         ),
     }
 }
@@ -1555,15 +1715,6 @@ fn write_data(
                 writer.write_all(&mhggnn)?;
                 if log_writes {
                     println!("mhggnn: {:?}", mhggnn);
-                }
-            }
-
-            // morgan (256 bytes, ECFP4 radius=2 computed in Python)
-            if config.molecular_representations.contains(&"morgan".to_string()) {
-                let morgan = smiles_data.morgan_buf;
-                writer.write_all(&morgan)?;
-                if log_writes {
-                    println!("morgan: {:?}", morgan);
                 }
             }
 
@@ -2159,6 +2310,15 @@ fn main() -> io::Result<()> {
              .action(ArgAction::SetTrue)
              .help("Finish even if some molecules were written with an all-zero ECFP4 block. \
                     Off by default: a zero fingerprint trains as if it were real features"))
+        .arg(Arg::new("json")
+             .long("json")
+             .action(ArgAction::SetTrue)
+             .help("With --self-test: emit the statistics as JSON, in the same shape \
+                    rust/reference/noise_arms.rs emits, so the two can be compared"))
+        .arg(Arg::new("seeds")
+             .long("seeds")
+             .action(ArgAction::Set)
+             .help("With --self-test --json: how many seeds to average the delivered dose over"))
         .arg(Arg::new("self_test")
              .long("self-test")
              .action(ArgAction::Set)
@@ -2284,6 +2444,18 @@ fn main() -> io::Result<()> {
             Some(path) => Some(load_scaffold_groups(path)?),
             None => None,
         };
+        if matches.get_flag("json") {
+            let seeds: u64 = matches
+                .get_one::<String>("seeds")
+                .map(|v| v.parse().expect("--seeds must be an integer"))
+                .unwrap_or(20);
+            let k: f32 = matches
+                .get_one::<String>("noise_level")
+                .map(|v| v.parse().expect("--noise-level must be a valid float"))
+                .unwrap_or(0.5);
+            self_test_json(&labels, groups.as_ref(), &canonical, k, seeds);
+            return Ok(());
+        }
         let failures = self_test(&labels, groups.as_ref(), &canonical);
         if failures > 0 {
             eprintln!("\n{} noise gate(s) FAILED", failures);

@@ -1034,7 +1034,21 @@ historical:
 | Gaussian-process cap removed | It was also keyed on the model name being exactly `GP`, so a Tanimoto variant escaped it. Now matches any variant |
 | **A requested-but-unavailable model is now a hard failure** | Guard 9. This is what would have stopped the two jobs that ran five folds over an empty roster |
 
-**Still outstanding on that side:** the feature-sampling setting, pending the decision above.
+**Applied 2026-08-26 in the second parity session (chat E), on BOTH sides via the shared spec:**
+
+| Change | Where it was wrong | Effect |
+|---|---|---|
+| **Neural batch size 64 → 32** | not in the hand audit at all | The experimental side trained on 64, QM9 on 32. Every neural row moves |
+| **Early stopping rolls back to the best epoch on QM9** | QM9 returned the last epoch, up to twenty past the optimum | Removes a procedural reason for QM9's neural degradation curves to look steeper. Author's decision |
+| **One early-stopping criterion** | QM9 needed a 0.01 absolute drop in a **summed** validation loss, so its threshold scaled silently with the number of validation batches; the other side used strict improvement on a mean | Now mean loss, strict improvement, patience 10, on both |
+| **The Gaussian process outputscale is applied** | QM9 set `params['outputscale'] = 1.0` and **never passed it to the model**, so its scale kernel actually started at gpytorch's `softplus(0) ≈ 0.693` while the experimental side set 1.0 "to match". The Optuna path searched a dimension that did nothing | Both now start at 1.0 |
+| **Which optimiser fitted the Gaussian process is recorded** | the experimental side fell back to an Adam loop whenever botorch refused a plain gpytorch `ExactGP`, and left no trace outside one attribute. **QM9 had no fallback at all**, so the same environment that quietly changed one study would kill every GP job in the other | Both share one try/except and both write a `gp_fit_method` column. ⚠️ On this laptop botorch 0.16.1 **does** refuse it, so every local GP fit uses the fallback — check that column before comparing new GP rows to old ones |
+| **NGBoost's distribution and score are named in the spec** | QM9 passed `Dist=Normal, Score=MLE`; the experimental side passed neither, so the two agreed only while ngboost's defaults happened to match | Both resolve the same names, and the audit asserts `MLE is LogScore` |
+| **`-b/--bootstrapping` renamed to `--repetitions`** | it is not bootstrapping — nothing is resampled with replacement; each repetition refits on a freshly seeded split | Author's instruction. Old spellings kept as aliases so the thirteen existing job arrays still run |
+| **Provenance columns on every results row** | a CSV could not be traced to the parameters behind it | `spec_version`, `spec_hash`, `gp_fit_method` on both sides. Appending to a file with the old header is now a hard error rather than ragged rows |
+| **Stale job-script headers corrected** | `unc_gp.sh` still advertised the 2,000-molecule cap and four scripts still said 30 stochastic passes | Six files |
+
+**Still outstanding on that side:** the feature-sampling setting, pending the measurement below.
 
 #### 3.4.4d The quantile forest cannot be fitted in the local environment
 
@@ -2305,6 +2319,22 @@ by a claim:
 Each was checked by removing the fix and confirming the check fails — including removing the dose
 solver, which reproduces the original confound on demand at 1.00–1.70× the Gaussian dose.
 
+**The third leg, added on audit.** The scheme lives in three places and only two were tied
+together: chat B's `scripts/crosscheck_injectors.py` ties the reference to the Python injector,
+and nothing tied either to the pipeline that actually noises QM9.
+`scripts/crosscheck_pipeline_reference.py` closes it, so the chain is now
+**Python injector ↔ reference ↔ pipeline**. On 4,000 real QM9 molecules at k = 0.25, 0.5 and 1.0
+the unit doses are identical where algebra fixes them, censoring agrees to six decimal places, and
+the 20-seed mean doses agree within 0.82% (2.53% at ν = 3, whose fourth moment is infinite).
+Details and what it found: `NOISE_DESIGN.md` §5.1d.
+
+⚠️ **One thing it found is not chat A's to settle.** `affected_molecule_fraction` means 1.0 in the
+pipeline and 0.0 in the reference for the conditions with no selection rule. The pipeline's reading
+is the one failure mode 6's guard needs — under the reference's convention every uniform condition
+reads as zero and trips a guard meant to catch a degenerate condition — but the column is also
+compared against the Python injector by chat B's gate, so a one-sided change would break that.
+**Whoever merges A, B and the Python side settles it in one edit across all three.**
+
 **Ten more gates** came out of doing the work: the ν ≤ 2 refusal, a mismatched scaffold file
 refused rather than silently degraded to uniform noise, a short record stream stopped rather than
 shifting every molecule's noise by one, censoring's direction, the affected-molecule fraction
@@ -2330,7 +2360,14 @@ flags and will now fail loudly** — they are rebuilt in chat H (§5.3).
 
 **Still open, and not chat A's:** whether the validation split gets its own independently drawn
 noise (§5.1 item 5, §13.5 — the author's), the ECFP4 truncation and index-drift guards (§5.1 item
-7, chat D), and whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way).
+7, chat D), whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way), and the
+`affected_molecule_fraction` convention above.
+
+**⚠️ A note for whoever merges.** Commit `d25bcb0`, which carries this work, also contains chat D's
+`--config` change (the configuration race, §2.8a) — it was uncommitted in the working tree when
+chat A staged `rust/src/main.rs`, and the commit message does not mention it. Nothing is lost and
+nothing is wrong in the code, but chat D should not expect to commit that change again, and the
+history attributes it to chat A.
 
 ---
 

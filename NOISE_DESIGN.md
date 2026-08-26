@@ -1,9 +1,15 @@
 # Noise injection — the redesign
 
-**Status: awaiting sign-off.** This is the specification for what replaces the current
-six noise strategies. Nothing here is implemented in the pipeline yet.
+**Status: the dose-matching rule is approved; one item is open.** This is the specification for
+what replaces the old six noise strategies. The rule that the noise level becomes the amount
+actually delivered was approved by the author on 2026-08-21. **One question remains open — whether
+Laplace is queued as a condition (§7).** Everything else in §7 is settled.
 
-Last updated 2026-08-24.
+**It is no longer a paper design.** Chat A built the Rust half on 2026-08-26 (`d25bcb0`) and it
+matches the reference implementation (§5.1c); the Python half is chat B's and §6.2 step 6 specifies
+it. Section 6 marks what is built and what is not, row by row.
+
+Last updated 2026-08-26.
 
 **Rule for this document:** every number carries a peer-reviewed primary source and a
 verbatim quote. Anything computed here is marked as computed. Anything unverified says so.
@@ -12,9 +18,19 @@ No preprints.
 **Companion document**
 - `RERUN_PLAN.md` — the single plan for the re-run: what is broken, what gets rebuilt, in what
   order, and which decisions are still open. It is the process document; this file is the
-  evidence and the algebra. (It replaces `RESULTS_REWORK.md`, `DISCUSSION_REWORK.md`,
-  `DISCUSSION_TRACKER.md`, `REVISION_STATUS.md`, `immediate_next_steps.md` and
-  `UNCERTAINTY_METRIC_FIX_PLAN.md`, all deleted 2026-08-24.)
+  evidence and the algebra.
+
+**Which document owns what.** This file owns what the noise *is* — the strategies, the algebra,
+the parameters, their sources, and the checks that are properties of the noise scheme.
+`RERUN_PLAN.md` owns what gets *run* and in what order — the staged design, the replicate counts,
+the representation set, the job scripts, the analysis. Neither restates the other; where a fact is
+needed on both sides, it lives in its owner and the other points at it.
+
+⚠️ An earlier version of this paragraph listed six state documents as having been deleted.
+**They were restored intact on 2026-08-25 and all six are on disk** — see `RERUN_PLAN.md` §11 for
+the audit of where each one's content went, and its opening note on `immediate_next_steps.md`,
+which is explicitly *not* superseded. `REVISION_GUIDE.md` is the one that is genuinely gone; its
+salvage is `RERUN_PLAN.md` §10b.
 
 ---
 
@@ -81,11 +97,13 @@ Two different axes, and they answer different questions:
 far more from the same absolute error, which is exactly why Caco-2 degrades first
 (τ ≈ 0.35 log₁₀ but a narrow dynamic range).
 
-**Practical consequence for the grid:**
-- **Experimental datasets** — choose τ in log units anchored to the assay error in §4, e.g.
-  τ ∈ {0, 0.25, 0.5, 0.68, 1.0} log units, and report the resulting k per dataset.
-- **QM9** — there is no assay error to anchor to, so k is the only honest axis. Choose
-  k ∈ {0, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0} and report τ in eV alongside.
+**Practical consequence for the grid:** choose the levels in τ for the experimental datasets,
+anchored to the assay error in §4, and in k for QM9, which has no assay error to anchor to. Report
+the other quantity alongside in both cases.
+
+**The grids themselves are in §6.4 and nowhere else.** An earlier draft of this section proposed
+its own ladders; they were superseded by the range-finding run (§5.5) and have been removed rather
+than left to disagree with §6.4.
 
 **Precedent for the k form:** Zhao Y, Wang J, Sedykh A, Zhu H (2017). *ACS Omega*
 2(6):2805–2812 — *"the standard deviation of each data set was multiplied by a parameter k
@@ -251,7 +269,10 @@ Four of the six go for one reason: they all assume error depends on the measured
 and that has been directly tested and disproved (§3.2).
 
 `threshold` has a second, independent problem: its cut fires on `|y| ≥ 1.0` against raw
-electronvolts, and QM9's smallest gap is 0.67 eV, so **99.9992% of molecules clear it**.
+electronvolts, and QM9's smallest gap is 0.669 eV, so **99.99925% of the 133,885 molecules clear
+it** — ten molecules in the whole dataset escape the cut. (Verified from
+`data/QM9/raw/gdb9.sdf.csv`; earlier notes quoting 2.08 eV and 100% were computed from the first
+10,000 molecules in file order, and the pipeline samples at random from the whole set.)
 It is homoscedastic Gaussian noise at double dose, with no threshold behaviour at all. Had
 the pipeline stayed in Hartree the same cut would have caught *zero* molecules. Its entire
 character is an accident of a unit conversion.
@@ -367,10 +388,24 @@ mistyped unit is a property of the *record*, not of the value.
 
 ### 3.5 Censoring is the most common mechanism
 
-**Svensson et al. (2025)** report 25–63% of labels censored in ten of fifteen real
-industrial assays, including 8% in a logD assay of 88,114 compounds. Assay Guidance Manual
-(NCBI Bookshelf NBK91994): values outside the tested range *"should be '<Xmin' or '>Xmax',
-as appropriate."*
+**Svensson et al. (2025)**, *Artificial Intelligence in the Life Sciences* 7:100128, Table 1.
+Fifteen real industrial assays from a pharmaceutical company, with the censored fraction reported
+for each. Counting left- and right-censoring together:
+
+- **Thirteen of the fifteen carry censored labels.** Only two do not, and the paper says so
+  outright: *"Finally, two of the target-based assays, Target 3 and Target 6, do not have any
+  censored labels."*
+- **Eight of the fifteen sit between 25% and 63%** — the three CYP assays at 61%, 63% and 58%,
+  hERG at 42%, and four target assays at 43%, 35%, 33% and 25%.
+- The lipophilicity assay is **88,114 compounds with 8% right-censored** and no left-censoring,
+  which is the largest assay in the set.
+
+⚠️ **Correction, 2026-08-26.** This section previously said "25–63% of labels censored in ten of
+fifteen assays". The 25–63% range is right; **the count was not** — it is eight of fifteen in that
+band, and thirteen of fifteen with any censoring at all. Checked against Table 1 of the paper.
+
+Assay Guidance Manual (NCBI Bookshelf NBK91994): values outside the tested range *"should be
+'<Xmin' or '>Xmax', as appropriate."*
 
 ### 3.6 What Heid et al. already published
 
@@ -925,6 +960,65 @@ dataset, and it would pass a broken solver on a large one.
 
 ---
 
+### 5.1d ✅ THE THIRD LEG — the pipeline against the reference, chat A 2026-08-26
+
+The scheme exists in three places and only two of them were tied together.
+`scripts/crosscheck_injectors.py` (chat B) ties the **reference** to the **Python
+injector**. Nothing tied either of them to the thing that actually noises QM9,
+`rust/src/main.rs`. The reference is a clean-room prover with no memmap, no RDKit and no
+pipeline around it; the pipeline is the code that touches the data. They can drift in
+exactly the way the two injectors already drifted once, and the existing gate would pass
+throughout.
+
+`scripts/crosscheck_pipeline_reference.py` closes it. The chain is now
+**Python injector ↔ reference ↔ pipeline.**
+
+```
+python scripts/crosscheck_pipeline_reference.py --labels <smiles,y> --groups <groups.json>
+```
+
+Result on 4,000 real QM9 molecules with real Murcko groups, 20 seeds, k = 0.5 — and at
+k = 0.25 and k = 1.0:
+
+| Compared | Outcome |
+|---|---|
+| Unit dose `G`, where it is fixed by algebra | **identical** — gaussian 1.0000, ν=10 1.1180, ν=5 1.2910, ν=3 1.7321, laplace 1.4142, grouped-shifted 1.0000, grouped-wider 1.6125 |
+| Censoring limit and delivered dose — deterministic given the labels | **identical to six decimal places** at every level. This is the sharpest check in the file: it is what catches the two putting the assay limit in different places |
+| Mean delivered dose over 20 seeds | within **0.82%** for every condition except ν=3, which is 2.53% and is discussed below |
+| Shape diagnostics — median absolute error, worst-hit 5%'s share of the noise energy | within 10% relative |
+
+Verified to fail: reverting the censoring limit to nearest-rank makes it report the limit
+mismatch and the dose gap on three levels.
+
+#### Three things the check found
+
+**1. The censoring roster was missing its zero control.** §6.4's grid is 0, 10, 20, 25, 30,
+40, 50%. The pipeline's roster started at 10%, so the negative control for the one condition
+that is not zero-mean was silently absent. **Fixed.**
+
+**2. ⚠️ `affected_molecule_fraction` means two different things — this needs one owner.**
+For the conditions with no selection rule (gaussian, Student-t, Laplace, grouped-shifted)
+the pipeline records **1.0**, since every molecule is affected. The reference records
+**0.0**, meaning "no targeting applies". Both are defensible readings of the name; they
+cannot both go in the column.
+
+The pipeline's reading is the one the design needs. Failure mode 6 in `RERUN_PLAN.md` §0.6
+guards by asserting the affected fraction "is neither near zero nor near one" — under the
+reference's convention every uniform condition reads as zero and trips a guard meant to catch
+a *degenerate* condition. **Recommendation: 1.0.** Not changed unilaterally, because
+`scripts/crosscheck_injectors.py` compares this column against the Python injector and a
+one-sided change would break that gate. Whoever merges A, B and the Python side settles it in
+one edit across all three. Until then the cross-check compares the column only where
+something actually selects, and asserts the pipeline's 1.0 separately.
+
+**3. Without a group file the two behave differently on purpose.** The reference falls back
+to 2,000 synthetic clusters; the pipeline refuses, because grouped noise over invented groups
+is uniform noise wearing a grouped name. So the grouped conditions cannot be compared without
+a real assignment — and the check now reports **PARTIAL and exits non-zero** rather than
+saying 15 of 17 conditions agree and calling it a pass.
+
+---
+
 ### 5.2 The noise types are genuinely distinguishable ✅
 
 At k = 0.5, with **identical total noise** in every row:
@@ -1010,8 +1104,8 @@ Two further things the numbers show:
    −0.397 eV at 10/25/40%. Every other noise type shifts labels by zero on average. That is
    precisely why models cope with it so badly — they can average away scatter, but not bias.
 
-**Why this matters for the paper:** Svensson et al. report that **25–63% of labels are
-censored in real industrial assays**. Real datasets therefore sit squarely in the range
+**Why this matters for the paper:** Svensson et al. report **25–63% of labels censored in eight
+of fifteen real industrial assays** (§3.5). Real datasets therefore sit squarely in the range
 where this goes from mild to catastrophic — while the differences between the zero-mean
 noise shapes never exceed 0.02 R².
 
@@ -1070,8 +1164,8 @@ Extra damage beyond what the *same delivered dose* of random noise costs:
 | 50% | 0.74 | **−0.481** |
 
 There is no knee — it is a smooth acceleration that becomes serious around 20% and severe
-past 30%. **Svensson et al. report 25–63% of labels censored in real industrial assays**,
-which is exactly the range running from −0.06 to −0.48.
+past 30%. **Svensson et al. report 25–63% of labels censored in eight of fifteen real industrial
+assays** (§3.5), which is exactly the range running from −0.06 to −0.48.
 
 **Censoring grid, set from this: 0, 10, 20, 25, 30, 40, 50%.** Keeping 10% as the null
 anchor, concentrating resolution where the damage accelerates.
@@ -1196,9 +1290,13 @@ The two figure-script rows below belong to chat J and are **not** done.
 | **`calibrate_sigma` and `calibrate_multiple_sigmas`**, `NoiseInject/noiseInject/calibration.py:16`, `:82` | A binary search on **mean \|Δy\| / SD** — the *first* moment. The design controls the second. At identical RMS dose, mean\|ε\|/RMS is 0.797 for Gaussian but 0.642 for Student-t ν=3, so calibrating this way hands the heavy-tailed conditions up to **24% more actual noise** at the same nominal level. It also re-uses one injector across its 20 iterations (`:49`, `:67`), so the objective it searches is stochastic. The closed-form solver replaces it: exact, deterministic, and identical to the Rust side. The classification calibrators stay |
 | ✅ `scripts/noise_strategy_params.json` | Never passed to the binary (`process_and_train.py:1635` omitted `--strategy_params`). A latent trap: if anyone had ever wired it up, its `base_sigma: 0.1` would have silently flattened every value-proportional curve. **Deleted 2026-08-26** |
 | ✅ `--strategy-params` argument, `process_and_train.py` | Dead argument for the dead file. **Deleted 2026-08-26**, along with `--sigma`, `--distribution` and `--noise-strategy` — see §6.2a |
-| `scripts/generate_paper_figures.py` | The v1 script built on the retired slope metric |
-| `results/paper_figures/` | Stale output of that script |
-| The synthetic methods-figure block, `generate_paper_figures_v2.py:2541-2562` | Fabricates a label distribution and reimplements two noise types differently from the pipeline (§2.9) |
+**Three analysis-side deletions used to be listed here and have been moved out** — the retired v1
+figure script, its stale output directory, and the synthetic methods-figure block. None of them is
+a noise-scheme deletion, and duplicating them here meant two documents specifying the same change.
+They are owned by `RERUN_PLAN.md` §5.4 and executed by chat J. The one point this document does
+own about the methods figure: it must be redrawn from real labels through the real injector at
+matched dose, because the block being deleted reimplements two noise types differently from the
+pipeline.
 
 ### 6.2 BUILD (phase 2)
 
@@ -1326,9 +1424,11 @@ splits fails `held_out_labels_are_bit_identical_across_levels`. Removing the dos
 `gate_one_dose_is_flat_across_types`, with the conditions spread across 1.00–1.70× the Gaussian
 dose — the original confound, reproduced on demand.
 
-1. **Against the reference implementation.** `rust/reference/noise_arms.rs` reproduces every
+1. ✅ **Against the reference implementation.** `rust/reference/noise_arms.rs` reproduces every
    dose to within ±0.5% (±2.2% for Student-t ν=3, which is sampling variability — §5.1b).
-   The pipeline must match it.
+   The pipeline must match it. **Executable: `scripts/crosscheck_pipeline_reference.py`**,
+   which exits non-zero on any disagreement and on incomplete coverage. Results and the one
+   open convention question in §5.1d.
 2. **Dose is flat across noise types.** At a fixed target, realised dose must be identical
    for every type. This is the single check that proves the confound is gone.
 3. **Held-out labels are untouched.** Assert `y_true` is bit-identical across every noise
@@ -1377,7 +1477,10 @@ the noise types separate at all.
 has no variance parameter and is not zero-mean. **Grid set by the range-finding run (§5.5): 0, 10, 20, 25, 30, 40, 50%.** There is no sharp
 knee — damage accelerates smoothly, becoming serious around 20% and severe past 30%.
 
-### 6.5 ORDER OF WORK
+### 6.5 ORDER OF WORK — the noise scheme only
+
+**The order of the whole re-run is `RERUN_PLAN.md` §10 and is not repeated here.** This table
+covers the build of the noise scheme itself, and doubles as its completion record.
 
 | # | Step | Blocks |
 |---|---|---|
@@ -1404,6 +1507,8 @@ verified flat across noise types.**
 | **Drop the four value-dependent types** | ✅ Their premise was directly tested and disproved (§3.2). Independently corroborated: the uncertainty re-run's own review found threshold degenerate on hERG and found heteroscedastic and value-proportional ranking molecules identically |
 | **Dose is the result, not the knob** | ✅ Every noise type solves for its scale so the delivered dose matches |
 | **Anchor in log units for the experimental datasets, fraction-of-spread for QM9** | ✅ One unit of real error is 0.13 of the label spread on logD but 0.76 on Caco-2 — a shared ladder would mean six different experiments |
+| **No separate artificial positive control is needed** | ✅ **Closed 2026-08-26.** This was open as "keep one label-keyed noise type as a deliberate positive control?" The question assumed the replacement set had no label-keyed condition. It has one: **censoring is keyed to the label by construction** — which molecules get clipped is a deterministic function of the value — so the condition the control was wanted for already exists, and the zero-noise subtraction does real work there. `RERUN_PLAN.md` §3.2 sets out the full mapping of which types have a learnable pattern and which are true nulls; §4 Decision 4 records the same conclusion. Reopen only if an *additional* deliberately unrealistic condition is wanted on top |
+| **What determines the QM9 and censoring level grids** | ✅ **Closed 2026-08-26.** The range-finding run has completed (§5.5) and the grids are set from it, in §6.4 |
 
 ### Still open
 
@@ -1415,42 +1520,66 @@ distribution family actually *fitted* to real bioactivity data (Anderson-Darling
 normality at p < 2×10⁻¹⁶; Laplace fitted with scale 0.7 and 1.3). Buys a citation, not a
 result. QM9 only if included.
 
-**2. Keep one label-keyed noise type as a deliberate positive control?**
-The evidence says real error is not keyed to the label value, which is why those four types
-are being dropped. But that also removes the only condition where a *known* learnable
-pattern exists. Including one — explicitly labelled unrealistic, present as a positive
-control — would let you distinguish "the method cannot detect patterns" from "there is no
-pattern to detect" if the Grouped result comes back null. One extra condition; meaningfully
-stronger inference.
-
-**3. What determines the QM9 and censoring level grids.**
-The range-finding run (§5.5) locates where the curves actually move, including the censoring
-knee that the coarse run bracketed only between 25% and 40%. Grids are set from that, not
-chosen a priori.
+Items 2 and 3 were here and are now settled above — the positive-control question was answered by
+censoring, and the grids were set by the range-finding run. **Laplace is the only item still open
+in this document.** `RERUN_PLAN.md` §4 Decision 4 and §13.5 carry it on the process side, with the
+context the author asked for.
 
 ## Sources
 
-- Alvarez Baron C, et al. (2025). *Sci Rep* 15:29995. doi:10.1038/s41598-025-15761-8
-- Avdeef A (2019). *ADMET & DMPK* 7(3):210–219. doi:10.5599/admet.698
-- Bentz J, O'Connor MP, Bednarczyk D, et al. (2013). *Drug Metab Dispos* 41(7):1347–1366. doi:10.1124/dmd.112.050500
-- Hampel F (2001). Robust statistics: a brief introduction and overview. ETH Zürich, Seminar für Statistik Research Report.
-- Heid E, McGill CJ, Vermeire FH, Green WH (2023). *J Chem Inf Model* 63(13):4012–4029. doi:10.1021/acs.jcim.3c00373
-- Horwitz W, Albert R (2006). *J AOAC Int* 89(4):1095.
-- Huber PJ (1964). *Ann Math Statist* 35(1):73–101. doi:10.1214/aoms/1177703732
-- Kalliokoski T, Kramer C, Vulpetti A, Gedeck P (2013). *PLoS ONE* 8(4):e61007. doi:10.1371/journal.pone.0061007
-- Kolmar SS, Grulke CM (2021). *J Cheminform* 13:92. doi:10.1186/s13321-021-00571-7
-- Kramer C, Kalliokoski T, Gedeck P, Vulpetti A (2012). *J Med Chem* 55(11):5165–5173. doi:10.1021/jm300131x
-- Kramer C, Dahl G, Tyrchan C, Ulander J (2016). *Drug Discov Today* 21(8):1213–1221. doi:10.1016/j.drudis.2016.03.015
-- Krüger FA, Overington JP (2012). *PLoS Comput Biol* 8(1):e1002333. doi:10.1371/journal.pcbi.1002333
-- Landrum GA, Riniker S (2024). *J Chem Inf Model* 64(5):1560–1567. doi:10.1021/acs.jcim.4c00049
-- Lange KL, Little RJA, Taylor JMG (1989). *JASA* 84(408):881–896.
-- Larregieu CA, Benet LZ (2013). *AAPS J* 15(2):483–497. doi:10.1208/s12248-013-9456-8
-- Llinàs A, Avdeef A (2019). *J Chem Inf Model* 59:3036–3040. doi:10.1021/acs.jcim.9b00345
-- O'Hagan S, Kell DB (2015). *PeerJ* 3:e1405. doi:10.7717/peerj.1405
-- OECD (2022). Test Guideline No. 117. doi:10.1787/9789264069824-en
-- Prieto P, Hoffmann S, Tirelli V, et al. (2010). *ATLA* 38(5):367–386. doi:10.1177/026119291003800510
-- Sato T, et al. (2018). *PLoS ONE* 13:e0199348.
-- Song H, et al. (2023). *IEEE TNNLS* 34(11):8135–8153.
-- Srinivasan B, Lloyd MD (2025). *J Med Chem* 68(3):2052–2056. doi:10.1021/acs.jmedchem.5c00131
-- Wenlock MC, Potter T, Barton P, Austin RP (2011). *J Biomol Screen* 16(3):348–355. doi:10.1177/1087057110396372
-- Zhao Y, Wang J, Sedykh A, Zhu H (2017). *ACS Omega* 2(6):2805–2812. doi:10.1021/acsomega.7b00274
+**Every source below now has an entry in `citations.bib`**, added 2026-08-26 with metadata taken
+from Crossref DOI content negotiation (or the publisher record where no DOI exists). The BibTeX
+key is given so the paper pass can cite directly. `RERUN_PLAN.md` §13.8 tracks the manuscript side.
+
+| Source | BibTeX key |
+|---|---|
+| Alvarez Baron C, Zhao J, Yu H, Ren M, Thiebaud N, Guo D, et al. (2025). *Sci Rep* 15:29995. doi:10.1038/s41598-025-15761-8 | `AlvarezBaron2025` |
+| Assay Guidance Manual — Iversen PW, Beck B, Chen Y-F, Dere W, Devanarayan V, Eastwood BJ, et al. (2017). *Assay Operations for SAR Support*. NCBI Bookshelf NBK91994, PMID 22553866 | `AssayGuidanceManual2017` |
+| Avdeef A (2019). *ADMET & DMPK* 7(3):210–219. doi:10.5599/admet.698 | `Avdeef2019` |
+| Bentz J, O'Connor MP, Bednarczyk D, Coleman J, Lee C, Palm J, et al. (2013). *Drug Metab Dispos* 41(7):1347–1366. doi:10.1124/dmd.112.050500 | `Bentz2013` |
+| Bruneau P, McElroy NR (2006). *J Chem Inf Model* 46(3):1379–1387. doi:10.1021/ci0504014 | `Bruneau2006` |
+| Chen X, Slättengren T, de Lange ECM, Smith DE, Hammarlund-Udenaes M (2017). *Fluids Barriers CNS* 14:30. doi:10.1186/s12987-017-0078-x | `Chen2017` |
+| Hampel FR (2001). Robust statistics: a brief introduction and overview. Research Report 94, Seminar für Statistik, ETH Zürich. doi:10.3929/ethz-a-004158597 | `Hampel2001` |
+| Hayeshi R, Hilgendorf C, Artursson P, Augustijns P, Brodin B, Dehertogh P, et al. (2008). *Eur J Pharm Sci* 35(5):383–396. doi:10.1016/j.ejps.2008.08.004 | `Hayeshi2008` |
+| Heid E, McGill CJ, Vermeire FH, Green WH (2023). *J Chem Inf Model* 63(13):4012–4029. doi:10.1021/acs.jcim.3c00373 | `Heid2023` |
+| Horwitz W, Albert R (2006). *J AOAC Int* 89(4):1095–1109. doi:10.1093/jaoac/89.4.1095 | `Horwitz2006` |
+| Huber PJ (1964). *Ann Math Statist* 35(1):73–101. doi:10.1214/aoms/1177703732 | `huber1964robust` |
+| Kalliokoski T, Kramer C, Vulpetti A, Gedeck P (2013). *PLoS ONE* 8(4):e61007. doi:10.1371/journal.pone.0061007 | `Kalliokoski2013` |
+| Kolmar SS, Grulke CM (2021). *J Cheminform* 13:92. doi:10.1186/s13321-021-00571-7 | `Kolmar2021` |
+| Kramer C, Kalliokoski T, Gedeck P, Vulpetti A (2012). *J Med Chem* 55(11):5165–5173. doi:10.1021/jm300131x | `Kramer2012` |
+| Kramer C, Dahl G, Tyrchan C, Ulander J (2016). *Drug Discov Today* 21(8):1213–1221. doi:10.1016/j.drudis.2016.03.015 | `Kramer2016` |
+| Krüger FA, Overington JP (2012). *PLoS Comput Biol* 8(1):e1002333. doi:10.1371/journal.pcbi.1002333 | `Kruger2012` |
+| Landrum GA, Riniker S (2024). *J Chem Inf Model* 64(5):1560–1567. doi:10.1021/acs.jcim.4c00049 | `landrum2024` |
+| Lange KL, Little RJA, Taylor JMG (1989). *JASA* 84(408):881–896. doi:10.1080/01621459.1989.10478852 | `Lange1989` |
+| Larregieu CA, Benet LZ (2013). *AAPS J* 15(2):483–497. doi:10.1208/s12248-013-9456-8 | `Larregieu2013` |
+| Llinàs A, Avdeef A (2019). *J Chem Inf Model* 59(6):3036–3040. doi:10.1021/acs.jcim.9b00345 | `Llinas2019` |
+| Niu Z, Xiao X, Wu W, Cai Q, Jiang Y, Jin W, et al. (2024). *Sci Data* 11:985. doi:10.1038/s41597-024-03793-0 | `Niu2024` |
+| O'Hagan S, Kell DB (2015). *PeerJ* 3:e1405. doi:10.7717/peerj.1405 | `OHagan2015` |
+| OECD (2022). Test No. 117: Partition Coefficient (n-octanol/water), HPLC Method. doi:10.1787/9789264069824-en | `OECD2022` |
+| Prieto P, Hoffmann S, Tirelli V, Tancredi F, González I, Bermejo M, De Angelis I (2010). *ATLA* 38(5):367–386. doi:10.1177/026119291003800510 | `Prieto2010` |
+| Sato T, Yuki H, Ogura K, Honma T (2018). *PLoS ONE* 13(7):e0199348. doi:10.1371/journal.pone.0199348 | `Sato2018` |
+| Song H, Kim M, Park D, Shin Y, Lee J-G (2023). *IEEE TNNLS* 34(11):8135–8153 | `Song2022` |
+| Srinivasan B, Lloyd MD (2025). *J Med Chem* 68(3):2052–2056. doi:10.1021/acs.jmedchem.5c00131 | `Srinivasan2025` |
+| Svensson E, Friesacher HR, Winiwarter S, Mervin L, Arany A, Engkvist O (2025). *Artif Intell Life Sci* 7:100128. doi:10.1016/j.ailsci.2025.100128 | `Svensson2025` |
+| Tukey JW (1960). A survey of sampling from contaminated distributions. In: Olkin I, ed. *Contributions to Probability and Statistics: Essays in Honor of Harold Hotelling*. Stanford University Press, 448–485 | `Tukey1960` |
+| Wenlock MC, Potter T, Barton P, Austin RP (2011). *J Biomol Screen* 16(3):348–355. doi:10.1177/1087057110396372 | `Wenlock2011` |
+| Zhao L, Wang W, Sedykh A, Zhu H (2017). *ACS Omega* 2(6):2805–2812. doi:10.1021/acsomega.7b00274 | `Zhao2017` |
+
+**Four corrections this list previously carried, all found 2026-08-26 when the entries were built
+from Crossref:**
+
+- **Zhao 2017's authors were wrong here.** This list said "Zhao Y, Wang J"; the paper is
+  **Zhao Linlin, Wang Wenyi**, Sedykh A, Zhu H. It is the published precedent for the `k` axis in
+  §1, so the attribution matters.
+- **Sato 2018 has four authors, not six and not eleven.** Crossref: **Sato T, Yuki H, Ogura K,
+  Honma T**. §4b's citation line named "Takaya D, Sasaki S, Tanaka A" and its section heading named
+  eleven people; both were wrong.
+- **Bruneau & McElroy is a 2006 journal issue** (JCIM 46(3):1379–1387) with an online-first date of
+  December 2005. Cite 2006. Its widely quoted 0.27 log-unit figure still **fails verification** and
+  must not be used — §4a.
+- **Hampel 2001 is an institutional research report**, not a peer-reviewed article — Research Report
+  94, Seminar für Statistik, ETH Zürich, with a stable DOI. It is the source of the p = 1–10%
+  contamination fraction in §2, so its status is stated here rather than left to look like a journal
+  paper. No peer-reviewed version was found; the canonical peer-reviewed alternative for the same
+  material is Hampel, Ronchetti, Rousseeuw & Stahel, *Robust Statistics: The Approach Based on
+  Influence Functions* (Wiley, 1986), which does not carry the 1–10% sentence verbatim.
