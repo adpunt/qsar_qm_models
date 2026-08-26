@@ -99,6 +99,7 @@ GROUP_FRACTION = 0.2  # affected group fraction, no published number, chosen and
 # realised dose over at least 20 seeds, never on one realisation. Student-t nu=3 and
 # grouped-shifted cannot meet a per-run tolerance by construction.
 N_DOSE_SEEDS = 24
+DOSE_CHECK_MIN_OBS = 8    # below this a standard error is not a standard error
 DOSE_TOL = 0.02       # on the MEAN over N_DOSE_SEEDS draws
 
 
@@ -729,12 +730,37 @@ def analyse(df, shape):
 
     # -- realised dose, guard 5 -----------------------------------------------
     print("\n--- delivered amount, by condition (guard 5: equal across conditions) ---")
+    # Rule 3 of NOISE_DESIGN.md section 2a: judge the MEAN, against its own standard
+    # error, never one realisation against a flat tolerance. Student-t nu=3 and
+    # grouped-shifted have per-run dose spreads several times the others', and a gate
+    # that ignores that fails at random -- which is exactly what the Rust one did.
     for level in sorted(df.level.unique()):
-        s = df[df.level == level].groupby('condition').realised_dose.agg(['mean', 'std'])
-        worst = (s['mean'] - level).abs().max()
-        print(f"  level {level}: realised {s['mean'].min():.4f}–{s['mean'].max():.4f}, largest "
-              f"departure from target {worst:+.4f} "
-              f"({'within' if worst <= DOSE_TOL * level else 'OUTSIDE'} tolerance)")
+        # One dose per (replicate, condition) -- the three models share a noise draw, so
+        # counting model rows would treble the sample size and shrink the standard error
+        # by root three for free.
+        per_draw = (df[df.level == level]
+                    .drop_duplicates(subset=['replicate', 'condition'])
+                    [['condition', 'realised_dose']])
+        s = per_draw.groupby('condition').realised_dose.agg(['mean', 'std', 'count'])
+        s['se'] = s['std'] / np.sqrt(s['count'])
+        s['off'] = s['mean'] - level
+        s['band'] = np.maximum(3 * s['se'], 0.005 * level)
+        n_obs = int(s['count'].max())
+        head = (f"  level {level}: realised {s['mean'].min():.4f}–{s['mean'].max():.4f} over "
+                f"{n_obs} replicate(s)")
+        if n_obs < DOSE_CHECK_MIN_OBS:
+            # A standard error from two or three draws is not a standard error. The
+            # flat-dose gate proper is the injector's own self-test, which averages 200
+            # seeds; this line is informational until enough replicates have landed.
+            print(head + f"; too few to judge flatness — the gate is "
+                         f"`rust_processor --self-test`, over 200 seeds")
+        else:
+            bad = s[s['off'].abs() > s['band']]
+            print(head + "; " + ("every condition within three standard errors of target"
+                                 if not len(bad) else
+                                 "OUTSIDE three standard errors: "
+                                 + ", ".join(f"{c} ({r['off']:+.4f} vs band {r['band']:.4f})"
+                                             for c, r in bad.iterrows())))
         for c in [c for c in s.index if 'nu=3' in c or 'nu=5' in c or 'shifted' in c]:
             print(f"      {c}: per-run dose SD {s.loc[c, 'std']:.4f} — the POPULATION dose is "
                   f"what is fixed, not this (NOISE_DESIGN.md 5.1b, rule 3 of 2a)")
