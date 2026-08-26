@@ -756,6 +756,58 @@ Two ways out, and the choice is yours because it changes numbers, not just tooli
 Run §1b of the runbook on the cluster before deciding — this may be a laptop-only problem, and
 whether it is changes the answer.
 
+### 2.8e 🔴 LAUNCH BLOCKER CANDIDATE — the Gaussian process SEGFAULTS once the boosting libraries are loaded
+
+**Found 2026-08-26 (chat E), by accident, when the calibration test died with no traceback.**
+
+Importing `lightgbm` **or** `xgboost` and then fitting a plain gpytorch `ExactGP` kills the process
+with a segmentation fault — exit 139, no Python error, no stack. Reproduced on this laptop, both
+libraries independently, and it is not data-dependent: it fires on random arrays.
+
+```bash
+python -c "
+import lightgbm, numpy as np, torch, gpytorch
+# ...build any ExactGP on ~900x208 and take a few Adam steps..."
+echo $?          # 139
+```
+
+**Why it reaches the real runs.** `models/models.py` imports `xgboost` (`:24`) and `lightgbm`
+(`:29`) at module level and then fits the gauche/gpytorch GP in `train_gauche_model`. The
+experimental pipeline imports both and fits a GP too. **Every Gaussian-process task on both
+pipelines therefore runs inside a process where both are loaded.**
+
+**Why it has been invisible.** A segfault produces no Python traceback, so a SLURM task simply
+stops. That is the exact signature of the two GP jobs in §2.8d, which "ran to completion and
+produced nothing". Those were diagnosed as a missing `gpytorch`, which was true of that
+interpreter — but this is a second, independent way for the same jobs to die on a host where the
+package IS present, and nothing was checking for it.
+
+**The cause is two OpenMP runtimes.** LightGBM and XGBoost link their own; PyTorch links another.
+Loading both and then running a threaded linear-algebra kernel crashes.
+
+**What was measured:**
+
+| Setting | Result |
+|---|---|
+| unset (what QM9 does) | **SEGFAULT** |
+| `OMP_NUM_THREADS=4` — what the experimental pipeline already sets at `:3` | **SEGFAULT** |
+| `OMP_NUM_THREADS=2` | **SEGFAULT** |
+| `OMP_NUM_THREADS=1` | ✅ fits |
+| `KMP_DUPLICATE_LIB_OK=TRUE` | **SEGFAULT** — the usual macOS workaround does not help |
+
+So the experimental pipeline's existing thread pin does **not** protect it, and QM9 has no pin at
+all.
+
+**Not fixed in either pipeline, deliberately.** Pinning to one thread costs every tree fit its
+parallelism across the whole grid, and the real fix is one OpenMP runtime in the environment —
+install `xgboost` and `lightgbm` from the same channel as `pytorch`. Which of those is right
+depends on whether the **cluster** environment is affected, and that cannot be tested from here.
+
+**What was done instead:** `scripts/audit_pipeline_parity.py` now runs the fit in a subprocess and
+reports the exit code, and says whether one thread cures it. It is in the uncertainty preflight as
+check 0 and in the QM9 runbook, so the cluster is tested before anything is submitted rather than
+after 500 tasks die quietly. **Run it on the cluster before launching any GP job.**
+
 ### 2.9 The Methods figure does not show the experiment
 
 `paper.tex:359` captions it as the QM9 label distribution. The code that draws it

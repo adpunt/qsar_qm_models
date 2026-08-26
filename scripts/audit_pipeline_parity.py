@@ -447,6 +447,64 @@ def audit_assumptions():
           'pipeline cannot do at all. This whole audit compares the DEFAULT '
           'path; a job on the tuned path is not audited by anything.')
 
+    def _gp_after_boosting():
+        """Does a Gaussian process still fit once the boosting libraries are loaded?
+
+        On this laptop it does not: importing lightgbm or xgboost and then
+        fitting a plain gpytorch ExactGP SEGFAULTS (exit 139). Both link their
+        own OpenMP runtime and PyTorch links another; loading two and then
+        running a threaded kernel kills the process.
+
+        This has to be a subprocess. A segfault cannot be caught in-process --
+        which is exactly why it is dangerous: in a SLURM array it looks like a
+        task that died with no Python traceback at all.
+
+        Both pipelines import xgboost and lightgbm at module level and both fit
+        a gauche/gpytorch GP, so if this fires on the cluster, every Gaussian-
+        process task dies silently.
+        """
+        code = (
+            "import lightgbm, xgboost, numpy as np, torch, gpytorch\n"
+            "class G(gpytorch.models.ExactGP):\n"
+            "    def __init__(s,x,y,l):\n"
+            "        super().__init__(x,y,l)\n"
+            "        s.m=gpytorch.means.ConstantMean()\n"
+            "        s.c=gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())\n"
+            "    def forward(s,x):\n"
+            "        return gpytorch.distributions.MultivariateNormal(s.m(x),s.c(x))\n"
+            "r=np.random.RandomState(0)\n"
+            "X=r.normal(size=(900,208)); y=X[:,0]*2+r.normal(scale=.3,size=900)\n"
+            "xt=torch.from_numpy(X); yt=torch.from_numpy(y)\n"
+            "l=gpytorch.likelihoods.GaussianLikelihood(noise=1e-3); m=G(xt,yt,l)\n"
+            "mll=gpytorch.mlls.ExactMarginalLogLikelihood(l,m)\n"
+            "m.train(); l.train()\n"
+            "o=torch.optim.Adam(m.parameters(),lr=0.1)\n"
+            "for _ in range(20):\n"
+            "    o.zero_grad(); (-mll(m(xt),yt)).backward(); o.step()\n"
+            "print('ok')\n")
+        r = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+        threads = os.environ.get('OMP_NUM_THREADS', 'unset')
+        if r.returncode == 0:
+            return True, f'fits with OMP_NUM_THREADS={threads}'
+        how = ('SEGFAULT' if r.returncode in (-11, 139)
+               else f'exit {r.returncode}')
+        # Is one thread the cure? That tells the author what to do about it.
+        env = dict(os.environ, OMP_NUM_THREADS='1')
+        r1 = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                            text=True, env=env)
+        cure = ('OMP_NUM_THREADS=1 fixes it'
+                if r1.returncode == 0 else 'OMP_NUM_THREADS=1 does NOT fix it')
+        return False, (f'{how} with OMP_NUM_THREADS={threads}; {cure}')
+    check('Gaussian process fits with boosting loaded', _gp_after_boosting,
+          'LAUNCH BLOCKER for every Gaussian-process task on both pipelines. Both '
+          'import xgboost and lightgbm at module level and then fit a '
+          'gauche/gpytorch GP. A segfault leaves NO Python traceback, so in a '
+          'SLURM array it looks like a task that simply died -- which is the '
+          'shape of the two GP jobs in RERUN_PLAN.md 2.8d. Fix the environment '
+          '(one OpenMP runtime: install xgboost/lightgbm from the same channel '
+          'as pytorch) rather than pinning threads to 1, which costs every tree '
+          'fit its parallelism.')
+
     def _rust_binary():
         p = REPO / 'rust' / 'target' / 'release' / 'rust_processor'
         return p.exists(), (str(p) if p.exists() else 'not built')
