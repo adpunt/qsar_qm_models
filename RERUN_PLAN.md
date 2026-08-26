@@ -139,7 +139,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 |---|---|---|---|
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
-| 3 | Noise redesign — specification, literature, local tests | ✅ done and sourced | §13 chats A, B |
+| 3 | Noise redesign — specification, literature, local tests | ✅ done and sourced; **settings screened, §13.9** | §13 chats A, B, G |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -2719,7 +2719,7 @@ Methods**, because a staged design has to be described as one.
 
 | Stage | What runs | Replicates | Answers |
 |---|---|---|---|
-| **0 — screen** | every model × every representation, Gaussian and censoring, full level grid | 1 | Choose what stage 2 goes deep on. **Reused as replicate 0 of stage 1, not thrown away** |
+| **0 — screen** | every model × every representation, **the same noise types stage 1 runs**, full level grid | 1 | Choose what stage 2 goes deep on. **Reused as replicate 0 of stage 1, not thrown away** |
 | **1 — breadth** | every model × every representation, a chosen subset of noise types, full level grid | **10** ✅ | Q1, Q3 |
 | **2 — depth** | chosen models × chosen representations, **all** noise types | 10 | Q2 — the small effects, where the precision is actually needed |
 | **3 — uncertainty** | the models that emit a per-molecule uncertainty, experimental datasets | 1 + a permutation null | Q4, Q5, Q6 |
@@ -2736,6 +2736,7 @@ where the replicates have to go, and stage 2 is where they go.
 |---|---|---|
 | Old design (6 noise types, 11 levels, 10 replicates) | 51,480 | 100% |
 | Stage 0 screen | 1,482 | 3% |
+| *(that 1,482 is 78 × 19 × 1 — the same nineteen level-conditions as stage 1, which is what makes the reuse work. An earlier version of this row said "Gaussian and censoring", which is thirteen conditions and 1,014 runs; the pricing was right and the description was wrong. Chat G, §13.9)* | | |
 | Stage 1 at **6** replicates | 8,892 | 17% |
 | Stage 1 at **10** replicates | 14,820 | 29% |
 | Stage 2 (10 replicates, 4 models × 3 representations) | 4,440 | 9% |
@@ -2761,11 +2762,16 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    correlations over thousands of molecules, so their precision comes from the molecule count, not
    the replicate count — one replicate is defensible **provided** a permutation null is reported so
    the reader has a reference distribution. Without repeats there is no run-to-run error bar at all.
-3. 🔴 **Which noise types run at full grid in stage 1?** Q1 asks for a decomposition *per noise
-   type*, so every type that needs its own decomposition must run at full grid. The three
-   structurally distinct ones are Gaussian (even), Grouped (structure-keyed) and Censoring
-   (one-directional). The heavy-tailed and sparse-contamination types are what stage 0 and stage 2
-   would establish behave like Gaussian.
+3. 🔵 **Which noise types run at full grid in stage 1? — chat G has now measured this (§13.9).**
+   Q1 asks for a decomposition *per noise type*, so every type that needs its own decomposition must
+   run at full grid. The structurally distinct ones are **four, not three**: Gaussian (even),
+   Grouped — wider (structure-keyed, centred), Grouped — shifted (structure-keyed, one-directional)
+   and Censoring (one-directional across the whole dataset). The two grouped conditions differ only
+   in whether the group's error is centred, and that single difference is worth 0.10–0.31 R² — the
+   largest zero-mean effect measured anywhere in this study — so they cannot share a cell. The
+   heavy-tailed and sparse-contamination types were what stage 2 was expected to show behave like
+   Gaussian, and they do: every setting within 0.006 R² at the reporting level. **Stage 1 at four
+   types is 25 level-conditions, 19,500 runs, and the staged total becomes 48% of the old design.**
 4. 🔴 **Which models and representations go deep in stage 2?** Cannot be chosen before stage 0 runs.
 5. 🔴 **The QM9 reporting level** (§6.1). Every table that reports accuracy at one level needs it.
 
@@ -2947,8 +2953,10 @@ order; emits the provenance columns. Verifies locally against `rust/reference/no
 **Spec:** `NOISE_DESIGN.md` §6.1 (delete), §6.2 (build), §6.3 (verify). `RERUN_PLAN.md` §5.1
 items 1, 2, 4, 6, §5.2 (the columns), §8 gates 1, 3, 4, 5, 7.
 
-**🔴 TODO in this chat:** whether Laplace is in (§13.3); how many Student-t and Outlier settings
-(answered by chat G).
+**✅ Both TODOs answered by chat G, §13.9:** one Student-t setting (suggest ν = 5) and one Outlier
+setting (suggest p = 10%), because all three of each are within 0.006 R² of Gaussian and of each
+other; Laplace is indistinguishable too and belongs in stage 2 if it is wanted for the citation at
+all. The skewed draw was tested and does not earn implementation.
 
 > **Prompt.** Implement the redesigned noise injection in `rust/src/main.rs`. The specification is
 > `NOISE_DESIGN.md` §6.1–6.3 and `RERUN_PLAN.md` §5.1 items 1, 2, 4 and 6 — read both in full and
@@ -3584,6 +3592,123 @@ than a second model in the roster**. 13 is right; the runbook line is stale.
 > setting worth running. Also test whether a **skewed** noise condition is distinguishable from a
 > symmetric one at matched amount; see `RERUN_PLAN.md` §13.3 for why this is open. Report the compute
 > each option costs against the table in §13.1. Recommend, do not decide. Do not touch `paper.tex`.
+
+---
+
+### 13.9 ✅ ANSWERED 2026-08-26 — which settings earn cluster time
+
+`scripts/setting_selection_test.py`, results in `results/setting_selection_test.csv` and
+`results/setting_selection_test_contrasts.csv`. Real QM9, 4,000 molecules per replicate drawn fresh,
+PDV descriptors, real Murcko scaffold split, noise on training labels only, scored on clean test
+labels. **Twelve replicates**, two levels — 0.5 (the proposed QM9 reporting level) and 1.5 (the top
+of the grid, and per `NOISE_DESIGN.md` §5.5 the only place the noise types separate at all). Three
+models on the pipeline's own defaults. 792 rows. Every condition delivers the same amount of noise:
+realised 0.490–0.505 at level 0.5 and 1.475–1.522 at level 1.5, every one within three standard
+errors of target.
+
+#### The answer, in one line
+
+**Shape and contamination do not earn separate settings. Direction does.**
+
+#### At the reporting level, everything except one condition is indistinguishable from Gaussian
+
+Across all ten non-Gaussian conditions except grouped-shifted, and all three models:
+
+| | |
+|---|---|
+| Largest \|mean ΔR²\| against Gaussian | **0.0058** |
+| Largest ratio to the replicate-to-replicate wobble | **0.29** |
+| Smallest paired *p* | 0.089 |
+| What twelve replicates could have detected | 0.0064 – 0.0208 |
+
+Every one of them is under a third of the run-to-run wobble. **This is not "we could not see it" —
+the test's own resolution is stated beside every number, and the effects sit at or below it.**
+
+**The ladders are flat.** ν = 10 → 5 → 3: every step under 0.0061 R², *p* ≥ 0.29. Outlier
+1% → 5% → 10%: every step under 0.0049.
+
+⚠️ **One statistically significant nothing, reported because it is the kind of number that gets
+misread.** Outlier 5% versus 1% reaches *p* = 0.0024 (LightGBM) and *p* = 0.0014 (ridge) — on
+differences of **+0.0049 and +0.0031 R²**, which are 0.36 and 0.14 of the wobble. Common random
+numbers across conditions make the paired difference very precise, so a trivial difference can be
+significant. It is also the *wrong sign* for a dose response — more contamination did marginally
+better — so it is precision around zero, not an ordering.
+
+#### Grouped-shifted is the exception, and it is large
+
+| Contrast | Level | LightGBM | Random forest | Ridge |
+|---|---|---|---|---|
+| Grouped-shifted − Gaussian | 0.5 | −0.0100 (0.58×) | −0.0077 (0.47×) | **−0.0311 (1.55×, p = 0.017)** |
+| Grouped-shifted − Gaussian | 1.5 | **−0.1274 (2.22×, p = 0.0008)** | **−0.1012 (2.98×, p = 0.0022)** | **−0.3300 (4.64×, p = 0.0002)** |
+| **Grouped-shifted − Grouped-wider** | 1.5 | **−0.1419 (2.71×, p < 0.001)** | **−0.0963 (2.52×, p = 0.003)** | **−0.3138 (7.44×, p < 0.001)** |
+
+The bracketed figure is the difference as a multiple of the replicate-to-replicate wobble.
+
+**The third row is the one that matters.** The two grouped conditions differ *only* in whether the
+group's error is centred — same amount of noise, same group structure, same targeting. So that
+contrast isolates **direction**, and direction is worth 0.10 to 0.31 R² where every difference of
+*shape* is worth under 0.006. **This is the study's censoring result reproduced by a second,
+independent mechanism at the level of a chemical family rather than the whole dataset** — which is
+precisely the argument §13.3 made for running both forms, now with evidence behind it.
+
+#### The skewed draw does not earn implementation — §13.3's rejection holds
+
+Nothing at the reporting level (largest 0.0055, ratio 0.27). At level 1.5 it reaches −0.0445 for the
+random forest alone (1.31× the wobble, *p* = 0.007) and nothing for the other two. A condition that
+moves one model out of three, only at the top of the grid, does not repay being built into two
+injectors and carried through the whole design. **Recommendation: do not implement it.** The
+asymmetry story is carried by censoring and by grouped-shifted, both of which are mechanisms with
+sources behind them rather than a chosen distribution.
+
+#### Guard 8: the declared filter, and where it matters
+
+One cell of thirty-six was excluded — replicate 2, ridge, **clean R² = −16.99**, a scaffold split a
+linear model cannot fit at all. It changes exactly one verdict: with the filter, grouped-shifted
+earns full grid on the strength of ridge at the reporting level; without it, grouped-shifted
+separates only above the reporting level. **Both are reported, and neither changes the
+recommendation**, because grouped-shifted's case rests on level 1.5, where all three models agree at
+*p* ≤ 0.003.
+
+#### 🔵 Recommendations — these are recommendations, and the decision is yours
+
+| # | Recommendation | Why |
+|---|---|---|
+| 1 | **One Student-t setting, not three. Suggest ν = 5.** | The three are within 0.006 R² of each other and of Gaussian. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
+| 2 | **One Outlier setting, not three. Suggest p = 10%.** | Same evidence. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there |
+| 3 | **Both grouped conditions at full grid in stage 1** | The only zero-mean condition that separates, and its comparator is what makes it interpretable. The pair is a claim; neither half is |
+| 4 | **Laplace: not in stage 1.** Stage 2 if it is wanted for the citation | Indistinguishable from Gaussian on every model at both levels (largest 0.0058). Its stated value in `NOISE_DESIGN.md` §2 is citational, not empirical |
+| 5 | **Do not build the skewed draw** | See above. It also does not exist in either injector yet, so this is a saving rather than a deletion |
+
+**This closes chat A's open TODO** — *"how many Student-t and Outlier settings"* — at one each.
+
+#### What it costs, priced against §13.1
+
+One extra setting at full grid in stage 1 is 78 combinations × 6 non-zero levels × 10 replicates =
+**4,680 training runs, 9.1% of the old design**. In stage 2 only it is 12 × 6 × 10 = **720 runs,
+1.4%**.
+
+| Option | Stage 1 | Staged total | Share of the old design |
+|---|---|---|---|
+| §13.1 as agreed — 3 noise types (19 level-conditions) | 14,820 | 19,260 | 37% |
+| **Recommended — 4 types: Gaussian, grouped-wider, grouped-shifted, censoring (25 level-conditions)** | **19,500** | **24,660** | **48%** |
+| Every Student-t and Outlier setting at full grid as well (+4 settings) | 33,540 | 37,980 | 74% |
+
+The recommendation costs 5,340 runs more than the currently agreed stage 1 and **13,320 fewer** than
+carrying all nine settings. It buys the one contrast in the whole zero-mean set that produces an
+effect, and it spends nothing on eight settings that produce none.
+
+**🔴 This changes §13.1 open item 3.** The three structurally distinct types were named as Gaussian,
+Grouped and Censoring. Grouped is **two** conditions, and the difference between them is the largest
+zero-mean effect measured anywhere in this study — so it is four, not three.
+
+#### What this test cannot settle, stated rather than buried
+
+One representation and three cheap models on 4,000 molecules. A setting that matters for a neural
+network or a Gaussian process would be missed. And it measures **accuracy only**: `NOISE_DESIGN.md`
+§5.3 already notes that a model may lose the same accuracy while being much better or worse at
+spotting *which* labels were corrupted, and that is where concentrated noise was expected to earn its
+place. That question belongs to the uncertainty runs, and on QM9 it cannot be answered in the main
+pipeline at all (§2.6).
 
 ---
 

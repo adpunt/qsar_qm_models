@@ -136,11 +136,11 @@ perturbed continuous label is nothing but magnitude.
 | # | Strategy | What it is | Why it is in | Size | Shape |
 |---|---|---|---|---|---|
 | 1 | **Gaussian** | Every label nudged by a similar amount | The reference case, and what both direct predecessors used, so results stay comparable to theirs | `τ` | — |
-| 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | ν = 10, 5, 3 |
-| 3 | **Laplace** *(optional, QM9 only)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6 | `τ` | fixed |
+| 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | **ν = 5** — one setting, not three (§5.8) |
+| 3 | **Laplace** *(stage 2 only, if at all)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6, and measured, it is indistinguishable from Gaussian (§5.8) | `τ` | fixed |
 | 4a | **Grouped — wider** | Whole scaffold groups get wider errors, still centred on the true value | **Best-evidenced of the set.** Within-laboratory error must be multiplied by about three to reach between-laboratory error (§3.3). The only zero-mean condition where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected **molecule** fraction ≈ 0.2 |
 | 4b | **Grouped — shifted** ✅ | Whole scaffold groups have their labels pushed in one direction by a constant | 62% of real measurement variance sits **between** laboratories (§3.3) — and that describes laboratory *averages* differing, which is an offset, not a widening. Added 2026-08-26; see §2a | `τ` | ρ = 0.62, from the source |
-| 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | p = 1%, 5%, 10%; λ = 3 |
+| 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | **p = 10%**, λ = 3 — one setting, not three (§5.8) |
 | 6 | **Censoring** ✅ | Values past the assay limit recorded as the limit | The most *prevalent* real mechanism (§3.5), and the only one that is not zero-mean | **cannot be dose-matched** — separate axis | fraction censored: 10%, 25%, 40% |
 
 Strategies 1–5 are dose-matched. 1, 2, 3, 4a and 5 are zero-mean; **4b is zero-mean in
@@ -1293,6 +1293,46 @@ matched amount, it never needs to enter either injector.
 
 One parameter, exact dose match in the population, and it nests nothing — which is the point: it is
 the only condition in the set that is asymmetric *by draw* rather than by mechanism.
+
+### 5.8 ✅ WHICH SETTINGS EARN THEIR PLACE — chat G, 2026-08-26
+
+`scripts/setting_selection_test.py`. Real QM9, 4,000 molecules per replicate drawn fresh, PDV
+descriptors, real Murcko scaffold split, noise on training labels only, scored on clean test labels.
+**Twelve replicates**, levels 0.5 and 1.5, three models on the pipeline's own defaults. Every
+condition delivered the same amount of noise, within three standard errors of target.
+
+**Shape does not earn separate settings. Direction does.**
+
+At the reporting level, across every non-Gaussian condition except grouped-shifted, and all three
+models: the largest mean difference against Gaussian is **0.0058 R²**, the largest ratio to the
+replicate-to-replicate wobble is **0.29**, and the smallest paired *p* is 0.089 — against a
+detectable floor of 0.0064–0.0208. The ν = 10 → 5 → 3 ladder and the p = 1% → 5% → 10% ladder are
+both flat, every step under 0.006 R².
+
+**This confirms §5.3 with a much better test.** That pilot found the same thing on three replicates
+with the subsample, split and model seeds all held fixed — so its comparison ran against a wobble
+that was far too small. Twelve replicates with everything redrawn per replicate give the same answer,
+and now the answer is worth something.
+
+**Grouped-shifted separates, and by a lot.** Against Gaussian at level 1.5: −0.127, −0.101 and
+−0.330 R² for LightGBM, the random forest and ridge — 2.2×, 3.0× and 4.6× the wobble, every *p* ≤
+0.002. Against **grouped-wider**, which differs only in whether the group's error is centred:
+−0.142, −0.096 and −0.314, at 2.5× to 7.4× the wobble. Same amount of noise, same groups, same
+targeting — the only difference is direction, and direction is worth fifty times what shape is.
+
+**That is the censoring result, reproduced by a second mechanism.** §5.3b and §5.5 show one-directional
+error doing twelve times more damage than any shape effect, at the level of the whole dataset.
+Grouped-shifted shows it at the level of a chemical family. Two independent demonstrations of one
+effect, which is what §13.3 of `RERUN_PLAN.md` argued the second grouped condition would buy.
+
+**The skewed draw (§5.7) does not earn implementation.** Nothing at the reporting level; −0.045 R² for
+the random forest alone at level 1.5 and nothing for the other two. §13.3's rejection of a skewed
+draw stands, and this measures what it costs: one model out of three, at the top of the grid only.
+
+⚠️ **One statistically significant nothing.** Outlier 5% versus 1% reaches *p* = 0.002 and *p* = 0.001
+on differences of +0.005 and +0.003 R² — 0.36 and 0.14 of the wobble, and the *wrong sign* for a dose
+response. Common random numbers make the paired difference precise, so a trivial difference can be
+significant. Precision around zero is not an effect.
 
 ### 5.4 🔴 Two analysis errors of mine, recorded so they do not resurface
 
