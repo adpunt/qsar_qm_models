@@ -2781,7 +2781,7 @@ seeded generator (§3.3).
 | Check | Result |
 |---|---|
 | `pytest tests/` in `NoiseInject` | **55 pass** |
-| `python scripts/crosscheck_injectors.py` | **342/342**, on all 133,885 real QM9 labels |
+| `python scripts/crosscheck_injectors.py` | **342/342** at three levels, re-confirmed **154/154 at one level, exit code 0**, after the close-out fixes. All 133,885 real QM9 labels, 30,313 real Murcko scaffold groups |
 | The gate actually fails | sabotaging the dose solver → **40 of 154 fail, exit code 1**; a condition present in one implementation but not the other → fails **by name**, not silently skipped |
 | `tests/smoke/smoke_nine_fixes.py` | all pass |
 | `tests/smoke/smoke_uncertainty_patch.py` | all pass, including out-of-fold error exceeding in-sample by 59% and censoring's confound-subtracted effect of −0.656 |
