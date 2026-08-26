@@ -78,6 +78,7 @@ What can we say about uncertainty in these contexts?"*
 | **The ranking table must not average across noise types** | 2026-08-14 | Report the reference type, keep the concordance coefficient for the strategy-independence claim, and highlight any type that behaves differently |
 | **The paper is not about choosing a model, and not about choosing a metric** | 2026-08-20 | *"This paper isn't about which metric is the best."* The three numbers assess models from different angles. Watch for drift — §7.3 was edging toward a metric bake-off |
 | **The Gaussian process goes into the variance decomposition, on one kernel everywhere** | 2026-08-26 | *"The kernel is not why the Gaussian process was kept out of the variance decomposition. Commit to the radial basis everywhere and it can go in alongside the support vector machine — which is what those jobs were for."* Settled. Both `gauche` and `gauche_rbf` come out of `ANOVA_MODELS_EXCLUDE`; one model, one kernel, every representation. **Conditional on the embedding rescaling fix (§2.8c)** — see §10b.2 |
+| **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
 | **The between-laboratory variance finding goes in the Background** | 2026-08-24 | Nearly two-thirds of real measurement variance is between laboratories — you asked for this to be written up |
 
 **Three still-open items from the register that are not in §4 and are yours to close:**
@@ -1781,11 +1782,44 @@ strategies."*
 This is directly supported by the seeding above. The sketch below is **a proposal for discussion,
 not a decision**:
 
-| Stage | What runs | Replicates | Purpose |
+#### ✅ AGREED 2026-08-26 — the staged design
+
+The author agreed the staged shape. **This table is the reference; it belongs in the paper's
+Methods**, because a staged design has to be described as one.
+
+| Stage | What runs | Replicates | Answers |
 |---|---|---|---|
-| 0 — screen | every model × every representation, Gaussian only, full level grid | 1 (`--start-iteration 0 --bootstrapping 1`) | See the shape. Choose what stage 2 goes deep on. **Reused, not thrown away** — it becomes replicate 0 of stage 1 |
-| 1 — breadth | every model × every representation, **a chosen subset of noise types**, full level grid | extend to the agreed count with `--start-iteration 1` | Q1 and Q3 |
-| 2 — depth | a chosen subset of models × representations, **all** noise types, plus uncertainty | agreed count | Q2, Q4, Q5, Q6 |
+| **0 — screen** | every model × every representation, Gaussian and censoring, full level grid | 1 | Choose what stage 2 goes deep on. **Reused as replicate 0 of stage 1, not thrown away** |
+| **1 — breadth** | every model × every representation, a chosen subset of noise types, full level grid | 6 or 10 🔴 | Q1, Q3 |
+| **2 — depth** | chosen models × chosen representations, **all** noise types | 10 | Q2 — the small effects, where the precision is actually needed |
+| **3 — uncertainty** | the models that emit a per-molecule uncertainty, experimental datasets | 1 + a permutation null | Q4, Q5, Q6 |
+
+**Why the replicates are not spread evenly.** Replicates buy precision, and precision only matters
+where the effect is small. The model-versus-representation split is large — roughly 70% against 10%
+— and six replicates resolves it. The difference between noise types at matched amount is small,
+under 0.02 in accuracy from the pilots, which is close to the run-to-run wobble itself. That is
+where the replicates have to go, and stage 2 is where they go.
+
+**Cost, in training runs on QM9** (13 models × 6 representations, 7 levels):
+
+| | runs | share of the old design |
+|---|---|---|
+| Old design (6 noise types, 11 levels, 10 replicates) | 51,480 | 100% |
+| Stage 0 screen | 1,482 | 3% |
+| Stage 1 at **6** replicates | 8,892 | 17% |
+| Stage 1 at **10** replicates | 14,820 | 29% |
+| Stage 2 (10 replicates, 4 models × 3 representations) | 4,440 | 9% |
+| **Total, stage 1 at 6** | **13,332** | **26%** |
+| **Total, stage 1 at 10** | **19,260** | **37%** |
+
+**Answering the author's question directly: ten replicates in stage 1 does not make things a lot
+worse.** It adds 5,928 runs, which is 67% more than stage 1 at six, but the whole staged design
+still lands at 37% of the old one rather than 26%. Both are far cheaper than what was planned
+before. Ten is the safer choice: it keeps headroom above the five-replicate gate, and it drops the
+floor on the paired test from 0.031 to 0.002.
+
+**🔴 Still open:** six or ten in stage 1; which noise types go into stage 1's full grid; and which
+models and representations go deep in stage 2, which cannot be chosen until stage 0 has run.
 
 **Open, and each needs an answer:**
 
@@ -1826,6 +1860,7 @@ independent of each other and can run in parallel.**
 | **H** | Job scripts, preflight, gates, launch | A B C D E G, and §13.1 | blocked |
 | **I** | The uncertainty decomposition build | F | 🔴 blocked on F |
 | **J** | Figure script consolidation and the five analyses | 🔴 needs 1:1 on the details first | blocked |
+| **K** | Bring `NOISE_DESIGN.md` and this plan into agreement, and fix the bibliography | — | ready |
 
 ---
 
@@ -1904,9 +1939,8 @@ the radial-basis kernel uses. `process_and_train.py:971-975` (mol2vec), `:828-83
 store float32; standardise per feature across the training set. Only the descriptor vector is
 standardised today (`:1800-1809`), and it is the best-performing cell in the study.
 
-**Then re-test.** The 0.872-versus-−0.016 gap on the embeddings is attributed to this defect. That
-attribution is an inference and it has to be **measured**, not assumed, before the kernel decision
-is treated as general. This is the author's point: *"That needs to be re-tested no?"*
+**Then re-test.** Whether the rescaling defect is what breaks the radial basis on the two learned
+embeddings has to be measured after the fix, not assumed. That is the deliverable of this chat.
 
 **🔴 TODO:** which additional embedding to add, if any. Candidates and reasoning are in §13.4.
 
@@ -2106,6 +2140,34 @@ noise type as arguments and ignores both.
 
 **Cannot start before the new columns exist**, because it is being rebuilt against them.
 
+#### Chat K — Sync the two documents, and fix the bibliography
+
+**Does:** two housekeeping jobs that both cost nothing and both block later work if left.
+
+**1. The two design documents disagree.** `NOISE_DESIGN.md` and this plan were written at different
+times and have drifted. Known differences: the count and structure of the noise types (§13.3); the
+level grids appear in both with slightly different wording; the Python injector is specified in this
+plan and absent from the design document; the Gaussian-process decision and the staged run design
+are in this plan only. **The design document is the specification and this plan is the process** —
+where they disagree, the design document wins on what the noise is, and this plan wins on what gets
+run and in what order. Neither should restate the other; each should point at it.
+
+**2. The bibliography (§13.8).** The manuscript points at a file that does not exist, seven cited
+keys are undefined, and twenty-two of the redesign's sources are missing from the bibliography.
+Sources, quotes and access routes are already collected in `NOISE_DESIGN.md` §4a–4b.
+
+> **Prompt.** Two housekeeping jobs. First, bring `NOISE_DESIGN.md` and `RERUN_PLAN.md` into
+> agreement. They were written at different times and have drifted — the noise type count and
+> structure, the level grids, the Python injector, the Gaussian-process decision and the staged run
+> design. Read both in full first. The design document is the specification of what the noise *is*;
+> the plan is the process of what gets *run*. Where they disagree, decide which one owns the fact,
+> put it there once, and have the other point at it rather than restating it. Do not average two
+> disagreeing statements — resolve them or mark them open. Second, fix the bibliography: the
+> manuscript's `\bibliography` line names a file that does not exist, seven cited keys are undefined,
+> and twenty-two sources the noise redesign relies on are missing. `RERUN_PLAN.md` §13.8 lists them
+> and `NOISE_DESIGN.md` §4a–4b has the verbatim quotes and access routes. Add the entries; do not
+> edit `paper.tex` itself — record the one-line change it needs instead.
+
 ### 13.3 🔴 TODO — skewed noise, and the count of noise types
 
 **Two things the author raised that the design does not currently answer honestly.**
@@ -2135,28 +2197,9 @@ Open, and the author's to settle:
   in `NOISE_DESIGN.md` is that no condition enters without a peer-reviewed source. Chat G can test
   whether it is even distinguishable at matched amount; the literature question is separate.
 
-### 13.4 🔴 TODO — an additional embedding
+### 13.4 — an additional embedding
 
-The author asked whether KIRBy's results suggest an embedding worth adding to both studies.
-
-**The strongest candidate is already implemented in both repositories and has never been used.**
-ChemBERTa: `chemberta_fingerprint` in `scripts/process_and_train.py:775`, `create_chemberta` in
-`KIRBy/src/kirby/representations/molecular.py:2201`. It is currently unusable for exactly the reason
-in chat C — it carries the same per-molecule rescaling defect — so **fixing the storage makes it
-available at no extra implementation cost.**
-
-**Why it is the right gap to fill.** The current set has two learned embeddings, and both are of the
-older kind: mol2vec is a shallow word-vector model over substructures, MHG-GNN is a graph
-autoencoder. Neither is a transformer language model, which is the family the field has moved to and
-which a referee will expect to see. Adding one turns "learned embeddings are weak" — a claim that is
-already suspect once the storage defect is fixed — into a claim tested across two different families.
-
-KIRBy also carries MolFormer, SELFormer, MolCLR, GraphMVP, Uni-Mol, MiniMol, GROVER, SMI-TED and
-others (`molecular.py`). Any of those would need implementing in the QM9 pipeline from scratch.
-
-**Open:** whether to add one at all — every representation added multiplies the whole grid, and §6.4
-already records that cutting representations guts the first research question, so adding one is not
-free either.
+Superseded by §13.7, which gives the evidence in tables rather than reasoning about it.
 
 ### 13.5 The two decisions restated plainly
 
@@ -2188,3 +2231,119 @@ no new behaviour**. What it buys is a sentence: it is the only distribution that
 behind it (Anderson-Darling, p < 2×10⁻¹⁶, Krüger & Overington 2012). With it you can write "we
 tested the error distribution observed in bioactivity data"; without it, "we tested a heavy-tailed
 distribution". One extra condition on QM9 only. 🔴 The author's call.
+
+### 13.6 The rescaling defect is QM9 only — the experimental pipeline is clean
+
+Checked 2026-08-26 in response to the author's question, *"Is there a rescaling defect in KIRBy too
+for the validation data?"*
+
+**No. The experimental pipeline does both things correctly and is the reference for the fix.**
+
+| | QM9 pipeline | Experimental pipeline |
+|---|---|---|
+| Embedding values as the model produces them | ❌ each molecule rescaled to fill 0–255 using its own smallest and largest value, then stored as bytes | ✅ returned as ordinary decimal numbers, no rescaling, no quantisation (`KIRBy/src/kirby/representations/molecular.py` — mol2vec `:1565`, MHG-GNN `:2074`, ChemBERTa `:2201`) |
+| Features put on a common scale before the model | ❌ only the descriptor vector (`process_and_train.py:1800-1809`) | ✅ every representation, fitted on the training fold and applied to the rest (`alternative_data_noise_robustness.py:882-884` for the tree and kernel models, `:967-970` for the neural ones) |
+
+**Three consequences.**
+
+1. **The experimental results for the learned embeddings are trustworthy. The QM9 ones are not.**
+   The paper's claim that learned embeddings are weak comes from QM9, which is the side with the
+   defect.
+2. **The fix is a port, not a design.** Copy what the experimental pipeline already does.
+3. **The Gaussian process comparison on the two embeddings has to be re-measured, not argued.** The
+   0.87-against-−0.02 gap is *attributed* to this defect. That attribution is an inference. Chat C
+   measures it.
+
+### 13.7 🔴 TODO — an additional embedding, on the evidence
+
+Replaces the reasoning previously offered here, at the author's request. **This is KIRBy's own
+representation-pruning evidence**, which scores every representation on its own and then compares
+how similar their predictions are.
+
+**How to read it.** *Solo score* is how well that representation alone predicts the property —
+rank correlation between predicted and true values, higher is better. *Average similarity* is how
+close its predictions are to every other representation's, averaged — high means it carries the same
+signal as the rest. *Nearest twin* is the single representation it most duplicates.
+
+#### hERG Ki (1,412 molecules), from the stored evidence
+
+| Representation | Solo score | Average similarity | Nearest twin | Similarity to twin |
+|---|---|---|---|---|
+| Graph kernel | 0.745 | 0.814 | Descriptor vector | 0.844 |
+| Descriptor vector | 0.729 | 0.823 | Mordred descriptors | 0.889 |
+| Atom pair | 0.727 | 0.820 | Mordred descriptors | 0.845 |
+| ECFP4 | 0.722 | 0.807 | Avalon | 0.839 |
+| Mordred descriptors | 0.713 | 0.825 | Descriptor vector | 0.889 |
+| Avalon | 0.704 | 0.808 | ECFP4 | 0.839 |
+| ChemBERT | 0.696 | 0.797 | SMI-TED | 0.831 |
+| GROVER | 0.693 | 0.793 | Descriptor vector | 0.825 |
+| SMI-TED | 0.671 | 0.801 | ChemBERT | 0.831 |
+
+The full run on the cluster covered fifteen representations and ranked them:
+graph kernel .745 · MHG-GNN .744 · ECFP4 .728 · descriptor vector .727 · atom pair .724 ·
+Mordred .721 · Avalon .714 · mol2vec .713 · topological torsion .700 · ChemBERT .696 ·
+GROVER .692 · SMI-TED .690 · ChemBERTa .689 · MolFormer .687 · GraphMVP .655.
+**No pair exceeded 0.9 similarity** — on this dataset the representations genuinely disagree.
+
+#### logD (5,028 molecules)
+
+Mordred .894 · MHG-GNN .889 · descriptor vector .882 · GROVER .868 · Avalon .865 · ECFP4 .860 ·
+graph kernel .857 · mol2vec .850 · atom pair .848 · SMI-TED .844 · MolFormer .835 ·
+topological torsion .830 · ChemBERT .809 · ChemBERTa .786 · GraphMVP .782.
+
+**Heavily redundant, unlike hERG.** The most similar pair is Mordred and the descriptor vector at
+0.967, and the top nine are all above 0.90 with each other. The final pool cut the descriptor
+vector, mol2vec, ChemBERTa, the graph kernel and atom pair.
+
+#### Caco-2
+
+Only one pair above 0.90 — the descriptor vector and Mordred at 0.907. Everything else genuinely
+distinct. Mordred and mol2vec were cut.
+
+#### QM9
+
+Final pool: Mordred, Avalon, SMI-TED, ECFP4, SELFormer, ChemBERTa, mol2vec, ChemBERT, GraphMVP,
+MolFormer. Cut: descriptor vector, GROVER, MHG-GNN, RDKit fingerprint, atom pair, MACCS.
+The recorded reason is that the redundancy sits in the strong fingerprints, in two tight clusters,
+**not in the pretrained embeddings** — so the cut removed duplicate fingerprints and kept one
+representative of each learned family.
+
+#### What this evidence actually says
+
+- **MHG-GNN is not a weak representation.** It is second on logD (.889) and second on hERG Ki
+  (.744), out of fifteen. The paper's claim that learned embeddings are weak is a QM9 claim, and QM9
+  is the pipeline with the storage defect (§13.6).
+- **mol2vec is the weakest of the learned ones and was cut from three of the four pools.** If one
+  representation is dropped rather than added, this is the candidate.
+- **The transformer language models cluster together and sit mid-pack.** ChemBERT, ChemBERTa,
+  MolFormer, SMI-TED and SELFormer are within about 0.03 of each other on both datasets, and
+  ChemBERT's nearest twin is SMI-TED at 0.831. **Adding one is defensible; adding several is not** —
+  they carry the same signal as each other.
+- **⚠️ These scores are not from this study.** They come from a different scoring model on a
+  different splitting scheme, and QM9 there is the 10,000-molecule subset. They rank
+  representations; they do not transfer as numbers.
+
+🔴 **The decision.** Add one transformer embedding, add none, or swap one out for one. The cheapest
+option by a wide margin is ChemBERTa, because it is already implemented in **both** repositories and
+has never been used — fixing the storage makes it available with no new code. The cost of any
+addition is that it multiplies the whole grid.
+
+### 13.8 Citations for the paper — make them reachable
+
+The author asked that the sources be easy to use when the paper edits happen.
+
+**State, checked 2026-08-26.** The manuscript points at a bibliography file that does not exist, so
+every citation currently renders as an unresolved marker (§9.1). Separately, of the sources the
+noise redesign relies on, **ten are already in `citations.bib` and twenty-two are not**:
+
+- **Present:** Heid, Huber, Kalliokoski, Kolmar, Kramer, Landrum, Niu, Riniker, Song, Zhao.
+- **Missing:** Alvarez Baron, Avdeef, Benet, Bentz, Hampel, Horwitz, Kell, Krüger, Lange,
+  Larregieu, Llinàs, Lloyd, O'Hagan, Prieto, Sato, Srinivasan, Svensson, Wenlock, and Tukey.
+
+Bentz is the most important of the missing ones — it carries both the between-laboratory finding for
+the Background and the Caco-2 error figure.
+
+**Task, and it needs no compute:** point the manuscript at the right bibliography file, add the
+twenty-two missing entries, and add the seven cited keys that are not defined anywhere (§9.1). The
+verbatim quotes and access routes are already collected in `NOISE_DESIGN.md` §4b, and the
+reconciliation between the two literature passes is §4a. Nothing else needs writing.
