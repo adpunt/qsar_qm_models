@@ -53,6 +53,7 @@ USAGE
     python scripts/audit_pipeline_parity.py --strict         # exit 1 on any problem
     python scripts/audit_pipeline_parity.py --self-test      # prove --strict bites
     python scripts/audit_pipeline_parity.py --write-baseline # after a deliberate change
+    python scripts/audit_pipeline_parity.py --compare-results a.csv b.csv --strict
 
 Run --strict under EVERY interpreter that will run jobs. It is wired into
 slurm_scripts_uncertainty_rerun/preflight.sh as check 0.
@@ -552,6 +553,65 @@ def self_test():
     return 0
 
 
+def compare_results(paths):
+    """Do these results files come from the same models?
+
+    The import-time hash check proves the two pipelines READ the same spec. This
+    proves the rows on disk were WRITTEN under it -- which is the claim anyone
+    pooling QM9 and experimental rows in a figure is actually relying on, and
+    the one that breaks quietly when a stale CSV survives a re-run.
+    """
+    import csv as _csv
+    print('=' * 78)
+    print('RESULTS PROVENANCE — do these files come from the same spec?')
+    print('=' * 78)
+    seen, problems = {}, 0
+    for path in paths:
+        f = Path(path)
+        if not f.exists():
+            print(f'  MISSING  {path}')
+            problems += 1
+            continue
+        with open(f, newline='') as fh:
+            rows = list(_csv.DictReader(fh))
+        if not rows:
+            print(f'  EMPTY    {path}')
+            problems += 1
+            continue
+        if 'spec_hash' not in rows[0]:
+            print(f'  NO PROVENANCE  {path}')
+            print('           written before the shared spec existed — it cannot be '
+                  'compared, and must not be pooled with rows that can')
+            problems += 1
+            continue
+        hashes = sorted({r['spec_hash'] for r in rows if r['spec_hash']})
+        versions = sorted({r.get('spec_version', '') for r in rows})
+        gp = sorted({r.get('gp_fit_method', '') for r in rows if r.get('gp_fit_method')})
+        print(f'  {f.name}: {len(rows)} rows   spec {versions} {hashes}'
+              + (f'   gp_fit_method {gp}' if gp else ''))
+        if len(hashes) > 1:
+            print('           ^ this ONE file mixes spec hashes — it holds rows from '
+                  'two different sets of models')
+            problems += 1
+        if len(gp) > 1:
+            print('           ^ this file mixes Gaussian-process fitting routines; '
+                  'those rows are not comparable')
+            problems += 1
+        for h in hashes:
+            seen.setdefault(h, []).append(f.name)
+
+    if len(seen) > 1:
+        problems += 1
+        print('\n  MISMATCH — these files were produced under different specs:')
+        for h, files in sorted(seen.items()):
+            print(f'    {h}  {files}')
+        print('  Pooling them in one figure or one ANOVA compares different models.')
+    elif seen:
+        print(f'\n  MATCH — every file was produced under spec '
+              f'{list(seen)[0]}')
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -566,10 +626,18 @@ def main():
                     help='path to alternative_data_noise_robustness.py')
     ap.add_argument('--skip-experimental', action='store_true',
                     help='audit this repository only')
+    ap.add_argument('--compare-results', nargs='+', metavar='CSV',
+                    help='check that two or more results files were written under '
+                         'the same spec, and that neither mixes specs internally')
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
+
+    if args.compare_results:
+        problems = compare_results(args.compare_results)
+        print(f'\nSUMMARY: {problems} problem(s)')
+        return 1 if (args.strict and problems) else 0
 
     problems = audit_spec_parity(args.experimental_path, args.skip_experimental)
     problems += audit_effective_params(write_baseline=args.write_baseline)
