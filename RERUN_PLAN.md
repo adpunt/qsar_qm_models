@@ -78,6 +78,8 @@ What can we say about uncertainty in these contexts?"*
 | **The ranking table must not average across noise types** | 2026-08-14 | Report the reference type, keep the concordance coefficient for the strategy-independence claim, and highlight any type that behaves differently |
 | **The paper is not about choosing a model, and not about choosing a metric** | 2026-08-20 | *"This paper isn't about which metric is the best."* The three numbers assess models from different angles. Watch for drift — §7.3 was edging toward a metric bake-off |
 | **The Gaussian process goes into the variance decomposition, on one kernel everywhere** | 2026-08-26 | *"The kernel is not why the Gaussian process was kept out of the variance decomposition. Commit to the radial basis everywhere and it can go in alongside the support vector machine — which is what those jobs were for."* Settled. Both `gauche` and `gauche_rbf` come out of `ANOVA_MODELS_EXCLUDE`; one model, one kernel, every representation. **Conditional on the embedding rescaling fix (§2.8c)** — see §10b.2 |
+| **Ten replicates in stage 1** | 2026-08-26 | *"Let's do the 10 reps for stage 1 then."* Takes the whole staged design to 37% of the old one instead of 26% (§13.1) |
+| **Both forms of grouped noise are run** | 2026-08-26 | *"For the skewed noise lets go with option C."* Groups get wider errors *and*, as a separate condition, groups get shifted errors. See §13.3 |
 | **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
 | **The between-laboratory variance finding goes in the Background** | 2026-08-24 | Nearly two-thirds of real measurement variance is between laboratories — you asked for this to be written up |
 
@@ -1790,7 +1792,7 @@ Methods**, because a staged design has to be described as one.
 | Stage | What runs | Replicates | Answers |
 |---|---|---|---|
 | **0 — screen** | every model × every representation, Gaussian and censoring, full level grid | 1 | Choose what stage 2 goes deep on. **Reused as replicate 0 of stage 1, not thrown away** |
-| **1 — breadth** | every model × every representation, a chosen subset of noise types, full level grid | 6 or 10 🔴 | Q1, Q3 |
+| **1 — breadth** | every model × every representation, a chosen subset of noise types, full level grid | **10** ✅ | Q1, Q3 |
 | **2 — depth** | chosen models × chosen representations, **all** noise types | 10 | Q2 — the small effects, where the precision is actually needed |
 | **3 — uncertainty** | the models that emit a per-molecule uncertainty, experimental datasets | 1 + a permutation null | Q4, Q5, Q6 |
 
@@ -1818,7 +1820,7 @@ still lands at 37% of the old one rather than 26%. Both are far cheaper than wha
 before. Ten is the safer choice: it keeps headroom above the five-replicate gate, and it drops the
 floor on the paired test from 0.031 to 0.002.
 
-**🔴 Still open:** six or ten in stage 1; which noise types go into stage 1's full grid; and which
+**✅ Settled 2026-08-26: ten replicates in stage 1.** **🔴 Still open:** which noise types go into stage 1's full grid; and which
 models and representations go deep in stage 2, which cannot be chosen until stage 0 has run.
 
 **Open, and each needs an answer:**
@@ -1848,19 +1850,51 @@ and a subset under the rest" is defensible; presenting it as a full factorial is
 Letters, not numbers, so inserting one does not renumber the rest. **A, C, D, E and G are
 independent of each other and can run in parallel.**
 
-| | Chat | Depends on | State |
+#### The standing rule for every chat on this list
+
+**Each chat FINISHES its issue. It does not re-plan it.**
+
+Investigation and reading come first — every prompt says so, and none of this work should be done
+from a summary. But the deliverable is working code with a check that proves it works, not a better
+description of the problem. A chat that ends with a revised plan and no committed change has failed,
+whatever it found on the way.
+
+Specifically, in every chat:
+
+- **Read the code before changing it.** The plan's file and line references are a starting point,
+  not a substitute. They were correct when written and the tree moves.
+- **Do the work.** If the plan turns out to be wrong about something, fix the plan *and then do the
+  corrected work in the same session*. Do not hand back a correction as the deliverable.
+- **Prove it.** Every fix ships with a check that fails if the fix is removed. A note in a document
+  is not a check. Several defects in this project survived because a test searched the source for a
+  matching line rather than running it.
+- **Commit.** Uncommitted work is lost work — this project has already had to recover research from
+  a temporary directory.
+- **Update `RERUN_PLAN.md` and `NOISE_DESIGN.md`** to match what was actually done, and close out
+  the items the chat covered rather than leaving them open.
+- **Stop at the scope line.** Each chat says what it must not touch. `paper.tex` is out of scope for
+  all of them.
+- **If a decision is genuinely the author's, ask once, state a recommendation, and carry on with
+  everything that does not depend on the answer.** Do not stop the whole chat on one open question.
+
+| | Chat | Depends on | Can start now? |
 |---|---|---|---|
-| **A** | Noise redesign in Rust | — | ready |
-| **B** | Noise redesign in the Python injector, and the cross-check gate | A (shares the spec) | ready |
-| **C** | Embedding storage fix, and the Gaussian-process re-test | — | ready, one 🔴 TODO |
-| **D** | Infrastructure: the configuration race, the file-writer guards, the environment | — | ready |
-| **E** | Cross-pipeline parity | — | 🔴 in progress elsewhere — re-assess before starting |
-| **F** | Uncertainty machinery, reviewed with the author | — | 🔴 TODO — this is a conversation, not a task |
-| **G** | Local test: which noise settings earn their place | A | ready |
-| **H** | Job scripts, preflight, gates, launch | A B C D E G, and §13.1 | blocked |
-| **I** | The uncertainty decomposition build | F | 🔴 blocked on F |
-| **J** | Figure script consolidation and the five analyses | 🔴 needs 1:1 on the details first | blocked |
-| **K** | Bring `NOISE_DESIGN.md` and this plan into agreement, and fix the bibliography | — | ready |
+| **A** | Noise redesign in Rust | — | ✅ **yes** — start first, most depends on it |
+| **B** | Noise redesign in the Python injector, and the cross-check | A, for the spec | ✅ **yes** — the specification is settled, so it can be written alongside A |
+| **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
+| **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **yes** |
+| **E** | Cross-pipeline parity | — | ✅ **yes** — but check what another session already did |
+| **F** | Uncertainty machinery, reviewed with the author | — | ❌ a conversation, not a task. Agenda below, no prompt |
+| **G** | Local test: which noise settings earn their place | A | ✅ **yes** — it tests the settings, not the implementation |
+| **H** | Job scripts, preflight, gates, launch | A B C D E G + §13.1 | ❌ blocked |
+| **I** | The uncertainty decomposition build | F | ❌ blocked on F |
+| **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
+| **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
+
+**Six can start immediately and run unattended: A, B, C, D, E, G, K** (seven, counting K). They touch
+different files. The one overlap to watch: A and B both change what the noise means, and C changes
+how features are stored — if two of them land at once, the person merging needs to re-run the checks
+in §8 rather than trusting either in isolation.
 
 ---
 
@@ -2034,6 +2068,20 @@ by hand and were still being verified when the last session ended.
 **🔴 TODO:** the three alignment choices in §4 decision 3b — quantile forest tree count, whether to
 remove the Gaussian-process cap, and repeat seeds on the experimental side.
 
+> **Prompt.** Bring the two training pipelines into agreement, and make the agreement enforced rather
+> than assumed. The differences found so far are in `RERUN_PLAN.md` §3.4 — read that, then read both
+> pipelines yourself, because that list was built by hand and is not guaranteed complete. **Check
+> first whether another session has already done part of this work** and continue it rather than
+> duplicating it. There is a script at `scripts/audit_pipeline_parity.py` that builds each model both
+> ways against the installed libraries and diffs the resulting parameters; its literal values were
+> transcribed by hand and were never verified, so verify them against both sources before trusting
+> it. Fix the differences that are plainly wrong: pin the boosting model's learning rate explicitly
+> on the experimental side rather than letting it fall through to a library default three times
+> larger, and make a requested model that cannot be constructed a hard failure rather than a skipped
+> warning. Three alignment choices are the author's and are listed in §4 decision 3b — ask once,
+> recommend, and do everything else meanwhile. Finish by wiring the audit into the preflight so a
+> drifted parameter or a missing package stops the queue. Do not touch `paper.tex`.
+
 ---
 
 #### Chat F — Uncertainty machinery, reviewed with the author
@@ -2103,6 +2151,21 @@ hyperparameters anyone thinks it uses.
 
 **🔴 TODO:** the compute ceiling, once §13.1 is settled.
 
+> **Prompt.** Generate one deduplicated set of cluster job scripts from the settled design, wire the
+> verification gates into a preflight, clear the caches, and launch. The design is `RERUN_PLAN.md`
+> §13.1 (the four stages and the replicate counts) and §6 (the noise types and levels); the gates are
+> §8. Read `slurm_scripts_qm9_rerun/RUNBOOK.md` and
+> `slurm_scripts_uncertainty_rerun/RUNBOOK.md` first — their reasoning about what is in and out, the
+> tier ordering, the one-task-first discipline and the archive step are all still good, and only the
+> noise types and levels are out of date. There are thirty existing script directories that overlap
+> heavily; produce one set and delete the rest. **Clear three caches, not one:** the memory-mapped
+> intermediate files and any stale settings files, the processed QM9 directory, and the tuned
+> hyperparameter files in `results/` — the training code silently substitutes tuned hyperparameters
+> from February whenever both of those files are present, so leaving them means the re-run does not
+> use the hyperparameters anyone thinks it uses. Confirm which copy of the KIRBy checkout the cluster
+> actually updates before submitting anything against it (§2.8b). No job is submitted until every
+> gate in §8 passes locally, and one task runs end to end before the rest. Do not touch `paper.tex`.
+
 ---
 
 #### Chat I — The uncertainty decomposition build
@@ -2119,6 +2182,20 @@ in at least seven places; two paths crash on contact; one call site is passed a 
 where a variance is required; and one model's data-driven term is a single scalar broadcast to every
 molecule, so its correlation with per-molecule noise is zero by construction however good the model
 is. The sourced literature review is in `research_archive/f692d614/`.
+
+> **Prompt.** Build the uncertainty decomposition — the split of a model's predicted uncertainty into
+> the part that comes from noise in the data and the part that comes from the model not knowing.
+> This was settled by the author on 2026-08-21 and is not open: it gets built to the standard other
+> papers use, by deleting the broken code and replacing it. Do not propose dropping it. The
+> specification is `RERUN_PLAN.md` §5.5 — the delete list, the build list, the four trainers to
+> rewire, and the three-part trap around undoing label standardisation. The sourced literature review
+> that justifies the method is in `research_archive/f692d614/`, along with working reference code.
+> Read all of it before changing anything. Four defects were found while writing that specification
+> and every one must be fixed, not just noted: the two components are swapped in at least seven
+> places, two paths crash the moment they are reached, one call site is handed a spread where a
+> variance is required, and one model's data-noise term is a single number copied to every molecule
+> so its correlation with per-molecule noise is zero however good the model is. Each fix ships with a
+> check that fails if the fix is removed. Do not touch `paper.tex`.
 
 ---
 
@@ -2139,6 +2216,17 @@ integration. The paired significance test is *worse* than not built: it takes a 
 noise type as arguments and ignores both.
 
 **Cannot start before the new columns exist**, because it is being rebuilt against them.
+
+> **Prompt.** Collapse the figure and table generation to a single script and build the five analyses
+> that were asked for and never written. The change map is `RERUN_PLAN.md` §5.4 and the five analyses
+> are §0.4; the guards this work implements are §0.6, numbers 1, 3, 4, 8, 9 and 12. Read the existing
+> script in full first — three of the five analyses are much smaller than they look, because the
+> machinery is already there and is either never called or called with its arguments ignored. There
+> is to be no versioning: delete the retired script, its launcher and its stale output directory,
+> rename the current one, and fold the standalone analysis script in so there is one path to every
+> number. Also remove both Gaussian processes from the analysis exclusion list per §0.3, and the
+> descriptor-only marker with them. Every guard must be an assertion that fails the run, not a
+> comment. Do not touch `paper.tex` — record what it needs instead.
 
 #### Chat K — Sync the two documents, and fix the bibliography
 
@@ -2168,7 +2256,7 @@ Sources, quotes and access routes are already collected in `NOISE_DESIGN.md` §4
 > and `NOISE_DESIGN.md` §4a–4b has the verbatim quotes and access routes. Add the entries; do not
 > edit `paper.tex` itself — record the one-line change it needs instead.
 
-### 13.3 🔴 TODO — skewed noise, and the count of noise types
+### 13.3 ✅ SETTLED — skewed noise, and the count of noise types
 
 **Two things the author raised that the design does not currently answer honestly.**
 
@@ -2191,11 +2279,49 @@ The only asymmetric condition in the design is **censoring**, which is one-direc
 construction, and it is the one condition where the effect is large. So the request is *partly*
 satisfied, by the strongest condition in the study — but by a mechanism, not by a skewed draw.
 
-Open, and the author's to settle:
-- Is censoring an acceptable answer to the skew request, or is a skewed *draw* wanted as well?
-- If a skewed draw is wanted, it needs a published mechanism before it goes in — the standing rule
-  in `NOISE_DESIGN.md` is that no condition enters without a peer-reviewed source. Chat G can test
-  whether it is even distinguishable at matched amount; the literature question is separate.
+#### ✅ The decision, 2026-08-26 — run both forms of grouped noise
+
+*"For the skewed noise lets go with option C."*
+
+**What was wrong with the grouped condition as specified.** It gives some scaffold groups *wider*
+errors, and everything stays centred on the true value. But the evidence it leans on is that 62% of
+real measurement variance sits between laboratories — and that describes laboratory *averages*
+differing from one another. That is an offset, not a widening. The condition and the evidence for it
+did not match.
+
+**So there are two mechanisms, both real, both separately sourced, and they are now two conditions:**
+
+| Condition | What happens | Source |
+|---|---|---|
+| **Grouped — wider** | Molecules in some scaffold groups get a larger error, still centred on the true value | Within-laboratory error must be multiplied by about three to reach between-laboratory error (Avdeef 2019; corroborated by Llinàs & Avdeef 2019 and Kalliokoski et al. 2013) |
+| **Grouped — shifted** | Molecules in some scaffold groups have their labels pushed in one direction by a constant | 62% of measurement variance sits between laboratories (Bentz et al. 2013, Table 7) |
+
+Both are dose-matched, so they deliver the same total amount of noise and can be compared directly.
+
+**Why this is worth one extra condition.** The study's emerging result is that error pushing in one
+direction hurts far more than error that scatters. Censoring shows that at the level of the whole
+dataset. Grouped-shifted would show it at the level of a chemical family, through a different
+mechanism, at matched amount. Two independent demonstrations of one effect is a much stronger claim
+than one, and the comparison is direct — the two grouped conditions differ *only* in whether the
+group's error is centred.
+
+**It also closes a gap in the specification.** The design currently says the affected group fraction
+has no published number, so choose 0.2 and say so. Under the shifted version there is nothing to
+choose: Bentz's decomposition states how much of the total variance the group-level term carries,
+so the parameter comes from the source rather than from a judgement.
+
+**Not doing, and why.** A skewed *draw* — an asymmetric bell curve — was considered and rejected for
+the three experimental datasets. Potency data is spread multiplicatively in raw units, and taking
+logarithms converts that to ordinary symmetric variation (Srinivasan & Lloyd 2025, already cited in
+`NOISE_DESIGN.md` §3.2). Since the models are fitted on the log scale, a skewed error draw there is
+poorly supported and a referee who knows that argument would ask why. QM9 is different — it is
+computed rather than measured, so nothing is being simulated and no assay has to justify the shape —
+but with two grouped conditions and censoring already testing asymmetry, it would not earn its cost.
+
+🔴 **For chat A and chat B:** the shifted condition needs its algebra written down in
+`NOISE_DESIGN.md` alongside the other five, in the same form. The natural construction is the one
+Bentz's analysis itself uses — a group-level term plus a within-molecule term, with the two
+variances summing to the target amount and the split between them taken from the paper.
 
 ### 13.4 — an additional embedding
 
@@ -2308,20 +2434,55 @@ The recorded reason is that the redundancy sits in the strong fingerprints, in t
 **not in the pretrained embeddings** — so the cut removed duplicate fingerprints and kept one
 representative of each learned family.
 
+#### QM9 itself — 9,978 molecules, five-fold scaffold-group CV, best of five models
+
+The most directly comparable evidence there is: same dataset, same size, same target, same splitting
+rule as the paper. Scored as fraction of variance explained, higher is better.
+
+| Representation | Score | ± | Family |
+|---|---|---|---|
+| Mordred descriptors | 0.912 | 0.010 | descriptor |
+| **Descriptor vector** | **0.903** | 0.011 | descriptor |
+| GROVER | 0.899 | 0.010 | learned, graph |
+| **MHG-GNN** | **0.889** | 0.033 | learned, graph |
+| **Avalon** | **0.884** | 0.013 | fingerprint |
+| RDKit fingerprint | 0.859 | 0.014 | fingerprint |
+| Atom pair | 0.850 | 0.009 | fingerprint |
+| SMI-TED | 0.826 | 0.019 | learned, transformer |
+| SELFormer | 0.818 | 0.013 | learned, transformer |
+| **ECFP4** | **0.816** | 0.063 | fingerprint |
+| ChemBERTa | 0.812 | 0.012 | learned, transformer |
+| **mol2vec** | **0.803** | 0.028 | learned, shallow |
+| MACCS | 0.795 | 0.031 | fingerprint |
+| ChemBERT | 0.788 | 0.062 | learned, transformer |
+| GraphMVP | 0.778 | 0.021 | learned, graph |
+| MolFormer | 0.772 | 0.029 | learned, transformer |
+| Topological torsion | 0.680 | 0.047 | fingerprint |
+| MolCLR | 0.620 | 0.026 | learned, graph |
+| Coulomb matrix | 0.500 | 0.038 | 3D |
+| USRCAT | 0.417 | 0.055 | 3D |
+| Graph kernel | 0.149 | 0.031 | graph |
+| Uni-Mol v2 | −0.007 | 0.007 | learned, 3D |
+
+⚠️ **The stored file reports error, not variance explained**, and error runs the other way. An
+earlier reading of it here had the ranking upside down and is corrected above.
+
 #### What this evidence actually says
 
-- **MHG-GNN is not a weak representation.** It is second on logD (.889) and second on hERG Ki
-  (.744), out of fifteen. The paper's claim that learned embeddings are weak is a QM9 claim, and QM9
-  is the pipeline with the storage defect (§13.6).
-- **mol2vec is the weakest of the learned ones and was cut from three of the four pools.** If one
-  representation is dropped rather than added, this is the candidate.
-- **The transformer language models cluster together and sit mid-pack.** ChemBERT, ChemBERTa,
-  MolFormer, SMI-TED and SELFormer are within about 0.03 of each other on both datasets, and
-  ChemBERT's nearest twin is SMI-TED at 0.831. **Adding one is defensible; adding several is not** —
-  they carry the same signal as each other.
-- **⚠️ These scores are not from this study.** They come from a different scoring model on a
-  different splitting scheme, and QM9 there is the 10,000-molecule subset. They rank
-  representations; they do not transfer as numbers.
+- **The graph kernel is dataset-specific and must not be added.** It is the *best* representation on
+  hERG Ki at 0.745 and near-useless on QM9 at 0.149.
+- **ChemBERT is the weakest of the transformers.** On QM9 it scores 0.788, *below* mol2vec's 0.803.
+  If a transformer is wanted, SMI-TED (0.826), SELFormer (0.818) and ChemBERTa (0.812) all beat it.
+- **Mordred is the strongest single representation on QM9 but adds little as a factor level.** It is
+  the same family as the descriptor vector already in use, and on logD the two agree at 0.967 — the
+  most redundant pair in that whole study.
+- **Avalon is the strongest genuinely-new option.** At 0.884 it beats ECFP4 (0.816) on QM9, it is a
+  different kind of fingerprint, and on hERG Ki its closest match is ECFP4 at 0.839 — below the
+  redundancy line. It is also an ordinary RDKit fingerprint, so implementing it is trivial.
+- **MHG-GNN is not weak.** 0.889 on QM9, second of fifteen on logD, second of fifteen on hERG Ki.
+  The paper's claim that learned embeddings are weak is a QM9 claim, from the pipeline with the
+  storage defect (§13.6).
+- **mol2vec is the weakest learned representation** and was cut from three of the four pools.
 
 🔴 **The decision.** Add one transformer embedding, add none, or swap one out for one. The cheapest
 option by a wide margin is ChemBERTa, because it is already implemented in **both** repositories and
