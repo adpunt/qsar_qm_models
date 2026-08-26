@@ -1180,6 +1180,56 @@ the features.
 | **Stochastic passes** | **100** | **30** | The paper says 100 |
 | **Gaussian process** | default kernel Tanimoto; uncapped | RBF; capped at 2,000 molecules | Different kernel *and* different training-set size |
 
+#### 3.4.3a 🔴 FOUND AND FIXED 2026-08-26 — the two sides scaled features differently
+
+**The largest thing the second parity pass found, and no settings comparison could ever have seen
+it**, because it is not a model setting. It is a preprocessing step applied to one class of
+representation and not another.
+
+| | which representations were scaled |
+|---|---|
+| QM9 | only the continuous ones. Fingerprints reached the models as raw 0/1 bits |
+| experimental | **everything**, unconditionally, in both the tree path and the neural path |
+
+Irrelevant for trees, which are scale-invariant. It changes the support vector machine and the
+Gaussian process completely: both measure distances with a radial kernel, and standardising a
+sparse binary fingerprint hands its rare bits enormous magnitudes so they dominate every distance.
+
+**Measured on both, because the size differs a great deal:**
+
+| | raw 0/1 bits | standardised | cost |
+|---|---|---|---|
+| QM9, 2,000 molecules, Morgan, three seeds | +0.815 / +0.809 / +0.832 | +0.320 / +0.124 / +0.182 | **−0.50 / −0.69 / −0.65** |
+| hERG, all 1,415 molecules, ECFP4, five folds | **+0.5335** | +0.4570 | **−0.077**, every fold agreeing |
+
+⚠️ **The direction is identical everywhere; the size is not.** About 0.6 on QM9 against about 0.08
+on hERG. Do not carry the QM9 figure across — I did exactly that in a summary and it was wrong.
+QM9's target is far more predictable to begin with, so there is more to lose, and its molecules are
+small enough that their fingerprints are much sparser than drug-like ones.
+
+**What it costs the paper.** Any statement that the support vector machine or the Gaussian process
+does worse on the experimental datasets than on QM9 now has a candidate explanation with nothing to
+do with the data or the noise. Re-check those after the re-run.
+
+**The fix, and the mistake inside it worth recording.** The rule is now in the shared spec and both
+pipelines read it — but it is keyed on **the matrix, not the name**. My first attempt used a name
+list and was wrong within minutes: `pdv` on QM9 is the BINARISED vector while `PDV` on the
+experimental side is the CONTINUOUS one. One name, opposite correct answers — the same trap as
+§3.4.1's fingerprint. Binary means never scale; anything else means scale, fitted on training rows
+only. That follows the data when the binarised vector and the flattened counts are fixed, with no
+list for anyone to forget.
+
+**Not yet measured, and it becomes live the moment chat A fixes the count storage:** sparse
+**counts** under standardisation. They read as binary today so they go unscaled; once they are real
+counts this rule will start scaling them, and sparse counts may have the same problem as sparse
+bits. Measure it then. The note is in the code where it will be seen.
+
+**A second defect found while repairing a bug I introduced here.** The record reader chose its
+storage type from that same name list, so any representation not on it was cast to an 8-bit
+integer — and a value above 255 would **wrap silently**, a count of 256 reading back as absent.
+That is the known wrap risk, but on the *reader* side, where nobody had looked. The narrow type is
+now used only when it provably cannot lose anything.
+
 #### 3.4.3 Protocol differences
 
 - **Early stopping.** QM9 **never restores the best weights** — it counts patience and breaks,
