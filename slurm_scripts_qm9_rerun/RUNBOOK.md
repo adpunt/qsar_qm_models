@@ -110,72 +110,71 @@ Confirm the fix is in the binary you just built:
 grep -n "apply_noise" rust/src/main.rs | head    # flag + 3 call sites (true/false/false)
 ```
 
-## 1b. Audit the interpreters — both of them
+## 1b. Audit the interpreter — this is a launch blocker
 
 Two Gaussian-process jobs (`12822693`, `12822694`) ran to completion on
-2026-08-19 and produced nothing. The interpreter was missing `gpytorch`, so the
-experiment list came out empty, five folds looped over nothing, and the job then
-crashed reading its own empty output. Fourteen minutes of queue time to discover
-a missing package (`RERUN_PLAN.md` §2.8d).
+2026-08-19 and produced nothing. The cause, confirmed on the cluster on
+2026-08-26, is worse than a missing package in one submission:
 
-There are **two** interpreters on the cluster and they are not the same. Run the
-probe under each and compare, before anything is submitted:
+**`micromamba` has never worked on this cluster.** `setup.sh` has always fallen
+through to its `conda` branch. Every job script in this directory used to open
+with
 
 ```bash
-cd /data/stat-cadd/scat9264/qsar_qm_models/scripts
-
-# (a) the environment the job scripts activate
-export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
-eval "$("$MAMBA_EXE" shell hook --shell bash)"
-cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh && cd scripts
-python check_environment.py 2>&1 | tee ~/env_jobenv.txt
-
-# (b) the one the two dead jobs actually used
-/data/stat-cadd/scat9264/py311-kirby/bin/python check_environment.py 2>&1 | tee ~/env_kirby.txt
-
-# what differs
-diff <(sed -n '/^packages/,/^$/p' ~/env_jobenv.txt) \
-     <(sed -n '/^packages/,/^$/p' ~/env_kirby.txt)
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"   # does not exist
+eval "$("$MAMBA_EXE" shell hook --shell bash)"               # fails
 ```
 
-Both must end `OK: everything requested can be constructed`. The probe
-constructs each model rather than importing its package, and fits the two that
-import cleanly and fail on contact — the quantile forest against an older
-scikit-learn is the live example.
+and because the scripts run under `set -uo pipefail` with **no `-e`**, that
+failure stopped nothing. A task that also failed to activate carried on in
+whatever python was on `PATH` — the system Anaconda at
+`/apps/system/easybuild/software/Anaconda3/2022.05/bin/python`, which has
+**no `gpytorch`, no `quantile_forest` and no `ngboost` at all**. The job then
+runs, finds nothing to do, and produces no rows.
+
+The dead `MAMBA_EXE` lines are gone, and the generated scripts now refuse to
+start if `CONDA_PREFIX` is unset or the interpreter resolves under
+`/apps/system`.
+
+### Confirm the environment before submitting
+
+Activate exactly the way the jobs do — through conda, not micromamba:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda env list                     # env_test must be here
+conda activate env_test
+
+python -c "import sys; print(sys.executable)"     # must NOT be under /apps/system
+python -m pip check | grep -i scikit-learn || echo "no scikit-learn conflicts"
+
+cd scripts && python check_environment.py
+```
+
+`check_environment.py` names the interpreter, prints every relevant package
+version, **constructs** each model rather than importing its package, and fits
+the two that construct cleanly and fail on contact. It must end
+`OK: everything requested can be constructed`.
+
+If `env_test` is missing, `. setup.sh` builds it from `env.yml` — but note that
+setup.sh also runs four network `pip install` calls **on every invocation**, so
+every task in a 390-task campaign re-installs packages at startup. Build the
+environment once, interactively, before submitting.
+
+### The other interpreter
+
+`/data/stat-cadd/scat9264/py311-kirby` is a separate environment that the
+uncertainty work has used. Check it too if you submit anything against it:
+
+```bash
+/data/stat-cadd/scat9264/py311-kirby/bin/python \
+    /data/stat-cadd/scat9264/qsar_qm_models/scripts/check_environment.py
+```
 
 **Jobs are submitted by script, never with `--wrap`.** The two dead jobs were
 `--wrap` submissions with no output path: they inherited whatever interpreter
-happened to be active, and there was no log to say which. Every script in this
-directory activates its environment explicitly and every one names its output
-file.
-
-### 1c. Parity audit — REQUIRED before submitting anything
-
-Both pipelines now read every shared default from one file,
-`models/model_defaults.py`, instead of each restating its own. This confirms
-they resolve the same copy of it, that every model can still be built with the
-libraries installed here, and that no estimator default has moved under a
-library upgrade:
-
-```bash
-export QSAR_QM_MODELS_ROOT=/data/stat-cadd/scat9264/qsar_qm_models
-export KIRBY_ROOT=/data/stat-cadd/scat9264/KIRBy
-python "$QSAR_QM_MODELS_ROOT/scripts/audit_pipeline_parity.py" --strict
-```
-
-Must exit 0. Run it under **both** interpreters from §1b — a parameter that
-builds correctly in one and not the other is exactly the failure this catches.
-
-Read the closing section of its output too. It lists the differences no
-automated diff can see, and three of them are still open: the QM9 `ecfp4` is a
-path fingerprint rather than a circular one, `pdv` is binarised, and `sns`
-discards its counts. None of those is a parameter, so nothing here or in any
-preflight will ever catch them.
-
-The uncertainty preflight (`slurm_scripts_uncertainty_rerun/preflight.sh`) runs
-this same audit as its check 0. There is no QM9-side preflight script yet —
-building one is Chat H's item; until then this step is manual and must not be
-skipped.
+was active and left no log saying which.
 
 ## 2. Archive the current results before anything overwrites them
 

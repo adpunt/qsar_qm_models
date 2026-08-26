@@ -125,13 +125,30 @@ TEMPLATE = '''#!/bin/bash
 
 set -uo pipefail
 
-export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
-eval "$("$MAMBA_EXE" shell hook --shell bash)"
-# Guarded: under `set -u` an unset CONDA_PREFIX aborts here, before python.
-export LD_LIBRARY_PATH="${{CONDA_PREFIX:-}}/lib:${{LD_LIBRARY_PATH:-}}"
-
+# micromamba has never worked on this cluster -- setup.sh has always fallen
+# through to its conda branch. The two `export MAMBA_EXE=...` lines that used to
+# sit here were dead: the hook failed, and because this script runs under
+# `set -uo pipefail` with no `-e`, the failure did not stop anything. The task
+# simply carried on unactivated, in whatever python was on PATH.
 cd {qsar_dir}
 . setup.sh
+
+# Activation is not optional, and until now nothing checked it. An unactivated
+# task falls through to the system Anaconda at /apps/system/..., which has no
+# gpytorch, no quantile_forest and no ngboost -- so the job runs, finds nothing
+# to do, and produces no rows. That is what happened to 12822693 and 12822694
+# (RERUN_PLAN.md §2.8d). Confirmed on the cluster 2026-08-26.
+if [ -z "${{CONDA_PREFIX:-}}" ]; then
+    echo "ERROR: setup.sh did not activate an environment (CONDA_PREFIX unset)."
+    exit 2
+fi
+case "$(command -v python)" in
+    /apps/system/*)
+        echo "ERROR: running the system Anaconda at $(command -v python)."
+        echo "       setup.sh did not activate 'env_test' (ENV_NAME in setup.sh). Refusing to run."
+        exit 2 ;;
+esac
+echo "=== interpreter: $(command -v python)  (CONDA_PREFIX=$CONDA_PREFIX)"
 
 # The binary carries the held-out-noise fix. Refuse to run without it rather
 # than silently regenerating the same invalid results.

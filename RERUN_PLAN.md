@@ -154,7 +154,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 14 | Aleatoric/epistemic decomposition | 🔴 spec written, not built; 4 further defects found (§5.5) | §13 chat I |
 | 15 | The five never-built analyses | 🔴 none built (§0.4) | §13 chat J |
 | 16 | Figure script consolidation to one file | 🔴 not started (§5.4) | §13 chat J |
-| 17 | Environment missing three model families | 🟢 **mostly done 2026-08-26 (chat D)** — the loud-failure half was already in KIRBy (`333f005`); `scripts/check_environment.py` now probes any interpreter and is wired into the job template; the local `torch_geometric` import is fixed. **One open finding for you: three packages need a newer scikit-learn than is installed** (§2.8d) | §13 chat D ✅ |
+| 17 | Environment: jobs were running in the wrong interpreter | 🟢 **root cause found and guarded 2026-08-26 (chat D)** — `micromamba` has never worked on the cluster, so the `MAMBA_EXE` lines in every job script were dead and an unactivated task fell through to the system Anaconda, which has none of the uncertainty packages. Deleted, and the scripts now refuse to start unactivated. Earlier work: — the loud-failure half was already in KIRBy (`333f005`); `scripts/check_environment.py` now probes any interpreter and is wired into the job template; the local `torch_geometric` import is fixed. **One open finding for you: three packages need a newer scikit-learn than is installed** (§2.8d) | §13 chat D ✅ |
 | 18 | Paper-side fixes needing no compute | 🔴 not started — **deliberately parked**, see §12 | parked |
 | 19 | The two documents had drifted apart | ✅ **done 2026-08-26** (chat K). Ownership rule stated, ten disagreements resolved, two of them a document contradicting itself. Guarded by `scripts/check_bib_and_docs.py` | §13 chat K ✅ |
 | 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
@@ -717,6 +717,19 @@ grep -m1 "model-rep configs" slurm-12822693.out      # reads "0 model-rep config
    running five folds over an empty list (commit `333f005`, "fail loudly when a task produces
    nothing"). This is guard 9.
 
+1b. 🔴 **AND THE REAL CAUSE, found on the cluster 2026-08-26: `micromamba` has never worked
+   there.** `setup.sh` has always fallen through to its `conda` branch, so the two
+   `export MAMBA_EXE=/data/stat-cadd/scat9264/bin/micromamba` lines that opened **every** job
+   script in `slurm_scripts_qm9_rerun/` pointed at a file that does not exist. The hook failed —
+   and because those scripts run under `set -uo pipefail` with **no `-e`**, the failure stopped
+   nothing. A task that also failed to activate carried on in whatever python was on `PATH`: the
+   system Anaconda at `/apps/system/easybuild/software/Anaconda3/2022.05/bin/python`, which has
+   **no `gpytorch`, no `quantile_forest` and no `ngboost` installed at all**.
+
+   This was never a version clash. It was an interpreter nobody meant to use. The dead
+   `MAMBA_EXE` lines are deleted, and the generated scripts now refuse to start if `CONDA_PREFIX`
+   is unset or `command -v python` resolves under `/apps/system`.
+
 2. ✅ **The environment is now asserted, and the interpreter is pinned.**
    `scripts/check_environment.py` names the interpreter it is speaking for, prints every relevant
    package version, **constructs** each requested model rather than merely importing its package,
@@ -727,9 +740,11 @@ grep -m1 "model-rep configs" slurm-12822693.out      # reads "0 model-rep config
    path, so they inherited whatever interpreter was active and left no log saying which; the
    runbook now states that jobs are submitted by script, never by `--wrap`.
 
-**🔴 One finding for you, and it is not mine to decide.** The probe also checks whether each
-package's own declared requirements are satisfied, because pip never re-checks that after the
-fact. On this laptop three of them are not:
+**🟠 A second finding, now downgraded.** The probe also checks whether each package's own
+declared requirements are satisfied, because pip never re-checks that after the fact. On the
+laptop three of them are not — but `env.yml` pins `scikit-learn=1.6.1`, which satisfies all
+three, so this is very likely a laptop-only problem and the cluster answer comes from §1b of the
+runbook. On the laptop:
 
 | package | declares | installed |
 |---|---|---|
