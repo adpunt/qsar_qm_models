@@ -340,6 +340,17 @@ def parse_arguments():
         "--bayesian-transformation",
         type=str,
         default=None,
+        # choices= was absent, and the job scripts pass `last`. Nothing in
+        # models.py branches on `last` -- it tests `last_layer` -- so the value
+        # fell through every branch, NO Bayesian layer was applied, and the model
+        # trained as an ordinary deterministic network. `is_bayesian` is set from
+        # `is not None`, so the code then took 100 stochastic forward passes over
+        # a model in eval mode, where dropout is inactive: all 100 identical, and
+        # the reported uncertainty exactly zero. The row was written to a file
+        # named ..._bnn_last.csv and the figure script identifies the model by
+        # filename, so a plain network was read as a last-layer Bayesian one.
+        # An unrecognised value is now refused by name.
+        choices=['full', 'last_layer', 'variational', 'full_variational'],
         help=(
             "Apply Bayesian transformation to applicable models (e.g., DNN, MLP). "
             "Options:\n"
@@ -668,8 +679,17 @@ def load_and_split_polaris(dataset_tuple, args, files):
         
         sns_fp = None
         if 'sns' in args.molecular_representations:
-            if local_idx in train_idx and mols_train:
-                mol = mols_train.popleft()
+            # Featurise THIS row's molecule.
+            #
+            # This used to pop from `mols_train`, a queue filled by iterating
+            # train_idx. The writer iterates positions in ASCENDING order, and a
+            # scaffold split does not return its indices ascending, so the queue
+            # was drained in a different order from the one it was filled in and
+            # each training row received a DIFFERENT molecule's fingerprint.
+            # Measured on QM9: 95.8% of training rows at 500 molecules, 99.0% at
+            # 2,000. The queue was only ever needed to FIT the substructure
+            # vocabulary, which happens before this loop; the featuriser itself
+            # is a plain function of one molecule.
             sns_fp = ecfp_featuriser(mol)
         
         pdv = None
@@ -808,9 +828,9 @@ def split_qm9(qm9, args, files):
 
         sns_fp = None
         if 'sns' in args.molecular_representations:
-            if index in train_idx:
-                mol = mols_train.popleft()
-            if not mol: 
+            # Same fix as the QM9 writer above: featurise this row's own
+            # molecule rather than popping a queue drained in a different order.
+            if not mol:
                 mol = Chem.MolFromSmiles(smiles_isomeric)
             sns_fp = ecfp_featuriser(mol)
 

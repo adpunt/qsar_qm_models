@@ -302,6 +302,33 @@ def audit_dumps(prefix):
                 print('  ✗ DEFECT: this is named ECFP4 but is not a circular radius-2')
                 print(f'            fingerprint. It matches {best}.')
                 problems += 1
+        elif rep == 'sns':
+            # Refit Sort-and-Slice on the very molecules the pipeline used, then
+            # featurise each row's own molecule and compare. This is what catches
+            # a row holding ANOTHER molecule's fingerprint -- the writer used to
+            # pop a queue drained in a different order from the one it was
+            # filled in, and 99% of training rows were misaligned.
+            import sys as _s
+            _s.path.insert(0, str(Path(__file__).resolve().parent))
+            from process_and_train import create_sort_and_slice_ecfp_featuriser
+            feat = create_sort_and_slice_ecfp_featuriser(
+                mols_train=mols, max_radius=2, pharm_atom_invs=False,
+                bond_invs=True, chirality=False, sub_counts=True,
+                vec_dimension=Xk.shape[1], print_train_set_info=False)
+            ref = np.array([feat(m) for m in mols])
+            ref_bits = (ref != 0).astype(int)
+            got_bits = (Xk != 0).astype(int)
+            per_row = (ref_bits == got_bits).all(axis=1)
+            print(f'\n  rows whose stored fingerprint matches their OWN molecule: '
+                  f'{per_row.mean():.1%}')
+            if per_row.mean() < 0.99:
+                print('  ✗ DEFECT: rows are holding other molecules\' fingerprints.')
+                print('            Features and labels are misaligned, which destroys')
+                print('            the signal rather than biasing it.')
+                problems += 1
+            else:
+                print('    every row is aligned with its own molecule')
+
         elif Xk.shape[1] in (200, 208, 210):
             ref = ref_descriptors(mols)
             print(f'\n  descriptor block: {Xk.shape[1]} columns against a '
