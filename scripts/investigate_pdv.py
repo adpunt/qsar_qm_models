@@ -413,7 +413,10 @@ def run_noise_experiment(X_train, y_train_clean, X_test, y_test, sigma_levels, i
         if sigma == 0.0:
             y_train_noisy = y_train_clean
         else:
-            injector = NoiseInjectorRegression(strategy='legacy', random_state=iteration_seed)
+            # 'legacy' was deleted in noiseInject 1.0.0; 'gaussian' is the same
+            # arithmetic under the settled name. sigma is now the amount DELIVERED.
+            injector = NoiseInjectorRegression.from_condition(
+                'gaussian', random_state=iteration_seed)
             y_train_noisy = injector.inject(y_train_clean, sigma)
 
         y_pred, rf = train_and_predict_rf(X_train, y_train_noisy, X_test, seed=iteration_seed)
@@ -823,7 +826,8 @@ def run_model_comparison(pdvs_train, pdvs_test, pdvs_val, y_train, y_test, y_val
                     y_noisy_n = y_train_n
                 else:
                     # Inject noise into ORIGINAL scale, then normalize
-                    injector = NoiseInjectorRegression(strategy='legacy', random_state=args.seed)
+                    injector = NoiseInjectorRegression.from_condition(
+                        'gaussian', random_state=args.seed)
                     y_noisy = injector.inject(y_train, sigma)
                     y_noisy_n = y_normalize(y_noisy)
 

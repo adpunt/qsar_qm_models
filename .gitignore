@@ -13,3 +13,13 @@ slurm_scripts_uncertainty/
 scripts/test_runtime_scaling.sh
 paper.md
 paper.tex
+
+# Research archive: keep the reviews, code and extracted text in git; not the source PDFs
+research_archive/**/*.pdf
+research_archive/**/*.html
+research_archive/**/*.xml
+
+# Cross-check working files: the label and group columns are regenerated from
+# data/QM9/ by scripts/crosscheck_injectors.py, so they are derived, not source.
+scratchpad_crosscheck/
+rust/reference/target/

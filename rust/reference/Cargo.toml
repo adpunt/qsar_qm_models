@@ -1,0 +1,29 @@
+# The reference noise implementation, as a standalone crate.
+#
+# It had no manifest, which meant nobody but its author could build it -- and
+# gate 2 of RERUN_PLAN.md section 8 (the two injectors agree) was therefore
+# unrunnable. The dependency versions match rust/Cargo.toml so the reference and
+# the pipeline draw from the same generators.
+#
+#   cargo run --release -- ../../data/qm9_gap_ev.txt --json
+#
+# Deliberately NOT a workspace member of rust/: this crate must keep building
+# even while rust/src/main.rs is mid-change.
+
+[package]
+name = "noise_arms"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "noise_arms"
+path = "noise_arms.rs"
+
+[dependencies]
+rand = "0.9.0"
+rand_distr = "0.5.1"
+
+[profile.release]
+opt-level = 3
+
+[workspace]
