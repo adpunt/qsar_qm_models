@@ -34,7 +34,6 @@ from torch_geometric.utils import to_networkx
 import uuid
 import time
 from gensim.models import word2vec
-from mol2vec.features import mol2alt_sentence, MolSentence, sentences2vec
 
 import sys
 import torch  # used at module level (device, below) and only ever arrived here
@@ -111,7 +110,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn', 'avalon']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'chemberta', 'mhggnn', 'avalon']
 
 # Representations stored as 32-bit floats rather than bits or bytes, and therefore
 # the ones that must be standardised per feature before a model sees them. The
@@ -119,7 +118,7 @@ bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smil
 # (models/models.py RBFKernel), so without this the widest few dimensions decide
 # every distance and the rest are invisible. Read the reader's dtype choice and the
 # standardisation block off this list so they cannot drift apart.
-CONTINUOUS_REPS = ('continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn')
+CONTINUOUS_REPS = ('continuous_pdv', 'chemberta', 'mhggnn')
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -264,6 +263,14 @@ def parse_arguments():
                              "(default 1, i.e. a single fit). The spread across "
                              "repetitions is the run-to-run variance term in the ANOVA.")
     parser.add_argument("--start-iteration", type=int, default=0, help="Starting repetition index (for splitting repetitions across parallel jobs)")
+    parser.add_argument("--dump-features", type=str, default=None,
+                        help="Write the parsed feature matrix for each representation to "
+                             "<PREFIX>__<rep>.npz, exactly as the model receives it and "
+                             "BEFORE standardisation. Used by "
+                             "scripts/audit_representation_identity.py to check a "
+                             "representation against a reference implementation rather than "
+                             "by reading the featuriser source. Off by default; it writes "
+                             "nothing unless a prefix is given.")
     parser.add_argument("--noise-level", nargs='*', default=[0.0],
                         help="Noise level(s) to run. For every noise type except censoring this is the "
                              "dose DELIVERED, read according to --dose-units. For censoring it is the "
@@ -340,7 +347,7 @@ def parse_arguments():
                                  'butina', 'splito', 'scaffold', 'molecular_weight'],
                         help="Method for domain clustering")
     parser.add_argument("--domain-representation", type=str, default='ecfp4',
-                        choices=['ecfp4', 'sns', 'pdv', 'mol2vec'],
+                        choices=['ecfp4', 'sns', 'pdv'],
                         help="Representation for domain clustering")
     parser.add_argument("--loss", type=str, default='mse',
                    choices=['mse', 'mae', 'smooth_l1', 'huber', 'cauchy', 'log_cosh',
@@ -362,10 +369,6 @@ def parse_arguments():
                        help="Use distance metrics in sample selection (default: False)")
     parser.add_argument("--alpha", nargs='*', type=float, default=[0.1],
                        help="Confidence levels for conformal prediction (default is [0.1])")
-    parser.add_argument("--mol2vec-dim", type=int, default=300,
-                       help="Dimensions for mol2vec embeddings (default is 300)")
-    parser.add_argument("--mol2vec-model", type=str, default=None,
-                       help="Path to pre-trained mol2vec model (default: data/model_300dim.pkl)")
     parser.add_argument("--create-hybrid", type=str2bool, default=False)
     parser.add_argument("--hybrid-n-per-rep", type=int, default=100)
     parser.add_argument("--hybrid-importance", type=str, default="shap",
@@ -432,7 +435,6 @@ def write_to_mmap(
     randomized_smiles,
     pdv,
     continuous_pdv,
-    mol2vec,
     chemberta,
     mhggnn,
     avalon,
@@ -489,13 +491,6 @@ def write_to_mmap(
         if continuous_pdv is not None:
             continuous_pdv_fp32 = continuous_pdv.astype(np.float32)
             entry += continuous_pdv_fp32.tobytes()
-        else:
-            return
-
-    if "mol2vec" in molecular_representations:
-        if mol2vec is not None:
-            # Already quantized in mol2vec_fingerprint(), just write it
-            entry += mol2vec.tobytes()
         else:
             return
 
@@ -625,13 +620,6 @@ def load_and_split_polaris(dataset_tuple, args, files):
             vec_dimension=1024, print_train_set_info=args.logging
         )
     
-    # Load mol2vec
-    mol2vec_model = None
-    mol2vec_dimensions = args.mol2vec_dim
-    if 'mol2vec' in args.molecular_representations:
-        model_path = get_mol2vec_model_path(args)
-        mol2vec_model = load_mol2vec_model(model_path)
-
     # Load mhggnn
     if 'mhggnn' in args.molecular_representations:
         _ = get_mhg_gnn_model()  # Load once
@@ -683,10 +671,6 @@ def load_and_split_polaris(dataset_tuple, args, files):
             else:
                 continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
         
-        mol2vec = None
-        if 'mol2vec' in args.molecular_representations:
-            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, dimensions=mol2vec_dimensions)
-        
         chemberta = None
         if 'chemberta' in args.molecular_representations:
             chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
@@ -699,7 +683,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         if 'avalon' in args.molecular_representations:
             avalon = avalon_fingerprint(smiles_canonical)
         
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, avalon,
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, chemberta, mhggnn, avalon,
                      target_list[local_idx], category, files,
                      args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
         written_canonical.append(smiles_canonical)
@@ -767,13 +751,6 @@ def split_qm9(qm9, args, files):
                                                                vec_dimension = 1024, 
                                                                print_train_set_info = args.logging)
 
-    # Load mol2vec model if needed
-    mol2vec_model = None
-    mol2vec_dimensions = args.mol2vec_dim
-    if 'mol2vec' in args.molecular_representations or 'mol2vec' in args.molecular_representations:
-        model_path = get_mol2vec_model_path(args)
-        mol2vec_model = load_mol2vec_model(model_path)
-
     # Load mhg-gnn
     if 'mhggnn' in args.molecular_representations:
         _ = get_mhg_gnn_model()  # Load once
@@ -836,11 +813,6 @@ def split_qm9(qm9, args, files):
             else:
                 continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
 
-        mol2vec = None
-        if 'mol2vec' in args.molecular_representations:
-            mol2vec = mol2vec_fingerprint(mol, mol2vec_model, 
-                                               dimensions=mol2vec_dimensions)
-
         chemberta = None
         if 'chemberta' in args.molecular_representations:
             chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
@@ -856,7 +828,7 @@ def split_qm9(qm9, args, files):
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, avalon, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, chemberta, mhggnn, avalon, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
 
             written_canonical.append(smiles_canonical)
 
@@ -1045,83 +1017,6 @@ def create_sort_and_slice_ecfp_featuriser(mols_train,
 
     return ecfp_featuriser
 
-def get_mol2vec_model_path(args):
-    """Get mol2vec model path from args or default location"""
-    if args.mol2vec_model:
-        return args.mol2vec_model
-    return os.path.join(data_dir, 'model_300dim.pkl')
-
-def load_mol2vec_model(model_path):
-    """Load pre-trained mol2vec model"""
-    if not os.path.exists(model_path):
-        print(f"\n{'='*70}")
-        print(f"ERROR: mol2vec model not found at {model_path}")
-        print(f"{'='*70}")
-        print("\nPlease download the pre-trained model:")
-        print("1. Visit: https://github.com/samoturk/mol2vec")
-        print("2. Download 'model_300dim.pkl'")
-        print(f"3. Place it at: {model_path}")
-        print(f"{'='*70}\n")
-        raise FileNotFoundError(f"mol2vec model not found at {model_path}")
-    
-    print(f"Loading mol2vec model from {model_path}...")
-    model = word2vec.Word2Vec.load(model_path)
-    print("mol2vec model loaded successfully")
-    return model
-
-def mol2vec_fingerprint(mol, model, dimensions):
-    """
-    Generate mol2vec embedding for molecule.
-    Compatible with both Gensim 3.x and 4.x
-    
-    Args:
-        mol: RDKit molecule object
-        model: Pre-trained mol2vec word2vec model
-        dimensions: Embedding dimensions (typically 300)
-    
-    Returns:
-        numpy array: mol2vec embedding as uint8 
-    """
-    try:
-        # Generate sentence from molecule
-        sentence = MolSentence(mol2alt_sentence(mol, radius=1))
-        
-        # FIXED: Manual implementation to work with Gensim 4.x
-        # Instead of using sentences2vec, we'll do it ourselves
-        vec = np.zeros(model.wv.vector_size)
-        count = 0
-        
-        for word in sentence:
-            if word in model.wv:  # Check if word is in vocabulary
-                vec += model.wv[word]  # Get vector for word
-                count += 1
-        
-        if count > 0:
-            vec = vec / count  # Average the vectors
-        else:
-            # If no words found, use a default vector or zeros
-            vec = np.zeros(model.wv.vector_size)
-        
-        # Ensure correct dimensions
-        if len(vec) != dimensions:
-            print(f"Warning: mol2vec returned {len(vec)} dims, expected {dimensions}")
-            if len(vec) < dimensions:
-                vec = np.pad(vec, (0, dimensions - len(vec)), mode='constant')
-            else:
-                vec = vec[:dimensions]
-        
-        # Store the embedding exactly as the model produced it. NO per-molecule
-        # rescaling: dimension k must mean the same thing on the same scale for every
-        # molecule, or distance between molecules is meaningless (RERUN_PLAN.md 2.8c).
-        # Per-feature standardisation is applied later, fitted on the training split.
-        return np.asarray(vec, dtype=np.float32)
-            
-    except Exception as e:
-        print(f"Error generating mol2vec: {e}")
-        import traceback
-        traceback.print_exc()
-        return np.zeros(dimensions, dtype=np.float32)
-
 def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
     """Load MHG-GNN model once and cache globally"""
     global _MHG_GNN_MODEL
@@ -1205,12 +1100,22 @@ def load_custom_model(model_path):
 # guard below is now what stops the next one rather than that one
 # (RERUN_PLAN.md §2.7, §5.6).
 PARSEABLE_REPS = {
-    "randomized_smiles", "sns", "pdv", "continuous_pdv", "mol2vec",
+    "randomized_smiles", "sns", "pdv", "continuous_pdv",
     "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
 }
 
 
-def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, s, logging):
+def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains, s, logging,
+               return_smiles=False):
+    """Decode the packed record the Rust writer produced.
+
+    return_smiles adds the canonical SMILES as a fourth return value, in the SAME
+    ORDER as the feature rows. Only the feature-dump path asks for it. It exists
+    so a feature matrix can be checked against a reference implementation
+    computed on the same molecules -- without it, a row cannot be traced to a
+    molecule at all, and representation identity can only be audited by reading
+    the featuriser source.
+    """
     unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
     if unreadable:
         raise RuntimeError(
@@ -1222,6 +1127,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     x_data = []
     y_data = []
     y_data_original = []
+    smiles_data = []
 
     for entry in range(entry_count):
         try:
@@ -1240,6 +1146,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             canon_len = struct.unpack("I", canon_len_bytes)[0]
             canon_bytes = mmap_file.read(canon_len)
             canonical_smiles = canon_bytes.decode("utf-8")
+            smiles_data.append(canonical_smiles)
             if logging:
                 print(f"[{entry}] canonical_smiles: {canonical_smiles}")
 
@@ -1291,16 +1198,6 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     if logging: 
                         print(f"continuous_pdv: {continuous_pdv}")
 
-            # --- mol2vec ---
-            if "mol2vec" in molecular_representations:
-                mol2vec_bytes = mmap_file.read(1200)
-                if "mol2vec" == rep:
-                    mol2vec = np.frombuffer(mol2vec_bytes, dtype=np.float32)
-                    # Already per-molecule quantized, use as-is or scale back to [0,1] if needed
-                    feature_vector.append(mol2vec)
-                    if logging: 
-                        print(f"mol2vec: {mol2vec}")
-
             # --- chemberta ---
             if "chemberta" in molecular_representations:
                 chemberta_bytes = mmap_file.read(3072)
@@ -1341,7 +1238,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep in ("sns", "pdv", "continuous_pdv", "mol2vec", "chemberta", "mhggnn", "avalon"):
+            if rep in ("sns", "pdv", "continuous_pdv", "chemberta", "mhggnn", "avalon"):
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -1453,6 +1350,8 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     y_data = np.array(y_data, dtype=np.float32)
     y_data_original = np.array(y_data_original, dtype=np.float32)
 
+    if return_smiles:
+        return x_data, y_data, y_data_original, smiles_data
     return x_data, y_data, y_data_original
 
 def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original, domain_labels=None):
@@ -1986,7 +1885,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 print("CREATING HYBRID REPRESENTATION")
                 print("="*70)
                 
-                sources = ['continuous_pdv', 'ecfp4', 'mol2vec', 'chemberta']
+                sources = ['continuous_pdv', 'ecfp4', 'chemberta']
                 available = [r for r in sources if r in args.molecular_representations]
                 
                 if len(available) >= 2:
@@ -2099,6 +1998,37 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                                     args.molecular_representations, args.k_domains, s, args.logging
                                 )
                             # ========== END MODIFIED ==========
+
+                            # Optional: write the features EXACTLY as the model will
+                            # receive them, before standardisation. Off unless asked for.
+                            # The point is that representation identity can then be
+                            # checked against a reference implementation instead of by
+                            # reading the Rust source -- which is how the fingerprint
+                            # being the wrong function went unnoticed for months
+                            # (RERUN_PLAN.md §3.4.1).
+                            if getattr(args, 'dump_features', None):
+                                _dump = f"{args.dump_features}__{rep}.npz"
+                                # Re-read the training split for its SMILES, in the
+                                # same order as the rows, through the SAME decoder --
+                                # a second copy of the offset logic is exactly the
+                                # kind of thing this audit exists to catch.
+                                files["train"].seek(0)
+                                *_, _smiles = parse_mmap(
+                                    files["train"], len(train_idx), rep,
+                                    args.molecular_representations, args.k_domains, s,
+                                    False, return_smiles=True
+                                )
+                                np.savez_compressed(
+                                    _dump,
+                                    x_train=np.asarray(x_train),
+                                    x_test=np.asarray(x_test),
+                                    y_train=np.asarray(y_train),
+                                    smiles_train=np.array(_smiles, dtype=object),
+                                    rep=rep,
+                                    sigma=s,
+                                )
+                                print(f"dumped features for {rep} -> {_dump} "
+                                      f"(pre-standardisation, {np.asarray(x_train).shape})")
 
                             # Per-feature standardisation, fitted on the TRAINING split only
                             # and applied to validation and test with the training constants.
