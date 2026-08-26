@@ -1728,7 +1728,9 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
     `python scripts/test_config_isolation.py` launches two binaries concurrently in one directory
     with different representations and asserts each keeps its own data, plus an instant static
     half that fails if a fixed `config.json` reappears anywhere in the tree. `--end-to-end` runs
-    two real pipeline tasks side by side (§2.8a).
+    two real pipeline tasks side by side (§2.8a). **All three passed on 2026-08-26**, including
+    the two real tasks — which is also the first end-to-end confirmation that the QM9 pipeline
+    runs on the laptop again, not merely that it imports.
 11. **The checkout being used is the live one.** Confirm which copy of KIRBy the cluster actually
     updates before submitting anything against it (§2.8b).
 
@@ -2463,12 +2465,15 @@ they replay the same run (§10b.2, constraint 1).
 
 **Two things this chat found that belong to other chats.**
 
-- **The `morgan` representation is wired in Rust and not in Python.** `rust/src/main.rs` carries a
-  `morgan_buf`, reads it and writes it, but `process_and_train.py` neither builds nor writes it. Ask
-  for it today and every record after the first is read at the wrong offset. It is half of the
-  repair §5.6 describes; the other half of that section, collapsing the two descriptor-vector names
-  into one, changes the same record layout. **Both should be done in one pass over that layout, and
-  neither is assigned to a chat.**
+- ✅ **`morgan` is deleted.** It was wired in Rust — a buffer, a read and a write — and absent from
+  Python, so asking for it read every later field at the wrong offset. **The author's instruction,
+  2026-08-26: *"don't trust the morgan from rust - in fact get rid of it"*.** Removed from
+  `rust/src/main.rs` entirely; the binary rebuilds clean and chat D's record-alignment gate passes.
+  This changes what §5.6 recommends: that section proposed reinstating a Python-computed Morgan
+  fingerprint to fix the ECFP4 misnaming, and the Rust buffer it would have fed no longer exists.
+  **The misnaming itself is still open** — QM9's `ecfp4` is a path-based fingerprint and
+  `paper.tex:203` calls it circular — and so is the other half of §5.6, collapsing the two
+  descriptor-vector names. Neither is assigned to a chat.
 - **This botorch cannot fit the pipeline's Gaussian process.** `fit_gpytorch_mll` refuses a bare
   gpytorch model in botorch 0.16 (*'Gauche' object has no attribute 'transform_inputs'*), which is
   what `models/models.py` calls. Whether the cluster interpreter has an older botorch decides
