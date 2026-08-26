@@ -17,6 +17,7 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import rdDepictor
 from rdkit.Chem import rdFingerprintGenerator
 from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
+from rdkit.Chem.Scaffolds.MurckoScaffold import MurckoScaffoldSmiles
 from collections import deque
 import gc
 import deepchem as dc
@@ -99,7 +100,15 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn', 'avalon']
+
+# Representations stored as 32-bit floats rather than bits or bytes, and therefore
+# the ones that must be standardised per feature before a model sees them. The
+# radial-basis kernel shares ONE lengthscale across every dimension
+# (models/models.py RBFKernel), so without this the widest few dimensions decide
+# every distance and the rest are invisible. Read the reader's dtype choice and the
+# standardisation block off this list so they cannot drift apart.
+CONTINUOUS_REPS = ('continuous_pdv', 'mol2vec', 'chemberta', 'mhggnn')
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -237,8 +246,37 @@ def parse_arguments():
     parser.add_argument("-n", "--sample-size", type=int, default=10000, help="Sample size per iteration (default is 10000)")
     parser.add_argument("-b", "--bootstrapping", type=int, default=1, help="Bootstrapping iterations (default is 1 ie. no bootstrapping)")
     parser.add_argument("--start-iteration", type=int, default=0, help="Starting iteration index (for splitting bootstrapping across parallel jobs)")
-    parser.add_argument("--sigma", nargs='*', default=[0.0], help="Standard deviation(s) of artificially added Gaussian noise (default is None)")
-    parser.add_argument("--distribution", type=str, default='gaussian', help="Distribution of artificial noise (default is Gaussian)")
+    parser.add_argument("--noise-level", nargs='*', default=[0.0],
+                        help="Noise level(s) to run. For every noise type except censoring this is the "
+                             "dose DELIVERED, read according to --dose-units. For censoring it is the "
+                             "fraction of labels clipped at the assay limit.")
+    parser.add_argument("--dose-units", type=str, default="spread", choices=["spread", "label"],
+                        help="How --noise-level is read: 'spread' = a fraction of the clean training "
+                             "label standard deviation (the only honest axis on QM9); 'label' = the "
+                             "label's own units, e.g. log units on the experimental datasets.")
+    parser.add_argument("--noise-shape", type=str, default="gaussian",
+                        choices=["gaussian", "student_t", "laplace"],
+                        help="Shape of each individual draw.")
+    parser.add_argument("--noise-targeting", type=str, default="uniform",
+                        choices=["uniform", "grouped_wide", "grouped_shift", "outlier", "censoring"],
+                        help="Who gets hit and how hard.")
+    parser.add_argument("--nu", type=float, default=5.0,
+                        help="Degrees of freedom for Student-t. Must be > 2 or the variance is "
+                             "undefined and the dose cannot be matched.")
+    parser.add_argument("--noise-lambda", type=float, default=3.0,
+                        help="How many times wider the affected molecules' error is "
+                             "(grouped_wide, outlier). Default 3, from Avdeef 2019.")
+    parser.add_argument("--group-fraction", type=float, default=0.2,
+                        help="Fraction of scaffold GROUPS affected by grouped_wide. No published "
+                             "number exists; 0.2 is a stated choice.")
+    parser.add_argument("--group-variance-share", type=float, default=0.62,
+                        help="Share of total variance carried by the group-level offset in "
+                             "grouped_shift. Default 0.62, from Bentz et al. 2013 Table 7.")
+    parser.add_argument("--outlier-p", type=float, default=0.05,
+                        help="Fraction of labels contaminated by the outlier type. Hampel (2001): "
+                             "1-10% for routine scientific data.")
+    parser.add_argument("--censor-side", type=str, default="upper", choices=["upper", "lower"],
+                        help="Which end of the label range the assay limit sits at.")
     parser.add_argument("--tuning", type=str2bool, default=False, help="Hyperparameter tuning (default is False)")
     parser.add_argument("--kernel", type=str, default="tanimoto", help="Specify the kernel for certain models (Gaussian Process)")
     parser.add_argument("-k", "--k_domains", type=int, default=1, help="Number of domains for clustering (default is 1)")
@@ -256,8 +294,6 @@ def parse_arguments():
     parser.add_argument("-u", "--uncertainty", type=str2bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
-    parser.add_argument("--noise-strategy", type=str, default="legacy", help="Noise strategy: legacy, value_proportional, quantile, threshold, outlier, heteroscedastic (default is legacy)")
-    parser.add_argument("--strategy-params", type=str, default="noise_strategy_params.json", help="JSON file path with strategy-specific parameters (default is noise_strategy_params.json)")
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
     parser.add_argument('--cp-base-model', type=str, default='rf',
                     choices=['rf', 'xgboost', 'dnn', 'qrf', 'gauche', 'gin', 'gcn'],
@@ -320,7 +356,57 @@ def parse_arguments():
                        choices=['standard', 'minmax', 'none'])
     parser.add_argument("--save-hybrid-analysis", type=str2bool, default=False,
                    help="Save hybrid feature rankings and diagnostics")
+
+    # The noise scheme was redesigned (NOISE_DESIGN.md). The retired flags are
+    # refused rather than ignored: a job script written against the old scheme would
+    # otherwise run silently under the new one, where the level means something
+    # different. Refusing is the whole point.
+    retired = {
+        "--sigma": "--noise-level (and note the meaning changed: the level is now the dose DELIVERED, "
+                   "not a knob each noise type interprets its own way)",
+        "--distribution": "--noise-shape (gaussian, student_t, laplace)",
+        "--noise-strategy": "--noise-targeting (uniform, grouped_wide, grouped_shift, outlier, censoring)",
+        "--strategy-params": "nothing — the file was never passed to the injector and is deleted",
+    }
+    for flag, replacement in retired.items():
+        if any(a == flag or a.startswith(flag + "=") for a in sys.argv[1:]):
+            parser.error(f"{flag} has been removed. Use {replacement}.")
+
     return parser.parse_args()
+
+
+def build_scaffold_groups(smiles_canonical_list):
+    """Map each canonical SMILES to a Murcko scaffold group id.
+
+    The grouped noise types need to know which molecules share a scaffold, and the
+    split itself is scaffold-based, so a training split holds whole groups. The map
+    is keyed by CANONICAL SMILES rather than by row position, because keying noise
+    by row position is precisely what let one molecule's noise land on another.
+
+    Molecules whose scaffold cannot be computed get their own singleton group, so
+    they are never silently folded in with anything else.
+    """
+    group_of_scaffold = {}
+    assignments = {}
+    for smiles in smiles_canonical_list:
+        if smiles is None or smiles in assignments:
+            continue
+        try:
+            scaffold = MurckoScaffoldSmiles(smiles=smiles, includeChirality=False)
+        except Exception:
+            scaffold = None
+        # Rule 2 of NOISE_DESIGN.md §2a: an acyclic molecule has an EMPTY Murcko
+        # scaffold, and RDKit returns the same empty string for all of them. Left
+        # alone they form one enormous group — 32.2% of the first 10,000 QM9
+        # molecules — so a single group-level offset would move a third of the
+        # dataset at once and the delivered dose would swing by 11% run to run.
+        # Each acyclic molecule is its own group instead.
+        if not scaffold:
+            scaffold = f"__acyclic__{smiles}"
+        if scaffold not in group_of_scaffold:
+            group_of_scaffold[scaffold] = len(group_of_scaffold)
+        assignments[smiles] = group_of_scaffold[scaffold]
+    return assignments
 
 def write_to_mmap(
     smiles_isomeric,
@@ -331,6 +417,7 @@ def write_to_mmap(
     mol2vec,
     chemberta,
     mhggnn,
+    avalon,
     property_value,
     category,
     files,
@@ -403,6 +490,12 @@ def write_to_mmap(
     if "mhggnn" in molecular_representations:
         if mhggnn is not None:
             entry += mhggnn.tobytes()
+        else:
+            return
+
+    if "avalon" in molecular_representations:
+        if avalon is not None:
+            entry += avalon.tobytes()
         else:
             return
 
@@ -527,6 +620,8 @@ def load_and_split_polaris(dataset_tuple, args, files):
     
     print("Writing to mmap...")
     
+    written_canonical = []
+
     # Write to mmap
     for local_idx in range(n_valid):
         category = "excluded"
@@ -581,16 +676,21 @@ def load_and_split_polaris(dataset_tuple, args, files):
         mhggnn = None
         if 'mhggnn' in args.molecular_representations:
             mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
+
+        avalon = None
+        if 'avalon' in args.molecular_representations:
+            avalon = avalon_fingerprint(smiles_canonical)
         
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn,
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, avalon,
                      target_list[local_idx], category, files,
                      args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+        written_canonical.append(smiles_canonical)
     
     if 'sns' in args.molecular_representations:
         del mols_train
     
     gc.collect()
-    return train_idx, test_idx, val_idx
+    return train_idx, test_idx, val_idx, build_scaffold_groups(written_canonical)
 
 def load_qm9(target):
     qm9 = QM9(root=osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', 'QM9'))
@@ -663,6 +763,7 @@ def split_qm9(qm9, args, files):
     successful_train_idx = []
     successful_test_idx = []
     successful_val_idx = []
+    written_canonical = []
 
     for index, data in enumerate(qm9[:args.sample_size]):
         smiles_isomeric = data.smiles
@@ -730,10 +831,16 @@ def split_qm9(qm9, args, files):
         if 'mhggnn' in args.molecular_representations:
             mhggnn = mhggnn_fingerprint(smiles_canonical, dimensions=1024)
 
+        avalon = None
+        if 'avalon' in args.molecular_representations:
+            avalon = avalon_fingerprint(smiles_canonical)
+
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, mol2vec, chemberta, mhggnn, avalon, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+
+            written_canonical.append(smiles_canonical)
 
             if category == "train":
                 successful_train_idx.append(index)
@@ -745,7 +852,8 @@ def split_qm9(qm9, args, files):
     if 'sns' in args.molecular_representations:
         del mols_train
 
-    return successful_train_idx, successful_test_idx, successful_val_idx
+    return (successful_train_idx, successful_test_idx, successful_val_idx,
+            build_scaffold_groups(written_canonical))
 
 def get_chemberta_model():
     """Load ChemBERTa model once and cache it globally"""
@@ -803,17 +911,15 @@ def chemberta_fingerprint(smiles, dimensions=768):
             else:
                 embedding = embedding[:dimensions]
         
-        # Quantize to uint8
-        vec_min, vec_max = embedding.min(), embedding.max()
-        if vec_max - vec_min > 1e-6:
-            vec_normalized = (embedding - vec_min) / (vec_max - vec_min)
-            return (vec_normalized * 255).astype(np.uint8)
-        else:
-            return np.zeros(dimensions, dtype=np.uint8)
+        # Store the embedding exactly as the model produced it. NO per-molecule
+        # rescaling: dimension k must mean the same thing on the same scale for every
+        # molecule, or distance between molecules is meaningless (RERUN_PLAN.md 2.8c).
+        # Per-feature standardisation is applied later, fitted on the training split.
+        return np.asarray(embedding, dtype=np.float32)
             
     except Exception as e:
         print(f"ChemBERTa error: {e}")
-        return np.zeros(dimensions, dtype=np.uint8)
+        return np.zeros(dimensions, dtype=np.float32)
 
 def mhggnn_fingerprint(smiles, dimensions=1024):
     """Generate MHG-GNN embedding for SMILES string"""
@@ -824,23 +930,42 @@ def mhggnn_fingerprint(smiles, dimensions=1024):
         embedding = model.encode([smiles])[0]
         embedding = embedding.cpu().detach().numpy()
         
-        # Quantize to uint8
-        vec_min, vec_max = embedding.min(), embedding.max()
-        if vec_max - vec_min > 1e-6:
-            vec_normalized = (embedding - vec_min) / (vec_max - vec_min)
-            return (vec_normalized * 255).astype(np.uint8)
-        else:
-            return np.zeros(dimensions, dtype=np.uint8)
+        # Store the embedding exactly as the model produced it. NO per-molecule
+        # rescaling: dimension k must mean the same thing on the same scale for every
+        # molecule, or distance between molecules is meaningless (RERUN_PLAN.md 2.8c).
+        # Per-feature standardisation is applied later, fitted on the training split.
+        return np.asarray(embedding, dtype=np.float32)
             
     except Exception as e:
         print(f"MHG-GNN error: {e}")
-        return np.zeros(dimensions, dtype=np.uint8)
+        return np.zeros(dimensions, dtype=np.float32)
 
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
     mol = Chem.MolFromSmiles(smiles_string)
     descriptor_vals = mol_descriptor_calculator.CalcDescriptors(mol)
     return np.array(descriptor_vals)
+
+def avalon_fingerprint(smiles, n_bits=2048):
+    """Avalon fingerprint, packed to bits.
+
+    Binary, so it needs neither the float storage the learned embeddings need nor
+    the per-feature standardisation — it is stored exactly like ECFP4. Same call
+    KIRBy makes (kirby/representations/molecular.py create_avalon), so the two
+    pipelines build the same features.
+    """
+    from rdkit.Avalon import pyAvalonTools
+
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return np.zeros(n_bits // 8, dtype=np.uint8)
+        fp = pyAvalonTools.GetAvalonFP(mol, nBits=n_bits)
+        bits = np.array(fp, dtype=np.uint8)
+        return np.packbits(bits, bitorder="little")
+    except Exception as e:
+        print(f"Avalon error: {e}")
+        return np.zeros(n_bits // 8, dtype=np.uint8)
 
 def create_sort_and_slice_ecfp_featuriser(mols_train, 
                                           max_radius = 2, 
@@ -967,20 +1092,17 @@ def mol2vec_fingerprint(mol, model, dimensions):
             else:
                 vec = vec[:dimensions]
         
-        # Quantize to uint8: scale to [0, 255]
-        vec_min, vec_max = vec.min(), vec.max()
-        if vec_max - vec_min > 1e-6:  # Avoid division by zero
-            vec_normalized = (vec - vec_min) / (vec_max - vec_min)
-            vec_uint8 = (vec_normalized * 255).astype(np.uint8)
-        else:
-            vec_uint8 = np.zeros(dimensions, dtype=np.uint8)
-        return vec_uint8
+        # Store the embedding exactly as the model produced it. NO per-molecule
+        # rescaling: dimension k must mean the same thing on the same scale for every
+        # molecule, or distance between molecules is meaningless (RERUN_PLAN.md 2.8c).
+        # Per-feature standardisation is applied later, fitted on the training split.
+        return np.asarray(vec, dtype=np.float32)
             
     except Exception as e:
         print(f"Error generating mol2vec: {e}")
         import traceback
         traceback.print_exc()
-        return np.zeros(dimensions, dtype=np.uint8)
+        return np.zeros(dimensions, dtype=np.float32)
 
 def get_mhg_gnn_model(materials_repo_path=None, model_pickle_path=None):
     """Load MHG-GNN model once and cache globally"""
@@ -1131,9 +1253,9 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             # --- mol2vec ---
             if "mol2vec" in molecular_representations:
-                mol2vec_bytes = mmap_file.read(300)
+                mol2vec_bytes = mmap_file.read(1200)
                 if "mol2vec" == rep:
-                    mol2vec = np.frombuffer(mol2vec_bytes, dtype=np.uint8)
+                    mol2vec = np.frombuffer(mol2vec_bytes, dtype=np.float32)
                     # Already per-molecule quantized, use as-is or scale back to [0,1] if needed
                     feature_vector.append(mol2vec)
                     if logging: 
@@ -1141,21 +1263,30 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             # --- chemberta ---
             if "chemberta" in molecular_representations:
-                chemberta_bytes = mmap_file.read(768)
+                chemberta_bytes = mmap_file.read(3072)
                 if "chemberta" == rep:
-                    chemberta = np.frombuffer(chemberta_bytes, dtype=np.uint8)
+                    chemberta = np.frombuffer(chemberta_bytes, dtype=np.float32)
                     feature_vector.append(chemberta)
                     if logging: 
                         print(f"chemberta: {chemberta}")
 
             # --- mhg-gnn ---
             if "mhggnn" in molecular_representations:
-                mhggnn_bytes = mmap_file.read(1024)
+                mhggnn_bytes = mmap_file.read(4096)
                 if "mhggnn" == rep:
-                    mhggnn = np.frombuffer(mhggnn_bytes, dtype=np.uint8)
+                    mhggnn = np.frombuffer(mhggnn_bytes, dtype=np.float32)
                     feature_vector.append(mhggnn)
                     if logging: 
                         print(f"mhggnn: {mhggnn}")
+
+            # --- avalon ---
+            if "avalon" in molecular_representations:
+                avalon_bytes = mmap_file.read(256)
+                if "avalon" == rep:
+                    avalon = np.unpackbits(np.frombuffer(avalon_bytes, dtype=np.uint8), bitorder="little")
+                    feature_vector.append(avalon)
+                    if logging:
+                        print(f"avalon: {avalon}")
 
             # --- processed target ---
             processed_bytes = mmap_file.read(4)
@@ -1170,7 +1301,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep == "sns" or rep == "pdv" or rep == "continuous_pdv" or rep == "mol2vec" or rep =="chemberta" or rep == "mhggnn":
+            if rep in ("sns", "pdv", "continuous_pdv", "mol2vec", "chemberta", "mhggnn", "avalon"):
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -1222,12 +1353,41 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 continue
 
         except Exception as e:
-            if logging:
-                print(f"[{entry}] Skipping malformed entry: {e}")
-            continue
+            # This used to be `continue`, and that was the defect: these records
+            # are a packed byte stream with no delimiters, so once a read has
+            # gone wrong the offset is unrecoverable and EVERY molecule after it
+            # is decoded from the wrong bytes. Skipping the entry does not
+            # resynchronise anything — it just stops anyone finding out
+            # (RERUN_PLAN.md §2.7). Wildly negative runs that the catastrophic
+            # filter later deleted are the shape this produces.
+            raise RuntimeError(
+                f"malformed record at entry {entry} of {entry_count} "
+                f"(byte offset {mmap_file.tell()}, representation '{rep}'). The stream "
+                f"cannot be resynchronised from here, so every later molecule would be "
+                f"read from the wrong bytes."
+            ) from e
+
+    # The stream must have been consumed exactly. A record written short — the
+    # failure mode the writer's all-or-nothing rule now prevents — shows up here
+    # as leftover bytes, and this is the assertion that catches it (gate 8).
+    end = mmap_file.tell()
+    mmap_file.seek(0, os.SEEK_END)
+    size = mmap_file.tell()
+    if end != size:
+        raise RuntimeError(
+            f"read {entry_count} records but consumed {end} of {size} bytes "
+            f"({size - end} left over, representation '{rep}'). The record stream and the "
+            f"expected layout disagree — a record was written short or a representation is "
+            f"missing from the configuration."
+        )
 
     if rep != "graph":
-        if rep == "continuous_pdv":
+        if len(x_data) != entry_count:
+            raise RuntimeError(
+                f"parsed {len(x_data)} feature rows from {entry_count} records "
+                f"(representation '{rep}')"
+            )
+        if rep in CONTINUOUS_REPS:
             x_data = np.vstack(x_data).astype(np.float32)
         else:
             x_data = np.vstack(x_data).astype(np.uint8)
@@ -1597,7 +1757,46 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
         else:
             res = model_selector(None, model_type)
 
-def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset,):
+def record_noise_manifest(args, manifest_path, iteration, file_no, level):
+    """Append the run-level noise provenance to a CSV beside the results file.
+
+    Nothing recorded how much noise was actually delivered, which is the single
+    reason it took the life of the project to notice that the six noise types were
+    one type at six doses (RERUN_PLAN.md §2.2). Every run now writes what it
+    delivered, next to the results it delivered it for.
+    """
+    if not os.path.exists(manifest_path):
+        print(f"WARNING: the injector wrote no manifest at {manifest_path}")
+        return None
+
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+
+    row = {
+        'iteration': iteration,
+        'file_no': file_no,
+        'noise_level': level,
+        'dose_units': args.dose_units,
+        'dataset': args.dataset,
+        'target': args.target,
+    }
+    params = manifest.pop('parameters', {}) or {}
+    row.update(manifest)
+    for k, v in params.items():
+        row[f'param_{k}'] = v
+
+    out_path = args.filepath.replace('.csv', '_noise_manifest.csv')
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    write_header = not os.path.exists(out_path)
+    with open(out_path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+    return row
+
+
+def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups=None,):
     rust_molecular_representations = args.molecular_representations.copy()
     if args.domain_representation and args.domain_representation not in rust_molecular_representations:
         rust_molecular_representations.append(args.domain_representation)
@@ -1620,20 +1819,57 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         'uncertainty': args.uncertainty
     }
 
-    with open('config.json', 'w') as f:
+    # One file per task, and the path is handed to the binary explicitly.
+    #
+    # This used to be a fixed 'config.json'. Every job script does `cd scripts`
+    # first and the array jobs run several tasks at once, so every concurrent
+    # task wrote and read the SAME file. The file carries `file_no`, which the
+    # binary uses to choose which memory-mapped training files to open and
+    # rewrite — so one task reading another's configuration meant one task
+    # silently overwriting another's training data, with no error from either
+    # (RERUN_PLAN.md §2.8a). Everything else the binary touches was already
+    # keyed by `file_no`; this was the last shared name.
+    config_path = f'config_{file_no}.json'
+    with open(config_path, 'w') as f:
         json.dump(config, f)
+
+    scaffold_path = f'scaffold_groups_{file_no}.json'
+    if scaffold_groups:
+        with open(scaffold_path, 'w') as f:
+            json.dump(scaffold_groups, f)
+    elif args.noise_targeting in ('grouped_wide', 'grouped_shift'):
+        raise RuntimeError(
+            f"{args.noise_targeting} needs scaffold group assignments and the split produced none"
+        )
+
+    manifest_path = f'noise_manifest_{file_no}.json'
+    provenance_path = f'noise_provenance_{file_no}.csv'
 
     print(f"Rust executable path: {rust_executable_path}")
 
+    rust_cmd = [
+        rust_executable_path,
+        '--seed', str(iteration_seed),
+        '--config', config_path,
+        '--model', "rf",
+        '--noise-level', str(s),
+        '--dose-units', args.dose_units,
+        '--noise-shape', args.noise_shape,
+        '--noise-targeting', args.noise_targeting,
+        '--nu', str(args.nu),
+        '--lambda', str(args.noise_lambda),
+        '--group-fraction', str(args.group_fraction),
+        '--group-variance-share', str(args.group_variance_share),
+        '--outlier-p', str(args.outlier_p),
+        '--censor-side', args.censor_side,
+        '--scaffold-file', scaffold_path,
+        '--noise-manifest', manifest_path,
+        '--noise-provenance', provenance_path,
+    ]
+    print(f"Rust command: {' '.join(rust_cmd)}")
+
     proc_a = subprocess.Popen(
-        [
-            rust_executable_path,
-            '--seed', str(iteration_seed),
-            '--model', "rf",
-            '--sigma', str(s),
-            '--noise_distribution', args.distribution,
-            '--noise_strategy', args.noise_strategy,
-        ],
+        rust_cmd,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1643,6 +1879,15 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
     print(f"Rust stderr: {stderr}")
     print(f"Rust stdout: {stdout}")
+
+    # The injector asserts its own gates and dies on any of them. A failure here is
+    # a confounded run, so it must stop the pipeline rather than be trained on.
+    if proc_a.returncode != 0:
+        raise RuntimeError(
+            f"noise injection failed (exit {proc_a.returncode}) at level {s}: {stderr.strip()}"
+        )
+
+    record_noise_manifest(args, manifest_path, iteration, file_no, s)
 
     # Close the write-mode files before reopening in read mode
     for f in files.values():
@@ -1796,8 +2041,9 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                                 )
                             # ========== END MODIFIED ==========
 
-                            # Z-score X normalization for continuous_pdv (matches investigation)
-                            if rep == "continuous_pdv":
+                            # Per-feature standardisation, fitted on the TRAINING split only
+                            # and applied to validation and test with the training constants.
+                            if rep in CONTINUOUS_REPS:
                                 x_mean = np.nanmean(x_train, axis=0)
                                 x_std = np.nanstd(x_train, axis=0)
                                 x_std[x_std == 0] = 1.0
@@ -1836,6 +2082,18 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 print(f"Error deleting {filename}: {e}")
         
         files.clear()
+
+        # The per-task configuration file goes with them. A task calls this
+        # function once per noise level per replicate — 110 times on the main
+        # grid — so leaving them behind would litter `scripts/` with a file per
+        # invocation.
+        try:
+            os.remove(config_path)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            print(f"Error deleting {config_path}: {e}")
+
         gc.collect()
 
 def main():
@@ -1861,10 +2119,10 @@ def main():
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    sigma_time = time.time()
-    for s in args.sigma:
+    level_time = time.time()
+    for s in args.noise_level:
         s = float(s)
-        print(f"Sigma: {s}")
+        print(f"Noise level: {s} ({args.noise_targeting} / {args.noise_shape}, units: {args.dose_units})")
 
         for iteration in range(args.start_iteration, args.start_iteration + args.bootstrapping):
             # Set seeds
@@ -1885,24 +2143,24 @@ def main():
             val_size = int(args.sample_size * 0.1)
 
             if args.dataset == 'QM9':
-                train_idx, test_idx, val_idx = split_qm9(dataset, args, files)
+                train_idx, test_idx, val_idx, scaffold_groups = split_qm9(dataset, args, files)
 
             else:
-                train_idx, test_idx, val_idx = load_and_split_polaris(dataset, args, files)
+                train_idx, test_idx, val_idx, scaffold_groups = load_and_split_polaris(dataset, args, files)
 
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
             try: 
-                process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset)
+                process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups)
             except Exception as e:
                 if logging:
-                    print(f"Error with sigma {s}: {e}")
+                    print(f"Error at noise level {s}: {e}")
                 continue
 
         current_time = time.time()
-        print(f"Time for sigma {s}: {current_time - sigma_time:.2f} seconds")
-        sigma_time = current_time
+        print(f"Time for noise level {s}: {current_time - level_time:.2f} seconds")
+        level_time = current_time
 
     print(f"Time for total run: {time.time() - start_time}")
 

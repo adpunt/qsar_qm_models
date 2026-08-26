@@ -127,8 +127,8 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 
 | # | Thread | State | Where it is picked up |
 |---|---|---|---|
-| 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **never re-run** | §13 chat H |
-| 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced | §13 chat A |
+| 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
+| 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done and sourced | §13 chats A, B |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **answered and decided 2026-08-26** (§10b.2) | §13 chat C |
@@ -137,7 +137,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 8 | QM9 job scripts | 🟠 written, superseded by the redesign before they ran | §13 chat G |
 | 9 | Uncertainty job scripts | 🟠 written, superseded, and point at a possibly stale checkout | §13 chat G |
 | 10 | Parity audit script | 🟠 written; its literals were still being verified when the last session ended | §13 chat E |
-| 11 | Noise redesign in the pipelines | 🔴 not started, **neither Rust nor Python** | §13 chats A, B |
+| 11 | Noise redesign in the pipelines | 🟢 **Rust done 2026-08-26** (chat A) — deleted, built, 14 gates passing, verified on 4,000 real QM9 molecules. Python is chat B's | §13 chats A ✅, B |
 | 12 | Per-molecule rescaling of learned embeddings | 🔴 found, not fixed; affects **three** representations, not two (§2.8c) | §13 chat C |
 | 13 | Concurrent-task configuration race | 🔴 found, not fixed — launch blocker (§2.8a) | §13 chat D |
 | 14 | Aleatoric/epistemic decomposition | 🔴 spec written, not built; 4 further defects found (§5.5) | §13 chat I |
@@ -565,6 +565,40 @@ grep -m1 "model-rep configs" slurm-12822693.out      # reads "0 model-rep config
 **Nothing is lost.** These were coverage for the kernel question, and that question is answered on
 QM9 (§10b.2). Resubmit once the environment is fixed.
 
+### 2.8e The Sort & Slice fingerprint stores presence where it computes counts
+
+**Proved 2026-08-26 against the published reference**, not asserted. The reference is Markus
+Dablander's own repository for the 2024 Journal of Cheminformatics paper. Its featuriser defaults
+to `sub_counts=True`, and the line that builds the vector sums a one-hot encoding **once per
+occurrence** — so element *k* is the number of times substructure *k* occurs.
+
+**The computation here is a faithful port.** A difference comparison of the two function bodies
+found exactly one non-comment difference, a null-molecule guard.
+
+**The storage throws the counts away.** `process_and_train.py:366-371` casts to `uint8` and calls
+`np.packbits`, which reduces every feature to one bit. The count vector becomes a presence vector.
+So the models have trained on the `sub_counts=False` variant while the code asks for `True`.
+
+**Measured on 20,000 real QM9 molecules: 21.8% of the information-bearing entries are wrong, and
+98.8% of held-out molecules carry at least one wrong feature.**
+
+The paper describes a binary vector, which matches what was stored — but not what the featuriser
+was configured to produce. Either the storage or the configuration has to change; they currently
+disagree with each other.
+
+**Fix:** store counts, one byte per feature — 1024 bytes rather than 128 — and clip at 255 instead
+of letting the cast wrap.
+
+**Two related defects, both latent rather than fired.**
+
+- A count that is an exact multiple of 256 wraps to zero and records as **absent**. It cannot fire
+  on QM9, where the largest count observed is 8, because those molecules have at most nine heavy
+  atoms. Untested on drug-like molecules.
+- On the ADME code path the training molecules are queued in one order and consumed in another, so
+  each row would receive a different molecule's fingerprint. **Verified not fired: no job script
+  passes `-d ADME` at all.** The QM9 path queues and consumes in the same ascending order and is
+  correct. I checked this specifically rather than accepting the report.
+
 ### 2.9 The Methods figure does not show the experiment
 
 `paper.tex:359` captions it as the QM9 label distribution. The code that draws it
@@ -860,6 +894,71 @@ sides noise is added to raw labels before any standardisation. The accuracy esti
 The Gaussian-process model class. The Sort & Slice featuriser settings. And
 `continuous_pdv`/`PDV`, the one honest representation pair.
 
+#### 3.4.4b Which settings are actually better — measured, not assumed
+
+Two benchmarks were run. **Where they disagree, trust the production-scale one.**
+
+**Random forest feature sampling, at QM9 production scale** (10,000 molecules, 80/10/10 scaffold,
+3 seeds, clean and at half a label spread of noise, 36 fits), paired against the current `sqrt`:
+
+| Representation | Noise | all features | 30% features |
+|---|---|---|---|
+| descriptors | clean | −0.001 | +0.002 |
+| descriptors | noised | **−0.011 (loses all 3)** | −0.000 |
+| Morgan | clean | +0.034 | **+0.046 (wins all 3)** |
+| Morgan | noised | +0.016 | **+0.027 (wins all 3)** |
+
+The answer depends on the representation. On the descriptor vector, `sqrt` is fine and using every
+feature is *worse* under noise — 208 descriptors means the square root is about 14 per split, which
+is enough. On the fingerprint `sqrt` is clearly bad: 45 bits sampled from 2048 mostly-zero bits
+rarely lands on anything informative.
+
+**A smaller earlier benchmark at 3,182 training molecules found every feature winning everywhere,
+and that reversed at production scale.** More training data is what lets a narrow feature sample
+find the signal. Recorded because it is a good reminder that a hyperparameter conclusion drawn at a
+convenient scale need not hold at the real one.
+
+**Recommendation: 30% on both pipelines** — the only setting that wins or ties in all four cells,
+about three times faster than every feature, and free on the primary representation.
+
+**Other settings, from the 4,000-molecule benchmark** (3 seeds, 2 feature sets, clean and noised):
+
+- **XGBoost: the pinned 0.1 beats the unset 0.3, and the gap widens under noise** — up to −0.050 R².
+  That is the fast rate fitting the injected corruption. Only the rate actually differed; the other
+  nine pinned values already equalled the library defaults.
+- **LightGBM: bit-identical.** Same parameters, zero R² difference in all twelve runs.
+- **Quantile forest tree count: +0.003 R², inside the seed spread.** Holding the feature setting
+  fixed, tripling the trees buys almost nothing. The gap between the pipelines was the feature
+  setting all along.
+- **Two proposed alternatives are not wins.** Wider LightGBM leaves are worse, and worse under
+  noise. A slower XGBoost with more rounds is inside the seed spread at three times the cost.
+
+#### 3.4.4c What has already been changed
+
+Applied to the experimental pipeline on 2026-08-26, so the parity table above is now partly
+historical:
+
+| Change | Effect |
+|---|---|
+| NN-β width 32 → 128 | Matches QM9 and the paper. ~38% more per epoch. Invalidates every row for that model family |
+| XGBoost: all ten parameters pinned | Baseline accuracy will **fall** — a slower rate at a fixed round count is a less-fitted model. Correct, not a regression |
+| Quantile forest 100 → 300 trees | Three times the fit cost, and it is cross-fitted, so check the wall-clock headroom |
+| Stochastic passes 30 → 100 | Under 1.5% runtime. Every Bayesian and variational uncertainty column shifts and must be regenerated |
+| Gaussian-process cap removed | It was also keyed on the model name being exactly `GP`, so a Tanimoto variant escaped it. Now matches any variant |
+| **A requested-but-unavailable model is now a hard failure** | Guard 9. This is what would have stopped the two jobs that ran five folds over an empty roster |
+
+**Still outstanding on that side:** the feature-sampling setting, pending the decision above.
+
+#### 3.4.4d The quantile forest cannot be fitted in the local environment
+
+`quantile_forest` 1.4.1 and scikit-learn 1.3.2 disagree on a constructor parameter, and every fit
+raises `Invalid parameter 'monotonic_cst'`. **This is live on this machine.** It is the exact
+incompatibility the uncertainty preflight checks for. If it is live on the cluster it takes out
+every task of that run. Check before submitting.
+
+Consequence for the benchmark above: the quantile forest could not be tested. The mechanism should
+carry over from the ordinary forest, but that is an inference and should be labelled as one.
+
 #### 3.4.5 The check is now a script
 
 `scripts/audit_pipeline_parity.py` builds each model **both ways against the installed libraries**
@@ -932,18 +1031,27 @@ computed, it is older than the 21 August instruction, and it was superseded on 2
 ruling that the uncertainty question gets re-run rather than reworded. I read the older note,
 matched it on keywords, and inverted a live instruction.
 
-**Decision 3b — how to align the two pipelines, where both directions are defensible.**
-From the audit in §3.4. Three of these are genuine choices; the rest I would just fix.
+**Decision 3b — SUPERSEDED, mostly by action.** Of the three questions raised here on 2026-08-25,
+two have been applied and one is answered by measurement:
 
-| Difference | The choice | My recommendation |
-|---|---|---|
-| **Quantile forest: 300 trees or 100?** | More trees give smoother quantiles, which is the whole point of that model here. Fewer are three times cheaper and match the ordinary forest | **300 on both.** The uncertainty *is* the deliverable for that model, and quantile estimates from 100 trees are noisy |
-| **Gaussian process: keep the 2,000-molecule cap on the experimental side?** | QM9 runs it uncapped on 8,000. All three experimental training folds fit under about 4,100, so the cap only binds on LogD | **Remove it.** It is the only thing making that model different between studies, and the cost is bounded |
-| **Repeat seeds on the experimental side** | There are none today — one fit per cell, seed pinned. Folds are a partition, not repeats, so nothing there estimates run-to-run variance (§3.3). Adding repeats is a real compute cost | **Your call, and it is the one that costs money.** Without it the experimental variance decomposition has no honest residual term. Three repeats would be enough to see the spread |
+- The quantile-forest tree count and the Gaussian-process cap are **done** (§3.4.4c). Note the
+  tree count buys +0.003 R², inside the seed spread — the feature setting was doing the work.
+- The forest feature setting moved to decision 3c below, because the benchmark contradicted the
+  original instruction.
+- **Repeat seeds on the experimental side remain open and are the one that costs money.** There
+  are none today: one fit per cell, seed pinned. Folds are a partition, not repeats, so nothing
+  there estimates run-to-run variance (§3.3). Without them that variance decomposition has no
+  honest residual term. Three repeats would show the spread.
 
-Not decisions, just fixes — I will make these unless you say otherwise: pin the XGBoost parameters
-explicitly on the experimental side to match QM9 rather than letting eight of them fall through to
-library defaults; and make a requested-but-unavailable model a hard failure in both pipelines.
+
+**Decision 3c — four alignment calls the audit and the benchmark opened.**
+
+| # | Question | Context | My recommendation |
+|---|---|---|---|
+| **Forest feature sampling** | `sqrt`, every feature, or 30%? | Measured at production scale (§3.4.4b). Representation-dependent: `sqrt` is fine on descriptors and bad on fingerprints | **30% on both.** The only setting that wins or ties everywhere. **Changes QM9 too**, so it invalidates every forest result — but everything is being re-run |
+| **Early stopping** | Keep the last epoch, or roll back to the best? | QM9 counts twenty epochs of no improvement and then returns *that* epoch's weights. The experimental side snapshots and restores the best. Those twenty extra epochs are spent memorising injected corruption, and more of it at higher noise — so **QM9's neural degradation curves are steeper for a procedural reason, pointing the same way as the finding** | **Roll back, both sides.** It is what almost everyone means by early stopping. Caveat: it means selecting on validation labels, which under decision 2 would be noisy — but that is correct, since nobody gets clean labels when deciding when to stop |
+| **Uncertainty calibration** | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
+| **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Today only the descriptor vector is standardised. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | **Standardise.** The alternative has already produced one false conclusion. It changes every embedding number, so it is your call |
 
 **Decision 4 — sign off the noise design.**
 `NOISE_DESIGN.md` §7 still has Laplace open. My view: include it. It is one extra condition on
@@ -973,12 +1081,12 @@ commit, because each of them changes what a noise level means.
 
 | # | Change | Where |
 |---|---|---|
-| 1 | Delete the five superseded noise types and the six unreachable distribution variants | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.1 |
-| 2 | Build the dose solver, the three shapes, the four targeting rules | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.2 |
+| 1 | ✅ **DONE 2026-08-26** — deleted the five superseded noise types and the six unreachable distribution variants, plus the four functions that served them | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.1 |
+| 2 | ✅ **DONE 2026-08-26** — dose solver, three shapes, five targeting rules (the shifted grouped condition of §13.3 included) | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.2, §6.2a |
 | 3 | Implement the identical specification in Python and cross-check it against Rust on the same labels | `NoiseInject/noiseInject/core.py` |
-| 4 | Standardise using the clean training mean and standard deviation | `rust/src/main.rs:938-981`, `:759-760` |
-| 5 | Validation split gets its own independently drawn noise (decision 2) | `rust/src/main.rs:1055`, `:1242-1247` |
-| 6 | Record what was actually injected — see §5.2 | `rust/src/main.rs:1247-1252`; `scripts/utils.py:200` |
+| 4 | ✅ **DONE 2026-08-26** — standardisation constants come from the clean training labels; `generate_aggregate_stats` no longer takes the noise at all | `rust/src/main.rs`, `generate_aggregate_stats` |
+| 5 | Validation split gets its own independently drawn noise (decision 2) — **still the author's call (§13.5)**. The code is now shaped for it: `write_data` takes an `apply_noise` flag and a `NoisePlan`, so it is one extra plan built over the validation labels | `rust/src/main.rs`, `preprocess_data` |
+| 6 | ✅ **DONE 2026-08-26** — recorded per molecule where it is drawn, never reconstructed. See §5.2 and `NOISE_DESIGN.md` §6.2a | `rust/src/main.rs`, `write_noise_manifest` + the provenance writer in `preprocess_data`; `scripts/process_and_train.py`, `record_noise_manifest` |
 | 7 | Guard the two truncation and index-drift risks | `rust/src/main.rs` ECFP4 block, `:173-191` |
 | 8 | Two-output head on the Bayesian networks (decision 3) | `models/models.py:2031`, `:2088` — note the head **already exists and is disabled**, and two models already compute a per-molecule aleatoric term and discard it (`:6835-6851`, `:6963-6977`) |
 | 9 | Out-of-fold uncertainty on QM9 training molecules (decision 1) | `process_and_train.py`, `models/models.py`, `scripts/utils.py` |
@@ -996,6 +1104,17 @@ The molecule identifier matters as much as the dose columns: the current `sample
 position, so rows cannot be linked to molecules or matched across replicates — which is
 separately why the Gaussian process's out-of-fold rows had to be re-indexed in the uncertainty
 patch.
+
+✅ **The Rust half is done, 2026-08-26.** Two files come out of every run
+(`NOISE_DESIGN.md` §6.2a): `noise_provenance_{file_no}.csv` carries
+`split, record_index, canonical_smiles, y_clean_raw, epsilon_raw, y_noisy_raw, y_written` for
+**every split**, and `noise_manifest_{file_no}.json` carries the run-level dose columns, which
+`process_and_train.py` appends to `<results>_noise_manifest.csv`. Held-out rows carry
+`epsilon_raw = 0` exactly, so the provenance file is itself the evidence for gate 3.
+
+Two things still to wire, and neither is chat A's: the Python injector writes the same columns
+(chat B), and the figure script joins the manifest onto the results rows so no figure can be
+un-traceable to the dose that produced it (chat J).
 
 ### 5.3 Free savings, no statistical cost
 
@@ -1153,6 +1272,53 @@ raw scale, with the scale and offset on every row so anything can be converted w
 Bayesian networks can, once they have the head. The quantile forest can, post hoc. The variational
 model cannot give a per-molecule data term at all, and the boosting model has no model-uncertainty
 axis without bagging over seeds. That table belongs in the paper.
+
+---
+
+### 5.6 The two representation repairs
+
+Both change the record layout, so they land together with the embedding storage fix (§2.8c) and
+before any cluster time.
+
+#### The fingerprint
+
+**How different are the two, actually?** Measured on a seeded random sample of 497 QM9 molecules:
+the path fingerprint and a genuine Morgan radius-2 agree at a **mean Tanimoto of 0.0091**, and
+differ on 497 of 497 molecules. Mean bits set: 20 for Morgan against 206 for the path fingerprint.
+They are effectively unrelated representations, whatever their downstream accuracy turns out to be.
+
+An earlier measurement claiming a much smaller difference was taken from the first 200 records of
+the file, which are methane, ammonia, water, acetylene and hydrogen cyanide — too small to have
+radius-3 environments at all. The random-sample figure is the right one.
+
+**Do not patch the Rust crate.** Its Morgan wrapper is hard-coded to radius 3, and the bridge
+exposes no radius argument, so there is no drop-in fix inside it.
+
+**Compute it in Python instead — and note this already existed.** A Python-computed `morgan`
+representation was added in commit `636ef8f` (2026-02-23) and reverted in `46256be` (2026-02-25).
+The pattern for handing a Python-computed representation to the writer is already established for
+several others, so this is following an existing path rather than inventing one.
+
+#### The descriptor vector
+
+The two names encode the same 200 descriptors from the same list, and **share the same source
+array** — one line assigns one from the other. The binary one is a presence bit per descriptor
+packed into 25 bytes; the continuous one is 800 bytes of 32-bit floats.
+
+Target state: the name `pdv` *is* the continuous, standardised vector, and the binary one ceases
+to exist.
+
+**The experimental side needs no change at all** — its `pdv` is already the continuous vector, and
+the string `continuous_pdv` does not appear anywhere in that repository.
+
+**On the QM9 side the edits are in lockstep and the compiler catches most of them:** the record
+struct collapses two buffers into one, the two read branches collapse to one, the struct literal
+loses a field, and the two write branches collapse to one — which must stay in the same position
+in the record between the neighbouring representations. Then the Python reader, the z-scoring
+branch, every job script, and the figure script's representation lists and labels.
+
+⚠️ **Watch for substring matches when renaming**: `pdv` occurs inside `continuous_pdv`, so a naive
+find-and-replace will corrupt one while fixing the other.
 
 ---
 
@@ -1338,22 +1504,50 @@ and even flipped sign between datasets — worth re-testing, worth nothing as a 
 
 No job is submitted until all of these pass locally.
 
-1. **The dose is flat across noise types.** At one target, on the real training labels, every type
-   must deliver the same measured amount. This is the single check that proves the confound is
-   gone. If it fails, the entire re-run is confounded and worthless.
+**Status, chat A 2026-08-26.** Gates 1, 3, 4, 5 and 7 are now executable checks that fail rather
+than notes that reassure. Two commands run them:
+
+```
+# the noise conditions, on the real label column — this is the preflight gate
+./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
+
+# the pipeline, over real mmap files — 14 gates
+cd rust && cargo test --release
+```
+
+Gate 2 is chat B's (`scripts/crosscheck_injectors.py`). Gates 6 and 9 need a training run and are
+chat H's. Gates 8, 10 and 11 are chat D's. Each of chat A's gates was checked by removing the fix
+and confirming the gate fails.
+
+1. ✅ **The dose is flat across noise types.** At one target, on the real training labels, every
+   type must deliver the same measured amount. This is the single check that proves the confound
+   is gone. If it fails, the entire re-run is confounded and worthless.
+   **Two halves, per `NOISE_DESIGN.md` §2a rule 3.** The construction — unit dose times solved
+   scale equals the target — is asserted *exactly* on every single run. What one realisation
+   delivered is asserted against a band the injector works out from the draw itself: the relative
+   standard error of a second moment is `√((kurtosis − 1) / (4·n_eff))`, which reproduces the
+   0.19% spread §5.1b measured across 40 seeds at n = 133,885. A flat half-percent band would fail
+   correct code on a small dataset and pass a broken solver on a large one.
+   **Measured on 4,000 real QM9 molecules with real Murcko groups:** mean delivered dose over 20
+   seeds within 0.74% of target for every condition, spread between conditions **1.27%**.
 2. **The two injectors agree.** Same labels, same seed, same target — Rust and Python within the
    tolerance in `NOISE_DESIGN.md` §5.1b (half a percent, except the heaviest-tailed Student-t
    where sampling variability is 2.2% and is expected).
-3. **Held-out labels are untouched.** The clean-label column must be bit-identical across every
+3. ✅ **Held-out labels are untouched.** The clean-label column must be bit-identical across every
    noise level. This is the check that caught the original bug.
-4. **The recorded noise reconstructs the label exactly.** `y_clean + epsilon == y_noisy`, every
-   type, every level.
-5. **Zero noise records exactly zero.** Not a small number — zero. This is the negative control the
-   old reconstruction never had.
+   `held_out_labels_are_bit_identical_across_levels` compares the written held-out labels bit for
+   bit across every condition and every level, and fails if noise reaches one. Re-applying noise
+   to the held-out splits makes it fail.
+4. ✅ **The recorded noise reconstructs the label exactly.** `y_clean + epsilon == y_noisy`, every
+   type, every level. `recorded_noise_reconstructs_the_label`, asserted with `==` on f32, not a
+   tolerance — the noise is recorded where it is drawn, so there is nothing to round.
+5. ✅ **Zero noise records exactly zero.** Not a small number — zero. This is the negative control
+   the old reconstruction never had. `zero_level_records_exactly_zero`, every condition.
 6. **Nothing changed at zero noise.** The clean-label R² must reproduce the existing zero-noise
    numbers, because nothing about that path has changed.
-7. **Student-t reduces to Gaussian in the limit.** At 200 degrees of freedom the two must be
-   indistinguishable.
+7. ✅ **Student-t reduces to Gaussian in the limit.** At 200 degrees of freedom the two must be
+   indistinguishable — checked on both the delivered dose and the tail fraction, inside
+   `--self-test`.
 8. **A short record no longer desyncs the file.** Feed a molecule that fails the fingerprint check
    and confirm the reader stays aligned.
 9. **Every new column is populated** in a smallest-possible end-to-end run.
@@ -1883,7 +2077,7 @@ Specifically, in every chat:
 
 | | Chat | Depends on | Can start now? |
 |---|---|---|---|
-| **A** | Noise redesign in Rust | — | ✅ **yes** — start first, most depends on it |
+| **A** | Noise redesign in Rust | — | ✅ **DONE 2026-08-26** |
 | **B** | Noise redesign in the Python injector, and the cross-check | A, for the spec | ✅ **yes** — the specification is settled, so it can be written alongside A |
 | **C** | Embedding storage fix, and the Gaussian-process re-test | — | ✅ **yes** |
 | **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **yes** |
@@ -1902,7 +2096,56 @@ in §8 rather than trusting either in isolation.
 
 ---
 
-#### Chat A — Noise redesign in Rust
+#### Chat A — Noise redesign in Rust ✅ DONE 2026-08-26
+
+**What landed.** `rust/src/main.rs` no longer contains the old scheme. The six unreachable
+distribution variants and the five superseded targeting rules are deleted outright, along with
+`generate_value_based_noise_map`, `generate_adaptive_noise`, `generate_noise_by_indices` and
+`sample_from_distribution`. In their place: three shapes (Gaussian, Student-t, Laplace), five
+targeting rules (uniform, grouped-wider, grouped-shifted, outlier, censoring), the dose solver, and
+the provenance. `scripts/noise_strategy_params.json` is gone with its dead argument.
+
+The four things the prompt required, each demonstrated by a check that fails the build rather than
+by a claim:
+
+| Required | Where the check is | What it measures |
+|---|---|---|
+| The delivered amount is identical across conditions at a given setting | `gate_one_dose_is_flat_across_types`, and `--self-test` on the real column | mean over 20 seeds within 0.74% of target for every condition; **spread between conditions 1.27%** on 4,000 real QM9 molecules |
+| Labels standardised with the **clean** training mean and spread, computed before injection | `standardisation_uses_the_clean_training_spread` | the constants do not move across the level grid, and the written value is the noisy label standardised by them |
+| Held-out labels bit-identical across every level | `held_out_labels_are_bit_identical_across_levels` | bit-for-bit, every condition × every level |
+| The injected value written per molecule, reconstructing the noisy label exactly, exactly zero at zero | `recorded_noise_reconstructs_the_label`, `zero_level_records_exactly_zero` | `y_clean + epsilon == y_noisy` on f32 equality; `epsilon == 0.0` at level 0 |
+
+Each was checked by removing the fix and confirming the check fails — including removing the dose
+solver, which reproduces the original confound on demand at 1.00–1.70× the Gaussian dose.
+
+**Ten more gates** came out of doing the work: the ν ≤ 2 refusal, a mismatched scaffold file
+refused rather than silently degraded to uniform noise, a short record stream stopped rather than
+shifting every molecule's noise by one, censoring's direction, the affected-molecule fraction
+measured rather than assumed, manifest completeness, and seed reproducibility.
+
+**Reconciled with chat B**, which landed `NOISE_DESIGN.md` §2a and rewrote
+`rust/reference/noise_arms.rs` while this was in flight: the group-selection rule, the numpy
+quantile for the censoring limit, f64 accumulation in every statistic, and the condition names
+(`gaussian`, `student_t_nu5`, `grouped_wider`, `grouped_shifted`, `outlier_p05`, `censoring_25`)
+now match the reference exactly, so the cross-check can join the two implementations on the name.
+
+**One difference from the reference, deliberate.** The reference flattens shape and targeting into
+one condition list; the pipeline keeps them separately selectable, as `NOISE_DESIGN.md` §6.0
+prescribes. The two agree exactly on every condition that is actually queued, because those all use
+the Gaussian shape where the normalisation is the identity.
+
+**Also changed, because the injector cannot be called otherwise:** `scripts/process_and_train.py`
+now writes the scaffold-group file, passes the new arguments, records the manifest beside the
+results, and **refuses** `--sigma`, `--distribution`, `--noise-strategy` and `--strategy-params` by
+name. A job script written against the old scheme must not run silently under the new one, where
+the level means something different. **The thirty existing SLURM script directories all use the old
+flags and will now fail loudly** — they are rebuilt in chat H (§5.3).
+
+**Still open, and not chat A's:** whether the validation split gets its own independently drawn
+noise (§5.1 item 5, §13.5 — the author's), the ECFP4 truncation and index-drift guards (§5.1 item
+7, chat D), and whether Laplace is queued (`NOISE_DESIGN.md` §7 — built either way).
+
+---
 
 **Does:** deletes the five superseded noise types and the six unreachable distribution variants;
 builds the dose solver, the three shapes and the four targeting rules; fixes the standardisation
@@ -2355,7 +2598,13 @@ poorly supported and a referee who knows that argument would ask why. QM9 is dif
 computed rather than measured, so nothing is being simulated and no assay has to justify the shape —
 but with two grouped conditions and censoring already testing asymmetry, it would not earn its cost.
 
-🔴 **For chat A and chat B:** the shifted condition needs its algebra written down in
+✅ **CLOSED 2026-08-26.** Chat B wrote the algebra into `NOISE_DESIGN.md` §2a; chat A implemented
+it in `rust/src/main.rs` as `NoiseTargeting::GroupedShift { group_variance_share }`, ρ = 0.62 from
+Bentz Table 7, offsets deliberately not centred. Its per-run delivered dose varies by 6.9% on
+4,000 QM9 molecules — that is the group count talking, not an error, and it is why gate 1 is on the
+construction and on the 20-seed mean rather than on one realisation.
+
+The original wording, for the record: the shifted condition needs its algebra written down in
 `NOISE_DESIGN.md` alongside the other five, in the same form. The natural construction is the one
 Bentz's analysis itself uses — a group-level term plus a within-molecule term, with the two
 variances summing to the target amount and the split between them taken from the paper.

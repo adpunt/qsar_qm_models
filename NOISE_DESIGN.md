@@ -864,6 +864,67 @@ error is unbiased (mean −0.30%) but its spread explodes as the tail heavies:
 dose or empirical kurtosis for ν ≤ 4 — the sample statistic is unstable by construction
 because the fourth moment is infinite.
 
+### 5.1c ✅ THE PIPELINE ITSELF NOW MATCHES THE REFERENCE — chat A, 2026-08-26
+
+`rust/src/main.rs` is no longer a plan. The redesign is implemented there, the old noise
+types are deleted, and the injector reproduces the reference table above **to the digit** on
+the same 133,885 QM9 labels:
+
+```
+./rust/target/release/rust_processor --self-test <labels.csv> [--scaffold-file <groups.json>]
+```
+
+| Noise type | Unit dose G | Error vs target | Reference (§5.1b) |
+|---|---|---|---|
+| Gaussian | 1.0000 | −0.05% | −0.05% |
+| Student-t ν=10 | 1.1180 | +0.14% | +0.14% |
+| Student-t ν=5 | 1.2910 | −0.03% | −0.03% |
+| Student-t ν=3 | 1.7321 | −2.58% | −2.58% |
+| Laplace | 1.4142 | −0.38% | −0.38% |
+| Outlier p=0.01 | 1.0392 | −0.09% | −0.09% |
+| Outlier p=0.05 | 1.1855 | +0.28% | +0.28% |
+| Outlier p=0.10 | 1.3435 | +0.49% | +0.49% |
+
+The shape diagnostics reproduce too (fraction beyond three times the dose: 0.27%, 0.73%,
+1.18%, 1.42%, 1.41%).
+
+**On 4,000 real QM9 molecules with real Murcko scaffold groups**, acyclic molecules split into
+singletons per §2a rule 2 — 1,703 groups, largest holding 7.0% of the molecules — the mean
+delivered dose over 20 seeds sits within **0.74%** of target for every condition, and the
+**spread between the conditions is 1.27%**. That is the whole point of the redesign, measured:
+
+| Condition | mean over 20 seeds | per-run SD | affected molecules |
+|---|---|---|---|
+| Gaussian | +0.10% | 1.2% | 100% |
+| Student-t ν=10 | +0.48% | 1.2% | 100% |
+| Student-t ν=5 | +0.67% | 1.6% | 100% |
+| Student-t ν=3 | +0.58% | 6.0% | 100% |
+| Laplace | −0.52% | 1.6% | 100% |
+| Outlier p=0.01 / 0.05 / 0.10 | +0.09 / +0.11 / +0.51% | 1.3–1.4% | 0.9 / 4.3 / 9.3% |
+| Grouped — wider (f=0.2) | −0.01% | 1.2% | **20.9%** |
+| Grouped — shifted (ρ=0.62) | +0.74% | **6.9%** | 100% |
+
+Two things to read off it. The grouped-wider condition lands on 20.9% of molecules against a
+request of 20% — under the old group-counting rule the same request gave 22.6%, and §2a's
+measurements put that rule's range at 6.7–55.1%. And grouped-shifted's per-run spread is 6.9%,
+matching §2a rule 3's "roughly ±5%" — which is why the gate is on the mean and on the
+construction, not on one realisation.
+
+#### The tolerance is derived, not chosen
+
+The half a percent quoted above is not a universal constant — it is what 133,885 Gaussian draws
+happen to give. For a second moment averaged over `n_eff` independent contributions with kurtosis
+`k`, the relative standard error is `sqrt((k − 1) / (4·n_eff))`, and the square root halves it. At
+n = 133,885 that is **0.19%**, which is exactly the standard deviation §5.1b measured across 40
+seeds at ν = 30. The injector therefore computes its own band per run — kurtosis from the sample,
+`n_eff` from the scale map (`(Σs²)² / Σs⁴`) and, for the shifted condition, from the group count
+(`1 / (ρ²/n_groups + (1−ρ)²/n)`).
+
+This matters because a flat band is wrong in both directions: it fails correct code on a small
+dataset, and it would pass a broken solver on a large one.
+
+---
+
 ### 5.2 The noise types are genuinely distinguishable ✅
 
 At k = 0.5, with **identical total noise** in every row:
@@ -1109,6 +1170,13 @@ quietly disabled. It compares statistics on the same labels, target, groups and 
 
 ### 6.1 DELETE (phase 1, no replacement)
 
+**`rust/src/main.rs` — ✅ DONE, chat A, 2026-08-26.** All six unreachable distribution variants
+and all five superseded targeting rules are gone, along with `generate_value_based_noise_map`,
+`generate_adaptive_noise`, `generate_noise_by_indices` and `sample_from_distribution`. No
+deprecation, no flag guards; `git show 6099659:rust/src/main.rs` is the archive.
+`scripts/noise_strategy_params.json` and the `--strategy-params` argument are deleted with them.
+The two figure-script rows below belong to chat J and are **not** done.
+
 **`rust/src/main.rs`:**
 
 | Delete | Lines | Why |
@@ -1126,13 +1194,16 @@ quietly disabled. It compares statistics on the same labels, target, groups and 
 |---|---|
 | **`NoiseInjectorRegression`'s six strategies** — `legacy`, `quantile`, `threshold`, `outlier` (z-score selection), `hetero`, `valprop`, `NoiseInject/noiseInject/core.py:87-211` | Four have a premise that was directly tested and disproved (§3.2); `outlier`'s selection rule is replaced by random selection; `legacy` is replaced by `uniform`/`gaussian`. Full clean break, author's decision 2026-08-26 |
 | **`calibrate_sigma` and `calibrate_multiple_sigmas`**, `NoiseInject/noiseInject/calibration.py:16`, `:82` | A binary search on **mean \|Δy\| / SD** — the *first* moment. The design controls the second. At identical RMS dose, mean\|ε\|/RMS is 0.797 for Gaussian but 0.642 for Student-t ν=3, so calibrating this way hands the heavy-tailed conditions up to **24% more actual noise** at the same nominal level. It also re-uses one injector across its 20 iterations (`:49`, `:67`), so the objective it searches is stochastic. The closed-form solver replaces it: exact, deterministic, and identical to the Rust side. The classification calibrators stay |
-| `scripts/noise_strategy_params.json` | Never passed to the binary (`process_and_train.py:1635` omits `--strategy_params`). A latent trap: if anyone ever wired it up, its `base_sigma: 0.1` would silently flatten every value-proportional curve |
-| `--strategy-params` argument, `process_and_train.py:260` | Dead argument for the dead file |
+| ✅ `scripts/noise_strategy_params.json` | Never passed to the binary (`process_and_train.py:1635` omitted `--strategy_params`). A latent trap: if anyone had ever wired it up, its `base_sigma: 0.1` would have silently flattened every value-proportional curve. **Deleted 2026-08-26** |
+| ✅ `--strategy-params` argument, `process_and_train.py` | Dead argument for the dead file. **Deleted 2026-08-26**, along with `--sigma`, `--distribution` and `--noise-strategy` — see §6.2a |
 | `scripts/generate_paper_figures.py` | The v1 script built on the retired slope metric |
 | `results/paper_figures/` | Stale output of that script |
 | The synthetic methods-figure block, `generate_paper_figures_v2.py:2541-2562` | Fabricates a label distribution and reimplements two noise types differently from the pipeline (§2.9) |
 
 ### 6.2 BUILD (phase 2)
+
+**Steps 1–5 are ✅ DONE in Rust, chat A, 2026-08-26.** Step 6 (Python) is chat B's. What was
+built and how it is invoked is §6.2a; what it was measured to deliver is §5.1c.
 
 **Step 1 — the dose solver.** One new function, and it is the change that fixes the confound.
 
@@ -1192,7 +1263,68 @@ NoiseInjectorRegression(strategy=..., distribution=..., random_state=..., **para
 - `CONDITIONS` — one registry name per run condition (`gaussian`, `student_t_nu5`, `grouped_shifted`,
   `outlier_p05`, `censoring_25`, …), so a job script, a results row and a figure label agree
 
+### 6.2a ✅ What the Rust injector now takes, and what it writes — chat A, 2026-08-26
+
+Shape and targeting are separately selectable, as §6.0 intended. `--sigma`,
+`--noise_distribution`, `--noise_strategy` and `--strategy_params` are gone; `process_and_train.py`
+**refuses** them by name rather than ignoring them, because a job script written against the old
+scheme would otherwise run silently under the new one, where the level means something different.
+
+| Argument | Values | Default |
+|---|---|---|
+| `--noise-level` | the dose to deliver; for censoring, the fraction of labels clipped | 0 |
+| `--dose-units` | `spread` (a fraction of the clean training label SD) or `label` (the label's own units) | `spread` |
+| `--noise-shape` | `gaussian`, `student_t`, `laplace` | `gaussian` |
+| `--noise-targeting` | `uniform`, `grouped_wide`, `grouped_shift`, `outlier`, `censoring` | `uniform` |
+| `--nu` | degrees of freedom; **refused at or below 2** | 5 |
+| `--lambda` | how many times wider the affected molecules' error is | 3 (Avdeef 2019) |
+| `--group-fraction` | affected **molecule** fraction for `grouped_wide` | 0.2 (a stated choice) |
+| `--group-variance-share` | ρ, the group-level share of the variance for `grouped_shift` | 0.62 (Bentz 2013 Table 7) |
+| `--outlier-p` | contaminated fraction | 0.05 (Hampel 2001) |
+| `--censor-side` | `upper` or `lower` | `upper` |
+| `--scaffold-file` | canonical SMILES → scaffold group id, written by `process_and_train.py` | `scaffold_groups_{file_no}.json` |
+| `--noise-manifest` / `--noise-provenance` | where the provenance goes | `noise_{manifest,provenance}_{file_no}.{json,csv}` |
+| `--self-test <labels>` | run the gates on a labels file and exit non-zero on failure. No pipeline needed | — |
+
+**Two files come out of every run, and neither existed before.**
+
+`noise_manifest_{file_no}.json` — the run-level record: `noise_type`, `noise_shape`,
+`noise_targeting`, `noise_level`, `unit_dose`, `solved_scale`, `target_dose_in_label_units`,
+`delivered_dose_in_label_units`, `delivered_dose_as_fraction_of_label_spread`, `mean_epsilon`,
+`affected_molecule_fraction`, `effective_n`, `standardisation_mean`, `standardisation_sd`,
+`clean_label_mean`, `clean_label_sd`, `seed`, `n_train`, and every condition parameter including
+`n_scaffold_groups` and `largest_group_share_of_molecules`. `process_and_train.py` appends it to
+`<results>_noise_manifest.csv`, so every results row can be joined back to the amount of noise
+that produced it.
+
+`noise_provenance_{file_no}.csv` — one row per molecule, **every split**:
+`split, record_index, canonical_smiles, y_clean_raw, epsilon_raw, y_noisy_raw, y_written`. The
+held-out rows carry `epsilon_raw = 0` exactly, so the file is itself the evidence that the
+held-out labels were untouched.
+
+**Scaffold groups are keyed by canonical SMILES, not by row position.** `process_and_train.py`
+builds the map with `MurckoScaffoldSmiles` in `build_scaffold_groups`, splitting acyclic molecules
+into singletons per §2a rule 2, and the injector **refuses to run** if more than 1% of the training
+molecules are missing from it — otherwise a stale file would quietly turn grouped noise into
+uniform noise while still calling itself grouped. The write path additionally asserts, molecule by
+molecule, that the row it is about to apply noise to is the row the noise was drawn for. That is
+the guard for the *class* the original held-out bug belonged to, not for that one instance.
+
 ### 6.3 VERIFY (phase 3, before any cluster time)
+
+**Status, chat A 2026-08-26.** Items 1, 2, 3, 5, 7 and 8 are implemented as checks that fail the
+build, and they pass. Item 6 is chat B's. Item 4 needs a training run and is chat H's.
+
+| Check | Where | Runs as |
+|---|---|---|
+| 1, 2, 5, 7 — dose against the reference, flatness across conditions, the ν→∞ limit, exact zero | `rust/src/main.rs`, `self_test` | `rust_processor --self-test <labels> [--scaffold-file <groups>]`, exits non-zero on failure. **This is the preflight command** |
+| 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, and manifest completeness | `rust/tests/noise_gates.rs` — 14 gates over real mmap files | `cargo test --release` |
+
+Each was checked by removing the fix and confirming the check fails. Reverting the standardisation
+order fails `standardisation_uses_the_clean_training_spread`. Re-applying noise to the held-out
+splits fails `held_out_labels_are_bit_identical_across_levels`. Removing the dose solver fails
+`gate_one_dose_is_flat_across_types`, with the conditions spread across 1.00–1.70× the Gaussian
+dose — the original confound, reproduced on demand.
 
 1. **Against the reference implementation.** `rust/reference/noise_arms.rs` reproduces every
    dose to within ±0.5% (±2.2% for Student-t ν=3, which is sampling variability — §5.1b).
@@ -1249,10 +1381,10 @@ knee — damage accelerates smoothly, becoming serious around 20% and severe pas
 
 | # | Step | Blocks |
 |---|---|---|
-| 1 | Range-finding run completes; fix the QM9 and censoring level grids | everything |
-| 2 | Delete §6.1 | — |
-| 3 | Build §6.2 | 2 |
-| 4 | Verify §6.3 locally on QM9 at N=4,000 | 3 |
+| 1 | ✅ Range-finding run completes; fix the QM9 and censoring level grids | everything |
+| 2 | ✅ Delete §6.1 — Rust done 2026-08-26. The two figure-script rows are chat J's | — |
+| 3 | ✅ Build §6.2 — Rust steps 1–5 done 2026-08-26. Step 6 (Python) is chat B's | 2 |
+| 4 | ✅ Verify §6.3 locally on QM9 at N=4,000 — done 2026-08-26, see §5.1c | 3 |
 | 5 | Author the cluster scripts | 4 |
 | 6 | QM9 re-run — also clears the held-out-label contamination | 5 |
 | 7 | Experimental datasets re-run | 5 |
@@ -1275,7 +1407,9 @@ verified flat across noise types.**
 
 ### Still open
 
-**1. Is Laplace worth one extra run?**
+**1. Is Laplace worth one extra run?** *(Built and verified either way — chat A, 2026-08-26.
+Nothing is blocked on this: it is a question of whether the condition is queued, not whether it
+exists.)*
 It adds little statistically — it sits near Student-t at ν = 6 — but it is the only
 distribution family actually *fitted* to real bioactivity data (Anderson-Darling rejects
 normality at p < 2×10⁻¹⁶; Laplace fitted with scale 0.7 and 1.3). Buys a citation, not a
