@@ -1923,6 +1923,46 @@ They therefore go in separate columns, and **must not share an axis or a
 significance test**. QM9's per-replicate equivalent is computed in the figure
 script rather than the pipeline, so it waits for that rewrite.
 
+### 2.18 ✅ FIXED 2026-08-28 — `rmse` and `mae` are in the label's own units on both sides
+
+Audit entry 78. Every QM9 label is standardised in the injector
+(`rust/src/main.rs:2491`) and nothing turned it back, so `rmse` and `mae` came out
+in label standard deviations. The experimental pipeline keeps raw log units all
+the way through, so its columns of the same name were in log units. Nothing on a
+QM9 results row said which, and nothing on it allowed the conversion — the
+standardisation constants were written on the per-molecule uncertainty rows only.
+
+**Settled: the label's own units.** That is the convention. QM9 work reports each
+target's error in eV or meV against chemical accuracy at 0.043 eV, and uses a
+standardised error only when averaging across the twelve targets, whose units
+cannot otherwise be pooled ([Godwin et al.](https://arxiv.org/pdf/2106.07971)).
+This study trains one target at a time, so that reason does not apply. On the
+QSAR side the reporting guidance requires the endpoint and predicted endpoint
+values to be recorded but does not state the units for RMSE
+([Belfield et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC6371683/)); the
+convention in that literature is log units, which is what the experimental
+pipeline already produced.
+
+`calculate_regression_metrics` multiplies the three error metrics by the recorded
+label spread. That is exact rather than a shortcut: the labels and the
+predictions were shifted and scaled by the same constants, so the offset cancels
+in all five metrics and the spread cancels in `r2` and the correlation — which do
+not move, and are asserted not to.
+
+Two columns were added to every results row, `standardisation_mean` and
+`standardisation_sd`, so the standardised numbers stay recoverable and a row says
+what its own conversion was. Blank means none was recorded, and the numbers are
+in whatever units the labels arrived in — which is the experimental pipeline's
+case, where no standardisation happens.
+
+`scripts/test_metric_units.py` compares the converted metrics against metrics
+computed directly from raw arrays, asserts `r2` does not move, asserts that
+unstandardised labels are not rescaled, and reads the two constants back off a
+written row.
+
+**The results header changed**, so a QM9 results file written before today cannot
+be appended to. `save_results` refuses by name rather than writing ragged rows.
+
 ### 2.17 ✅ FIXED 2026-08-27 — the network's own predicted variance now reaches the file
 
 Audit entry 53. Two losses make the network output how uncertain it is about each
@@ -2004,8 +2044,8 @@ each; `confirmed_35.json` and `refuted_5.json` each carry a
 
 | | count |
 |---|---|
-| real, fixed | 78 |
-| real, still open — yours to decide | 11 |
+| real, fixed | 79 |
+| real, still open — yours to decide | 10 |
 | duplicate of another entry | 14 |
 | partly fixed | 4 |
 | refuted | 2 |
@@ -2052,7 +2092,7 @@ first time and **two stayed green**, which is the point of running it:
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
-**Still yours.** Eleven entries are real and unfixed because fixing them is a
+**Still yours.** Ten entries are real and unfixed because fixing them is a
 decision, not a repair:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
@@ -2068,8 +2108,8 @@ decision, not a repair:
 5. **Table 4's pooling** across noise levels, and the cross-dataset figure's
    pooling across conditions and representations. The report now says out loud
    what is pooled; computing them per level changes the table's shape.
-6. **`rmse` and `mae` in different units** across the two pipelines. Recoverable —
-   the standardisation constants are on every QM9 uncertainty row now.
+6. ~~`rmse` and `mae` in different units across the two pipelines~~ — **settled**:
+   the label's own units on both sides, with the conversion on every row (§2.18).
 7. **hERG N.** `paper.tex` says 1,482; the cached extract holds 1,415, and so does
    the module docstring. The loader reproduces 1,415 exactly.
 8. The remaining spec literals in models.py (batch size, the MC pass count, the
@@ -2080,75 +2120,71 @@ decision, not a repair:
 
 ### 2.14a ✅ FIXED 2026-08-27 — the shifted grouped condition delivered the wrong amount under every shape but Gaussian, in BOTH injectors
 
-Audit entry 34, the last of the noise-amount entries, now closed. It was written
-up as latent. It is not latent in the sense the entry assumed: both injectors were
-wrong, in opposite directions, and each was wrong on its own terms.
+Audit entry 34, the last of the noise-amount entries, now closed. It was written up
+as latent and as a Python fault. It is neither: both injectors were wrong, in
+opposite directions, and each disagreed with itself. The algebra, the measured
+delivery and the checks are in `NOISE_DESIGN.md` §2a and §5.1c.
 
-Every other condition draws at the shape's own spread and multiplies by the scale
-the dose solver returned. The shifted grouped condition bypassed that in each
-implementation, and the two bypassed it differently:
+**No results need re-running, and this is measured rather than argued.** Every
+condition the study runs is Gaussian, where a draw has spread 1 and all the
+conventions coincide. The pre-fix and post-fix binaries were built and run on the
+same 4,000 labels and the same groups: every roster row came out **byte for byte
+identical**, censoring and the shifted grouped type included. On the Python side
+the pre-fix line was replicated and its array compared element by element against
+the fixed one — identical under Gaussian, different under the other two shapes,
+which is the fix.
 
-| | what it multiplied by | delivered, Gaussian | Laplace | Student-t nu=5 |
-|---|---|---|---|---|
-| Python, `noiseInject/core.py` | the target, on draws at the shape's own spread | target | 1.51x | 1.19x |
-| Rust, `rust/src/main.rs` | the solved scale, on draws divided down to unit variance | target | 0.71x | 0.77x |
-| both, now | the solved scale, on draws at the shape's own spread | target | target | target |
+**What was reachable, and from where.** Not just latent: `process_and_train.py`
+passes `--noise-shape` and `--noise-targeting` straight through, so a job script
+asking for the shifted grouped type under Laplace was one flag away. On the QM9
+side it would have aborted, because the delivered-amount gate runs on all three
+splits. On the experimental side it would have written a wrong number.
 
-A Gaussian draw has spread 1, so the three conventions coincide there, and the
-condition roster is Gaussian at every entry on both sides. That is the whole
-reason neither was ever seen. It is also why **no results need re-running**: every
-run in the study is Gaussian, where the old code and the new agree exactly, bit
-for bit — the seed stream is unchanged, because both halves already called the
-same draw and only the constant in front of it moved.
+#### ✅ SETTLED 2026-08-28 — the check warns, it does not stop the run
 
-The Rust half is worth stating plainly because the entry recorded the opposite.
-`rust/src/main.rs` says in its own comment that the two components are unit
-variance "hence G = 1 by construction", but the solver computes G generically as
-the shape's spread, so the two disagreed with each other inside one function. On
-a real run the delivered-dose gate would have caught it — it runs on all three
-splits at line 3323 — so the Rust side would have aborted rather than written a
-wrong number. The Python side had no such check and would have written one.
+The Python injector now checks what it delivered instead of only recording it,
+against the same band as Rust. That check can fire on a legitimate draw: about 1%
+for `student_t_nu5` and `grouped_shifted` on Caco-2 and hERG, none on LogD.
+**Author's decision, 2026-08-28: keep going.** It emits a `DoseWarning` and carries
+on.
 
-**The Python injector now checks what it delivered**, the same way and against the
-same band: `dose_tolerance`, derived from the draw's own fourth moment and its
-effective size, is the twin of the Rust function and until now only the tests
-called it. Censoring is exempt — it is swept on the fraction clipped and has no
-target amount.
+Nothing is lost by continuing. The delivered amount is on every row beside the
+amount requested, so a wide draw is recorded rather than dropped and a run can be
+filtered for them afterwards. The measurement that settled it is in
+`NOISE_DESIGN.md` §5.1d: a correct draw misses by about 2% typically and 30% at
+worst once in 1,800 draws, while the defect the check exists for missed by 29–51%
+on **every** draw. One wide draw is therefore not evidence of anything; a
+consistent offset is.
 
-**One thing for you, and it is a number rather than an opinion.** That band is a
-flat 15% for Student-t at nu <= 4, because the sample kurtosis it is otherwise
-derived from is itself meaningless there. Flat means it does not shrink with the
-dataset, and the experimental sets are two orders of magnitude smaller than QM9.
-Measured over 200 draws of `student_t_nu3` at k=0.5:
+QM9 is unchanged — `rust/src/main.rs` still aborts, and at 133,885 labels the band
+is never exceeded, so it costs nothing there.
 
-| n | single draws outside the 15% band | worst |
-|---|---|---|
-| 1,415 (hERG) | 7.0% | 98% |
-| 4,000 | 2.5% | 47% |
-| 20,000 | 1.0% | 20% |
-| 133,885 (QM9) | 0.0% | 11% |
+**Also fixed, and it was the real hazard.** KIRBy wraps each cell in
+`except Exception`, prints one line and carries on — right for a model that failed
+to fit, wrong for a failed injection, which would have vanished as a printed line
+with the cell simply missing while the job finished green. `DoseError` stays
+defined and `alternative_data_noise_robustness.py` re-raises it beside
+`RunIntegrityError`, so nothing made fatal later can be swallowed.
+`tests/smoke/smoke_kirby_dose_error.py` drives both halves through the real runner.
 
-So the check is safe where Rust runs it and will stop about one hERG
-`student_t_nu3` run in fourteen. Those runs did deliver twice what was asked, so
-refusing them is defensible — but whether a heavy-tailed draw on a small set
-should abort the run or be recorded and kept is your call, not a repair. Nothing
-is red today: all 342 checks in `crosscheck_injectors.py` pass on the real QM9
-column, all 28 Rust gates pass, and all 17 conditions agree between the reference
-and the pipeline.
+#### What now checks it
 
-**What now compares the two.** `scripts/test_noise_arms.py` ends in an assertion
-rather than a table: it drives both injectors on the shifted grouped condition
-under Gaussian, Laplace and Student-t at nu=5 and requires that they deliver the
-target and agree with each other. Reaching the Rust one needed a way in, because
-the roster is Gaussian throughout — `--self-test --json` now runs a single named
-shape-and-targeting pair when both flags are given, and the roster path is
-untouched. No noise algebra changed for that.
-`rust/reference/noise_arms.rs` cannot take part at all: it fuses the shape and
-the targeting into one type, so its shifted grouped entry has no shape to set.
+`scripts/test_noise_arms.py` ends in an assertion rather than a table: it drives
+both injectors on the shifted grouped condition under Gaussian, Laplace and
+Student-t at nu=5 and requires that they deliver the target and agree with each
+other. Reaching the Rust one needed a way past the roster, which is Gaussian
+throughout — `--self-test --json` runs a single named shape-and-targeting pair when
+both flags are given, and the roster path is untouched. No noise algebra changed
+for it. The Rust gate table gained the same condition under Laplace and Student-t,
+which carries it through seven gates including the validation split's inherited
+group offsets; removing the fix turns six of them red, where before it turned none.
+`rust/reference/noise_arms.rs` cannot take part at all and is left alone: it fuses
+the shape and the targeting into one type, so its shifted grouped entry has no
+shape to set.
 
-Three new cases in `scripts/check_fixes_fail_when_removed.py`, each confirmed red
-with its fix removed: the Python scale, the Python delivered-amount check, and
-the agreement between the two injectors.
+Four cases in `scripts/check_fixes_fail_when_removed.py`, each confirmed red with
+its fix removed: the Python scale, the Python delivered-amount check, the agreement
+between the two injectors, and the swallowed injection failure.
 
 ---
 

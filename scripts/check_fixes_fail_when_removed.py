@@ -142,8 +142,8 @@ CASES = [
  # above stayed wrong through every run in the project.
  ("the Python injector checks what it delivered",
   f"{NOISE}/noiseInject/core.py",
-  "        if abs(realised / dose - 1.0) > tol:\n            raise DoseError(",
-  "        if False:\n            raise DoseError(",
+  "        if abs(realised / dose - 1.0) > tol:\n            warnings.warn(",
+  "        if False:\n            warnings.warn(",
   [sys.executable, f"{NOISE}/tests/test_noiseinject.py", "-k",
    "delivered_dose_is_checked"]),
 
@@ -209,6 +209,17 @@ CASES = [
   "                    output = output[:, 0:1]\n"
   "                preds.append(output)",
   [sys.executable, f"{QSAR}/scripts/test_predictive_head.py"]),
+
+ # Leave the error columns in label standard deviations, which is what they were
+ # while the same two columns on the experimental side were in log units.
+ ("rmse and mae are in the label's own units",
+  f"{QSAR}/scripts/utils.py",
+  "    _, sd = current_standardisation()\n"
+  "    if sd is not None and float(sd) > 0:\n"
+  "        sd = float(sd)\n"
+  "        mae, mse, rmse = mae * sd, mse * sd * sd, rmse * sd",
+  "    pass  # BROKEN ON PURPOSE",
+  [sys.executable, f"{QSAR}/scripts/test_metric_units.py"]),
 ]
 
 

@@ -1039,17 +1039,23 @@ under Laplace and Student-t is now in the Rust gate table, which puts it through
 including the one covering the validation split's inherited group offsets. Removing the fix turns
 six of those gates red; nothing covered that path before.
 
-### 5.1d ✅ The Python injector checks what it delivered — and what that costs
+### 5.1d ✅ The Python injector checks what it delivered — and warns rather than stopping
 
-Added 2026-08-27. `rust/src/main.rs` has asserted the delivered amount against `dose_tolerance` on
-every split since it was written; the Python injector recorded the same number and never read it
-back, which is how the error above survived. It now runs the same check against the same function.
-Censoring is exempt: it is swept on the fraction clipped and has no target amount.
+Added 2026-08-27, settled 2026-08-28. `rust/src/main.rs` has asserted the delivered amount against
+`dose_tolerance` on every split since it was written; the Python injector recorded the same number
+and never read it back, which is how the error above survived. It now runs the same check against
+the same function. Censoring is exempt: it is swept on the fraction clipped and has no target
+amount.
 
-That band is **three standard errors**, so roughly three legitimate draws in a thousand fall
-outside it by chance — on either implementation, at any size. Measured over the study's real
-conditions, its real level grid and the real labels and Murcko scaffold groups, at one training
-fold's size (120 seeds × 6 levels = 720 draws per cell):
+**It warns and carries on; it does not stop the run.** That band is **three standard errors**, so a
+working injector lands outside it by chance. The realised amount is on every row already, beside
+the amount requested, so a draw that landed wide is recorded rather than lost and a run can be
+filtered for them afterwards. What the check is for is the other case: the defect it would have
+caught was a fixed scale error present on **every** draw, 29–51% depending on the shape, against a
+median miss of about 2% from sampling alone.
+
+Measured over the study's real conditions, its real level grid and the real labels and Murcko
+scaffold groups, at one training fold's size (120 seeds × 6 levels = 720 draws per cell):
 
 | Dataset | n train/fold | gaussian | student_t_nu5 | laplace | grouped_wider | grouped_shifted | outlier_p05 |
 |---|---|---|---|---|---|---|---|
@@ -1057,10 +1063,22 @@ fold's size (120 seeds × 6 levels = 720 draws per cell):
 | OpenADMET-Caco2_Efflux | 1,556 | 0 | 6 | 0 | 0 | 12 | 0 |
 | ChEMBL-hERG-Ki | 1,019 | 0 | 6 | 0 | 0 | 6 | 0 |
 
-So it is silent on the largest set and trips on about 1% of draws for the two most awkward
+So it is silent on the largest set and warns on about 1% of draws for the two most awkward
 conditions on the two smaller ones. `student_t_nu3` is not in the experimental condition list;
 at nu ≤ 4 the band is a flat 15% that does not shrink with n, and 200 draws put it outside that
 band 7.0% of the time at 1,415 molecules against 0.0% at QM9's 133,885.
+
+How far a **correct** draw lands from what was asked, on the real labels and scaffolds, 1,800 draws
+per condition — the number that decided warn against stop:
+
+| | median miss | 99th percentile | worst seen |
+|---|---|---|---|
+| hERG, worst condition (`student_t_nu5`) | 2.4% | 11.6% | 30.2% |
+| Caco-2, worst condition (`grouped_shifted`) | 2.1% | 9.6% | 12.6% |
+| every other condition, both sets | 1.1–2.4% | 4.2–9.6% | 4.4–12.0% |
+
+A single draw 30% out therefore says nothing on its own — the defect's signature was being 29–51%
+out on every draw, not once. Stopping on one would have discarded a sound run.
 
 ### 5.1b ✅ A Rust reference implementation exists, builds, and agrees with Python
 
