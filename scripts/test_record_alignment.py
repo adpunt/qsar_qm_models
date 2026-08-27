@@ -199,60 +199,6 @@ def every_accepted_representation_is_fixed_width():
         )
 
 
-def every_accepted_representation_is_fixed_width():
-    """The assumption the uniform-width check rests on, per representation.
-
-    If this fails, someone has added a representation whose rows can differ in
-    width -- and the width check in `parse_mmap` then fires on VALID data.
-    Revisit that check before the representation ships.
-    """
-    from process_and_train import (DROPPED_REPS, PARSEABLE_REPS, CHEMBERTA_BYTES,
-                                   MHGGNN_BYTES, SNS_RECORD_BYTES)
-
-    # bytes each representation contributes to one record, in the reader's order
-    block_bytes = {
-        "sns": SNS_RECORD_BYTES,
-        "continuous_pdv": 800,
-        "chemberta": CHEMBERTA_BYTES,
-        "mhggnn": MHGGNN_BYTES,
-        "avalon": 256,
-        "ecfp4": FP_BYTES,
-    }
-    accepted = (PARSEABLE_REPS - DROPPED_REPS) - {"graph"}
-    missing = accepted - set(block_bytes)
-    assert not missing, (
-        f"this test does not know the record layout of {sorted(missing)}, so it cannot "
-        f"say whether their rows are a fixed width. Add them here."
-    )
-
-    for name in sorted(accepted):
-        n = block_bytes[name]
-        # Deliberately different SMILES lengths: length is the only thing that
-        # varies between molecules, so if any width could move, it moves here.
-        widths = set()
-        for smiles, ylen in (("CO", 4.0), ("CCCCCCCCCCO", 5.0)):
-            b = smiles.encode()
-            rec = struct.pack("I", len(b)) + b
-            rec += struct.pack("I", len(b)) + b
-            rec += struct.pack("f", ylen)
-            if name == "ecfp4":
-                # ECFP4 is written LAST, after the processed target.
-                rec += struct.pack("f", 0.5)
-                rec += bytes((i * 13 + 7) % 256 for i in range(n))
-            else:
-                rec += bytes((i * 13 + 7) % 256 for i in range(n))
-                rec += struct.pack("f", 0.5)
-            buf = io.BytesIO(rec)
-            buf.seek(0)
-            x, _, _ = parse_mmap(buf, 1, name, [name], 1, 0.0, False)
-            widths.add(np.asarray(x).shape[1])
-        assert len(widths) == 1, (
-            f"{name}: two molecules of different SMILES length decoded to widths "
-            f"{sorted(widths)}. The uniform-width check in parse_mmap would fire on "
-            f"valid data for this representation."
-        )
-
-
 def main():
     print("record alignment (RERUN_PLAN.md gate 8)")
     results = [
@@ -264,8 +210,6 @@ def main():
               trailing_bytes_are_not_ignored),
         check("a representation with no reader is refused by name",
               a_representation_with_no_reader_is_refused_by_name),
-        check("every accepted representation decodes to a fixed width",
-              every_accepted_representation_is_fixed_width),
         check("every accepted representation decodes to a fixed width",
               every_accepted_representation_is_fixed_width),
     ]

@@ -112,41 +112,6 @@ VALIDATION_MODELS = {
     "MLP-VBLL-Full": (("torch",), None),
 }
 
-# The validation and uncertainty rosters, as KIRBy's --models flag spells them.
-#
-# These are a SEPARATE namespace from QM9_MODELS: KIRBy says 'LightGBM' where
-# process_and_train.py says 'lgb', and 'BNN-Full' where it says 'dnn_bnn_full'.
-# Passing a KIRBy label to --models would fail with "unknown model name", which
-# is the guard blocking a job for the guard's own reason -- so those two job
-# families get --validation-models instead.
-#
-# Sources, checked rather than guessed: the optional-import blocks at
-# alternative_data_noise_robustness.py:253-333 (one try/except per backend,
-# each setting a HAS_* flag that silently drops the model when False) and
-# UNCERTAINTY_MODELS at :182. VBLL has no external package -- VBLLLayer is
-# written out in that file on top of torch -- so it maps to torch.
-#
-# The value is (modules, attr): EVERY module must import, and attr -- when it is
-# not None -- is looked up on the first of them and constructed. GP needs three
-# packages, and gauche or botorch missing is exactly the case that turned into a
-# silent skip before.
-VALIDATION_MODELS = {
-    # the validation roster (slurm_scripts_validation_rerun MODELS_ALL)
-    "RF": (("sklearn.ensemble",), "RandomForestRegressor"),
-    "QRF": (("quantile_forest",), "RandomForestQuantileRegressor"),
-    "SVM": (("sklearn.svm",), "SVR"),
-    "XGBoost": (("xgboost",), "XGBRegressor"),
-    "LightGBM": (("lightgbm",), "LGBMRegressor"),
-    "NGBoost": (("ngboost",), "NGBRegressor"),
-    "GP": (("gpytorch", "gauche", "botorch"), None),
-    "DNN": (("torch",), None),
-    # the uncertainty roster's additions (UNCERTAINTY_MODELS)
-    "BNN-Full": (("torchbnn", "torchhk"), None),
-    "MLP-BNN-Full": (("torchbnn", "torchhk"), None),
-    "VBLL-Full": (("torch",), None),
-    "MLP-VBLL-Full": (("torch",), None),
-}
-
 # Packages worth reporting a version for whatever was asked.
 VERSION_REPORT = [
     "numpy", "pandas", "scipy", "scikit-learn", "torch", "torch_geometric",
@@ -898,36 +863,6 @@ def check_validation_models(models, failures, resource_failures):
     print()
 
 
-def check_validation_models(models, failures, resource_failures):
-    """The per-task guard for the validation and uncertainty jobs.
-
-    The counterpart of check_qm9 for KIRBy's model names. Cheap by design: it
-    imports each model's backend and constructs the estimator, and does NOT
-    exec alternative_data_noise_robustness.py -- that is check_validation's job
-    and it belongs in the preflight, not in 336 array tasks.
-    """
-    print("validation/uncertainty roster -- each model's backend is imported and, where "
-          "there is one, the estimator constructed.")
-
-    unknown = [m for m in models if m not in VALIDATION_MODELS]
-    if unknown:
-        print(f"  FAIL  unknown model name(s): {sorted(unknown)}")
-        print(f"        known: {sorted(VALIDATION_MODELS)}")
-        failures.append("unknown validation model names")
-        models = [m for m in models if m in VALIDATION_MODELS]
-
-    for model in sorted(set(models)):
-        modules, attr = VALIDATION_MODELS[model]
-
-        def _build(modules=modules, attr=attr):
-            mods = [importlib.import_module(m) for m in modules]
-            if attr is not None:
-                getattr(mods[0], attr)()  # constructed, not merely imported
-
-        probe(f"{model:<16s} ({', '.join(modules)})", _build, failures, resource_failures)
-    print()
-
-
 def check_validation(failures, resource_failures=None):
     """The KIRBy roster, when that checkout is next to this one."""
     here = os.path.dirname(os.path.abspath(__file__))
@@ -1062,10 +997,6 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="*", default=None,
                     help="Only check these models. Default: the whole QM9 roster.")
-    ap.add_argument("--validation-models", nargs="+", default=None, metavar="NAME",
-                    help="Check these KIRBy model names instead of the QM9 roster (e.g. "
-                         "SVM, LightGBM, BNN-Full). This is what the validation and "
-                         "uncertainty job templates call.")
     ap.add_argument("--validation-models", nargs="+", default=None, metavar="NAME",
                     help="Check these KIRBy model names instead of the QM9 roster (e.g. "
                          "SVM, LightGBM, BNN-Full). This is what the validation and "
