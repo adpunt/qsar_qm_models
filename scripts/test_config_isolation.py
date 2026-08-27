@@ -46,7 +46,15 @@ PDV_BYTES = 800
 
 
 def write_split(path, rows, rep):
-    """Rows as the Python side writes them, for one representation."""
+    """Rows as the Python side writes them, for one representation.
+
+    `ecfp4` is 256 bytes at the END of the record. It used to be computed by the
+    Rust side and inserted into the OUTPUT only, so the input record carried
+    nothing for it; since 2026-08-27 it is Morgan radius 2, computed in Python
+    and carried through, because the Rust binding has no route to radius 2
+    (RERUN_PLAN.md 2.13b). A fixture without that block leaves the reader short
+    and the run refuses the split.
+    """
     out = b""
     for smiles, y, payload in rows:
         b = smiles.encode()
@@ -55,6 +63,11 @@ def write_split(path, rows, rep):
         out += struct.pack("f", y)
         if rep == "continuous_pdv":
             out += payload  # written BEFORE the label by the Rust writer
+        elif rep == "ecfp4":
+            # Not all zeros: an all-zero block is a featurisation failure and
+            # stops the run by design.
+            out += bytes(((payload[0] if payload else 0x11) + i) % 256 | 1
+                         for i in range(FP_BYTES))
     with open(path, "wb") as f:
         f.write(out)
 

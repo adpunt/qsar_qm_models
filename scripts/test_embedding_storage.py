@@ -34,9 +34,12 @@ for d in ('models', 'preprocessing', 'results', 'scripts'):
 import process_and_train as P
 
 # Dimensions and the byte width each representation occupies in one record.
+# Widths come from the pipeline's own constants, not restated here -- that is how
+# the two halves of a record drift apart. chemberta moved 768 -> 384 on
+# 2026-08-27, when both pipelines were settled on DeepChem/ChemBERTa-77M-MTR.
 EMBEDDINGS = {
-    'chemberta': (768,  3072),
-    'mhggnn':    (1024, 4096),
+    'chemberta': (P.CHEMBERTA_DIMS, P.CHEMBERTA_BYTES),
+    'mhggnn':    (P.MHGGNN_DIMS,    P.MHGGNN_BYTES),
 }
 
 failures = []
@@ -133,22 +136,42 @@ for rep, (dims, width) in list(EMBEDDINGS.items()) + [('continuous_pdv', (200, 8
           rust_widths.get(rust_name) == str(width),
           f"Rust says {rust_widths.get(rust_name)}")
 
-    m = re.search(rf'{rep}_bytes = mmap_file\.read\((\d+)\)', python_reads)
+    # The reader may name a constant rather than a literal; resolve either.
+    m = re.search(rf'{rep}_bytes = mmap_file\.read\(([\w]+)\)', python_reads)
+    read_width = None
+    if m:
+        token = m.group(1)
+        read_width = int(token) if token.isdigit() else getattr(P, token, None)
     check(f"{rep}: the Python reader reads {width} bytes",
-          m is not None and m.group(1) == str(width),
-          f"reader says {m.group(1) if m else 'no read found'}")
+          read_width == width,
+          f"reader says {read_width if m else 'no read found'}")
 
 # ── 3. No builder hands back bytes ──────────────────────────────────────────
 #
 # The failure paths matter as much as the success path: a molecule the model
 # cannot embed must still write a full-width record, or the file desynchronises.
-print("\n3. the builders return float32, including when they fail")
-check("chemberta: failure path is float32 and full width",
-      P.chemberta_fingerprint(None, dimensions=768).dtype == np.float32
-      and len(P.chemberta_fingerprint(None, dimensions=768)) == 768)
-check("mhggnn: failure path is float32 and full width",
-      P.mhggnn_fingerprint(None, dimensions=1024).dtype == np.float32
-      and len(P.mhggnn_fingerprint(None, dimensions=1024)) == 1024)
+print("\n3. a builder that fails RAISES; it does not hand back zeros")
+#
+# It used to return np.zeros(dimensions) on any exception. That keeps the record
+# full width -- and puts a molecule with NO FEATURES into training carrying a
+# real label, where nothing downstream can tell it from a real row, and every
+# such molecule looks identical to the model (RERUN_PLAN.md 2.13). The record
+# stays aligned because the writer never gets that far.
+for _name, _fn in (('chemberta', P.chemberta_fingerprint),
+                   ('mhggnn', P.mhggnn_fingerprint)):
+    try:
+        _fn(None)
+        _raised = False
+    except RuntimeError:
+        _raised = True
+    except Exception:          # noqa: BLE001 -- any raise is better than zeros
+        _raised = True
+    check(f"{_name}: a molecule it cannot embed raises rather than returning zeros",
+          _raised)
+
+check("chemberta: a real molecule is float32 at the record width",
+      P.chemberta_fingerprint('CCO').dtype == np.float32
+      and len(P.chemberta_fingerprint('CCO')) == P.CHEMBERTA_DIMS)
 check("avalon: builds 2048 bits packed into 256 bytes",
       len(P.avalon_fingerprint('CCO')) == 256
       and P.avalon_fingerprint('CCO').dtype == np.uint8)

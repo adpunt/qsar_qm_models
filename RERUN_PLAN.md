@@ -1554,8 +1554,35 @@ zero-noise RMSE. Both pipelines now write what the noise DELIVERED (`delivered_d
 `warn_if_axes_differ` names a mismatch instead of pooling silently. Censoring stays on its own axis:
 its level is already dimensionless and it has no dose to rescale.
 
-**Still open for you:** whether the paper reports `auc_norm_shared`, `auc_norm`, or both. Nothing is
-removed either way — both columns are written.
+**✅ SETTLED 2026-08-27 by the author: one shared grid, no rescaling.**
+
+The three experimental grids become `0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5`, read as
+fractions of each fold's CLEAN TRAINING label spread — the grid QM9 already runs,
+so QM9 does not move. Each experiment runner multiplies the level by that spread
+before the dose reaches the injector, so `sigma` on the row stays the shared
+ladder and `level_units` reads `label_sd` on both sides. **Censoring is exempt**:
+its level is the fraction of labels clipped, already dimensionless and already
+shared, and scaling it by a spread puts it outside [0, 1] — caught by the smoke
+suite the moment the change was made.
+
+Measured on hERG, forest + ECFP4, after the change: at level 0.20 the delivered
+noise is 0.182 log units, at 0.50 it is 0.440, at 1.00 it is **0.896 against a
+clean label spread of 0.896**, and at 1.50 it is 1.295. R² falls 0.514 → 0.159
+across that fold.
+
+**What it costs, and it belongs in the caption.** A level is no longer a stated
+multiple of assay error. At the top of the grid LogD carries **11.9x** its
+within-lab error of 0.15, Caco-2 **1.9x** its 0.35, hERG **2.5x** its 0.54. That
+asymmetry cannot be removed: one unit of real error is 0.13 of the label spread
+on LogD and 0.79 on Caco-2, so whichever axis is held constant, the other varies
+sixfold. §6.4 of `NOISE_DESIGN.md` held realism constant; this holds comparability
+constant. Both grids and the reason for each are written above
+`NOISE_LEVELS_BY_DATASET`.
+
+**Re-runs: all three experimental datasets. QM9 is unaffected.**
+
+`auc_norm_shared` is kept as a diagnostic rather than deleted — one column, and
+it is how a future drift between the grids would be noticed.
 
 **Also settled 2026-08-27, and each one invalidates results:**
 
@@ -1808,7 +1835,8 @@ green**, which is the point of running it:
 **Still yours.** Fourteen entries are real and unfixed because fixing them is a
 decision, not a repair:
 
-1. **Which auc_norm the paper reports** (§2.12). Both columns are written now.
+1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
+   fractions of the label spread, no rescaling (§2.12).
 2. **`--calibration-size`** for the conformal models: honour it, or refuse it by
    name. Nothing uses it today and the whole validation split is the calibration
    set, which is the better estimator now that no model trains on it.
