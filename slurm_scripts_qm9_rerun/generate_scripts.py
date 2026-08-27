@@ -444,11 +444,15 @@ exit $status
 # and reps, or it does not run -- rather than the default invocation refusing and the next
 # person working around the refusal.
 _FULL_BREADTH = [c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
+# The deep run drops them too. Censoring has its own run on its own five pairs, so
+# including it here would either refuse (the deep run is more pairs than its subset) or
+# quietly run it at deep-run breadth, which is the cost the subset decision removed.
+_DEEP = [c for c in STAGE2_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
 
 STAGE_DEFAULTS = {
     0: dict(replicates=1,  start=0, conditions=_FULL_BREADTH),
     1: dict(replicates=9,  start=1, conditions=_FULL_BREADTH),
-    2: dict(replicates=10, start=0, conditions=STAGE2_CONDITIONS),
+    2: dict(replicates=10, start=0, conditions=_DEEP),
 }
 
 

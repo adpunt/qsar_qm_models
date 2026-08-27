@@ -3474,21 +3474,29 @@ turns it off. Gate 11 was missed. Rule 3 of `NOISE_DESIGN.md` §2a says it in on
 population, never on one realisation.
 
 **The fix.** `VALIDATION_SEEDS = 100` in `rust/src/main.rs`. Both sides are built at each of 100
-seeds, the mean ratio is compared against three standard errors of its own mean, floored at 0.5% —
-the same rule the flat-dose gate above uses. The per-run spread is now printed beside the ratio, so
-the reader can see which conditions are noisy (guard 4).
+seeds and the **ratio of the two means** is compared against three standard errors of that ratio,
+floored at 0.5% — the same rule the flat-dose gate above uses. Each side's per-run spread is printed
+beside it, so the reader can see which conditions are noisy (guard 4).
+
+⚠️ **The first version of this fix used the mean of the per-seed ratios, and that was wrong twice.**
+Caught on review the same day, before it went further than this document. It **contradicted its own
+printed components** — on the 4,000-molecule column it read +0.39% for ν = 3 while the train and val
+means printed beside it give −0.99%, the opposite sign, which is precisely what guard 4 exists to
+stop. And the two draws are independent, so E[V/T] ≈ (E[V]/E[T])(1 + CV²): ν = 3's per-draw spread of
+about 14% biases that statistic **upward by roughly 2%**, worst on the heaviest tail, which is the
+shape the gate is already weakest on. The ratio of means has neither problem.
 
 **It also made the gate much stronger, which is the point.** The old bands ran 8.6%–28.7%; the new
-ones run 0.93%–5.36%. It now detects an error five to twenty times smaller than before while no
+ones run 0.92%–5.84%. It now detects an error five to twenty times smaller than before while no
 longer failing by chance.
 
-**Verified four ways.**
+**Verified four ways, all re-run after the statistic was corrected.**
 
 | Check | Result |
 |---|---|
-| The 4,000-molecule column that failed | ✅ `EXIT=0`, all gates pass. ν = 3 now reads **+0.39%** against a band of 5.36% |
-| The full 133,885-label column | ✅ `EXIT=0`, all gates pass. Validation spread is 3.37× training's and every condition lands within 0.12% |
-| **The fix removed** — validation dosed against its own spread | ✅ **All ten conditions FAIL**, at **+181% to +184%** against bands of 2.62%–15.08%. The gate still catches what it exists to catch, by two orders of magnitude |
+| The 4,000-molecule column that failed | ✅ `EXIT=0`, all gates pass. ν = 3 now reads **−0.99%** against a band of 5.84%, and 0.647348/0.653810 reproduces it exactly |
+| The full 132,480-label column | ✅ `EXIT=0`, all gates pass. Validation spread is 3.37× training's and every condition lands within 0.12% |
+| **The fix removed** — validation dosed against its own spread | ✅ **All ten conditions FAIL**, at **+178.67% to +183.38%** against bands of 2.58%–16.42%. The gate still catches what it exists to catch, by an order of magnitude and more |
 | 1,000 / 2,000 / 4,000 / 8,000 / 20,000 molecules | ✅ `EXIT=0` at every size. The verdict no longer depends on how much data the gate is handed |
 
 **The last row is the part worth keeping.** The gate passed on the full column and failed on a
@@ -4641,6 +4649,55 @@ the labels with no record of the true value, so its cost can be observed but not
 removes label range as well as corrupting individual values. That is what censoring does to a real
 dataset too, so it is a property of the mechanism and not an artefact — but a reader will ask, and
 the Methods should say it.
+
+---
+
+### 13.14 The run design — what runs, and what each part costs
+
+**Read off the generator on 2026-08-27, not from arithmetic in this document.** Every number below
+is what `slurm_scripts_qm9_rerun/generate_scripts.py` prints when asked to build that part. Rebuild
+this table by re-running it, never by editing the numbers.
+
+QM9 has 13 models × 6 representations = **78 pairs**.
+
+| Part | What runs | Pairs | Replicates | Training runs |
+|---|---|---|---|---|
+| **The screen** | the three full-breadth conditions, all levels | 78 | 1 | **1,680** |
+| **The main grid** | the same three, all levels | 78 | 9 more | **15,120** |
+| **Censoring** | censoring only, its own axis | **5** | 10 | **270** |
+| **The deep run** | all six dose-matched conditions | 12 (example: 4 models × 3 reps) | 10 | **5,040** |
+| **QM9 total** | | | | **22,110** |
+
+The screen is replicate 0 of the main grid and is reused, not thrown away — which is why the main
+grid adds nine replicates rather than ten.
+
+**The three full-breadth conditions are gaussian, grouped_wider and grouped_shifted.** Censoring is
+excluded from the screen, the main grid and the deep run by default (§13.13) and asked for by name on
+named pairs. The deep run adds student_t_nu5, outlier_p10 and laplace.
+
+**Only gaussian runs the clean level.** The other conditions get the clean row copied in afterwards
+by `copy_zero_rows.py`, because at level 0 every condition is the same run by construction. That is
+what makes the level counts uneven — 7 levels for gaussian, 6 for each of the others.
+
+#### 🔴 One ordering constraint the censoring run creates
+
+A censoring-only run has no gaussian in it, so **nothing in it runs the clean level and
+`copy_zero_rows.py` has no source to copy from.** The generator warns about this at build time. The
+censoring run must therefore be queued **after** the main grid, and its five pairs must be pairs the
+main grid covered — which they are, since the main grid covers all 78. Do not run censoring first.
+
+#### The uncertainty runs, which are not on this grid at all
+
+Three experimental datasets × 4 representations × 7 models, on the four main-grid conditions plus
+`outlier_p10` (§13.1 item 6), one replicate plus a permutation null (§13.1 item 2). **336 array
+tasks**, sized in `slurm_scripts_uncertainty_rerun/generate_scripts.py` rather than here, because
+the fit count per task depends on the cross-fitting folds.
+
+#### What this replaces
+
+§13.1's cost table prices the design at 22,400 runs across the screen and main grid, on four
+conditions at full breadth. That predates the censoring decision. The figure above is the current
+one; §13.1's table is kept for the reasoning about replicate counts, not for its totals.
 
 ---
 
@@ -5815,11 +5872,13 @@ sources behind them rather than a chosen distribution.
 #### Guard 8: the declared filter, and where it matters
 
 One cell of thirty-six was excluded — replicate 2, ridge, **clean R² = −16.99**, a scaffold split a
-linear model cannot fit at all. It changes exactly one verdict: with the filter, grouped-shifted
-earns full grid on the strength of ridge at the reporting level; without it, grouped-shifted
-separates only above the reporting level. **Both are reported, and neither changes the
-recommendation**, because grouped-shifted's case rests on level 1.5, where all three models agree at
-*p* ≤ 0.003.
+linear model cannot fit at all. It changed exactly one verdict, and only through ridge: with the
+filter, grouped-shifted earned full grid on the strength of a ridge row at the reporting level.
+**Ridge is not in the study, so that verdict was never available anyway** — on the two roster models
+grouped-shifted separates only above the reporting level, with or without the filter, and
+`--analyse-only` now prints *"the declared filter changes no verdict"*. The recommendation is
+unaffected either way, because grouped-shifted's case rests on level 1.5, where **both roster
+models** agree at *p* ≤ 0.0031.
 
 #### ✅ SETTLED 2026-08-27 — the author approved all five
 
@@ -5828,7 +5887,7 @@ These were put as recommendations and were approved as they stand. They are now 
 
 | # | Recommendation | Why |
 |---|---|---|
-| 1 | **One Student-t setting, not three: ν = 5.** | The three are within 0.0036 R² of each other and of Gaussian, against a test that could have seen 0.0064 – 0.0107. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
+| 1 | **One Student-t setting, not three: ν = 5.** | The three are within 0.0036 R² of each other and of Gaussian, against a test that could have seen 0.0087 – 0.0120 on the model carrying each effect. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
 | 2 | **One Outlier setting, not three: p = 10%.** | Same evidence. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there |
 | 3 | **Both grouped conditions at full grid in stage 1** | The only zero-mean condition that separates, and its comparator is what makes it interpretable. The pair is a claim; neither half is |
 | 4 | **Laplace: not in the main grid — the deep run only.** ✅ The author settled it there on 2026-08-27 | Indistinguishable from Gaussian on both roster models at both levels. The largest difference anywhere is **0.0136 R²** — LightGBM at level 1.5, against a replicate-to-replicate wobble of 0.0574, so **0.24 of the wobble**, paired *t* p = 0.350. At the reporting level it is 0.0024. The earlier "largest 0.0058" was a Ridge row. Its stated value in `NOISE_DESIGN.md` §2 is citational, not empirical, and the citation costs 720 runs |

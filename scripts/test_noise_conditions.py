@@ -160,8 +160,12 @@ def check_pair_subset_scope():
 
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        for stage in ('0', '1'):
-            r = run('--stage', stage, '--out-dir', tmp)
+        # The deep run drops the pair-subset conditions too: it is more pairs than the
+        # subset, so leaving censoring in would either refuse or quietly restore its cost.
+        for stage, extra in (('0', []), ('1', []),
+                             ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm',
+                                    '--reps', 'continuous_pdv', 'ecfp4', 'mhggnn'])):
+            r = run('--stage', stage, *extra, '--out-dir', tmp)
             assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
             line = [l for l in r.stdout.splitlines() if 'conditions:' in l]
             assert line, f"stage {stage} did not report its conditions"
