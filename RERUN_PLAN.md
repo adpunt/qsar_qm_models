@@ -2532,6 +2532,47 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
 
 ---
 
+## 8a. 🚩 PAPER INSERTIONS — drafted 2026-08-27 (chat F), for the author to paste
+
+Three sentences the Methods needs because of what chat F changed or measured. Drafted here rather
+than in `paper.tex`, which chat F does not edit. Each states a fact that was verified by a run;
+none of them is an opinion.
+
+**8a.1 — Validation labels carry noise (decision 2, settled 2026-08-26).**
+
+> Noise was injected into the training labels and, independently, into the labels used for early
+> stopping; the held-out test labels were never altered. The two injected draws are independent
+> and both are anchored on the spread of the clean training labels, so each split receives the same
+> amount of error in absolute label units. Corrupting the early-stopping labels matters because
+> several model families merge that split into their training set, and because a model early-stopped
+> against clean labels is selected not to fit the corruption it is being measured under.
+
+**8a.2 — The grouped conditions are undefined on held-out molecules under a scaffold split.**
+
+> The grouped conditions assign error at the level of the Murcko scaffold, and every split in this
+> work holds whole scaffold groups out. A held-out molecule therefore belongs to a group that was
+> never selected for corruption, and the amount of error its region receives is zero by
+> construction rather than by measurement. We therefore report the question of whether a model's
+> uncertainty rises in the regions that were corrupted on the cross-fitted training molecules,
+> where the regions are ones the model was exposed to, and we do not report it on held-out
+> molecules for the grouped conditions. The censoring condition is keyed to the label rather than
+> the scaffold, so it remains defined on both splits and is reported on both.
+
+**8a.3 — The predicted-label control does not apply to the grouped conditions.**
+
+> As a control we recompute the corruption pattern from each model's own predicted label rather
+> than the true one; a model whose uncertainty tracks the recomputed pattern as closely as the true
+> one is following its own prediction rather than the data. The control is informative only where
+> the pattern is a function of the label. For the grouped conditions the pattern is a function of
+> the scaffold, which a prediction cannot change, and the two patterns are identical; we therefore
+> report the control for the censoring condition alone.
+
+**Verified for 8a.2 and 8a.3:** measured on QM9 and on ChEMBL-hERG-Ki, the two correlations in 8a.3
+agree to every printed digit, and the held-out shape in 8a.2 is constant on both datasets.
+`RERUN_PLAN.md` §3.1d.
+
+---
+
 ## 9. Paper defects that need no compute
 
 **Split by whether the re-run kills them.** Most of what an earlier pass listed here was
