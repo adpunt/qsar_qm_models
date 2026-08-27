@@ -1926,7 +1926,7 @@ script rather than the pipeline, so it waits for that rewrite.
 ### 2.16 ✅ FIXED 2026-08-27 — one noise condition, one name
 
 Audit entry 39, the naming half of what was item 4 below. The amount-of-noise
-half is entry 34, fixed the same day and written up with it.
+half is entry 34, fixed the same day and written up in §2.14a.
 
 The two injectors named the same condition differently as soon as a shape other
 than Gaussian was asked for. QM9 composed `outlier_p05_laplace`; the Python
@@ -2110,8 +2110,8 @@ target and agree with each other. Reaching the Rust one needed a way in, because
 the roster is Gaussian throughout — `--self-test --json` now runs a single named
 shape-and-targeting pair when both flags are given, and the roster path is
 untouched. No noise algebra changed for that.
-`rust/reference/noise_arms.rs` cannot take part at all: its arm enum fuses the
-shape and the targeting, so its shifted grouped arm has no shape to set.
+`rust/reference/noise_arms.rs` cannot take part at all: it fuses the shape and
+the targeting into one type, so its shifted grouped entry has no shape to set.
 
 Three new cases in `scripts/check_fixes_fail_when_removed.py`, each confirmed red
 with its fix removed: the Python scale, the Python delivered-amount check, and
