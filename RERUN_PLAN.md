@@ -143,7 +143,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done, sourced, and the settings **settled 2026-08-27** (§13.9), in `noise_conditions.json` with a gate on each side | §13 chats A, B, G |
-| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | 🔴 open — the set was settled on **accuracy**, and corruption detection is a different question (§13.1 item 6) | yours to decide, chat H to queue, chat F's material first |
+| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | 🔴 open — the set was settled on **accuracy**, and corruption detection is a different question (§13.1 item 6) | **yours to decide, and chat H is where it gets asked** — it queues the uncertainty runs. Chat F closed 2026-08-27; nothing waits on it |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -3136,6 +3136,16 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    heavy-tailed and sparse-contamination types were what stage 2 was expected to show behave like
    Gaussian, and they do: every setting within 0.006 R² at the reporting level. **Stage 1 at four
    types is 25 level-conditions, 19,500 runs, and the staged total becomes 48% of the old design.**
+
+   ⚠️ **Correction to that arithmetic, 2026-08-27 (chat M).** "25 level-conditions" counts the clean
+   level once and shares it across the four conditions. The generator cannot do that yet, and it is
+   not the generator's call: `auc_norm` is a retention fraction anchored on the level-0 row *within*
+   each (model, representation, condition) group, so dropping level 0 from three of the four would
+   leave those three with nothing to normalise against. So it emits **28 level-conditions, 22,400
+   training runs across stages 0 and 1**, not 25 and 19,500 — 11% more. Those three extra cells are
+   bit-identical by construction, which makes them four independent tasks that must agree exactly:
+   a real check on the path that switches noise off. Sharing one anchor across conditions is a
+   figure-script change (chat J), and the 11% is available the day it lands.
 4. 🔴 **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
    it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
@@ -3146,7 +3156,9 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    point on the grid and agree, so any choice from the grid leaves the settings verdict standing
    (§13.9); the intermediate levels are bracketed rather than measured.
 6. 🔴 **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
-   chat H to queue, and it needs chat F's material first.** The set was settled on chat G's
+   and chat H is where it gets asked** — it queues the uncertainty runs, so it is the last point at
+   which the question can be put before compute is spent. Chat F closed on 2026-08-27 and everything
+   it found is in the tree, so nothing is waiting on it. The set was settled on chat G's
    measurement of **accuracy on QM9** — one representation, three tree and linear models (§13.9).
    The uncertainty question is a different one: `NOISE_DESIGN.md` §5.3 notes that a model can lose
    the same accuracy while being much better or worse at spotting *which* labels were corrupted, and
@@ -4336,9 +4348,13 @@ hyperparameters anyone thinks it uses.
 > specifically.** The noise conditions are settled and live in `noise_conditions.json` — read them
 > rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight beside the
 > other gates; it already checks that the QM9 generator agrees with the file, and it will fail if the
-> two drift. And §13.1 item 6 is a decision the author has to make before the uncertainty jobs are
-> queued, not after: whether those runs inherit the settled set or test it. Bring it to them with the
-> price rather than choosing quietly. The design is `RERUN_PLAN.md`
+> two drift. And §13.1 item 6 is a decision the author has to make **before** the uncertainty jobs
+> are queued, not after: do those runs inherit the settled condition set, or test it? **You are where
+> that question gets asked**, because you are what turns it into compute — chat F closed on
+> 2026-08-27 and its material is in the tree, so nothing is waiting on it. Put it to the author with
+> both options priced and do not choose quietly. Why it is open: the set was settled on **accuracy**
+> on QM9, and a model can lose the same accuracy while being much better or worse at spotting which
+> labels were corrupted, which is exactly what the uncertainty runs measure. The design is `RERUN_PLAN.md`
 > §13.1 (the four stages and the replicate counts) and §6 (the noise types and levels); the gates are
 > §8. Read `slurm_scripts_qm9_rerun/RUNBOOK.md` and
 > `slurm_scripts_uncertainty_rerun/RUNBOOK.md` first — their reasoning about what is in and out, the
