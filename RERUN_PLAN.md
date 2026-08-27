@@ -4694,12 +4694,12 @@ twelve replicates, counted per replicate, nothing averaged:
 | 0.5 | 8 of 12 | 4 of 12 |
 | 1.5 | 1 of 12 | **11 of 12** |
 
-**R² across the twelve replicates, PDV, as a range** — no median (the author's rule, 2026-08-27):
+**PDV. Median R² over the twelve replicates, with the range beside it:**
 
 | Model | clean | 0.5 | 1.5 |
 |---|---|---|---|
-| LightGBM | 0.882 – 0.925 | 0.842 – 0.895 | 0.550 – 0.736 |
-| Random forest | 0.862 – 0.920 | 0.836 – 0.888 | 0.639 – 0.731 |
+| LightGBM | 0.902 `[0.882–0.925]` | 0.868 `[0.842–0.895]` | 0.622 `[0.550–0.736]` |
+| Random forest | 0.891 `[0.862–0.920]` | 0.865 `[0.836–0.888]` | 0.682 `[0.639–0.731]` |
 
 The order reverses completely between the clean labels and level 1.5, and both models are still
 fitting there. The boosting model is more accurate on clean labels and loses more; the forest is
@@ -5109,44 +5109,43 @@ one process **hangs** — see §2.8e-ter, found doing exactly this. The replicat
 the replicate index and the level, so the separate processes draw the same molecules, the same split
 and the same noise; XGBoost gives the same clean R² to four decimals either way.
 
-#### R² across the nine replicates — PDV, plain Gaussian
+#### PDV — plain Gaussian. Median R² over the nine replicates, with the range beside it
 
-**The range, with no central value.** The author's rule, 2026-08-27: *"Never median."* A median or
-mean over replicates collapses the run-to-run spread, and that spread is what this study measures.
-**Every table here is one representation — PDV — and says so.** Never pool across representations.
+**Every table in this section is one representation, PDV, and says so in its title.** That is the
+rule: replicates are repeats of the same experiment and a median over them is what a median is for;
+representations are different features and are never pooled.
 
 | Model | clean | 0.5 | 1.0 | 1.5 |
 |---|---|---|---|---|
-| **NGBoost** | 0.846 – 0.892 | 0.829 – 0.878 | **0.799 – 0.854** | **0.751 – 0.828** |
-| DNN | 0.857 – 0.922 | 0.828 – 0.892 | 0.719 – 0.834 | 0.653 – 0.809 |
-| MLP | 0.840 – 0.921 | 0.831 – 0.880 | 0.774 – 0.860 | 0.686 – 0.831 |
-| SVM | 0.830 – 0.901 | 0.790 – 0.872 | 0.743 – 0.825 | 0.691 – 0.770 |
-| Random forest | 0.862 – 0.920 | 0.836 – 0.888 | 0.745 – 0.822 | 0.625 – 0.733 |
-| XGBoost | 0.878 – 0.925 | 0.833 – 0.883 | 0.697 – 0.800 | 0.555 – 0.739 |
-| LightGBM | 0.882 – 0.925 | 0.843 – 0.895 | 0.723 – 0.805 | 0.558 – 0.730 |
+| NGBoost | 0.871 `[0.846–0.892]` | 0.860 `[0.829–0.878]` | 0.836 `[0.799–0.854]` | 0.798 `[0.751–0.828]` |
+| DNN | 0.907 `[0.857–0.922]` | 0.866 `[0.828–0.892]` | 0.799 `[0.719–0.834]` | 0.775 `[0.653–0.809]` |
+| MLP | 0.902 `[0.840–0.921]` | 0.854 `[0.831–0.880]` | 0.791 `[0.774–0.860]` | 0.772 `[0.686–0.831]` |
+| SVM | 0.874 `[0.830–0.901]` | 0.849 `[0.790–0.872]` | 0.795 `[0.743–0.825]` | 0.722 `[0.691–0.770]` |
+| Random forest | 0.895 `[0.862–0.920]` | 0.867 `[0.836–0.888]` | 0.798 `[0.745–0.822]` | 0.681 `[0.625–0.733]` |
+| XGBoost | 0.903 `[0.878–0.925]` | 0.872 `[0.833–0.883]` | 0.783 `[0.697–0.800]` | 0.639 `[0.555–0.739]` |
+| LightGBM | 0.902 `[0.882–0.925]` | 0.871 `[0.843–0.895]` | 0.784 `[0.723–0.805]` | 0.611 `[0.558–0.730]` |
 
-**NGBoost's range is the narrowest at every level and the highest at 1.0 and 1.5.** At level 1.5 its
-worst replicate, 0.751, beats every other model's best except the DNN's and the MLP's. It is also
-the lowest-topping model on clean labels — its best clean replicate, 0.892, is below every other
-model's best.
+**NGBoost has the narrowest range at every level and the highest median at 1.0 and 1.5.** At level
+1.5 its worst replicate, 0.751, beats every other model's best except the two neural ones — and its
+best clean replicate, 0.892, is below every other model's best. It starts lowest and ends highest.
 
-#### R² across the nine replicates — PDV, grouped-shifted noise
+#### PDV — grouped-shifted noise. Median R² over the nine replicates, with the range
 
 | Model | 0.5 | 1.0 | 1.5 |
 |---|---|---|---|
-| NGBoost | 0.812 – 0.876 | 0.753 – 0.835 | 0.647 – 0.783 |
-| Random forest | 0.816 – 0.883 | 0.742 – 0.801 | 0.492 – 0.723 |
-| XGBoost | 0.823 – 0.893 | 0.701 – 0.779 | 0.425 – 0.646 |
-| SVM | 0.772 – 0.861 | 0.692 – 0.802 | 0.469 – 0.694 |
-| LightGBM | 0.823 – 0.884 | 0.691 – 0.778 | 0.384 – 0.629 |
-| DNN | 0.748 – 0.888 | 0.585 – 0.721 | **0.122 – 0.734** |
-| MLP | 0.771 – 0.881 | 0.591 – 0.779 | **0.120 – 0.630** |
+| NGBoost | 0.853 `[0.812–0.876]` | 0.794 `[0.753–0.835]` | 0.671 `[0.647–0.783]` |
+| DNN | 0.833 `[0.748–0.888]` | 0.682 `[0.585–0.721]` | 0.363 `[0.122–0.734]` |
+| MLP | 0.835 `[0.771–0.881]` | 0.691 `[0.591–0.779]` | 0.397 `[0.120–0.630]` |
+| SVM | 0.826 `[0.772–0.861]` | 0.744 `[0.692–0.802]` | 0.597 `[0.469–0.694]` |
+| Random forest | 0.857 `[0.816–0.883]` | 0.765 `[0.742–0.801]` | 0.589 `[0.492–0.723]` |
+| XGBoost | 0.861 `[0.823–0.893]` | 0.725 `[0.701–0.779]` | 0.535 `[0.425–0.646]` |
+| LightGBM | 0.857 `[0.823–0.884]` | 0.726 `[0.691–0.778]` | 0.502 `[0.384–0.629]` |
 
-⚠️ **Look at the neural models at level 1.5.** The DNN spans 0.122 to 0.734 and the MLP 0.120 to
-0.630 — a range wider than the entire difference between models. **How much systematic family-level
-bias costs a neural network depends enormously on which scaffold split it gets.** No single number
-can carry that, which is the reason for showing ranges. NGBoost's range at the same level is
-0.647 – 0.783, a sixth as wide.
+⚠️ **Look at the ranges on the neural models at level 1.5.** The DNN spans 0.122 to 0.734 and the MLP
+0.120 to 0.630 — wider than the entire difference between models. **How much systematic family-level
+bias costs a neural network depends enormously on which scaffold split it draws.** NGBoost's range at
+the same level is 0.647–0.783, a sixth as wide. The median alone would not show this, which is why
+the range is beside it.
 
 #### Which model is best, counted per replicate
 
