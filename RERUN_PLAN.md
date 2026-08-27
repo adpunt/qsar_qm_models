@@ -3266,6 +3266,16 @@ reason that has nothing to do with the model:
 You settled this on 2026-08-21: build it, to industry standard, by deleting the broken code and
 replacing it (§0.3, §4). This is that spec. Every line reference was checked this session.
 
+> **One part of this is now built — do not build it twice.** The sampling path for
+> a network whose head predicts its own variance is done, and checked, as of
+> 2026-08-27: see §2.17. `split_predictive_head` in `scripts/utils.py` is the one
+> place a wide head is narrowed, and the evidential split uses the terms this
+> section specifies — `beta / (alpha - 1)` for the data-driven part. What remains
+> here is everything else: the swapped components at the other sites listed
+> below, the two paths that crash on contact, the Gaussian-process call that is
+> handed a standard deviation where a variance belongs, and the constant
+> broadcast in the variational split (audit entry 54, still open).
+
 The literature behind it is recovered and sits in `research_archive/f692d614/` — a 36 KB evidence
 review, the implementation notes, and the reference sources from Chemprop and from Ryu et al.
 
@@ -6748,8 +6758,41 @@ pipeline at all (§2.6).
 
 #### Chat N — The uncertainty screen: which models and which representations
 
-🔴 **OPEN. Nothing has run.** A first attempt on 2026-08-27 was cancelled by the author because it
-was built to answer the wrong question. Read the next paragraph before anything else.
+▶️ **RUNNING 2026-08-27.** The screen is on the laptop in `env_test`: seven models, six
+representations, two noise levels, QM9 at 5,000 molecules, one noise type (plain Gaussian), one
+process per model. Outputs go to `/Volumes/seagate/chatN_screen`, the tables to
+`results/uncertainty_screen/`, and the decision rule below was written **before** any number came
+back. A first attempt earlier that day was cancelled by the author because it was built to answer
+the wrong question. Read the next paragraph before anything else.
+
+##### The rule that decides the two lists, fixed before the numbers
+
+**The paper's own column cannot do it, and this is the one correction chat N makes to its own
+brief.** `tab:top_unc_noise` is the plain Spearman correlation between predicted uncertainty and
+the size of the injected noise. It is reported — a reader looks for it — but under cross-fitting no
+model ever saw the noise draw on the molecule it is scoring, and under uniform Gaussian noise every
+molecule gets the same amount, so the honest answer is near zero for every model alike.
+`scripts/uncertainty_stats.py` says exactly that in `q4_plain_correlation`'s own docstring and names
+itself `q4_plain_correlation_NOT_THE_ANSWER` in the output. A screen run on it would rank seven
+models on noise and call it a decision. **A large value there is evidence of leakage, not of skill.**
+
+What separates the models, all out of fold, all inside one noise level, all already built:
+
+| Column | What it asks | Where it comes from |
+|---|---|---|
+| `rho_delta`, `auc_delta` | does dividing the cross-fitted error by the predicted uncertainty find the corrupted labels **better than the error alone** — zero means the uncertainty added nothing | `q4_error_ratio` |
+| `rho_unc_vs_clean_error` | does the uncertainty rank the size of the error against the CLEAN label — the everyday use | `q6_error_ranking` |
+| `coverage_1sigma`, `coverage_2sigma` | the calibration column the paper already reports | `calculate_coverage`'s definition, on the label the model was trained on |
+| `r2` | so no model is praised for ranking error it has plenty of | the pipeline's own result rows |
+
+**The rule.** A model stays in `MODELS` if, at level 1.5, in **at least three of the six
+representations**, either its `rho_delta` interval clears zero **or** its
+`rho_unc_vs_clean_error` reaches 0.2 with an interval clearing zero — and its coverage at 1σ is not
+degenerate (outside 0.02–0.99, an interval of zero width or of infinite width, is a model that
+cannot be calibrated and produces rows nobody can read). A representation stays in, or joins,
+`REPS` if its best model matches the weakest incumbent representation on those same columns. The
+intervals are 300 molecule resamples inside each cell, and they are a statement about these
+molecules, not a replicate spread — the screen runs one replicate.
 
 **THE ONLY THING THIS CHAT DECIDES.** Two lists at the top of
 `slurm_scripts_uncertainty_rerun/generate_scripts.py`:

@@ -221,6 +221,15 @@ breaks each fix in the real file, runs its check, and puts the file back. A chec
 that stays green with its fix removed guards nothing. Two did, the first time it
 was run.
 
+**If it is killed, it leaves a broken file behind.** Stopping the run from
+outside skips the step that puts the file back, and nothing says so — on
+2026-08-27 that left `utils.py` with a `save_results` that raises and `models.py`
+with a fix undone, both live on disk and neither committed. It now copies the
+original out before touching anything, and a copy still sitting in
+`scripts/.harness_unrestored/` at start-up means the last run was killed: the
+file is put back and the run refuses to start until you have looked at
+`git diff`.
+
 Two scripts in `scripts/` match `test_*.py` but are **not** part of this suite,
 and the loop above will run them:
 
