@@ -1456,7 +1456,10 @@ algebraic dose, which is what the pipeline uses; where an exact-dose figure is q
 At the reporting level, across every non-Gaussian condition except grouped-shifted, on both roster
 models: the largest mean difference against Gaussian is **0.0047 R²** (Outlier p = 1%, random
 forest), the largest ratio to the replicate-to-replicate wobble is **0.29** — the same row — and the
-smallest paired *p* is 0.178, against a detectable floor of **0.0064–0.0130**. The ν = 10 → 5 → 3
+smallest paired *p* is 0.178. Each of those effects sits under what its **own** model could have
+detected, which ranges **0.0068–0.0120** across the conditions. (Quoting the best model's threshold
+against another model's effect — which this section did until 2026-08-27 — flatters the test by up
+to a factor of two; the effects are far enough below either figure that no verdict moves.) The ν = 10 → 5 → 3
 ladder and the p = 1% → 5% → 10% ladder are both flat, every step under **0.0049 R²**.
 
 **This confirms §5.3 with a much better test.** That pilot found the same thing on three replicates

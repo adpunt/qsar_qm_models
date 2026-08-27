@@ -1955,7 +1955,6 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
         if !targeting.is_dose_matched() {
             continue;
         }
-        let mut ratios: Vec<f32> = Vec::new();
         let mut train_doses: Vec<f32> = Vec::new();
         let mut val_doses: Vec<f32> = Vec::new();
         let mut label = String::new();
@@ -2001,30 +2000,50 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
             label = t_plan.noise_type.clone();
             train_doses.push(t_plan.realised_dose_label_units);
             val_doses.push(v_plan.realised_dose_label_units);
-            ratios.push(v_plan.realised_dose_label_units / t_plan.realised_dose_label_units - 1.0);
         }
         if errored {
             continue;
         }
-        let err = population_mean(&ratios);
-        let sd = population_sd(&ratios);
-        // three standard errors of the mean, floored so a tiny spread cannot make the
-        // gate unreasonably strict — the same rule the flat-dose gate above uses
-        let band = (3.0 * sd / (ratios.len() as f32).sqrt()).max(0.005);
+        // The ratio of the two MEANS, not the mean of the per-seed ratios.
+        //
+        // Both were tried. The mean of ratios is wrong here for two reasons and the
+        // second is the one that matters. First, it does not reproduce the two numbers
+        // printed beside it — on the 4,000-molecule column it read +0.39% for Student-t
+        // ν = 3 while the train and val means printed next to it give −0.99%, the
+        // opposite sign, which is exactly the contradiction guard 4 exists to stop.
+        // Second, the two draws are independent, so E[V/T] ≈ (E[V]/E[T])(1 + CV_T²) and
+        // ν = 3's per-draw spread of ~15% biases the statistic upward by about 2% — a
+        // bias that grows with the tail weight of the very shape the gate is weakest on.
+        // The ratio of means has neither problem and is what the printed line shows.
+        let m_train = population_mean(&train_doses);
+        let m_val = population_mean(&val_doses);
+        let n = train_doses.len() as f32;
+        let se_train = population_sd(&train_doses) / n.sqrt();
+        let se_val = population_sd(&val_doses) / n.sqrt();
+        let err = m_val / m_train - 1.0;
+        // standard error of the ratio, to first order, from both sides' own spread
+        let se_ratio = ((se_val * se_val + (m_val / m_train).powi(2) * se_train * se_train)
+            .sqrt())
+            / m_train;
+        // three of them, floored so a tiny spread cannot make the gate unreasonably
+        // strict — the same rule the flat-dose gate above uses
+        let band = (3.0 * se_ratio).max(0.005);
         let ok = err.abs() <= band;
         if !ok {
             failures += 1;
         }
-        // guard 4: the ratio never appears without the two doses it is a ratio of
+        // guard 4: the ratio never appears without the two doses it is a ratio of, and
+        // those two doses now reproduce it exactly
         let unanchored = 0.5 * val_sd_here;
         println!(
-            "  {:<34} train={:.6} val={:.6} ({:+.2}%, per-run SD {:.2}%, band {:.2}%)  \
+            "  {:<34} train={:.6} val={:.6} ({:+.2}%, per-run SD {:.2}%/{:.2}%, band {:.2}%)  \
              [val's own spread would give {:.6}]  {}",
             label,
-            population_mean(&train_doses),
-            population_mean(&val_doses),
+            m_train,
+            m_val,
             err * 100.0,
-            sd * 100.0,
+            100.0 * population_sd(&train_doses) / m_train,
+            100.0 * population_sd(&val_doses) / m_val,
             band * 100.0,
             unanchored,
             if ok { "ok" } else { "FAIL" }

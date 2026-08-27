@@ -429,8 +429,10 @@ def noise_group_ids(scaffs):
 
     The corrected ids are used for BOTH the noise grouping and the scaffold split, at
     every call site, because the real pipeline corrects both. Leaving the split on raw
-    scaffolds put the whole acyclic third of the data on one side of it and the clean
-    baseline collapsed to R2 = -0.40, which is how the omission was found.
+    scaffolds put the whole acyclic third of the data on one side of it: the clean
+    baseline fell to 0.83 for LightGBM and 0.79 for the random forest against roughly
+    0.92 for both, which is how the omission was found. (A third model, ridge, went to
+    -0.40, but ridge is not in the study and that figure is not evidence for anything.)
     """
     return np.asarray([f"__singleton_{i}" if (sc == '' or sc is None) else sc
                        for i, sc in enumerate(scaffs)], dtype=object)
@@ -838,19 +840,35 @@ def verdict_table(cdf):
         # sqrt(n). It does not; but the row was labelled "what twelve replicates could
         # have detected" while the winning contrast had eleven. The count travels with
         # the number now, so the label cannot drift from the arithmetic again.
-        if len(at_report):
+        # The effect and the resolution must come from the SAME model, or the pair is
+        # two different rows presented as one comparison. Taking the largest effect
+        # across models and the smallest threshold across models did exactly that on
+        # six of ten conditions, and always in the flattering direction: Student-t
+        # ν = 10 read "largest 0.0017, could have seen 0.0064" when the model carrying
+        # the 0.0017 could only have seen 0.0119, nearly double. The best-case
+        # threshold is still reported, separately and labelled as such, because "the
+        # most sensitive model could have seen X" is a real and different claim.
+        if len(at_report) and at_report.min_detectable_delta.notna().any():
+            lead = at_report.loc[at_report.mean_delta_r2.abs().idxmax()]
             best = at_report.loc[at_report.min_detectable_delta.idxmin()]
-            detectable, detectable_n = float(best.min_detectable_delta), int(best.n_replicates)
-            detectable_model = str(best.model)
+            largest = float(abs(lead.mean_delta_r2))
+            lead_model, lead_n = str(lead.model), int(lead.n_replicates)
+            lead_detectable = float(lead.min_detectable_delta)
+            best_detectable, best_model = float(best.min_detectable_delta), str(best.model)
         else:
-            detectable, detectable_n, detectable_model = np.nan, 0, ''
+            largest = lead_detectable = best_detectable = np.nan
+            lead_model = best_model = ''
+            lead_n = 0
         out.append(dict(
             condition=name, verdict=v,
-            largest_abs_delta_at_reporting_level=(at_report.mean_delta_r2.abs().max()
-                                                  if len(at_report) else np.nan),
-            smallest_detectable_delta=detectable,
-            detectable_n_replicates=detectable_n,
-            detectable_model=detectable_model,
+            largest_abs_delta_at_reporting_level=largest,
+            largest_delta_model=lead_model,
+            n_replicates_for_that_model=lead_n,
+            # what THAT model could have detected — the honest partner to the number above
+            detectable_for_that_model=lead_detectable,
+            # and the best any model in the run could have done, which is a weaker claim
+            best_detectable_any_model=best_detectable,
+            best_detectable_model=best_model,
             models_passing_at_reporting_level=len(passes),
             models_passing_at_any_level=len(anywhere)))
     return pd.DataFrame(out)
@@ -992,10 +1010,11 @@ def analyse(df, shape):
     for _, r in verdicts.iterrows():
         alt = other.loc[r.condition, 'verdict'] if r.condition in other.index else r.verdict
         flag = "" if alt == r.verdict else f"   <-- WITHOUT the filter: {alt}"
-        print(f"  {r.condition:<20} {r.verdict:<42} largest |dR2| at level {REPORTING_LEVEL}: "
-              f"{r.largest_abs_delta_at_reporting_level:.4f}   (could have seen "
-              f"{r.smallest_detectable_delta:.4f} on {r.detectable_model} at "
-              f"{r.detectable_n_replicates} replicates){flag}")
+        print(f"  {r.condition:<20} {r.verdict:<40} largest |dR2| at level {REPORTING_LEVEL}: "
+              f"{r.largest_abs_delta_at_reporting_level:.4f} on {r.largest_delta_model} "
+              f"({r.n_replicates_for_that_model} reps), which could have seen "
+              f"{r.detectable_for_that_model:.4f}; best model {r.best_detectable_model} "
+              f"could have seen {r.best_detectable_any_model:.4f}{flag}")
     disagree = [r.condition for _, r in verdicts.iterrows()
                 if r.condition in other.index and other.loc[r.condition, 'verdict'] != r.verdict]
     print(f"\n  The declared filter changes the verdict for: {', '.join(disagree)}"

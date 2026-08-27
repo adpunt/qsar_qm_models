@@ -4499,6 +4499,63 @@ The old logD run reached only 0.84 of the label spread, so levels 1.0 and 1.5 we
 This is not a gap in the design — the re-run sweeps the full ladder on all four datasets. It means
 only that the logD choice cannot be checked against existing numbers before the re-run.
 
+#### 🔴 The validation jobs were running a retired noise condition
+
+**Found 2026-08-27 on a review pass over the regenerated scripts, not by any check.** The 87
+validation job scripts passed **no `--conditions` at all**, so every one of them inherited the
+runner's own `NOISE_CONDITIONS` literal (`alternative_data_noise_robustness.py:168):
+
+```
+gaussian, student_t_nu5, laplace, grouped_wider, grouped_shifted, outlier_p05, censoring
+```
+
+`outlier_p05` is listed under `not_run` in `noise_conditions.json` — retired on 2026-08-27 in
+favour of `outlier_p10`, on the evidence that every step of the 1% → 5% → 10% ladder is under
+0.0049 R². So the whole experimental-dataset robustness family would have run a setting the study
+had dropped, and not run the one it kept, **silently**: nothing in a result file makes anyone read
+a condition name.
+
+It is the drift `noise_conditions.json` exists to prevent, and its own comment names the rule —
+*"READ BY TESTS ON BOTH SIDES"*. The runner restates the set as a Python literal instead, and
+`scripts/test_noise_conditions.py` checks that condition names resolve in the injector, not that
+the runner's default matches the settled file. Nothing connected the two.
+
+**Fixed.** The generator now reads `noise_conditions.json` and states the conditions on the
+command line. Default: the full grid's four (`gaussian`, `grouped_wider`, `grouped_shifted`,
+`censoring`), which is what §6.3 specifies for the experimental datasets;
+`--include-depth-conditions` adds the depth three. It asserts no retired name can reach a script.
+
+⚠️ **This changes what the validation family runs** — from an implicit seven, one of them retired,
+to an explicit four. Adding the depth three back is one flag. The author should confirm the four
+is what is wanted before launch.
+
+**The runner's literal is still wrong and is in the other repository.** Anyone invoking
+`alternative_data_noise_robustness.py` by hand still gets `outlier_p05`. The live job families no
+longer can: QM9 has its own command line, the uncertainty family has stated its conditions since
+2026-08-27, and the validation family now does too.
+
+#### 🔴 The validation jobs had no injector-version guard
+
+Same review pass. The runner does `from noiseInject import CONDITIONS` at module scope, so a stale
+checkout does not fail — it runs the pre-1.0.0 scheme, where a level meant something else, and
+writes results that look exactly like the new ones. The uncertainty jobs have refused a stale
+injector by name since 2026-08-27. The validation jobs, which use the **same runner and the same
+injector**, did not. Fixed: the same check, generated into all 88 scripts.
+
+#### The validation family had no job-script test at all
+
+Which is why both of the above, and the `--datasets herg` defect, survived. QM9 has
+`scripts/test_generated_job_flags.py`; the uncertainty family has
+`scripts/test_uncertainty_job_scripts.py`. **`scripts/test_validation_job_scripts.py`** is the
+missing third: it generates real scripts into a temporary directory and puts every command line
+through the runner's own parser, then checks the conditions are stated and settled, that hERG's
+two names are both right, that all three guards are present, and that every model name is one the
+environment probe knows. Eight checks. Each was confirmed to FAIL with its fix removed.
+
+The generator also gained `--out-dir`, without which the only way to see what it emits is to run
+it — which overwrites the committed scripts, and is how all 87 were silently rewritten on
+2026-08-27.
+
 #### hERG was never cut
 
 It is in both live generators — `slurm_scripts_uncertainty_rerun/generate_scripts.py:120` and
