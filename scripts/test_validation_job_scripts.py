@@ -184,7 +184,12 @@ def the_conditions_are_stated_not_inherited():
     asserts every script states them, and that what it states is the settled
     set rather than a copy that can drift.
     """
-    expected = [c['name'] for c in SETTLED['stage_1_full_grid']]
+    pair_subset = {c['name'] for g in ('stage_1_full_grid', 'stage_2_depth_only')
+                   for c in SETTLED[g]
+                   if c.get('scope', {}).get('mode') == 'pair_subset'
+                   and 'validation_robustness' in c['scope'].get('applies_to', [])}
+    expected = [c['name'] for c in SETTLED['stage_1_full_grid']
+                if c['name'] not in pair_subset]
     with tempfile.TemporaryDirectory() as tmp:
         scripts, out = generate(tmp)
         for name in scripts:
@@ -291,7 +296,7 @@ def the_merge_keeps_every_condition(runner):
         "the runner no longer labels its per-level metrics with 'noise_type'; "
         "merge_results.py keys on that name")
 
-    conditions = [c['name'] for c in SETTLED['stage_1_full_grid']]
+    conditions = [c['name'] for c in SETTLED['stage_1_full_grid']]  # merge sees all of them
     frame = pd.DataFrame([
         {'dataset': 'caco2', 'model': 'SVM', 'rep': 'PDV', 'sigma': 0.5,
          'fold': 0, 'noise_type': c, 'r2': 0.6 + i / 100}

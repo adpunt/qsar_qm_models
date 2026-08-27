@@ -170,10 +170,10 @@ def levels_for(name, levels):
 # uncertainty runs. Read from the file rather than hardcoded, so the file stays the place
 # the decision lives.
 PAIR_SUBSET_CONDITIONS = {
-    c['name']: c['qm9_scope']
+    c['name']: c["scope"]
     for g in ('stage_1_full_grid', 'stage_2_depth_only')
     for c in _SETTLED[g]
-    if c.get('qm9_scope', {}).get('mode') == 'pair_subset'
+    if c.get("scope", {}).get('mode') == 'pair_subset'
 }
 
 STAGE1_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']]
@@ -487,6 +487,10 @@ def main():
     ap.add_argument('--sample-size', type=int, default=10000,
                     help='Molecules per replicate (default 10000). Small values are for '
                          'smoke tests, not for results.')
+    ap.add_argument('--drop-shortlisted', action='store_true',
+                    help='Leave out a model the author shortlisted for the deep run before the '
+                         'screen was read. Without this the generator refuses, so a shortlisted '
+                         'model cannot go missing by accident.')
     ap.add_argument('--throttle', type=int, default=5)
     ap.add_argument('--models', nargs='+', default=None, help='Subset of model labels.')
     ap.add_argument('--reps', nargs='+', default=None, choices=ALL_REPS,
@@ -515,6 +519,22 @@ def main():
     if args.stage == 2 and not (args.models and args.reps):
         ap.error('--stage 2 needs --models and --reps. Which models and representations go '
                  'deep is chosen from what stage 0 shows; see RERUN_PLAN.md §13.1 item 4.')
+
+    # Models the author has already put on the deep run's shortlist, before the screen is
+    # read. They can still be dropped, but only on purpose. ngboost went on it 2026-08-27:
+    # it was absent from the first three-model screen and the seven-model one then showed it
+    # is the LEAST accurate model on clean labels and the MOST robust under noise, winning 8
+    # of 9 replicates at level 1.0 (RERUN_PLAN.md 13.15). That is the study's argument, and
+    # it would have been missed.
+    SHORTLISTED = {'ngboost': 'RERUN_PLAN.md 13.15 — least accurate clean, most robust under noise'}
+    if args.stage == 2 and args.models:
+        missing = [m for m in SHORTLISTED if m not in args.models]
+        if missing and not args.drop_shortlisted:
+            ap.error(
+                'the deep run is missing ' + ', '.join(missing) + ', which the author put on '
+                'the shortlist before the screen was read:\n  '
+                + '\n  '.join(f'{m}: {SHORTLISTED[m]}' for m in missing)
+                + '\nAdd it, or pass --drop-shortlisted to leave it out on purpose.')
 
     # A pair-subset condition may not be generated at full breadth. Without this the four
     # main-grid conditions look interchangeable and censoring would quietly cost 5,460 runs

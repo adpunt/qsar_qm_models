@@ -142,13 +142,22 @@ def check_pair_subset_scope():
     repo = Path(__file__).resolve().parent.parent
     spec = json.loads((repo / 'noise_conditions.json').read_text())
 
-    scoped = {c['name']: c['qm9_scope']
+    scoped = {c['name']: c['scope']
               for g in ('stage_1_full_grid', 'stage_2_depth_only')
               for c in spec[g]
-              if c.get('qm9_scope', {}).get('mode') == 'pair_subset'}
+              if c.get('scope', {}).get('mode') == 'pair_subset'}
     assert 'censoring' in scoped, \
-        "noise_conditions.json no longer restricts censoring to a pair subset on QM9 " \
+        "noise_conditions.json no longer restricts censoring to a pair subset " \
         "(RERUN_PLAN.md 13.13). If that is deliberate the plan has to say so first."
+    # Widened 2026-08-27 on the author's ruling: the lab-dataset robustness runs
+    # use the same pairing as QM9. The uncertainty runs do not -- censoring is
+    # one of only two conditions there that can say WHICH molecules were damaged.
+    applies = scoped['censoring'].get('applies_to', [])
+    assert 'qm9_grid' in applies and 'validation_robustness' in applies, \
+        f"censoring's pair subset must cover the QM9 grid and the validation robustness " \
+        f"runs; it covers {applies}"
+    assert 'uncertainty_runs' in scoped['censoring'].get('full_breadth_in', []), \
+        "censoring must stay a FULL condition in the uncertainty runs"
     n = scoped['censoring']['n_pairs']
     assert 1 <= n <= 20, f"censoring's n_pairs is {n}, which is not a small subset"
 
@@ -163,7 +172,10 @@ def check_pair_subset_scope():
         # The deep run drops the pair-subset conditions too: it is more pairs than the
         # subset, so leaving censoring in would either refuse or quietly restore its cost.
         for stage, extra in (('0', []), ('1', []),
-                             ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm',
+                             # ngboost is on the author's deep-run shortlist
+                             # (RERUN_PLAN.md 13.15) and the generator refuses a
+                             # deep run without it, so this fixture carries it.
+                             ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm', 'ngboost',
                                     '--reps', 'continuous_pdv', 'ecfp4', 'mhggnn'])):
             r = run('--stage', stage, *extra, '--out-dir', tmp)
             assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
@@ -184,9 +196,30 @@ def check_pair_subset_scope():
             f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
 
     unc = (repo / 'slurm_scripts_uncertainty_rerun' / 'generate_scripts.py').read_text()
-    assert 'qm9_scope' not in unc, \
-        "the uncertainty generator has picked up the QM9 pair-subset scope; censoring must " \
+    assert 'scope' not in unc, \
+        "the uncertainty generator has picked up the pair-subset scope; censoring must " \
         "stay a full condition there (RERUN_PLAN.md 13.1 item 6)"
+
+    # The validation robustness generator MUST honour it, the same way QM9 does.
+    valgen = repo / 'slurm_scripts_validation_rerun' / 'generate_scripts.py'
+    with tempfile.TemporaryDirectory() as tmp:
+        r = subprocess.run([sys.executable, str(valgen), '--out-dir', tmp],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[-800:]
+        line = [l for l in r.stdout.splitlines() if 'Conditions' in l][0]
+        assert 'censoring' not in line, \
+            f"the validation robustness runs still take censoring at full breadth: {line.strip()}"
+
+        r = subprocess.run([sys.executable, str(valgen), '--conditions', 'censoring',
+                            '--out-dir', tmp], capture_output=True, text=True)
+        assert r.returncode != 0, \
+            "asking for censoring without --models and --reps was accepted there too"
+        assert '13.13' in r.stderr, f"the refusal does not point at the decision: {r.stderr[-300:]}"
+
+        r = subprocess.run([sys.executable, str(valgen), '--conditions', 'censoring',
+                            '--models', 'LightGBM', 'RF', '--reps', 'PDV', '--out-dir', tmp],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"censoring on named pairs was refused:\n{r.stderr[-800:]}"
     assert 'censoring' in [c['name'] for c in spec['stage_1_full_grid']], \
         "censoring left the main-grid group, which removes it from the uncertainty runs too"
 

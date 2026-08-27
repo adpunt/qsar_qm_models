@@ -61,6 +61,20 @@ FULL_GRID = [c['name'] for c in _SETTLED['stage_1_full_grid']]
 DEPTH_ONLY = [c['name'] for c in _SETTLED['stage_2_depth_only']]
 RETIRED = [c['name'] for c in _SETTLED['not_run']]
 
+# Conditions that run on a NAMED SUBSET of model-and-representation pairs rather
+# than the whole grid. Censoring is one, settled by the author 2026-08-27: the
+# question it answers is how big the effect is, not which model resists it best,
+# and it is the same ruling that already applies on QM9. Which pairs comes from
+# the screen. This generator therefore refuses to put censoring in a script
+# unless the models and representations are named, exactly as the QM9 generator
+# does -- the failure to avoid is running it across the whole grid by accident.
+PAIR_SUBSET = {c['name']: c['scope']
+               for g in ('stage_1_full_grid', 'stage_2_depth_only')
+               for c in _SETTLED[g]
+               if c.get('scope', {}).get('mode') == 'pair_subset'
+               and 'validation_robustness' in c['scope'].get('applies_to', [])}
+BREADTH_GRID = [c for c in FULL_GRID if c not in PAIR_SUBSET]
+
 TIME_LIMITS = {
     'RF': '8:00:00',
     'QRF': '8:00:00',
@@ -278,6 +292,15 @@ def main():
                          'this: without it the only way to see what the generator emits is to '
                          'run it, which overwrites the committed scripts. Probing it that way '
                          'is what silently rewrote all 87 of them on 2026-08-27.')
+    ap.add_argument('--models', nargs='+', default=None, metavar='NAME',
+                    help=f'Only these models (default: all {len(MODELS_ALL)}). Required, with '
+                         f'--reps, to run a pair-subset condition.')
+    ap.add_argument('--reps', nargs='+', default=None, metavar='NAME',
+                    help=f'Only these representations (default: all {len(ALL_REPS)}).')
+    ap.add_argument('--conditions', nargs='+', default=None, metavar='NAME',
+                    help=f'Override the conditions. Default: {" ".join(BREADTH_GRID)}. '
+                         f'The pair-subset conditions ({", ".join(PAIR_SUBSET) or "none"}) are '
+                         f'not in the default and need --models and --reps.')
     ap.add_argument('--include-depth-conditions', action='store_true',
                     help=f'Also run the depth-only conditions ({", ".join(DEPTH_ONLY)}). '
                          f'Off by default: RERUN_PLAN.md 6.3 puts them in the depth run, so '
@@ -287,23 +310,63 @@ def main():
                          f'more compute.')
     args = ap.parse_args()
 
-    conditions = list(FULL_GRID) + (list(DEPTH_ONLY) if args.include_depth_conditions else [])
+    if args.conditions:
+        conditions = list(args.conditions)
+    else:
+        conditions = list(BREADTH_GRID) + (
+            list(DEPTH_ONLY) if args.include_depth_conditions else [])
+
     bad = [c for c in conditions if c in RETIRED]
-    assert not bad, f"retired condition(s) reached the job scripts: {bad}"
+    if bad:
+        ap.error(f"{', '.join(bad)} is retired -- {NOISE_CONDITIONS_FILE.name} lists it under "
+                 f"not_run. It cannot go in a job script.")
+    unknown = [c for c in conditions
+               if c not in FULL_GRID + DEPTH_ONLY]
+    if unknown:
+        ap.error(f"unknown condition(s) {', '.join(unknown)}; "
+                 f"{NOISE_CONDITIONS_FILE.name} knows {', '.join(FULL_GRID + DEPTH_ONLY)}")
+
+    # A pair-subset condition across the whole grid is the accident this guards.
+    restricted = [c for c in conditions if c in PAIR_SUBSET]
+    if restricted and not (args.models and args.reps):
+        n = PAIR_SUBSET[restricted[0]]['n_pairs']
+        ap.error(
+            f"{', '.join(restricted)} runs on about {n} model-and-representation pairs, not the "
+            f"full grid, so it needs --models and --reps. Which pairs comes from the screen; see "
+            f"RERUN_PLAN.md 13.13. To run the rest without it, take the default: "
+            f"{' '.join(BREADTH_GRID)}.")
+    if restricted and args.models and args.reps:
+        n_pairs = len(args.models) * len(args.reps)
+        want = PAIR_SUBSET[restricted[0]]['n_pairs']
+        if n_pairs > 2 * want:
+            ap.error(
+                f"--models x --reps is {n_pairs} pairs, and {', '.join(restricted)} is meant to "
+                f"run on about {want}. If that is deliberate, say so in RERUN_PLAN.md 13.13 "
+                f"first and raise n_pairs in {NOISE_CONDITIONS_FILE.name} -- the file is where "
+                f"the decision lives.")
+
+    models = args.models or MODELS_ALL
+    reps = args.reps or ALL_REPS
     condition_args = ' '.join(conditions)
 
     print(f"Conditions ({len(conditions)}, from {NOISE_CONDITIONS_FILE.name}): "
           f"{condition_args}")
-    if not args.include_depth_conditions:
-        print(f"  depth-only, NOT run: {', '.join(DEPTH_ONLY)}  (--include-depth-conditions)")
+    if not args.conditions:
+        if PAIR_SUBSET:
+            print(f"  pair subset, NOT in the default: {', '.join(PAIR_SUBSET)} "
+                  f"(needs --conditions with --models and --reps)")
+        if not args.include_depth_conditions:
+            print(f"  depth-only, NOT run: {', '.join(DEPTH_ONLY)}  "
+                  f"(--include-depth-conditions)")
     print(f"  retired, never run:  {', '.join(RETIRED)}")
+    print(f"  {len(models)} model(s) x {len(reps)} representation(s)")
 
     output_dir = args.out_dir or os.path.dirname(os.path.abspath(__file__))
     os.makedirs(output_dir, exist_ok=True)
     scripts = []
 
-    for model in MODELS_ALL:
-        for rep in ALL_REPS:
+    for model in models:
+        for rep in reps:
             # GP is PDV-only in the code
             if model == 'GP' and rep != 'PDV':
                 continue
