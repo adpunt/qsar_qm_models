@@ -1888,6 +1888,56 @@ so does an all-zero feature row.
   it reads `data.y`, so it would be trained and scored on CLEAN labels at every
   level and its flat curve would read as robustness. It refuses by name.
 
+### 2.13f ✅ FIXED 2026-08-27 (chat N) — the analysis module read two scales as one, and every error statistic was wrong
+
+**What the file says about itself, and what the reader did with it.** The QM9 writer puts
+`y_pred_mean`, `y_pred_std_*` and `y_true_noisy` on the **standardised** scale the model was fitted
+on, and `y_true_original`, `injected_noise`, `noise_scale` and `noise_pattern` in the **label's own
+units**. `scripts/utils.py` says so on `UNCERTAINTY_COLUMNS` and puts `standardisation_mean` and
+`standardisation_sd` on every row for exactly this reason (§2.13). The loader in
+`scripts/uncertainty_stats.py` ignored both constants and mixed the two scales.
+
+**It is not a rounding error.** On QM9 the clean label averages 6.89 eV, so
+`|y_true_clean - y_pred|` became that constant plus a small residual: the absolute value never
+folds, and the statistic ranks the **signed** residual instead of the size of the error. Both
+error-based statistics were affected — `q4_error_ratio`, which is *the answer* to the question the
+uncertainty runs exist to ask, and `q6_error_ranking`.
+
+| On 400 real out-of-fold QM9 rows, Gaussian at level 1.5 | before | after |
+|---|---|---|
+| `rho_error` — does the cross-fitted error track the injected noise it contains | **−0.024** | **+0.642** |
+| `auc_error` — the corrupted decile against the rest | 0.497 | **0.916** |
+
+The corrupted labels ARE the large errors by construction, so −0.024 was the defect announcing
+itself and nothing was reading it.
+
+**Nothing published moves.** §3.1c is the record that nothing had ever computed a number from an
+uncertainty run before 2026-08-27, and no run had reached this module before this chat.
+
+**The fix** converts to the model's scale — the one `y_pred` and the uncertainty are on, and the
+only one the file can be put on without the constants. The noise columns take the spread and not
+the mean, so `noise_scale = level x noise_pattern` still holds and
+`check_noise_scale_redundancy` still passes.
+
+**The guard is the file's own arithmetic.** Every row carries the corrupted label the model trained
+on, so `y_true_clean + injected_noise == y_true_noisy` is checkable without reference to anything
+outside the file. It holds to float32 on a correctly scaled frame and misses by 5.3 spreads on a
+wrongly scaled one; a frame that misses is refused by name. Two tests in
+`scripts/test_uncertainty_stats.py`, and **the reason the defect survived is in them**: every
+builder that module already had wrote ONE scale, so none of them ever reproduced the writer's real
+layout. Removing either half of the fix fails them. Commit `bcaecaf`.
+
+**KIRBy does not have it** — checked, not assumed. Its predictions are inverse-transformed back to
+label units and its uncertainties are multiplied by the label spread
+(`tests/alternative_data_noise_robustness.py:1172`, `:1183`), so its rows are on one scale and the
+loader leaves them alone.
+
+🟠 **One thing left for chat J, in the figure script.** `generate_paper_figures_v2.py` reads
+`y_true_noisy` first, which is correct, but four `elif` branches (`:3937`, `:3979`, `:4081`,
+`:4110`) fall back to `y_true_original` against `y_pred_mean` — the same mismatch, and one of them
+says so in its own comment. They cannot fire on a file written after 2026-08-27, because every such
+file carries `y_true_noisy`. They should refuse rather than compute.
+
 ### 2.15 ✅ SETTLED 2026-08-27 — what a spread on auc_norm is, and what it is not
 
 **What was happening.** Every fold writes its own row: 5 folds x 7 levels per
@@ -3470,6 +3520,51 @@ across molecules — and each filtered to strictly positive values, so a model w
 is exactly zero contributes nothing and the column reads blank rather than zero. **The
 decomposition currently has no question attached to it.** That is what has to be settled
 before the build, not after.
+
+**CORRECTED 2026-08-28, after a full re-read of the archive literature, both runners and the
+paper.** Three things above are wrong and one omission is serious.
+
+- **Point 1's reason is wrong.** Nine of the sites are behind the loss check. The tenth,
+  `models/models.py:7820-7821`, has no loss check at all — it is selected by asking for that model
+  by name, and no job script does. So all ten are still unreached, but by the ROSTER, not by the
+  loss. There are also **twelve** pairs, not ten: `:5432-5433` and `:5440-5441` were missed. And at
+  eleven of the twelve the mislabelling changes no stored number, because the two terms are only
+  ever summed; `:7820` is the single place they are written out as separate columns.
+- **Point 6 is half wrong.** The lab runner writes one column and performs no split — correct. But
+  it does hold a learned observation-noise parameter, commented "(aleatoric)" at
+  `KIRBy/tests/alternative_data_noise_robustness.py:806-807`, read only by the training loss. And
+  that one column pools four different quantities: a quantile gap, a latent-only GP spread with the
+  noise excluded, a predicted scale, and a pass-to-pass spread.
+- **🔴 Point 8 is wrong, and this is the omission that matters. The split is already a published
+  result.** `paper.tex:218` states the method per model; `:536` is the caption of a figure whose
+  panel (b) plots both components against the noise level for the VBLL models; and `:531` reports
+  the finding — *"Although we expect to see aleatoric uncertainty increase with injected noise, for
+  VBLL both the aleatoric and epistemic components increased."* The figure script switches that
+  figure from one panel to two whenever both component columns carry enough positive values
+  (`generate_paper_figures_v2.py:3622-3641`). **So the question the split answers is already in the
+  paper — the plan simply never recorded it.** It is: does the aleatoric component rise with
+  injected label noise while the epistemic component does not?
+- **That published finding rests on a defect that has since been fixed.** The VBLL aleatoric term
+  is one number per fit, which `paper.tex:531` already says. The figure predates the
+  standardisation repair of §2.4, which made the divisor grow with the noise level. Both components
+  rising together is what a moving divisor produces. **The finding must be regenerated before it is
+  interpreted, not reworded.**
+- **A second route into questions 4, 5 and 6.** For the VBLL models the total uncertainty those
+  three questions read is itself the square root of the sum of the two squared components, so the
+  split sits upstream of them even though none of them names it. Its twin
+  (`models/models.py:3430` against `:2699-2701`) writes the pass-to-pass spread alone, so the two
+  VBLL variants report different quantities under one heading.
+
+**What the literature on disk supports, and what it does not.** Three papers in
+`research_archive/f692d614/` do this split and all three do it identically — epistemic is the
+spread across sampled models, aleatoric is the average of a per-molecule predicted variance, and
+they add: Kendall & Gal (`kg.pdf`), Ryu et al. (`ryu2.pdf`), Scalia et al. (`scalia.pdf`). Working
+implementations are on disk with them (`ryu_train_cep.py`, `scalia_predict.py`). **No paper on disk
+fits a single scalar noise value and calls it the aleatoric component** — so the aleatoric column
+the Gaussian process and the VBLL models write today has no precedent in the sources held. The
+forest split has working code (`forest_ae.py`, verified per-molecule for both terms) but **its
+paper is not on disk**. Rasmussen & Williams, Duan et al. and Meinshausen are cited in `paper.tex`
+and **none of the three is on disk**.
 
 **What the build actually is, once the unreachable code is set aside:** give the four
 Bayesian networks a per-molecule data-noise term they do not have; give the quantile forest a

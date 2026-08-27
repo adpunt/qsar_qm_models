@@ -60,7 +60,14 @@ RESULT_COLUMNS = ["sigma", "iteration", "model", "rep", "sample_size", "mae",
                   # provenance of the noise that produced it -- and file_no is
                   # what separates two replicates that share a level
                   # (RERUN_PLAN.md 2.13).
-                  "file_no"]
+                  "file_no",
+                  # Added 2026-08-28. What the labels were standardised by, so
+                  # the error columns beside them can be put back on either
+                  # scale. `mae` and `rmse` are now in the label's own units on
+                  # both pipelines; these two say what that conversion was, and
+                  # blank means none was recorded and the numbers are in
+                  # whatever units the labels arrived in (RERUN_PLAN.md 2.18).
+                  "standardisation_mean", "standardisation_sd"]
 
 # The three things a level can measure.
 LEVEL_UNITS = ('label_sd', 'raw_label', 'fraction_censored')
@@ -169,14 +176,45 @@ def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='
                                else _CURRENT_DELIVERED_DOSE),
                          file_no if file_no is not None
                          else ('' if _CURRENT_FILE_NO is None
-                               else _CURRENT_FILE_NO)])
+                               else _CURRENT_FILE_NO),
+                         '' if _CURRENT_STANDARDISATION[0] is None
+                         else _CURRENT_STANDARDISATION[0],
+                         '' if _CURRENT_STANDARDISATION[1] is None
+                         else _CURRENT_STANDARDISATION[1]])
 
 def calculate_regression_metrics(y_test, prediction, logging=False):
+    """The five metrics, with the error ones in the LABEL'S OWN UNITS.
+
+    Every QM9 label is standardised in the injector and nothing turned it back,
+    so `rmse` and `mae` came out in label standard deviations while the same two
+    columns on the experimental side were in log units -- two quantities under
+    one name, in two files that are meant to be read together (RERUN_PLAN.md
+    2.18).
+
+    The convention is the label's own units. QM9 work reports each target's error
+    in eV or meV against chemical accuracy at 0.043 eV, and uses a standardised
+    error only when averaging ACROSS the twelve targets, whose units cannot
+    otherwise be pooled (Godwin et al., arXiv:2106.07971). This study trains one
+    target at a time, so that reason does not apply.
+
+    Multiplying afterwards is exact rather than a shortcut: the labels and the
+    predictions were shifted and scaled by the SAME constants, so the offset
+    cancels in all five metrics and the spread cancels in r2 and the correlation.
+    scripts/test_metric_units.py asserts that against arrays converted directly.
+
+    When no standardisation was recorded the numbers are returned as they are,
+    and the two columns beside them on the row are blank -- which is what says so.
+    """
     mae = mean_absolute_error(y_test, prediction)
     mse = mean_squared_error(y_test, prediction)
     rmse = np.sqrt(mse)
     r2 = r2_score(y_test, prediction)
     pearson_corr, _ = pearsonr(y_test, prediction)
+
+    _, sd = current_standardisation()
+    if sd is not None and float(sd) > 0:
+        sd = float(sd)
+        mae, mse, rmse = mae * sd, mse * sd * sd, rmse * sd
 
     # Optionally log the metrics
     if logging:
