@@ -21,9 +21,11 @@
 # bare `conda activate` instead would test an environment nobody runs in -- and
 # that is precisely how jobs 12822693 and 12822694 died: activation failed
 # silently, the job ran in the system Anaconda, found no gpytorch, and wrote
-# nothing. So setup.sh is NOT read-only here: it can create the conda
-# environment, conda-install libstdcxx-ng and pip-install several packages.
-# Where jobs have already run these are satisfied and it is quick.
+# nothing. Since 2026-08-27 setup.sh only installs anything when a hash of
+# env.yml + pip-constraints.txt has changed, so on an environment that is
+# already built this is activation and nothing else. If the recipe HAS changed
+# it will install; that is a rebuild, and a rebuild belongs before a launch and
+# never during one (RERUN_PLAN.md 2.8i).
 #
 #   bash scripts/server_audit.sh --no-setup
 #
@@ -44,6 +46,14 @@
 #   6  Do the two pipelines agree, parameter for parameter          (3.4.5)
 #   7  Is the Rust noise binary built, and does it pass its gates   (chat A)
 #   8  Is torch_geometric importable -- needed for the caching work
+#
+# THE GATE THIS SCRIPT FEEDS. Questions 3, 4 and 5 are now also answered, in one
+# command and in one environment, by
+#     python scripts/check_environment.py --deep --validation
+# which additionally counts the DISTINCT OpenMP runtime files a job would load
+# -- the root cause of question 5 and of the LightGBM hang (RERUN_PLAN.md 2.8i).
+# This script stays because it answers the cluster-shaped questions (1, 2, 6, 7)
+# that a single interpreter cannot.
 # =============================================================================
 #SBATCH --job-name=server_audit
 #SBATCH --nodes=1

@@ -1,22 +1,6 @@
-# LightGBM FIRST, before anything that pulls in PyTorch.
-#
-# PyTorch ships Intel's OpenMP runtime (libiomp5) and LightGBM ships LLVM's
-# (libomp). If torch is imported first, LightGBM's first fit dies -- as a
-# segmentation fault in a small script, and as a permanent hang inside an
-# OpenMP join barrier in this pipeline. Found on 2026-08-27 by running the real
-# pipeline: it sat for three hours at 0% CPU, having produced one result row,
-# and would have burned a whole SLURM allocation and written nothing.
-#
-# Reproducer and the mitigations that DON'T work:
-#   import torch, lightgbm      -> exit 139
-#   KMP_DUPLICATE_LIB_OK=TRUE   -> exit 139   (only silences the warning)
-#   OMP_NUM_THREADS=1           -> exit 139
-#   import lightgbm, torch      -> works      <- this
-#   lightgbm n_jobs=1           -> works      (but costs all its threads)
-import lightgbm as _lgb_first  # noqa: F401  MUST stay above the torch imports
-
 import argparse
 import os
+import zlib
 import os.path as osp
 import random
 import json
@@ -50,7 +34,6 @@ import pickle
 from torch_geometric.utils import to_networkx
 import uuid
 import time
-from gensim.models import word2vec
 
 import sys
 import torch  # used at module level (device, below) and only ever arrived here
@@ -148,6 +131,20 @@ from model_defaults import should_standardise, is_binary_matrix
 # FEATURES -- `pdv` means the binarised vector here and the continuous one on
 # the experimental side, so no name-keyed list can be right for both.
 CONTINUOUS_REPS = ('continuous_pdv', 'chemberta', 'mhggnn')
+
+# ChemBERTa: ONE encoder across both pipelines, settled 2026-08-27 by the author.
+# This side used to load seyonec/ChemBERTa-zinc-base-v1 -- a masked language model
+# pretrained on ZINC, 768 wide, 6 layers -- while the experimental pipeline loaded
+# DeepChem/ChemBERTa-77M-MTR, a multi-task REGRESSION model pretrained on PubChem,
+# 384 wide, 3 layers. A 'ChemBERTa' row from one pipeline and a 'ChemBERTa' row
+# from the other came from unrelated networks (RERUN_PLAN.md 2.12).
+#
+# The width is in the record layout, so this constant and `chemberta_buf` in
+# rust/src/main.rs must move together or every field after it decodes at the
+# wrong offset.
+CHEMBERTA_MODEL_ID = "DeepChem/ChemBERTa-77M-MTR"
+CHEMBERTA_DIMS = 384
+CHEMBERTA_BYTES = CHEMBERTA_DIMS * 4
 
 # The Sort & Slice record: 1024 substructures, stored as COUNTS rather than
 # presence bits. The dimension must match the vec_dimension the featuriser is
@@ -484,6 +481,67 @@ def parse_arguments():
     return args
 
 
+def scaffold_split_indices(smiles_list, frac_train=0.8, frac_valid=0.1,
+                           frac_test=0.1):
+    """Split by Murcko scaffold, with each ACYCLIC molecule its own group.
+
+    This used to be `dc.splits.ScaffoldSplitter()`. DeepChem keys on
+    `MurckoScaffoldSmiles`, which returns the EMPTY STRING for an acyclic
+    molecule and does not special-case it, so every acyclic molecule joins one
+    pseudo-group -- and its splitter fills the training set from the largest
+    groups first, so that whole group lands in training.
+
+    MEASURED on the first 2,000 QM9 molecules: 851 of them (42.5%) are acyclic,
+    and under DeepChem's splitter they were 53.2% of the training set and
+    **0.0%** of validation and of test. The models were trained on a population
+    half of which never appeared in what they were scored on (RERUN_PLAN.md
+    2.13). QM9's own noise grouping already gives acyclic molecules singletons,
+    and so does the experimental pipeline's CV grouping.
+
+    The groups are filled in RANDOM order, not largest-first. DeepChem's
+    largest-first rule leaves the smallest groups for the held-out splits, and
+    once acyclic molecules are singletons that means validation and test come out
+    almost entirely acyclic -- measured at 100% and 82% on the same 2,000
+    molecules. A random group order gives each split roughly the population's own
+    composition while still never splitting a group across two, and it is what
+    the experimental pipeline's GroupKFold does in effect. The order is drawn
+    from the global numpy generator, which main() seeds per replicate, so each
+    replicate is an independently reseeded split -- which is what a QM9
+    replicate means.
+    """
+    groups = {}
+    for i, smiles in enumerate(smiles_list):
+        try:
+            scaffold = MurckoScaffoldSmiles(smiles=smiles, includeChirality=False)
+        except Exception:
+            scaffold = None
+        if not scaffold:
+            scaffold = f"__acyclic__{i}"
+        groups.setdefault(scaffold, []).append(i)
+
+    ordered = sorted(groups.values(), key=lambda idx: idx[0])
+    np.random.shuffle(ordered)
+    n = len(smiles_list)
+    train_cutoff = frac_train * n
+    valid_cutoff = (frac_train + frac_valid) * n
+
+    train_idx, val_idx, test_idx = [], [], []
+    for members in ordered:
+        if len(train_idx) + len(members) <= train_cutoff:
+            train_idx.extend(members)
+        elif len(train_idx) + len(val_idx) + len(members) <= valid_cutoff:
+            val_idx.extend(members)
+        else:
+            test_idx.extend(members)
+
+    if not val_idx or not test_idx:
+        raise RuntimeError(
+            f"the scaffold split produced {len(train_idx)} training, "
+            f"{len(val_idx)} validation and {len(test_idx)} test molecules out "
+            f"of {n}. A split with an empty held-out part cannot be scored.")
+    return sorted(train_idx), sorted(val_idx), sorted(test_idx)
+
+
 def build_scaffold_groups(smiles_canonical_list):
     """Map each canonical SMILES to a Murcko scaffold group id.
 
@@ -533,6 +591,7 @@ def write_to_mmap(
     k_domains,
     sns_fp,
     max_vocab,
+    ecfp4=None,
 ):
     entry = b""
 
@@ -628,6 +687,17 @@ def write_to_mmap(
             entry += avalon.tobytes()
         else:
             return
+
+    # LAST in the record, because that is where the Rust re-write puts it in the
+    # output too, and the two orderings have to agree.
+    if "ecfp4" in molecular_representations:
+        if ecfp4 is None:
+            return
+        if len(ecfp4) != ECFP4_BYTES:
+            raise ValueError(
+                f"ECFP4 block is {len(ecfp4)} bytes, the record holds "
+                f"{ECFP4_BYTES}")
+        entry += ecfp4.tobytes()
 
     files[category].write(entry)
     files[category].flush()
@@ -799,7 +869,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         
         chemberta = None
         if 'chemberta' in args.molecular_representations:
-            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
+            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=CHEMBERTA_DIMS)
 
         mhggnn = None
         if 'mhggnn' in args.molecular_representations:
@@ -808,10 +878,15 @@ def load_and_split_polaris(dataset_tuple, args, files):
         avalon = None
         if 'avalon' in args.molecular_representations:
             avalon = avalon_fingerprint(smiles_canonical)
-        
+
+        ecfp4 = None
+        if 'ecfp4' in args.molecular_representations:
+            ecfp4 = ecfp4_fingerprint(smiles_canonical)
+
         write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, chemberta, mhggnn, avalon,
                      target_list[local_idx], category, files,
-                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
+                     ecfp4=ecfp4)
         written_canonical.append(smiles_canonical)
     
     if 'sns' in args.molecular_representations:
@@ -862,12 +937,8 @@ def split_qm9(qm9, args, files):
 
     elif args.split == 'scaffold':
         qm9_smiles = [data.smiles for data in qm9[:args.sample_size]]
-        Xs = np.zeros(len(qm9_smiles))  # Dummy features just for splitting
-        dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=qm9_smiles)
-
-        splitter = dc.splits.ScaffoldSplitter()
-        split = splitter.split(dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
-        train_idx, val_idx, test_idx = split
+        train_idx, val_idx, test_idx = scaffold_split_indices(
+            qm9_smiles, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
 
     else:
         raise ValueError("Invalid split type")
@@ -911,12 +982,14 @@ def split_qm9(qm9, args, files):
         elif index in val_idx:
             category = "val"
 
+        # The SMILES canonicalisation cache was READ here and never written --
+        # grep found no INSERT or UPDATE on that table anywhere, and the on-disk
+        # file is schema only. So the lookup always missed, and if it ever HAD
+        # hit, `mol` would have stayed None and the randomized-SMILES branch
+        # below would have raised (RERUN_PLAN.md 2.13). The molecule is built
+        # once and canonicalised from it, which is what actually happened on
+        # every pass.
         smiles_canonical = None
-        if 'smiles' in args.molecular_representations:
-            cursor.execute("SELECT canonical FROM smiles_db WHERE isomeric = ?", (smiles_isomeric,))
-            result = cursor.fetchone()
-            if result:
-                smiles_canonical = result[0]
 
         if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
             mol = Chem.MolFromSmiles(smiles_isomeric)
@@ -952,7 +1025,7 @@ def split_qm9(qm9, args, files):
 
         chemberta = None
         if 'chemberta' in args.molecular_representations:
-            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=768)
+            chemberta = chemberta_fingerprint(smiles_canonical, dimensions=CHEMBERTA_DIMS)
 
         mhggnn = None
         if 'mhggnn' in args.molecular_representations:
@@ -962,10 +1035,17 @@ def split_qm9(qm9, args, files):
         if 'avalon' in args.molecular_representations:
             avalon = avalon_fingerprint(smiles_canonical)
 
+        ecfp4 = None
+        if 'ecfp4' in args.molecular_representations:
+            ecfp4 = ecfp4_fingerprint(smiles_canonical)
+
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, chemberta, mhggnn, avalon, data.y.item(), category, files, args.molecular_representations, args.k_domains, sns_fp, args.max_vocab)
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv,
+                          chemberta, mhggnn, avalon, data.y.item(), category, files,
+                          args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
+                          ecfp4=ecfp4)
 
             written_canonical.append(smiles_canonical)
 
@@ -991,7 +1071,7 @@ def get_chemberta_model():
         import torch
         
         print("Loading ChemBERTa model (one-time, ~30 seconds)...")
-        model_name = "seyonec/ChemBERTa-zinc-base-v1"
+        model_name = CHEMBERTA_MODEL_ID
         _CHEMBERTA_TOKENIZER = AutoTokenizer.from_pretrained(model_name)
         _CHEMBERTA_MODEL = AutoModel.from_pretrained(model_name)
         _CHEMBERTA_MODEL.eval()
@@ -1004,7 +1084,7 @@ def get_chemberta_model():
     
     return _CHEMBERTA_TOKENIZER, _CHEMBERTA_MODEL
 
-def chemberta_fingerprint(smiles, dimensions=768):
+def chemberta_fingerprint(smiles, dimensions=CHEMBERTA_DIMS):
     """
     Generate ChemBERTa embedding for SMILES string.
     Uses globally cached model.
@@ -1025,18 +1105,29 @@ def chemberta_fingerprint(smiles, dimensions=768):
         # Generate embedding
         with torch.no_grad():
             outputs = model(**inputs)
-            embedding = outputs.last_hidden_state.mean(dim=1).squeeze()
+            # Mean over the real tokens only. The experimental pipeline pools
+            # this way (KIRBy molecular.py create_chemberta); a plain mean(dim=1)
+            # agrees with it only because this side tokenises one molecule at a
+            # time and so never pads. Same pooling, both sides, on purpose.
+            mask = inputs['attention_mask'].unsqueeze(-1)
+            token_embeddings = outputs.last_hidden_state
+            embedding = ((token_embeddings * mask).sum(dim=1)
+                         / mask.sum(dim=1)).squeeze()
             
             if torch.cuda.is_available():
                 embedding = embedding.cpu()
             embedding = embedding.numpy()
         
-        # Ensure 768 dimensions
+        # A width other than the record slot's is a hard error, not something to
+        # pad or truncate: silently trimming an embedding to fit changes what the
+        # representation IS, and padding writes zeros that read as real features.
         if len(embedding) != dimensions:
-            if len(embedding) < dimensions:
-                embedding = np.pad(embedding, (0, dimensions - len(embedding)), mode='constant')
-            else:
-                embedding = embedding[:dimensions]
+            raise RuntimeError(
+                f"{CHEMBERTA_MODEL_ID} returned a {len(embedding)}-wide "
+                f"embedding where the record slot holds {dimensions}. Padding or "
+                f"truncating it would change what 'chemberta' means; change "
+                f"CHEMBERTA_DIMS here and chemberta_buf in rust/src/main.rs "
+                f"together, and re-featurise.")
         
         # Store the embedding exactly as the model produced it. NO per-molecule
         # rescaling: dimension k must mean the same thing on the same scale for every
@@ -1045,27 +1136,87 @@ def chemberta_fingerprint(smiles, dimensions=768):
         return np.asarray(embedding, dtype=np.float32)
             
     except Exception as e:
-        print(f"ChemBERTa error: {e}")
-        return np.zeros(dimensions, dtype=np.float32)
+        # A zero row is a molecule with no features carrying a real label into
+        # training, and nothing downstream can tell it from a real one.
+        raise RuntimeError(f"ChemBERTa failed on {smiles!r}: {e}") from e
 
-def mhggnn_fingerprint(smiles, dimensions=1024):
+MHGGNN_DIMS = 1024
+MHGGNN_BYTES = MHGGNN_DIMS * 4
+
+# ECFP4 = Morgan, radius 2, 2,048 bits. Computed HERE, in Python, and carried
+# through the record, because that is the only way to compute the same thing the
+# experimental pipeline computes (KIRBy create_ecfp4 uses
+# rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)).
+#
+# The Rust side used to compute it with `rdk_fingerprint_mol`, which is RDKit's
+# PATH fingerprint (RDKFingerprintMol) -- a different fingerprint entirely.
+# Measured on the first 1,500 QM9 molecules: the path fingerprint and Morgan
+# radius 2 agreed on ZERO of them, and methane, ammonia and water came back
+# all-zero from the path fingerprint because a molecule with one heavy atom has
+# no bond paths (RERUN_PLAN.md 2.13). The rdkit-sys binding exposes only
+# `morgan_fingerprint_mol`, hardcoded to radius 3, so there was no Rust route to
+# radius 2 at all.
+ECFP4_BITS = 2048
+ECFP4_RADIUS = 2
+ECFP4_BYTES = ECFP4_BITS // 8
+
+_ECFP4_GENERATOR = None
+
+
+def ecfp4_fingerprint(smiles):
+    """Morgan radius 2, 2,048 bits, packed little-endian into 256 bytes."""
+    global _ECFP4_GENERATOR
+    if _ECFP4_GENERATOR is None:
+        from rdkit.Chem import rdFingerprintGenerator
+        _ECFP4_GENERATOR = rdFingerprintGenerator.GetMorganGenerator(
+            radius=ECFP4_RADIUS, fpSize=ECFP4_BITS)
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise RuntimeError(f"ECFP4: RDKit could not parse {smiles!r}")
+    bits = np.array(Chem.RDKFingerprint(mol), dtype=np.uint8)
+    if bits.size != ECFP4_BITS:
+        raise RuntimeError(
+            f"ECFP4: got {bits.size} bits, the record slot holds {ECFP4_BITS}")
+    if not bits.any():
+        # An all-zero row is a molecule with no features carrying a real label
+        # into training, and every such molecule presents the model with an
+        # identical input. The Rust gate never caught this case because the
+        # fingerprint had been computed SUCCESSFULLY.
+        raise RuntimeError(
+            f"ECFP4 is all zeros for {smiles!r}. That row would train as if it "
+            f"were featurised, and every all-zero molecule would look identical "
+            f"to the model.")
+    return np.packbits(bits, bitorder='little')
+
+
+def mhggnn_fingerprint(smiles, dimensions=MHGGNN_DIMS):
     """Generate MHG-GNN embedding for SMILES string"""
     try:
         model = get_mhg_gnn_model()
-        
+
         # Encode returns list of tensors
         embedding = model.encode([smiles])[0]
         embedding = embedding.cpu().detach().numpy()
-        
-        # Store the embedding exactly as the model produced it. NO per-molecule
-        # rescaling: dimension k must mean the same thing on the same scale for every
-        # molecule, or distance between molecules is meaningless (RERUN_PLAN.md 2.8c).
-        # Per-feature standardisation is applied later, fitted on the training split.
-        return np.asarray(embedding, dtype=np.float32)
-            
+
+        # The width is part of the RECORD LAYOUT: write_to_mmap writes whatever
+        # this returns, and both readers consume a fixed 4,096 bytes. An
+        # embedding of any other length would shift every field after it in that
+        # record, for every molecule, silently -- the failure the deleted
+        # `morgan` representation caused. Nothing checked it here; every other
+        # float representation enforces its width before writing
+        # (RERUN_PLAN.md 2.13).
+        embedding = np.asarray(embedding, dtype=np.float32).ravel()
+        if embedding.size != dimensions:
+            raise RuntimeError(
+                f"the MHG-GNN encoder returned {embedding.size} values where the "
+                f"record slot holds {dimensions}. Change MHGGNN_DIMS here and "
+                f"mhggnn_buf in rust/src/main.rs together, and re-featurise.")
+        return embedding
+
     except Exception as e:
-        print(f"MHG-GNN error: {e}")
-        return np.zeros(dimensions, dtype=np.float32)
+        # A zero row is a molecule with no features carrying a real label into
+        # training. It is not a fallback; it is a silent corruption.
+        raise RuntimeError(f"MHG-GNN failed on {smiles!r}: {e}") from e
 
 def rdkit_mol_descriptors_from_smiles(smiles_string):
     mol_descriptor_calculator = MolecularDescriptorCalculator(DEFAULT_DESCRIPTOR_LIST)
@@ -1236,12 +1387,22 @@ def load_custom_model(model_path):
 # DELETED from the Rust side on 2026-08-26 (the author does not trust it), so the
 # guard below is now what stops the next one rather than that one
 # (RERUN_PLAN.md §2.7, §5.6).
-# Dropped from the study on 2026-08-26 when the representation set was settled:
-# PDV, MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. mol2vec has been deleted
-# outright. One-hot SMILES still builds -- pulling out the tokenizer would mean
-# editing the record layout and the vocabulary handling -- so it is refused by
-# name instead, which is what stops a job running it by accident.
-DROPPED_REPS = {"smiles", "randomized_smiles"}
+# The representation set settled on 2026-08-26 is: continuous_pdv (called PDV in
+# the paper), MHG-GNN, Avalon, ECFP4, ChemBERTa and Sort & Slice. Everything
+# below is OUTSIDE that set and refused by name, which is what stops a job
+# running one by accident. mol2vec has been deleted outright.
+#
+# `pdv` is the BINARY physicochemical vector: write_to_mmap stores
+# `(pdv > 0)` bit-packed, so every descriptor magnitude is thrown away before
+# storage and the model receives 200 raw 0/1 values -- 47 of which are constant
+# across QM9, because MolWt, HeavyAtomCount and the like are positive for every
+# molecule. `continuous_pdv` is the same 200 descriptors kept as float32, and it
+# is the one in the roster (RERUN_PLAN.md 2.13).
+#
+# One-hot SMILES and randomized SMILES still BUILD -- pulling out the tokenizer
+# would mean editing the record layout and the vocabulary handling -- so they are
+# refused here rather than deleted.
+DROPPED_REPS = {"smiles", "randomized_smiles", "pdv"}
 
 PARSEABLE_REPS = {
     "randomized_smiles", "sns", "pdv", "continuous_pdv",
@@ -1270,10 +1431,11 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     dropped = [r for r in molecular_representations if r in DROPPED_REPS]
     if dropped:
         raise RuntimeError(
-            f"representation(s) {sorted(dropped)} were dropped from the study on 2026-08-26. "
-            f"The set is: PDV (continuous_pdv), MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. "
-            f"mol2vec is gone from the code entirely; one-hot SMILES still builds but is not part "
-            f"of the study, so running it would produce results with nowhere to go."
+            f"representation(s) {sorted(dropped)} are not in the study. The study's set is "
+            f"continuous_pdv (the paper calls it PDV), mhggnn, avalon, ecfp4, chemberta and sns. "
+            f"mol2vec is gone from the code entirely; one-hot SMILES, randomized SMILES and the "
+            f"binary pdv still build but have nowhere to go, so a job asking for one would "
+            f"produce results nothing reads."
         )
 
     unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
@@ -1360,7 +1522,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             # --- chemberta ---
             if "chemberta" in molecular_representations:
-                chemberta_bytes = mmap_file.read(3072)
+                chemberta_bytes = mmap_file.read(CHEMBERTA_BYTES)
                 if "chemberta" == rep:
                     chemberta = np.frombuffer(chemberta_bytes, dtype=np.float32)
                     feature_vector.append(chemberta)
@@ -1369,7 +1531,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             # --- mhg-gnn ---
             if "mhggnn" in molecular_representations:
-                mhggnn_bytes = mmap_file.read(4096)
+                mhggnn_bytes = mmap_file.read(MHGGNN_BYTES)
                 if "mhggnn" == rep:
                     mhggnn = np.frombuffer(mhggnn_bytes, dtype=np.float32)
                     feature_vector.append(mhggnn)
@@ -2220,14 +2382,60 @@ def record_noise_manifest(args, manifest_path, iteration, file_no, level):
     for k, v in params.items():
         row[f'param_{k}'] = v
 
+    # The join keys go back LAST. `row.update(manifest)` overwrote noise_level
+    # with the injector's value, which has been through an f32 -- so a level of
+    # 0.3 came back as 0.30000001192092896 and a join against the results row's
+    # sigma of 0.3 matched nothing. Measured: one of two rows joined
+    # (RERUN_PLAN.md 2.13).
+    row['iteration'] = iteration
+    row['file_no'] = file_no
+    row['noise_level'] = level
+
     out_path = args.filepath.replace('.csv', '_noise_manifest.csv')
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    write_header = not os.path.exists(out_path)
-    with open(out_path, 'a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if write_header:
+
+    # The header is the UNION of every row's keys, rewritten when a later row
+    # brings a column the header does not have.
+    #
+    # This used to be `csv.DictWriter(f, fieldnames=list(row.keys()))` in append
+    # mode, with the header written on the first call only. Fieldnames were
+    # recomputed per row, so no exception was raised -- the row was simply
+    # written with ITS OWN column set. The level loop runs 0.0 first, and the
+    # injector returns early at level 0 before it inserts lambda, the outlier
+    # fraction and the censoring limit, so the header came from the NARROWEST
+    # row: for outlier, grouped_wide, grouped_shift and censoring every later
+    # level appended 2-4 extra values with no header cells above them
+    # (RERUN_PLAN.md 2.13).
+    existing_rows, header = [], []
+    if os.path.exists(out_path):
+        with open(out_path, newline='') as f:
+            reader = csv.DictReader(f)
+            header = list(reader.fieldnames or [])
+            existing_rows = list(reader)
+
+    new_keys = [k for k in row.keys() if k not in header]
+    if header and new_keys:
+        header = header + new_keys
+        with open(out_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=header, restval='')
             writer.writeheader()
-        writer.writerow(row)
+            for old_row in existing_rows:
+                writer.writerow(old_row)
+            writer.writerow(row)
+        return row
+
+    if not header:
+        header = list(row.keys())
+        with open(out_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=header, restval='')
+            writer.writeheader()
+            writer.writerow(row)
+        return row
+
+    with open(out_path, 'a', newline='') as f:
+        # restval fills a column this row does not carry; extrasaction cannot
+        # fire, because new_keys is empty here.
+        csv.DictWriter(f, fieldnames=header, restval='').writerow(row)
     return row
 
 
@@ -2292,10 +2500,14 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     # integrity problem. Reported at the end so a task cannot finish quietly
     # having produced fewer rows than it was asked for.
     failed_pairs = []
-    rust_molecular_representations = args.molecular_representations.copy()
-    if args.domain_representation and args.domain_representation not in rust_molecular_representations:
-        rust_molecular_representations.append(args.domain_representation)
-    
+    # `rust_molecular_representations` used to be built here -- args.
+    # molecular_representations plus the domain representation -- and then never
+    # used: the config below wrote args.molecular_representations, and
+    # write_to_mmap is driven by the same list, so the domain representation was
+    # never actually written or read. It is gone rather than left looking live;
+    # --k_domains > 1 is refused in main() for the same reason (the domain byte
+    # is a placeholder, RERUN_PLAN.md 2.13).
+
     print(f"normalising: {args.normalize}")
 
     config = {
@@ -2342,9 +2554,24 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
     print(f"Rust executable path: {rust_executable_path}")
 
+    # The seed is a function of the replicate AND the level.
+    #
+    # It used to be `iteration_seed` alone, recomputed identically at every level
+    # of the outer loop, and for uniform targeting the scale map consumes no
+    # randomness -- so the epsilon at every level was the SAME standard draw
+    # times that level's solved scale, and epsilon(0.6) was exactly 2 x
+    # epsilon(0.3). The whole degradation curve within a replicate rode on one
+    # realisation: an unusually smooth curve and a replicate-to-replicate spread
+    # of auc_norm smaller than an independent-draw design gives. The experimental
+    # pipeline draws each level independently, so the two were not measuring the
+    # same thing (RERUN_PLAN.md 2.13). crc32 of the level's own repr, not its
+    # position, so a subset run reproduces the full run's rows.
+    level_seed = (iteration_seed * 1000003 + zlib.crc32(repr(float(s)).encode())) \
+        & 0xFFFFFFFF
+
     rust_cmd = [
         rust_executable_path,
-        '--seed', str(iteration_seed),
+        '--seed', str(level_seed),
         '--config', config_path,
         '--model', "rf",
         '--noise-level', str(s),
@@ -2405,7 +2632,10 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     set_current_noise_type(
         condition_from_manifest_row(manifest_row, manifest_path, s, iteration),
         level_units=level_units_for(args),
-        delivered_dose=(manifest_row or {}).get('delivered_dose_in_label_units'))
+        delivered_dose=(manifest_row or {}).get('delivered_dose_in_label_units'),
+        standardisation=((manifest_row or {}).get('standardisation_mean'),
+                         (manifest_row or {}).get('standardisation_sd')),
+        file_no=file_no)
 
     # The noise the injector RECORDED, read back before a single model is fitted.
     # Only when the out-of-fold pass is on: it is the only consumer, and reading
@@ -2622,15 +2852,27 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                             # Per-feature standardisation, fitted on the TRAINING split only
                             # and applied to validation and test with the training constants.
                             if should_standardise(x_train, rep):
-                                x_mean = np.nanmean(x_train, axis=0)
-                                x_std = np.nanstd(x_train, axis=0)
-                                x_std[x_std == 0] = 1.0
+                                # PER CELL, and BEFORE the scaling constants are
+                                # computed. It used to be after: a single +inf
+                                # anywhere in a feature made nanmean inf and
+                                # nanstd nan, the `x_std[x_std == 0] = 1.0` guard
+                                # does not catch a nan, and the nan_to_num that
+                                # followed then zeroed that ENTIRE feature for
+                                # every molecule rather than the one cell. The
+                                # experimental pipeline replaces non-finite cells
+                                # before scaling (KIRBy create_pdv); this now
+                                # does the same (RERUN_PLAN.md 2.13).
+                                _clean = lambda a: np.nan_to_num(
+                                    np.asarray(a, dtype=np.float64),
+                                    nan=0.0, posinf=0.0, neginf=0.0)
+                                x_train, x_test, x_val = (
+                                    _clean(x_train), _clean(x_test), _clean(x_val))
+                                x_mean = x_train.mean(axis=0)
+                                x_std = x_train.std(axis=0)
+                                x_std[~np.isfinite(x_std) | (x_std == 0)] = 1.0
                                 x_train = ((x_train - x_mean) / x_std).astype(np.float32)
                                 x_test = ((x_test - x_mean) / x_std).astype(np.float32)
                                 x_val = ((x_val - x_mean) / x_std).astype(np.float32)
-                                x_train = np.nan_to_num(x_train, 0.0)
-                                x_test = np.nan_to_num(x_test, 0.0)
-                                x_val = np.nan_to_num(x_val, 0.0)
 
                             print(f"model: {model}")
                             print(f"rep: {rep}")
@@ -2732,13 +2974,27 @@ def main():
     # exit 0 -- which in an array job of hundreds of tasks is indistinguishable
     # from success (RERUN_PLAN.md 0.6, failure mode 9). Fail here instead, before
     # a single molecule is read.
+    # The domain label is written as a literal zero for every molecule by the
+    # Rust writer, so a run with more than one domain carries no domain
+    # assignment through the record at all -- the clustering result is discarded
+    # and every reader sees one constant (RERUN_PLAN.md 2.13). Refused rather
+    # than run into a silent no-op.
+    if getattr(args, 'k_domains', 1) > 1:
+        raise SystemExit(
+            f"\nERROR: --k_domains {args.k_domains} was requested, but the domain "
+            f"label the record carries is a literal zero for every molecule "
+            f"(rust/src/main.rs). The clustering would be computed and thrown "
+            f"away. Run with k_domains 1, or wire the label through first.\n")
+
     dropped = sorted(set(args.molecular_representations) & DROPPED_REPS)
     if dropped:
         raise SystemExit(
-            f"\nERROR: {dropped} were dropped from the study on 2026-08-26.\n"
-            f"The set is: continuous_pdv (PDV), mhggnn, avalon, ecfp4, chemberta, sns.\n"
-            f"mol2vec no longer exists in the code. One-hot SMILES still builds, but it is\n"
-            f"not part of the study, so this job would produce results with nowhere to go.\n"
+            f"\nERROR: {dropped} are not in the study.\n"
+            f"The study's set is: continuous_pdv (the paper calls it PDV), mhggnn, avalon,\n"
+            f"ecfp4, chemberta, sns.\n"
+            f"mol2vec no longer exists in the code. One-hot SMILES, randomized SMILES and the\n"
+            f"binary pdv still build, but none is part of the study, so this job would produce\n"
+            f"results with nowhere to go.\n"
         )
 
     # Prepare for communication with Rust
@@ -2796,7 +3052,12 @@ def main():
             # full grid draws roughly 4,000 of these (36 tasks x 110
             # invocations). At 32 bits that is about a 1-in-500 chance of a
             # birthday collision across the run; at 64 bits it is negligible.
-            file_no = uuid.uuid4().int & 0xFFFFFFFFFFFFFFFF
+            # 63 bits, not 64: a value above 2^63 does not fit in an int64, so
+            # pandas reads such a column as float or object and a join on it
+            # loses precision or fails outright -- measured, one of two rows
+            # joined (RERUN_PLAN.md 2.13). The birthday risk is unchanged at this
+            # width.
+            file_no = uuid.uuid4().int & 0x7FFFFFFFFFFFFFFF
 
             files = {
                 "train": open('train_' + str(file_no) + '.mmap', 'wb+'),

@@ -18,6 +18,16 @@ Usage
     python check_environment.py                     # the whole QM9 roster
     python check_environment.py --models lgb rf     # only what this job runs
     python check_environment.py --validation        # the KIRBy roster too
+    python check_environment.py --deep --validation # THE PREFLIGHT GATE
+
+The last one is what has to pass before a launch. On top of constructing every
+model it imports models/models.py for real, checks that env.yml describes the
+interpreter it is speaking for, checks that noiseInject and kirby are
+importable, counts the DISTINCT OpenMP runtime files a job would load, and then
+runs the two failures that forced the 2026-08-27 environment rebuild -- a
+LightGBM fit and a Gaussian-process fit with the boosting libraries already
+loaded -- under both of the thread settings the two pipelines use. Both must
+pass in the same environment: curing one at the other's expense is the trap.
 
 Exit status is 0 only if everything asked for can be built.
 """
@@ -278,6 +288,461 @@ def check_declared_requirements(failures, models):
     print()
 
 
+def _omp_family(basename):
+    """Which OpenMP implementation a filename belongs to, by name alone."""
+    if basename.startswith("libiomp"):
+        return "Intel (libiomp5)"
+    if basename.startswith("libgomp"):
+        return "GNU (libgomp)"
+    if basename.startswith("libomp"):
+        return "LLVM (libomp)"
+    return None
+
+
+def _linked_libraries(binary):
+    """(name, resolved path or None) for every shared library `binary` links."""
+    import subprocess as _sp
+    out = ""
+    try:
+        if sys.platform == "darwin":
+            out = _sp.run(["otool", "-L", binary], capture_output=True,
+                          text=True, timeout=30).stdout
+        else:
+            out = _sp.run(["ldd", binary], capture_output=True,
+                          text=True, timeout=30).stdout
+    except Exception:
+        return []
+
+    found = []
+    for raw in out.splitlines():
+        if sys.platform == "darwin" and not raw.startswith("\t"):
+            continue                          # otool's header: the binary itself
+        line = raw.strip().rstrip(":")
+        if not line:
+            continue
+        if "=>" in line:                      # ldd: "libgomp.so.1 => /path (0x..)"
+            name, _, rhs = line.partition("=>")
+            path = rhs.strip().split(" ")[0]
+            found.append((os.path.basename(name.strip()),
+                          path if path.startswith("/") else None))
+        else:                                 # otool, or ldd's static entries
+            token = line.split(" ")[0]
+            found.append((os.path.basename(token),
+                          token if token.startswith("/") else None))
+    return found
+
+
+def _resolve_lib(name, path, roots):
+    """Best real path for a library an extension links, or an unresolved marker.
+
+    macOS records @rpath/libomp.dylib rather than a path, so a linked entry has
+    to be looked for in the places the loader would look. Getting this right is
+    what separates "three names for one conda file" from "three separate copies
+    bundled by three wheels".
+    """
+    if path and os.path.exists(path):
+        return os.path.realpath(path)
+    base = os.path.basename(name)
+    for d in roots:
+        if not d:
+            continue
+        cand = os.path.join(d, base)
+        if os.path.exists(cand):
+            return os.path.realpath(cand)
+    return f"unresolved:{base}"
+
+
+def check_threading_runtimes(failures):
+    """More than one OpenMP runtime FILE across the installed backends kills jobs.
+
+    With two or more loaded in one process, one library's threads deadlock or
+    crash inside the other's barrier, and which model dies depends on which
+    package was imported first. Measured 2026-08-27: nothing first -> LightGBM
+    crashes; LightGBM first -> the Gaussian process crashes; PyTorch first ->
+    LightGBM crashes. No import order saves both (RERUN_PLAN.md 2.8e-bis).
+    Neither KMP_DUPLICATE_LIB_OK=TRUE nor OMP_NUM_THREADS=1 cures it.
+
+    It matters because of HOW it fails. In the full pipeline it presented as a
+    hang: three hours at zero processor time, one result row, no error. On a
+    cluster that consumes the whole allocation and the scheduler kills the
+    task, so it writes no rows and no message.
+
+    COUNT FILES, NOT NAMES. The two things a name-based check gets wrong are
+    both live here:
+
+      * conda-forge's llvm-openmp ships libgomp.so.1 AND libiomp5.so as
+        SYMLINKS to libomp.so. Three names, one file, no conflict -- a
+        name-based check fails a perfectly good environment.
+      * two PyPI wheels each bundling their own private copy of libomp are two
+        distinct files under one name. That is the actual defect, and a
+        name-based check passes it.
+
+    So every candidate is resolved to a real path and the distinct paths are
+    counted. Where a path cannot be resolved (macOS @rpath entries), the name
+    is kept as its own entry rather than assumed to be a duplicate.
+
+    This inspects what is INSTALLED rather than what happens to be imported:
+    models/models.py imports every backend at module scope, so every job loads
+    every runtime whatever model it was asked for.
+    """
+    import glob as _glob
+    print("threading runtimes (what a job would load, not what is loaded now)")
+
+    # key (a real path, or "unresolved:<name>") -> {"who": set, "family": str}
+    by_file = {}
+    search_dirs = [os.path.join(sys.prefix, "lib"),
+                   os.path.join(os.environ.get("CONDA_PREFIX", ""), "lib")]
+
+    def _note(key, who, family):
+        e = by_file.setdefault(key, {"who": set(), "family": family})
+        e["who"].add(who)
+
+    for pkg in ("torch", "lightgbm", "sklearn", "xgboost", "quantile_forest",
+                "gpytorch", "functorch"):
+        try:
+            spec = importlib.util.find_spec(pkg)
+        except Exception:
+            continue
+        if spec is None or not spec.submodule_search_locations:
+            continue
+        root = list(spec.submodule_search_locations)[0]
+
+        # Copies shipped inside the package. The wheels hide these in
+        # .dylibs / .libs, which glob will not descend into unless the dot is
+        # named -- the first version of this check missed scikit-learn's for
+        # exactly that reason.
+        candidates = []
+        for sub in ("", ".dylibs", ".libs", "lib"):
+            base = os.path.join(root, sub) if sub else root
+            candidates += _glob.glob(os.path.join(base, "*.dylib"))
+            candidates += _glob.glob(os.path.join(base, "*.so*"))
+        # A wheel's bundled copies sit in a sibling "<dist>.libs" directory,
+        # NOT inside the package -- and the distribution name is not always the
+        # import name (sklearn ships as scikit_learn.libs). Only this package's
+        # own directories are scanned: an earlier version globbed all of
+        # site-packages and reported every package as bundling every copy.
+        parent = os.path.dirname(root)
+        dist_dir = {"sklearn": "scikit_learn"}.get(pkg, pkg)
+        for stem in {pkg, dist_dir}:
+            candidates += _glob.glob(os.path.join(parent, f"{stem}.libs", "*.so*"))
+            candidates += _glob.glob(os.path.join(parent, f"{stem}.libs", "*.dylib"))
+        for hit in candidates:
+            fam = _omp_family(os.path.basename(hit))
+            if fam is None:
+                continue
+            _note(os.path.realpath(hit), f"{pkg} bundles {os.path.basename(hit)}", fam)
+
+        # What its compiled extensions actually LINK against -- the only way to
+        # see a runtime that lives outside the package.
+        exts = (_glob.glob(os.path.join(root, "*.so"))
+                + _glob.glob(os.path.join(root, "*.dylib"))
+                + _glob.glob(os.path.join(root, "lib", "*.dylib"))
+                + _glob.glob(os.path.join(root, "lib", "*.so")))
+        pkg_dirs = [root, os.path.join(root, "lib"),
+                    os.path.join(root, ".dylibs"), os.path.join(root, ".libs")]
+        for ext in exts[:8]:
+            for name, path in _linked_libraries(ext):
+                fam = _omp_family(name)
+                if fam is None:
+                    continue
+                _note(_resolve_lib(name, path, pkg_dirs + search_dirs),
+                      f"{pkg} links {name}", fam)
+
+    if not by_file:
+        print("  OK    no OpenMP runtime detected in any installed backend")
+        print()
+        return
+
+    if len(by_file) == 1:
+        key, e = next(iter(by_file.items()))
+        print(f"  OK    one threading runtime: {key}")
+        print(f"          {e['family']}")
+        for w in sorted(e["who"]):
+            print(f"          {w}")
+        print()
+        return
+
+    print(f"  FAIL  {len(by_file)} DISTINCT OpenMP runtime files are reachable from the "
+          f"installed packages:")
+    for key, e in sorted(by_file.items()):
+        print(f"          {key}   [{e['family']}]")
+        for w in sorted(e["who"]):
+            print(f"            {w}")
+    print("        Any job importing models/models.py loads all of them, because that")
+    print("        file imports every backend at module scope. One model will then")
+    print("        deadlock or crash inside another's thread barrier, and in this")
+    print("        pipeline that presents as a HANG -- the task burns its whole")
+    print("        allocation and writes no rows and no error.")
+    print("        Pinning threads does NOT cure it (measured, RERUN_PLAN.md 2.8e-bis).")
+    print("        Rebuild the environment: SETUP_REBUILD=1 . setup.sh")
+    failures.append("multiple threading runtimes")
+    print()
+
+
+# The two failures that forced the rebuild. They must pass in ONE environment:
+# curing either at the other's expense is the trap -- an "import lightgbm
+# first" fix was committed and reverted on 2026-08-27 for exactly that.
+#
+# Both run in a SUBPROCESS on purpose. A segfault or a deadlock inside this
+# interpreter would take the preflight down with it and report nothing.
+_LGB_PROBE = """
+import torch, lightgbm as lgb, numpy as np
+from sklearn.datasets import make_regression
+X, y = make_regression(n_samples=400, n_features=512, random_state=0)
+lgb.LGBMRegressor(n_estimators=15, verbose=-1).fit(X, y)
+print('LightGBM OK')
+"""
+
+# Section 5 of scripts/server_audit.sh, verbatim in behaviour: import the
+# boosting libraries first, then fit a plain ExactGP.
+_GP_PROBE = """
+import lightgbm, xgboost, numpy as np, torch, gpytorch
+class G(gpytorch.models.ExactGP):
+    def __init__(s, x, y, l):
+        super().__init__(x, y, l)
+        s.m = gpytorch.means.ConstantMean()
+        s.c = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+    def forward(s, x):
+        return gpytorch.distributions.MultivariateNormal(s.m(x), s.c(x))
+r = np.random.RandomState(0)
+X = r.normal(size=(900, 208)); y = X[:, 0] * 2 + r.normal(scale=.3, size=900)
+xt = torch.from_numpy(X); yt = torch.from_numpy(y)
+l = gpytorch.likelihoods.GaussianLikelihood(noise=1e-3); m = G(xt, yt, l)
+mll = gpytorch.mlls.ExactMarginalLogLikelihood(l, m)
+m.train(); l.train()
+o = torch.optim.Adam(m.parameters(), lr=0.1)
+for _ in range(20):
+    o.zero_grad(); (-mll(m(xt), yt)).backward(); o.step()
+print('GP OK')
+"""
+
+
+def _run_probe(label, code, env_overrides, failures, timeout=600):
+    """Run `code` in a fresh interpreter and classify how it ended."""
+    import subprocess as _sp
+    env = dict(os.environ)
+    for k, v in env_overrides.items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = v
+    try:
+        r = _sp.run([sys.executable, "-c", code], capture_output=True,
+                    text=True, timeout=timeout, env=env)
+    except _sp.TimeoutExpired:
+        # This is the shape that costs a whole allocation: no crash, no output,
+        # just threads waiting on a barrier that never completes.
+        print(f"  FAIL  {label}: HUNG (no exit after {timeout}s)")
+        print("        This is the failure that writes one row and then sits at zero")
+        print("        processor time until the scheduler kills the task.")
+        failures.append(f"{label} hung")
+        return
+    if r.returncode == 0:
+        print(f"  OK    {label}")
+        return
+    if r.returncode in (-11, 139, -6, 134):
+        print(f"  FAIL  {label}: SEGFAULT (exit {r.returncode}), no Python traceback")
+        failures.append(f"{label} segfaulted")
+        return
+    first = (r.stderr.strip().splitlines() or ["no stderr"])[-1]
+    print(f"  FAIL  {label}: exit {r.returncode}: {first}")
+    failures.append(label)
+
+
+def check_hang_probes(failures):
+    """The LightGBM fit and the Gaussian-process fit, in one environment.
+
+    The thread settings are named rather than inherited, because the two halves
+    of the study differ: QM9 jobs set no thread count at all, the experimental
+    module pins both to 4 at import. Testing only the ambient setting is how
+    this same question got opposite answers in two audits.
+
+    Use `-u`/None to UNSET. Setting a thread count to the EMPTY STRING is not
+    the same as leaving it unset -- some numerical libraries reject an empty
+    value outright, which once produced a spurious error and hid the real one.
+    """
+    print("the two failures that forced the rebuild (each in its own process)")
+    unset = {"OMP_NUM_THREADS": None, "MKL_NUM_THREADS": None}
+    pinned = {"OMP_NUM_THREADS": "4", "MKL_NUM_THREADS": "4"}
+    _run_probe("LightGBM fits, no thread count set (how QM9 jobs run)",
+               _LGB_PROBE, unset, failures)
+    _run_probe("LightGBM fits, both pinned to 4 (how validation jobs run)",
+               _LGB_PROBE, pinned, failures)
+    _run_probe("Gaussian process fits after lightgbm+xgboost, no thread count set",
+               _GP_PROBE, unset, failures)
+    _run_probe("Gaussian process fits after lightgbm+xgboost, both pinned to 4",
+               _GP_PROBE, pinned, failures)
+    print()
+
+
+def check_loaded_runtimes(failures):
+    """Ground truth: what a process that imported every backend actually mapped.
+
+    The static check above reads what is installed. This reads /proc/self/maps
+    after importing the backends in the order models/models.py does, which is
+    the measurement RERUN_PLAN.md 2.8e-bis reports ("three OpenMP runtimes
+    loaded in the one process"). Linux only -- there is no equivalent file on
+    macOS, and the cluster is where the answer counts.
+    """
+    if not sys.platform.startswith("linux"):
+        print("loaded threading runtimes: /proc/self/maps is Linux-only, skipping")
+        print("  (this check answers the question on the cluster, which is where it counts)")
+        print()
+        return
+
+    import subprocess as _sp
+    code = """
+import torch, sklearn, lightgbm, xgboost, gpytorch  # noqa: F401
+import os
+seen = {}
+for line in open('/proc/self/maps'):
+    path = line.rstrip().split(' ', 5)[-1].strip()
+    if not path.startswith('/'):
+        continue
+    b = os.path.basename(path)
+    if b.startswith(('libomp', 'libiomp', 'libgomp')):
+        seen.setdefault(os.path.realpath(path), b)
+for k, v in sorted(seen.items()):
+    print(f'{k}\\t{v}')
+"""
+    print("loaded threading runtimes (/proc/self/maps after importing every backend)")
+    try:
+        r = _sp.run([sys.executable, "-c", code], capture_output=True,
+                    text=True, timeout=600)
+    except Exception as e:
+        print(f"  ---   could not run the probe: {e}")
+        print()
+        return
+    if r.returncode != 0:
+        first = (r.stderr.strip().splitlines() or ["no stderr"])[-1]
+        print(f"  FAIL  importing every backend failed: exit {r.returncode}: {first}")
+        failures.append("backend import for the maps probe")
+        print()
+        return
+    lines = [l for l in r.stdout.splitlines() if l.strip()]
+    if len(lines) <= 1:
+        for l in lines:
+            path, _, name = l.partition("\t")
+            print(f"  OK    one runtime mapped: {path} ({name})")
+        if not lines:
+            print("  OK    no OpenMP runtime mapped")
+    else:
+        print(f"  FAIL  {len(lines)} distinct OpenMP runtimes mapped into ONE process:")
+        for l in lines:
+            path, _, name = l.partition("\t")
+            print(f"          {path} ({name})")
+        failures.append("multiple threading runtimes loaded")
+    print()
+
+
+def check_env_recipe(failures):
+    """Is env.yml a truthful record of what is installed?
+
+    It was not, for five months: the file pinned pytorch 2.5.1 while the
+    cluster ran a PyPI wheel of 2.3.1+cu121, and pinned gpytorch 1.14 while
+    botorch 0.10.0 forced 1.11. Nothing reported either, so "what were these
+    results produced under" had no answer. This makes the question a check.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+    yml = os.path.join(root, "env.yml")
+    if not os.path.isfile(yml):
+        print(f"env.yml: not found at {yml}, skipping")
+        print()
+        return
+
+    try:
+        import importlib.metadata as md
+    except Exception as e:
+        print(f"env.yml: cannot check ({e})")
+        print()
+        return
+
+    # conda package name -> the distribution that carries its python metadata,
+    # where the two differ.
+    dist_of = {
+        "pytorch": "torch",
+        "pytorch_geometric": "torch-geometric",
+        "matplotlib-base": "matplotlib",
+        "huggingface_hub": "huggingface-hub",
+        "typing_extensions": "typing-extensions",
+        "rdkit-dev": "rdkit",
+    }
+    # Pins with no python metadata to compare against.
+    skip = {"python", "pip", "boost-cpp", "llvm-openmp", "pybind11",
+            "pybind11-global"}
+
+    import re
+    pins = []
+    for raw in open(yml):
+        line = raw.split("#", 1)[0].strip()
+        if not line.startswith("- "):
+            continue
+        spec = line[2:].strip()
+        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*==?\s*([0-9][0-9A-Za-z_.\-]*)", spec)
+        if not m:
+            continue
+        name, want = m.group(1), m.group(2)
+        if name in skip:
+            continue
+        pins.append((name, want))
+
+    print(f"env.yml is a truthful record ({len(pins)} pinned packages)")
+    bad = []
+    for name, want in pins:
+        dist = dist_of.get(name, name)
+        have = None
+        for cand in (dist, dist.replace("_", "-"), dist.replace("-", "_")):
+            try:
+                have = md.version(cand)
+                break
+            except md.PackageNotFoundError:
+                continue
+        if have is None:
+            bad.append(f"{name}: pinned {want}, NOT INSTALLED")
+            continue
+        # A local version tag is exactly the tell that a PyPI wheel replaced a
+        # conda package: the live environment read "2.3.1+cu121".
+        base = have.split("+")[0]
+        if base != want:
+            extra = " (a PyPI wheel, not the conda package)" if "+" in have else ""
+            bad.append(f"{name}: env.yml pins {want}, installed {have}{extra}")
+
+    if bad:
+        for line in bad:
+            print(f"  FAIL  {line}")
+        print("        env.yml does not describe this interpreter, so it is not a record")
+        print("        of what any result was produced under. Rebuild it, or fix the pin")
+        print("        and pip-constraints.txt together and say what moved in RERUN_PLAN.md.")
+        failures.append("env.yml disagrees with what is installed")
+    else:
+        print("  OK    every pinned version in env.yml is what is installed")
+    print()
+
+
+def check_project_packages(failures):
+    """noiseInject and kirby: both pipelines import them with no sys.path help."""
+    print("project packages (the validation pipeline imports these at module scope)")
+    for mod, human in (("noiseInject", "the noise injector"),
+                       ("kirby", "the validation pipeline's own package")):
+        try:
+            m = importlib.import_module(mod)
+            where = getattr(m, "__file__", "?")
+            ver = getattr(m, "__version__", None)
+            if ver is None:
+                try:
+                    import importlib.metadata as md
+                    ver = md.version(mod)
+                except Exception:
+                    ver = "?"
+            print(f"  OK    {mod:<12s} {ver}   {where}")
+        except Exception as e:
+            print(f"  FAIL  {mod}: {type(e).__name__}: {str(e).splitlines()[0]}")
+            print(f"        {human} is not importable, so the KIRBy half cannot start.")
+            print("        setup.sh installs it editable from the checkout.")
+            failures.append(mod)
+    print()
+
 def probe(name, fn, failures, resource_failures=None):
     try:
         fn()
@@ -432,8 +897,11 @@ def main():
     ap.add_argument("--validation", action="store_true",
                     help="Also check the KIRBy validation roster.")
     ap.add_argument("--deep", action="store_true",
-                    help="Also import models/models.py itself (~1 minute). Use in the "
-                         "preflight, not in a per-task guard.")
+                    help="Also import models/models.py itself, check env.yml against what "
+                         "is installed, and RUN the two failures that forced the "
+                         "environment rebuild -- the LightGBM fit and the Gaussian-process "
+                         "fit after the boosting libraries are loaded. A few minutes. Use "
+                         "in the preflight, not in a per-task guard.")
     ap.add_argument("--audit-roster", action="store_true",
                     help="Check that every model the job generator can emit is known here, "
                          "and exit. Nothing is imported.")
@@ -451,11 +919,19 @@ def main():
 
     requested = args.models if args.models else sorted(QM9_MODELS)
     check_declared_requirements(failures, requested)
-
     check_qm9(requested, failures, resource_failures)
+    check_threading_runtimes(failures)
 
     if args.deep:
+        check_env_recipe(failures)
+        check_project_packages(failures)
         check_models_module(failures, resource_failures)
+        # What the process actually mapped, then whether it can survive it.
+        # Both halves have to pass HERE, in one environment: curing the
+        # LightGBM failure at the Gaussian process's expense is the trap that
+        # an "import lightgbm first" fix walked into on 2026-08-27.
+        check_loaded_runtimes(failures)
+        check_hang_probes(failures)
 
     if args.validation:
         check_validation(failures, resource_failures)

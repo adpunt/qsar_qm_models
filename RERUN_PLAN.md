@@ -1186,8 +1186,39 @@ Settled **upward, to 2.5.1, CPU build**:
 - `gpytorch` moves 1.14 → **1.11** in the file. 1.14 was never installed: `botorch 0.10.0`
   pins `gpytorch==1.11` and pip enforced it every time.
 
-Solves measured the same day: linux-64, 290 packages, 552 MB, one runtime. osx-64, 278
+Solves measured the same day: linux-64, 290 packages, 538 MB, one runtime. osx-64, 278
 packages, 268 MB, one runtime.
+
+#### Built and gated, not just solved (2026-08-27)
+
+The whole recipe was built from scratch through `setup.sh` — conda list, pip block,
+`torchsort` from source, `torchcp`, and both editable installs — and then put through
+`check_environment.py --deep --validation`:
+
+| check | result |
+|---|---|
+| every QM9 roster label constructs | ✅ **26 of 26**, conformal included |
+| `qrf` and `ngboost` actually *fit* | ✅ |
+| `models/models.py` imports for real | ✅ |
+| distinct OpenMP runtime files | ✅ **one** |
+| LightGBM fits, no thread count set / both pinned to 4 | ✅ / ✅ |
+| GP fits after lightgbm+xgboost, no thread count / both pinned to 4 | ✅ / ✅ |
+| `env.yml` describes the interpreter | ✅ all 34 pins |
+| `noiseInject` 1.0.0, `kirby` 0.2.0 importable | ✅ |
+| KIRBy validation roster, every optional backend | ✅ |
+
+**The conformal models build for the first time.** §2.8d's remaining real failure was
+`torchsort/isotonic_cpu...so: undefined symbol: _ZNK3c105Error4whatEv`, and
+`--no-build-isolation` closes it: all four `conformal*` labels construct. They stay in
+`EXCLUDED_MODELS` — that is a study decision, not a broken package — but the guard no longer
+blocks them for the guard's own reason.
+
+One pin was wrong on the first build and the check caught it: conda-forge ships `lightning`
+as `2.5.1.post0`, not `2.5.1`. That is the truthfulness check doing its job on its first run.
+
+⚠️ **This was measured on osx-64, on the laptop.** It proves the recipe resolves, builds,
+and clears both blockers; it does not prove the cluster's answer. The `/proc/self/maps`
+check is Linux-only and has not run yet. Run the block below on ARC.
 
 #### Packages the roster was missing, now in the recipe
 
@@ -1209,6 +1240,13 @@ packages, 268 MB, one runtime.
 
 Dropped as imported nowhere in either repo: `tensorflow`, `jax`, `gensim`, `mol2vec`,
 `torchaudio`, and the four PyG companion wheels.
+
+**Expect four harmless lines on every `import deepchem`** now that TensorFlow, JAX and DGL
+are gone: *"Skipped loading some Tensorflow models, missing a dependency"* and three like it.
+That is deepchem declining to register its own optional model zoo, none of which this study
+uses — everything here uses `dc.data.DiskDataset`, `dc.splits.ScaffoldSplitter` and the
+`molnet` loaders, all pure numpy. Checked 2026-08-27: scaffold splitting produces the same
+splits with TensorFlow absent. Do not read those lines as breakage.
 
 #### It must never happen during a run
 
@@ -3826,28 +3864,110 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | **Decide it from the main grid, not now.** All seven levels run; pick the level from the data when the results exist. If a level must be named before then, **1.5** — the only measured level where the largest zero-mean result is visible | chat J, at figure-script rebuild |
-| 2 | **Inherit** the four settled conditions, and say in the Methods that corruption detection was not tested across noise shapes | the uncertainty job-script chat |
+| 1 | **1.5.** It is measured, 1.0 is not; the models all still fit there (R² 0.62–0.77); and it is where both the grouped-shifted result and the boosting-versus-linear flip are visible. Report the clean column beside it | chat J, at figure-script rebuild |
+| 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | the uncertainty job-script chat |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | the uncertainty job-script chat |
 | 4 | Nothing to default. The screen runs, the author looks, the author chooses | after the screen |
 
-#### The measurement behind item 1, recomputed from the file rather than quoted
+#### Item 1 — the level changes which model wins, so it is not a presentational choice
 
-`results/setting_selection_test.csv`, 1,008 rows, twelve replicates, QM9, PDV, three models. Count
-of replicates in which grouped-shifted is worse than Gaussian by more than 0.05 R², Ridge replicate
-2 excluded and named (its clean R² is −0.35, a scaffold split ridge could not fit):
+Recomputed 2026-08-27 from `results/setting_selection_test.csv` (QM9, PDV, plain Gaussian, twelve
+replicates, Ridge replicate 2 excluded and named — its clean R² is −0.35, a scaffold split ridge
+could not fit).
+
+**Order of the three models, counted per replicate, not averaged:**
+
+| Level | Order, and in how many replicates |
+|---|---|
+| clean | LightGBM > forest > ridge in **11 of 12** |
+| 0.5 | LightGBM > forest > ridge in 7 of 12; forest first in 4 |
+| 1.5 | **ridge first in 9 of 12** — LightGBM > forest > ridge in none |
+
+**R² per model, so the flip can be read as a result rather than a collapse:**
+
+| Model | clean median | 0.5 median | 1.5 median |
+|---|---|---|---|
+| LightGBM | 0.902 | 0.871 | 0.619 |
+| Random forest | 0.895 | 0.866 | 0.683 |
+| Ridge | 0.862 | 0.845 | **0.765** |
+
+Nothing is broken at 1.5 — every model still fits. The boosting model is the most accurate on clean
+labels and loses the most; the linear model is the least accurate on clean labels and loses the
+least. **That contrast is the paper's argument, and level 0.5 does not show it**: at 0.5 all three
+sit within 0.03 of their clean score and the order is still the clean order.
+
+Grouped-shifted, counted the same way (replicates in which it is worse than Gaussian by more than
+0.05 R²):
 
 | | LightGBM | Random forest | Ridge |
 |---|---|---|---|
 | level 0.5 | 1 / 12 | 1 / 12 | 2 / 11 |
 | level 1.5 | 8 / 12 | 8 / 12 | 11 / 11 |
 
-**The file contains only levels 0.5 and 1.5.** 1.0 has never been measured, so recommending it was
-recommending an unmeasured point. That is the reason item 1 is deferred to the main grid rather
-than answered now.
+**The file contains only levels 0.5 and 1.5.** 1.0 has never been measured on QM9, so the standing
+recommendation of "1.0 or 1.5" was half a recommendation for an unmeasured point.
 
-*(Chat D's version of this table read 9 for the random forest at 1.5. Recomputing from the CSV
-gives 8. One replicate, no change to the conclusion.)*
+**The same instability on real data.** `results/validation_full/openadmet_logd/all_results.csv`,
+plain Gaussian, one fit per cell, seventeen model-and-representation pairs ranked at each level.
+Rank agreement with the clean ranking: **+0.94 at 0.5, +0.56 at 1.0**. Individual pairs move a long
+way — the neural network on ECFP4 goes 3rd → 8th → 12th, the forest on the PDV goes 10th → 7th →
+2nd. This is one fit per cell with no replicates, so it is corroboration, not a measurement.
+
+**Recommendation: report at 1.5**, with the clean column beside it. It is measured, it is where the
+grouped-shifted result is visible, the models are all still fitting, and the rank flip is the
+finding rather than an artefact of a broken regime.
+
+#### Item 2 — two of the three conditions on offer cannot answer the question at all
+
+`slurm_scripts_uncertainty_rerun/generate_scripts.py:133` lists `FLAT_BY_DESIGN`: the conditions
+that give every molecule the same amount of noise. Under those, "does the uncertainty find which
+molecules were corrupted" is undefined, not zero.
+
+| Condition | In | Can it answer "which molecules"? |
+|---|---|---|
+| gaussian | main grid | no — flat |
+| grouped_shifted | main grid | no — flat |
+| grouped_wider | main grid | **yes** |
+| censoring | main grid | **yes** |
+| laplace | depth only | no — flat |
+| student_t_nu5 | depth only | no — flat |
+| outlier_p10 | depth only | **yes** |
+
+So "test the conditions rather than inherit them" reduces to **one condition, not three**. Inheriting
+gives two conditions that can answer the question; adding `outlier_p10` gives three, and it is the
+only concentrated-noise condition left — which is exactly the case the question was raised about.
+
+**Cost.** One array task per (dataset, representation, condition), one script per model: 3 × 4 × 7.
+Inherit = 336 tasks. Adding `outlier_p10` = **+84 tasks, +25%**. Adding all three depth-only
+conditions = +252 tasks, +75%, of which two thirds buys nothing.
+
+**Recommendation: inherit the four, and add `outlier_p10`.**
+
+#### Item 3 — one replicate is the only thing the runner can do
+
+`slurm_scripts_uncertainty_rerun/generate_scripts.py:77-80`: the runner has no replicate axis; the
+five scaffold folds are the only repeat. More replicates would be a build, not a flag. The
+permutation null is built and tested — `scripts/uncertainty_stats.py:760`, `permutation_null`,
+which permutes the noise within a cell and fold and returns the observed value against a 2.5–97.5
+band.
+
+**Recommendation: accept one replicate plus the null.** It is what exists, and the null is the
+reference distribution.
+
+#### Item 4 — pre-register the choice rather than select on the screen's results
+
+Choosing the deep run's models and representations from the screen's output is selection on the
+outcome: the conditions that look interesting get the precision, and a referee can ask why. The
+budget in §13.1 is 4 models × 3 representations. A pre-registered set that spans the space, and is
+defensible before any result exists:
+
+| | Chosen | Why |
+|---|---|---|
+| Models | `lgb`, `rf`, `svm`, `dnn` | boosting, bagging, kernel, neural — the four families, and the three measured above already behave differently from each other |
+| Representations | `ecfp4`, `continuous_pdv`, `mhggnn` | one fingerprint, the PDV, one learned embedding |
+
+The generator still refuses `--stage 2` without explicit choices, so this changes nothing until it
+is passed. If the screen shows something this set misses, widen it and say so in the Methods.
 
 ---
 

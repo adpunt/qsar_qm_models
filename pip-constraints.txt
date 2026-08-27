@@ -1,0 +1,60 @@
+# Pip may not replace anything conda installed.
+#
+# WHY THIS FILE EXISTS. Every OpenMP threading runtime beyond the first arrived
+# on a PyPI wheel installed over the top of a conda package: torch,
+# scikit-learn, lightgbm and xgboost wheels each bundle their own private copy
+# of libomp/libgomp, and two copies in one process is the deadlock that
+# RERUN_PLAN.md 2.8e-bis measured -- three hours at zero processor time, one
+# result row, no error.
+#
+# It is not hypothetical. The live env_test ran a PyPI wheel of torch
+# 2.3.1+cu121 while env.yml said conda pytorch 2.5.1, and nothing reported the
+# swap for five months. gpytorch went the same way: env.yml said 1.14, botorch
+# 0.10.0 pins gpytorch==1.11, and pip quietly enforced 1.11 every time.
+#
+# setup.sh exports PIP_CONSTRAINT=<this file> before it runs any pip command,
+# so a pip package that demands a different version of anything below now FAILS
+# THE BUILD instead of silently rewriting the environment. A loud failure at
+# build time is the point; if one happens, fix the pin in env.yml and here
+# together, and say in RERUN_PLAN.md what moved and why.
+#
+# Keep in step with env.yml. `python scripts/check_environment.py --deep`
+# fails if the two disagree with what is actually installed.
+
+# --- the four whose wheels bundle an OpenMP runtime -----------------------
+torch==2.5.1
+scikit-learn==1.6.1
+lightgbm==4.4.0
+xgboost==3.0.0
+
+# --- the rest of the compiled numerics ------------------------------------
+numpy==1.26.4
+scipy==1.15.2
+pandas==2.2.3
+joblib==1.4.2
+torchvision==0.20.1
+
+# --- model backends whose version changes the numbers ---------------------
+gpytorch==1.11
+botorch==0.10.0
+quantile-forest==1.4.1
+ngboost==0.5.5
+shap==0.47.0
+grakel==0.1.10
+torch-geometric==2.6.1
+
+# --- representation stack -------------------------------------------------
+transformers==4.51.3
+huggingface-hub==0.30.2
+networkx==3.4.2
+
+# --- imported at module scope by one pipeline or the other ----------------
+optuna==4.3.0
+diskcache==5.6.3
+requests==2.32.3
+lightning==2.5.1.post0
+sympy==1.13.3
+tqdm==4.67.1
+typing-extensions==4.12.2
+matplotlib==3.10.1
+seaborn==0.13.2
