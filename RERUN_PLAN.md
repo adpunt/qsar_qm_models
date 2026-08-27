@@ -4339,10 +4339,13 @@ twelve replicates, counted per replicate, nothing averaged:
 | 0.5 | 8 of 12 | 4 of 12 |
 | 1.5 | 1 of 12 | **11 of 12** |
 
-| Model | clean median R² | 0.5 median | 1.5 median |
+**R² at replicate 0**, named, with the range across the other eleven beside it — no median
+(the author's rule, 2026-08-27):
+
+| Model | clean | 0.5 | 1.5 |
 |---|---|---|---|
-| LightGBM | 0.902 | 0.871 | 0.619 |
-| Random forest | 0.895 | 0.866 | 0.683 |
+| LightGBM | 0.902 [0.882-0.925] | 0.880 [0.842-0.895] | 0.609 [0.550-0.736] |
+| Random forest | 0.898 [0.862-0.920] | 0.870 [0.836-0.888] | 0.651 [0.639-0.731] |
 
 The order reverses completely between the clean labels and level 1.5, and both models are still
 fitting there. The boosting model is more accurate on clean labels and loses more; the forest is
