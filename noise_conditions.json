@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "WHAT THE STUDY RUNS. One file, because the scheme is implemented twice and the",
+    "two implementations have already drifted apart once without anything noticing",
+    "(RERUN_PLAN.md section 2.3, guard 10 of section 0.6).",
+    "",
+    "This file is READ BY TESTS ON BOTH SIDES, not just documented. rust/tests/",
+    "noise_gates.rs parses it and asserts the injector's own condition list and CLI",
+    "defaults agree with it; scripts/test_noise_conditions.py asserts every name here",
+    "resolves in noiseInject.CONDITIONS to the same parameters. A previous settings",
+    "file, scripts/noise_strategy_params.json, was never passed to the binary at all",
+    "and so silently meant nothing for the life of the project. This one fails a test",
+    "if it stops matching.",
+    "",
+    "The names are the condition keys shared by both injectors.",
+    "",
+    "Settled 2026-08-27 by the author, on the evidence in RERUN_PLAN.md section 13.9",
+    "and NOISE_DESIGN.md section 5.8: twelve replicates on real QM9, every condition",
+    "delivering the same amount of noise. Shape and contamination do not earn",
+    "separate settings; direction does."
+  ],
+
+  "settled": "2026-08-27",
+  "evidence": "RERUN_PLAN.md 13.9, NOISE_DESIGN.md 5.8",
+
+  "stage_1_full_grid": [
+    {
+      "name": "gaussian",
+      "why": "The reference case, and what both direct predecessors used, so the results stay comparable to theirs."
+    },
+    {
+      "name": "grouped_wider",
+      "why": "Whole scaffold families get a larger error, still centred on the truth. Indistinguishable from Gaussian on its own -- it is here because it is the comparator that makes grouped_shifted interpretable. The pair is the claim; neither half is."
+    },
+    {
+      "name": "grouped_shifted",
+      "why": "Whole scaffold families pushed in one direction. The ONLY zero-mean condition that separates: against grouped_wider at level 1.5 it costs 0.096 to 0.314 R2, at 2.5x to 7.4x the run-to-run spread, every p <= 0.003. Same amount of noise, same families, same targeting -- the only difference is direction."
+    },
+    {
+      "name": "censoring",
+      "why": "Values past the assay limit recorded as the limit. The most prevalent real mechanism, not zero-mean, and it cannot be dose-matched, so it runs on its own axis (fraction of labels clipped)."
+    }
+  ],
+
+  "stage_2_depth_only": [
+    {
+      "name": "student_t_nu5",
+      "why": "One tail weight, not three. The three settings are within 0.006 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.006 to 0.021. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
+    },
+    {
+      "name": "outlier_p10",
+      "why": "One contamination fraction, not three. Same evidence: every step of the 1% -> 5% -> 10% ladder is under 0.005 R2. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
+    },
+    {
+      "name": "laplace",
+      "optional": true,
+      "why": "Indistinguishable from Gaussian on every model at both levels (largest 0.0058 R2). Its value in NOISE_DESIGN.md section 2 is citational -- it is the distribution actually fitted to real bioactivity differences -- not empirical. Dropping it saves 720 training runs and costs nothing but the citation."
+    }
+  ],
+
+  "not_run": [
+    {
+      "name": "student_t_nu10",
+      "why": "Within 0.0054 R2 of Gaussian at the reporting level (0.29 of the run-to-run spread, p = 0.24), and within 0.002 of nu = 5. Represented by student_t_nu5."
+    },
+    {
+      "name": "student_t_nu3",
+      "why": "Within 0.0036 R2 of Gaussian at the reporting level, and within 0.006 of nu = 5. Represented by student_t_nu5."
+    },
+    {
+      "name": "outlier_p01",
+      "why": "Within 0.0058 R2 of Gaussian at the reporting level. Represented by outlier_p10."
+    },
+    {
+      "name": "outlier_p05",
+      "why": "Within 0.0034 R2 of Gaussian at the reporting level. Represented by outlier_p10. Note that outlier_p05 minus outlier_p01 reaches p = 0.001 on a difference of +0.003 R2 -- precision around zero, and the wrong sign for a dose response, not an effect."
+    },
+    {
+      "name": "skewed_draw",
+      "never_implemented": true,
+      "why": "A centred Gamma draw, asymmetric by draw rather than by mechanism. Tested in scripts/setting_selection_test.py and NOT built into either injector. Nothing at the reporting level; -0.045 R2 for the random forest alone at level 1.5 and nothing for the other two models. The asymmetry story is carried by censoring and by grouped_shifted, both of which are mechanisms with sources behind them rather than a chosen distribution."
+    }
+  ],
+
+  "settings_that_follow": {
+    "_comment": "The CLI defaults that make the single-setting decisions operative. Both injectors are tested against these.",
+    "nu": 5.0,
+    "outlier_p": 0.1,
+    "lambda": 3.0,
+    "group_fraction": 0.2,
+    "group_variance_share": 0.62,
+    "censor_side": "upper"
+  }
+}

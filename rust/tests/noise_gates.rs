@@ -1372,3 +1372,150 @@ fn a_scaffold_split_still_gives_validation_the_condition_and_leaves_test_flat() 
          for scaffolds the condition never reached — an injection that did not happen"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The settled condition set. `noise_conditions.json` at the repository root says
+// what the study runs; these tests make it binding on this side.
+//
+// The point is not documentation. `scripts/noise_strategy_params.json` was a
+// settings file that nothing ever read -- it was never passed to the binary, so
+// for the life of the project it silently meant nothing while everyone believed
+// it was in force. A file that describes the run and a run that ignores it is
+// worse than no file. These tests fail if the two stop agreeing.
+
+fn conditions_file() -> serde_json::Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crate sits inside the repository")
+        .join("noise_conditions.json");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {}", path.display(), e));
+    serde_json::from_str(&text).expect("noise_conditions.json is not valid JSON")
+}
+
+fn names_in(v: &serde_json::Value, key: &str) -> Vec<String> {
+    v[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("noise_conditions.json has no array at {}", key))
+        .iter()
+        .map(|e| e["name"].as_str().expect("every entry needs a name").to_string())
+        .collect()
+}
+
+#[test]
+fn the_settled_conditions_are_the_ones_this_injector_can_build() {
+    let spec = conditions_file();
+    let mut wanted = names_in(&spec, "stage_1_full_grid");
+    wanted.extend(names_in(&spec, "stage_2_depth_only"));
+
+    // Every condition the study runs must be one the self-test actually exercises,
+    // or it ships unverified.
+    let self_tested: HashSet<&str> = [
+        "gaussian",
+        "student_t_nu10",
+        "student_t_nu5",
+        "student_t_nu3",
+        "laplace",
+        "outlier_p01",
+        "outlier_p05",
+        "outlier_p10",
+        "grouped_wider",
+        "grouped_shifted",
+        "censoring",
+    ]
+    .into_iter()
+    .collect();
+
+    for name in &wanted {
+        assert!(
+            self_tested.contains(name.as_str()),
+            "the study runs '{}' but `--self-test` never exercises it, so it would ship \
+             unverified. Add it to the `types` list in `self_test`, or take it out of \
+             noise_conditions.json",
+            name
+        );
+    }
+}
+
+#[test]
+fn the_dropped_conditions_stay_dropped() {
+    let spec = conditions_file();
+    let stage_1 = names_in(&spec, "stage_1_full_grid");
+    let stage_2 = names_in(&spec, "stage_2_depth_only");
+    let dropped = names_in(&spec, "not_run");
+
+    for name in &dropped {
+        assert!(
+            !stage_1.contains(name) && !stage_2.contains(name),
+            "'{}' is listed as not run AND as something that runs. The evidence for \
+             dropping it is in RERUN_PLAN.md §13.9; if that has been revisited, move the \
+             entry rather than listing it twice",
+            name
+        );
+    }
+
+    // The four settings the twelve-replicate screen found redundant. Naming them
+    // explicitly means putting one back is a deliberate edit to a test, with the
+    // measurement in front of whoever does it, rather than a quiet line in a job script.
+    for name in ["student_t_nu10", "student_t_nu3", "outlier_p01", "outlier_p05"] {
+        assert!(
+            dropped.contains(&name.to_string()),
+            "'{}' was dropped on 2026-08-27: twelve replicates on real QM9 put every \
+             Student-t and Outlier setting within 0.006 R2 of Gaussian at the reporting \
+             level, against a test that could have detected 0.006 to 0.021. Putting it \
+             back costs 4,680 training runs (9.1% of the old design) and needs a reason \
+             that measurement does not already answer",
+            name
+        );
+    }
+
+    // The skewed draw is not in either injector and is not to be built.
+    let skewed = spec["not_run"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "skewed_draw")
+        .expect("skewed_draw belongs in not_run");
+    assert_eq!(
+        skewed["never_implemented"], serde_json::json!(true),
+        "the skewed draw was tested and rejected; it exists only in the local screen"
+    );
+}
+
+#[test]
+fn the_cli_defaults_are_the_settled_settings() {
+    // The single-setting decisions are only real if the defaults follow them. A grid
+    // that says "one Student-t setting" while the binary defaults to a different one
+    // is two sources of truth, and the job scripts would decide which wins.
+    let spec = conditions_file();
+    let settings = &spec["settings_that_follow"];
+    let f = fixture("cli_defaults");
+
+    // Ask for Student-t WITHOUT naming the tail weight. The shape's own name carries
+    // it, so the manifest says which one was actually used.
+    let out = f.run(&["--noise-shape", "student_t", "--noise-level", "0.5"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let nu = settings["nu"].as_f64().unwrap();
+    let want = format!("student_t_nu{}", nu);
+    let got = f.manifest()["noise_shape"].as_str().unwrap_or_default().to_string();
+    assert_eq!(
+        got, want,
+        "the binary defaults Student-t to '{}', but noise_conditions.json settles it at \
+         nu = {}. RERUN_PLAN.md §13.9: the three tail weights are within 0.006 R2 of each \
+         other, so exactly one runs, and the default is how that decision takes effect",
+        got, nu
+    );
+
+    // Same for the contamination fraction, which the manifest records by name.
+    let out = f.run(&["--noise-targeting", "outlier", "--noise-level", "0.5"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let want_p = settings["outlier_p"].as_f64().unwrap();
+    let got_p = f.manifest()["parameters"]["outlier_p"].as_f64().unwrap_or(-1.0);
+    assert!(
+        (got_p - want_p).abs() < 1e-6,
+        "the binary defaults the contaminated fraction to {}, but noise_conditions.json \
+         settles it at {}. One setting runs, not three",
+        got_p,
+        want_p
+    );
+}

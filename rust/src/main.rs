@@ -2955,7 +2955,8 @@ fn main() -> io::Result<()> {
         .arg(Arg::new("outlier_p")
              .long("outlier-p")
              .action(ArgAction::Set)
-             .help("Fraction of labels contaminated (outlier)"))
+             .help("Fraction of labels contaminated (outlier). Default 0.10, the one \
+                    setting the study runs (noise_conditions.json)"))
         .arg(Arg::new("censor_side")
              .long("censor-side")
              .action(ArgAction::Set)
@@ -3054,10 +3055,15 @@ fn main() -> io::Result<()> {
         .get_one::<String>("group_variance_share")
         .map(|v| v.parse().expect("--group-variance-share must be a valid float"))
         .unwrap_or(0.62);
+    // 0.10, not 0.05. Settled 2026-08-27 (`noise_conditions.json`, RERUN_PLAN.md
+    // §13.9): twelve replicates on real QM9 put 1%, 5% and 10% contamination within
+    // 0.005 R² of each other and of Gaussian, so one setting runs rather than three,
+    // and it is the top of Hampel's published range -- the strongest contamination,
+    // where anything that is ever going to show will show.
     let outlier_p: f32 = matches
         .get_one::<String>("outlier_p")
         .map(|v| v.parse().expect("--outlier-p must be a valid float"))
-        .unwrap_or(0.05);
+        .unwrap_or(0.10);
     let censor_side = match matches
         .get_one::<String>("censor_side")
         .map(|s| s.as_str())

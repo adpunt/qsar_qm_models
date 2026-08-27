@@ -299,7 +299,10 @@ def parse_arguments():
                         help="Who gets hit and how hard.")
     parser.add_argument("--nu", type=float, default=5.0,
                         help="Degrees of freedom for Student-t. Must be > 2 or the variance is "
-                             "undefined and the dose cannot be matched.")
+                             "undefined and the dose cannot be matched. Default 5 -- the ONE "
+                             "setting the study runs, settled 2026-08-27 in noise_conditions.json: "
+                             "nu = 10, 5 and 3 came within 0.006 R2 of each other and of Gaussian "
+                             "over twelve replicates on real QM9 (RERUN_PLAN.md 13.9).")
     parser.add_argument("--noise-lambda", type=float, default=3.0,
                         help="How many times wider the affected molecules' error is "
                              "(grouped_wide, outlier). Default 3, from Avdeef 2019.")
@@ -309,9 +312,12 @@ def parse_arguments():
     parser.add_argument("--group-variance-share", type=float, default=0.62,
                         help="Share of total variance carried by the group-level offset in "
                              "grouped_shift. Default 0.62, from Bentz et al. 2013 Table 7.")
-    parser.add_argument("--outlier-p", type=float, default=0.05,
+    parser.add_argument("--outlier-p", type=float, default=0.10,
                         help="Fraction of labels contaminated by the outlier type. Hampel (2001): "
-                             "1-10% for routine scientific data.")
+                             "1-10% for routine scientific data. Default 0.10 -- the ONE setting "
+                             "the study runs, settled 2026-08-27 in noise_conditions.json, because "
+                             "1%, 5% and 10% came within 0.005 R2 of each other over twelve "
+                             "replicates on real QM9 (RERUN_PLAN.md 13.9).")
     parser.add_argument("--censor-side", type=str, default="upper", choices=["upper", "lower"],
                         help="Which end of the label range the assay limit sits at.")
     parser.add_argument("--tuning", type=str2bool, default=False, help="Hyperparameter tuning (default is False)")
@@ -775,6 +781,17 @@ def load_qm9(target):
     return qm9
 
 def split_qm9(qm9, args, files):
+    """Shuffle, split, featurise and write QM9.
+
+    Returns the SHUFFLED dataset along with the indices, and the caller must
+    use the object it returns. `index_select` and `shuffle` both return a NEW
+    dataset and rebind the local name only, so every index below is a position
+    in the shuffled order. main() used to keep the indices and throw this
+    object away, then hand the original, unshuffled dataset to the graph
+    models -- which paired each graph with a different molecule's label
+    (RERUN_PLAN.md §2.10b). scripts/test_qm9_split_alignment.py fails if that
+    comes back.
+    """
 
     # Shuffle with random seed
     indices = torch.randperm(len(qm9))
@@ -908,7 +925,7 @@ def split_qm9(qm9, args, files):
     if 'sns' in args.molecular_representations:
         del mols_train
 
-    return (successful_train_idx, successful_test_idx, successful_val_idx,
+    return (qm9, successful_train_idx, successful_test_idx, successful_val_idx,
             build_scaffold_groups(written_canonical))
 
 def get_chemberta_model():
@@ -2687,16 +2704,23 @@ def main():
             val_size = int(args.sample_size * 0.1)
 
             if args.dataset == 'QM9':
-                train_idx, test_idx, val_idx, scaffold_groups = split_qm9(dataset, args, files)
+                # split_dataset is the SHUFFLED dataset the indices belong to.
+                # Passing `dataset` here instead voids the split for every graph
+                # model: qm9[train_idx] on the unshuffled object is an arbitrary
+                # subset, and the graph at each position belongs to a different
+                # molecule than the label written at that position.
+                split_dataset, train_idx, test_idx, val_idx, scaffold_groups = \
+                    split_qm9(dataset, args, files)
 
             else:
+                split_dataset = dataset
                 train_idx, test_idx, val_idx, scaffold_groups = load_and_split_polaris(dataset, args, files)
 
             gc.collect()
             
             target_domain = 1 # TODO: change, this is just a placeholder
             try: 
-                pairs = process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups)
+                pairs = process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, split_dataset, scaffold_groups)
                 for rep, model, msg in (pairs or []):
                     failed_cells.append((s, iteration, f"{rep}/{model}: {msg}"))
             except Exception as e:

@@ -144,11 +144,20 @@ def shape_draw(shape, n, rng):
     if kind == 'laplace':
         return rng.laplace(0.0, 1.0, n)
     if kind == 'skewed':
-        # PROPOSED (chat G), not in the Rust injector. Errors far more likely in one
-        # direction: g ~ Gamma(a, 1) centred on its mean. Skewness 2/sqrt(a).
-        # NOISE_DESIGN.md via RERUN_PLAN.md 13.3 rejected a skewed draw for the three
-        # experimental datasets, because log-scale potency error is symmetric. This
-        # condition measures what that rejection costs.
+        # ❌ TESTED AND REJECTED, 2026-08-27. Lives here and NOWHERE ELSE -- it is not
+        # in the Rust injector, it is not in the Python one, and it is not to be built.
+        # `noise_conditions.json` records it under `not_run` with `never_implemented`,
+        # and a test on each side fails if that changes.
+        #
+        # It exists so the rejection is a measurement rather than an argument. Errors
+        # far more likely in one direction: g ~ Gamma(a, 1) centred on its mean,
+        # skewness 2/sqrt(a). RERUN_PLAN.md 13.3 rejected a skewed draw for the three
+        # experimental datasets because log-scale potency error is symmetric; this
+        # measures what that rejection costs on QM9, which is computed rather than
+        # measured and so has no assay to justify any shape. The answer: nothing at the
+        # reporting level, and -0.045 R2 for the random forest alone at the top of the
+        # grid. The asymmetry story is carried by censoring and by grouped-shifted,
+        # which are mechanisms with sources behind them rather than a chosen shape.
         return rng.gamma(GAMMA_SHAPE, 1.0, n) - GAMMA_SHAPE
     raise ValueError(shape)
 
@@ -245,6 +254,7 @@ CONDITIONS = [
     ('Outlier p=0.10',  GAUSSIAN,             ('outlier', 0.10, LAMBDA),        'contamination'),
     ('Grouped wider',   GAUSSIAN,             ('grouped_wide', LAMBDA, GROUP_FRACTION), 'structure-keyed'),
     ('Grouped shifted', GAUSSIAN,             ('grouped_shift', BETWEEN_GROUP_SHARE),   'structure-keyed'),
+    # Rejected 2026-08-27 -- kept so the rejection stays reproducible, not to be built.
     ('Skewed draw',     ('skewed',),          UNIFORM,                          'asymmetric'),
 ]
 CONDITION_NAMES = [c[0] for c in CONDITIONS]

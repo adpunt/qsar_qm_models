@@ -136,16 +136,23 @@ perturbed continuous label is nothing but magnitude.
 | # | Strategy | What it is | Why it is in | Size | Shape |
 |---|---|---|---|---|---|
 | 1 | **Gaussian** | Every label nudged by a similar amount | The reference case, and what both direct predecessors used, so results stay comparable to theirs | `τ` | — |
-| 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | **ν = 5** — one setting, not three (§5.8) |
+| 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | **ν = 5**, settled 2026-08-27 — one setting, not three (§5.8) |
 | 3 | **Laplace** *(stage 2 only, if at all)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6, and measured, it is indistinguishable from Gaussian (§5.8) | `τ` | fixed |
 | 4a | **Grouped — wider** | Whole scaffold groups get wider errors, still centred on the true value | **Best-evidenced of the set.** Within-laboratory error must be multiplied by about three to reach between-laboratory error (§3.3). The only zero-mean condition where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected **molecule** fraction ≈ 0.2 |
 | 4b | **Grouped — shifted** ✅ | Whole scaffold groups have their labels pushed in one direction by a constant | 62% of real measurement variance sits **between** laboratories (§3.3) — and that describes laboratory *averages* differing, which is an offset, not a widening. Added 2026-08-26; see §2a | `τ` | ρ = 0.62, from the source |
-| 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | **p = 10%**, λ = 3 — one setting, not three (§5.8) |
+| 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | **p = 10%**, λ = 3, settled 2026-08-27 — one setting, not three (§5.8) |
 | 6 | **Censoring** ✅ | Values past the assay limit recorded as the limit | The most *prevalent* real mechanism (§3.5), and the only one that is not zero-mean | **cannot be dose-matched** — separate axis | fraction censored: 10%, 25%, 40% |
 
 Strategies 1–5 are dose-matched. 1, 2, 3, 4a and 5 are zero-mean; **4b is zero-mean in
 expectation but not in any one run — that asymmetry is its mechanism, not a defect**. Strategy 6
 is neither dose-matched nor zero-mean, which is why it needs its own axis and its own figure.
+
+**✅ Which of these actually run, and at which stage, was settled on 2026-08-27 and lives in
+`noise_conditions.json` at the repository root.** That file is read by `rust/tests/noise_gates.rs`
+and by `scripts/test_noise_conditions.py`, so a grid that stops matching it fails a test rather than
+quietly running. The evidence is §5.8. In short: Gaussian, both grouped conditions and censoring at
+full grid; one Student-t setting and one Outlier setting at depth only; Laplace optional; the other
+four settings dropped; the skewed draw never built.
 
 ### The exact algebra
 
@@ -1279,13 +1286,16 @@ measured between-group share. The parameter is still the sourced 0.62.
 **Grouped — wider hits the fraction it is given.** 0.200 of *molecules* affected against a requested
 0.2, using the molecule-fraction selection rule rather than counting groups.
 
-### 5.7 🔵 The skewed draw — a chat G proposal, not yet in either injector
+### 5.7 ❌ The skewed draw — tested, and rejected 2026-08-27
 
 §13.3 of `RERUN_PLAN.md` rejected a skewed *draw* for the three experimental datasets, on the sound
 argument that log-scale potency error is symmetric. The condition below exists to measure what that
 rejection costs on QM9, which is computed rather than measured and so has no assay to justify any
-shape. **It is implemented only in the local screen.** If it does not separate from Gaussian at
-matched amount, it never needs to enter either injector.
+shape. **It did not separate, and it is not being built** — nothing at the reporting level, and
+−0.045 R² for the random forest alone at the top of the grid. It stays in
+`scripts/setting_selection_test.py` so the rejection remains reproducible, is recorded in
+`noise_conditions.json` under `not_run` as never implemented, and a test on each side fails if it
+appears in a grid.
 
 > Centred Gamma: `ε = ((g − a)/√a)·τ` with `g ~ Gamma(a, 1)`. Mean zero, variance `τ²`, skewness
 > `2/√a`. At `a = 1` the sample skewness on real labels came out **+2.26** against the target +2.00,

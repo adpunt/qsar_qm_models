@@ -92,6 +92,7 @@ What can we say about uncertainty in these contexts?"*
 | **Ten replicates in stage 1** | 2026-08-26 | *"Let's do the 10 reps for stage 1 then."* Takes the whole staged design to 37% of the old one instead of 26% (§13.1) |
 | **Both forms of grouped noise are run** | 2026-08-26 | *"For the skewed noise lets go with option C."* Groups get wider errors *and*, as a separate condition, groups get shifted errors. See §13.3 |
 | **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
+| **The noise conditions, and how many settings of each** | 2026-08-27 | Settled on chat G's measurement (§13.9): Gaussian, both grouped conditions and censoring at full grid; **one** Student-t setting (ν = 5) and **one** Outlier setting (p = 10%) at depth only; Laplace optional; ν = 10, ν = 3, p = 1% and p = 5% dropped; the skewed draw never built. Lives in `noise_conditions.json`, enforced by tests on both sides |
 | **The between-laboratory variance finding goes in the Background** | 2026-08-24 | Nearly two-thirds of real measurement variance is between laboratories — you asked for this to be written up |
 
 **Three still-open items from the register that are not in §4 and are yours to close:**
@@ -139,7 +140,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 |---|---|---|---|
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
-| 3 | Noise redesign — specification, literature, local tests | ✅ done and sourced; **settings screened, §13.9** | §13 chats A, B, G |
+| 3 | Noise redesign — specification, literature, local tests | ✅ done, sourced, and the settings **settled 2026-08-27** (§13.9), in `noise_conditions.json` with a gate on each side | §13 chats A, B, G |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -2190,10 +2191,21 @@ find-and-replace will corrupt one while fixing the other.
 From `NOISE_DESIGN.md` §2 and §6.4, with the levels set by the range-finding run rather than
 chosen in advance.
 
-**Five zero-mean types, all delivering the same amount of noise:** Gaussian; Student-t at three
-tail weights; Laplace (QM9 only, pending decision 4); Grouped by scaffold; Outlier with random
-selection. **Plus censoring on its own axis**, because it is not zero-mean and cannot be
-dose-matched.
+**✅ The condition set was settled on 2026-08-27 and now lives in `noise_conditions.json`, which
+tests on both sides read** (§8). What runs, and why, is §13.9; what it is is here.
+
+| | Conditions | |
+|---|---|---|
+| **Full grid** | Gaussian · Grouped — wider · Grouped — shifted | three zero-mean types, all delivering the same amount of noise |
+| **Full grid, own axis** | Censoring | not zero-mean, cannot be dose-matched, and the largest effect in the study |
+| **Depth only** | Student-t at ν = 5 · Outlier at p = 10% | one setting each, not three: the three settings of each came within 0.006 R² of Gaussian and of one another over twelve replicates |
+| **Depth only, optional** | Laplace | indistinguishable from Gaussian; its value is citational. Dropping it saves 720 runs |
+| **Dropped** | Student-t at ν = 10 and ν = 3 · Outlier at p = 1% and 5% | measured redundant, §13.9 |
+| **Never built** | a skewed draw | tested in the local screen and rejected; the asymmetry story is carried by censoring and by grouped-shifted, which are mechanisms with sources rather than a chosen distribution |
+
+**Both grouped conditions run at full grid.** They differ *only* in whether the family's error is
+centred, and that single difference is worth 0.10–0.31 R² — the largest zero-mean effect anywhere in
+this study. The pair is the claim; neither half is.
 
 | Dataset | Axis | Levels |
 |---|---|---|
@@ -2420,6 +2432,25 @@ Its dose-matching check was verified to fail, on 8 of 10 conditions, when the so
 
 Gates 6 and 9 need a training run and are chat H's. Gates 8, 10 and 11 are chat D's. Each of chat
 A's gates was checked by removing the fix and confirming the gate fails.
+
+**One more gate, and it costs a second — chat G, 2026-08-27.** It guards the settled condition set:
+
+```
+python3 scripts/test_noise_conditions.py
+```
+
+`noise_conditions.json` at the repository root says what the study runs — four conditions at full
+grid, two at depth, one optional, four dropped and one never to be built, each with the measurement
+behind it (§13.9). The file is **read by tests on both sides**, not merely documented: this one
+checks that every name in it resolves in the Python injector with the settled parameters, and
+`rust/tests/noise_gates.rs` checks the same against the Rust injector and its command-line defaults.
+Both were verified to fail — put a dropped setting back and the Python gate names it; change a
+settled parameter and the Rust gate names the number and the number it should be.
+
+**Why a file and not a note.** `scripts/noise_strategy_params.json` was a settings file that nothing
+read: it was never passed to the binary, so for the life of the project it silently meant nothing
+while everyone believed it was in force (§2.2). A file that describes the run and a run that ignores
+the file is worse than no file.
 
 **One more gate, and it costs a second — chat K, 2026-08-26.** It guards the documents and the
 bibliography rather than the noise, which is why it sits outside the numbered list:
@@ -3036,7 +3067,7 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    correlations over thousands of molecules, so their precision comes from the molecule count, not
    the replicate count — one replicate is defensible **provided** a permutation null is reported so
    the reader has a reference distribution. Without repeats there is no run-to-run error bar at all.
-3. 🔵 **Which noise types run at full grid in stage 1? — chat G has now measured this (§13.9).**
+3. ✅ **SETTLED 2026-08-27 — which noise types run at full grid in stage 1 (§13.9).**
    Q1 asks for a decomposition *per noise type*, so every type that needs its own decomposition must
    run at full grid. The structurally distinct ones are **four, not three**: Gaussian (even),
    Grouped — wider (structure-keyed, centred), Grouped — shifted (structure-keyed, one-directional)
@@ -3093,8 +3124,8 @@ Specifically, in every chat:
 | **D** | Infrastructure: settings race, writer guards, environment | — | ✅ **DONE 2026-08-26** |
 | **E** | Cross-pipeline parity | — | ✅ **DONE 2026-08-26** |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
-| **G** | Local test: which noise settings earn their place | A | ✅ **yes** — it tests the settings, not the implementation |
-| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ + B C E G + §13.1 | ❌ blocked |
+| **G** | Local test: which noise settings earn their place | A | ✅ **DONE 2026-08-27** — §13.9; the set is in `noise_conditions.json`, gated on both sides |
+| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ G ✅ + B C E + §13.1 | ❌ blocked — but not on G. Read the conditions from `noise_conditions.json` rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight |
 | **I** | The uncertainty decomposition build | F | ❌ blocked on F's findings |
 | **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
 | **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
@@ -3903,9 +3934,9 @@ type are worth cluster time — and whether a skewed condition is needed (§13.3
 contamination fractions. Run every setting and there are nine conditions, not six — the largest
 single multiplier on the grid, larger than the replicate count.
 
-**🔵 IN PROGRESS 2026-08-26.** The harness is `scripts/setting_selection_test.py`, committed. What
-it has already established is below; the accuracy verdict per setting is the run itself and lands in
-§13.9.
+**✅ CLOSED 2026-08-27.** The harness is `scripts/setting_selection_test.py`, the run is
+`results/setting_selection_test.csv`, and the answer with the settled set is §13.9. Everything below
+is what the test found on the way.
 
 ##### What this test does that the earlier pilots did not
 
@@ -4070,17 +4101,27 @@ separates only above the reporting level. **Both are reported, and neither chang
 recommendation**, because grouped-shifted's case rests on level 1.5, where all three models agree at
 *p* ≤ 0.003.
 
-#### 🔵 Recommendations — these are recommendations, and the decision is yours
+#### ✅ SETTLED 2026-08-27 — the author approved all five
+
+These were put as recommendations and were approved as they stand. They are now in
+`noise_conditions.json`, which tests on both sides read (§8), and in the two injectors' defaults.
 
 | # | Recommendation | Why |
 |---|---|---|
-| 1 | **One Student-t setting, not three. Suggest ν = 5.** | The three are within 0.006 R² of each other and of Gaussian. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
-| 2 | **One Outlier setting, not three. Suggest p = 10%.** | Same evidence. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there |
+| 1 | **One Student-t setting, not three: ν = 5.** | The three are within 0.006 R² of each other and of Gaussian. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
+| 2 | **One Outlier setting, not three: p = 10%.** | Same evidence. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there |
 | 3 | **Both grouped conditions at full grid in stage 1** | The only zero-mean condition that separates, and its comparator is what makes it interpretable. The pair is a claim; neither half is |
 | 4 | **Laplace: not in stage 1.** Stage 2 if it is wanted for the citation | Indistinguishable from Gaussian on every model at both levels (largest 0.0058). Its stated value in `NOISE_DESIGN.md` §2 is citational, not empirical |
 | 5 | **Do not build the skewed draw** | See above. It also does not exist in either injector yet, so this is a saving rather than a deletion |
 
 **This closes chat A's open TODO** — *"how many Student-t and Outlier settings"* — at one each.
+
+**What implementing it touched.** `noise_conditions.json` (new, the settled set with its evidence);
+the Rust injector's contaminated-fraction default, 0.05 → 0.10, and the same default in
+`process_and_train.py`; three new tests in `rust/tests/noise_gates.rs` and a new
+`scripts/test_noise_conditions.py`, all four of which were verified to fail when the set or a
+parameter drifts. Job-script generation reads the settled set rather than restating it — that is
+chat H's step, and §13.9 is what it reads.
 
 #### What it costs, priced against §13.1
 
