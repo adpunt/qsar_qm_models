@@ -1454,17 +1454,23 @@ def _fill_non_finite(values):
 def score_training_molecules_out_of_fold(
         fit_predict, x_fit, y_fit, train_noise, args, s, rep, iteration,
         iteration_seed, file_no, model_name,
-        train_slice=slice(None), val_slice=slice(None),
+        train_slice=slice(None), val_slice=None,
         y_pred_std_calibrated=None, temperature=None,
         epistemic_from=None, restore_torch_rng=False):
     """Score the molecules a model fitted, out of fold, and write their rows.
 
     `train_slice` / `val_slice` say which provenance rows `x_fit` is made of, in
-    `vstack((x_train, x_val))` order. Seven model families merge validation into
-    training before fitting (RERUN_PLAN.md §2.5) and validation now carries its own
-    independently drawn noise, so those rows are corrupted training rows and belong
-    here on the same footing; a family that holds part of validation back for
-    calibration passes the slice it actually fitted.
+    `vstack((x_train, x_val))` order.
+
+    `val_slice` defaults to None — no validation rows — because since 2026-08-27
+    **no model stacks validation into its training set** (RERUN_PLAN.md §2.12).
+    It used to differ by family, and three callers went on passing the slice that
+    described the old regime after the merge was removed: the forest took the
+    `slice(None)` default and NGBoost and the Gauche GP passed half of validation,
+    so each asked the provenance for molecules its model no longer fitted. The
+    guard below caught it rather than mis-attributing the noise, which is what it
+    is for. The default is None so that forgetting is the safe case; a family that
+    genuinely fits some of validation must say so explicitly.
 
     UNITS. Predictions and uncertainties are written in the model's own
     (standardised) units, exactly as on a test row, so no column changes meaning
@@ -1911,7 +1917,7 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
 
         score_training_molecules_out_of_fold(
             _fp, x_val_train, y_val_train, train_noise, args, s, rep, iteration,
-            iteration_seed, file_no, 'ngboost', val_slice=_val_used)
+            iteration_seed, file_no, 'ngboost', val_slice=None)
 
     return metrics[3]
 
@@ -2269,7 +2275,10 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         # training inputs, so scoring them with the fitted model would report
         # confidence that says nothing about the labels -- this family is the
         # clearest case for why the out-of-fold pass exists at all.
-        _val_used = slice(0, len(x_val) // 2)
+        # `val_slice=None`: `x_train_full` IS `x_train`, because validation is no
+        # longer stacked into training (the branch above, settled 2026-08-27,
+        # RERUN_PLAN.md 2.12). The half-of-validation slice this used to pass was
+        # the old regime's, and it outlived it.
 
         def _fp(x_fit, y_fit, x_score):
             xt = torch.from_numpy(np.asarray(x_fit)).double()
@@ -2293,7 +2302,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         # result is what it would have been without the out-of-fold pass.
         score_training_molecules_out_of_fold(
             _fp, x_train_full, y_train_full, train_noise, args, s, rep, iteration,
-            iteration_seed, file_no, model_name, val_slice=_val_used,
+            iteration_seed, file_no, model_name, val_slice=None,
             restore_torch_rng=True)
 
     return metrics[3]
