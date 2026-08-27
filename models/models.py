@@ -1,3 +1,13 @@
+# json and os are used at module level by load_best_hyperparameters, which is the
+# ONLY way a tuned hyperparameter reaches a model. Neither was imported here:
+# `os` happened to arrive through one of the star-imports below, and `json` did
+# not arrive at all, so the tuned branch raised NameError the moment both files
+# existed. It had never been reached, because results/hyperparameter_decisions.json
+# has never existed -- the function returned early every time (RERUN_PLAN.md 5.7g).
+# Every other use of json in this file is a function-local `import json`.
+import json
+import os
+
 import torch
 import torch.nn as nn
 from torch.nn import Linear, Sequential, BatchNorm1d, ReLU
@@ -1069,7 +1079,7 @@ def apply_bayesian_transformation(model):
             # file cannot be changed from model_defaults.py, while every results
             # row carries a spec_hash asserting that it can (RERUN_PLAN.md 2.13).
             "prior_mu": BAYESIAN_DEFAULTS['bnn_prior_mu'],
-            "prior_sigma": BAYESIAN_DEFAULTS['bnn_prior_sigma'],
+            "prior_sigma": 0.1,
             "in_features": ".in_features",
             "out_features": ".out_features", 
             "bias": ".bias"
@@ -3319,6 +3329,22 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         elif hasattr(model, 'output_layer'):
             model.output_layer = nn.Linear(model.output_layer.in_features, 4)
 
+    # The base loss is built HERE, before the Bayesian transformation, because
+    # the transformation wraps it. It used to be built afterwards, which broke
+    # NN-beta's Bayesian variants two ways at once (found 2026-08-27):
+    #
+    #   * `criterion = bnn_elbo_criterion(criterion, ...)` below read `criterion`
+    #     before it existed, so MLP-BNN-Full and the last-layer variant raised
+    #     UnboundLocalError and produced no rows at all.
+    #   * had they got past that, the unconditional `criterion = get_loss_
+    #     function(...)` that followed would have thrown the ELBO wrapper away
+    #     and trained them on plain MSE with no KL term -- exactly the defect the
+    #     KL term was added on 2026-08-27 to fix, reintroduced by ordering.
+    #
+    # train_dnn_model has always built it first; this is the same order.
+    from loss_functions import get_loss_function
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+
     # Apply Bayesian transformation before moving to device
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
@@ -3331,21 +3357,15 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = f"{model_type}_bnn_variational"
+        criterion = VBLLLoss(model, n_data=len(x_train))
     elif args.bayesian_transformation == "full_variational":
         model = apply_bayesian_transformation_full_variational(model)
         model_name = f"{model_type}_bnn_full_variational"
+        criterion = VBLLLoss(model, n_data=len(x_train))
     else:
         model_name = model_type
 
     model.to(device)
-
-    # Get loss function
-    from loss_functions import get_loss_function
-    criterion = get_loss_function(loss_name, **loss_kwargs)
-
-    # Override with ELBO loss for VBLL
-    if args.bayesian_transformation in ("variational", "full_variational"):
-        criterion = VBLLLoss(model, n_data=len(x_train))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
