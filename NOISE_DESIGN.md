@@ -485,6 +485,63 @@ Notes:
 ⚠️ Attribute as *estimated for heterogeneous public Ki data with SD 0.54 pKi units*, not as
 a universal ceiling — the derivation is in the paywalled body and is unverified.
 
+### 4c. The same anchors on the shared scale — what a QM9 level of 1.0 or 1.5 corresponds to
+
+Added 2026-08-27, after the author asked what can be cited at a level between 1.0 and 1.5.
+
+Since the one-shared-grid decision (`RERUN_PLAN.md` §2.12) every dataset sweeps the same ladder,
+read as a fraction of that fold's clean training label spread. That makes the published assay
+errors above convertible onto the QM9 axis: **divide the assay error in log units by that
+dataset's clean label spread.**
+
+The three spreads, and where each comes from:
+
+| Dataset | Clean label spread | How it is known |
+|---|---|---|
+| hERG (pKi) | **0.896** | Measured directly on the real data after the shared-grid change — forest + ECFP4, level 1.00 delivered 0.896 log units against a spread of 0.896 (`RERUN_PLAN.md` §2.12) |
+| Caco-2 | **≈0.44** | Derived: the top of the grid carries 1.9× the 0.35 assay error, so 1.5 × spread = 0.665 |
+| logD | **≈1.19** | Derived: the top of the grid carries 11.9× the 0.15 within-lab error, so 1.5 × spread = 1.785 |
+
+**Every anchor in §4 placed on the shared scale:**
+
+| Source | What it measures | log units | On the shared scale |
+|---|---|---|---|
+| Wenlock et al. 2011 | logD, within one laboratory | 0.15 | **0.13** |
+| OECD Test Guideline 117 | logD, between methods | 0.50 | **0.42** |
+| Kramer et al. 2012 | pKi across public data (hERG stand-in) | 0.54 | **0.60** |
+| Sato et al. 2018 | hERG, between assay formats (RMSD, n = 209) | 0.737 | **0.82** |
+| Bentz et al. 2013 | Caco-2, median across 11 laboratories | 0.35 | **0.79** |
+| O'Hagan & Kell 2015, reporting Hayeshi et al. 2008 | Caco-2, top of the published inter-laboratory range (*"within a factor of 2–5"* = 0.30–0.70) | 0.70 | **1.58** |
+
+**The answer to "what can I cite between 1.0 and 1.5".**
+
+1. **Caco-2 inter-laboratory variability at the top of its published range is 1.58 of the Caco-2
+   label spread.** This is the only single published figure that lands there. Cite it to
+   **O'Hagan & Kell 2015** as the secondary source for Hayeshi et al. 2008 — §4's blocklist forbids
+   citing the fold figures to Hayeshi directly, and the *"within a factor of 2–5"* wording is the
+   verified one (§4b item 5).
+2. **Twice the published assay error**, which is already the rule the experimental grids were built
+   on (§6.4: *"each grid brackets one unit of real error and runs to roughly twice it"*), puts
+   **Caco-2 at 1.58 and hERG at 1.21**. This is the stronger argument of the two, because it is a
+   rule the design already applies rather than a single number picked because it fits.
+3. **Nothing anchors logD above 0.42.** Its label spread is wide and its assay is precise, so on
+   this scale logD never leaves the bottom of the grid. Say so rather than letting a reader
+   average across the three.
+
+**What cannot be claimed, and it has to be stated in the Methods.** QM9 has no assay error at all —
+Kolmar & Grulke, quoted in §4: *"quantum mechanical calculations do not have random experimental
+error."* A QM9 level of 1.5 is **not** a realistic measurement error and must never be described as
+one. What the conversion above buys is narrower and still worth having: a level of 1.5 is the amount
+of error that the noisiest real assay in this study actually carries between laboratories. That is a
+statement about the range being realistic for *some* endpoint, not about QM9.
+
+⚠️ **One number needs settling and it is a one-line check.** §6.4 of this document says one unit of
+real error is **0.76** of the Caco-2 label spread; `RERUN_PLAN.md` §2.12 says **0.79**. The two imply
+Caco-2 label spreads of 0.461 and 0.443. Nothing in either document records the spread directly —
+both figures are derived. Print the clean Caco-2 training label SD once on the cluster and fix both.
+Until then, quote the anchor as **≈0.8 of the label spread** and the top-of-range figure as
+**≈1.5–1.6**, not to three digits.
+
 ### 🚫 Numbers that must NOT enter the paper
 
 Each is in circulation, each is wrong, each was traced to source during the August 2026
