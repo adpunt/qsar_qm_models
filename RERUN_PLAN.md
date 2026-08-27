@@ -6542,6 +6542,66 @@ pipeline at all (§2.6).
 
 ---
 
+#### Chat N — The uncertainty screen: which models and which representations
+
+🔴 **OPEN. Nothing has run.** A first attempt on 2026-08-27 was cancelled by the author because it
+was built to answer the wrong question. Read the next paragraph before anything else.
+
+**THE ONLY THING THIS CHAT DECIDES.** Two lists at the top of
+`slurm_scripts_uncertainty_rerun/generate_scripts.py`:
+
+    MODELS   currently 7   QRF, NGBoost, GP, BNN-Full, VBLL-Full, MLP-BNN-Full, MLP-VBLL-Full
+    REPS     currently 4   ECFP4, PDV, SNS, MHG-GNN   — Avalon and ChemBERTa are NOT in it
+
+The uncertainty runs are 420 jobs. Those two lists are what makes them 420. A model whose predicted
+uncertainty does not track injected noise is a job that produces a row nobody can use, and the
+author has asked repeatedly which models and which representations are worth running. **That is the
+question. It is not the noise types.**
+
+**THE NOISE TYPES ARE SETTLED AND ARE NOT UNDER TEST.** `noise_conditions.json`, settled 2026-08-27,
+gated by tests on three sides. The cancelled attempt ran five of them and reported per-noise-type
+findings; that multiplied the cost fivefold and answered nothing that was open. **Use ONE noise
+type — plain Gaussian — and spend everything on the two lists.**
+
+**THE METRIC IS THE ONE THE PAPER ALREADY REPORTS.** Spearman correlation between predicted
+per-molecule uncertainty and injected noise magnitude, computed **within one noise level**, scored
+**out of fold**, per (model, representation). That is `paper.tex` `tab:top_unc_noise` — "Strongest
+and weakest model–representation combinations for uncertainty–noise correlation". Alongside it the
+paper reports the uncertainty-versus-absolute-error correlation and coverage at 1σ and 2σ. Report
+those. Do not invent a statistic; `scripts/uncertainty_stats.py` already has every one of them.
+
+**THE RUN.**
+
+    QM9, -n 5000, 1 replicate, --oof-folds 3, -u True
+    one noise type: --noise-shape gaussian --noise-targeting uniform
+    two levels: --noise-level 0.0 1.5
+    all six representations: ecfp4 continuous_pdv mhggnn avalon chemberta sns
+    all seven uncertainty models
+
+Run it locally in `env_test`, NOT the base Anaconda — the laptop's base has scikit-learn 1.3.2
+against a 1.6.1 pin and every quantile-forest fit raises `Invalid parameter 'monotonic_cst'`.
+`env_test` already exists on the laptop with the pinned versions. **Do not pip install anything
+into base**: §2.8i is explicit that a PyPI wheel over a conda package is what puts four OpenMP
+runtimes in one interpreter and segfaults LightGBM and the Gaussian process.
+
+Anything large goes on `/Volumes/seagate`, the author's external drive.
+
+**THE DELIVERABLE IS AN EDIT, NOT A FINDING.** One table — uncertainty-versus-noise correlation per
+model and representation, one table per representation, nothing pooled, nothing averaged — and then
+the two lists in the generator edited to match, committed, with the job count before and after.
+**If a number does not change a line of that file, do not report it.**
+
+**What the cancelled attempt got wrong, so it is not repeated:** it tested the settled noise types
+instead of the open lists; it reported per-noise-type results the author had no decision to make
+about; it dropped NGBoost — one of the author's most noise-robust models — without asking; and it
+never once connected a number to a line of the generator. The author's words: *"Your refusal to
+connect results to implementation is downright offensive."*
+
+**Two defects it did find, both fixed and both still in force** — §3.1e (the out-of-fold pass asked
+for validation rows no model fits, which had silently disabled training-molecule scoring for the
+quantile forest, NGBoost and the Gaussian process) and the censoring name normalisation in
+`scripts/uncertainty_stats.py`.
+
 #### Chat H — Job scripts, preflight, gates, launch
 
 **Blocked** on A, B, C, D, E, G and the run design in §13.1.
