@@ -427,8 +427,10 @@ def noise_group_ids(scaffs):
     one group a single offset draw moves a third of the dataset at once and the
     realised dose swings by 11%. Each acyclic molecule becomes its own group.
 
-    The scaffold SPLIT keeps the raw scaffolds, because that is what the real pipeline's
-    splitter does. Only the noise grouping is corrected.
+    The corrected ids are used for BOTH the noise grouping and the scaffold split, at
+    every call site, because the real pipeline corrects both. Leaving the split on raw
+    scaffolds put the whole acyclic third of the data on one side of it and the clean
+    baseline collapsed to R2 = -0.40, which is how the omission was found.
     """
     return np.asarray([f"__singleton_{i}" if (sc == '' or sc is None) else sc
                        for i, sc in enumerate(scaffs)], dtype=object)
@@ -830,12 +832,25 @@ def verdict_table(cdf):
         v = ('EARNS FULL GRID' if len(passes)
              else ('separates only above the reporting level' if len(anywhere)
                    else 'REDUNDANT with its reference'))
+        # Guard 8, second half. The accuracy floor drops a (replicate, model) row, so
+        # a contrast can rest on fewer replicates than the run has -- and the smallest
+        # detectable difference SHRINKS as replicates are lost only if you forget the
+        # sqrt(n). It does not; but the row was labelled "what twelve replicates could
+        # have detected" while the winning contrast had eleven. The count travels with
+        # the number now, so the label cannot drift from the arithmetic again.
+        if len(at_report):
+            best = at_report.loc[at_report.min_detectable_delta.idxmin()]
+            detectable, detectable_n = float(best.min_detectable_delta), int(best.n_replicates)
+            detectable_model = str(best.model)
+        else:
+            detectable, detectable_n, detectable_model = np.nan, 0, ''
         out.append(dict(
             condition=name, verdict=v,
             largest_abs_delta_at_reporting_level=(at_report.mean_delta_r2.abs().max()
                                                   if len(at_report) else np.nan),
-            smallest_detectable_delta=(at_report.min_detectable_delta.min()
-                                       if len(at_report) else np.nan),
+            smallest_detectable_delta=detectable,
+            detectable_n_replicates=detectable_n,
+            detectable_model=detectable_model,
             models_passing_at_reporting_level=len(passes),
             models_passing_at_any_level=len(anywhere)))
     return pd.DataFrame(out)
@@ -979,7 +994,8 @@ def analyse(df, shape):
         flag = "" if alt == r.verdict else f"   <-- WITHOUT the filter: {alt}"
         print(f"  {r.condition:<20} {r.verdict:<42} largest |dR2| at level {REPORTING_LEVEL}: "
               f"{r.largest_abs_delta_at_reporting_level:.4f}   (could have seen "
-              f"{r.smallest_detectable_delta:.4f}){flag}")
+              f"{r.smallest_detectable_delta:.4f} on {r.detectable_model} at "
+              f"{r.detectable_n_replicates} replicates){flag}")
     disagree = [r.condition for _, r in verdicts.iterrows()
                 if r.condition in other.index and other.loc[r.condition, 'verdict'] != r.verdict]
     print(f"\n  The declared filter changes the verdict for: {', '.join(disagree)}"

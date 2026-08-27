@@ -32,7 +32,7 @@
     },
     {
       "name": "grouped_shifted",
-      "why": "Whole scaffold families pushed in one direction. The ONLY zero-mean condition that separates: against grouped_wider at level 1.5 it costs 0.096 to 0.314 R2, at 2.5x to 7.4x the run-to-run spread, every p <= 0.003. Same amount of noise, same families, same targeting -- the only difference is direction."
+      "why": "Whole scaffold families pushed in one direction. The ONLY zero-mean condition that separates: against grouped_wider at level 1.5 it costs 0.0963 R2 on the random forest and 0.1419 on LightGBM, at 2.52x and 2.71x the run-to-run spread, paired t p = 0.0031 and 0.0002. The wider range quoted before 2026-08-27 (0.096 to 0.314 at up to 7.4x) included a Ridge row, and Ridge is not in the study. Same amount of noise, same families, same targeting -- the only difference is direction."
     },
     {
       "name": "censoring",
@@ -42,38 +42,38 @@
   "stage_2_depth_only": [
     {
       "name": "student_t_nu5",
-      "why": "One tail weight, not three. The three settings are within 0.006 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.006 to 0.021. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
+      "why": "One tail weight, not three. The three settings are within 0.0036 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.0064 to 0.0107. Every figure here is on the two roster models at twelve replicates; the wider ranges quoted before 2026-08-27 were Ridge rows, and Ridge is not in the study. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
     },
     {
       "name": "outlier_p10",
-      "why": "One contamination fraction, not three. Same evidence: every step of the 1% -> 5% -> 10% ladder is under 0.005 R2. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
+      "why": "One contamination fraction, not three. Same evidence: every step of the 1% -> 5% -> 10% ladder is under 0.0049 R2, and the largest of the three against Gaussian is 0.0047. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
     },
     {
       "name": "laplace",
-      "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every model at both levels tested (largest 0.0087 R2 across roster models; the 0.0058 previously quoted here was a Ridge row, and Ridge is not in the study -- corrected 2026-08-27), so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
+      "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every roster model at both levels tested. The largest difference anywhere is 0.0136 R2 -- LightGBM at level 1.5, against a replicate-to-replicate spread of 0.0574, so 0.24 of the wobble, paired t p = 0.350. At the reporting level it is 0.0024. Two earlier figures here, 0.0058 and 0.0087, were both wrong: the first was a Ridge row and Ridge is not in the study, the second understated the level-1.5 difference. Corrected 2026-08-27 from results/setting_selection_test.csv, so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
     }
   ],
   "not_run": [
     {
       "name": "student_t_nu10",
-      "why": "Within 0.0054 R2 of Gaussian at the reporting level (0.29 of the run-to-run spread, p = 0.24), and within 0.002 of nu = 5. Represented by student_t_nu5."
+      "why": "Within 0.0017 R2 of Gaussian at the reporting level (0.10 of the run-to-run spread, paired t p = 0.698), and within 0.0019 of nu = 5. Represented by student_t_nu5."
     },
     {
       "name": "student_t_nu3",
-      "why": "Within 0.0036 R2 of Gaussian at the reporting level, and within 0.006 of nu = 5. Represented by student_t_nu5."
+      "why": "Within 0.0036 R2 of Gaussian at the reporting level (0.22 of the spread, paired t p = 0.416), and within 0.0027 of nu = 5. Represented by student_t_nu5."
     },
     {
       "name": "outlier_p01",
-      "why": "Within 0.0058 R2 of Gaussian at the reporting level. Represented by outlier_p10."
+      "why": "Within 0.0047 R2 of Gaussian at the reporting level (0.29 of the spread, paired t p = 0.178). Represented by outlier_p10."
     },
     {
       "name": "outlier_p05",
-      "why": "Within 0.0034 R2 of Gaussian at the reporting level. Represented by outlier_p10. Note that outlier_p05 minus outlier_p01 reaches p = 0.001 on a difference of +0.003 R2 -- precision around zero, and the wrong sign for a dose response, not an effect."
+      "why": "Within 0.0034 R2 of Gaussian at the reporting level (0.21 of the spread, paired t p = 0.239). Represented by outlier_p10. Note that outlier_p05 minus outlier_p01 reaches paired t p = 0.002 on LightGBM on a difference of +0.0049 R2 -- precision around zero, and the next step of the same ladder goes the other way at -0.0019, so it is not a dose response."
     },
     {
       "name": "skewed_draw",
       "never_implemented": true,
-      "why": "A centred Gamma draw, asymmetric by draw rather than by mechanism. Tested in scripts/setting_selection_test.py and NOT built into either injector. Nothing at the reporting level; -0.045 R2 for the random forest alone at level 1.5 and nothing for the other two models. The asymmetry story is carried by censoring and by grouped_shifted, both of which are mechanisms with sources behind them rather than a chosen distribution."
+      "why": "A centred Gamma draw, asymmetric by draw rather than by mechanism. Tested in scripts/setting_selection_test.py and NOT built into either injector. Nothing at the reporting level -- 0.0016 R2, 0.10 of the spread, paired t p = 0.604. At level 1.5 it does separate on the random forest, -0.0445 R2 at 1.31 of the spread, paired t p = 0.007, but not on LightGBM (-0.0073, 0.13 of the spread, p = 0.571). One model at one level above where the paper reports. The asymmetry story is carried by censoring and by grouped_shifted, both of which are mechanisms with sources behind them rather than a chosen distribution."
     }
   ],
   "settings_that_follow": {

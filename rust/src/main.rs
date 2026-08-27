@@ -1914,7 +1914,25 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
     // called it "level 0.5". The column below is rigged: the validation labels' spread
     // is three times training's, so an unanchored dose would be out by a factor of three
     // and could not be mistaken for sampling noise.
-    println!("\ngate: validation is dosed against the CLEAN TRAINING spread, not its own");
+    //
+    // Averaged over seeds, not compared on one. This is the third launch gate to have
+    // needed that fix and the only one that exits 1, so it is the one that stops the
+    // run (chat G, 2026-08-27). On a 4,000-molecule column Student-t ν=3 delivered
+    // +36.54% against a 21.21% band and failed on every attempt, while the same
+    // construction averaged over 100 seeds is flat. The validation part is a fifth of
+    // an already small column, so its per-draw dose spread is the largest anywhere in
+    // the self-test, and the ratio of two single heavy-tailed draws is not a statistic
+    // about the anchoring rule at all. It passed on the full 133,885-label column only
+    // because that split is large enough to hide the problem — which is the worst way
+    // for a gate to be right, since it makes the gate's verdict depend on how much data
+    // it happens to be handed. The defect being tested is a factor of three; a mean
+    // over 100 seeds catches that with several orders of magnitude to spare.
+    const VALIDATION_SEEDS: u64 = 100;
+    println!(
+        "\ngate: validation is dosed against the CLEAN TRAINING spread, not its own \
+         (mean over {} seeds)",
+        VALIDATION_SEEDS
+    );
     let cut = (labels.len() * 4) / 5;
     let train_part: Vec<f32> = labels[..cut].to_vec();
     let train_names: Vec<String> = canonical[..cut].to_vec();
@@ -1932,63 +1950,81 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
         val_sd_here,
         val_sd_here / train_sd_here
     );
+    let val_seeds: Vec<u64> = (0..VALIDATION_SEEDS).map(|i| 2000 + i * 6151).collect();
     for (shape, targeting) in &types {
         if !targeting.is_dose_matched() {
             continue;
         }
-        let spec = NoiseSpec {
-            shape: *shape,
-            targeting: *targeting,
-            level: 0.5,
-            units: DoseUnits::Spread,
-            seed: 42,
-        };
-        let t_ctx = PlanContext::training(&train_part);
-        let t_plan =
-            match build_noise_plan(&train_part, &train_names, &spec, groups, &t_ctx) {
+        let mut ratios: Vec<f32> = Vec::new();
+        let mut train_doses: Vec<f32> = Vec::new();
+        let mut val_doses: Vec<f32> = Vec::new();
+        let mut label = String::new();
+        let mut errored = false;
+        for seed in &val_seeds {
+            let spec = NoiseSpec {
+                shape: *shape,
+                targeting: *targeting,
+                level: 0.5,
+                units: DoseUnits::Spread,
+                seed: *seed,
+            };
+            let t_ctx = PlanContext::training(&train_part);
+            let t_plan =
+                match build_noise_plan(&train_part, &train_names, &spec, groups, &t_ctx) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        println!("  {:<34} FAIL: {}", targeting.name(), e);
+                        failures += 1;
+                        errored = true;
+                        break;
+                    }
+                };
+            let v_spec = NoiseSpec {
+                seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
+                ..spec.clone()
+            };
+            let v_ctx = PlanContext {
+                reference_labels: &train_part,
+                shared: Some(&t_plan.targeting_state),
+                apply: true,
+                split_name: "val",
+            };
+            let v_plan = match build_noise_plan(&val_part, &val_names, &v_spec, groups, &v_ctx) {
                 Ok(p) => p,
                 Err(e) => {
                     println!("  {:<34} FAIL: {}", targeting.name(), e);
                     failures += 1;
-                    continue;
+                    errored = true;
+                    break;
                 }
             };
-        let v_spec = NoiseSpec {
-            seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
-            ..spec.clone()
-        };
-        let v_ctx = PlanContext {
-            reference_labels: &train_part,
-            shared: Some(&t_plan.targeting_state),
-            apply: true,
-            split_name: "val",
-        };
-        let v_plan = match build_noise_plan(&val_part, &val_names, &v_spec, groups, &v_ctx) {
-            Ok(p) => p,
-            Err(e) => {
-                println!("  {:<34} FAIL: {}", targeting.name(), e);
-                failures += 1;
-                continue;
-            }
-        };
-        let band = {
-            let a = dose_tolerance(shape, &t_plan.epsilon, t_plan.effective_n);
-            let b = dose_tolerance(shape, &v_plan.epsilon, v_plan.effective_n);
-            (a * a + b * b).sqrt()
-        };
-        let err = v_plan.realised_dose_label_units / t_plan.realised_dose_label_units - 1.0;
+            label = t_plan.noise_type.clone();
+            train_doses.push(t_plan.realised_dose_label_units);
+            val_doses.push(v_plan.realised_dose_label_units);
+            ratios.push(v_plan.realised_dose_label_units / t_plan.realised_dose_label_units - 1.0);
+        }
+        if errored {
+            continue;
+        }
+        let err = population_mean(&ratios);
+        let sd = population_sd(&ratios);
+        // three standard errors of the mean, floored so a tiny spread cannot make the
+        // gate unreasonably strict — the same rule the flat-dose gate above uses
+        let band = (3.0 * sd / (ratios.len() as f32).sqrt()).max(0.005);
         let ok = err.abs() <= band;
         if !ok {
             failures += 1;
         }
-        // what the unanchored version would have delivered, for contrast
+        // guard 4: the ratio never appears without the two doses it is a ratio of
         let unanchored = 0.5 * val_sd_here;
         println!(
-            "  {:<34} train={:.6} val={:.6} ({:+.2}%, band {:.2}%)  [val's own spread would give {:.6}]  {}",
-            t_plan.noise_type,
-            t_plan.realised_dose_label_units,
-            v_plan.realised_dose_label_units,
+            "  {:<34} train={:.6} val={:.6} ({:+.2}%, per-run SD {:.2}%, band {:.2}%)  \
+             [val's own spread would give {:.6}]  {}",
+            label,
+            population_mean(&train_doses),
+            population_mean(&val_doses),
             err * 100.0,
+            sd * 100.0,
             band * 100.0,
             unanchored,
             if ok { "ok" } else { "FAIL" }
@@ -2209,15 +2245,22 @@ struct FeaturisationFailure {
     reason: String,
 }
 
-/// Build the 256-byte ECFP4 block for one molecule.
+/// Write one memory-mapped split: every molecule's features, label and record.
 ///
-/// Returns the block and, when it could not be computed, the reason. On failure
-/// the block is 256 zero bytes: the record must stay the same length whatever
-/// happens, because a short record shifts the read offset of every molecule
-/// after it and the whole file is silently misparsed from that point on
-/// (RERUN_PLAN.md §2.7). The failure is not swallowed — it is recorded, and the
-/// run refuses to finish with any recorded failure unless explicitly permitted,
-/// so a zero fingerprint can never reach a model as if it were real features.
+/// Records are ALL-OR-NOTHING and every record is the same length. That is the
+/// property the Python reader depends on: a record short by even one field
+/// shifts the read offset of every molecule after it, and the file is then
+/// silently misparsed from that point on with no error anywhere
+/// (RERUN_PLAN.md §2.7).
+///
+/// The ECFP4 block is where that used to break. It is no longer computed here —
+/// this side had no route to Morgan radius 2, so the Python writer computes it
+/// and it is carried through as a fixed `[u8; 256]` (see `SmilesData`), which
+/// cannot be short. What is checked here is the other half: an all-zero block
+/// means the Python writer's own refusal was bypassed, and a row of zeros would
+/// train as if it were real features. Such a molecule is recorded in `failures`
+/// and `main` refuses to finish with any recorded failure unless
+/// `--allow-featurisation-failures` is passed.
 fn write_data(
     reader: &mut BufReader<File>,
     writer: &mut BufWriter<File>,
@@ -2263,7 +2306,8 @@ fn write_data(
                         split: split_name.to_string(),
                         index,
                         canonical_smiles: smiles_data.canonical_smiles.clone(),
-                        reason: "ECFP4 is all zeros; a row with no features                                  would train as if it were featurised"
+                        reason: "ECFP4 is all zeros; a row with no features would \
+                                 train as if it were featurised"
                             .to_string(),
                     });
                 }

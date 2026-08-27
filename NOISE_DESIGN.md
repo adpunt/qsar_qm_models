@@ -1,9 +1,9 @@
 # Noise injection — the redesign
 
-**Status: the dose-matching rule is approved; one item is open.** This is the specification for
-what replaces the old six noise strategies. The rule that the noise level becomes the amount
-actually delivered was approved by the author on 2026-08-21. **One question remains open — whether
-Laplace is queued as a condition (§7).** Everything else in §7 is settled.
+**Status: settled. Nothing in this document is open.** This is the specification for what replaces
+the old six noise strategies. The rule that the noise level becomes the amount actually delivered was
+approved by the author on 2026-08-21. The condition set was settled on 2026-08-27 and the last open
+question — whether Laplace runs — was closed the same day: **it is kept, in the deep run only** (§7).
 
 **It is no longer a paper design.** Chat A built the Rust half on 2026-08-26 (`d25bcb0`) and it
 matches the reference implementation (§5.1c); the Python half is chat B's and §6.2 step 6 specifies
@@ -90,7 +90,7 @@ Two different axes, and they answer different questions:
 
 | Axis | Use it for | Why |
 |---|---|---|
-| **τ in the label's own units** (log units for the experimental sets) | **Choosing** the noise levels, and claiming realism | Assay error in log units is roughly constant across endpoints *regardless of label spread*, so a fixed value in log units is more defensible as "one unit of real error" than a spread-matched one |
+| **τ in the label's own units** (log units for the experimental sets) | **Choosing** the noise levels, and claiming realism | Assay error in log units is roughly constant across endpoints *regardless of label spread*, so a fixed value in log units is a more defensible stand-in for the error a real assay actually has than a spread-matched one |
 | **k = τ / SD(y)** | **Reporting** and cross-dataset comparison | Unitless, so electronvolts and log units land on one axis, and it is what determines how hard the learning problem becomes |
 
 **Report both.** They are not interchangeable: a dataset with a narrow label spread suffers
@@ -137,7 +137,7 @@ perturbed continuous label is nothing but magnitude.
 |---|---|---|---|---|---|
 | 1 | **Gaussian** | Every label nudged by a similar amount | The reference case, and what both direct predecessors used, so results stay comparable to theirs | `τ` | — |
 | 2 | **Student-t** | Same, but badly-wrong labels far more common | Real error is formally non-normal (§3.1). Gaussian is this strategy's ν→∞ limit, so the two nest on one number | `τ` | **ν = 5**, settled 2026-08-27 — one setting, not three (§5.8) |
-| 3 | **Laplace** *(stage 2 only, if at all)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6, and measured, it is indistinguishable from Gaussian (§5.8) | `τ` | fixed |
+| 3 | **Laplace** *(the deep run only — kept, settled 2026-08-27)* | A specific heavy-tailed shape | The distribution actually **fitted** to real bioactivity differences (§3.1). Citational value — statistically it sits near ν = 6, and measured, it is indistinguishable from Gaussian (§5.8) | `τ` | fixed |
 | 4a | **Grouped — wider** | Whole scaffold groups get wider errors, still centred on the true value | **Best-evidenced of the set.** Within-laboratory error must be multiplied by about three to reach between-laboratory error (§3.3). The only zero-mean condition where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected **molecule** fraction ≈ 0.2 |
 | 4b | **Grouped — shifted** ✅ | Whole scaffold groups have their labels pushed in one direction by a constant | 62% of real measurement variance sits **between** laboratories (§3.3) — and that describes laboratory *averages* differing, which is an offset, not a widening. Added 2026-08-26; see §2a | `τ` | ρ = 0.62, from the source |
 | 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | **p = 10%**, λ = 3, settled 2026-08-27 — one setting, not three (§5.8) |
@@ -151,7 +151,7 @@ is neither dose-matched nor zero-mean, which is why it needs its own axis and it
 `noise_conditions.json` at the repository root.** That file is read by `rust/tests/noise_gates.rs`
 and by `scripts/test_noise_conditions.py`, so a grid that stops matching it fails a test rather than
 quietly running. The evidence is §5.8. In short: Gaussian, both grouped conditions and censoring at
-full grid; one Student-t setting and one Outlier setting at depth only; Laplace optional; the other
+full grid; one Student-t setting and one Outlier setting at depth only; Laplace **kept**, at depth; the other
 four settings dropped; the skewed draw never built.
 
 ### The exact algebra
@@ -521,7 +521,7 @@ The three spreads, and where each comes from:
    citing the fold figures to Hayeshi directly, and the *"within a factor of 2–5"* wording is the
    verified one (§4b item 5).
 2. **Twice the published assay error**, which is already the rule the experimental grids were built
-   on (§6.4: *"each grid brackets one unit of real error and runs to roughly twice it"*), puts
+   on (§6.4: *"each list of levels includes the published assay error and runs to roughly twice it"*), puts
    **Caco-2 at 1.58 and hERG at 1.21**. This is the stronger argument of the two, because it is a
    rule the design already applies rather than a single number picked because it fits.
 3. **Nothing anchors logD above 0.42.** Its label spread is wide and its assay is precise, so on
@@ -1428,27 +1428,35 @@ the only condition in the set that is asymmetric *by draw* rather than by mechan
 
 `scripts/setting_selection_test.py`. Real QM9, 4,000 molecules per replicate drawn fresh, PDV
 descriptors, real Murcko scaffold split, noise on training labels only, scored on clean test labels.
-**Twelve replicates**, levels 0.5 and 1.5, three models on the pipeline's own defaults. Every
-condition delivered the same amount of noise, within three standard errors of target.
+**Twelve replicates**, levels 0.5 and 1.5, on the pipeline's own defaults. Every condition
+delivered the same amount of noise, within three standard errors of target.
+
+⚠️ **Every figure in this section was recomputed on 2026-08-27.** The run fitted a third model,
+ridge, as a cheap linear reference; **ridge is not in the study roster**, so every number that
+included it has been replaced by the roster-only figure from
+`results/setting_selection_test_contrasts.csv`. The verdicts are unchanged and several are
+strengthened, because dropping ridge makes the differences smaller. The primary analysis is the
+algebraic dose, which is what the pipeline uses; where an exact-dose figure is quoted it says so.
 
 **Shape does not earn separate settings. Direction does.**
 
-At the reporting level, across every non-Gaussian condition except grouped-shifted, and all three
-models: the largest mean difference against Gaussian is **0.0058 R²**, the largest ratio to the
-replicate-to-replicate wobble is **0.29**, and the smallest paired *p* is 0.089 — against a
-detectable floor of 0.0064–0.0208. The ν = 10 → 5 → 3 ladder and the p = 1% → 5% → 10% ladder are
-both flat, every step under 0.006 R².
+At the reporting level, across every non-Gaussian condition except grouped-shifted, on both roster
+models: the largest mean difference against Gaussian is **0.0047 R²** (Outlier p = 1%, random
+forest), the largest ratio to the replicate-to-replicate wobble is **0.29** — the same row — and the
+smallest paired *p* is 0.178, against a detectable floor of **0.0064–0.0130**. The ν = 10 → 5 → 3
+ladder and the p = 1% → 5% → 10% ladder are both flat, every step under **0.0049 R²**.
 
 **This confirms §5.3 with a much better test.** That pilot found the same thing on three replicates
 with the subsample, split and model seeds all held fixed — so its comparison ran against a wobble
 that was far too small. Twelve replicates with everything redrawn per replicate give the same answer,
 and now the answer is worth something.
 
-**Grouped-shifted separates, and by a lot.** Against Gaussian at level 1.5: −0.127, −0.101 and
-−0.330 R² for LightGBM, the random forest and ridge — 2.2×, 3.0× and 4.6× the wobble, every *p* ≤
-0.002. Against **grouped-wider**, which differs only in whether the group's error is centred:
-−0.142, −0.096 and −0.314, at 2.5× to 7.4× the wobble. Same amount of noise, same groups, same
-targeting — the only difference is direction, and direction is worth fifty times what shape is.
+**Grouped-shifted separates, and by a lot.** Against Gaussian at level 1.5: **−0.1274** for LightGBM
+(0.4945 against 0.6219, 2.22× the wobble, *p* = 0.0008) and **−0.1012** for the random forest (0.5866
+against 0.6878, 2.98× the wobble, *p* = 0.0022). Against **grouped-wider**, which differs only in
+whether the group's error is centred: **−0.1419** and **−0.0963**, at 2.71× and 2.52× the wobble,
+*p* = 0.0002 and 0.0031. Same amount of noise, same groups, same targeting — the only difference is
+direction, and direction is worth roughly thirty times what shape is.
 
 **That is the censoring result, reproduced by a second mechanism.** §5.3b and §5.5 show one-directional
 error doing twelve times more damage than any shape effect, at the level of the whole dataset.
@@ -1457,18 +1465,22 @@ effect, which is what §13.3 of `RERUN_PLAN.md` argued the second grouped condit
 
 **And the delivered-dose wobble was not smearing it.** Student-t ν = 3's per-run dose spread reaches
 17% at level 1.5, so a second pass rescaled every draw to *exactly* the target amount. Nothing moved:
-every condition except grouped-shifted stays within 0.048 R² of Gaussian at ratios to the wobble of
-1.04 or less, while grouped-shifted holds at −0.111, −0.094 and −0.312 (2.1×, 2.6×, 4.4×, all
-*p* ≤ 0.002).
+on the roster models every condition except grouped-shifted stays within **0.0380 R²** of Gaussian at
+ratios to the wobble of **1.04 or less**, while grouped-shifted holds at **−0.1110** for LightGBM
+(0.512 against 0.623, 2.13× the wobble, *p* = 0.002) and **−0.0940** for the random forest (0.590
+against 0.684, 2.58×, *p* = 0.002). Exact-dose figures; the primary analysis is above.
 
-**The skewed draw (§5.7) does not earn implementation.** Nothing at the reporting level; −0.045 R² for
-the random forest alone at level 1.5 and nothing for the other two. §13.3's rejection of a skewed
-draw stands, and this measures what it costs: one model out of three, at the top of the grid only.
+**The skewed draw (§5.7) does not earn implementation.** Nothing at the reporting level — 0.0016 R²,
+0.10 of the wobble, *p* = 0.604. At level 1.5 it does separate on the random forest, **−0.0445 R²** at
+1.31× the wobble, *p* = 0.007, but not on LightGBM (−0.0073, 0.13× the wobble, *p* = 0.571). §13.3's
+rejection of a skewed draw stands, and this measures what it costs: **one model out of two, at the
+top of the grid only, and the paper does not report there.**
 
-⚠️ **One statistically significant nothing.** Outlier 5% versus 1% reaches *p* = 0.002 and *p* = 0.001
-on differences of +0.005 and +0.003 R² — 0.36 and 0.14 of the wobble, and the *wrong sign* for a dose
-response. Common random numbers make the paired difference precise, so a trivial difference can be
-significant. Precision around zero is not an effect.
+⚠️ **One statistically significant nothing.** Outlier 5% versus 1% reaches *p* = 0.002 on LightGBM on
+a difference of **+0.0049 R²** — 0.36 of the wobble, and the *wrong sign* for a dose response, since
+the next step of the same ladder goes the other way at −0.0019. Common random numbers make the paired
+difference precise, so a trivial difference can be significant. Precision around zero is not an
+effect.
 
 ### 5.4 🔴 Two analysis errors of mine, recorded so they do not resurface
 
@@ -1685,7 +1697,7 @@ training run and is chat H's.
 Four commands re-run the lot, none of them needing the cluster or the Python training stack:
 
 ```
-cd rust && cargo test --release --test noise_gates          # 15 gates over real mmap files
+cd rust && cargo test --release --test noise_gates          # 28 gates over real mmap files
 ./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
 python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
 python scripts/test_injector_wiring.py                      # the Python driver's helpers
@@ -1701,7 +1713,7 @@ collapsing the acyclic molecules back into one group.
 | 1 — the pipeline against the reference implementation | `scripts/crosscheck_pipeline_reference.py` | exits non-zero on disagreement **and on incomplete coverage**; see §5.1d |
 | 2, 5, 7 — flatness across conditions, the ν→∞ limit, exact zero | `rust/src/main.rs`, `self_test` | `rust_processor --self-test <labels> [--scaffold-file <groups>]`, exits non-zero on failure. **This is the preflight command** |
 | The Python driver's helpers — the acyclic-singleton rule, the manifest columns, the retired-flag refusal | `scripts/test_injector_wiring.py` | runs without the training stack |
-| 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, manifest completeness, and the effective group count | `rust/tests/noise_gates.rs` — 15 gates over real mmap files | `cargo test --release` |
+| 1, 3, 7, 8 plus the standardisation order, the molecule-identity guard, censoring's direction, the ν ≤ 2 refusal, a mismatched scaffold file, a short record stream, manifest completeness, and the effective group count | `rust/tests/noise_gates.rs` — 28 gates over real mmap files | `cargo test --release` |
 
 Each was checked by removing the fix and confirming the check fails. Reverting the standardisation
 order fails `standardisation_uses_the_clean_training_spread`. Re-applying noise to the held-out
@@ -1820,7 +1832,8 @@ not run these.**
 | Caco-2 | 0.35 between 11 labs | 0, 0.1, 0.2, 0.35, 0.5, 0.7 |
 | hERG | 0.54 (stand-in) | 0, 0.15, 0.3, 0.54, 0.8, 1.1 |
 
-Each grid bracketed one unit of real error and ran to roughly twice it. The reason they were
+Each list of levels included the amount of error the published studies found for that assay, and ran
+to roughly twice it. The reason they were
 replaced: two `auc_norm` values are on the same footing only if the axis under them is the same
 quantity over the same span, and these three axes were neither.
 
@@ -1875,8 +1888,9 @@ stands as the record of what the decision was made on.
 whether it exists.)*
 
 **Narrowed 2026-08-27 (§5.8).** It is **out of the full grid on measurement** — indistinguishable
-from Gaussian on every model at both levels tested, largest difference 0.0058 R² against a test that
-could have seen 0.0086. So the question is no longer whether it joins the breadth stage at 4,680
+from Gaussian on both roster models at both levels tested, largest difference **0.0136 R²**
+(LightGBM at level 1.5, 0.24 of the replicate wobble, *p* = 0.350) against a test that could have
+seen 0.0099 at the reporting level. So the question is no longer whether it joins the breadth stage at 4,680
 training runs; it is whether it runs at depth for **720**. It adds nothing statistically — it sits
 near Student-t at ν = 6 — but it is the only distribution family actually *fitted* to real
 bioactivity data (Anderson-Darling rejects normality at p < 2×10⁻¹⁶; Laplace fitted with scale 0.7
