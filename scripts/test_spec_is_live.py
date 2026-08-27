@@ -90,6 +90,45 @@ def the_vbll_initialisation_comes_from_the_spec():
     print(f"    VBLL initial log noise variance {before} -> {after}")
 
 
+def the_training_constants_come_from_the_spec():
+    """Batch size, learning rate and the Monte Carlo pass count.
+
+    models.py restated all three as literals that happened to equal their
+    NEURAL_DEFAULTS counterpart, so editing model_defaults.py would have changed
+    nothing while spec_hash on every row asserted that it had
+    (RERUN_PLAN.md §2.13). Counted by reading the module as text, because these
+    are constructor arguments scattered over thirty call sites rather than one
+    value this test could build.
+    """
+    import re
+
+    source = open(os.path.join(ROOT, 'models', 'models.py')).read()
+    # The literals, in the forms they took. A bare `32` or `0.001` elsewhere in
+    # the file is not what this is about, so the patterns are anchored to the
+    # constructor keyword each one was passed as.
+    stale = {
+        'batch_size=32': len(re.findall(r'batch_size\s*=\s*32\b', source)),
+        'lr=0.001': len(re.findall(r'Adam\([^)]*lr\s*=\s*0\.001\b', source)),
+        'num_samples = 100': len(re.findall(r'\bnum_samples\s*=\s*100\b', source)),
+    }
+    assert not any(stale.values()), (
+        f"literals are back where the spec should be read: "
+        f"{ {k: v for k, v in stale.items() if v} }")
+
+    live = {
+        'batch_size': len(re.findall(
+            r"batch_size=NEURAL_DEFAULTS\['training'\]\['batch_size'\]", source)),
+        'lr': len(re.findall(
+            r"lr=NEURAL_DEFAULTS\['training'\]\['lr'\]", source)),
+        'mc_passes': len(re.findall(
+            r"NEURAL_DEFAULTS\['training'\]\['mc_passes'\]", source)),
+    }
+    assert all(v > 0 for v in live.values()), live
+    print(f"    read from the spec: {live['batch_size']} batch-size sites, "
+          f"{live['lr']} learning-rate sites, {live['mc_passes']} "
+          f"Monte-Carlo-pass sites; 0 literals left")
+
+
 def the_kl_weight_comes_from_the_spec():
     old = BAYESIAN_DEFAULTS['bnn_kl_weight']
     try:
@@ -124,6 +163,8 @@ def main():
               the_vbll_initialisation_comes_from_the_spec),
         check("the KL weight comes from the spec",
               the_kl_weight_comes_from_the_spec),
+        check("the training constants come from the spec",
+              the_training_constants_come_from_the_spec),
     ]
     if not all(results):
         print("\nFAIL: a spec value is restated as a literal in models.py")

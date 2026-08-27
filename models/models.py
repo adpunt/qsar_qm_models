@@ -1702,9 +1702,12 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             )
 
             # The TRAINING molecules, scored by forests that never saw their
-            # labels. `x_train`/`y_train` are already the merged train+validation
-            # rows this model actually fitted, in that order, which is exactly
-            # what `rows(slice(None), slice(None))` returns.
+            # labels. `val_slice=None` because validation is NOT fitted: the
+            # author settled on 2026-08-27 that no model stacks it into training
+            # (the branch above, RERUN_PLAN.md 2.12). This call used to take the
+            # default `slice(None)`, which was right while the forest fitted
+            # train+validation and wrong the moment it stopped -- it asked the
+            # provenance for every validation row the model no longer sees.
             def _fp(x_fit, y_fit, x_score):
                 inner = RandomForestQuantileRegressor(
                     random_state=iteration_seed, **params)
@@ -1715,7 +1718,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
             score_training_molecules_out_of_fold(
                 _fp, x_train, y_train, train_noise, args, s, rep, iteration,
-                iteration_seed, file_no, model_type)
+                iteration_seed, file_no, model_type, val_slice=None)
     else:
         y_pred = model.predict(x_test)
 
@@ -1885,11 +1888,12 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
 
-        # The TRAINING molecules. `x_val_train` is the training split plus the
-        # FIRST HALF of validation -- the second half is held back for temperature
-        # calibration and was never fitted -- so the recorded-noise rows are sliced
-        # the same way rather than assumed to be everything.
-        _val_used = slice(0, len(x_val) // 2)
+        # The TRAINING molecules. `val_slice=None` because `x_val_train` IS
+        # `x_train` -- validation is held out for calibration and never fitted
+        # (the branch above, settled 2026-08-27, RERUN_PLAN.md 2.12). This used to
+        # pass the first half of validation, which is what NGBoost fitted under
+        # the old regime; when the merge went, the slice stayed, and the
+        # provenance then covered 250 molecules the model never saw.
 
         def _fp(x_fit, y_fit, x_score):
             inner = NGBRegressor(
@@ -2528,8 +2532,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         domain_labels_val_train = domain_labels_val
 
-    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
-    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
 
     # STEP 2: Get loss function
     from loss_functions import get_loss_function
@@ -2598,7 +2602,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model_name = "bnn_full_variational"
         criterion = VBLLLoss(model, n_data=len(x_train))
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
 
     # STEP 5: Train with appropriate domain labels
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
@@ -2611,7 +2615,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
         
-        num_samples = 100
+        num_samples = NEURAL_DEFAULTS['training']['mc_passes']
 
         # Get calibration predictions
         x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
@@ -2745,9 +2749,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         yt = torch.tensor(np.asarray(y_fit), dtype=torch.float32).view(-1, 1).to(device)
         xe = torch.tensor(np.asarray(x_es), dtype=torch.float32).to(device)
         ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
-        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=32, shuffle=True)
-        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=32, shuffle=False)
-        opt = torch.optim.Adam(m.parameters(), lr=0.001)
+        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
+        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
+        opt = torch.optim.Adam(m.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
         train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
                  file_no, 'oof_inner', rep)
         return m
@@ -3050,8 +3054,8 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         domain_labels_val_train = domain_labels_val
     
-    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
+    val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     
     if loss_name == 'heteroscedastic':
         model = FlexibleDNNRegressionModel(input_size=x_train.shape[1], hidden_sizes=params['hidden_sizes'], activation_fn=activation).to(device)
@@ -3088,7 +3092,7 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     criterion = get_loss_function(loss_name, **loss_kwargs)
     if args.bayesian_transformation in ("variational", "full_variational"):
         criterion = VBLLLoss(model, n_data=len(x_train))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
              domain_labels_train=domain_labels_train if needs_domains else None,
@@ -3100,7 +3104,7 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
         
-        num_samples = 100
+        num_samples = NEURAL_DEFAULTS['training']['mc_passes']
         
         if args.uncertainty:
             x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
@@ -3269,17 +3273,17 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             domain_labels_val_train = None
             domain_labels_val_cal = None
             
-        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     elif x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         domain_labels_val_train = domain_labels_val
-        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     else:
         domain_labels_val_train = None
         val_loader = None
 
-    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
 
     # Model setup with special output layers for certain losses
     if model_type == "mlp":
@@ -3348,7 +3352,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         torch.manual_seed(iteration_seed)
         np.random.seed(iteration_seed)
         
-        num_samples = 100
+        num_samples = NEURAL_DEFAULTS['training']['mc_passes']
         
         if args.uncertainty:
             # Get calibration predictions
@@ -3483,8 +3487,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         yt = torch.tensor(np.asarray(y_fit), dtype=torch.float32).view(-1, 1).to(device)
         xe = torch.tensor(np.asarray(x_es), dtype=torch.float32).to(device)
         ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
-        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=32, shuffle=True)
-        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=32, shuffle=False)
+        loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
+        es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
         opt = torch.optim.Adam(m.parameters(), lr=params['lr'])
         train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
                  file_no, 'oof_inner', rep)
@@ -3572,12 +3576,12 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     if x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).unsqueeze(1).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=32, shuffle=False)
+        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     else:
         val_loader = None
 
-    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=32, shuffle=True)
-    test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=32, shuffle=False)
+    train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
+    test_loader = TorchDataLoader(TensorDataset(x_test_tensor, y_test_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
 
     model = RNNRegressionModel(
         input_size=x_train.shape[1],
@@ -4213,6 +4217,11 @@ def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3
 
 
 def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None, train_noise=None):
+    # `calibration_size` is accepted and NOT used: the conformity scores below are
+    # computed over the whole held-out validation split. That is deliberate now --
+    # no model trains on validation, so all of it is a valid calibration set and
+    # more points is the better estimator. The flag that fed this is commented
+    # out in process_and_train.py, and callers pass None (RERUN_PLAN.md 2.13).
     from quantile_forest import RandomForestQuantileRegressor
     from torchcp.regression.predictor import SplitPredictor, ACIPredictor
     from torchcp.regression.score import ABS
@@ -4358,9 +4367,9 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         
         train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
         val_dataset = TensorDataset(x_val_tensor, y_val_tensor)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+        val_loader = DataLoader(val_dataset, batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
         
         criterion = torch.nn.MSELoss()
         optimizer = torch.optim.Adam(base_model.parameters(), lr=learning_rate)
@@ -4844,11 +4853,14 @@ def load_best_hyperparameters(model_type, rep, results_dir='results'):
     
     return None
 
-def calibrate_bayesian_uncertainty(model, cal_loader, device, num_samples=100):
+def calibrate_bayesian_uncertainty(model, cal_loader, device, num_samples=None):
     """
     Calibrate BNN uncertainty estimates using variance scaling.
     Returns optimal scaling factor T.
     """
+    # From the shared spec, not a default in the signature (RERUN_PLAN.md 2.13).
+    if num_samples is None:
+        num_samples = NEURAL_DEFAULTS['training']['mc_passes']
     model.eval()
     all_means = []
     all_stds = []
@@ -5032,7 +5044,7 @@ def train_meta_weight_net(
     ).to(device)
     
     # Optimizers
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     meta_optimizer = torch.optim.Adam(meta_net.parameters(), lr=meta_lr)
     
     # Loss functions
@@ -5053,7 +5065,7 @@ def train_meta_weight_net(
     x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
     
     train_dataset = TensorDataset(x_train_t, y_train_t)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
     
     train_losses = []
     val_losses = []
@@ -5557,7 +5569,7 @@ def train_early_learning_regularization(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     
     # Loss functions
     criterion = get_loss_function(loss_name, **loss_kwargs)
@@ -5802,7 +5814,7 @@ def train_multistage_cleaning(
         ).to(device)
         model.fc3 = nn.Linear(hidden_size2, output_size)
         
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
         criterion = get_loss_function(loss_name, **loss_kwargs)
         
         # Train on current clean set
@@ -5970,7 +5982,7 @@ def train_uncertainty_curriculum(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # Prepare data
@@ -6184,7 +6196,7 @@ def train_confident_learning(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # Train initial model
@@ -6434,7 +6446,7 @@ def train_small_loss_trick(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     tracking_criterion = nn.MSELoss(reduction='none')  # For sample selection
     
@@ -6993,7 +7005,7 @@ def train_contrast_to_divide(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     tracking_criterion = nn.MSELoss(reduction='none')
     
@@ -7317,7 +7329,7 @@ def train_distance_based_selection(
         if output_size > 1:
             model.fc3 = nn.Linear(hidden_size2, output_size)
         
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
         criterion = get_loss_function(loss_name, **loss_kwargs)
         tracking_criterion = nn.MSELoss(reduction='none')
         
@@ -8056,7 +8068,10 @@ def train_conformal_heteroscedastic(
     x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
     
     # Split validation into calibration and validation
-    cal_size = int(len(x_val) * (args.calibration_size / 100.0))
+    # --calibration-size is commented out in process_and_train.py; this is the
+    # only function that ever read it, and it is not in the study roster either.
+    # 20% was its default (RERUN_PLAN.md 2.13).
+    cal_size = int(len(x_val) * (getattr(args, 'calibration_size', 20) / 100.0))
     x_val_cal = x_val_t[:cal_size]
     y_val_cal = y_val_t[:cal_size]
     x_val_proper = x_val_t[cal_size:]
@@ -8072,7 +8087,7 @@ def train_conformal_heteroscedastic(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, 2)  # mean + log_var
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function('heteroscedastic')
     
     # Phase 1: Train heteroscedastic model
@@ -8328,7 +8343,7 @@ def train_mixup(
     x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
     
     train_dataset = TensorDataset(x_train_t, y_train_t)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
     
     # Create model
     if mixup_mode == 'manifold':
@@ -8382,7 +8397,7 @@ def train_mixup(
         if output_size > 1:
             model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # For uncertainty-aware mixup, we need initial model
@@ -8603,7 +8618,7 @@ def train_sam(
     x_test_t = torch.tensor(x_test, dtype=torch.float32).to(device)
     
     train_dataset = TensorDataset(x_train_t, y_train_t)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
     
     # Create model
     model = DNNRegressionModel(
