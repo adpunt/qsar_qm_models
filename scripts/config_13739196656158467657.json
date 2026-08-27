@@ -1,0 +1,1 @@
+{"sample_size": 4000, "noise": true, "train_count": 3200, "test_count": 400, "val_count": 400, "max_vocab": 30, "file_no": 13739196656158467657, "molecular_representations": ["pdv"], "k_domains": 1, "logging": false, "regression": true, "normalize": true, "uncertainty": true}

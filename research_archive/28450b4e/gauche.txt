@@ -1,0 +1,1170 @@
+arXiv:2212.04450v2 [physics.chem-ph] 21 Feb 2023
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+Ryan-Rhys Griffiths * 1 Leo Klarner * 2 Henry Moss * 3 Aditya Ravuri * 1 Sang Truong * 4 Samuel Stanton * 5
+Gary Tom * 6 7 Bojana Rankovic * 8 Yuanqi Du * 9 Arian Jamasb * 1 Aryan Deshwal 10 Julius Schwartz 1
+Austin Tripp 1 Gregory Kell 11 Simon Frieder 2 Anthony Bourached 12 Alex J. Chan 1 Jacob Moss 1
+Chengzhi Guo 1 Johannes Durholt 13 Saudamini Chaurasia 14 Felix Strieth-Kalthoff 6 Alpha A. Lee 1
+Bingqing Cheng 15 Alán Aspuru-Guzik 6 7 16 Philippe Schwaller 8 Jian Tang 17 18 16
+
+Abstract
+We introduce GAUCHE, a library for GAUssian
+processes in CHEmistry. Gaussian processes have
+long been a cornerstone of probabilistic machine
+learning, affording particular advantages for uncertainty quantification and Bayesian optimisation. Extending Gaussian processes to chemical
+representations however is nontrivial, necessitating kernels defined over structured inputs such as
+graphs, strings and bit vectors. By defining such
+kernels in GAUCHE, we seek to open the door
+to powerful tools for uncertainty quantification
+and Bayesian optimisation in chemistry. Motivated by scenarios frequently encountered in experimental chemistry, we showcase applications
+for GAUCHE in molecular discovery and chemical reaction optimisation. The codebase is made
+available at https://github.com/leojklarner/gauche
+
+1. Introduction
+Early-stage scientific discovery is typically characterised
+by the limited availability of high-quality experimental data
+(Zhang & Ling, 2018; Griffiths et al., 2021a; 2022), leaving
+lots of knowledge to discover by additional targeted experiments.In contrast, in the big data regime, discovery offers
+diminishing returns as most knowledge about the space of interest has already been acquired. As such, machine learning
+methodologies that facilitate discovery in small data regimes
+such as Bayesian optimisation (BO) (Gómez-Bombarelli
+et al., 2018; Griffiths & Hernández-Lobato, 2020; Shields
+*
+
+Equal contribution 1 University of Cambridge 2 University
+of Oxford 3 Secondmind Labs 4 Stanford University 5 Genentech
+6
+University of Toronto 7 Vector Institute 8 EPFL 9 Cornell University 10 Washington State University 11 King’s College London
+12
+University College London 13 Evonik Industries AG 14 Syracuse
+University 15 IST Austria 16 CIFAR AI Research Chair 17 MILA Quebec AI Institute 18 HEC Montreal. Correspondence to: Ryan-Rhys
+Griffiths <ryangriff123@gmail.com>.
+Preliminary work.
+
+et al., 2021; Du et al., 2022; Griffiths, 2023) and active
+learning (AL) (Zhang et al., 2019; Jablonka et al., 2021)
+have great potential to expedite the rate at which performant molecules, molecular materials, chemical reactions
+and proteins are discovered.
+Currently in molecular machine learning, Bayesian neural
+networks (BNNs) and deep ensembles are typically used
+to produce uncertainty estimates for driving BO and AL
+loops (Ryu et al., 2019; Zhang et al., 2019; Hwang et al.,
+2020; Scalia et al., 2020). For small datasets, however, deep
+neural networks are often not the model of choice (Tom
+et al., 2022). Notably, certain deep learning experts have
+voiced a preference for Gaussian processes (GPs) in the
+small data regime (Bengio, 2011). Furthermore, for BO,
+GPs possess particularly advantageous properties; first, they
+admit exact as opposed to approximate Bayesian inference
+and second, few of their parameters need to be determined
+by hand. In the words of Sir David MacKay (MacKay et al.,
+2003),
+"Gaussian processes are useful tools for automated tasks where fine tuning for each problem
+is not possible. We do not appear to sacrifice any
+performance for this simplicity.”
+The iterative model refitting required in BO makes it a prime
+example of such an automated task. Although BNN surrogates have been trialled for BO (Snoek et al., 2015; Springenberg et al., 2016), GPs remain the model of choice as
+evidenced by the results of the recent NeurIPS Black-Box
+Optimisation Competition (Turner et al., 2021).
+Training GPs on molecular inputs, however, is non-trivial.
+Canonical applications of GPs assume continuous input
+spaces of low and fixed dimensionality. The most popular molecular input representations are SMILES/SELFIES
+strings (Anderson et al., 1987; Weininger, 1988; Krenn et al.,
+2020), fingerprints (Rogers & Hahn, 2010; Probst & Reymond, 2018; Capecchi et al., 2020) and graphs (Duvenaud
+et al., 2015; Kearnes et al., 2016). Each of these input
+representations poses problems for GPs. SMILES strings
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+have variable length, fingerprints are high-dimensional
+and sparse bit vectors, while graphs are also a form of
+non-continuous input. To construct a GP framework over
+molecules, GAUCHE provides GPU-based implementations
+of kernels that operate on molecular inputs, including string,
+fingerprint and graph kernels. Furthermore, GAUCHE includes support for protein and chemical reaction representations and interfaces with the GPyTorch (Gardner et al., 2018)
+and BoTorch (Balandat et al., 2020) libraries to facilitate
+usage for advanced probabilistic modelling and BO.
+Concretely, our contributions may be summarised as:
+1. We propose a GP framework for molecules and chemical reactions.
+2. We provide an open-source, GPU-enabled library building on GPyTorch (Gardner et al., 2018), BoTorch (Balandat et al., 2020) and RDKit (Landrum, 2013).
+3. We extend the use of black box graph kernels from
+GraKel (Siglidis et al., 2020) to GP regression via a
+GPyTorch interface, along with a set of graph kernels
+implemented in native GPyTorch to enable optimisation of the graph kernel hyperparameters under the
+marginal likelihood.
+
+Kernels: The choice of kernel is an important inductive
+bias for the properties of the function being modelled. A
+common choice for continuous input domains is the radial
+basis function kernel
+
+
+−||x − x0 ||22
+0
+2
+,
+kRBF (x, x ) = σf exp
+2`2
+where σf2 is the signal amplitude hyperparameter (vertical
+lengthscale) and ` is the (horizontal) lengthscale hyperparameter. The symbol θ, introduced previously, is used to
+represent the set of kernel hyperparameters. For molecules,
+bespoke kernel functions need to be defined for structured
+input spaces.
+GP Training: Hyperparameters for GPs comprise kernel
+hyperparameters, θ, in addition to the likelihood noise, σy2 .
+These hyperparameters are chosen by optimising an objective function known as the negative log marginal likelihood
+(NLML)
+1
+log p(y|X, θ) = − y> (Kθ (X, X) + σy2 I)−1 y
+| 2
+{z
+}
+encourages fit with data
+
+1
+N
+− log |Kθ (X, X) + σy2 I| − log(2π).
+2
+|
+{z
+} 2
+controls model capacity
+
+4. We conduct benchmark experiments evaluating the
+utility of the GP framework on regression, uncertainty
+quantification and BO.
+GAUCHE includes tutorials to guide users through the
+tasks considered in this paper and is made available at
+https://github.com/leojklarner/gauche.
+
+2. Background
+2.1. Gaussian Processes
+Notation: X ∈ Rn×d is a design matrix of n training examples of dimension d. A given row i of the design matrix
+contains a training molecule’s representation xi . A GP is
+specified by a mean function, m(x) = E[f (x)] and a covariance function k(x, x0 ) = E[(f (x)−m(x))(f (x0 )−m(x))].
+Kθ (X, X) is a kernel matrix where entries are computed
+by the kernel function as [K]ij = k(xi , xj ). θ represents
+the set of kernel hyperparameters. The GP specifies the full
+distribution over the function f to be modelled as
+
+f (x) ∼ GP m(x), k(x, x0 ) .
+Prediction: At test locations X∗ the GP returns a predictive mean, f¯∗ = K(X∗ , X)[K(X, X) + σy2 I]−1 y,
+and a predictive uncertainty cov(f∗ ) = K(X∗ , X∗ ) −
+K(X∗ , X)[K(X, X) + σy2 I]−1 K(X, X∗ ).
+
+Iσy2 represents the variance of i.i.d. Gaussian noise on
+the observations y. The NLML embodies Occam’s razor
+for Bayesian model selection (Rasmussen & Ghahramani,
+2001) in favouring models that fit the data without being
+overly complex.
+2.2. Bayesian Optimisation
+In molecular discovery campaigns we are typically interested in solving problems of the form
+x? = arg max f (x),
+x∈X
+
+where f (·) : X → R is an expensive black-box function
+over a structured input domain X . In our example setting
+the structured input domain consists of a set of molecular
+representations (graphs, strings, bit vectors) and the expensive black-box function is a property of interest for a given
+molecule that we wish to optimise. Bayesian optimisation (BO) (Kushner, 1963; Močkus, 1975; Zhilinskas, 1975;
+Jones et al., 1998; Brochu et al., 2010; Grosnit et al., 2020)
+is a data-efficient methodology for determining x? . BO operates sequentially by selecting input locations at which to
+query the black-box function f with the aim of identifying
+the optimum in as few queries as possible. Evaluations are
+focused into promising areas of the the space as well as
+areas for which we have uncertainty, a balancing act known
+as the exploration/exploitation trade-off.
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+The two components of a BO scheme are a probabilistic
+surrogate model and an acquisition function. The surrogate model is typically chosen to be a GP due to its ability
+to maintain calibrated uncertainty estimates through exact
+Bayesian inference. The uncertainty estimates of the surrogate model are then leveraged by the acquisition function to
+propose new input locations to query. The acquisition function is a heuristic that trades off exploration and exploitation,
+well-known examples of which include expected improvement (EI) (Močkus, 1975; Jones et al., 1998) and entropy
+search (Hennig & Schuler, 2012; Hernández-Lobato et al.,
+2014; Wang & Jegelka, 2017; Moss et al., 2021). After the
+acquisition function proposes an input location, the blackbox is evaluated at that location, the surrogate model is
+retrained and the process repeats until a solution is obtained.
+Systematic reviews of the BO literature may be found in
+Brochu et al. (2010); Shahriari et al. (2016); Frazier (2018).
+2.3. Molecular Representations
+We review here the three main categories of molecular representations before describing the kernels that operate on them
+in section 3. An overview of the representations considered
+by GAUCHE is provided in Figure 1.
+Graphs: A molecule may be represented as an undirected,
+labeled graph G = (V, E) where vertices V = {v1 , . . . , vN }
+represent the atoms of an N -atom molecule and edges
+E ⊂ V × V represent covalent bonds between these atoms.
+Additional information may be incorporated in the form of
+vertex and edge labels L : V × E → ΣV × ΣE , with common label spaces including attributes such as atom types
+(e.g. hydrogen, carbon) as vertex labels and bond orders
+(e.g. single, double) as edge labels.
+Fingerprints: Molecular fingerprints were first introduced for chemical database substructure searching
+(Christie et al., 1993) but were later repurposed for similarity searching (Johnson & Maggiora, 1990), clustering
+(McGregor & Pallai, 1997) and classification (Breiman et al.,
+2017). Extended Connectivity FingerPrints (ECFP) (Rogers
+& Hahn, 2010) were introduced as part of the Pipeline
+project (Hassan et al., 2006) with the explicit goal of capturing features relevant for molecular property prediction
+(Xia et al., 2004). ECFP fingerprints operate by assigning
+initial numeric identifiers to each atom in a molecule. These
+identifiers are subsequently updated in an iterative fashion
+based on the identifiers of their neighbours. The number
+of iterations corresponds to half the diameter of the fingerprint and the naming convention reflects this. For example,
+ECFP6 fingerprints have a diameter of 6, meaning that 3
+iterations of atom identifier reassignment are performed.
+Each level of iteration appends substructural features of increasing non-locality to an array and the array is then hashed
+
+to a bit vector reflecting the presence or absence of those
+substructures in the molecule.
+For property prediction applications a radius of 3 or 4 is recommended. We use a radius of 3 for all experiments in the
+paper. Additionally we make use of fragment descriptors
+which are count vectors, each component of which indicates the count of a particular functional group present in a
+molecule. For example row 1 of the count vector could be an
+integer representing the number of aliphatic hydroxl groups
+present in the molecule. We make use of both fingerprint
+and fragment features computed using RDKit (Landrum,
+2013) as well as the concatenation of the fingerprint and
+fragment feature vectors, a representation termed fragprints
+(Griffiths et al., 2022) which has shown strong empirical
+performance. Example representations xf for fingerprints
+and xfr for fragments are given as
+h
+xf = 1
+
+0
+
+···
+
+1
+
+i>
+
+h
+, xfr = 3
+
+0
+
+···
+
+2
+
+i>
+
+.
+
+Strings: The Simplified Molecular-Input Line-Entry System (SMILES) is a text-based representation of molecules
+(Anderson et al., 1987; Weininger, 1988), examples of
+which are given in Figure 2. Self-Referencing Embedded
+Strings (SELFIES) (Krenn et al., 2020) is an alternative
+string representation to SMILES such that a bijective mapping exists between a SELFIES string and a molecule.
+2.4. Reaction Representations
+Chemical reactions consist of (multiple) reactants and
+reagents that react to form one or more products. The choice
+of reactant/reagent typically constitutes a categorical design
+space X . Taking as an example the high-throughput experiments by (Ahneman et al., 2018) on Buchwald-Hartwig
+reactions, the reaction design space consists of 15 aryl and
+heteroaryl halides, 4 Buchwald ligands, 3 bases, and 23
+isoxazole additives.
+Concatenated Molecular Representations: If the number of choices for reactant and reagent is constant, the molecular representations discussed above may be used to encode
+the selected reactants and reagents, and the vectors for the
+individual reaction components can be concatenated to build
+the reaction representation (Ahneman et al., 2018; Sandfort
+et al., 2020). An additional and commonly-used concatenated representation, is the one-hot-encoding (OHE) of the
+reaction categories where bits specify which of the components in the different reactant and reagent categories is
+present. In the Buchwald-Hartwig example, the OHE would
+describe which of the aryl halides, Buchwald ligands, bases
+and additives are used in the reaction, resulting in a 44dimensional bit vector (Chuang & Keiser, 2018).
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+Figure 1: An overview of the applications and representations available in GAUCHE.
+trained in a supervised or an unsupervised fashion on reaction SMILES. Those models can be fine-tuned on the task
+of interest to learn more specific reaction representations
+(Schwaller et al., 2021b) (RXNFP). Similar to the DRFP, the
+size of the data-driven reaction fingerprints is independent
+of the number of reaction components.
+2.5. Protein Representations
+Figure 2: SMILES strings for structurally similar molecules.
+Similarity is encoded in the string through common contiguous subsequences (black). Local differences are highlighted
+in red. Molecules chosen for purposes of illustration only.
+
+Differential Reaction Fingerprints: Inspired by the
+hand-engineered difference reaction fingerprints by Schneider et al. (2015), Probst et al. (2022) recently introduced
+the differential reaction fingerprint (DRFP). This reaction
+fingerprint is constructed by taking the symmetric difference
+of the sets containing the molecular substructures on both
+sides of the reaction arrow. Reagents are added to the reactants. The size of the reaction bit vector generated by DRFP
+is independent of the number of reaction components.
+Data-Driven Reaction Fingerprints: Schwaller et al.
+(2021a) described data-driven reaction fingerprints using
+Transformer models such as BERT (Kenton et al., 2019)
+
+Proteins are large macromolecules that adopt complex 3D
+structures. Proteins can be represented in string form describing the underlying amino acid sequence. Graphs at
+varying degrees of coarseness may be used for structural representations that capture spatial and intramolecular relationships between structural elements, such as atoms, residues,
+secondary structures and chains. GAUCHE interfaces with
+Graphein (Jamasb et al., 2021), a library for pre-processing
+and computing graph representations of structural biological
+data thereby enabling the application of graph kernel-based
+methods to protein structure.
+
+3. Molecular Kernels
+Here we introduce examples of the classes of GAUCHE
+kernel designed to operate on the molecular representations
+introduced in section 2.
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+3.1. Fingerprint Kernels
+Scalar Product Kernel: The simplest kernel to operate
+on fingerprints is the scalar product or linear kernel defined
+for vectors x, x0 ∈ Rd as
+kScalar Product (x, x0 ) := σf2 · hx, x0 i,
+where σf is a scalar signal variance hyperparameter and
+h·, ·i is the Euclidean inner product.
+Tanimoto Kernel: Introduced as a general similarity metric for binary attributes (Gower, 1971), the Tanimoto kernel
+was first used in chemoinformatics in conjunction with nonGP-based kernel methods (Ralaivola et al., 2005). It is
+defined for binary vectors x, x0 ∈ {0, 1}d for d ≥ 1 as
+kTanimoto (x, x0 ) := σf2 ·
+
+hx, x0 i
+2
+
+2
+
+kxk + kx0 k − hx, x0 i
+
+,
+
+where || · || is the Euclidean norm.
+3.2. String Kernels
+String kernels (Lodhi et al., 2002; Cancedda et al., 2003)
+measure the similarity between strings by examining the
+degree at which their sub-strings differ. In GAUCHE, we implement the SMILES string kernel (Cao et al., 2012) which
+calculates an inner product between the occurrences of substrings, considering all contiguous sub-strings made from at
+most n characters (we set n = 5 in our experiments). Therefore, for the sub-string count featurisation φ : S → Rp ,
+also known as a bag-of-characters representation (Jurafsky
+& Martin, 2000), the SMILES string kernel between two
+strings S and S 0 is given by
+kString (S, S 0 ) := σ 2 · hφ(S), φ(S 0 )i.
+More complicated string kernels do exist in the literature, for
+example GAUCHE also provides an implementation of the
+subset string kernel (Moss et al., 2020a) which allows noncontiguous matches. However, we found that the significant
+extra computational cost of these methods did not provide
+improved performance over the more simple SMILES string
+kernel in the context of molecular data. Note that although
+named the SMILES string kernel, this kernel can also be
+applied to any other string representation of molecules e.g.
+SELFIES.
+3.3. Graph Kernels
+Graph Kernels: Graph kernel methods φλ : G → H
+map elements from a graph domain G to a reproducing
+kernel Hilbert space (RKHS) H, in which an inner product
+between a pair of graphs g, g 0 ∈ G is derived as a measure
+of similarity
+kGraph (g, g 0 ) := σ 2 · hφλ (g), φλ (g 0 )iH ,
+
+where λ denotes kernel-specific hyperarameters and σ 2 is a
+scale factor. Depending on how φλ is defined (Nikolentzos
+et al., 2021), the kernel considers different substructural motifs and is characterised by different hyperparameters. Feature functions φλ from standard libraries also enable maintainable software development, as preprocessing graphs by
+transforming them into real-valued inputs and utilizing a
+linear kernel (available in most GP packages) is equivalent
+to the calculation above.
+Frequently-employed approaches include the random walk
+kernel (Vishwanathan et al., 2010), given by a geometric
+series over the count of matching random walks of increasing length with coefficient λ, and Weisfeiler-Lehman kernel
+(Shervashidze et al., 2011), given by the inner products of label count vectors over λ iterations of the Weisfeiler-Lehman
+algorithm.
+Graph Embedding: Pretrained graph neural networks
+(GNNs) (Hu et al., 2019; Tom et al., 2022) may also be
+used to embed molecular graphs in a vector space, which
+are reminiscent of deep kernel feature functions. Since the
+GNN is trained on a large amount of data, the representation
+it produces has the potential to be a more expressive method
+to encode a molecule (Note: this assumes access to a large
+pool of in-domain data). Given a vector representation from
+a pretrained GNN model, we may apply any GP kernel for
+continuous input spaces, such as the RBF kernel.
+
+4. Experiments
+We evaluate GAUCHE on regression, uncertainty quantification (UQ) and BO. The principle goal in conducting regression and UQ benchmarks is to gauge whether performance
+on these tasks may be used as a proxy for BO performance.
+BO is a powerful tool for automated scientific discovery
+but one would prefer to avoid model misspecification in
+the surrogate when deploying a scheme in the real world.
+We make use of the following datasets, whose labels are
+experimentally-determined:
+• The Photoswitch Dataset: (Griffiths et al., 2022): The
+labels, y are the values of the E isomer π−π ∗ transition
+wavelength for 392 photoswitch molecules.
+• ESOL: (Delaney, 2004): The labels y are the logarithmic aqueous solubility values for 1128 organic small
+molecules.
+• FreeSolv: (Mobley & Guthrie, 2014): The labels y are
+the hydration free energies for 642 molecules.
+• Lipophilicity: The labels y are the octanol/water distribution coefficient (log D at pH 7.4) of 4200 compounds
+curated from the ChEMBL database (Gaulton et al.,
+2012; Bento et al., 2014).
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+• Buchwald-Hartwig reactions: (Ahneman et al., 2018)
+The labels y are the yields for 3955 Pd-catalysed Buchwald–Hartwig C–N cross-couplings.
+• Suzuki-Miyaura reactions: (Perera et al., 2018) The
+labels y are the yields for 5760 Pd-catalysed SuzukiMiyaura C-C cross-couplings.
+
+coverage error (QCE). We provide the NLPD results in
+Table 2 and defer the MSLL and QCE results to Appendix C.
+One trend to note is that uncertainty estimate quality is
+roughly correlated with regression performance.
+Table 2: UQ benchmark. NLPD values for 80/20 train/test
+split across 20 random trials.
+GP Model
+
+4.1. Regression
+The regression results for molecular property prediction are
+reported in Table 1 and for reaction yield prediction in Table B1 of Appendix B. The datasets are split in a train/test
+ratio of 80/20 (note that validation sets are not required for
+the GP models since hyperparameters are chosen using the
+marginal likelihood objective on the train set). Errorbars
+represent the standard error across 20 random initialisations.
+All GP models are trained using the L-BFGS-B optimiser
+(Liu & Nocedal, 1989). If not mentioned, default settings in
+the GPyTorch and BoTorch libraries apply. For the SELFIES representation, some molecules could not be featurised
+and corresponding entries are left blank. The results of Table B1 indicate that the best choice of representation (and
+hence the choice of kernel) is task-dependent.
+
+Dataset
+
+Kernel
+
+Representation
+
+Photoswitch
+
+ESOL
+
+FreeSolv
+
+Tanimoto
+
+fragprints
+
+0.22 ± 0.03
+
+0.33 ± 0.01
+
+0.28 ± 0.02
+
+0.71 ± 0.01
+
+fingerprints
+
+0.33 ± 0.03
+
+0.71 ± 0.01
+
+0.58 ± 0.03
+
+0.85 ± 0.01
+
+fragments
+
+0.50 ± 0.04
+
+0.57 ± 0.01
+
+0.44 ± 0.03
+
+0.94 ± 0.02
+
+fragprints
+
+0.23 ± 0.03
+
+0.53 ± 0.01
+
+0.25 ± 0.02
+
+0.92 ± 0.01
+
+fingerprints
+
+0.33 ± 0.03
+
+0.84 ± 0.01
+
+0.64 ± 0.03
+
+1.03 ± 0.01
+
+fragments
+
+0.80 ± 0.03
+
+0.82 ± 0.01
+
+0.54 ± 0.02
+
+0.88 ± 0.10
+
+SELFIES
+
+0.37 ± 0.04
+
+-
+
+-
+
+-
+
+SMILES
+
+0.30 ± 0.04
+
+0.29 ± 0.03
+
+0.16 ± 0.02
+
+0.72 ± 0.01
+
+graph
+
+0.39 ± 0.11
+
+0.76 ± 0.001
+
+0.47 ± 0.02
+
+-
+
+Scalar Product
+
+String
+WL Kernel (GraKel)
+
+Table 3: Molecular property prediction regression benchmark for deep Bayesian models. RMSE of predictions for
+Bayesian Neural Networks (BNN) and Bayesian Graph Neural Networks (GNN) for 80/20 train/test split across 20 random trials.
+Deep Probabilistic Models
+
+For comparison, the regression experiments are repeated
+for Bayesian neural networks (BNNs), and deep ensembles.
+The prediction and calibration results are shown in Tables
+3 and 4, respectively. The BNNs are based on variational
+inference (VI) of the posterior distribution of the network
+weights (Blundell et al., 2015), as implemented in BayesianTorch (Krishnan et al., 2022). The results are shown for a
+fully connected (FC)-BNN and a GNN with a final Bayesian
+layer (Hwang et al., 2020). The deep ensemble and deep
+kernel GP both use 1D CNN architectures (Stanton et al.,
+2022). Further details on the deep probabilistic models are
+given in Appendix D.
+
+Dataset
+
+Model
+
+Representation
+
+Photoswitch
+
+ESOL
+
+FreeSolv
+
+Lipophilicity
+
+FC-BNN
+
+fragprints
+
+20.9 ± 0.6
+
+0.88 ± 0.01
+
+1.39 ± 0.03
+
+0.75 ± 0.01
+
+fingerprints
+
+22.4 ± 0.7
+
+1.08 ± 0.02
+
+1.93 ± 0.07
+
+0.81 ± 0.01
+
+fragments
+
+25.8 ± 0.7
+
+1.03 ± 0.01
+
+1.48 ± 0.02
+
+0.87 ± 0.01
+
+GNN-BNN
+
+graph
+
+28.5 ± 1.2
+
+0.88 ± 0.01
+
+0.96 ± 0.01
+
+0.73 ± 0.02
+
+CNN Ensemble
+
+SELFIES
+
+26.4 ± 1.0
+
+0.67 ± 0.01
+
+1.29 ± 0.04
+
+0.75 ± 0.01
+
+CNN DKL GP
+
+SELFIES
+
+25.1 ± 0.8
+
+0.94 ± 0.04
+
+1.41 ± 0.11
+
+0.91 ± 0.01
+
+Table 4: UQ benchmark. NLPD values of predictions for
+Bayesian Neural Networks (BNN) and Bayesian Graph Neural Networks (GNN) for 80/20 train/test split across 20 random trials.
+Deep Probabilistic Models
+
+Kernel
+
+Representation
+
+Photoswitch
+
+ESOL
+
+FreeSolv
+
+Lipophilicity
+
+FC-BNN
+
+fragprints
+
+1.63 ± 0.44
+
+1.70 ± 0.11
+
+1.41 ± 0.38
+
+3.82 ± 0.12
+
+fingerprints
+
+2.22 ± 0.56
+
+2.59 ± 0.40
+
+2.65 ± 0.72
+
+3.74 ± 0.10
+
+fragments
+
+0.69 ± 0.09
+
+1.93 ± 0.28
+
+0.89 ± 0.12
+
+5.52 ± 0.23
+
+GNN-BNN
+
+graph
+
+1.00 ± 0.13
+
+1.70 ± 0.11
+
+1.01 ± 0.02
+
+1.14 ± 0.01
+
+Lipophilicity
+
+CNN Ensemble
+
+SELFIES
+
+4.34 ± 0.55
+
+2.91 ± 0.14
+
+2.24 ± 0.21
+
+2.60 ± 0.06
+
+Tanimoto
+
+CNN DKL GP
+
+SELFIES
+
+0.48 ± 0.05
+
+0.90 ± 0.15
+
+0.33 ± 0.04
+
+1.46 ± 0.03
+
+Scalar Product
+
+String
+WL Kernel (GraKel)
+
+Dataset
+FreeSolv
+
+Dataset
+
+Model
+
+Table 1: Molecular property prediction benchmark. RMSE
+values for 80/20 train/test split across 20 random trials.
+GP Model
+
+Lipophilicity
+
+Representation
+
+Photoswitch
+
+ESOL
+
+fragprints
+
+20.9 ± 0.7
+
+0.71 ± 0.01
+
+1.31 ± 0.06
+
+0.67 ± 0.01
+
+fingerprints
+
+23.4 ± 0.8
+
+1.01 ± 0.01
+
+1.93 ± 0.09
+
+0.76 ± 0.01
+
+fragments
+
+26.3 ± 0.8
+
+0.91 ± 0.01
+
+1.49 ± 0.05
+
+0.80 ± 0.01
+
+fragprints
+
+22.5 ± 0.7
+
+0.88 ± 0.01
+
+1.27 ± 0.02
+
+0.77 ± 0.01
+
+fingerprints
+
+24.8 ± 0.8
+
+1.17 ± 0.01
+
+1.93 ± 0.07
+
+0.84 ± 0.01
+
+fragments
+
+36.6 ± 1.0
+
+1.15 ± 0.01
+
+1.63 ± 0.03
+
+0.97. ± 0.01
+
+SELFIES
+
+24.9 ± 0.6
+
+-
+
+-
+
+-
+
+SMILES
+
+24.8 ± 0.7
+
+0.66 ± 0.01
+
+1.31 ± 0.01
+
+0.68 ± 0.01
+
+graph
+
+22.4 ± 1.4
+
+1.04 ± 0.02
+
+1.47 ± 0.06
+
+0.74 ± 0.05
+
+4.2. Uncertainty Quantification (UQ)
+To quantify the quality of the uncertainty estimates we use
+three metrics, the negative log predictive density (NLPD),
+the mean standardised log loss (MSLL) and the quantile
+
+4.3. Bayesian Optimisation
+We take forward two of the best-performing kernels, the
+Tanimoto-fragprint kernel and the SMILES string kernel
+to undertake BO over the photoswitch and ESOL datasets.
+Random search is used as a baseline. BO is run for 20
+iterations of sequential candidate selection (EI acquisition) where candidates are drawn from 95% of the dataset.
+The models are initialised with 5% of the dataset. In the
+case of the photoswitch dataset this corresponds to just 19
+molecules. The results are provided in Figure 3. In this
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+ultra-low data setting, common to many areas of synthetic
+chemistry (Griffiths et al., 2022) both models outperform
+random search, highlighting the real-world use-case for
+such models in supporting human chemists prioritise candidates for synthesis. Furthermore, one may observe that
+BO performance is tightly coupled to regression and UQ
+performance. In the case of the photoswitch dataset, the
+better-performing Tanimoto model on regression and UQ
+also achieves better BO performance. Additionally, we run
+BO on the Buchwald-Hartwig dataset using the Tanimoto
+kernel for the bit-vector representations DRFP and OHE,
+and the RBF kernel for RXNFP. All three representations
+perform similarly, and outperform the random search.
+
+applications including property prediction, representation
+learning, retrosynthesis, biomedical knowledge graph reasoning and molecule generation.
+GP implementations are not included, however, in the aforementioned libraries. In terms of atomistic systems, DScribe
+(Himanen et al., 2020) features, amongst other methods, the
+Smooth Overlap of Atomic Positions (SOAP) representation
+(Bartók et al., 2013) which is typically used in conjunction
+with a GP model to learn atomistic properties. Automatic
+Selection And Prediction (ASAP) (Cheng et al., 2020) also
+principally focusses on atomistic properties as well as dimensionality reduction and visualisation techniques for materials and molecules. Lastly, the Graphein library focusses
+on graph representations of proteins (Jamasb et al., 2021).
+
+5. Related Work
+General-purpose GP and BO libraries do not cater for molecular representations. Likewise, general-purpose molecular
+machine learning libraries do not consider GPs and BO.
+Here, we review existing libraries, highlighting the niche
+GAUCHE fills in bridging the GP and molecular machine
+learning communities.
+The closest work to ours is FlowMO (Moss & Griffiths,
+2020), which introduces a basic molecular GP library in the
+GPflow framework. In this project, we extend the scope of
+the library to a broader class of molecular representations
+(graphs), problem settings (BO) and applications (reaction
+optimisation and protein engineering).
+
+Graph Kernel Libraries: Graph kernel libraries include GraKel (Siglidis et al., 2020), graphkit-learn (Jia
+et al., 2021), graphkernels (Sugiyama et al., 2018),
+graph-kernels (Sugiyama & Borgwardt, 2015), pykernels
+(https://github.com/gmum/pykernels) and ChemoKernel
+(Gaüzére et al., 2012). The aforementioned libraries focus
+on CPU implementations in Python. Extending graph kernel
+computation to GPUs has been noted as an important direction for future research (Ghosh et al., 2018). In our work,
+we build on the GraKel library by interfacing it with GPyTorch, facilitating GP regression with GPU computation.
+Furthermore, we enable the graph kernel hyperparameters
+to be learned through the marginal likelihood objective as
+opposed to being pre-specified and fixed upfront. It is worth
+noting that GAUCHE extends the applicability of GPUenabled GPs to general graph-structured inputs beyond just
+molecules and proteins.
+
+Gaussian Process Libraries: GP libraries include GPy
+(Python) (GPy, since 2012), GPflow (TensorFlow)
+(Matthews et al., 2017; van der Wilk et al., 2020), GPyTorch (PyTorch) (Gardner et al., 2018) and GPJax (Jax)
+(Pinder & Dodd, 2022) while examples of recent BO libraries include BoTorch (PyTorch) (Balandat et al., 2020),
+Dragonfly (Python) (Kandasamy et al., 2020), HEBO (PyTorch) (Cowen-Rivers et al., 2020) and Trieste (Tensorflow)
+(Berkeley et al., 2022). The aforementioned libraries do
+not explicitly support molecular representations. Extension
+to cover molecular representations however is nontrivial,
+requiring implementations of bespoke GP kernels for bit
+vector, string and graph inputs together with modifications
+to BO schemes to consider acquisition function evaluations
+over a discrete set of heldout molecules, a setting commonly
+encountered in virtual screening (Pyzer-Knapp, 2020; Graff
+et al., 2022).
+
+Molecular Bayesian Optimisation: BO over molecular
+space can be divided into two classes. In the first class,
+molecules are encoded into the latent space of a variational
+autoencoder (VAE) (Gómez-Bombarelli et al., 2018). BO is
+then performed over the continuous latent space and queried
+molecules are decoded back to the original space. Much
+work on VAE-BO has focussed on improving the synergy
+between the surrogate model and the VAE (Griffiths et al.,
+2021b; Griffiths & Hernández-Lobato, 2020; Tripp et al.,
+2020; Deshwal & Doppa, 2021; Grosnit et al., 2021; Verma
+& Chakraborty, 2021; Maus et al., 2022; Stanton et al.,
+2022). One of the defining characteristics of VAE-BO is
+that it enables the generation of new molecular structures.
+
+Molecular Machine Learning Libraries: Molecular
+machine learning libraries include DeepChem (Ramsundar et al., 2019), DGL-LifeSci (Li et al., 2021) and TorchDrug (Zhu et al., 2022). DeepChem features a broad range
+of model implementations and tasks, while DGL-LifeSci
+focuses on graph neural networks. TorchDrug caters for
+
+In the second class of methods, BO is performed directly
+over the original discrete space of molecules. In this setting
+it is not possible to generate new structures and so a candidate set of queryable molecules is defined. The inability
+to generate new structures however, is not a bottleneck to
+molecule discovery as the principle concern is how best to
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+(a) Photoswitch
+
+(b) ESOL
+
+(c) Buchwald-Hartwig reactions
+
+Figure 3: BO performance reporting the standard error from 50 randomly initialised trials (20 for Buchwald-Hartwig). A
+kernel density estimate over the trials is shown on the right axis. EI fragprints results use the Tanimoto kernel.
+explore existing candidate sets. These candidate sets are
+also known as molecular libraries in the virtual screening
+literature (Pyzer-Knapp et al., 2015).
+To date, there has been little work on BO directly over discrete molecular spaces. In Moss et al. (2020a), the authors
+use a string kernel GP trained on SMILES to perform BO
+to select from a candidate set of molecules. In Korovina
+et al. (2020), an optimal transport kernel GP is used for BO
+over molecular graphs. In Häse et al. (2021a) a surrogate
+based on the Nadarya-Watson estimator is defined such that
+the kernel density estimates are inferred using BNNs. The
+model is then trained on molecular descriptors. Lastly, in
+Hernández-Lobato et al. (2017) and Vakili et al. (2021) a
+BNN and a sparse GP respectively are trained on fingerprint
+representations of molecules. In the case of the sparse GP
+the authors select an ArcCosine kernel. It is a longstanding
+aim of the GAUCHE Project to compare the efficacy of
+VAE-BO against vanilla BO on real-world molecule discovery tasks.
+Chemical Reaction Optimisation: Chemical reactions
+describe how reactants transform into products. Reagents
+(catalysts, solvents, and additives) and reaction conditions
+heavily impact the outcome of chemical reactions. Typically the objective is to maximise the reaction yield (the
+amount of product compared to the theoretical maximum)
+(Ahneman et al., 2018), in asymmetric synthesis, where the
+reactions could result in different enantiomers, to maximise
+the enantiomeric excess (Zahrt et al., 2019), or to minimise
+the E-factor, which is the ratio between waste materials and
+the desired product (Schweidtmann et al., 2018).
+A diverse set of studies have evaluated the optimisation of
+chemical reactions in single and multi-objective settings
+(Schweidtmann et al., 2018; Müller et al., 2022). Felton
+et al. (2021) and Häse et al. (2021b) benchmarked reac-
+
+tion optimisation algorithms in low-dimensional settings
+including reaction conditions, such as time, temperature,
+and concentrations. Shields et al. (2021) suggested BO as a
+general tool for chemical reaction optimisation and benchmarked their approach against human experts. Haywood
+et al. (2021) compared the yield prediction performance of
+different kernels and Pomberger et al. (2022) the impact of
+various molecular representations.
+In all reaction optimisation studies above, the representations of the different categories of reactants and reagents are
+concatenated to generate the reaction input vector, which
+could lead to limitations if another type of reagent is suddenly considered. Moreover, most studies concluded that
+simple one-hot encodings (OHE) perform at least on par
+with more elaborate molecular representations in the lowdata regime (Shields et al., 2021; Pomberger et al., 2022;
+Hickman et al., 2022). In GAUCHE, we introduce reaction
+fingerprint kernels, based on existing reaction fingerprints
+(Schwaller et al., 2021a; Probst et al., 2022) and work independently of the number of reactant and reagent categories.
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+6. Conclusions and Future Work
+
+References
+
+We have introduced GAUCHE, a library for GAUssian Processes in CHEmistry with the aim of providing tools for
+uncertainty quantification and Bayesian optimisation that
+may hopefully be deployed for screening in laboratory settings. Future work is centred along two axes:
+
+Ahneman, D. T., Estrada, J. G., Lin, S., Dreher, S. D., and
+Doyle, A. G. Predicting reaction performance in C–N
+cross-coupling using machine learning. Science, 2018.
+
+1. Methodology: We seek to incorporate more sophisticated GP-based optimisation and active learning loops
+in chemistry applications (Eyke et al., 2020; Rankovic
+et al., 2022; Griffiths, 2023), such as the application
+of ideas from batch (González et al., 2016), multitask (Swersky et al., 2013), multi-fidelity (Moss et al.,
+2020b), multi-objective (Knowles, 2006), and quantile
+(Torossian et al., 2020) optimisation. We will also investigate the use of approximate Gaussian processes
+(Titsias, 2009; Hensman et al., 2013) and their recent
+adaptations for BO (Maddox et al., 2021; Chang et al.,
+2022; Moss et al., 2022; 2023) to allow our methods to
+handle larger evaluation budgets.
+2. User Feedback: We seek to further grow our userbase
+and solicit feedback from laboratory practitioners on
+the most common use-cases for BO and GP modelling
+in molecular discovery campaigns. Of particular interest is the relative prevalance of molecule generation
+and optimisation via VAE-BO compared to AL/BO
+to prioritise molecules in high-throughput screening
+settings.
+
+Anderson, E., Veith, G. D., and Weininger, D. SMILES, a
+line notation and computerized interpreter for chemical
+structures. Environmental Research Laboratory, 1987.
+Balandat, M., Karrer, B., Jiang, D., Daulton, S., Letham, B.,
+Wilson, A. G., and Bakshy, E. BoTorch: A framework for
+efficient Monte-Carlo Bayesian optimization. Advances
+in Neural Information Processing Systems, 2020.
+Bartók, A. P., Kondor, R., and Csányi, G. On representing
+chemical environments. Physical Review B, 2013.
+Bengio, Y. What are some Advantages of Using Gaussian Process Models vs Neural Networks?, 2011.
+https://www.quora.com/What-are-some-advantages-ofusing-Gaussian-Process-Models-vs-Neural-Networks.
+Bento, A. P., Gaulton, A., Hersey, A., Bellis, L. J., Chambers, J., Davies, M., Krüger, F. A., Light, Y., Mak, L.,
+McGlinchey, S., et al. The ChEMBL bioactivity database:
+An update. Nucleic Acids Research, 2014.
+Berkeley, J., Moss, H. B., Artemev, A., Pascual-Diaz, S.,
+Granta, U., Stojic, H., Couckuyt, I., Qing, J., Loka,
+N., Paleyes, A., Ober, S. W., and Picheny, V. Trieste.
+https://github.com/secondmind-labs/trieste, 2022.
+Blundell, C., Cornebise, J., Kavukcuoglu, K., and Wierstra,
+D. Weight uncertainty in neural network. In International
+conference on machine learning, pp. 1613–1622. PMLR,
+2015.
+Breiman, L., Friedman, J. H., Olshen, R. A., and Stone, C. J.
+Classification and regression trees. Routledge, 2017.
+Brochu, E., Cora, V. M., and De Freitas, N. A tutorial
+on Bayesian optimization of expensive cost functions,
+with application to active user modeling and hierarchical
+reinforcement learning. arXiv preprint arXiv:1012.2599,
+2010.
+Cancedda, N., Gaussier, E., Goutte, C., and Renders, J. M.
+Word sequence kernels. Journal of Machine Learning
+Research, 2003.
+Cao, D.-S., Zhao, J.-C., Yang, Y.-N., Zhao, C.-X., Yan,
+J., Liu, S., Hu, Q.-N., Xu, Q.-S., and Liang, Y.-Z. In
+silico toxicity prediction by support vector machine and
+SMILES representation-based string kernel. SAR and
+QSAR in Environmental Research, 2012.
+Capecchi, A., Probst, D., and Reymond, J.-L. One molecular
+fingerprint to rule them all: Drugs, biomolecules, and the
+metabolome. Journal of Cheminformatics, 2020.
+
+GAUCHE: A Library for Gaussian Processes in Chemistry
+
+Chang, P. E., Verma, P., John, S., Picheny, V., Moss,
+H., and Solin, A. Fantasizing with dual gps in
+bayesian optimization and active learning. arXiv preprint
+arXiv:2211.01053, 2022.
+Cheng, B., Griffiths, R.-R., Wengert, S., Kunkel, C.,
+Stenczel, T., Zhu, B., Deringer, V. L., Bernstein, N., Margraf, J. T., Reuter, K., et al. Mapping materials and
+molecules. Accounts of Chemical Research, 2020.
+Christie, B. D., Leland, B. A., and Nourse, J. G. Structure
+searching in chemical databases by direct lookup methods.
+Journal of Chemical Information and Computer Sciences,
+1993.
+Chuang, K. V. and Keiser, M. J. Comment on “predicting reaction performance in c–n cross-coupling using machine
+learning”. Science, 2018.
+Cowen-Rivers, A. I., Lyu, W., Tutunov, R., Wang, Z., Grosnit, A., Griffiths, R. R., Maraval, A. M., Jianye, H., Wang,
+J., Peters, J., et al. An empirical study of assumptions in
+Bayesian optimisation. arXiv preprint arXiv:2012.03826,
+2020.
+Delaney, J. S. ESOL: Estimating aqueous solubility directly
+from molecular structure. Journal of Chemical Information and Computer Sciences, 2004.
+Deshwal, A. and Doppa, J. Combining latent space and
+structured kernels for Bayesian optimization over combinatorial spaces. Advances in Neural Information Processing Systems, 2021.
+Du, Y., Fu, T., Sun, J., and Liu, S. Molgensurvey: A systematic survey in machine learning models for molecule
+design. arXiv preprint arXiv:2203.14500, 2022.
+Duvenaud, D. K., Maclaurin, D., Iparraguirre, J., Bombarell, R., Hirzel, T., Aspuru-Guzik, A., and Adams, R. P.
+Convolutional networks on graphs for learning molecular
+fingerprints. Advances in Neural Information Processing
+Systems, 2015.
+Eyke, N. S., Green, W. H., and Jensen, K. F. Iterative
+experimental design based on active machine learning
+reduces the experimental burden associated with reaction
+screening. Reaction Chemistry & Engineering, 2020.
+Felton, K. C., Rittig, J. G., and Lapkin, A. A. Summit:
+Benchmarking machine learning methods for reaction
+optimisation. Chemistry-Methods, 2021.
+
+Gaulton, A., Bellis, L. J., Bento, A. P., Chambers, J., Davies,
+M., Hersey, A., Light, Y., McGlinchey, S., Michalovich,
+D., Al-Lazikani, B., et al. ChEMBL: A large-scale bioactivity database for drug discovery. Nucleic Acids Research, 2012.
+Gaüzére, B., Brun, L., Villemin, D., and Brun, M. Graph
+kernels based on relevant patterns and cycle information
+for chemoinformatics. In Proceedings of the 21st International Conference on Pattern Recognition, 2012.
+Ghosh, S., Das, N., Gonçalves, T., Quaresma, P., and Kundu,
+M. The journey of graph kernels through two decades.
+Computer Science Review, 2018.
+Gómez-Bombarelli, R., Wei, J. N., Duvenaud, D.,
+Hernández-Lobato, J. M., Sánchez-Lengeling, B., Sheberla, D., Aguilera-Iparraguirre, J., Hirzel, T. D., Adams,
+R. P., and Aspuru-Guzik, A. Automatic chemical design using a data-driven continuous representation of
+molecules. ACS Central Science, 2018.
+González, J., Dai, Z., Hennig, P., and Lawrence, N. Batch
+Bayesian optimization via local penalization. In Artificial
+Intelligence and Statistics, 2016.
+Gower, J. C. A general coefficient of similarity and some of
+its properties. Biometrics, 1971.
+GPy. GPy: A Gaussian process framework in Python.
+http://github.com/SheffieldML/GPy, since
+2012.
+Graff, D. E., Aldeghi, M., Morrone, J. A., Jordan, K. E.,
+Pyzer-Knapp, E. O., and Coley, C. W. Self-focusing
+virtual screening with active design space pruning. arXiv
+preprint arXiv:2205.01753, 2022.
+Griffiths, R.-R. Gaussian Processes at Extreme Lengthscales: From Molecules to Black Holes. PhD thesis,
+University of Cambridge, 2023.
+Griffiths, R.-R. and Hernández-Lobato, J. M. Constrained
+Bayesian optimization for automatic chemical design using variational autoencoders. Chemical Science, 2020.
+
+Frazier, P. I. A tutorial on Bayesian optimization. arXiv
+preprint arXiv:1807.02811, 2018.
+
+Griffiths, R.-R., Jiang, J., Buisson, D. J., Wilkins, D., Gallo,
+L. C., Ingram, A., Grupe, D., Kara, E., Parker, M. L., Alston, W., et al. Modeling the multiwavelength variability
+of Mrk 335 using Gaussian processes. The Astrophysical
+Journal, 914(2):144, 2021a.
+
+Gardner, J., Pleiss, G., Weinberger, K. Q., Bindel, D., and
+Wilson, A. G. GPyTorch: Blackbox matrix-matrix Gaussian process inference with GPU acceleration. In Advances in Neural Information Processing Systems, 2018.
+
+Griffiths, R.-R., Schwaller, P., and Lee, A. A. Dataset
+bias in the natural sciences: A case study in chemical
+reaction prediction and synthesis design. arXiv preprint
+arXiv:2105.02637, 2021b.
+
+

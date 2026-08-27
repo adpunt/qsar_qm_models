@@ -1,0 +1,341 @@
+## 1. `where_to_submit.sh` — `--emit`
+
+File: `/Users/apunt/repos/KIRBy/tests/slurm_scripts/where_to_submit.sh` (81 lines, mtime 2026-08-19 16:31)
+
+`--emit` prints **one line: `"<account> <partition>"`** to stdout and exits 0 (L31–32).
+
+- account (L24–28): all associations for user `scat9264` (`U=scat9264`, L16) via `sacctmgr -n show assoc user=$U format=account%40`, intersected with `sshare -n -u $U -o Account,FairShare`, sorted by FairShare descending, `head -1` → **the allowed account with the highest FairShare** (not hardcoded).
+- partition (L29): `part="${EMIT_PARTITION:-medium}"` → **default partition is `medium`**; override with env `EMIT_PARTITION=long`.
+- L30: if no account resolved, prints `where_to_submit --emit: could not determine account` to stderr and `exit 1`.
+
+Documented rationale (L18–22): "partition = medium by default (long/medium share nodes; short is usually swamped)".
+
+## 2. Partition wall-clock limits
+
+**No file states a hard `MaxTime` per partition.** `where_to_submit.sh:42-43` obtains them *at runtime*: `sinfo -o "%.12P %.6a %.12l %.6t %C"` (`%l` = time limit). The only in-repo assertions are comments, and **they contradict each other**:
+
+| Source | Claim |
+|---|---|
+| `KIRBy/.../migrate_short_to_medium.sh:21-22` | `TIME_LIMIT="2-00:00:00"`, `PARTITION="medium"` (2 d used for medium) |
+| `KIRBy/.../migrate_medium_to_long.sh:10` | "cancel + resubmit to long (**7d max**)" |
+| `KIRBy/.../migrate_medium_to_long.sh:22-23` | `TIME_LIMIT="7-00:00:00"`, `PARTITION="long"` |
+| `KIRBy/.../submit_cgr_comparison_resubmit.sh:3` | "Bumped to 4-day wall (**long partition max**)" — and uses `--time="3-23:59:00"` (L25) |
+| `KIRBy/.../submit_annitia_short.sh:12` | "SHORT walltime (**1h** on `short` partition)"; `--time=01:00:00` (L7) |
+| `KIRBy/.../submit_annitia_medium.sh:12` | "MEDIUM walltime (**12h** on `medium` partition)"; `--time=12:00:00` (L7) |
+| `KIRBy/.../submit_annitia_long.sh:12` | "LONG walltime (**48h** on `long` partition)"; `--time=48:00:00` (L7) |
+| `KIRBy/.../submit_dataset.sh:27` | "SLURM defaults: long, **7d**, 128G, 32 cpus, account stat-ecr" |
+| `qsar_qm_models/slurm_scripts_analysis/run_figures.sh:2-3` | "long shares the same nodes and a 2h job fits its **30-day cap**" |
+| `qsar_qm_models/slurm_scripts_analysis/run_figures_v2.sh:3-4` | same "**30-day cap**" claim |
+| `KIRBy/.../preflight_check.sh:5-6` | uses `--time=02:00:00 --partition=short`; comment L15 "7-day jobs" |
+| `KIRBy/.../where_to_submit.sh:70` | "Interactive partitions on ARC: 'interactive' (**4h wall**), 'devel' (**10min wall**)" |
+
+**Safe empirical ceilings actually observed in submitted files:** short ≤ `02:00:00`, medium ≤ `2-00:00:00`, long ≤ `7-00:00:00` (max long value anywhere: `--time=7-00:00:00`, `migrate_medium_to_long.sh:22`; next highest literal `--time="3-23:59:00"`, `submit_cgr_comparison_resubmit.sh:25`, and `--time=71:59:00` in qsar). The "30-day cap" claim appears **only** in the two qsar figure scripts and is unverified by any sinfo output in-repo.
+
+## 3. KIRBy `tests/slurm_scripts/` survey (120 `.sh`, archive excluded)
+
+`--partition` (literal): `long` 68, `short` 22, `medium` 19; variable-driven `${PARTITION}`/`${partition}` 11.
+`--time` (literal, top): `23:59:00` ×27, `47:59:00` ×15, `11:59:00` ×11, `24:00:00` ×7, `08:00:00` ×6, `47:00:00` ×4, `02:00:00` ×4, `"3-23:59:00"` ×4, `04:00:00` ×4, `2-00:00:00` ×3, `7-00:00:00` ×2, `72:00:00`, `48:00:00`, `18:00:00`, `12:00:00` ×2, `10:00`, `00:30:00`, `00:20:00`; variable `${wall}` ×11.
+`--cpus-per-task`: **8** ×79, 16 ×20, 4 ×9, 2 ×5, 32 ×2, 1 ×1.
+`--mem`: `64G` ×27, `256G` ×20, `128G` ×22 (18 + 4 quoted), `48G` ×7, `32G` ×7, `96G` ×3, `4G` ×4, `8G` ×2, `16G` ×1; variable `${mem}` ×23.
+`--account`: **mostly absent.** Literals: `stat-cadd` ×4, `stat-ecr` ×2, `ACCT` ×2 (placeholder text in `where_to_submit.sh:80-81`); variable `${ACCOUNT}` ×5. Defaults set in-file: `ACCOUNT="${ACCOUNT:-stat-ecr}"` (`submit_opig_priority.sh:19`, `submit_similarity_metrics.sh:45`, `submit_sim_optimized_hybrid.sh:57`).
+GPU: `--gres=gpu:1` ×30 (+6 quoted/braced variants).
+**Job arrays: only 3 files** — `run_c32_allocation_cross.sh`, `run_c31_weighted_global.sh` (`--array=0-29%8`), `run_validity_gate.sh` (`--array=0-$…`). Arrays are passed at submit time, not baked in, for c31/c32.
+
+### 3 most recently modified, VERBATIM
+
+**(a) `/Users/apunt/repos/KIRBy/tests/slurm_scripts/run_c32_allocation_cross.sh` (2026-08-23 22:34)** — note it has **no `#SBATCH --partition` / `--account` / `--array`**; those are submit-time.
+```bash
+#!/bin/bash
+# c32 — allocation strategy CROSS (weighting x mechanism x N).
+#
+# Fills the (weighting x N) grid interior that f01/f12/c31 never ran: for each
+# (dataset x model x budget) CELL it scores all 32 strategies
+#   {2,3,5,10} N  x  {linear,power_2,softmax_T1,rank_exp_d0.3} W  x  {quota,global} M
+# vs the best-single-rep target, paired per fold, with a bootstrap noise floor.
+# Deliverable = per-full-strategy win-counts across the 60 cells.
+#
+# MODEL is an ARRAY dimension (not an inner loop): datasets(10) x models(3) = 30
+# tasks. Task idx maps to
+#   ds    = DATASETS[idx / nmodels]
+#   model = MODELS[idx % nmodels]
+# and each task passes C32_MODELS=<one model> and writes its OWN file
+# <ds>__<model>.json (one file per task — no cross-task write races).
+#
+# Never calls find_best_hybrid, so NO result_db / cache is touched — nothing to
+# delete before or after. Uses the engine's own _compute_allocation_weights
+# (import-only); never edits hybrid.py / find_best_hybrid.py.
+#
+# --account and --partition are LIVE STATE — pass them at submit time. CPU job
+# (lightgbm/rf/catboost are all CPU here), no GPU. Confirm the right
+# account/partition/cluster first with where_to_submit.sh, then:
+#   sbatch --account=stat-cadd --partition=medium --array=0-29%8 \
+#          tests/slurm_scripts/run_c32_allocation_cross.sh
+#   (10 datasets x 3 models = 30 tasks -> 0-29; drop to 20 tasks / 0-19 if you
+#    cut catboost. The bash index math uses ${#MODELS[@]}, so it auto-adjusts.)
+#SBATCH --job-name=c32_alloc_cross
+#SBATCH --time=47:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=96G
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
+. setup.sh
+
+# High-signal testbed (spanning molecular / reaction / antibody) — same 10 as c31.
+# All have exactly 10 staged reps wired in complexity_helpers.DATASET_REPS.
+DATASETS=(
+  qm9                     # molecular (quantum) — large n, may be slow
+  logd                    # molecular ADMET
+  buchwald_hartwig        # reaction
+  bh_doyle_plates         # reaction
+  herg_ki                 # molecular
+  adme_mdr1               # molecular ADMET
+  adme_rlm                # molecular ADMET
+  flab_expression_koenig  # antibody
+  caco2                   # molecular ADMET
+  adme_hlm                # molecular ADMET
+)
+# MODEL is the inner array dimension. 3 CPU tree/boosting models. Cut catboost
+# for a 2-model run (array 0-19).
+MODELS=(lightgbm rf catboost)
+
+nmodels=${#MODELS[@]}
+ds_idx=$(( SLURM_ARRAY_TASK_ID / nmodels ))
+m_idx=$(( SLURM_ARRAY_TASK_ID % nmodels ))
+ds="${DATASETS[$ds_idx]}"
+model="${MODELS[$m_idx]}"
+
+outdir="${KIRBY_CACHE_DIR}/c32_allocation_cross"
+mkdir -p "${outdir}"
+# One file per (dataset, model) task — no write races.
+export C32_OUT="${outdir}/${ds}__${model}.json"
+export C32_MODELS="${model}"
+
+echo "c32 array task ${SLURM_ARRAY_TASK_ID} -> ds=${ds} model=${model}"
+echo "  KIRBY_CACHE_DIR=${KIRBY_CACHE_DIR}"
+echo "  C32_OUT=${C32_OUT}  C32_MODELS=${C32_MODELS}"
+python -u tests/experiments/complexity/c32_allocation_strategy_cross.py "${ds}"
+```
+Note L33: `cd "${SLURM_SUBMIT_DIR:-$PWD}"` — this one does **not** hardcode the server path; it relies on being submitted from the repo root.
+
+**(b) `/Users/apunt/repos/KIRBy/tests/slurm_scripts/diagnostic.sh` (2026-08-21 06:34)** — SBATCH header + stages 1–3 (Python body is a 60-line import test, elided marker noted):
+```bash
+#!/bin/bash
+# DIAGNOSTIC: Tests each stage of SLURM job execution independently.
+# Submit with: sbatch tests/slurm_scripts/diagnostic.sh
+# Then: cat slurm-<jobid>.out
+#
+# This tells you EXACTLY where jobs hang or fail.
+
+#SBATCH --job-name=diagnostic
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --time=00:30:00
+#SBATCH --partition=short
+#SBATCH --mem=8G
+#SBATCH --output=slurm-%j.out
+...
+cd /data/stat-ecr/scat9264/KIRBy || { echo "FAILED: cd to KIRBy"; exit 1; }
+...
+module load CUDA 2>&1 || echo "[$(date +%H:%M:%S)] module load CUDA failed (exit $?)"
+...
+export KIRBY_SKIP_INSTALLS=1
+. ./setup.sh
+```
+(Full 123-line file read; only the `python -c "…"` import-test block L57–116 and echo scaffolding omitted here.)
+
+**(c) `/Users/apunt/repos/KIRBy/tests/slurm_scripts/submit_rep_prune.sh` (2026-08-21 02:10)** — this is the canonical dynamic-account submitter; full text quoted under §8.
+
+## 4. `qsar_qm_models/slurm_scripts_validation_rerun/` (92 `.sh`)
+
+`--partition`: `long` ×87, `short` ×1 (`smoke_test.sh:8`).
+`--time`: `8:00:00` ×48, `24:00:00` ×24, `16:00:00` ×12, `47:59:00` ×3, `1:00:00` ×1.
+`--cpus-per-task`: `8` ×88 (uniform).
+`--mem`: `128G` ×88 (uniform).
+`--account`: **DOES NOT EXIST** — zero occurrences in this directory. Jobs run under the SLURM default association.
+Job arrays: **DOES NOT EXIST** — zero `--array` in this directory.
+`--gres`/GPU: **DOES NOT EXIST** — zero occurrences.
+Non-job files: `submit_all.sh`, `check_completion.sh`, `check_jobs.sh`, `check_outputs.sh`, `generate_scripts.py`, `merge_results.py`.
+
+**Python entrypoint (all 88 job scripts):** `python alternative_data_noise_robustness.py` run from `/data/stat-cadd/scat9264/KIRBy/tests` (file exists: `/Users/apunt/repos/KIRBy/tests/alternative_data_noise_robustness.py`, 57552 bytes).
+**Flags used:** `--datasets <one>`, `--models <one>`, `--reps <one>`, `--results-root results/validation_rerun/<rep>_<dataset>`; `smoke_test.sh` adds `--sigmas 0.0`.
+**Full argparse surface** (`/Users/apunt/repos/KIRBy/tests/alternative_data_noise_robustness.py:1181-1199`): `--datasets` (nargs +), `--openadmet-csv`, `--results-root` (default `results/validation`), `--models` (nargs +), `--reps` (nargs +), `--sigmas` (nargs +, float), `--gp-kernel` (choices rbf|tanimoto, default rbf), `--gp-reps` (nargs +).
+
+### Verbatim — `/Users/apunt/repos/qsar_qm_models/slurm_scripts_validation_rerun/val_qrf_pdv_logd.sh` (the 86-file majority pattern)
+```bash
+#!/bin/bash
+#SBATCH --job-name=val_QRF_pdv_logd
+#SBATCH --output=slurm-%j.out
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --partition=long
+#SBATCH --time=8:00:00
+#SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
+#SBATCH --mail-type=END,FAIL
+
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+cd /data/stat-cadd/scat9264/KIRBy
+. ../qsar_qm_models/setup.sh
+cd tests
+
+python alternative_data_noise_robustness.py \
+    --datasets logd \
+    --models QRF \
+    --reps PDV \
+    --results-root results/validation_rerun/pdv_logd
+
+echo "Done: QRF x PDV x logd"
+```
+
+### Verbatim — `/Users/apunt/repos/qsar_qm_models/slurm_scripts_validation_rerun/val_svm_pdv_herg.sh` (the 2-file exception: `git pull` + defensive pip)
+```bash
+#!/bin/bash
+#SBATCH --job-name=val_SVM_pdv_herg
+#SBATCH --output=slurm-%j.out
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --partition=long
+#SBATCH --time=16:00:00
+#SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
+#SBATCH --mail-type=END,FAIL
+
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git pull
+. setup.sh
+cd /data/stat-cadd/scat9264/KIRBy
+git pull
+cd tests
+
+# Defensive env top-up — only runs if package is missing in env_test.
+python -c "import noiseInject" 2>/dev/null || \
+    pip install --no-deps -e /data/stat-cadd/scat9264/NoiseInject 2>/dev/null || \
+    pip install --no-deps -e /data/stat-ecr/scat9264/NoiseInject 2>/dev/null || \
+    echo "WARN: could not locate NoiseInject source — install manually"
+python -c "from kirby.representations.molecular import create_pdv" 2>/dev/null || \
+    pip install --no-deps -e /data/stat-cadd/scat9264/KIRBy 2>/dev/null
+
+python alternative_data_noise_robustness.py \
+    --datasets herg_ki \
+    --models SVM \
+    --reps PDV \
+    --results-root results/validation_rerun/pdv_herg
+
+echo "Done: SVM x PDV x herg"
+```
+Note the dataset-name inconsistency that a patch must respect: `--datasets herg_ki` here vs `--datasets herg` in `smoke_test.sh:29`, and `--datasets logd` / `--datasets caco2` elsewhere.
+
+## 5. Server repo paths (from `cd` lines only)
+
+**KIRBy repo, two distinct locations — the repos disagree:**
+- `/data/stat-ecr/scat9264/KIRBy` — **90** `cd` lines across `KIRBy/tests/slurm_scripts/*.sh`; also `KIRBy/tests/experiments/annitia/_slurm_setup.sh:14` (`REPO=/data/stat-ecr/scat9264/KIRBy`). This is the only KIRBy path used by KIRBy's own scripts.
+- `/data/stat-cadd/scat9264/KIRBy` — **175** `cd` lines across `qsar_qm_models/slurm_scripts_*`; plus `/data/stat-cadd/scat9264/KIRBy/tests` ×2. Referenced as a data path in `run_figures.sh:26` and `run_figures_v2.sh:30` (`--validation-dir /data/stat-cadd/scat9264/KIRBy/tests/results/alternative_full`).
+
+**qsar_qm_models repo — one location:**
+- `/data/stat-cadd/scat9264/qsar_qm_models` — **458** `cd` lines across `slurm_scripts_*`. Subdir cds also appear: `.../qsar_qm_models/slurm_scripts_uncertainty`, `.../slurm_scripts_mol2vec_investigation`, `.../slurm_scripts_deeper_dnn`, `.../slurm_scripts_anova`, `.../results` (1 each).
+
+**Other paths referenced (not repo roots):** `/data/stat-cadd/scat9264/bin/micromamba` (MAMBA_EXE, every qsar script), `/data/stat-cadd/scat9264/NoiseInject` and `/data/stat-ecr/scat9264/NoiseInject` (`val_svm_pdv_herg.sh:26-27`). `_slurm_setup.sh:26-27` documents "The migration moved data from stat-cadd to stat-ecr" — i.e. **stat-ecr is the newer KIRBy home; the qsar scripts still point at stat-cadd.** Verify before submitting.
+
+## 6. Environment activation
+
+**KIRBy** — no micromamba hook; `setup.sh` at repo root does everything.
+- `. ./setup.sh` ×92 and `. setup.sh` ×19 across `KIRBy/tests/slurm_scripts/*.sh`.
+- Batch-mode guard: `export KIRBY_SKIP_INSTALLS=1` before sourcing (`diagnostic.sh:41-42`).
+- Canonical wrapped prefix (`migrate_short_to_medium.sh:20`, identical at `migrate_medium_to_long.sh:21`):
+```bash
+WRAP_PREFIX="cd /data/stat-ecr/scat9264/KIRBy && export KIRBY_SKIP_INSTALLS=1 && . ./setup.sh && export PYTHONWARNINGS=ignore && export TRANSFORMERS_VERBOSITY=error"
+```
+- `module load CUDA` ×5 (only GPU-adjacent scripts, e.g. `diagnostic.sh:34`).
+- ANNITIA scripts instead do `source /data/stat-ecr/scat9264/KIRBy/tests/experiments/annitia/_slurm_setup.sh` ×3 (`submit_annitia_{short,medium,long}.sh:19`), which internally does `cd $REPO` then `. ./setup.sh` (`_slurm_setup.sh:14-23`).
+
+**qsar_qm_models** — explicit micromamba hook, **three lines, identical in every script**:
+```bash
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+```
+(`val_qrf_pdv_logd.sh:13-15`, `run_figures_v2.sh:16-18`, `vbll_parallel.sh:12-14`, etc.)
+Then `. setup.sh` from `/data/stat-cadd/scat9264/qsar_qm_models`, or `. ../qsar_qm_models/setup.sh` ×86 when cwd is the KIRBy root (`val_qrf_pdv_logd.sh:18`).
+`/Users/apunt/repos/qsar_qm_models/setup.sh:3` sets `ENV_NAME="env_test"`, `:4` `YML_FILE="env.yml"`, `:15` `micromamba activate "$ENV_NAME"`, `:45-48` aborts if `CONDA_PREFIX` unset, `:53` installs `libstdcxx-ng>=12`. **Note:** `setup.sh` will `micromamba create` and `micromamba install` on a compute node if the env is missing — there is no `KIRBY_SKIP_INSTALLS`-style guard in the qsar setup.sh.
+
+## 7. Batch-submission scripts — both repos have them
+
+**qsar:** `/Users/apunt/repos/qsar_qm_models/slurm_scripts_validation_rerun/submit_all.sh` (181 lines) — a flat unconditional list, no args, no dry-run:
+```bash
+#!/bin/bash
+# Submit all validation re-run jobs
+COUNT=0
+
+sbatch val_dnn_ecfp4_caco2.sh
+COUNT=$((COUNT + 1))
+sbatch val_dnn_ecfp4_herg.sh
+COUNT=$((COUNT + 1))
+...
+sbatch val_xgboost_sns_logd.sh
+COUNT=$((COUNT + 1))
+
+echo "Submitted $COUNT jobs (expected 87)"
+```
+It relies on cwd being the script's own directory (bare `sbatch val_*.sh`, no path). Also present: `generate_scripts.py` (the generator that emitted the 88 job files), `check_jobs.sh`, `check_completion.sh`, `check_outputs.sh`.
+
+**KIRBy:** `/Users/apunt/repos/KIRBy/tests/slurm_scripts/submit_all_datasets.sh` (the roster source of truth) — takes a CATEGORY plus `--domain` / `--datasets` / `--skip` / `--dry-run` (`:18-27`), and submits via `submit_dataset.sh`:
+```bash
+CMD="sbatch ${EXPORT_FLAG} --job-name=${PREFIX}_${DS} --mem=${MEM_OVERRIDE} ${SUBMIT_SCRIPT} ${CATEGORY} ${DS}"   # :155
+CMD="sbatch ${EXPORT_FLAG} --job-name=${PREFIX}_${DS} ${SUBMIT_SCRIPT} ${CATEGORY} ${DS}"                          # :157
+```
+
+## 8. Dynamic `--account`
+
+**`/Users/apunt/repos/KIRBy/tests/slurm_scripts/submit_rep_prune.sh:56-97`** is the only script that resolves account *and* partition at submit time:
+```bash
+# ── Parse args ──────────────────────────────────────────────────────────
+ACCOUNT=""; PARTITION=""; DOMAIN="all"; DRY_RUN=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --account)   ACCOUNT=$2; shift 2 ;;
+        --partition) PARTITION=$2; shift 2 ;;
+        --domain)    DOMAIN=$2; shift 2 ;;
+        --dry-run)   DRY_RUN=true; shift ;;
+        *) echo "Unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+# If not given, ask where_to_submit.sh --emit for the live account/partition
+# (higher-FairShare account, medium partition). Explicit flags always override.
+if [ -z "$ACCOUNT" ] || [ -z "$PARTITION" ]; then
+    echo "No --account/--partition given — asking where_to_submit.sh --emit ..." >&2
+    if read -r AUTO_ACCT AUTO_PART < <(bash "${SCRIPT_DIR}/where_to_submit.sh" --emit 2>/dev/null); then
+        [ -z "$ACCOUNT" ]   && ACCOUNT="$AUTO_ACCT"
+        [ -z "$PARTITION" ] && PARTITION="$AUTO_PART"
+    fi
+    if [ -z "$ACCOUNT" ] || [ -z "$PARTITION" ]; then
+        echo "ERROR: could not auto-determine account/partition. Run" >&2
+        echo "       bash tests/slurm_scripts/where_to_submit.sh   and pass --account/--partition." >&2
+        exit 1
+    fi
+    echo "Using account=${ACCOUNT} partition=${PARTITION} (from where_to_submit.sh --emit; override with --account/--partition)."
+fi
+...
+EXPORT_FLAG="--export=ALL,KIRBY_PRUNE_FOLDS=3,KIRBY_PRUNE_CAP=0"
+...
+    CMD="sbatch --account=${ACCOUNT} --partition=${PARTITION} ${EXPORT_FLAG} \
+--job-name=repprune_${D} --mem=${MEM} ${JOB_SCRIPT} ${DS}"
+```
+Weaker env-override variants (no `--emit` call): `ACCOUNT="${ACCOUNT:-stat-ecr}"` at `submit_opig_priority.sh:19`, `submit_similarity_metrics.sh:45`, `submit_sim_optimized_hybrid.sh:57`. Usage example at `submit_similarity_metrics.sh:20`: `ACCOUNT=stat-cadd PARTITION=medium bash tests/slurm_scripts/submit_similarity_metrics.sh`.
+
+## Hazards for a patch that must run first time
+
+1. **Account differs by repo.** qsar hardcodes `--account=stat-cadd` (26 files, all in `slurm_scripts_analysis/` and `slurm_scripts_gauche_rbf/`), while KIRBy defaults to `stat-ecr` (`submit_dataset.sh:27-28`) and `where_to_submit.sh --emit` picks whichever has higher FairShare at run time. `slurm_scripts_validation_rerun/` sets **no account at all**.
+2. **KIRBy server path is ambiguous**: KIRBy scripts use `/data/stat-ecr/…`, qsar scripts use `/data/stat-cadd/…`. `_slurm_setup.sh:26-27` says data migrated stat-cadd → stat-ecr.
+3. **Partition default disagrees**: `where_to_submit.sh:29` emits `medium`; every qsar script hardcodes `long`; `run_figures*.sh:2-3` justify `long` because short is backlogged.
+4. **The "30-day long cap" claim exists only in the two qsar figure scripts** and is contradicted by KIRBy's "7d max" / "4-day (long partition max)". Use ≤ `7-00:00:00` on long unless `sinfo` says otherwise.
+5. qsar `setup.sh` may attempt `micromamba create` / `install` on a compute node (`setup.sh:12,53`) — no skip-installs guard exists on the qsar side.

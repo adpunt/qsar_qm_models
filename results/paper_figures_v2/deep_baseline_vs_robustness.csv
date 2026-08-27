@@ -1,0 +1,6 @@
+study,scope,n,pearson_r,pearson_p,spearman_r,spearman_p,note
+QM9,QM9 (all configs),0,,,,,GAP: QM9 baseline_r2 for baseline-vs-robustness correlation NEEDS server dump qm9_auc_with_baseline.csv (valprop-guarded) OR raw anova_*.csv
+Validation,Validation (pooled all datasets),458,0.5253472433071363,7.4322145471226616e-34,0.5866820154551426,1.0630323304930736e-43,
+Validation,Validation (OpenADMET-LogD),156,-0.3059953759679977,0.00010243719094485187,-0.4232757126872421,3.687402070668505e-08,
+Validation,Validation (OpenADMET-Caco2_Efflux),153,0.10282700390774499,0.20593416195973455,0.030646207042367753,0.7068780162248945,
+Validation,Validation (ChEMBL-hERG-Ki),149,0.303674665395326,0.0001666092530136779,0.32998306401273825,3.960839696162e-05,

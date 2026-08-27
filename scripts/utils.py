@@ -53,7 +53,14 @@ RESULT_COLUMNS = ["sigma", "iteration", "model", "rep", "sample_size", "mae",
                   # noise divided by the noise-free baseline error, sigma/RMSE0,
                   # against RMSE/RMSE0. Without the delivered amount on the row,
                   # that axis cannot be built after the fact.
-                  "delivered_dose"]
+                  "delivered_dose",
+                  # Added 2026-08-27. The noise manifest is keyed on
+                  # (iteration, file_no, noise_level) and the results row carried
+                  # no file_no, so a results row could not be joined to the
+                  # provenance of the noise that produced it -- and file_no is
+                  # what separates two replicates that share a level
+                  # (RERUN_PLAN.md 2.13).
+                  "file_no"]
 
 # The three things a level can measure.
 LEVEL_UNITS = ('label_sd', 'raw_label', 'fraction_censored')
@@ -69,11 +76,19 @@ _CURRENT_LEVEL_UNITS = None
 _CURRENT_DELIVERED_DOSE = None
 
 
-def set_current_noise_type(name, level_units=None, delivered_dose=None):
+_CURRENT_STANDARDISATION = (None, None)
+_CURRENT_FILE_NO = None
+
+
+def set_current_noise_type(name, level_units=None, delivered_dose=None,
+                           standardisation=None, file_no=None):
     """Record which condition, in what units, and how much, from now on."""
     global _CURRENT_NOISE_TYPE, _CURRENT_LEVEL_UNITS, _CURRENT_DELIVERED_DOSE
+    global _CURRENT_STANDARDISATION, _CURRENT_FILE_NO
+    _CURRENT_FILE_NO = file_no
     _CURRENT_NOISE_TYPE = None if name in (None, '') else str(name)
     _CURRENT_DELIVERED_DOSE = delivered_dose
+    _CURRENT_STANDARDISATION = tuple(standardisation or (None, None))
     if level_units is not None and level_units not in LEVEL_UNITS:
         raise ValueError(
             f"level_units={level_units!r} is not one of {LEVEL_UNITS}; a row "
@@ -94,9 +109,15 @@ def current_delivered_dose():
     return _CURRENT_DELIVERED_DOSE
 
 
+def current_standardisation():
+    """(mean, spread) the labels were standardised by, or (None, None)."""
+    return _CURRENT_STANDARDISATION
+
+
 def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default',
                  loss_function='mse', gp_fit_method='', gp_collapsed='',
-                 noise_type=None, level_units=None, delivered_dose=None):
+                 noise_type=None, level_units=None, delivered_dose=None,
+                 file_no=None):
     """
     Save results to a CSV file with loss function tracking.
 
@@ -145,7 +166,10 @@ def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='
                          else (_CURRENT_LEVEL_UNITS or ''),
                          delivered_dose if delivered_dose is not None
                          else ('' if _CURRENT_DELIVERED_DOSE is None
-                               else _CURRENT_DELIVERED_DOSE)])
+                               else _CURRENT_DELIVERED_DOSE),
+                         file_no if file_no is not None
+                         else ('' if _CURRENT_FILE_NO is None
+                               else _CURRENT_FILE_NO)])
 
 def calculate_regression_metrics(y_test, prediction, logging=False):
     mae = mean_absolute_error(y_test, prediction)
@@ -321,6 +345,14 @@ UNCERTAINTY_COLUMNS = [
     # analysis module can read both producers.
     "split", "canonical_smiles", "noise_scale", "noise_pattern",
     "noise_pattern_pred", "oof_folds_ok",
+    # Added 2026-08-27. y_true_original is the RAW label; y_pred_mean,
+    # y_pred_std_* and y_true_noisy are on the STANDARDISED scale, because the
+    # Rust writer standardises with the clean training mean and spread before the
+    # models ever see a label. Subtracting one from the other is wrong by exactly
+    # these two numbers, and the figure script carried a workaround for it. They
+    # are on the row now, so the file says what its own columns mean
+    # (RERUN_PLAN.md 2.13).
+    "standardisation_mean", "standardisation_sd",
     # Added 2026-08-27: the condition's registry name, so a row can be conditioned
     # on its noise type rather than the type being guessed from the file name.
     "noise_type",
@@ -427,7 +459,13 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             'y_pred_std_uncalibrated': y_pred_std[i],
             'y_true_original': y_true_original[i],
             'y_true_noisy': y_true_noisy[i],
-            'injected_noise': injected_noise_rows[i]
+            'injected_noise': injected_noise_rows[i],
+            # What separates y_true_original (raw) from the standardised
+            # columns beside it.
+            'standardisation_mean': ('' if _CURRENT_STANDARDISATION[0] is None
+                                     else _CURRENT_STANDARDISATION[0]),
+            'standardisation_sd': ('' if _CURRENT_STANDARDISATION[1] is None
+                                   else _CURRENT_STANDARDISATION[1]),
         }
 
         # Add calibrated values if provided

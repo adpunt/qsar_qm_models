@@ -1,0 +1,246 @@
+# DECISIONS REQUIRED BEFORE COMPUTE
+
+Everything below verified against code this session. Line numbers are from the current working tree.
+
+---
+
+# (A) DECISIONS THAT CHANGE WHAT GETS COMPUTED
+
+## A1. Should the validation labels carry noise too? — HIGHEST COST
+
+**Question.** After the uncommitted Rust fix, only the training split gets noise; but six model families paste the validation set straight into their training set, so roughly one in nine of their training labels is clean — while the neural nets instead early-stop against a clean validation signal. Do we noise the validation split, stop merging it, or leave it?
+
+**Why irreversible.** It changes the fitted model for RF, QRF, SVM, NGBoost, XGBoost, LightGBM, GP and conformal-GP, and the stopping epoch for every neural net. Every R², every `auc_norm`, every uncertainty CSV, on QM9 *and* on the three external datasets. There is no post-hoc correction.
+
+**Evidence.**
+- `rust/src/main.rs:1029` train `true`, `:1056` val `false`, `:1083` test `false`; guard at `:750`; noise indices are `0..train_count` only, `rust/src/main.rs:1142-1147`.
+- Unconditional merges: `models/models.py:1382-1383` (RF/QRF), `:1457-1458` (SVM), `:1501-1507` + `:1518` (NGBoost), `:1622-1623` (XGBoost), `:1672-1673` (LightGBM), `:1732-1738` (GP), `:3576-3577` (conformal-GP, which then computes conformity scores on `x_val` at `:3671` — inside its own fit set).
+- Split is 80/10/10 (`scripts/process_and_train.py:495-500`), so the merged training set is 11.1% clean labels for those families and 0% for the NNs.
+- NN side: `train_nn` early-stops on `val_loss` (`models/models.py:1871-1879`) and **never restores best weights** — it returns the model at the break epoch.
+- External pipeline has the same asymmetry from the other direction: `KIRBy/tests/alternative_data_noise_robustness.py:980-981` takes `y_val` from `y_train_full` *before* injection, and `:760`/`:795` inject into `y_train` only — so neural nets there early-stop on a clean oracle, and trees never see val at all (`run_tree_experiment`, `:750`, takes no val).
+
+**Options.**
+1. **Noise train + val, test stays clean.** Every family trains on 100% corrupted labels; early stopping and calibration happen against corrupted labels, as in real practice. Changes: `rust/src/main.rs:1142-1147` (draw a second map over val indices), `:1056` (`apply_noise` true), and the same in `KIRBy/tests/alternative_data_noise_robustness.py:978-981` (inject before carving val).
+2. **Delete the merges, keep val clean.** Trees lose 11% of their data; NNs and trees both then hold a clean oracle, which is a leak the paper cannot defend. Changes: the eight merge sites listed above.
+3. **Leave as is.** The paper's headline ("tree ensembles are the most robust") is then partly manufactured by giving exactly those models clean labels the neural nets never get.
+
+**Recommendation: option 1.** It is the only configuration where "robustness" measures what the paper says it measures, and it makes the two pipelines comparable.
+
+---
+
+## A2. Does the threshold cut move to the standardised label?
+
+**Question.** Threshold noise is supposed to hit molecules with extreme labels, but the code compares the raw label to ±1.0 — on QM9 that is every molecule, so threshold is just Gaussian noise at double strength. Do we move the cut onto the standardised label?
+
+**Why irreversible.** All threshold runs — 144 of the 864 `anova_*.csv` targets on QM9, plus the threshold sixth of all three external datasets. Existing threshold results are not comparable to fixed ones.
+
+**Evidence.**
+- Raw comparison: `rust/src/main.rs:364-373` reads `target_values[idx]`, which is the raw f32 from `read_all_target_values` (`:542`); normalisation happens later and separately at `:759-761`. Defaults ±1.0 at `:1195-1196`.
+- Same raw comparison in the external injector: `NoiseInject/noiseInject/core.py:97-115`.
+- Consequence on the actual training set (`qm9[:10000]`, `scripts/process_and_train.py:625`): min gap 2.084 eV → **100%** of molecules get 2σ, threshold CV of σ_i = 0.000 exactly. Per-dataset: LogD 85.4%, hERG 100%, log10 Caco-2 efflux 9.2% — so the same strategy is a pure dose increase on three datasets and a concentrated tail-attack on the fourth.
+- `paper.tex:354` states the cut is "$|y| > 1.0$ (on normalized data)". That is factually false against the code.
+
+**Options.**
+1. **Standardise before the cut** (`z_i = (y-ȳ)/s`, cut at |z|>1). Threshold becomes a genuinely distinct mechanism, comparable across endpoints; matches the caption. Changes: `rust/src/main.rs:364-373` (+ pass `mean`/`std_dev`, already computed at `:973-978`), `NoiseInject/noiseInject/core.py:97-115`.
+2. **Keep raw, rewrite the paper.** Zero compute; but you must state that threshold ≡ Gaussian at 2σ on QM9 and hERG, and every threshold-vs-Gaussian comparison in Results becomes a dose comparison.
+3. **Drop threshold** from the six.
+
+**Recommendation: option 1**, done in both injectors in the same commit. Reason: it is the difference between six mechanisms and four mechanisms plus two relabelled doses.
+
+---
+
+## A3. Should σ be renormalised so one unit means the same amount of corruption in every strategy?
+
+**Question.** At σ=1 the six strategies deliver RMS label perturbations from 0.502 to 2.000 eV — a 4× range — so every cross-strategy comparison in the paper is currently a comparison of doses, not of noise patterns. Do we rescale each strategy so σ means the same corruption everywhere?
+
+**Why irreversible.** Rescaling changes the injected values, so every σ>0 point for five of the six strategies, on every dataset. It also changes the meaning of the σ axis, hence `auc_norm` (`scripts/generate_paper_figures_v2.py:1798-1800`, trapezoid over σ normalised by the σ range).
+
+**Evidence.**
+- Formulas and defaults: valprop `main.rs:309-317` / `:1176-1177` (factor 0.1); quantile `:322-352` / `:1184-1188`; threshold `:355-376` / `:1195-1199`; outlier `:379-404` / `:1206-1208`; hetero `:406-415` / `:1215-1216`.
+- Realised RMS dose at σ=1 on the first-8000 QM9 training set: legacy 1.000, threshold 2.000, valprop 1.701, quantile 0.899, hetero 0.669, outlier 0.502.
+- Dose ordering re-orders across endpoints (threshold is the harshest strategy on QM9 and LogD, second-mildest on Caco-2).
+- Mean retention per strategy is a perfect rank-inversion of the dose ordering (Spearman −1.000 on QM9; −0.943 / −1.000 / −0.943 on LogD / Caco-2 / hERG). The paper's per-strategy η² differences are dose differences.
+- `paper.tex:222` and `paper.tex:354` both promise the opposite ("the difficulty scaling controlled by σ is consistent").
+
+**Options.**
+1. **Renormalise each strategy to a common realised dose** (scale σ_i so that RMS(ε) = σ·SD(y), computed from the training labels before injection). Cross-strategy differences then isolate *shape*. Legacy is unchanged; the other five re-run. One extra pass over the label array in `main.rs:302-430` and `NoiseInject/noiseInject/core.py:71-170`.
+2. **Keep raw σ, report realised dose alongside**, and delete every claim that compares strategies as mechanisms (paper L380, L383, L460, L462, L493, L562). Zero compute; the paper loses Q3.
+3. **Post-hoc dose-matching in analysis only** (interpolate each strategy's curve to matched dose). Cheap, but the σ grids do not overlap in dose at either end — the σ=1 outlier point has no Gaussian counterpart below σ=0.502, so a third of every curve is extrapolated.
+
+**Recommendation: option 1.** It is the only version in which Q3 ("do robustness patterns generalise across noise mechanisms?") is answerable, and it is a one-time change to two files. Decide this **before** A6, because it redefines the σ axis.
+
+---
+
+## A4. Do we save per-sample uncertainty for training molecules — and is RQ2 salvageable at all?
+
+**Question.** The paper claims uncertainty estimates track which individual labels were corrupted; but corrupted labels only ever enter training, and uncertainty is only ever saved for test molecules — which the model never saw a label for. Do we add training-molecule uncertainty, and if so, cross-fitted or in-sample?
+
+**Why irreversible.** No file on disk permits reconstructing it: the mmaps carrying both clean and noisy training targets are deleted at `scripts/process_and_train.py:1826-1835`, the noise map is never written (built `rust/src/main.rs:1242-1247`, dropped at exit), and the normalisation constants are returned in-process only (`:973-978`).
+
+**Evidence.**
+- All 13 `save_uncertainty_values` call sites pass test arrays: `models/models.py:1403, 1555, 1793, 2155, 2272, 2494, 2761, 3196, 3397, 4000, 6851, 6977, 7183`. `grep "predict(x_train"` in `models/models.py` returns nothing.
+- Writer: `scripts/utils.py:200-269`; `injected_noise` is a linear-regression residual (`:216-224`), not a recorded ε.
+- **The metric is undefined by construction on held-out data.** A model's uncertainty at a test molecule cannot depend on that molecule's label perturbation, because the perturbation never entered training. Pre-fix, `injected_noise` on test was the *training* molecule's draw at the same index (`rust/src/main.rs:740-748`, loop counter restarts at `:625`) — i.e. a correlation against a permutation. Post-fix it is identically zero. Neither is an answer.
+- The external half cannot help: no `injected_noise` column exists there at all (`scripts/generate_paper_figures_v2.py:1218`, `:1252-1254`).
+
+**Options.**
+1. **Out-of-fold cross-fitted uncertainty on the training set.** K-fold inside train; each molecule scored by the fold that excluded it. The only statistically honest version. Costs K× the uncertainty arm (~544 invocations today carry `-u True`) and is a protocol change, not a re-run.
+2. **In-sample training-set uncertainty**, degeneracy stated. Cheap (one duplicated predict block per model, `scripts/utils.py:200-210` + `scripts/process_and_train.py:1815-1819` + `models/models.py:1387-1418, 1533-1570, 1770-1810, 2073-2172, 2680-2778`). But GP posterior variance collapses at its own training inputs by construction, and RF/QRF are fit on train ∪ val — near-zero spread on their own rows. The answer will be "no signal" for reasons that have nothing to do with noise.
+3. **Retire RQ2 as posed; report the population-level questions that the existing data already answers.** Uncertainty inflates ~2× while error inflates ~1.24× (27/27 configs); error-ranking collapses (ρ 0.289 → 0.069, 27/27); 1σ coverage drifts 0.635 → 0.884 (27/27); across-molecule CV of uncertainty falls 0.398 → 0.156 (27/27) — uncertainty inflates uniformly, not selectively. All from `/Users/apunt/repos/KIRBy/tests/results_server/validation_rerun/*/*/{QRF,NGBoost,GP}_*_uncertainty_values.csv`, no compute.
+
+**Recommendation: option 3 now, option 1 only if a fourth uncertainty arm is affordable.** Reason: RQ2 as written is unanswerable in principle on held-out data, and the answerable version is already fully supported by 27 files sitting on disk.
+
+**If you take option 1 or 2**, also dump exact ε: `rust/src/main.rs` between `:1247` and `:1252`, write `train_index,noise_raw` plus `mean,std_dev` (both in scope at `:1249-1250`). Otherwise `injected_noise` stays a regression estimate.
+
+---
+
+## A5. Do the Bayesian networks get a two-output (mean + variance) head?
+
+**Question.** Nothing in the model roster predicts a per-molecule noise level — the component that would actually flag a corrupted label — so do the neural families get a mean-and-variance output head?
+
+**Why irreversible.** Different architecture and different loss; every neural run.
+
+**Evidence.**
+- `scripts/utils.py:80` sampling BNNs return `aleatoric = None`; `:162` NGBoost/QRF return `epistemic = None`; `:130` GP aleatoric is `np.full_like(...)`, one constant; `:188` VBLL the same.
+- The two-output head already exists — `models/models.py:2031` (`model.fc3 = nn.Linear(hidden_size2, 2)` under `loss_name == 'heteroscedastic'`) — but column 1 is thrown away at `:2088` and `:2103` (`output = output[:, 0:1]`), and `decompose_uncertainty_sampling_heteroscedastic` (`scripts/utils.py:88`) has **zero callers repo-wide**.
+- `--loss` is never passed by any SLURM script (default `mse`, `scripts/process_and_train.py:291`), so the head has never been active.
+- The MLP-side override (`models/models.py:2621-2632`) tests only for `fc_out`/`output_layer`; `FactorizationMLP` and `MTLRegressionModel` have neither, so it is a silent no-op there — a 1-output net trained against a 2-output loss.
+- Two models already compute a genuine per-molecule aleatoric term and discard it: `train_heteroscedastic_gp` (`:6835-6837` computed, only `total_std` saved at `:6851`) and `train_evidential_kernel` (`:6963-6964` computed, `:6977` saves total only).
+
+**Options.**
+1. **Turn on the two-output head for the NN families** as an added arm. Doubles the neural matrix and requires fixing `:2088`/`:2103` and wiring `decompose_uncertainty_sampling_heteroscedastic`, plus the `FactorizationMLP`/`MTL` no-op.
+2. **Keep one output; drop the per-sample aleatoric claim** and say plainly that no model in the roster predicts an input-dependent noise level.
+3. **Two-line fix instead:** pass the already-computed components at `models/models.py:6851` and `:6977`, and add `het_gp_*` / `evidential_kernel_*` to the figure roster (`scripts/generate_paper_figures_v2.py:283-289`).
+
+**Recommendation: 2 + 3.** No architecture change; you get a real per-molecule aleatoric arm for two models at essentially zero cost, and the honest statement for the rest.
+
+---
+
+## A6. Does the σ grid change?
+
+**Question.** Keep 11 levels (0.0 to 1.0 in steps of 0.1), or coarsen / re-centre on realistic assay error?
+
+**Why irreversible.** `auc_norm` is a trapezoid over the grid divided by the grid range (`scripts/generate_paper_figures_v2.py:1798-1800`); configs need ≥3 σ points and a σ=0 row (`:1820-1832`). Numbers from two different grids cannot appear in one table.
+
+**Evidence.** 1252 of 1259 slurm invocations use exactly the 11-point grid; the only exceptions are a 7-point resume (`slurm_scripts_fixup_timeout/anova_cpdv_svm_valprop.sh:24`) and two validation smoke tests. Published assay-error SDs put one unit of real experimental error near σ≈0.6, so roughly half the grid sits beyond anything physical.
+
+**Options.**
+1. **Keep 11 points.** Comparable to all existing tables; full cost.
+2. **Coarsen to 6 points (0, 0.2, …, 1.0).** ~45% saving on the whole matrix. `auc_norm` shifts by trapezoid error; the entire results set must move together.
+3. **Re-centre on 0–0.6 with finer spacing.** Best physical interpretation, but abandons the "extreme noise" half of every degradation curve.
+
+**Recommendation: option 1** if A9's budget allows; otherwise **option 2** applied uniformly. Do not mix grids. Decide after A3, since renormalisation changes what a σ unit is.
+
+---
+
+## A7. Does the skewed-noise experiment run?
+
+**Question.** Do we run the non-Gaussian noise *shapes* (left-tailed, right-tailed, U-shaped) at all?
+
+**Why irreversible.** A separate arm, multiplying the matrix by however many distributions are added.
+
+**Evidence.** `--distribution` is never passed by any of the 30 slurm directories; default `gaussian` (`scripts/process_and_train.py:241`). The implementations are wrong:
+- LeftTailed (`rust/src/main.rs:465-471`): both branches return ≤ 0 — support is (−∞, 0], i.e. a systematic downward label shift, not zero-mean noise.
+- RightTailed (`:480-486`): `powf(1.5)` on the positive side, `powf(0.5)` on the negative — realised SD ≠ σ and not linear in σ.
+- UShaped (`:491-496`): Var = 6σ², so SD ≈ 2.449σ; the comment at `:260-262` claims σ².
+- Only Uniform (`:498-502`) is correct. All of it is duplicated at `:211-264`.
+
+**Options.**
+1. **Do not run; delete the three broken variants and the duplicate block.** Zero cost, removes a landmine.
+2. **Fix them (zero-mean, unit-scale) and run as a supplementary arm.** Three extra distributions across the matrix; and each is a fresh dose confound on top of A3.
+3. Run as is — guaranteed-wrong results.
+
+**Recommendation: option 1.** Nothing in the paper claims them.
+
+---
+
+## A8. Is the Gaussian process re-run on the primary representation?
+
+**Question.** The GP is entirely missing from the descriptor representation the paper builds its figures on — do we run it there?
+
+**Why irreversible.** It is a run or it is a hole in Figures 1 and 3 and in §5.3.
+
+**Evidence.**
+- `slurm_scripts_gauche_rbf/` writes 24 targets covering ecfp4 / mhggnn / mol2vec / smiles — **no `continuous_pdv` target exists**.
+- `slurm_scripts_continuous_pdv/gauche.sh:22-33` runs `-m gauche` on `continuous_pdv` with no `--kernel`, so it uses the Tanimoto default (`scripts/process_and_train.py:243`) — a binary-vector kernel on a real-valued descriptor.
+- The figure script asks for `gauche_rbf` at `rep = continuous_pdv` (`scripts/generate_paper_figures_v2.py:2657-2658`) and gets nothing; the bookkeeping is self-contradictory, with `ANOVA_MODELS_EXCLUDE` dropping both GP names (`:128-132`) while `PDV_ONLY_MODELS = {'gauche_rbf'}` (`:135`).
+- In the external data the GP is the strongest uncertainty-tracking model, so its absence undercuts §5.3 specifically.
+
+**Options.**
+1. **Run `gauche_rbf × continuous_pdv × 6 strategies`** — 6 job-equivalents in the 71:59 wall-time class used by `slurm_scripts_gauche_rbf/`.
+2. **Leave the GP out of the primary representation** and extend the Figure 4 caption (L427) to explain the RBF gap, not just the Tanimoto one.
+3. Drop the GP from QM9 entirely, keep it in external validation only.
+
+**Recommendation: option 1.** Six jobs is the cheapest item on this list and it closes the one hole the reviewers will see immediately.
+
+---
+
+## A9. What is the scope of the QM9 re-run?
+
+**Question.** Does QM9 stay the primary dataset — about eleven thousand requested wall-hours to redo — or does the paper lead with the three external datasets, which are clean and already computed?
+
+**Why irreversible.** It is the budget.
+
+**Evidence.**
+- Every QM9 R² at σ>0 is invalid: held-out labels received the *training* noise map, mispaired (`rust/src/main.rs:740-748` comment; index restart at `:625`).
+- Cost: 216 job scripts, 906 distinct output CSVs, **11,132 requested wall-hours / 44,528 requested core-hours**.
+- The external tree is clean and complete: `/Users/apunt/repos/KIRBy/tests/results/validation/{logd,caco2,herg}/all_results.csv`, 16,170 rows each, model × rep × strategy × σ × fold all present as columns; noise into `y_train` only (`alternative_data_noise_robustness.py:760`); test labels bit-identical across all 11 σ in 27/27 uncertainty files.
+- **Nothing in the current tree can produce corrected runs yet**: the `apply_noise` fix is uncommitted (12 insertions, last commit touching the file is `8bcda92`) and `rust/target/release/` DOES NOT EXIST — the ARC binary predates the fix unless `cargo build --release` is re-run there.
+
+**Options.**
+1. **Full re-run** — all 5 representations, `-b 10`, 11 σ. ~11.1k wall-hours.
+2. **All 5 representations at `-b 5`.** ~50% saving; still clears every gate (`MIN_CELL_ITERS = 5`, `scripts/generate_paper_figures_v2.py:434`; `min_iterations = 5`, `:653`). Costs precision on the residual term, which is itself a headline (outlier residual η² 83.6%).
+3. **Two representations (PDV + ECFP4) at `-b 10`.** ~60% saving, but it guts the model-vs-representation decomposition, which *is* the paper's headline.
+
+**Recommendation: option 2.** Reducing replicates preserves both ANOVA factors; reducing representations does not.
+
+---
+
+## A10. Do the deterministic models keep running six times at σ=0?
+
+**Question.** At σ=0 no noise is injected regardless of strategy, so six of the strategy runs collapse to one for the deterministic models — do we stop paying for the duplicates?
+
+**Why irreversible.** It is ~9% of the compute bill (one of eleven σ levels, five-sixths wasted for part of the roster), and it inflates every count on pooled σ=0 data sixfold.
+
+**Evidence.** `scripts/process_and_train.py:1609` sets `'noise': s > 0`, and `rust/src/main.rs:750` gates on `config.noise`, so σ=0 is byte-identical across strategies. Confirmed empirically: LightGBM, QRF, SVM and XGBoost have exactly zero across-strategy SD at σ=0 in **100%** of (model, rep, fold) cells on all three external datasets; RF 80/70/5%; every neural model 0% (they re-seed).
+
+**Options.**
+1. **Run σ=0 once per (model, rep) and reuse it** across strategies for the deterministic families. Saves ~9%; needs a change in the strategy loop of each slurm script.
+2. **Keep the duplication, deduplicate in analysis.** No compute saving, but fixes the statistics.
+3. Keep as is — every σ=0 standard error, df and p-value is inflated 6× for half the roster.
+
+**Recommendation: option 2** if editing 216 slurm scripts is unattractive, **option 1** if the budget is tight. Either way the deduplication must reach the analysis.
+
+---
+
+# (B) DECISIONS ABOUT ANALYSIS OF ALREADY-COMPUTED DATA — no compute cost
+
+- **B1. Is R² floored at zero before the variance decomposition?** `calculate_robustness` does not floor (`scripts/generate_paper_figures_v2.py:1798`), but the flooring choice flips every η² in the framework: neural representation η² on LogD goes 53.5 → 8.1 and residual 23.9 → 79.6 when the floor is removed. No η² in the paper is interpretable until the transform is stated in the caption. Prerequisite for T3 and Additional file 10.
+- **B2. One baseline gate or two?** `ROBUSTNESS_BASELINE_THRESHOLD = 0.3` (`:429`, used `:1804`, `:2057`) versus `BASELINE_THRESHOLD = 0.6` (`:423`, used `:2189`, `:2285`, `:3679`). `table1_anova_summary.csv` and `table1_supp_simple_effects.csv` therefore rest on different config sets under one headline. Pick one.
+- **B3. Do the cross-strategy averages survive?** `:3272-3273`, `:3290`, `:3297`, `:2452` all average over the six strategies; `fig_validation_combined` (`:1704-1784`) averages over strategies *and* representations *and* (panel b) all three datasets. Direct conflict with the no-averaging rule.
+- **B4. Delete `fix_injected_noise`** (`:980-1021`). It overwrites the correctly-scoped per-run value from `scripts/utils.py:212-223` with a recomputation grouped on `{model, rep, sigma, iteration}` (`:995`) that omits `strategy` and `file_no` — pooling runs with different normalisation constants and leaving a deterministic function of the clean label inside the "noise".
+- **B5. T5's p-values do not belong to T5's numbers.** `wilcoxon_paired_test` (`:1892-1930`) ignores its `strategy` argument and uses `rep` only as a default, pairing across all rep × strategy cells (`:1908-1913`), while the AUC column beside it is PDV + Gaussian only (`:3315`).
+- **B6. The validation ANOVA is rank-deficient.** Residual η² is exactly 0.0 on all three datasets because max cell size = 1 after the strategy filter (`:1593`, `:1596`); residual is computed at `:1430`, written at `:1648`, and not plotted at `:1642-1643`. Restore the fold axis or drop the interaction term.
+- **B7. Do RMSE and MAE get reported?** They are already in every results CSV (`scripts/utils.py:38`) and the v2 script never reads them — the only "RMSE" in v2 is a synthetic annotation at `:2626`. Reporting them is a script edit, not a run.
+- **B8. Figure 1 shows synthetic data with two wrong formulas.** `:2538-2546` generates a 3-component Gaussian mixture; no QM9 label enters the figure, though `paper.tex:359` says otherwise. Its valprop is additive (`:2557`) where Rust is multiplicative (`rust/src/main.rs:313`), and its threshold is a median split (`:2563-2565`) where Rust uses an absolute ±1.0 cut (`:364-373`).
+- **B9. Fix the roster in one place.** `GLOBAL_MODELS_EXCLUDE` `:116-126`, `ANOVA_MODELS_EXCLUDE` `:128-132`, `PDV_ONLY_MODELS` `:135`, `ANOVA_REPS_EXCLUDE` `:137-143`, plus a function-local `EXCLUDED_MODELS` at `:4009` — and the validation ANOVA applies the rep exclusions but not the model exclusions (`:1593`), so QM9 and validation run on different rosters.
+
+---
+
+# (C) DECISIONS THAT ONLY CHANGE THE PAPER TEXT
+
+- **C1.** NDS or AUC_norm — pick one. NDS is never defined in Methods yet appears in the captions of T3 (L387), T5 (L470, L475), F8 (L556) and in body lines L462, L464, L493, L495, L551, L571, L573, plus Additional files 2–11 (L660–669).
+- **C2.** The exclusion threshold is quoted as R² < 0.3 (L247, L422, L418, L547) and as R² ≤ 0.6 (L464, L663).
+- **C3.** `paper.tex:354` "on normalized data" for threshold is false against `rust/src/main.rs:364-373`. Rewrite regardless of how A2 goes.
+- **C4.** `paper.tex:222` and `:354` promise σ scales difficulty consistently across strategies; realised dose spans 4×. Rewrite regardless of how A3 goes.
+- **C5.** ECE is gone from the scripts but still in T1 (L300-302), T6 (L508-526), Declarations (L620) and Abbreviations (L587).
+- **C6.** Internal contradictions: PDV is "particularly robust" (L462, L493) and "the least noise-resistant" (L567); the GP has "a single global observation noise term… does not absorb individual residuals" (L531) and "absorbs these larger residuals with a per-sample posterior variance" (L565).
+- **C7.** L197's SVM/Tanimoto claim is wrong (SVM is RBF throughout, `models/models.py:1453-1455`); L560's "QRF consistently less robust" is an averaging artifact.
+- **C8.** Any "no kernel model ever fails" phrasing must be narrowed: SVM never fails at σ=0, but the GP does on hERG × PDV (18 of 30 clean runs below zero, median R² −0.288).
+- **C9.** Float counts: the file has 6 tables and 8 figures. `tab:metrics_summary` is never referenced; `sec1` and `sec13` are never referenced. Editorial markers remain at L249, L379, L459.
+
+---
+
+## Ordering constraint
+
+A3 (dose) must be settled before A2 and A6, because it redefines what a σ unit is; A1 must be settled before anything is submitted, because it changes every fitted model in both pipelines; A9 sets the budget that A5–A8 draw against. **And before any of it: commit the `apply_noise` change and run `cargo build --release` on ARC — `rust/target/release/` DOES NOT EXIST in this tree, and `--strategy_params` is still never passed (`scripts/process_and_train.py:1628-1641`), so `scripts/noise_strategy_params.json` remains dead code.**

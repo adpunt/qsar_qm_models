@@ -1,0 +1,1421 @@
+Pattern Recognition and Machine Learning
+Chapter 2: Probability Distributions
+Cécile Amblard
+
+Alex Kläser
+
+Jakob Verbeek
+
+October 11, 2007
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Probability Distributions: General
+
+I Density Estimation: given a finite set x1 , . . . , xN of
+
+observations, find distribution p(x) of x
+Frequentist’s Way: chose specific parameter values by
+optimizing criterion (e.g., likelihood)
+I Bayesian Way: prior distribution over parameters, compute
+posterior distribution with Bayes’ rule
+I
+
+I Conjugate Prior: leads to a posterior distribution of the
+
+same functional form as the prior (makes life a lot easier :)
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Binary Variables: Frequentist’s Way
+Given a binary random variable x ∈ {0, 1} (tossing a coin) with
+p(x = 1|µ) = µ,
+
+p(x = 0|µ) = 1 − µ.
+
+(2.1)
+
+p(x) can be described by the Bernoulli distribution:
+Bern(x|µ) = µx (1 − µ)1−x .
+
+(2.2)
+
+The maximum likelihood estimate for µ is:
+µML =
+
+m
+N
+
+with
+
+m = (#observations of x = 1)
+
+Yet this can lead to overfitting (especially for small N ), e.g.,
+N = m = 3 yields µML = 1!
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+(2.8)
+
+Binary Variables: Bayesian Way (1)
+The binomial distribution describes the number m of observations
+of x = 1 out of a data set of size N :
+ 
+N
+Bin(m|N, µ) =
+µm (1 − µ)N −m
+(2.9)
+m
+ 
+N!
+N
+≡
+(2.10)
+m
+(N − m)!m!
+0.3
+
+0.2
+
+0.1
+
+0
+
+0
+
+1
+
+2
+
+3
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+Bishop Chapter 2: Probability Distributions
+
+Binary Variables: Bayesian Way (2)
+For a Bayesian treatment, we take the beta distribution as
+conjugate prior:
+Γ(a + b) a−1
+µ (1 − µ)b−1)
+Γ(a)Γ(b)
+Z ∞
+ux−1 e−u du
+Γ(x) ≡
+
+Beta(µ|a, b) =
+
+(2.13)
+
+0
+
+(The gamma function extends the factorial to real numbers, i.e.,
+Γ(n) = (n − 1)!.) Mean and variance are given by
+E[µ] =
+var[µ] =
+
+a
+a+b
+
+(2.15)
+ab
+
+(a + b)2 (a + b + 1)
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+(2.16)
+
+Binary Variables: Beta Distribution
+Some plots of the beta distribution:
+
+2
+
+2
+
+1
+
+1
+
+0
+
+0
+
+0.5
+
+1
+
+
+ 
+
+3
+
+0
+
+2
+
+1
+
+1
+
+0
+
+0
+
+0.5
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+1
+
+0
+
+0.5
+
+1
+
+0.5
+
+1
+
+
+ 
+
+3
+
+2
+
+0
+
+
+ 
+
+3
+
+ 
+  
+
+3
+
+0
+
+Bishop Chapter 2: Probability Distributions
+
+Binary Variables: Bayesian Way (3)
+Multiplying the binomial likelihood function (2.9) and the beta
+prior (2.13), the posterior is a beta distribution and has the form:
+p(µ|m, l, a, b) ∝ Bin(m, l|µ)Beta(µ|a, b)
+∝ µm+a−1 (1 − µ)l+b−1
+
+(2.17)
+
+with l = N − m.
+I Simple interpretation of hyperparameters a and b as effective
+
+number of observations of x = 1 and x = 0 (a priori)
+I As we observe new data, a and b are updated
+I As N → ∞, the variance (uncertainty) decreases and the
+
+mean converges to the ML estimate
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Multinomial Variables: Frequentist’s Way
+A random variable with K mutually exclusive states can be
+represented as a K dimensional vector x with xk = 1 and
+xi6=k = 0. The Bernoulli distribution can be generalized to
+K
+Y
+
+p(x|µ) =
+
+µxk k
+
+(2.26)
+
+k=1
+
+P
+with k µk = 1. For a data set D with N independent
+observations x1 , . . . , xN , the corresponding likelihood function
+takes the form
+p(D|µ) =
+
+N
+Y K
+Y
+
+K
+Y
+
+µxk nk =
+
+n=1 k=1
+
+(
+
+P
+
+µk
+
+n xnk )
+
+k=1
+
+=
+
+K
+Y
+
+k
+µm
+k
+
+(2.29)
+
+k=1
+
+The maximum likelihood estimate for µ is:
+µML
+=
+k
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+mk
+N
+Bishop Chapter 2: Probability Distributions
+
+(2.33)
+
+Multinomial Variables: Bayesian Way (1)
+The multinomial distribution is a joint distribution of the
+parameters m1 , . . . , mK , conditioned on µ and N :
+
+Mult(m1 , m2 , . . . , mK |µ, N ) =
+
+
+N
+m1 m2 . . . mK
+
+
+
+N
+m1 m2 . . . mK
+
+Y
+K
+
+k
+µm
+(2.34)
+k
+
+k=1
+
+N!
+≡
+m1 !m2 ! . . . mK !
+
+(2.35)
+
+where the variables mk are subject to the constraint:
+K
+X
+
+mk = N
+
+k=1
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+(2.36)
+
+Multinomial Variables: Bayesian Way (2)
+
+For a Bayesian treatment, the Dirichlet distribution can be taken
+as conjugate prior:
+K
+
+Dir(µ|α) =
+
+Y α −1
+Γ(α0 )
+µk k
+Γ(α1 ) . . . Γ(αK )
+k=1
+
+with α0 =
+
+PK
+
+k=1 αk .
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+(2.38)
+
+Multinomial Variables: Dirichlet Distribution
+Some plots of a Dirichlet distribution over 3 variables:
+
+Dirichlet distribution with values
+(clockwise from top left): α =
+(6, 2, 2), (3, 7, 5), (6, 2, 6), (2, 3, 4).
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Dirichlet distribution with values (from left to right): α =
+(0.1, 0.1, 0.1), (1, 1, 1).
+
+Bishop Chapter 2: Probability Distributions
+
+Multinomial Variables: Bayesian Way (3)
+
+Multiplying the prior (2.38) by the likelihood function (2.34) yields
+the posterior:
+p(µ|D, α) ∝ p(D|µ)p(µ|α) ∝
+
+K
+Y
+
+µαk k +mk −1
+
+(2.40)
+
+k=1
+
+p(µ|D, α) = Dir(µ|α + m)
+
+(2.41)
+
+with m = (m1 , . . . , mK )> . Similarly to the binomial distribution
+with its beta prior, αk can be interpreted as effective number of
+observations of xk = 1 (a priori).
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution
+The gaussian law of a D dimensional vector x is:
+N (x|µ, Σ) =
+
+1
+
+1
+exp{− (x − µ)> Σ−1 (x − µ)} (2.43)
+2
+(2π) |Σ|
+D
+2
+
+1
+2
+
+Motivations:
+I maximum of the entropy,
+I central limit theorem.
+
+
+
+3
+
+
+
+3
+
+2
+
+2
+
+2
+
+1
+
+1
+
+1
+
+0
+
+0
+
+0.5
+
+1
+
+0
+
+0
+
+
+
+3
+
+0.5
+
+1
+
+0
+
+0
+
+0.5
+
+1
+
+Histogram of the mean of N uniform random variables
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : Properties
+
+I The law is a function of the Mahalanobis distance from x to
+
+µ:
+∆2 = (x − µ)> Σ−1 (x − µ)
+
+(2.44)
+
+I The expectation of x under the Gaussian distribution is:
+
+IE(x) = µ,
+
+(2.59)
+
+I The covariance matrix of x is:
+
+cov(x) = Σ.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+(2.64)
+
+The gaussian distribution : Properties
+The law is constant on elliptical surfaces
+x2
+
+u2
+u1
+y2
+y1
+µ
+1/2
+
+λ2
+
+1/2
+
+λ1
+
+x1
+
+where
+I λi are the eigenvalues of Σ,
+I ui are the associated eigenvectors.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : Conditional and marginal laws
+Given a Gausian distribution N (x|µ, Σ) with:
+x = (xa , xb )> , µ = (µa , µb )>
+
+Σ=
+
+Σaa Σab
+Σba Σbb
+
+(2.94)
+
+
+(2.95)
+
+I The conditional distribution p(xa |xb ) is a gaussian law with
+
+parameters:
+µa|b = µa + Σab Σ−1
+bb (xb − µb ),
+
+(2.96)
+
+Σa|b = Σaa − Σab Σ−1
+bb Σba .
+
+(2.82)
+
+I The marginal distribution p(xa ) is a gaussian law with
+
+parameters (µa , Σaa ).
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : Bayes’ theorem
+A linear gaussian model is a couple of vectors (x, y) described by
+the relations:
+p(x) = N (x, µ, Λ)
+
+(2.113)
+
+−1
+
+(2.114)
+
+p(y|x) = N (y, Ax + b, L
+
+)
+
+(y = Ax + b + ) where x is gaussian and  is a centered gaussian
+noise).
+Then
+p(y) = N (y, Aµ + b, L−1 + AΛ−1 A> )
+
+(2.115)
+
+>
+
+p(x|y) = N (x|Σ(A L(y − b) + Λµ), Σ)
+
+(2.116)
+
+Σ = (Λ + A> LA)−1
+
+(2.117)
+
+where
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : Maximum likehood
+Assume we have X a set of N iid observations following a
+Gaussian law. The parameters of the law, estimated by ML are:
+N
+
+1 X
+xn ,
+µML =
+N
+
+(2.121)
+
+1 X
+(xn − µML )(xn − µML )> .
+N
+
+(2.122)
+
+n=1
+
+N
+
+ΣML =
+
+n=1
+
+The empirical mean is unbiased but it is not the case of the
+empirical variance. The bias can be correct multiplying ΣML by
+N
+the factor
+.
+N −1
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : Maximum likehood
+
+The mean estimated form N data points is a revision of the
+estimator obtained from the (N − 1) first data points:
+(N )
+
+(N −1)
+
+µML = µML
+
++
+
+1
+(N −1)
+(xN − µML ).
+N
+
+(2.126)
+
+It is a particular case of the algorithm of Robbins-Monro, which
+iteratively search the root of a regression function.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The gaussian distribution : bayesian inference
+
+I The conjugate prior for µ is gaussian,
+I The conjugate prior for λ = 12 is a Gamma law,
+σ
+I The conjugate prior of the couple (µ, λ) is the normal gamma
+distribution N (µ|µ0 , λ−1
+0 )Gam(λ|a, b) where λ0 is a linear
+
+function of λ.
+I The posterior distribution would exhibit a coupling between
+
+the precision of µ and λ.
+I The multidimensional conjugate prior is the Gaussian Wishart
+
+law.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The Gaussian distribution : limitations
+
+I A lot of parameters to estimate D(1 + (D + 1)/2) :
+
+simplification (diagonal variance matrix),
+I Maximum likehood estimators are not robust to outliers:
+
+t-Student distribution,
+I Not able to describe periodic data: von Mises distribution,
+I Unimodal distribution Mixture of Gaussian.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+After the gaussian distribution : t-Student distribution
+I A student distribution is an infinite sum of gaussian having
+
+the same mean but different precisions (described by a
+Gamma law)
+Z ∞
+p(x|µ, a, b) =
+N (x|µ, τ −1 )Gam(τ |a, b)dτ (2.158)
+0
+I It is robust to outliers
+0.5
+
+0.5
+
+0.4
+
+0.4
+
+0.3
+
+0.3
+
+0.2
+
+0.2
+
+0.1
+
+0.1
+
+0
+−5
+
+0
+
+5
+
+10
+
+(a)
+
+0
+−5
+
+0
+
+5
+
+10
+
+(b)
+
+Histogram of 30 “gaussian” data points (+3 outliers) and ML
+estimator of the Gaussian (green) and the Student (red) laws
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+After the gaussian distribution : von Mises distribution
+I When the data are periodic, it is necessary to work with polar
+
+coordinates.
+I The von Mises law is obtained by conditionning the
+bidimensional gaussian law to the unit circle:
+x2
+p(x)
+
+x1
+r=1
+
+I the distribution is:
+
+p(θ|θ0 , m) =
+
+1
+exp(m cos(θ − θ0 )
+2πI0 (m)
+
+(2.179)
+
+where
+I
+I
+
+m is the concentration (precision) parameter,
+θ0 is the mean.
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Mixtures (of Gaussians) (1/3)
+I Data with distinct regimes better modeled with mixtures
+100
+
+100
+
+80
+
+80
+
+60
+
+60
+
+40
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+40
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+I General form: convex combination of component densities
+
+p(x) =
+
+K
+X
+
+πk pk (x),
+
+(2.188)
+
+k=1
+
+πk ≥ 0,
+
+K
+X
+
+Z
+πk = 1,
+
+pk (x) dx = 1
+
+k=1
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Mixtures (of Gaussians) (2/3)
+I Gaussian popular density, and so are mixtures thereof
+p(x)
+
+I Example of mixture of Gaussians on IR
+I Example of mixture of Gaussians on IR2
+1
+
+1
+
+(a)
+
+0.5
+
+0.2
+
+(b)
+
+0.5
+
+0.3
+
+0.5
+0
+
+0
+0
+
+0.5
+
+1
+
+0
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+0.5
+
+1
+
+Bishop Chapter 2: Probability Distributions
+
+x
+
+Mixtures (of Gaussians) (3/3)
+I Interpretation of mixture density: p(x) =
+
+PK
+
+k=1 p(k)p(x|k)
+
+mixing weight πk is the prior probability p(k) on the regimes
+I pk (x) is the conditional distribution p(x|k) on x given regime
+I p(x) is the marginal on x
+I p(k|x) ∝ p(k)p(x|k) is the posterior on the regime given x
+I
+
+I The log-likelihood contains a log-sum
+
+log p({xn }N
+n=1 ) =
+
+N
+X
+n=1
+
+log
+
+K
+X
+
+πk pk (xn )
+
+(2.193)
+
+k=1
+
+introduces local maxima and prevents closed-form solutions
+iterative methods: gradient-ascent or bound-maximization
+I the posterior p(k|x) appears in gradient and in (EM) bounds
+I
+
+I
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The Exponential Family (1/3)
+I Large family of useful distributions with common properties
+
+Bernoulli, beta, binomial, chi-square, Dirichlet, gamma,
+Gaussian, geometric, multinomial, Poisson, Weibull, . . .
+I Not in the family: Cauchy, Laplace, mixture of Gaussians, . . .
+I Variable can be discrete or continuous (or vectors thereof)
+I
+
+I General form: log-linear interaction
+
+p(x|η) = h(x)g(η) exp{η > u(x)}
+
+(2.194)
+
+I Normalization determines form of g:
+−1
+
+g(η)
+
+I
+
+Z
+=
+
+h(x) exp{η > u(x)} dx
+
+(2.195)
+
+Differentiation with respect to η, using Leibniz’s rule, reveals
+
+
+−∇ log g(η) = IEp(x|η ) u(x)
+(2.226)
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The Exponential Family (2/3): Sufficient Statistics
+I Maximum likelihood estimation for i.i.d. data X = {xn }N
+n=1
+
+p(X) =
+
+N
+Y
+
+!
+
+(
+N
+
+h(xn ) g(η) exp η
+
+n=1
+
+>
+
+N
+X
+
+)
+u(xn )
+
+(2.227)
+
+n=1
+
+I Setting gradient w.r.t. η to zero yields
+N
+
+1 X
+−∇ log g(η M L ) =
+u(xn )
+N
+
+(2.228)
+
+n=1
+
+I
+
+PN
+
+n=1 u(xn ) is all we need from the data: sufficient statistics
+
+I Combining with result from previous slide, ML estimate yields
+N
+
+
+1 X
+IEp(x|η M L ) u(x) =
+u(xn )
+N
+n=1
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+The Exponential Family (3/3): Conjugate Priors
+I Given a probability distribution p(x|η), prior p(η) is conjugate
+
+if the posterior p(η|x) has the same form as the prior.
+I All exponential family members have conjugate priors:
+
+n
+o
+p(η|χ, ν) = f (χ, ν)g(η)ν exp νη > χ
+
+(2.229)
+
+I Combining the prior with a exponential family likelihood
+N
+Y
+
+p(X = {xn }N
+n=1 ) =
+
+!
+
+(
+
+h(xn ) g(η)N exp η >
+
+N
+X
+
+)
+u(xn )
+
+n=1
+
+n=1
+
+we obtain (2.230)
+(
+N +ν
+
+p(η|X, χ, ν) ∝ g(η)
+
+exp η
+
+>
+
+νχ +
+
+N
+X
+
+!)
+u(xn )
+
+n=1
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Nonparametric methods
+I So far we have seen parametric densities in this chapter
+I
+I
+
+Limitation: we are tied down to a specific functional form
+Alternatively we can use (flexible) nonparametric methods
+
+I Basic idea: consider small region R, with P =
+
+R
+
+R p(x) dx
+
+For N → ∞ data points we find about K ≈ N P in R
+I For small R with volume V : P ≈ p(x)V for x ∈ R
+I Thus, combining we find: p(x) ≈ K/(N V )
+I
+
+I Simplest example: histograms
+
+ 
+
+5
+
+Choose bins
+I Estimate density in i-th bin
+I
+
+pi =
+I
+
+ni
+N ∆i
+
+5
+
+(2.241)
+
+Tough in many dimensions:
+smart chopping required
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+0
+
+0
+5
+
+0
+
+0
+
+ 
+
+0.5
+
+1
+
+0
+
+ 
+
+0.5
+
+1
+
+0.5
+
+1
+
+0
+
+Bishop Chapter 2: Probability Distributions
+
+Kernel density estimators: fix V , find K
+I Let R ∈ IRD be a unit hypercube around x, with indicator
+
+
+k(x − y) =
+
+1 : |xi − yi | ≤ 1/2
+0 : otherwise
+
+(i = 1, . . . , D)
+(2.247)
+
+I # points in X = {x1 , . . . , xN } in hypercube of side h is:
+
+
+
+N
+X
+x − xn
+K=
+k
+h
+
+(2.248)
+
+n=1
+
+I Plug this into approximation p(x) ≈ K/(N V ), with V = hD :
+N
+
+1 X 1
+p(x) =
+k
+N
+hD
+n=1
+
+I
+
+
+
+x − xn
+h
+
+
+(2.249)
+
+Note: this is a mixture density!
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+Bishop Chapter 2: Probability Distributions
+
+Kernel density estimators
+I Smooth kernel density estimates obtained with Gaussian
+
+
+
+N
+1 X
+1
+kx − xn k2
+p(x) =
+exp −
+N
+2h2
+(2πh2 )1/2
+
+(2.250)
+
+n=1
+
+I Example with Gaussian kernel for different values of the
+
+smoothing parameter h
+ 
+
+5
+
+0
+5
+
+0
+5
+
+0
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+0
+
+ 
+
+0.5
+
+1
+
+0
+
+
+
+0.5
+
+1
+
+0.5
+
+1
+
+0
+
+Bishop Chapter 2: Probability Distributions
+
+Nearest-neighbor methods: fix K, find V
+I Single smoothing parameter for kernel approach is limiting
+
+too large: structure is lost in high-density areas
+too small: noisy estimates in low-density areas
+I we want density-dependent smoothing
+I
+I
+
+I Nearest Neighbor method also based on local approximation:
+
+p(x) ≈ K/(N V )
+
+(2.246)
+
+
+
+5
+
+0
+
+I For new x, find the volume of
+
+5
+
+the smallest circle centered on x
+enclosing K points
+
+0
+5
+
+0
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+0
+
+
+
+0.5
+
+1
+
+0
+
+
+
+0.5
+
+1
+
+0.5
+
+1
+
+0
+
+Bishop Chapter 2: Probability Distributions
+
+Nearest-neighbor methods: classification with Bayes rule
+I Density estimates from K-neighborhood with volume V :
+
+Marginal density estimate p(x) = K/(N V )
+Class prior esimates: p(Ck ) = Nk /N
+I Class-conditional estimate p(x|Ck ) = Kk /(Nk V )
+I
+I
+
+I Posterior class probability from Bayes rule:
+
+p(Ck |x) =
+I
+I
+
+p(Ck )p(x|Ck )
+Kk
+=
+p(x)
+K
+
+(2.256)
+
+Classification based on class-counts in K-neighborhood
+In limit N → ∞ classification error at most 2× optimal
+[Cover & Hart, 1967]
+
+I Example for binary classification, (a) K = 3, (b) K = 1
+x2
+
+x2
+
+x1
+(a)
+
+Cécile Amblard, Alex Kläser, Jakob Verbeek
+
+x1
+(b)
+
+Bishop Chapter 2: Probability Distributions
+
+

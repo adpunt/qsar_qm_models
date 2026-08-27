@@ -1,0 +1,20 @@
+% ANOVA Variance Decomposition by Noise Strategy
+\begin{table}[htbp]
+\centering
+\caption{Variance decomposition (η²) across noise injection strategies. Performance measured at σ=0.3; robustness measured by noise degradation slope.}
+\label{tab:anova_strategies}
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{Performance (R²)} & \multicolumn{3}{c}{Robustness (NDS)} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Strategy & Model & Rep & Int. & Model & Rep & Int. \\
+\midrule
+Outlier & 11.3 & 42.9 & 46.6 & 19.1 & 1.7 & 12.6 \\
+Value-Proportional & 16.9 & 47.2 & 39.1 & 58.8 & 7.1 & 29.0 \\
+Quantile & 13.8 & 43.5 & 46.0 & 37.7 & 6.3 & 14.7 \\
+Gaussian & 12.3 & 47.7 & 40.7 & 59.4 & 5.5 & 20.5 \\
+Heteroscedastic & 12.9 & 47.4 & 42.4 & 49.8 & 3.9 & 18.5 \\
+Threshold & 17.9 & 43.9 & 38.4 & 58.1 & 10.8 & 31.0 \\
+\bottomrule
+\end{tabular}
+\end{table}

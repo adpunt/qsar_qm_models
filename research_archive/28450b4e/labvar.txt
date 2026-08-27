@@ -1,0 +1,943 @@
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+An analysis of laboratory variability and thresholds for human in vitro
+ADME/PK methods
+Urban Fagerholm
+Prosilico AB, Lännavägen 7, SE-141 45 Huddinge, Sweden.
+e-mail: urban.fagerholm@prosilico.com; phone number: +46-70-1731302
+
+ABSTRACT
+Introduction Various in vitro methods are used to measure absorption, distribution, metabolism and
+excretion/pharmacokinetics (ADME/PK) of candidate drugs and predict and decide whether
+properties are clinically adequate.
+Methods Objectives were to evaluate variability within and between laboratories for commonly used
+human in vitro ADME/PK methods and to explore whether reliable thresholds may be defined. The
+literature was searched for in vitro data for intrinsic metabolic clearance (hepatocyte CLint), apparent
+intestinal permeability (Caco-2 Papp), efflux ratio (Caco-2 ER), solubility (S) and BCS-class, and
+corresponding clinical estimates. In vitro ADME/PK data for three example drugs (atenolol,
+diclofenac and gemfibrozil) were used to predict human in vivo ADME/PK and investigate whether
+these would pass a compound selection process.
+Results and Conclusions Interlaboratory variability is considerable, especially for fu, S, ER and BCSclassification, and on average about twice as high as intralaboratory variability. Approximate mean
+interlaboratory variability for CLint, Papp, ER and fu (3- to 3.5-fold) appears to be about 2- to 3-fold
+higher than corresponding interlaboratory variability. Mean and maximum interlaboratory range for
+CLint, Papp, ER, fu and S are approximately 5- to 100-fold and 50- to 4500-fold, respectively, with
+second largest range for fu and largest range for S. For one drug, laboratories produced almost 1000fold different CLint • fu-values. It appears difficult/impossible to set clear clinically useful thresholds,
+especially for CLint, ER and S. Poor in vitro-in vivo consistency for S and BCS-classification and
+large portions of compounds out of reach for Caco-2 and conventional hepatocyte assays are evident.
+Predictions for reference compounds are consistent with inadequate in vivo ADME/PK. Ways to
+improve predictions and compound selection are suggested.
+
+This manuscript has undergone peer reviews and been updated based on recommendations (to add a few references and
+more reference compounds to predict and clarify the data analysis).
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+INTRODUCTION
+Various in vitro methods are used to measure and screen absorption, distribution, metabolism and
+excretion/pharmacokinetic (ADME/PK) properties of candidate drugs, for example, human
+hepatocytes for intrinsic hepatic metabolic clearance (CLint), Caco-2 cells for apparent intestinal
+permeability (Papp) and basolateral to apical/apical to basolateral Papp-efflux ratio (ER), and water and
+buffers for solubility (S). It is assumed, and also shown, that these to some extent resemble the in vivo
+situation, and are therefore used to predict corresponding human clinical estimates, exposure profiles
+and doses.
+Compound selection and decision making (stop/go) during the drug discovery phase may be
+based on rank ordering of important basic ADME/PK-properties (for example, choosing the most
+permeable and metabolically stable in a series of compounds) or integrated ADME/PK-profiles (for
+example, selecting the compound with predicted most adequate oral bioavailability (F) and half-life
+(t½) and multiple elimination routes), and/or certain thresholds/cut-off values and classes/categories
+for ADME/PK.
+There is a defined permeability/uptake threshold for the Biopharmaceutics Classification System
+(BCS) - high permeability when fraction absorbed (fa) based on permeation is or is predicted to be
+≥90 %, otherwise, low permeability. The BCS also has a cut-off limit for S - high S when the highest
+dose strength is soluble in 250 mL or less of aqueous media over the pH range of 1.2 to 6.8, otherwise,
+low S. Another established classification exists for hepatic extraction ratio (EH) - high (>0.7),
+intermediate (0.3-0.7) or low (<0.3). Except for these, there appears to be no consensus regarding
+general thresholds for in vitro and in vivo ADME/PK. Certain threshold have, however, been
+proposed for in vitro microsomal CLint and S (see below) and a Papp corresponding to a fa of at least
+approximately 0.1-0.3 seems generally desired for oral administered drugs. The lack of consensus
+regarding thresholds for in vitro ADME/PK-methods could, at least partly, be explained by
+differences between methodologies and laboratories and uncertainties regarding in vitro-in vivo
+relationships and what is assumed to be adequate and inadequate.
+In vivo ADME/PK-profiles could match the ones produced in laboratories. However, appropriate
+in vitro ADME/PK-properties do not necessarily mean that the same will be true in vivo in man. For
+example, a) the combination of low CLint (below, at or near the limit of quantification (LOQ) of
+hepatocyte and microsome assays) and high Papp could imply zero excretion, very slow metabolism
+and unacceptably long t½ in vivo, b) the combination of moderate CLint and Papp might be associated
+with low F and short t½ in vivo if there is high unbound fraction in plasma (fu), low steady-state
+volume of distribution (Vss) and considerable excretion, and c) good in vitro S could be insufficient
+for a compound with low permeability and for which high oral exposure and dose are required.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+A reliable estimate of oral dose is usually not available in early drug discovery (which makes the
+interpretation of S-data difficult), and despite efforts at laboratories, a considerable portion of
+compounds has been shown to have high prediction errors of oral exposure and dose. For example,
+16 and 36 % of compounds showed >10-fold prediction errors with the best of selected animal and
+in vitro prediction models, respectively (Poulin et al. 2011), and a near million-fold overprediction of
+oral exposure and dose has been estimated with classic allometric scaling methodology for one
+substance (Fuse et al. 2008).
+Other obstacles for the screening, selection and prediction process include that ADME/PK for
+many compounds cannot be quantified at laboratories due to low recovery (Skolnik et al. 2010) and/or
+low sensitivity (Stringer et al. 2008). The uncertainty for non-quantifiable compounds could
+potentially imply that they are not considered for further investigation and selection.
+For the early drug discovery scientist involved in screening, prediction, ranking and selection of
+candidate drugs it is important to know how to interpret available ADME/PK-data and decide whether
+compounds have excellent, sufficiently good or too poor properties and which parameter estimates to
+improve via design. Based on an apparent lack of consensus regarding thresholds for in vitro
+ADME/PK there is a need for further investigation and clarification.
+The objectives of this study were to evaluate variability within and between laboratories for
+commonly used human in vitro ADME/PK methods and to explore whether it is possible to define
+approximate reliable general thresholds for in vitro ADME/PK that could be used for the decision
+making and compound selection in the early drug discovery process. In vitro ADME/PK data for
+three example drugs (atenolol, diclofenac and gemfibrozil) were used to predict human in vivo
+ADME/PK and investigate whether these would pass a compound selection process.
+
+MATERIALS & METHODS
+In vitro-in vivo Data and Relationships
+The literature was searched for data for human hepatocyte CLint, Caco-2 cell Papp and ER, S in water
+and buffers, intrinsic aqueous S (Sint; the aqueous solubility of compounds in free acid or free base
+form, independent on pH and rather more reproducible than other solubility measures) and BCSclass, and for corresponding clinical estimates, including CLint (estimated using the well-stirred liver
+model and lower blood flow rate of 1500 mL/min), hepatic clearance (CLH), EH, F, fu, fa and
+maximum in vivo dissolution potential (fdiss; the fraction of oral dose dissolved in the human
+gastrointestinal tract during optimized conditions). In addition, data on fraction excreted (fe) and
+CYP3A4-specificity (binary classification; substrate/non-substrate) were collected.
+Data were taken from the following references - human hepatocyte CLint (Stringer et al. 2008,
+Bowman and Benet 2019, Hallifax et al. 2010, Sohlenius-Sternbeck et al. 2010, Yamagata et al. 2017,
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Soars et al. 2002, Cyprotex, 2022), Caco-2 Papp (Skolnik et al. 2010; Pham-The et al. 2013, Lin et al.
+2011, McGinnity et al. 2007, Bock et al. 2004, Nožinić et al. 2010, Balimane et al. 2006, Hayeshi et
+al. 2008, Thomas et al. 2005, Matsson et al. 2005, Lee et al. 2017), Caco-2 ER (Skolnik et al. 2010;
+Pham-The et al. 2013, Lin et al. 2011, McGinnity et al. 2007, Bock et al. 2004, Nožinić et al. 2010,
+Balimane et al. 2006, Hayeshi et al. 2008), S (Pham-The et al. 2013), Sint (Chasing Equilibrium
+method data (Hewitt et al. 2009, Llinàs and Avdeef 2019)), BCS (Pham-The et al. 2013), CLH and
+EH (Varma et al. 2010), F (Varma et al. 2010), fa (Pham-The et al. 2013, Varma et al. 2010), fe (Varma
+et al. 2010), fu (Fagerholm el al. 2021, Wang et al. 2014) and CYP3A4 (Carbon-Mangels and Hutter
+2011, Yap and Chen 2005, Bioinformatics 2011, Drugbank). Estimates of fdiss were estimated based
+on fa-data (fdiss≥fa) (Pham-The et al. 2013, Varma et al. 2010).
+In vitro-in vivo relationships, including correlations (R2), were established and in vivo estimate
+ranges at certain in vitro estimate levels were investigated.
+
+In vitro-in vivo Relationships for Example Compounds
+Atenolol, diclofenac and gemfibrozil were chosen as reference compounds for evaluation of in vitro
+vs in vivo ADME/PK-data and thresholds. Atenolol was selected based on moderate in vivo
+permeability and fa (53 %), high S, indications of intestinal efflux, and low in vivo CLint (6 mL/min),
+whereas diclofenac was selected based on its high in vivo permeability and fa (99 %) and CLint (58000
+mL/min) and uncertainty regarding S. Gemfibrozil was chosen based on observed large
+interlaboratory variability difference in CLint and fu. Differences in results between laboratories have
+been demonstrated for these three compounds, and especially for gemfibrozil. Their in vivo
+ADME/PK in man was simply predicted considering fa (based on Papp and S), CLH (using the well
+stirred liver flow model with CLint and fu), Vss and glomerular filtration rate • fu.
+
+Laboratory Variability
+The average laboratory variability for each parameter (both within and between laboratories) was
+estimated from absolute differences from the mean (“variability”) and maximum/minimum-ratios
+(“range”) for the compounds. Contradictory binary classifications were defined as ≤1 vs >1.4 for ER,
+substrate vs non-substrate identities for CYP3A4, < or > 10-fold difference for fu, and < or > 90 % fa
+and in vivo vs in vitro classing for BCS.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+RESULTS
+In vitro-in vivo Data and Relationships
+Intrinsic Metabolic Clearance
+Figure 1 shows the relationships between in vivo log CLint (including the median CLint for of 277
+drugs = 738 mL/min (Varma et al. 2010)) and EH, F and fe. There are trends toward increased CLH
+(R2=0.12), EH and CL (R2=0.07) with increasing CLint, increased F (R2=0.04) and fe with decreasing
+CLint, and no apparent relationship between CLint and t½ (R2=0.009). The median fe at around the
+median in vivo CLint for the drugs (corresponding to an average in vitro CLint of ~3 µL/min/106 cells)
+is ~0.3 (range 0 to 0.8). Near complete renal elimination is also found for many drugs with in vitro
+CLint of ~2 µL/min/106 cells (just above the LOQ of the hepatocyte assay).
+Figure 1 Relationships between in vivo log CLint (including the median CLint for of 277 drugs = 738 mL/min
+and EH, F and fe.
+1,0
+0,9
+
+In vivo EH, F or fe
+
+0,8
+0,7
+0,6
+0,5
+0,4
+0,3
+0,2
+0,1
+0,0
+1
+
+10
+
+100
+
+1000
+
+10000
+
+100000
+
+1000000
+
+10000000
+
+In vivo CLint (mL/min)
+Hepatic extraction ratio (EH)
+
+Oral bioavailability (F)
+
+Median in vivo CLint for drugs
+
+Fraction excreted (fe)
+
+In Figure 2, the correlation between in vivo and in vitro log CLint (R2=0.44; n=112; (Stringer et
+al. 2008, Sohlenius-Sternbeck et al. 2010, Yamagata et al. 2017, Soars et al. 2002, Cyprotex, 2022))
+is shown. It also shows data for compounds with non-quantifiable CLint (with in vivo CLint ranging
+from 40 to >10000 mL/min). Inclusion of data for 59 compounds with non-quantifiable in vitro CLint
+results in a R2 of 0.40. At ~1 (~LOQ) and ~10 µL/min/106 cells, the in vivo CLint range ~1500-fold
+(6.0 to 9136 mL/min) and ~1200-fold (607 to 712500 mL/min), respectively. The in vivo CLint for
+the compounds with quantifiable in vitro CLint averages 33000 mL/min and has a median value of
+1500 mL/min, which is higher than the median for drugs (738 mL/min). One compound (amiodarone)
+has a F of 65 % despite a very high CLint (773000 mL/min). Another compound (UCN-01) has a CL
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+of 0.2 mL/min and t½ of 1 month (inadequate in vivo PK) despite a moderate CLint. Low in vivo EH is
+found for 1/3 of compounds with in vitro CLint≥40 µL/min/106 cells, and high in vivo EH is found for
+6 % of compounds with in vitro CLint≤4 µL/min/106 cells.
+Figure 2 Relationships between in vivo and in vitro log CLint from various laboratories (R2=0.44; n=112; data
+from 5 sources). The median in vivo CLint for of 277 drugs (738 mL/min) is shown.
+In vitro CLint (µl/min/million cells)
+
+1000
+
+100
+
+10
+
+1
+
+0,1
+1
+
+10
+
+100
+
+1000
+
+10000
+
+100000
+
+1000000
+
+10000000
+
+In vivo CLint (ml/min)
+<LOQ
+
+0.5-2 µl/min/million cells
+
+>2 µl/min/million cells
+
+Median in vivo CLint for drugs
+
+In vitro CLint for 59 compounds with non-quantifiable are shown in the figure. Non-quantifiable compounds with in vivo CLint <1, 110, >10-100 and >100 mL/min/kg from Stringer et al. (2008) were set to have in vivo CLint of 40, 400, 4000 and 15000 mL/min,
+respectively. Inclusion of these non-quantifiable compounds with in vitro CLint set to 0.4 µL/min/106 cells resulted in a R^2 of 0.40.
+
+Stringer et al. (2008) investigated intra- and interlaboratory variability for 6 compounds with low
+to high in vitro CLint and found 20 % standard deviation for the former and approximately 2- and 15fold mean and maximum variability (and average 9-fold range) for the latter. They also found that
+every other compound had non-quantifiable in vitro CLint, including ~1/3 of compounds with
+moderate and high in vivo CLint. Soars et al. (2002) found a near 4-fold average batch difference and
+maximum 37-fold range for 8 glucuronidated compounds in their laboratory. Bowman and Benet
+(2019) compiled hepatocyte CLint data for 50 compounds from 14 papers, and results show ~3-fold
+mean interlaboratory variability (5-fold mean range) and maximum 51-fold range for one compound
+(gemfibrozil). Cyprotex showed an overall <2-fold intralaboratory variability (more than half with
+<1.5-fold difference) for in vitro CLint of compounds with in vivo CLint>2000 mL/min and greater
+variability for compounds with higher metabolic stability.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Apparent Permeability
+Pham-The et al. (2013) established a typical sigmoidal relationship between log Caco-2 Papp and fa
+(average of data from various sources; n=282) and found that for Caco-2 Papp 1 and 10 • 10-6 cm/s the
+fa averages ~0.6 (range <0.1 to 1) and ~0.8 (range ~0.1-0.2 to 1) and that the standard error is 18.5
+%. Several groups/laboratories have found that Caco-2 Papp of ~≥10 • 10-6 cm/s corresponds to fa≥0.80.9 (Pham-The et al. 2013). There are also studies which have produced lower (~2-3 • 10-6 cm/s
+(Thomas et al. 2005, Lee et al. 2017)) or higher (~30 • 10-6 cm/s (Matsson et al. 2005)) Caco-2 Papp
+at and above this fa-limit. A similar trend is apparent for Caco-2 Papp corresponding to fa=0.5. A Caco2 Papp of ~1-2 • 10-6 cm/s often represents a fa of ~0.5, but lower Caco-2 Papp is sometimes found at
+this fa-level (~0.1-0.3 • 10-6 cm/s (Thomas et al. 2005, Lee et al. 2017)). Weak Papp-fa-correlations are
+shown at low Caco-2 Papp and low fa (<0.5) (Pham-The et al. 2013, Lin et al. 2011, Matsson et al.
+2005).
+The approximate average interlaboratory variability for Caco-2 Papp is 3-fold (data for 11
+compounds in 10 studies (Thomas et al. 2005, Matsson et al. 2005, Lee et al. 2017)). The mean range
+is 24-fold (Thomas et al. 2005, Matsson et al. 2005, Lee et al. 2017). Corresponding estimates for 5
+compounds (atenolol, metoprolol, talinolol, BSP and Gly-Sar) explored at 10 different laboratories
+were 4- and 44-fold, respectively (Hayeshi et al. 2008). The corresponding intralaboratory values
+were 2- and 16-fold, respectively (Hayeshi et al. 2008). The standard error for the interlaboratory
+investigation by Pham-The et al. (2013) was 18.5 %, which is higher than the mean intralaboratory
+coefficient of variation found by Matsson et al. (2019) (14 %).
+Compounds with low recovery (often those with high lipophilicity) seem to be excluded in
+most/many Caco-2 reports. Sköld et al. (2006) included two such compounds in a Caco-2 Papp-data
+set (fenofibrate with log P 5.1 and meclizine with log P 6.2) and reported them as ”[Papp] not
+detectable and low recovery” and “[Papp] not reliable due to low recovery”. Problems to quantify
+Caco-2 Papp and predict fa were also shown by Skolnik et al. (2010), who found that 1/8 and 50 % of
+compounds were subject to <30 % (44 % of poorly soluble compounds) and <80 % recovery,
+respectively.
+
+Efflux Ratio
+There is a trend towards decreased fa with increasing Caco-2 ER (R2=0.13; n=207; Figure 3).
+However, there is no apparent difference in Caco-2 Papp vs fa-relationships for compounds with low
+ER/no efflux and high ER (Skolnik et al. 2010, Lin et al. 2011). Complete fa (≥0.95) is found in the
+ER-range 0.28 to 7.0. At ER≥10 the maximum fa is ~0.7, and fa≤0.1 is found for compounds with ER
+in the range 0.17 to 60.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Figure 3 Relationship between Caco-2 cell Papp ER from different laboratories and in vivo fa (R2=0.13;
+n=207).
+1,0
+
+In vivo fraction absorbed (fa)
+
+0,9
+0,8
+0,7
+0,6
+0,5
+0,4
+0,3
+0,2
+0,1
+0,0
+0,1
+
+1,0
+
+10,0
+
+100,0
+
+Caco-2 efflux ratio (ER)
+
+Eight of 42 compounds (19 %) have contradictory interlaboratory ER-results (ER≤1 vs ER >1.4;
+substrate vs non-substrate for intestinal transporters), and the average, median and maximum range
+for ER are 5.3- (corresponds to 2.8-fold average variability), 1.7-fold and 93-fold, respectively. Three
+laboratories out of 9 (33 %) show contradictory ER-results (substrate at one occasion and nonsubstrate at another) for a compound with moderate Caco-2 Papp, but only for 1 out of 9 (11 %) for a
+compound with moderately high Caco-2 Papp (Hayeshi et al. 2008). The average intralaboratory range
+for 5 compounds with mean 1.4 to 20 ER is 1.8-fold (Hayeshi et al. 2008).
+
+CYP3A4
+CYP3A4-substrate data for were found for 815 compounds, and for 65 (8 %) of these both substrate
+and non-substrate identities (contradictions) are reported (Carbon-Mangels and Hutter 2011, Yap
+and Chen 2005, Bioinformatics 2011, Drugbank).
+
+Solubility
+1, 10 and 100 µM have been suggested minimum S required for minimum acceptable fa of high
+permeability-compounds at oral doses of 0.1, 1 and 10 mg/kg, respectively (Thomas et al. 2006).
+Corresponding estimates for low permeability-compounds are ~20, ~200 and ~2000 µM,
+respectively. A different S-classification was proposed by Hill and Young (2010): >200 µM = high
+S, 30-200 µM = intermediate S, <30 µM = low S.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+S-values collected by Pham-The et al. (2013) shows average, median and maximum
+interlaboratory range of 100-, 2.3- and 4500-fold, respectively (n=150). The lack of relationship
+(R2=0) between minimum reported in vitro S and in vivo fa for 40 low S-compounds (S≤0.02 g/L; S
+~≤40-80 µM) is shown in Figure 4. Complete or near complete fa is demonstrated for many
+compounds with S=0.001 g/L (~2-4 µM) and moderate uptake is shown for compounds with
+S=0.0001 g/L (~0.2-0.4 µM) (Pham-The et al. 2013). Incomplete fa for high permeability compounds
+appears to be rare. Solubility/dissolution-limited uptake is shown for one highly permeable compound
+given at high oral doses, griseofulvin (fa=45 %; oral dose 250-500 mg).
+Figure 4 Relationship between minimum reported in vitro S and in vivo fa for 40 low S-compounds (S≤0.02
+g/L; S ca ≤40-80 µM).
+1,0
+0,9
+0,8
+
+In vivo fa
+
+0,7
+0,6
+0,5
+0,4
+0,3
+0,2
+0,1
+0,0
+0
+
+0,005
+
+0,01
+
+0,015
+
+0,02
+
+S (g/L)
+
+Out of 129 compounds with Sint-data (Solubility Challenge data set), 27 have Sint in the 1-100
+µM-range – amodiaquine, chlorprothixene, diflunisal, dipyramidole, folic acid, glipizide and
+sulfasalazine in the 1-10 µM-range, and bendroflumethiazide, benzthiazide, carprofen,
+chlorpromazine, dibucaine, diclofenac, diethylstilbestrol, flufenamic acid, furosemide, imipramine,
+maprotiline, miconazole, niflumic acid, piroxicam, probenecid, pyrimethamine, sertraline, sulindac,
+trimipramine and warfarin in the 10-100 µM-range (all of these except folic acid has moderate or
+high permeability). Only one of these 27 compounds have an in vivo gastrointestinal uptake clearly
+limited/determined by solubility/dissolution (Figure 5).
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Figure 5 The relationship between in vitro log Sint and in vivo fdiss for 27 low Sint-compounds with high and
+low Papp.
+
+Maximum fraction dissolved in vivo (fdiss)
+
+1,0
+0,9
+0,8
+0,7
+0,6
+0,5
+0,4
+0,3
+0,2
+0,1
+0,0
+1
+
+10
+
+100
+
+Intrinsic aqueous solubility (Sint; µM)
+Low Papp drugs
+
+High Papp drugs
+
+The Solubility Challenge includes two data sets with Sint-data for one specific method, one with
+smaller and one with larger interlaboratory variability (Llinàs and Avdeef 2019) - 1.5-fold standard
+deviation (corresponding to an approximate average 3-fold variability; n=100) for the former and 4.3fold standard deviation (corresponding to an approximate average 6.5-fold variability; n=32) for the
+latter. The maximum individual standard deviation for interlaboratory variability is 8.5-fold (Llinàs
+and Avdeef 2019).
+
+BCS-Classification
+Pham-The et al. (2013) collected in vitro BCS data for a large set of compounds. For compounds
+which have BCS-classification from different sources (n=140) 36 % have consistent classification
+and 64 % show contradictory classes. Most commonly, compounds with undefined in vitro BCS-class
+are classified as class I (high permeability - high solubility) and III (low permeability - high
+solubility). For compounds with defined BCS-class and predicted/anticipated fa above 90 % (in vivo
+BCS class I) or below 90 % (in vivo BCS classes II-IV) (n=73; Figure 5), 37 % are incorrectly
+classified. 77, 84 and 100 % of compounds predicted/anticipated to be in BCS classes I, III and IV
+also belong to these classes based on their measured in vivo fa. For compounds that were
+predicted/anticipated to belong to BCS class II (high permeability - low solubility), however, only 31
+% belong to in vivo BCS class II and 69 % have an in vivo fa of 0.9-1.0 (BCS class I).
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Figure 6 In vivo fa vs in vitro BCS class for 73 compounds (produced using data from reference 11). The in
+vivo threshold for fa is 0.9 (BCS class I fa≥0.9; BCS classes II-IV fa<0.9).
+4
+
+In vitro BCS-class
+
+3
+
+2
+
+1
+
+0
+0,0
+
+0,1
+
+0,2
+
+0,3
+
+0,4
+
+0,5
+
+0,6
+
+0,7
+
+0,8
+
+0,9
+
+1,0
+
+In vivo fa
+Correct classing
+
+Incorrect classing
+
+Unbound Fraction in Plasma
+Fu-data from various laboratories and with different methodologies were collected for 252 compounds
+(Figure 7) (Fagerholm et al. 2021). The mean, median and maximum for ratios were 6.8-, 2.0- and
+185-fold, respectively (Fagerholm et al. 2021). Corresponding interlaboratory variability estimates
+were 3.3-, 1.5- and 47-fold, respectively. 5 % of compounds showed >10-fold range for reported fu.
+Wang et al. evaluated intralaboratory variability for clozapine (mean fu=0.13; 4-fold range
+between laboratories) and warfarin (mean fu=0.013; 4-fold range between laboratories) and found ~5
+% outliers (maximum fu 0.48 and 0.57 for clozapine and 0.095 and 0.13 for warfarin) (Wang et al.
+2014). Intralaboratory variability for clozapine, warfarin, diltiazem, fluconazole, fluoxetine average
+~1.1-fold (Wang et al. 2014).
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Figure 7 Fu vs fu-range for data collected from various laboratories and with different methodologies
+(n=252).
+0,0001
+
+0,0010
+
+0,0100
+
+0,1000
+
+1,0000
+1,0000
+
+fu-range
+
+0,1000
+
+0,0100
+
+0,0010
+
+0,0001
+
+fu
+
+Predictions for Example Compounds
+Atenolol
+In vitro CLint for atenolol has been estimated to 1.9 µL/min/106 cells (Sohlenius-Sternbeck et al.
+2010), which corresponds to an average and maximum in vivo CLint of ~1700 mL/min and ~18500
+mL/min (see Figure 2), respectively. Considering that the in vivo CLint is 6 mL/min there is a ~300fold overprediction of this parameter and an in vitro CLint far below the LOQ of the conventional
+hepatocyte assay is anticipated (Sohlenius-Sternbeck et al. 2010).
+Atenolol has a fa of ~50 % (Pham-The et al. 2013). Caco-2 Papp-values for this compound in the
+selected reports range between 0.17 (indicating low absorptive capacity) and 11 (indicating high
+uptake capacity) • 10-6 cm/s (65-fold difference), and in 13 of 23 (57 %) cases its reported Papp is
+considerably lower than 1 • 10-6 cm/s (McGinnity et al. 2007, Bock et al. 2004, Hayeshi et al. 2008,
+Thomas et al. 2005, Lee et al. 2017). Largest intralaboratory range shown for atenolol is 16-fold (0.33
+and 5.2 • 10-6 cm/s; Hayeshi et al. 2008). In one laboratory-comparison study the ER for atenolol
+averages 1.4-fold and ranges from 0.17 to 3.8 (21-fold difference), with 2/3 of measurements
+indicating efflux and 4.4-fold maximum intralaboratory difference (Hayeshi et al. 2008). Thus, there
+is considerable uncertainty (efflux or not; low, moderate or high fa) regarding its predicted
+gastrointestinal uptake.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+The reported fu and S for atenolol are 0.49 to 0.97 and 10000 µM, respectively (Pham-The et al.
+2013, Fagerholm et al. 2021). It has moderate F (0.5), determined by moderate uptake capacity (BCS
+class III - low permeability and high solubility (Pham-The et al. 2013)) and a very low EH,
+intermediate t½ (6-7 h), intermediate Vss (0.95 L/kg) and renal excretion as major route of elimination
+(fe=0.99).
+According to in vitro-in vivo predictions, assuming contribution by glomerular filtration and no
+tubular reabsorption, intermediate fa, and a Vss of 1 L/kg, atenolol has intermediate EH (~0.5; range
+~0.4 to 0.9), low fe (0.13), low/moderate F (~0.25; range ~<0.05 to 0.5) and short t½ following
+intravenous dosing (<1 h; range ~0.5-1.5 h). Absorption-rate determined elimination (“flip-flop”),
+and longer t½ following oral dose administration, is likely.
+
+Diclofenac
+Reported in vitro CLint for diclofenac is high (19 and 125 µL/min/106 cells (Sohlenius-Sternbeck et
+al. 2010, Cyprotex, 2022), 87 mL/min/kg (Hallifax et al. 2010)), which corresponds to a high in vivo
+CLint (~100000 mL/min). Its reported fu ranges between 0.002 and 0.10 (50-fold interlaboratory
+variability) (Pham-The et al. 2013, Fagerholm et al. 2021), and its Caco-2 Papp is high 13-97 • 10-6
+cm/s) (McGinnity et al. 2007, Lee et al. 2017). Its reported S ranges from 2 (low) to 9000 (high) mg/L
+(7-30000 µM) (Pham-The et al. 2013, Llinàs et al. 2008), and the t½ is intermediate (1.2-2 h) and Vss
+is small (0.2 L/kg) (Varma et al. 2010). Despite high CLint and a Sint in the risk zone for inadequate
+gastrointestinal uptake for a highly permeable drug it has a low hepatic CL (260 mL/min), complete
+fa (0.99) and moderate oral F (0.54).
+According to predictions, assuming Vss=0.1 L/kg as predicted from animal data (McGinnity et
+al. 2007) and negligible renal excretion (as for many highly permeable compounds and based on a
+predicted CLint>>glomerular filtration), diclofenac has incomplete (BCS class II if high dose) or
+complete (BCS class I if low dose) fa, intermediate EH (~0.4; range ~0.1 to 0.9), short t½ (0.15 h;
+range ~<0.1-0.5 h), and moderate F if belonging to BCS class I (~0.6; range ~0.1 to 0.9) or
+low/moderate F (<0.6) if belonging to BCS class II.
+McGinnity et al (2007) used various laboratory data and predicted the t½ and daily oral dose of
+diclofenac in man to be 0.4 h and ~5 grams (~70 times higher than the actual clinical daily dose),
+respectively.
+
+Gemfibrozil
+For gemfibrozil, 51- and 18-fold interlaboratory variabilities have been shown for in vitro CLint and
+fu (Bowman & Benet 2019, Fagerholm et al. 2022). The implication of these differences is that two
+laboratories may show almost 1000-fold differences in CLint • fu (~0.5 vs ~450 mL/min). Considering
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+its low EH (for both CLint • fu-estimates) and high permeability it is predicted to have high F, high
+renal tubular reabsorption capacity and minor contribution by renal excretion. Differences in CLint •
+fu also give almost 1000-fold difference in predicted t½. By choosing the low CLint • fu (~0.5 mL/min)
+there is high potential that the compound would not have passed a stop/go decision.
+
+DISCUSSION
+With the collection of in vitro ADME/PK-data from several studies it was possible to make
+approximations of interlaboratory and intralaboratory variabilities and the extent of non-quantifiable
+compounds, discrepancies and deviations (Tables 1 and 2). Approximate mean interlaboratory
+variability for CLint, Papp, ER and fu (3- to 3.5-fold) appears to be about 2- to 3-fold higher than
+corresponding interlaboratory variability. Mean and maximum interlaboratory range for CLint, Papp,
+ER, fu and S are approximately 5- to 100-fold and 50- to 4500-fold, respectively, with second largest
+range for fu and largest range for S. S and fu, in particular, are highly sensitive to experimental
+conditions and presents a serious challenge to laboratories and for human clinical ADME/PKpredictions.
+For a compound with a measured fu of 0.08 in one laboratory other laboratories may (based on
+results from the collected data) find values of somewhere between ~0.005 and 0.6 for that compound
+(Figure 7). Corresponding ranges for compounds with measured fu of 0.01 and 0.5 in one laboratory
+are ~0.0002 to 0.07 and ~0.05 to 1, respectively. The large variability for fu opens up for retrospective
+selection of favorable reference fu-data for estimation and prediction of, for example, CLint, as shown
+in Fagerholm et al. (2022) where the R2 for predicted vs observed log CLint varied between <0.1 and
+0.8-0.9 depending on choice of fu- and CLH-data. The confidence in such predictions may increase
+by estimating and using mean fu-values from various sources (including in silico predicted estimates)
+and comparing to fu (mean and range) for reference compounds.
+Variabilities and ranges for measurements of solubility/dissolution are extensive, and these can
+also be reduced by standardization such as for example using a certain method and protocol (such as
+Sint). Despite this, there is questionable applicability of such measurements for predicting and
+understanding in vivo solubility/dissolution. Results by Fagerberg et al. (2015) show a poor
+correlation between S in phosphate buffer and human intestinal fluid (R2<0.2) and, as shown in the
+present investigation, there is limited/uncertain (actually no) relationship between in vitro S and in
+vivo dissolution and uptake (Figures 4 and 5). Proposed minimum S required for achieving minimum
+acceptable fa (see Thomas et al. 2006) appear exaggerated. A threshold of 1-100 µM for S does not
+appear adequate. This finding together with the 100-fold average interlaboratory range found for S
+and comparably high prediction error and uncertainty for predictions of oral exposure and dose
+implies a major uncertainty/obstacle.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+The variability and uncertainty of S-measurements also cause uncertainty and contradictory
+results for BCS-classification. 2/3 and 1/3 discrepancies between studies for in vitro BCSclassification and in vitro and in vivo BCS (Figure 6), respectively, are remarkable. Most compounds
+predicted to belong to BCS class II belong to in vivo BCS class I, which is in line with exaggerated
+solubility limitations as shown and discussed above and in reference 36.
+Interlaboratory variability is also quite pronounced for the Caco-2 assay, both for Papp- and ERmeasurements. The variability and uncertainty were demonstrated for atenolol. Based on Pappmeasurements it is not clear whether this compound is effluxed or not or is predicted to have low,
+moderate or high fa. In many cases, Caco-2 Papp of ~1-2 and ≥10 • 10-6 cm/s represent fa of ~0.5 and
+~≥0.8-0.9, respectively. Overall, a Caco-2 Papp of ~≥2-3 • 10-6 cm/s seems compatible with high level
+of permeability-determined gastrointestinal uptake (fa≥0.8-0.9). The use of Papp for reference
+compounds with known fa is recommended for calibration/adjustment for the interlaboratory
+variability along the Papp-scale (up to ~±3- to 10-fold) of Papp vs fa-relationships. Otherwise it is
+difficult to tell whether a Papp in the approximate range 0.1 to 2 • 10-6 cm/s is sufficiently high for
+assuring/predicting adequate gastrointestinal uptake. At lower Papp it is even more difficult to predict
+whether a compound will be absorbed to more than, for example, 10-30 %.
+Efflux influences the extent of gastrointestinal uptake, at least and in particular for compounds
+with low and moderate Papp. An ER>7-10 seems to be associated with an incomplete fa (Figure 3),
+but besides that the magnitude of ER appears to have limited impact on fa-predictions. Sufficiently
+high fa can be reached despite an ER exceeding 70. This and a ~90-fold maximum interlaboratory
+range makes it difficult to set a useful and clear threshold for ER. 20 % discrepancies (both efflux
+and non-efflux shown for a compound) within and between laboratories imply additional
+uncertainties.
+Interlaboratory discrepancy is also demonstrated for CYP3A4-substrate identity, and it appears
+to be the lowest of those studied and compared in this study (8 %).
+Low recovery is another important and common (and generally not often covered and discussed)
+issue with the Caco-2 assay. In such cases (apparently, for almost every other compound), in silico
+methodology may be particularly useful for predictions of fa.
+The variability, range and coverage for the hepatocyte assay appear to be of the same size as for
+Caco-2 – 1.5- to 2-fold intralaboratory variability, 3- to 3.5-fold interlaboratory variability, 50- to 60fold maximum range and approximately 50 % quantifiable compounds. Improvements can be
+achieved by the inclusion of reference compound data and use of in silico methodology (with higher
+sensitivity and capacity to predict in vivo CLint of compounds with in vitro CLint<LOQ) and a
+hepatocyte assay capable of quantifying low CLint-compounds.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Thresholds for in vitro CLint have been proposed and used (20 and 25 µL/min mg protein for
+microsomes; corresponds to an approximate moderately high average in vivo CLint of 7000 mL/min
+(Lee et al. 2007, Sakiyama et al. 2008, Liu et al. 2015, Hu et al. 2010).To set sharp thresholds for in
+vitro CLint-values seems, however, difficult, especially such that are clinically relevant and useful.
+Reasons include the facts that a) the in vitro LOQ represents low up to moderately high in vivo CLint
+(up to >10000 mL/min; >7-fold the liver blood flow rate), b) there is several thousand-fold variability
+of in vivo CLint for compounds with an in vitro CLint of ~1 µL/min/106 cells (~LOQ), c) hundred- to
+thousand-fold predictions errors (overpredictions of in vivo CLint; as for atenolol) have been produced
+with the hepatocyte assay (Sohlenius-Sternbeck et al. 2010), d) a low CLint is not necessarily favorable
+(risk of very long t½ for a compound with low fu and high Papp), e) there are poor correlations (R2=~00.1) between in vivo CLint and CLH, CL, t½ and F, f) sufficiently high F and long t½ are achievable
+despite very high CLint (including compounds with in vivo CLint of nearly a million mL/min and
+~100000 mL/min (diclofenac)), and g) inadequate human clinical PK has been found despite
+moderate-size CLint (as for UCN-01). The correlations between in vivo CLint and CLH (R2=0.12) and
+CL (R2=0.07) are weak. CLint needs to be considered together with other parameters such as fu,
+extrahepatic elimination (often significant for compounds with in vitro CLint of same size as LOQ)
+and Vss, and inclusion of in vitro CLint for reference compounds with known in vivo CLint is
+recommended.
+The findings challenge in silico methods based on in vitro ADME/PK-data, for example, for S,
+fa and binary CLint. It is possible to reach 70-80 % correct binary in silico predictions of in vitro
+microsome CLint using a threshold of 20-25 µL/min mg protein (corresponds to an in vivo CLint
+ranging from ~500 to 25000 mL/min (Lee et al. 2007, Sakiyama et al. 2008, Liu et al. 2015, Hu et
+al. 201))), but the clinical relevance of such models is not obvious. In silico models for S are hindered
+by the lack of apparent correlation between in vitro S and in vivo fdiss.
+The predictions of human clinical ADME/PK for the selected reference compounds showed that
+atenolol and diclofenac (and dependent on choice of data, maybe also gemfibrozil) lacked sufficiently
+good/promising properties and would be at risk of being stopped from further development (in case
+they were candidate drugs). In vitro ADME/PK-data for atenolol and diclofenac are varying and
+include either poor permeability, solubility and/or metabolic stability. Integrated predictions showed
+low F and short t½. The outcomes show the importance to consider laboratory variability, include
+reference compounds and uncertainty measurements, validate prediction methods, and consider
+extrahepatic elimination (including gut-wall degradation and renal and biliary excretion) and
+absorption rate in predictions, and that one should be careful in basing choices and making decisions
+on thresholds.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Limitations with the study include that it is not based on all reports with useful data (it is based
+on data from a selection of important papers in the field), that approximations (rather than exact
+estimations) of variability were made and ADME/PK-predictions for atenolol, diclofenac and
+gemfibrozil were incomplete and relatively simple (as usually during the early discovery phase).
+Despite this, results show the variabilities and uncertainties with laboratory ADME/PK-data.
+Addition of data may not dramatically change the overall picture presented here.
+
+CONCLUSION
+The overall impression for in vitro ADME/PK methods is that interlaboratory variability is
+considerable, especially for fu, S, ER and BCS-classification, and on average about twice as high as
+corresponding variability within laboratories, and that it appears difficult or impossible to set clear
+clinically useful thresholds, especially for CLint, ER and S. Caco-2 Papp appears to be most suitable
+for setting a threshold for sufficient and good properties. Most notable is the very large variability
+and poor/absent in vivo correlation for S, poor in vitro-in vivo consistency for BCS-classification,
+large portion of compounds out of reach for Caco-2 and hepatocytes, and predictions for atenolol,
+diclofenac and gemfibrozil suggesting that they would/might have inadequate ADME/PKcharacteristics in vivo in man (and therefore opted out as suitable candidate drugs). Improvements are
+believed to be achievable with the inclusion of average data for reference compounds, use of
+prediction methods for extrahepatic elimination and complementary in silico prediction methodology
+with wider range and higher accuracy, and an increased insight into the relationship between in vitro
+S and in vivo solubility/dissolution.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+REFERENCES
+Balimane PV, Han Y-H, Chong S. 2006. Current industrial practices of assessing permeability and Pglycoprotein interaction. The AAPS Journal 8.
+Bioinformatics. 2011. http://bioinformatics.charite.de/supercyp/. July 11.
+Bock U, Flototto T, Haltner E. 2004. Validation of cell culture models for the intestine and the blood-brain
+barrier and comparison of drug permeation. ALTEX 21, Suppl. 3:57-64.
+Bowman CM, Benet LZ. 2019. Interlaboratory variability in human hepatocyte intrinsic clearance values and
+trends with physicochemical properties. Pharm Res. 36:113.
+Carbon-Mangels M, Hutter MC. 2011. Selecting relevant descriptors for classification by Bayesian
+estimates: A comparison with decision trees and support vector machines approaches for disparate data
+sets. Mol Inform. 30:885-895.
+Cyprotex hepatic stability. https://www.cyprotex.com/admepk/in-vitro-metabolism/hepatocyte-stability.
+Drugbank. https://go.drugbank.com/categories/DBCAT002646. Cytochrome P-450 CYP3A4 substrates.
+Fagerberg JH, Karlsson E, Ulander J, Hanisch G, Bergström CAS. 2015. Computational prediction of drug
+solubility in fasted simulated and aspirated human intestinal fluid. Pharm Res. 32:578-589.
+Fagerholm U, Spjuth O, Hellberg S. 2021. Comparison between lab variability and in silico prediction errors
+for the unbound fraction of drugs in human plasma. Xenobiot. 51:1095-1100.
+Fagerholm U, Spjuth O, Hellberg S. 2022. The impact of reference data selection for the prediction accuracy
+of intrinsic hepatic metabolic clearance. J Pharm Sci. 111:2645-2649.
+Fuse E, Tanii H, Kurata N et al. 1998. Unpredicted clinical pharmacology of UCN-01 caused by specific
+binding to human α-1-acid glycoprotein. Cancer Res. 58:3248-3253.
+Hallifax D, Foster JA, Houston JB. 2010. Prediction of human metabolic clearance from in vitro systems:
+Retrospective analysis and prospective view. Pharm Res. 27:2150-2161.
+Hayeshi R, Hilgendorf C, Artursson P et al. 2008. Comparison of drug transporter gene expression and
+functionality in Caco-2 cells from 10 different laboratories. Eur J Pharm Sci. 35:383-396.
+Hewitt M, Cronin MTD, Enoch SJ, Madden JC, Roberts DW, Dearden JC. 2009. In silico prediction of
+aqueous solubility: the solubility challenge. J Chem Inf Mod. 49:2572-2587.
+Hill AP, Young RJ. 2010. Getting physical in drug discovery: A contemporary perspective on solubility and
+hydrophobicity. Drug Disc. Today 15:648-655.
+Hu Y, Unwalla R, Denny RA, Bikker J, Di L, Humblet C. 2010. Development of QSAR models for
+microsomal stability: Identification of good and bad structural features for rat, human and mouse
+microsomal stability. J Comput Aided Mol Des. 24:23-35.
+Lee JB, Zgair A, Taha DA, Zang X, Kagan L, Kim TH, Kim MG, Yun H-Y, Fischer PM, Gershkovich P.
+2017. Quantitative analysis of lab-to-lab variability in Caco-2 permeability. Eur J Pharm Biopharm.
+114:38-42.
+Lee PH, Cucurull-Sanchez L, Lu J, Du YJ. 2007. Development of in silico models for human liver
+microsomal stability. J Comput Aided Mol Des. 21:665-673.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Lin X, Skolnik S, Chen X, Wang J. 2011. Attenuation of intestinal absorption by major efflux transporters:
+quantitative tools and strategies using a Caco-2 model. Drug Met Disp. 39: 265-274.
+Liu R, Schyman P, Wallqvist A. 2015. Critically assessing the predictive power of QSAR models for human
+liver microsomal stability. J Chem Inf Mod. 55;1566-1575.
+Llinàs A, Avdeef A. 2019. Solubility challenge revisited after ten years, with multilab shake-flask data, using
+tight (SD ~ 0.17 log) and loos (SD ~ 0.62 log) test sets. J Chem Inf Mod. 59:6.
+Llinàs A, Glen RC, Goodman JM. 2008. Solubility challenge: Can you predict solubilities of 32 molecules
+using a database of 100 reliable measurements? J Chem Inf Mod. 48:1289-1303.
+Matsson P, Bergström CAS, Nagahara N, Tavelin S, Norinder U, Artursson, P. 2005. Exploring the role of
+different drug transport routes in permeability screening. J Med Chem. 48:604-613.
+McGinnity DF, Collington J, Austin RP, Riley RJ. 2007. Evaluation of human pharmacokinetics, therapeutic
+dose and exposure predictions using marketed oral drugs. Current Drug Met. 8:463-479.
+Nožinić D, Milić A, Mikac L, Ralić J, Padovan J, Antolović R. 2010. Assessment of macrolide transport
+using PAMPA, Caco-2 and MDCKII-hMDR1 assays. Croat. Chem. Acta 83:323-331.
+Pham-The H, Garrigues T, Bermejo M, González-Álvarez I, Cruz Monteagudo M, Ángel Cabrera-Pérez M.
+2013. Provisional classification and in silico study of biopharmaceutical system based on Caco-2 cell
+permeability and dose number. Mol Pharmaceut. 10:2445-2461.
+Poulin P, Jones RDO, Jones HM, Gibson CT, Rowland M, Chien JY, Ring BJ, Adkinson KK, Ku S,
+Vuppugalla R, Marathe P, Fischer O, Dutta S, Sinha VK, Björnsson T, Lavé T. Yates JW. 2011. PHRMA
+CPCDC initiative on predictive models of human pharmacokinetics, Part 5: Prediction of plasma
+concentration–time profiles in human by using the physiologically-based pharmacokinetic modeling
+approach. J Pharm Sci. 100:4127-4157.
+Sakiyama Y, Yuki H, Moriya T, Hattori K, Suzuki M, Shimada K, Honma T. 2008. Predicting human liver
+microsomal stability with machine learning techniques. J Mol Graph Mod. 26:907-915.
+Skolnik S, Lin X, Wang J, Chen X-H, He T, Zhang B. 2010. Towards prediction of in vivo intestinal
+absorption using a 96-well Caco-2 assay. J Pharm Sci. 99:3246-3265.
+Sköld C, Winiwarter S, Wernevik J, Bergström F, Engström L, Allen R, Box K, Comer J, Mole J, Hallberg A,
+Lennernäs H, Lundstedt T, Ungell A-L, Karlén A. 2006. Presentation of a structurally diverse and
+commercially available drug data set for correlation and benchmarking studies. J Med Chem. 49:66606671.
+Soars MG, Burchell B, Riley RJ. 2002. In vitro analysis of human drug glucuronidation and prediction of in
+vivo metabolic clearance. J Pharmacol Expl Ther. 301:382-390.
+Sohlenius-Sternbeck A-K, Afzelius L, Prusis P, Neelissen J, Hoogstraate J, Johansson J, Floby E, Bengtsson
+A, Gissberg O, Sternbeck J, Petersson C. 2010. Evaluation of the human prediction of clearance from
+hepatocyte and microsome intrinsic clearance for 52 drug compounds. Xenobiot. 40:637-649.
+Stringer R, Nicklin PL, Houston JB. 2008. Reliability of human cryopreserved hepatocytes and liver
+microsomes as in vitro systems to predict metabolic clearance. Xenobiot. 38:1313-1329.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+Thomas S, Brightman F, Gill H, Lee S, Pufong B. 2005. Simulation modelling of human intestinal
+absorption using Caco-2 permeability and kinetic solubility data for early drug discovery. J Pharm Sci.
+48:604-613.
+Thomas VH, Bhattachar S, Hitchingham L, Zocharski P, Naath M, Surendran N, Stoner CL, El-Kattan A.
+2006. The road map to oral bioavailability: an industrial perspective. Expert Opin. Drug Metab. Toxicol.
+2:591-608.
+Varma MVS, Obach RS, Rotter C, Miller HR, Chang G, Steyn SJ, El-Kattan A, Troutman MD. 2010.
+Physicochemical space for optimum oral bioavailability: Contribution of human intestinal absorption
+and first-pass elimination. J Med Chem. 53:1098-1108.
+Wang H, Zrada M, Anderson K, Katwaru R, Harradine P, Choi B, Tong V, Pajkovic N, Mazsenko R, Cox K,
+Chien LH. 2014. Understanding and reducing the experimental variability of in vitro plasma protein
+binding measurements. J Pharm Sci. 103;3302-3309.
+Yamagata T, Zanelli U, Gallemann D, Perrin D, Dolgos H, Petersson C. 2017. Comparison of methods for
+the prediction of human clearance from hepatocyte intrinsic clearance for a set of reference compounds
+and an external evaluation set. Xenobiot. 47:741-751.
+Yap CW, Chen YZ. 2005. Prediction of cytochrome P450 3A4, 2D6, and 2C9 inhibitors and substrates by
+using Support Vector Machines. J Chem Inf Model 45:982-992.
+
+bioRxiv preprint doi: https://doi.org/10.1101/2022.09.27.509731; this version posted September 28, 2022. The copyright holder for this
+preprint (which was not certified by peer review) is the author/funder, who has granted bioRxiv a license to display the preprint in
+perpetuity. It is made available under a CC-BY-ND 4.0 International license.
+
+TABLES
+Table 1 Approximate variability within and between laboratories for common in vitro ADME/PKmethods.
+
+Parameter
+Hepatocyte CLint
+Caco-2 Papp
+Caco-2 Papp ER
+fu
+S
+Sint
+
+Approximate
+mean
+intralaboratory
+variability
+(-fold)
+1.5
+2
+1.8
+1.1
+-
+
+Approximate
+mean
+interlaboratory
+variability
+(-fold)
+3
+3.5
+3
+3
+3
+
+Approximate
+mean
+interlaboratory
+range
+(-fold)
+5
+25
+5
+7
+100
+-
+
+Approximate
+maximum
+range
+(-fold)
+50
+60
+90
+185
+4500
+-
+
+Intrinsic hepatic metabolic clearance (CLint), basolateral to apical/apical to basolateral Papp-efflux ratio (ER), unbound
+fraction in plasma (fu), apparent permeability (Papp), solubility (S), intrinsic aqueous solubility (Sint).
+
+Table 2 Approximate non-quantifiable portion and discrepancies within and between laboratories
+for common in vitro ADME/PK-methods.
+
+Parameter
+Hepatocyte CLint
+Caco-2 Papp
+
+Approximate nonquantifiable portion (%)
+(within/between
+laboratories)
+50 / 50
+50 / 50
+
+Parameter
+Intestinal efflux
+CYP3A4-substrate
+BCS-classing in vitro
+BCS-classing in vitro vs in vivo
+fu
+
+Approximate discrepancy
+(%) (within/between
+laboratories)
+20 / 20
+-/8
+- / 65
+- / 35
+5/5
+
+Comment
+<LOQ
+<50 % recovery
+
+Comment
+Caco-2 efflux (Yes/No)
+Substrate ID (Yes/No)
+In vitro-in vivo discrepancy
+>10-fold difference
+
+Biopharmaceutics Classification System (BCS), intrinsic hepatic metabolic clearance (CLint), unbound fraction in plasma
+(fu), apparent permeability (Papp).
+
+

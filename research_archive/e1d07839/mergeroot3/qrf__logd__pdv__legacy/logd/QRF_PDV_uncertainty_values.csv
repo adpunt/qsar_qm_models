@@ -1,0 +1,13 @@
+split,strategy,sigma,fold,sample_idx,y_true,y_pred,uncertainty,noise_scale,noise_pattern,injected_noise,dataset,model,rep
+test,legacy,0.0,0,0,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.0,0,1,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.0,0,2,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,0,0,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,0,1,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,0,2,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV
+test,legacy,0.0,1,0,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.0,1,1,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.0,1,2,1.0,2.0,0.3,0.0,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,1,0,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,1,1,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV
+test,legacy,0.5,1,2,1.0,2.0,0.3,0.5,1.0,0.0,logd,QRF,PDV

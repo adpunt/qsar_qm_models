@@ -1,0 +1,3315 @@
+T EMPORAL D ISTRIBUTION S HIFT IN R EAL -W ORLD
+P HARMACEUTICAL DATA : I MPLICATIONS FOR U NCERTAINTY
+Q UANTIFICATION IN QSAR M ODELS
+
+arXiv:2502.03982v1 [cs.LG] 6 Feb 2025
+
+Hannah Rosa Friesacher1,2
+Lewis Mervin3
+1
+
+Molecular AI, Discovery Sciences
+AstraZeneca R&D
+Gothenburg, 431 83 Sweden
+
+2
+
+Emma Svensson2,4
+
+Susanne Winiwarter6
+
+Adam Arany2
+
+Ola Engkvist1,5
+3
+
+ESAT-STADIUS,
+KU Leuven,
+3000 Belgium
+
+4
+
+Molecular AI, Discovery Sciences
+AstraZeneca R&D
+Cambridge, CB2 0AA UK
+
+5
+
+ELLIS Unit Linz &
+Institute for Machine Learning
+Johannes Kepler University Linz
+Linz, 4040 Austria
+
+Department of Computer
+Science and Engineering
+Chalmers University of Technology
+Gothenburg, 412 96 Sweden
+
+6
+
+Drug Metabolism and Pharmacokinetics, Research and
+Early Development Cardiovascular, Renal and Metabolism (CVRM),
+BioPharmaceuticals R&D,
+AstraZeneca, Gothenburg, 431 83 Sweden
+
+A BSTRACT
+The estimation of uncertainties associated with predictions from quantitative structure-activity relationship (QSAR) models can accelerate the drug discovery process by identifying promising
+experiments and allowing an efficient allocation of resources. Several computational tools exist that
+estimate the predictive uncertainty in machine learning models. However, deviations from the i.i.d.
+setting have been shown to impair the performance of these uncertainty quantification methods. We
+use a real-world pharmaceutical dataset to address the pressing need for a comprehensive, large-scale
+evaluation of uncertainty estimation methods in the context of realistic distribution shifts over time.
+We investigate the performance of several uncertainty estimation methods, including ensemble-based
+and Bayesian approaches. Furthermore, we use this real-world setting to systematically assess the
+distribution shifts in label and descriptor space and their impact on the capability of the uncertainty
+estimation methods. Our study reveals significant shifts over time in both label and descriptor space
+and a clear connection between the magnitude of the shift and the nature of the assay. Moreover, we
+show that pronounced distribution shifts impair the performance of popular uncertainty estimation
+methods used in QSAR models. This work highlights the challenges of identifying uncertainty
+quantification methods that remain reliable under distribution shifts introduced by real-world data.
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+1
+
+Introduction
+
+The development of new therapeutic agents is a time- and resource-consuming process, characterized by high failure
+rates and development spans of over a decade until a compound can be put on the market [1, 2]. The use of artificial
+intelligence (AI), or more precisely, machine learning (ML) approaches, can contribute to easing these problems by
+using the extensive amount of data produced in the drug discovery pipeline to train computational models that can
+effectively support future projects with their expert knowledge [3]. During early-stage drug discovery, a part of the vast
+chemical space is screened to identify promising molecular compounds, which are subsequently optimized to achieve
+the desired properties [4]. The large scale and complexity of this early-stage screening make it an ideal application
+for ML models with their high computational power and predictive abilities [3, 5]. Quantitative structure-activity
+relationship (QSAR) models are well-established in computer-aided drug discovery for identifying compounds with
+desired features. They enable the prediction of biological activities or properties of chemical compounds based on
+their molecular structure. However, the reliability of these approaches is crucial to optimally support an informed
+decision-making process, which ultimately saves money and time in the lengthy and costly drug discovery pipeline.
+Uncertainty quantification is a powerful tool to increase the reliability of ML models and the confidence in deploying
+them to real-world applications [6]. Various sources can lead to uncertainty in the predictions obtained from neural
+networks. A common classification found in literature is the distinction between aleatoric uncertainty, which originates
+from uncertainty in the data, and epistemic sources, which quantifies uncertainty inherent in the choice of model [7, 8].
+Optimally, estimates of the predictive uncertainty should represent the total uncertainty originating from these different
+sources. Uncertainty quantification methods can be classified into Bayesian approaches [9, 10, 11, 12], ensemble-based
+models [13, 14], conformal predictors [15, 16], evidential learning [17, 18, 19, 20, 21] and distance-based approaches
+[22]. Furthermore, multiple techniques exist that can improve the uncertainty estimates post hoc by calibrating them
+using a simple function trained on a separate calibration dataset [23, 24, 25]. Many of these computational tools have
+been explored for drug discovery applications to enable the estimation of predictive uncertainties in molecular property
+prediction tasks [26, 27]. However, available uncertainty quantification methods vary in their ability to capture all
+sources of uncertainty correctly, and there is no clear agreement in previous studies on which approach estimates these
+uncertainties most reliably [19, 28, 29, 30, 31, 32, 33, 34, 35, 36].
+Furthermore, the available uncertainty quantification methods have primarily been evaluated on public data lacking
+temporal information about the measurements, which is needed to perform data splits that cohere with the history of the
+assay of interest. Due to this lack of temporal information, the use of temporal splitting techniques for cross-validation
+is not possible, which is needed to realistically evaluate model performance over time, as reported by Sheridan [37] for
+classification and Landrum et al. [38] for regression tasks. Alternative splitting strategies that do not require temporal
+input include random splits or approaches that are based on the chemical structure of the chemical compounds. However,
+these methods are usually too optimistic or pessimistic compared to the true prospective prediction as they do not reflect
+the evolution of data in real-world pharmaceutical drug discovery projects [37].
+The first part of this work investigates the evolution of real-world pharmaceutical data and the resulting distribution
+shift. Dundar et al. [39] reported an intrinsic assumption of many training algorithms that the data is independent and
+identically distributed (i.i.d). While this assumption is foundational for traditional ML models, it imposes significant
+constraints and oversimplifies the complexities of realistic scenarios [40]. Consequently, the simplified problems may
+fail to accurately represent or address the challenges inherent in real-world datasets, such as the pharmaceutical data
+included in this study. In the context of probability calibration, deviations from the i.i.d. setting have been shown to
+impair the performance of common uncertainty estimation methods previously reported to improve model calibration
+under i.i.d. conditions [41, 42].
+Therefore, the second part of this work compares common uncertainty estimation approaches that employ real-world
+temporal splits to evaluate model performance in a more realistic setting. In binary classification problems, neural
+networks typically give probability-like predictions that can be directly interpreted as an estimate of the confidence
+in the prediction. Previous work has concluded that modern neural networks often fail to give realistic estimates of
+the uncertainty associated with a prediction in classification tasks, resulting in poorly calibrated models [26, 27, 43].
+Several approaches exist in the literature that use more sophisticated techniques to improve the reliability of these
+uncertainty estimates. For a more straightforward comparison between the uncertainty estimation methods used in
+this work, we classify them into two categories, namely train-time uncertainty estimation approaches and post hoc
+probability calibration methods.
+Train-time uncertainty quantification approaches refer to Bayesian methods or ensemble-based techniques inspired
+by the Bayesian framework to estimate the posterior distribution of predictions from a set of models [14, 13, 44].
+These approaches include uncertainty by accounting for model variance, which increases when the neural network is
+overfitting, or the test instance lies outside the domain of the training data. We consider three methods for train-time
+2
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+uncertainty estimation in this work. Deep ensembles and Monte Carlo (MC) dropout aim to improve the performance
+by obtaining numerous base estimators to determine the model variance [7, 13, 14]. Furthermore, we compare the
+ensemble-based strategies with a full Bayesian neural network trained with the Bayes-by-Backprop approach [10]. The
+posterior distribution accounts for model variance in the Bayesian setting, where the network’s parameters are treated as
+random variables rather than point estimates and which therefore provides a natural solution for including epistemic
+uncertainty. Bayes-by-Backprop allows to quickly obtain samples from the posterior distribution of the neural network
+weights by using a variational approximation scheme.
+While these train-time uncertainty quantification approaches aim to achieve better uncertainty estimation by accounting
+for the epistemic uncertainty, post hoc calibration approaches improve model calibration by applying an additional
+post-processing step to the scores retrieved from a separately trained classifier. These methods require a separate
+dataset, called a calibration set, to train the calibrating function used in the post-processing step. For this study, we
+tested two post hoc calibration techniques, including the commonly used Platt scaling approach [23] and Venn-ABERS
+predictors [24], which were previously shown to enhance the probability calibration of classifier predictions [35, 45].
+Platt scaling fits a logistic regression to the classification scores of the calibration set to counteract over- or underfitted
+uncertainty estimations, while Venn-ABERS predictors use the more flexible isotonic regression functions to calibrate
+the probability point estimates.
+To our knowledge, only a few studies have addressed the performance of uncertainty estimation approaches under
+temporal shifts. In some of these works, temporal splitting approaches are applied to ChEMBL [46] data, using the
+publication date as a reference [19]. As the date of publication does not correspond to the date when the experiment was
+conducted, it remains questionable how accurately this information can reflect the timeline in a pharmaceutical company.
+Other studies [47, 48] used internal data from pharmaceutical companies with the necessary information to perform
+proper temporal splits. Rodríguez-Pérez et al. [47] studied the performance of multitask graph neural networks for
+uncertainty estimation focusing on intrinsic clearance data. Another recent work compares the uncertainty estimation of
+various regression models for pharmacokinetic property prediction of potential drug molecules [48]. However, both
+of these studies use training data from a fixed time span for all experiments and, therefore, do not address model
+performance over time. Furthermore, they do not address shifts in the data caused by the temporal splitting strategy.
+Svensson et al. [49] recently published an extensive temporal study comparing uncertainty estimation methods trained
+on drug-target interaction data with and without censored data. While this study provides a comprehensive guide on
+handling uncertainty estimation methods for regression tasks, a comparable large-scale study that applies temporal
+splitting strategies to different biological assays has yet to be published for classification approaches.
+In this work, we aim to address these gaps by assessing the performance of different uncertainty estimation approaches
+using single-task models over time and in the context of assay-specific distribution shifts in the data. The models were
+trained on an internal dataset, which has already been studied in previous works [49, 50, 51]. This dataset includes
+drug-target interaction data from different biochemical assays, providing the additional information required to perform
+temporal splits. First, we analyze the history of the individual assays and how the data distribution shifts in label and
+descriptor space over time. Next, we compare available probability calibration and train-time uncertainty quantification
+methods and explore possible connections between their performance and data shifts.
+
+2
+
+Methods
+
+The following section is structured into three parts to examine the material and methods used in this study. The first
+section describes the assay data and the splitting strategy used to generate splits representing different time spans in
+the assay history. The second part addresses the modeling approaches, including the base estimators and the more
+sophisticated uncertainty estimation approaches. Finally, the last section provides insight into the experiments and
+metrics used to compare the uncertainty estimation approaches comprehensively.
+2.1
+
+Data
+
+This study uses internal data from 15 biological assays to gain insight into the properties of real-world pharmaceutical
+data and subsequently train binary classifiers for each assay separately. Parts of the dataset [50, 51] or the whole
+dataset [49] have already been used in previous studies. The included assays are diverse and represent different
+optimization problems typically addressed during the drug discovery workflow to enhance the pharmacokinetic and
+pharmacodynamic properties of a drug candidate. Furthermore, the assays exhibited different sizes, modeled endpoints,
+and ratios of the preferred class in the individual datasets. The total size of the assays is illustrated in the left panel of
+Figure 1. In addition, Table 1 provides detailed information on the assays used in this study. The assays were assigned
+to two categories, Target-Based (TB) and ADME-T, and subsequently labeled based on size and category affiliation.
+The labels of the ADME-T assays were created from the class name and the assay description together with the
+3
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Figure 1: Overview of dataset sizes. The left panel plots the size of the individual assays ordered according to assay
+size. The striped areas in the bar indicate the amount of compounds belonging to the preferred class (PC) in each assay.
+The right panel shows the amount of training data in each temporal setting across all assays, with 1, 2, or 3 time spans
+used for training.
+Table 1: Overview of the assay data. Details of the assays included in this study, including assay size, assay unit,
+and modeled endpoint. Descriptions of the ADME-T assays are shown. The ratio of compounds belonging to the
+preferred class (PC) is reported for each assay. The last column indicates the corresponding threshold T used to assign
+compounds to classes and if the PC lies above or below T (PC < / > T )
+Abbreviation
+
+Assay
+Description
+
+Assay
+Size
+
+Ratio
+PC
+
+Assay
+Unit
+
+Modeled
+End-point
+
+Threshold T
+(PC < / > T )
+
+Target-Based
+TB-1
+TB-2
+TB-3
+TB-4
+TB-5
+TB-6
+. TB-7
+
+NA
+NA
+NA
+NA
+NA
+NA
+NA
+
+5,082
+5,237
+10,465
+10,624
+12,612
+13,093
+14,605
+
+0.38
+0.39
+0.82
+0.73
+0.16
+0.79
+0.33
+
+µM
+µM
+µM
+µM
+µM
+µM
+µM
+
+pIC50
+pIC50
+pIC50
+pIC50
+pEC50
+pIC50
+pIC50
+
+>6
+>6
+>6
+>6
+>6
+>6
+>6
+
+CYP3A4
+CYP2C9 (I)
+CYP2C9 (II)
+Permeability
+Solubility
+Toxicity
+Lipophilicity
+Metabolic Stability
+
+12,875
+12,876
+14,062
+16,511
+47,607
+67,687
+88,114
+92,161
+
+0.79
+0.84
+0.30
+0.15
+0.48
+0.70
+0.58
+0.36
+
+µM
+µM
+µM
+1e-6cm/s
+µM
+µM
+µl/min/1e6
+
+pIC50
+pIC50
+pIC50
+logP
+logS
+pIC50
+logD
+logMS
+
+<5
+<5
+<5
+>1
+>2
+<5
+>3
+<1
+
+ADME-T
+A-CYPa
+A-CYPb
+A-CYPc
+A-PM
+A-SOL
+A-hERG
+A-logD
+A-MS
+
+prefix “A“ to indicate theaffiliation to the ADME-T category (e.g., A-logD for the lipophilicity assay). The TB assays
+were ordered according to size and numbered consecutively (TB-1 for the smallest to TB-7 for the largest assay).
+TB Assays. The TB category includes project-specific assays from activity screens to identify active substances on a
+specific target of interest. Active substances are compounds that modulate the function of a protein, for example, by
+inhibiting or activating the target. This work includes seven TB assays, with assay sizes ranging from 5,082 to 14,605
+measured compounds. As opposed to the ADME-T assays, further specifics regarding these biological assays cannot be
+disclosed due the proprietary constraints.
+4
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+ADME-T Assays. Assays in the ADME-T category typically assess the pharmacokinetic properties and toxicity
+profile of a drug candidate. These properties are connected to the absorption, distribution, metabolism, and excretion
+(ADME) of a compound, while the toxicity screens identify compounds that hit unintended targets. The ADME-T
+category comprises assays that assess the general features of a compound, which are typically relevant for the success
+of a promising compound in the drug discovery and development pipeline [52, 53]. The assays, which include data
+from various projects, are usually comparatively large. In our study, eight ADME-T assays were used, including five
+large assays with measurement numbers between 16,511 and 92,161 and three smaller assays comprising 12,875 and
+14,062 data points, which measure interactions with Cytochrome P450 (CYP).
+As opposed to the TB assays, the ADME-T assays included in this study are widely used in the drug discovery process,
+which allows the disclosure of more detailed descriptions of the assays. The CYP assays measure the inhibition of one
+of the two CYP isoforms, CYP3A4 (A-CYPa) and CYP2C9 (A-CYPb and A-CYPc). These isoforms play an essential
+role in drug metabolism and the detection of drug-drug interactions [54, 55, 56]. Two distinct assay types are available,
+exploring different types of interactions with the CYP isoforms. The CYP2C9 (I) and CYP3A4 assays measure drug
+molecule disappearance using liquid chromatography-mass spectrometry, while the CYP2C9 (II) assay measures CYP
+inhibition using a fluorescent substrate. In both assays, weaker interactions with the CYP protein are usually favorable
+to avoid rapid decomposition of the drug molecule and drug-drug interactions. The permeability assay (A-PM) evaluates
+the flux of a compound across a Caco-2 cell, reflecting its potential in vivo absorption, which is measured in 1e-6 cm/s
+[57]. High velocities are favorable, indicating a compound’s ability to cross biological membranes. The solubility assay
+(A-SOL) assesses the maximum concentration of a compound in an aqueous solution at pH 7.4. A Dimethyl sulfoxide
+(DMSO) stock solution is used, and the organic solvent is evaporated to obtain a solid sample. Compounds with high
+solubility are preferred to allow sufficient dissolution in biological fluids [58]. The hERG assay (A-hERG) provides
+vital insight into a compound’s toxicity profile by measuring its inhibiting effects on the human Ether-a-go-go Related
+Gene (hERG) potassium channel. Inhibition of hERG is correlated to severe cardiac side effects by prolonging the QT
+interval [59]. Therefore, inhibiting interactions with hERG is usually undesirable. The lipophilicity of a compound is
+obtained in the A-logD assay by measuring the logarithm of the distribution coefficient between octanol and aqueous
+phase at pH 7.4. Lipophilicity is crucial since it significantly affects drug absorption, metabolism, and safety. A logD
+greater than 3 has previously been identified as a trigger for safety concerns [60, 61]. Finally, the metabolic stability
+assay (A-MS) measures how fast a compound is metabolized in rat hepatocytes. The in vivo hepatic clearance is
+measured in µl/min/million cells. In general, low values for hepatic clearance are desirable, as they imply slower
+decomposition and, therefore, higher bioavailability of the drug molecule [62, 63].
+
+Binary Classification of Compounds. The measured values were converted to a logarithmic scale, and a suitable
+threshold was determined for each assay individually. Assay-specific thresholds were defined to determine if a
+compound belongs to the preferred class. All TB assays, obtain a compound’s inhibiting potency by measuring the
+IC50, except TB-5, in which the EC50 was used. The IC50 value measures the compound concentration needed to
+inhibit half of a protein’s activity, while the EC50 value indicates the compound’s concentration that triggers half of the
+maximum possible effect. Subsequently, these values were converted to pIC50/pEC50 by taking the logarithm of the
+measurements converted from micromolar (µM ) to molar. The preferred classes in the TB assays comprise compounds
+with a pIC50/pEC50 value above 6, indicating that a substance achieves the desired effect when its IC50/EC50 value is
+below 1 µM . In addition, four ADME-T assays, including the three CYP and the hERG assays, contain pIC50 values.
+Since these assays aim to detect interaction with off-targets, lower pIC50 thresholds of 5 were selected to decrease the
+risk of false negatives. The preferred class includes compounds with pIC50 values below this threshold. For A-logD,
+A-SOL, A-PM, and A-MS, individual thresholds were chosen as shown in Table 1 to assign compounds with desirable
+properties to the preferred class.
+
+Temporal Split. For each assay, we split the data into five roughly equally sized folds using the date of each
+measurement. Each fold represents a specific time span in the history of the assay. These folds were then used to set
+up three experimental settings, using one, two, or three folds for training the QSAR models. In each case, the first
+subsequent fold was used for validation, including model selection and calibration where applicable. We only evaluated
+each setting on the first fold following the validation set for consistency between test sets. However, all remaining folds
+could, in principle, be used. Figure 2 illustrates the temporal splitting strategy. Considering all assays and settings, 45
+separate training datasets were used throughout this work. For experiments in which the results of all three settings are
+used, the assays are labeled with the Assay Abbreviation [Temporal Setting]. Naturally, the size of the training sets
+varies among the temporal settings as shown in the right panel of Figure 1.
+5
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+BIOACTIVITY DATA
+
+TEMPORAL SPLIT
+
+MODEL TRAINING
+
+from
+
+5 Time Spans
+
+3 Temporal Se�ngs
+
+7 Target-Based Assays
+8 ADME-T Assays
+
+Assay Start
+
+1
+
+2
+
+3
+
+4
+
+�me
+
+1.
+
+5
+
+2.
+
+# Measurements in Folds ~ N
+
+3.
+
+1
+
+1
+
+2
+
+3
+
+1
+
+2
+
+3
+
+4
+
+2
+
+3
+
+4
+
+5
+
+Valid.
+
+Test
+
+Training
+
+Figure 2: Overview of the temporal split and model training. The data in each assay was assigned to 5 time spans
+to create three temporal settings, each with increasing amounts of training (Training) data. The subsequent two folds
+were used for validation (Valid.) and testing (Test). The validation data also served as a calibration set used in post hoc
+calibration approaches.
+2.2
+
+Models
+
+Figure 3 provides an overview of the models compared in this study. All architectures used in this work stem from a
+Random Forest (RF) or a multilayer perceptron (MLP). Both approaches are commonly used in research addressing
+uncertainty estimation in QSAR modeling [35, 36, 30]. Furthermore, both approaches can be easily combined with
+the ECFP fingerprint representation. Note that more sophisticated options exist for molecular representations and
+model architectures, like graph neural networks for molecular graph representations or language models for SMILES
+representations. However, since our study aims to gain insight into uncertainty estimation in QSAR models rather than
+finding the best approach, or comparing molecular representations, we opted for the simple ECFP representation. The
+RDKit package [64] was used to generate ECFP fingerprints of length 4096 from the SMILES [65] of the compound
+structures. Due to additional computational constraints, we concentrated on RF and MLP models as suitable choices for
+examining uncertainty quantification in a temporal context.
+
+BASELINE MODELS
+Random Forest
+(RF)
+
+Mul�layer Perceptron
+(MLP)
+
+UNCERTAINTY ESTIMATION
+Deep Ensemble
+(MLPE)
+
+MC Dropout
+(MLPMC)
+
+Bayesian NN
+(BNN)
+
+Figure 3: Overview of the classification models. The architectures of the baseline models and train-time uncertainty
+quantification methods compared in this study are shown. All models were trained in a single-task manner. The
+hyperparameters of the baselines, RF and MLP, were tuned in an extensive grid search. The baseline MLP was used as
+the basis for the three uncertainty quantification methods, deep ensembles, MC dropout, and a Bayesian neural network.
+Model Generation. A Python package is publicly available at https://github.com/MolecularAI/uq4dd, which
+contains the code used for model generation and evaluation inspired by the design pattern proposed by Hartog et al. [66].
+The hyperparameter tuning for the two base estimators, RF and MLP, was performed using an exhaustive grid search.
+The binary cross-entropy (BCE) loss was calculated to compare the model performance on a validation set. The exact
+parameter space search is described in the appendix (Table 3). The RF models were generated using scikit-learn [67].
+During hyperparameter tuning, the maximum depth of the trees and the required number of estimators of each assay and
+temporal setting were individually tuned using the validation BCE loss. Probability-like outputs were generated from
+the ratio of decision trees in the RF that classified a test instance as active. The MLP models were trained using PyTorch
+[68] with the BCE loss function. Similarly, the model selection, including early stopping, was optimized using the
+validation loss for every assay and temporal setting. The network architecture was optimized for the number of hidden
+units, number of hidden layers, and dropout rate. Additionally, the learning rate and scaling factor of a ReduceOnPlateu
+6
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+learning rate scheduler were also optimized. Adam was used as an optimization algorithm [69] to train the neural
+networks. Probability-like scores were obtained by applying a sigmoid function to the output of the MLP.
+The base estimators were further modulated to generate more sophisticated uncertainty estimation methods. Train-time
+uncertainty quantification methods were trained using the MLP base estimators. Furthermore, post hoc probability
+calibration methods were applied to selected models. A detailed description of the train-time and post hoc calibration
+uncertainty estimation methods can be found below.
+Train-time Uncertainty Quantification. Train-time uncertainty quantification approaches aim to estimate uncertainty
+during model training by accounting for uncertainty in the neural network. They account for model variance, which
+increases when the model is overfitting, or the test instance lies outside the domain of the training data. In contrast to post
+hoc calibration methods, they do not apply a post-processing step to the scores of the classifier. In this work, we compare
+two ensemble-based techniques inspired by the Bayesian theorem: deep ensembles (MLPE) and Monte Carlo (MC)
+dropout (MLPMC). We also include one full Bayesian neural network trained with the Bayes-by-Backprop approach
+(BNN). These methods aim to estimate the posterior distribution over the parameters of the neural network[13, 14, 44].
+Theoretically, the posterior distribution P (Θ|D) over model parameters Θ, given data D, can be computed using the
+Bayesian theorem
+P (Θ|D) = R
+
+P (D|Θ)P (Θ)
+.
+P (D|Θ)P (Θ) dΘ
+
+(1)
+
+When working with high-dimensional posteriors, the calculation of the closed-form solution of the Bayesian equation
+is usually infeasible due to the intractability of the evidence term in the denominator, which requires solving a
+highly complex integral. To circumvent this problem, sampling-based methods are often used that retrieve samples
+Θ := {θ1 , θ2 , ..., θN } from the posterior distribution, so that θn ∼ P (Θ|D). During inference, the predictions of the
+sampled models are averaged to obtain a mean estimate of the target label y given the descriptor x:
+N
+
+P (y|x, D) ≈
+
+1 X
+P (y|x, θn ).
+N n=1
+
+(2)
+
+Both ensemble-based approaches, deep ensembles (MLPE) and MC dropout (MLPMC), approximate the Bayesian
+treatment by estimating the predictive uncertainty using numerous base estimators. Deep ensembles use multiple
+randomly initialized models as base estimators, corresponding to different local minima in the loss landscape [13]. In
+this work, 25 base estimators were trained, and their predictions were averaged to obtain a point estimate. MC dropout
+applies dropout during inference by setting a number of randomly selected neurons to zero to introduce stochasticity
+[14]. To generate MC dropout (MLPMC) models, 400 forward passes using dropout were aggregated, with the average
+being the final prediction of the models.
+To compare the ensemble-based methods with a full Bayesian approach, we include Bayesian neural networks (BNN)
+trained with the Bayes-by-Backprop method in the comparison study. We used a previously published repository
+for the Bayes-by-Backprop method accessible at https://github.com/ThirstyScholar/bayes-by-backprop
+as a template for our implementation of the BNN approach. In the Bayesian setting, neural network weights are
+treated as random variables rather than point estimates, which allows model variance to be accounted for in the
+posterior distribution of the weights. Since the parameter space is usually high-dimensional, the closed-form solution
+of the posterior distribution cannot be solved. Bayes-by-Backprop provides a quick solution for obtaining samples
+from the approximate posterior distribution of neural network weights W using a variational approximation scheme.
+The underlying idea of Bayes-by-Backprop is to learn the optimal parameters Θ∗ of a surrogate distribution that
+minimizes the Kullback-Leibler (KL) divergence [70] between the simpler surrogate q(W |Θ) and the complex posterior
+distribution P (W |D)
+Θ∗ = argmin KL[q(W |Θ)|P (W |D)].
+
+(3)
+
+Θ
+
+The calculation of the resulting KL divergence requires the incomputable closed-form solution of the posterior.
+Therefore, the evidence lower bound (ELBO) is used to derive a computable loss function that can be used in the
+backpropagation framework:
+L(Θ, D) = argmin KL[q(W |Θ)|P (W )] − Eq(W |Θ) (logP (D|Θ)).
+Θ
+
+7
+
+(4)
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+When sampling from the surrogate distribution, the introduced stochasticity prevents using a backpropagation scheme.
+To allow the computation of gradients, the local reparametrization trick is applied. Instead of sampling directly from the
+proposal function, a deterministic transformation function with learnable parameters is used to convert a sample of
+parameter-free noise into a sample of the proposal function. We refer to Blundell et al. [10] for more technical details
+of the Bayes-by-Backprop approach.
+Post hoc Probability Calibration. Two post hoc probability calibration techniques were fitted to each model using
+the validation set. These approaches included Platt scaling [23] and Venn-ABERS (VA) predictors [24]. Platt scaling
+fits a logistic regression to the classification scores to counteract over- or underfitted uncertainty estimations [23]. Two
+isotonic regression functions were trained on the validation set and a given test instance [24] for calibration with VA
+predictors. The two isotonic regression functions represent the hypothesis that the test instance is active versus inactive.
+As such, the probabilities obtained from the isotonic regression functions correspond to a lower and an upper bound on
+the estimated probability. Finally, these bounds were condensed to a point estimate, as proposed by Toccaceli et al. [71].
+The suffixes -P and -VA indicate models calibrated with Platt scaling or Venn-ABERS predictors, respectively. For
+instance, the calibrated MLPE model was labeled MLPE-P or MLPE-VA.
+2.3
+
+Experiments
+
+The first part of this study focuses on the data characteristics resulting from the temporal splitting strategy. We
+studied the shift in label and descriptor space over time, mainly concentrating on the differences between TB and
+ADME-T assays. The shift in label space was assessed by comparing the ratios of the preferred class in each time span.
+Shifts in the descriptor space were quantified using the maximum mean discrepancy (MMD) [72], which provides a
+kernel-based estimate for the distance between the ECFP spaces of two datasets. The MMD between a training dataset
+X := {x1 , ..., xM } and a test dataset Z := {z1 , ..., zN } distributed according to P (X) and Q(Z) can be computed
+with
+
+M M D(P, Q) =
+
+M M
+N N
+M N
+1 XX
+1 XX
+1 XX
+k(x
+,
+x
+)
++
+k(z
+,
+z
+)
+−
+k(xi , zj ).
+i
+j
+i
+j
+M 2 i=1 j=1
+N 2 i=1 j=1
+M N i=1 j=1
+
+(5)
+
+When using the Tanimoto coefficient [73] as kernel, the MMD lies between 0 and 1, with 0 indicating no differences
+and 1 indicating no shared features between the compounds in the datasets.
+The second part of the study aims to determine how well different uncertainty quantification methods estimate the
+probability that compounds have a certain desirable feature, such as being active on a TB assay or inactive on an
+ADME-T toxicity assay. To compare the models, the AUC under the receiver operating characteristic (ROC) curve [74]
+(AUC [↑]), the binary cross-entropy (BCE [↓]) and the adaptive calibration error [75] (ACE [↓]) of the predictions were
+calculated. The predictions were ordered and assigned to ten bins to obtain the calibration error. Subsequently, the
+difference between the mean probabilities and the ratio of the instances belonging to the preferred class was computed
+for each bin. The ACE was calculated by taking the mean of the differences in the bins. Another commonly used
+calibration error is the expected calibration error, which is similar to the ACE but uses equally spaced instead of
+equally sized bins [75]. However, this binning strategy can overestimate the calibration error when handling imbalanced
+datasets due to the high variance of the predictions in the sparsely populated bins [75]. In this context, the ACE
+provides a more robust estimate of the calibration error and is, therefore, the preferred estimator for the probability
+calibration error in this study. Note that the ACE is an improper score [76, 77], so a perfect calibration error of 0 does
+not automatically correspond to the best model. Thus, the ACE was always evaluated in combination with the BCE for
+a more comprehensive analysis. The performance of the approaches was assessed by generating ten model repetitions
+and obtaining the mean score of the respective evaluation metric. A two-sided, independent t-test was used to assess
+whether the difference between the best and any other model was statistically significant.
+
+8
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Figure 4: Quantification of the distribution shifts between the training and test datasets over time. The shift in
+label space and in the descriptor space is illustrated for each temporal setting, using the data of 1, 2, or 3 time spans for
+training. Results are shown for each assay. The left panel shows the shift in label space in terms of the difference in
+ratios of the preferred class between the training and test datasets. The right panel shows the MMD in the descriptor
+space between the training and test datasets for each temporal setting and assay, quantifying shifts in descriptor space.
+
+3
+
+Results and Discussion
+
+We divide the results of this study into two consecutive parts to investigate the efficacy of uncertainty quantification and
+probability calibration methods using real-world temporal data. The first part addresses the properties of the data in
+the context of a distribution shift in the label and descriptor space. In the second section, we compare the probability
+calibration of various uncertainty quantification methods and set the results in context with the underlying distribution
+shift resulting from the temporal split.
+3.1
+
+Distribution Shifts over Time
+
+Shift in Label Space. The ratios of the preferred class in different time spans of an assay were compared to evaluate
+shifts in the label space. The left panel in Figures 4 illustrates the distribution shift in label space by plotting the
+difference between the ratios of the preferred class in the training and the test set for each assay. The ratio of the
+preferred class in each time span is listed for all assays in Table 4 in the appendix. We assessed all three temporal
+settings, using one, two, or three time spans as training data. The second consecutive span after the training data was
+considered the test set. We refer to Figure 2 for a more comprehensive explanation of the different training settings.
+The left heatmap of Figure 4 shows that TB assays evolve differently in label space over time than ADME-T assays.
+Generally, the differences in preferred class ratios between the training and test sets are smaller in ADME-T assays,
+while the more extreme values in TB assays indicate larger shifts in label space. Recall that the TB category includes
+project-based assays, which aim to find modulators for a specific target of interest. Therefore, a plausible explanation
+for the larger shifts in label space could be that various chemical series are tested in search of promising compounds.
+These series may differ in their abilities to modulate a target, leading to changing ratios of preferred compounds over
+time. Some assays show an enrichment of the preferred class over time, as observed in TB-3 and TB-6. However,
+this pattern was not observed in all assays, and the TB-1 and TB-7 assays even show opposite tendencies. The more
+stable ratios in the ADME-T assays can be attributed to the nature of this assay category, as well. These assays are not
+9
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Figure 5: T-SNE plots of the ECFP space. T-SNE plots of the ECFP space are shown for one example of each assay
+category to illustrate how the explored chemical space changes over time. Compounds are colored according to the
+time span that they were assigned to. The t-SNE plot of the remaining TB and ADME-T assays are shown in Figures 9
+and 10 in the appendix.
+
+specific to individual projects and are used to evaluate the pharmacokinetic and toxicity profiles of compounds. Based
+on the results above, it is highly questionable whether the i.i.d. assumption for these assays remains valid over time,
+particularly in the TB category. This category includes some challenging assays, such as TB-3 and TB-7, which exhibit
+significant label shifts.
+Shift in Descriptor Space. The shifts in ECFP space are visualized using two-dimensional t-SNE plots to reveal
+patterns and clusters in the dataset. The t-SNE plots for TB-7 and A-CYPb are shown in Figure 5, while the plots for the
+remaining assays can be found in Figures 9 and 10 in the appendix. Figure 5 reveals a clear pattern in the TB-7 assay,
+which indicates a shift in the chemical space over the assay history. Furthermore, chemically similar compounds tend to
+be assigned to the same time span, as indicated by the color purity in various clusters. In contrast, the t-SNE plot of the
+ADME-T assay does not show a clear pattern in clusters and color gradients. To quantify the shift in descriptor space,
+the MMD was calculated between the training and test set. The MMD of the three temporal settings is shown in the
+right panel of Figure 4. The observed tendencies are similar to the patterns reported for the label shifts. In general, the
+TB assays exhibit larger shifts than the ADME-T assays, which is also supported by the patterns seen in the t-SNE plots.
+These results can be again explained by the different characteristics of the two assay categories, resulting in distinct
+developments through the descriptor space over time. To find promising compounds in the TB assays, various chemical
+series are usually screened, containing chemically similar compounds. As a result, large shifts are observed when
+comparing the descriptor space of compounds assigned to different time spans. In conclusion, the shifts in descriptor
+space are more pronounced in TB assays, while those in ADME-T assays are comparatively small. Similar to the shifts
+in label space, the i.i.d. assumption might not be appropriate, particularly in the TB assays.
+3.2
+
+Probability Calibration Study
+
+We assessed the performance of various uncertainty estimation methods in three experiments, focusing on the probability
+calibration of the models. Throughout this part of the study, the model performance is assessed separately for TB and
+ADME-T assays. The first experiment compares the baseline approaches, and the uncertainty quantification approaches
+limited to the third temporal setting, in which three time spans were used as training datasets. The second section
+investigates the change in model performances over time by comparing the three temporal settings. Moreover, the
+results will be linked to the assay-specific conclusions about the label and data shift drawn in Section 3.1. The third
+experiment concentrates on the potential of post hoc probability calibration methods in the context of distribution shifts
+between the calibration and test sets. The results of the majority of models are presented. The numerical results of all
+methods are listed in Section D in the appendix.
+10
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 2: Summary of AUC results for the third temporal setting. AUC results for the baselines (RF and MLP) and
+train-time uncertainty quantification models (MLPE, MLPMC, and BNN) are reported. The models were trained with
+compounds from three time spans. The mean and standard deviation of 10 model repetitions are shown. The bestperforming approach and those not significantly different from it, as determined by a two-sided t-test, are highlighted in
+bold.
+RF
+
+MLP
+
+MLPE
+
+MLPMC
+
+BNN
+
+Target-Based
+TB-1
+0.437 ± 0.025
+TB-2
+0.778 ± 0.018
+TB-3
+0.708 ± 0.023
+TB-4
+0.909 ± 0.027
+TB-5
+0.676 ± 0.028
+TB-6
+0.641 ± 0.06
+TB-7
+0.533 ± 0.086
+
+0.586 ± 0.065
+0.793 ± 0.01
+0.765 ± 0.009
+0.95 ± 0.007
+0.896 ± 0.008
+0.768 ± 0.007
+0.71 ± 0.026
+
+0.614 ± 0.006
+0.795 ± 0.002
+0.768 ± 0.001
+0.956 ± 0.0
+0.9 ± 0.001
+0.771 ± 0.001
+0.718 ± 0.004
+
+0.592 ± 0.061
+0.791 ± 0.01
+0.761 ± 0.009
+0.952 ± 0.003
+0.897 ± 0.008
+0.768 ± 0.007
+0.718 ± 0.03
+
+0.502 ± 0.024
+0.289 ± 0.026
+0.73 ± 0.002
+0.957 ± 0.001
+0.78 ± 0.171
+0.701 ± 0.007
+0.479 ± 0.014
+
+ADME-T
+A-CYPa 0.675 ± 0.015
+A-CYPb 0.581 ± 0.012
+A-CYPc 0.631 ± 0.024
+A-PM
+0.613 ± 0.031
+A-SOL
+0.692 ± 0.008
+A-hERG 0.632 ± 0.009
+A-logD
+0.641 ± 0.015
+A-MS
+0.694 ± 0.006
+
+0.625 ± 0.013
+0.644 ± 0.005
+0.714 ± 0.003
+0.769 ± 0.004
+0.78 ± 0.011
+0.729 ± 0.005
+0.833 ± 0.003
+0.71 ± 0.01
+
+0.627 ± 0.002
+0.648 ± 0.001
+0.714 ± 0.0
+0.77 ± 0.001
+0.792 ± 0.002
+0.735 ± 0.001
+0.839 ± 0.002
+0.716 ± 0.003
+
+0.625 ± 0.013
+0.643 ± 0.006
+0.715 ± 0.003
+0.765 ± 0.004
+0.779 ± 0.013
+0.729 ± 0.005
+0.834 ± 0.003
+0.713 ± 0.006
+
+0.622 ± 0.016
+0.661 ± 0.001
+0.734 ± 0.003
+0.784 ± 0.023
+0.511 ± 0.011
+0.652 ± 0.003
+0.828 ± 0.004
+0.745 ± 0.007
+
+Comparison of Uncertainty Estimation Methods. We compared the predictive performance of RF, MLP, MLPE,
+MLPMC, and BNN in terms of AUC, BCE, and ACE. For a straightforward comparison, we limit the reported results
+to the third temporal setting, in which three time spans were used for model training. The data assigned to the last time
+span was used as a test set. The AUC values of the models are listed in Table 2. The AUC results for the TB assays
+show that the MLPs, as well as the non-bayesian uncertainty estimation methods, outperform the RFs and BNNs on
+most datasets. In more detail, the MLPE model is always among the best approaches. The MLP and the MLPMC
+models retrieve results that are not statistically different from the best in 6 and 5 out of 7 datasets. The BNN is the best
+model for assay TB-4, while the RF approach is consistently outperformed. In contrast, the results for the ADME-T
+assays show that either the MLPEs, or the BNNs, or both outperform the other approaches in 7 out of 8 assays. The
+remaining assay is A-CYPa, for which the RF approach achieves the best result.
+The model calibration is analyzed using the ACE and the BCE scores. The results are illustrated in Figure 6. The
+analysis of the BCE and ACE values reveals trends similar to those observed in the AUC scores. The results of the
+models trained on TB assays show that the MLPE approach is among the best-performing approaches for all datasets,
+except for TB-1, for which MLPMC performs best in terms of ACE. The baseline MLP matches the performance of
+MLPE in 4 out of 7 times in terms of BCE and in 5 out of 7 assays in terms of ACE. Furthermore, the models perform
+overall worse on TB-1 and TB-2 in terms of BCE. A reason for this result could be the small dataset size of these
+two assays, which might lead to overfitting and, therefore, poorer calibration of the models. Furthermore, both assays
+exhibit comparatively large shifts in label and descriptor space, as shown in Figure 4, which introduces additional
+difficulties in generalizing well over time. The results of the models trained on the ADME-T data demonstrate the
+superiority of the MLPE and BNN methods. More specifically, in all assays, either MLPE or the BNN performs best
+with regard to BCE and ACE. A-CYPa is the only exception for which RF and MLPMC perform best. The MLPE and
+BNN models achieve the best results across both metrics in the same number of assays, namely in 4 out of 8 cases.
+It is surprising that the more sophisticated uncertainty estimation methods improve the probability calibration of the
+baselines trained on AMDE-T assays but fail to do so for models trained on TB category datasets. The MLPE and
+the BNN approaches account for epistemic uncertainty by including model variance in their predictions. The deep
+ensemble approach retrieves model samples representing different local minima of the loss surface, while the BNNs
+model the neural network weights as probability distributions. These characteristics should enable the models to detect
+out-of-distribution test instances that are dissimilar from the training instances. As reported in Section 3.1, the shifts
+innate to assays in the TB category are comparatively large, which leads to the assumption that these approaches
+enhance probability calibration for these assays. However, for most TB assays, the uncertainty estimation methods do
+not improve the quality of uncertainty estimates for the baseline MLPs. Koh et al. [42] showed that the performance of
+11
+
+ACE
+
+BCE
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Assay
+
+Assay
+
+Figure 6: Summary of BCE and ACE scores for the third temporal setting. The first column shows the results for
+TB assays, while the second one reports the performance of models trained on ADME-T assays. BCE scores are plotted
+in the first, and ACE scores in the second row. Results for the baselines (RF and MLP) and train-time uncertainty
+quantification models (MLPE, MLPMC, and BNN) are reported. The models were trained with compounds from three
+time spans. The results of 10 model repetitions were aggregated. For each assay, the best-performing approach and
+those not significantly different from it, as determined by a two-sided t-test, are marked with an asterisk.
+
+a classifier can degrade significantly when there is a distribution shift between the source and target domains. Moreover,
+Garg et al. [78] reported specifically for the presence of label shift, that a classifier that is ideal for the source domain
+might no longer be ideal for the target domain. In general, deep ensemble approaches have been shown to outperform
+other uncertainty estimation approaches, including approximate Bayesian neural networks, in terms of predictive
+accuracy and calibration without [79] and under distribution shift in the descriptor space [41, 80]. These conclusions
+are supported by the results in this study, that show that MLPE performs better than other uncertainty estimation
+under distribution shift. However, despite being the best uncertainty estimation approach, the MLPE models rarely
+outperform the baseline MLP in the presence of distribution shift. An additional reason for the failure of the uncertainty
+estimation methods to generate better uncertainty estimates that the baseline could be their inability to handle the shifts
+in label space well. This conclusion might be transferrable to model calibration, thus explaining the difference between
+architectures trained on TB and ADME-T assays to produce better-calibrated probabilities. A large study that compared
+uncertainty estimation approaches used for regression models trained on the same dataset also reported that the deep
+ensemble and Bayesian neural network approaches outperform other common uncertainty estimation approaches for
+regression [49]. In contrast to the classification setting, the uncertainty estimates of baselines trained with TB assays
+could also be improved in the regression study. This observation could indicate that uncertainty estimation models
+for regression tasks are less sensitive to shifts in the label space than approaches for classification. A reason for this
+observation could be that the model can access the actual values of the measurements in the regression setting, which
+might attenuate the shift in the target space. For example, strongly inactive and weakly inactive compounds exhibit
+different target values for regression models, while this information is lost in classification tasks due to the application
+of binary classification thresholds.
+Uncertainty Estimation over Time. We assessed the quality of the uncertainty estimates over time by comparing
+the model performance in all three temporal settings. The results are displayed in Figure 7. The plots show that the
+model performance in one time span rarely allows conclusions about the performance of the same approach at another
+point in time. In 3 out of 7 TB assays, a single model is always among the models with the best BCE score in all three
+temporal settings. These approaches include MLPMC for TB-1, MLP for TB-6, and MLPE for TB-7. Regarding the
+ACE scores, the MLPE is consistently among the best methods for TB-2, and the MLP is among the best for TB-3.
+The BCE results of the ADME-T assays show consistent results over time for 4 assays, including the RFs for A-CYPa
+and the MLPE approach for A-PM, A-SOL, and A-hERG. The ACE results of the ADME-T assays reveal a consistent
+model performance in 2 out of 8 assays, namely the MLPs for A-PM and the MLPE for A-hERG. In general, model
+performance in terms of ACE is slightly less stable over time than in terms of BCE. Interestingly, Svensson et al. [49]
+12
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Figure 7: Summary of BCE and ACE scores across all temporal settings. The first two columns show the ACE
+and BCE scores for TB assays, while the last two report the performance of models trained on ADME-T assays. The
+temporal setting is indicated in brackets after the assay abbreviation. Results for the baselines (RF and MLP) and
+train-time uncertainty quantification models (MLPE, MLPMC, and BNN) are reported. The models were trained with
+compounds from three time spans. Averages over 10 model repetitions are shown. For each assay, the best-performing
+approach and those not significantly different from it, as determined by a two-sided t-test, are marked with an asterisk.
+
+applied regression modeling techniques to the same data and reported more consistent model performance for the
+ADME-T assays.
+Plotting the model performance on all temporal settings confirms the conclusions drawn in Section 3.2. The MLP
+and MLPE methods obtain the best results in terms of both BCE and ACE for the TB assays. Both are among the
+best-performing approaches in at least one temporal setting in all assays, except TB-4, where MLP is not among the
+best models in any setting. Interestingly, regarding the BCE results, the MLP is as often among the best models as the
+MLPEs, namely for 13 out of the 21 settings. The ACE scores reveal a similar result. MLP is among the best methods
+for 11 and MLPE for 13 out of 21 settings. All other approaches trained on the TB assays are much less often among
+the best-performing models. The results for the ADME-T assays also support the results from the previous experiment.
+Concerning the ACE scores, the MLPE and BNNs outperform all other models, with MLPE being among the best
+methods for 13 and BNN for 11 out of 24 settings. The MLPs and the MLPMCs are among the best-calibrated methods
+in 5 and 7 settings, respectively. The MLPEs outperform the other approaches in terms of BCE, obtaining significant
+results in 13 settings. The MLPMCs are among the best methods in 8, and the BNNs in 7 out of 24 settings.
+In conclusion, the MLPE approach generates the best-performing models for most ADME-T assays. Considering
+the high computational resources required to train these MLPEs, another good choice are BNNs. This approach is
+much more time—and resource-effective and generates well-calibrated models for many ADME-T datasets. Note
+that a fixed variance was chosen for the Gaussian prior and that tuning this hyperparameter could even improve the
+performance of the BNNs. Given that deep ensemble models always lead to more underconfident predictions [81],
+the good performance of these methods indicates overfitting of the baselines. The MLPEs and BNNs counteract this
+behavior for the ADME-T assays but not for datasets from the TB category. The ACE values for TB assays are higher
+than for the ADME-T assays, as illustrated in Figure 6, indicating worse model calibration. This result indicates room
+for improvement in probability calibration and eliminates good baseline model calibration as a reason for the inability
+of MLPE and BNN to improve the ACE of the MLP. An alternative reason for the failure of MLPEs and BNNs could be
+the shift in label space which is considerably larger for TB assays. Based on these results, it is questionable whether the
+costly generation of MLPEs for improved uncertainty estimation is justified for datasets with large distribution shifts,
+13
+
+ACE
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+(
+
+Assay
+MDD: Validation vs Test)
+
+(
+
+Assay
+MDD: Validation vs Test)
+
+Figure 8: Summary of ACE scores of post-hoc probability calibration approaches using the third temporal setting.
+The left panel shows the ACE scores of models trained on TB assays, while the right panel reports the ACE performance
+of ADME-T models. The assays in each panel are ordered according to increasing distribution shifts in descriptor space
+between the calibration and the training set. The distribution shift is determined by the maximum mean discrepancy
+(MMD) between the two datasets using the Tanimoto coefficient on the ECFP space determines the distribution shift.
+Results for the deep ensembles (MLPE), the Platt scaled deep-ensembles (MLPE-P), and the ensembles calibrated
+with a Venn-ABERS predictor (MLPE-VA) are reported. The models were trained with compounds from three time
+spans. The results of 10 model repetitions were aggregated. For each assay, the best-performing approach and those not
+significantly different from it, as determined by a two-sided t-test, are marked with an asterisk.
+
+such as the TB data. As discussed in Section 3.2, this shift might be difficult to handle for the uncertainty quantification
+methods, resulting in the incapability of uncertainty quantification methods to improve the probability calibration.
+
+Post hoc Probability Calibration. The effects of two post hoc calibration methods, Platt scaling and Venn-ABERS
+predictors, were assessed. Furthermore, the distribution shift between calibration and test set was taken into account
+by obtaining the MMD between the two datasets. The MMD between the calibration and test dataset is reported in
+Table 5 in the appendix. For the sake of clarity, we only include the results of the third temporal setting for the MLPE
+approach, which was reported to be one of the best-performing models in previous sections of this study. Only the
+ACE is reported since the post hoc calibration step includes the application of monotonous increasing functions, which
+cannot correct non-monotonous distortions and, therefore, does not change the ranking of the predictions. Hence, these
+approaches only affect the probability calibration while the AUC scores of the models remain constant. The results
+of all calibrated models across all temporal settings and assays can be found in Section D of the appendix. Figure 8
+shows the performance of the Platt-scaled MLPEs (MLPE-P) and the MLPEs calibrated with Venn-ABERS predictors
+(MLP-VA). The results are shown separately for TB and ADME-T assays, and the assays are ordered according to
+increasing MMD values. In general, post hoc scaling leads to better results in 4 out of 7 TB assays and in 4 out of 8
+ADME-T assays. In 4 out of these 8 cases, both MLPE-P and MLPE-VA are the best models, while in 4 cases, either
+MLPE-P or MLPE-VA perform best. Both panels in Figure 8 show, that with increasing MMD between calibration
+and test set, the calibrating abilities of the post hoc calibration methods decrease. A stronger trend can be detected for
+the TB assays, for which the shifts are larger than for the ADME-T assays. Nevertheless, the pattern is also visible in
+the right panel plotting the results for ADME-T, which show no improvements after post hoc calibration for assays
+with large MMD, like A-CYPc and A-CYPa. The reported trends can also be seen for other approaches, albeit less
+clearly for some models. An intuitive explanation for this pattern is that post hoc probability approaches perform better
+if the training set is similar to the test set, and worse if the training and test set are different. Ovadia et al. [41] showed
+that post hoc calibration approaches improve model calibration in the i.i.d. setting. However, their calibrating abilities
+degrade as the data shift increases so that they are ultimately outperformed by train-time uncertainty quantification
+methods in the presence of large shifts. These findings are supported by the post hoc calibration results in this study,
+which shows for small shifts good calibrating properties of the post hoc calibration methods, while for larger shifts,
+they are outperformed by the train-time versions of the methods.
+14
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+4
+
+Conclusions
+
+Uncertainty estimation emerges as a critical tool in the cost- and resource-intensive drug discovery process, facilitating
+the evaluation of experimental risks and costs. In this framework, the quality of the uncertainty estimates is crucial
+to ensure the reliability of the models. This study evaluates uncertainty estimation approaches for classification tasks
+in a practical, real-world context. A temporal splitting strategy was applied to internal data from a pharmaceutical
+company to simulate the evolution of drug-target interaction data through time. Our findings offer valuable insights into
+uncertainty estimation and highlight the challenges posed by real-world applications.
+The analysis of the pharmaceutical data showed that the distribution shifts in label and descriptor space over time strongly
+depended on the nature of the individual assays. The project-specific TB assays exhibited more pronounced distribution
+shifts, while the more abundantly used toxicity screens and assays assessing the pharmacodynamic properties (ADME-T
+assays) showed moderate and more stable shifts in descriptor space and little shift in label space over time. These
+results suggest that the i.i.d. assumption might not be accurate, especially for target-specific assays with larger shifts in
+label- and descriptor space.
+A comparison of common uncertainty quantification methods revealed that the deep ensembles and the Bayesian
+neural network achieved the best-calibrated results for ADME-T assays that show small distribution shifts in the data.
+Recently, these two approaches have also been shown to outperform other common uncertainty quantification methods
+in regression tasks [49]. Given that training deep ensembles demand a lot of computational resources, Bayesian neural
+networks might be the best choice when striving for a fast method that produces well-calibrated estimates. For TB
+assays exhibiting more pronounced distribution shifts, the deep ensemble method performed best. However, the baseline
+MLP matched the performance of the uncertainty quantification methods for many datasets. In general, the uncertainty
+quantification methods consider epistemic uncertainty, resulting in less confident predictions for test instances that are
+different from the training data. This leads to the assumption that the inability of the uncertainty estimation approaches
+to produce well-calibrated uncertainties for TB assays might result from the shifts in label space rather than shifts in
+descriptor space. However, due to the high computational effort required to train deep ensembles, choosing a simple
+MLP for assays with large distribution shifts might be the best and most efficient solution.
+The analysis of the performance of uncertainty estimation approaches over time showed that it is difficult to draw
+conclusions from results from one point of time in the assay history to another. In general, model performance
+was unstable over time. Only for a few assays could one method be identified that was among the best-performing
+approaches at all considered time points in the assay history. In conclusion, a reevaluation of classification model
+performance is required for all assays as soon as more recent data is added. Interestingly, the performance of regression
+models is more stable over time for ADME-T assays, as shown recently by Svensson et al. [49].
+Lastly, two post hoc calibration approaches, including Platt scaling and Venn-ABERS predictors, were tested on their
+ability to improve the probability calibration of deep ensembles. Overall, the calibration methods were able to achieve
+better-calibrated results for some assays, while for others, the calibration stayed the same or even deteriorated after the
+post hoc calibration step. The calibrating capabilities were dependent on the distribution shift between the calibration
+and test set, with declining performance when the shifts in the descriptor space increase.
+The uncertainty estimation approaches discussed in this study have been previously demonstrated to improve model
+calibration on toy data or datasets that do not account for the distribution shift caused by the evolution of the data
+over time. However, previous studies show that improved performance on i.i.d. data often fails to translate into better
+outcomes under distribution shift [41, 42], which is also supported by the findings in this study. This study highlights the
+challenges introduced by real-world data, emphasizing the complexity of identifying effective strategies for uncertainty
+estimation in QSAR models.
+
+Acknowledgements
+The authors sincerely thank their colleagues for the useful discussions. Special appreciation goes to András Formanek
+and Antoine Passemiers at KU Leuven for their valuable insights. This study was partially funded by the European
+Union’s Horizon 2020 research and innovation programme under the Marie Skłodowska-Curie Actions grant agreement
+“Advanced machine learning for Innovative Drug Discovery (AIDD)” No. 956832. HRF, and AA are affiliated to
+Leuven.AI and received funding from the Flemish Government (AI Research Program).
+
+15
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+References
+[1] Natesh Singh, Philippe Vayer, Shivalika Tanwar, Jean-Luc Poyet, Katya Tsaioun, and Bruno O Villoutreix. Drug
+discovery and development: introduction to the general public and patient groups. Frontiers in Drug Discovery, 3:
+1201419, 2023.
+[2] Ute Laermann-Nguyen and Martin Backfisch. Innovation crisis in the pharmaceutical industry? a survey. SN
+Business & Economics, 1(12):164, 2021.
+[3] Anastasiia V Sadybekov and Vsevolod Katritch. Computational approaches streamlining drug discovery. Nature,
+616(7958):673–685, 2023.
+[4] Robert P Hertzberg and Andrew J Pope. High-Throughput Screening: New Technology for the 21st Century.
+Curr. Opin. Chem. Biol., 4(4):445–451, 2000.
+[5] Kevin Bleakley and Yoshihiro Yamanishi. Supervised Prediction of Drug–Target Interactions Using Bipartite
+Local Models. Bioinform., 25(18):2397–2403, 2009.
+[6] George Apostolakis. The Concept of Probability in Safety Assessments of Technological Systems. Science, 250
+(4986):1359–1364, 1990.
+[7] Eyke Hüllermeier and Willem Waegeman. Aleatoric and epistemic uncertainty in machine learning: an introduction
+to concepts and methods. Machine Learning, 110:457 – 506, 2019. doi:10.1007/s10994-021-05946-3.
+[8] Cornelia Gruber, Patrick Oliver Schenk, Malte Schierholz, Frauke Kreuter, and Göran Kauermann. Sources of
+uncertainty in machine learning – a statisticians’ view, 2023.
+[9] Radford M Neal. Bayesian learning for neural networks, volume 118. Springer Science & Business Media, 2012.
+[10] Charles Blundell, Julien Cornebise, Koray Kavukcuoglu, and Daan Wierstra. Weight uncertainty in neural network.
+In International conference on machine learning, pages 1613–1622. PMLR, 2015.
+[11] Pavel Izmailov, Sharad Vikram, Matthew D Hoffman, and Andrew Gordon Gordon Wilson. What are bayesian
+neural network posteriors really like? In International conference on machine learning, pages 4629–4640. PMLR,
+2021.
+[12] QHwan Kim, Joon-Hyuk Ko, Sunghoon Kim, Nojun Park, and Wonho Jhe. Bayesian neural network with
+pretrained protein embedding enhances prediction accuracy of drug-protein interaction. Bioinformatics, 37(20):
+3428–3435, 2021.
+[13] Balaji Lakshminarayanan, Alexander Pritzel, and Charles Blundell. Simple and scalable predictive uncertainty estimation using deep ensembles. In I. Guyon, U. Von Luxburg, S. Bengio, H. Wallach, R. Fergus,
+S. Vishwanathan, and R. Garnett, editors, Advances in Neural Information Processing Systems, volume 30. Curran Associates, Inc., 2017. URL https://proceedings.neurips.cc/paper_files/paper/2017/file/
+9ef2ed4b7fd2c810847ffa5fa85bce38-Paper.pdf.
+[14] Yarin Gal and Zoubin Ghahramani. Dropout as a bayesian approximation: Representing model uncertainty in
+deep learning. In Maria Florina Balcan and Kilian Q. Weinberger, editors, Proceedings of The 33rd International
+Conference on Machine Learning, volume 48 of Proceedings of Machine Learning Research, pages 1050–1059,
+New York, New York, USA, 20–22 Jun 2016. PMLR. URL https://proceedings.mlr.press/v48/gal16.
+html.
+[15] Anastasios N Angelopoulos and Stephen Bates. A gentle introduction to conformal prediction and distribution-free
+uncertainty quantification. arXiv preprint arXiv:2107.07511, 2021.
+[16] Vianney Taquet, Vincent Blot, Thomas Morzadec, Louis Lacombe, and Nicolas Brunel. Mapie: an open-source
+library for distribution-free uncertainty quantification. arXiv preprint arXiv:2207.12274, 2022.
+[17] Murat Sensoy, Lance Kaplan, and Melih Kandemir. Evidential deep learning to quantify classification uncertainty.
+Advances in neural information processing systems, 31, 2018.
+[18] Ruixuan Wang, Zhikang Liu, Jiahao Gong, Qingping Zhou, Xiaoqing Guan, and Guangbo Ge. An uncertaintyguided deep learning method facilitates rapid screening of cyp3a4 inhibitors. Journal of Chemical Information
+and Modeling, 63(24):7699–7710, 2023.
+[19] Dong Wang, Zhenxing Wu, Chao Shen, Lingjie Bao, Hao Luo, Zhe Wang, Hucheng Yao, De-Xin Kong, Cheng
+Luo, and Tingjun Hou. Learning with uncertainty to accelerate the discovery of histone lysine-specific demethylase
+1a (kdm1a/lsd1) inhibitors. Briefings in Bioinformatics, 24(1):bbac592, 2023.
+[20] Dongpin Oh and Bonggun Shin. Improving evidential deep learning via multi-task learning. In Proceedings of the
+AAAI Conference on Artificial Intelligence, volume 36, pages 7895–7903, 2022.
+16
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+[21] Ava P Soleimany, Alexander Amini, Samuel Goldman, Daniela Rus, Sangeeta N Bhatia, and Connor W Coley.
+Evidential deep learning for guided molecular property prediction and discovery. ACS central science, 7(8):
+1356–1367, 2021.
+[22] Jeremiah Liu, Zi Lin, Shreyas Padhy, Dustin Tran, Tania Bedrax Weiss, and Balaji Lakshminarayanan. Simple
+and principled uncertainty estimation with deterministic deep learning via distance awareness. Advances in neural
+information processing systems, 33:7498–7512, 2020.
+[23] John Platt. Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods.
+Adv. Large Margin Classif., 10, 06 1999.
+[24] Vladimir Vovk and Ivan Petej. Venn-abers predictors, 2014.
+[25] Bianca Zadrozny and Charles Elkan. Transforming classifier scores into accurate multiclass probability estimates.
+In Proceedings of the eighth ACM SIGKDD international conference on Knowledge discovery and data mining,
+pages 694–699, 2002.
+[26] Lewis H. Mervin, Simon Johansson, Elizaveta Semenova, Kathryn A. Giblin, and Ola Engkvist. Uncertainty quantification in drug design. Drug Discovery Today, 26(2):474–489, 2021. ISSN 1359-6446.
+doi:10.1016/j.drudis.2020.11.027.
+[27] Jie Yu, Dingyan Wang, and Mingyue Zheng. Uncertainty quantification: Can we trust artificial intelligence in
+drug discovery? Iscience, 25(8), 2022.
+[28] Victor Dheur and Souhaib Ben Taieb. A large-scale study of probabilistic calibration in neural network regression.
+In International Conference on Machine Learning, pages 7813–7836. PMLR, 2023.
+[29] Kajetan Schweighofer, Lukas Aichberger, Mykyta Ielanskyi, Günter Klambauer, and Sepp Hochreiter. Quantification of uncertainty with adversarial models. Advances in Neural Information Processing Systems, 36:19446–19484,
+2023.
+[30] Lewis H Mervin, Maria-Anna Trapotsi, Avid M Afzal, Ian P Barrett, Andreas Bender, and Ola Engkvist.
+Probabilistic random forest improves bioactivity predictions close to the classification threshold by taking into
+account experimental uncertainty. Journal of Cheminformatics, 13:1–17, 2021.
+[31] Milad Rayka, Morteza Mirzaei, and Ali Mohammad Latifi. An ensemble-based approach to estimate confidence
+of predicted protein–ligand binding affinity values. Molecular Informatics, 43(4):e202300292, 2024.
+[32] Zhehuan Fan, Jie Yu, Xiang Zhang, Yijie Chen, Shihui Sun, Yuanyuan Zhang, Mingan Chen, Fu Xiao, Wenyong
+Wu, Xutong Li, et al. Reducing overconfident errors in molecular property classification using posterior network.
+Patterns, 2024.
+[33] Hannah Rosa Friesacher, Ola Engkvist, Lewis Mervin, Yves Moreau, and Adam Arany. Achieving well-informed
+decision-making in drug discovery: A comprehensive calibration study using neural network-based structureactivity models. arXiv preprint arXiv:2407.14185, 2024.
+[34] Lior Hirschfeld, Kyle Swanson, Kevin Yang, Regina Barzilay, and Connor W Coley. Uncertainty quantification
+using neural networks for molecular property prediction. Journal of Chemical Information and Modeling, 60(8):
+3770–3780, 2020.
+[35] Lewis H. Mervin, Avid M. Afzal, Ola Engkvist, and Andreas Bender. Comparison of scaling methods to obtain
+calibrated probabilities of activity for protein–ligand predictions. Journal of Chemical Information and Modeling,
+60(10):4546–4559, 2020. doi:10.1021/acs.jcim.0c00476. PMID: 32865408.
+[36] Thomas-Martin Dutschmann, Lennart Kinzel, Antonius Ter Laak, and Knut Baumann. Large-scale evaluation of
+k-fold cross-validation ensembles for uncertainty estimation. Journal of Cheminformatics, 15(1):49, 2023.
+[37] Robert P Sheridan. Time-split cross-validation as a method for estimating the goodness of prospective prediction.
+J. Chem. Inf. Model., 53(4):783–790, 2013. doi:10.1021/ci400084k.
+[38] Gregory A Landrum, Maximilian Beckers, Jessica Lanini, Nadine Schneider, Nikolaus Stiefl, and Sereina Riniker.
+Simpd: an algorithm for generating simulated time splits for validating machine learning approaches. Journal of
+cheminformatics, 15(1):119, 2023.
+[39] Murat Dundar, Balaji Krishnapuram, Jinbo Bi, and R Bharat Rao. Learning classifiers when the training data is
+not iid. In IJCAI, volume 2007, pages 756–61. Citeseer, 2007.
+[40] Longbing Cao. Beyond iid: Non-iid thinking, informatics, and learning. IEEE Intelligent Systems, 37(4):5–17,
+2022.
+17
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+[41] Yaniv Ovadia, Emily Fertig, Jie Ren, Zachary Nado, D. Sculley, Sebastian Nowozin, Joshua Dillon, Balaji Lakshminarayanan, and Jasper Snoek. Can you trust your model's uncertainty? evaluating predictive uncertainty under dataset shift. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d'Alché-Buc,
+E. Fox, and R. Garnett, editors, Advances in Neural Information Processing Systems, volume 32. Curran Associates, Inc., 2019. URL https://proceedings.neurips.cc/paper_files/paper/2019/file/
+8558cb408c1d76621371888657d2eb1d-Paper.pdf.
+[42] Pang Wei Koh, Shiori Sagawa, Henrik Marklund, Sang Michael Xie, Marvin Zhang, Akshay Balsubramani,
+Weihua Hu, Michihiro Yasunaga, Richard Lanas Phillips, Irena Gao, et al. Wilds: A benchmark of in-the-wild
+distribution shifts. In International conference on machine learning, pages 5637–5664. PMLR, 2021.
+[43] Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural networks. In
+Doina Precup and Yee Whye Teh, editors, Proceedings of the 34th International Conference on Machine Learning,
+volume 70 of Proceedings of Machine Learning Research, pages 1321–1330. PMLR, 06–11 Aug 2017. URL
+https://proceedings.mlr.press/v70/guo17a.html.
+[44] Robert P Sheridan. Three Useful Dimensions for Domain Applicability in QSAR Models Using Random Forest.
+J. Chem. Inf. Model., 52(3):814–823, 2012.
+[45] Alexandru Niculescu-Mizil and Rich Caruana. Predicting good probabilities with supervised learning. In
+Proceedings of the 22nd international conference on Machine learning, pages 625–632, 2005.
+[46] Barbara Zdrazil, Eloy Felix, Fiona Hunter, Emma J Manners, James Blackshaw, Sybilla Corbett, Marleen de Veij,
+Harris Ioannidis, David Mendez Lopez, Juan F Mosquera, et al. The chembl database in 2023: a drug discovery
+platform spanning multiple bioactivity data types and time periods. Nucleic acids research, 52(D1):D1180–D1192,
+2024.
+[47] Raquel Rodríguez-Pérez, Markus Trunzer, Nadine Schneider, Bernard Faller, and Gregori Gerebtzoff. Multispecies
+machine learning predictions of in vitro intrinsic clearance with uncertainty quantification analyses. Molecular
+Pharmaceutics, 20(1):383–394, 2022.
+[48] Raya Stoyanova, Paul Maximilian Katzberger, Leonid Komissarov, Aous Khadhraoui, Lisa Sach-Peltason,
+Katrin Groebke Zbinden, Torsten Schindler, and Nenad Manevski. Computational predictions of nonclinical
+pharmacokinetics at the drug design stage. Journal of Chemical Information and Modeling, 63(2):442–458, 2023.
+[49] Emma Svensson, Hannah Rosa Friesacher, Susanne Winiwarter, Lewis Mervin, Adam Arany, and Ola Engkvist. Enhancing uncertainty quantification in drug discovery with censored regression labels. arXiv preprint
+arXiv:2409.04313, 2024.
+[50] Hannah Rosa Friesacher, Emma Svensson, Adam Arany, Lewis Mervin, and Ola Engkvist. Towards reliable
+uncertainty estimates for drug discovery: A large-scale temporal study of probability calibration. In ICML 2024
+AI for Science Workshop, 2024.
+[51] Hannah Rosa Friesacher, Emma Svensson, Adam Arany, Lewis Mervin, and Ola Engkvist. Temporal evaluation
+of probability calibration with experimental errors. In International Workshop on AI in Drug Discovery, pages
+13–20. Springer, 2024.
+[52] Joseph A DiMasi. Risks in new drug development: approval success rates for investigational drugs. Clinical
+Pharmacology & Therapeutics, 69(5):297–307, 2001.
+[53] Han Van De Waterbeemd and Eric Gifford. Admet in silico modelling: towards prediction paradise? Nature
+reviews Drug discovery, 2(3):192–204, 2003.
+[54] Malavika Deodhar, Sweilem B Al Rihani, Meghan J Arwood, Lucy Darakjian, Pamela Dow, Jacques Turgeon, and
+Veronique Michaud. Mechanisms of cyp450 inhibition: understanding drug-drug interactions due to mechanismbased inhibition in clinical practice. Pharmaceutics, 12(9):846, 2020.
+[55] Costas Ioannides. Cytochromes P450: metabolic and toxicological aspects. Crc Press, 1996.
+[56] Laura Lowe Furge and F Peter Guengerich. Cytochrome p450 enzymes in drug metabolism and chemical
+toxicology: An introduction. Biochemistry and Molecular Biology Education, 34(2):66–74, 2006.
+[57] Pranav Shah, Viral Jogani, Tamishraha Bagchi, and Ambikanandan Misra. Role of caco-2 cell monolayers in
+prediction of intestinal drug absorption. Biotechnology progress, 22(1):186–198, 2006.
+[58] Li Di, Paul V Fish, and Takashi Mano. Bridging solubility between drug discovery and development. Drug
+discovery today, 17(9-10):486–495, 2012.
+[59] Mark T Keating and Michael C Sanguinetti. Molecular genetic insights into cardiovascular disease. Science, 272
+(5262):681–685, 1996.
+[60] Michael J Waring. Lipophilicity in drug discovery. Expert Opinion on Drug Discovery, 5(3):235–248, 2010.
+18
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+[61] Minjun Chen, Jürgen Borlak, and Weida Tong. High lipophilicity and high daily dose of oral medications are
+associated with significant risk for drug-induced liver injury. Hepatology, 58(1):388–396, 2013.
+[62] Collen M Masimirembwa, Richard Thompson, and Tommy B Andersson. In vitro high throughput screening of
+compounds for favorable metabolic properties in drug discovery. Combinatorial chemistry & high throughput
+screening, 4(3):245–263, 2001.
+[63] Li Di, Edward H Kerns, Yan Hong, Teresa A Kleintop, Oliver J Mc Connell, and Donna M Huryn. Optimization of
+a higher throughput microsomal stability screening assay for profiling drug discovery candidates. SLAS Discovery,
+8(4):453–462, 2003.
+[64] Greg Landrum. Rdkit: Open-source cheminformatics, 2006.
+[65] David Weininger. SMILES, a Chemical Language and Information System. 1. Introduction to Methodology and
+Encoding Rules. J. Chem. Inf. Comput. Sci., 28(1):31–36, 1988.
+[66] Peter B R Hartog, Emma Svensson, Lewis Mervin, Samuel Genheden, Ola Engkvist, and Igor V Tetko. Registries
+in Machine Learning-Based Drug Discovery: A Shortcut to Code Reuse. In International Workshop on AI in Drug
+Discovery, pages 98–115. Springer, 2024. URL https://doi.org/10.1007/978-3-031-72381-0_9.
+[67] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer, R. Weiss,
+V. Dubourg, J. Vanderplas, A. Passos, D. Cournapeau, M. Brucher, M. Perrot, and E. Duchesnay. Scikit-learn:
+Machine Learning in Python. Journal of Machine Learning Research, 12:2825–2830, 2011.
+[68] Adam Paszke et al. PyTorch: An Imperative Style, High-Performance Deep Learning Library. In Advances in
+Neural Information Processing Systems, volume 32. Curran Associates, Inc., 2019.
+[69] Diederik P Kingma and Jimmy Ba. Adam: A Method for Stochastic Optimization. In International Conference
+on Learning Representations, 2015.
+[70] Solomon Kullback and Richard A Leibler. On information and sufficiency. The annals of mathematical statistics,
+22(1):79–86, 1951.
+[71] Paolo Toccaceli, Ilia Nouretdinov, Zhiyuan Luo, Vladimir Vovk, Lars Carlsson, and Alex Gammerman. Excape
+wp1-probabilistic prediction, 2016.
+[72] Arthur Gretton, Karsten M Borgwardt, Malte J Rasch, Bernhard Schölkopf, and Alexander Smola. A kernel
+two-sample test. The Journal of Machine Learning Research, 13(1):723–773, 2012.
+[73] John D Holliday, CY Hu, and Peter Willett. Grouping of coefficients for the calculation of inter-molecular
+similarity and dissimilarity using 2d fragment bit-strings. Combinatorial chemistry & high throughput screening,
+5(2):155–166, 2002.
+[74] James A Hanley and Barbara J McNeil. The meaning and use of the area under a receiver operating characteristic
+(roc) curve. Radiology, 143(1):29–36, 1982.
+[75] Jeremy Nixon, Michael W. Dusenberry, Linchuan Zhang, Ghassen Jerfel, and Dustin Tran. Measuring calibration
+in deep learning. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR) Workshops, June 2019. doi:10.48550/arXiv.1904.01685.
+[76] Tilmann Gneiting and Adrian E Raftery. Strictly proper scoring rules, prediction, and estimation. Journal
+of the American Statistical Association, 102(477):359–378, 2007. doi:10.1198/016214506000001437. URL
+https://doi.org/10.1198/016214506000001437.
+[77] Jochen Bröcker. Reliability, sufficiency, and the decomposition of proper scores. Quarterly Journal of the Royal
+Meteorological Society: A journal of the atmospheric sciences, applied meteorology and physical oceanography,
+135(643):1512–1519, 2009.
+[78] Saurabh Garg, Yifan Wu, Sivaraman Balakrishnan, and Zachary Lipton. A unified view of label shift estimation.
+Advances in Neural Information Processing Systems, 33:3290–3300, 2020.
+[79] Fredrik K Gustafsson, Martin Danelljan, and Thomas B Schon. Evaluating scalable bayesian deep learning
+methods for robust computer vision. In Proceedings of the IEEE/CVF conference on computer vision and pattern
+recognition workshops, pages 318–319, 2020.
+[80] Hendrik A Mehrtens, Alexander Kurz, Tabea-Clara Bucher, and Titus J Brinker. Benchmarking common
+uncertainty estimation methods with histopathological images under domain shift and label noise. Medical image
+analysis, 89:102914, 2023.
+[81] Rahul Rahaman and Alexandre Thiery. Uncertainty quantification and deep ensembles. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing
+Systems, volume 34, pages 20063–20075. Curran Associates, Inc., 2021. URL https://proceedings.neurips.
+cc/paper_files/paper/2021/file/a70dc40477bc2adceef4d2c90f47eb82-Paper.pdf.
+19
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+A
+
+Model Selection
+
+Table 3: Summary of the hyperparameter optimization strategy. The hyperparameters of the baseline models were
+tuned for each temporal setting of each dataset individually using the BCE loss in a validation dataset. The range of the
+hyperparameters considered during the hyperparameter tuning is reported in the left column. The right column lists the
+fixed hyperparameters for each baseline model.
+
+B
+
+Baseline
+
+Tuned Hyperparameter
+
+Explored Values
+
+Fixed Hyperparameter
+
+Values
+
+Random Forest
+(RF)
+
+Number of Estimators
+Maximum Depth
+
+50 - 1500
+5 - 10000
+
+ECFP Size
+
+4096
+
+Mulitlayer
+Perceptron
+(MLP)
+
+Weight Decay
+Dropout
+Hidden Dimension
+Number of Layers
+Decreasing Dimension
+Scheduler Factor
+
+0 - 0.0005
+0 - 0.75
+64 - 512
+2-5
+True/False
+0.1/0.5
+
+ECFP Size
+Learning Rate
+
+4096
+0.0001
+
+Distribution Shift in Label Space
+
+Table 4: Overview of ratio of the preferred class. The ratios of the compounds assigned to the preferred class are
+reported for each time span and each assay.
+Assay
+
+Span 1
+
+Span 2
+
+Span 3
+
+Span 4
+
+Span 5
+
+TB-1
+TB-2
+TB-3
+TB-4
+TB-5
+TB-6
+TB-7
+
+0.678218
+0.336185
+0.780019
+0.547912
+0.102444
+0.750672
+0.299052
+
+0.531628
+0.401515
+0.687738
+0.869677
+0.245645
+0.657795
+0.717688
+
+0.422665
+0.389691
+0.789397
+0.779412
+0.119409
+0.747870
+0.472853
+
+0.236022
+0.304681
+0.878903
+0.715577
+0.176832
+0.870065
+0.189217
+
+0.355208
+0.537486
+0.955903
+0.760392
+0.168000
+0.905208
+0.079219
+
+A-CYPa
+A-CYPb
+A-CYPc
+A-PM
+A-SOL
+A-hERG
+A-logD
+A-MS
+
+0.853501
+0.856396
+0.606965
+0.186431
+0.470625
+0.559480
+0.633528
+0.340375
+
+0.675146
+0.844581
+0.761506
+0.195426
+0.472610
+0.694663
+0.600615
+0.333128
+
+0.775178
+0.793540
+0.728951
+0.155797
+0.488615
+0.726091
+0.608635
+0.356558
+
+0.817248
+0.823023
+0.635174
+0.096440
+0.525761
+0.719838
+0.554792
+0.421075
+
+0.773893
+0.864290
+0.707853
+0.090965
+0.434304
+0.783182
+0.533047
+0.365665
+
+20
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+C
+
+Distribution Shift in Descriptor Space
+
+Figure 9: T-SNE plots of the ECFP space for all TB assays. T-SNE plots of the ECFP space are shown for all TB
+assays. Compounds are colored according to the time span that they were assigned to.
+
+Figure 10: T-SNE plots of the ECFP space for all ADME-T assays. T-SNE plots of the ECFP space are shown for all
+ADME-T assays. Compounds are colored according to the time span that they were assigned to.
+
+21
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 5: Quantification of the label distribution shifts between the calibration and test set. The shift in label space
+is reported for each temporal setting, using the data of 1, 2, or 3 time spans for training. Results are shown for each
+assay. The shift in label space is shown in terms of the difference in ratios of the preferred class between the training
+and test datasets.
+Number of Training Spans
+
+D
+
+Assay
+
+1
+
+2
+
+3
+
+TB
+TB-1
+TB-2
+TB-3
+TB-4
+TB-5
+TB-6
+TB-7
+
+0.022208
+0.018045
+0.063842
+0.033499
+0.088506
+0.044372
+0.130317
+
+0.016968
+0.061332
+0.098653
+0.043690
+0.054487
+0.107566
+0.095124
+
+0.057858
+0.050021
+0.073235
+0.020273
+0.035291
+0.062775
+0.048923
+
+ADME-T
+A-CYPa
+A-CYPb
+A-CYPc
+A-PM
+A-SOL
+A-hERG
+A-logD
+A-MS
+
+0.024293
+0.018977
+0.010841
+0.015786
+0.006665
+0.004232
+0.008009
+0.008084
+
+0.028514
+0.026954
+0.010273
+0.016645
+0.008250
+0.003890
+0.005819
+0.006091
+
+0.016945
+0.013106
+0.016587
+0.015720
+0.007077
+0.006738
+0.007059
+0.007487
+
+Results of the Calibration Study
+
+22
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 6: Summary of the BCE (↓) scores for the baseline models. BCE results for all three temporal settings of
+all TB and ADME-T assays are reported. The temporal setting is indicated in brackets after the assay abbreviation.
+Results for the baselines (Random Forests (RF) and a multilayer perceptron (MLP)), Platt scaled models (RF-P and
+MLP-P) and models calibrated with Venn-ABERS (VA) predictors (RF-VA and MLP-VA) are reported. The models
+were trained with compounds from three time spans. Averages over 10 model repetitions are shown.
+Assay
+
+RF
+
+RF-P
+
+RF-VA
+
+MLP
+
+MLP-P
+
+MLP-VA
+
+TB-1[1]
+TB-1[2]
+TB-1[3]
+TB-2[1]
+TB-2[2]
+TB-2[3]
+TB-3[1]
+TB-3[2]
+TB-3[3]
+TB-4[1]
+TB-4[2]
+TB-4[3]
+TB-5[1]
+TB-5[2]
+TB-5[3]
+TB-6[1]
+TB-6[2]
+TB-6[3]
+TB-7[1]
+TB-7[2]
+TB-7[3]
+
+0.82 ± 0.012
+0.66 ± 0.005
+0.68 ± 0.003
+0.63 ± 0.007
+0.58 ± 0.003
+0.75 ± 0.009
+0.52 ± 0.003
+0.46 ± 0.011
+0.33 ± 0.01
+0.57 ± 0.013
+0.55 ± 0.005
+0.5 ± 0.012
+0.34 ± 0.003
+0.46 ± 0.007
+0.44 ± 0.004
+0.55 ± 0.002
+0.51 ± 0.011
+0.43 ± 0.007
+0.79 ± 0.009
+0.57 ± 0.007
+0.53 ± 0.013
+
+0.7 ± 0.006
+0.51 ± 0.006
+0.81 ± 0.036
+0.61 ± 0.009
+0.56 ± 0.005
+0.8 ± 0.025
+0.64 ± 0.025
+0.38 ± 0.011
+0.2 ± 0.009
+0.39 ± 0.043
+0.45 ± 0.02
+0.33 ± 0.031
+0.41 ± 0.005
+0.48 ± 0.018
+0.42 ± 0.008
+0.64 ± 0.026
+0.43 ± 0.011
+0.3 ± 0.012
+0.73 ± 0.024
+0.54 ± 0.019
+0.32 ± 0.013
+
+0.7 ± 0.006
+0.51 ± 0.012
+0.77 ± 0.011
+0.63 ± 0.015
+0.56 ± 0.006
+0.78 ± 0.024
+0.68 ± 0.016
+0.37 ± 0.009
+0.2 ± 0.013
+0.4 ± 0.067
+0.47 ± 0.011
+0.32 ± 0.037
+0.41 ± 0.021
+0.49 ± 0.018
+0.41 ± 0.011
+0.67 ± 0.029
+0.43 ± 0.02
+0.3 ± 0.012
+0.69 ± 0.032
+0.46 ± 0.036
+0.34 ± 0.031
+
+0.69 ± 0.017
+0.44 ± 0.012
+0.73 ± 0.066
+0.67 ± 0.038
+0.57 ± 0.062
+0.62 ± 0.024
+0.49 ± 0.009
+0.45 ± 0.016
+0.19 ± 0.006
+0.31 ± 0.018
+0.46 ± 0.023
+0.27 ± 0.082
+0.53 ± 0.041
+0.63 ± 0.076
+0.31 ± 0.007
+0.54 ± 0.004
+0.46 ± 0.036
+0.29 ± 0.007
+0.78 ± 0.107
+0.48 ± 0.041
+0.35 ± 0.113
+
+0.64 ± 0.055
+0.43 ± 0.004
+0.77 ± 0.03
+0.67 ± 0.027
+0.54 ± 0.011
+0.66 ± 0.011
+0.56 ± 0.005
+0.44 ± 0.006
+0.21 ± 0.006
+0.31 ± 0.016
+0.46 ± 0.029
+0.24 ± 0.028
+0.39 ± 0.005
+0.53 ± 0.018
+0.28 ± 0.008
+0.65 ± 0.006
+0.44 ± 0.017
+0.28 ± 0.004
+0.72 ± 0.133
+0.47 ± 0.028
+0.28 ± 0.009
+
+0.6 ± 0.064
+0.44 ± 0.005
+0.77 ± 0.036
+0.64 ± 0.006
+0.54 ± 0.009
+0.7 ± 0.013
+0.56 ± 0.008
+0.52 ± 0.093
+0.21 ± 0.004
+0.31 ± 0.007
+0.47 ± 0.021
+0.24 ± 0.038
+0.37 ± 0.003
+0.52 ± 0.024
+0.29 ± 0.006
+0.66 ± 0.007
+0.5 ± 0.062
+0.29 ± 0.003
+0.73 ± 0.125
+0.44 ± 0.016
+0.28 ± 0.011
+
+A-CYPa[1]
+A-CYPa[2]
+A-CYPa[3]
+A-CYPb[1]
+A-CYPb[2]
+A-CYPb[3]
+A-CYPc[1]
+A-CYPc[2]
+A-CYPc[3]
+A-PM[1]
+A-PM[2]
+A-PM[3]
+A-SOL[1]
+A-SOL[2]
+A-SOL[3]
+A-hERG[1]
+A-hERG[2]
+A-hERG[3]
+A-logD[1]
+A-logD[2]
+A-logD[3]
+A-MS[1]
+A-MS[2]
+A-MS[3]
+
+0.54 ± 0.003
+0.47 ± 0.002
+0.51 ± 0.003
+0.51 ± 0.003
+0.47 ± 0.001
+0.4 ± 0.001
+0.6 ± 0.002
+0.63 ± 0.005
+0.59 ± 0.003
+0.44 ± 0.001
+0.35 ± 0.002
+0.34 ± 0.001
+0.68 ± 0.001
+0.68 ± 0.002
+0.67 ± 0.0
+0.61 ± 0.002
+0.59 ± 0.001
+0.54 ± 0.001
+0.64 ± 0.004
+0.67 ± 0.001
+0.69 ± 0.001
+0.64 ± 0.001
+0.69 ± 0.002
+0.64 ± 0.001
+
+0.53 ± 0.005
+0.48 ± 0.003
+0.51 ± 0.005
+0.5 ± 0.007
+0.53 ± 0.01
+0.4 ± 0.001
+0.56 ± 0.005
+0.62 ± 0.012
+0.62 ± 0.017
+0.43 ± 0.001
+0.33 ± 0.005
+0.3 ± 0.003
+0.66 ± 0.006
+0.63 ± 0.007
+0.64 ± 0.006
+0.54 ± 0.003
+0.54 ± 0.004
+0.5 ± 0.003
+0.62 ± 0.01
+0.64 ± 0.003
+0.66 ± 0.007
+0.63 ± 0.004
+0.66 ± 0.007
+0.61 ± 0.004
+
+0.52 ± 0.01
+0.5 ± 0.014
+0.51 ± 0.005
+0.49 ± 0.007
+0.56 ± 0.008
+0.4 ± 0.002
+0.57 ± 0.014
+0.6 ± 0.017
+0.62 ± 0.016
+0.44 ± 0.004
+0.34 ± 0.006
+0.3 ± 0.005
+0.66 ± 0.007
+0.63 ± 0.007
+0.64 ± 0.006
+0.54 ± 0.003
+0.54 ± 0.004
+0.51 ± 0.004
+0.62 ± 0.01
+0.64 ± 0.002
+0.65 ± 0.008
+0.63 ± 0.004
+0.66 ± 0.006
+0.61 ± 0.003
+
+0.55 ± 0.01
+0.48 ± 0.004
+0.53 ± 0.009
+0.49 ± 0.008
+0.49 ± 0.015
+0.39 ± 0.008
+0.59 ± 0.009
+0.63 ± 0.027
+0.55 ± 0.004
+0.38 ± 0.002
+0.28 ± 0.005
+0.28 ± 0.006
+0.6 ± 0.002
+0.61 ± 0.03
+0.59 ± 0.027
+0.54 ± 0.024
+0.5 ± 0.002
+0.49 ± 0.011
+0.59 ± 0.008
+0.64 ± 0.031
+0.53 ± 0.007
+0.61 ± 0.018
+0.68 ± 0.011
+0.64 ± 0.014
+
+0.55 ± 0.007
+0.48 ± 0.002
+0.53 ± 0.004
+0.49 ± 0.003
+0.51 ± 0.012
+0.39 ± 0.001
+0.58 ± 0.003
+0.6 ± 0.016
+0.56 ± 0.002
+0.38 ± 0.002
+0.3 ± 0.006
+0.27 ± 0.002
+0.59 ± 0.004
+0.6 ± 0.031
+0.58 ± 0.026
+0.52 ± 0.005
+0.5 ± 0.003
+0.48 ± 0.005
+0.57 ± 0.004
+0.62 ± 0.022
+0.5 ± 0.004
+0.6 ± 0.02
+0.65 ± 0.015
+0.64 ± 0.006
+
+0.57 ± 0.023
+0.5 ± 0.005
+0.52 ± 0.005
+0.49 ± 0.002
+0.52 ± 0.02
+0.39 ± 0.002
+0.58 ± 0.002
+0.6 ± 0.019
+0.57 ± 0.002
+0.38 ± 0.002
+0.3 ± 0.023
+0.27 ± 0.002
+0.59 ± 0.004
+0.57 ± 0.02
+0.56 ± 0.013
+0.51 ± 0.004
+0.5 ± 0.001
+0.48 ± 0.004
+0.57 ± 0.003
+0.59 ± 0.016
+0.5 ± 0.005
+0.6 ± 0.028
+0.65 ± 0.008
+0.6 ± 0.005
+
+23
+
+MLPE-P
+
+0.63 ± 0.021
+0.43 ± 0.001
+0.8 ± 0.004
+0.67 ± 0.006
+0.53 ± 0.004
+0.66 ± 0.003
+0.56 ± 0.001
+0.45 ± 0.003
+0.21 ± 0.001
+0.3 ± 0.002
+0.45 ± 0.005
+0.22 ± 0.004
+0.39 ± 0.001
+0.53 ± 0.003
+0.28 ± 0.001
+0.65 ± 0.006
+0.44 ± 0.004
+0.28 ± 0.0
+0.61 ± 0.026
+0.46 ± 0.005
+0.27 ± 0.002
+
+0.55 ± 0.004
+0.52 ± 0.023
+0.53 ± 0.001
+0.49 ± 0.0
+0.51 ± 0.002
+0.39 ± 0.0
+0.58 ± 0.001
+0.6 ± 0.004
+0.56 ± 0.0
+0.38 ± 0.0
+0.29 ± 0.001
+0.27 ± 0.0
+0.59 ± 0.001
+0.54 ± 0.005
+0.55 ± 0.003
+0.51 ± 0.001
+0.49 ± 0.001
+0.48 ± 0.001
+0.56 ± 0.001
+0.6 ± 0.009
+0.49 ± 0.003
+0.59 ± 0.001
+0.64 ± 0.002
+0.63 ± 0.008
+
+MLPE
+
+0.7 ± 0.008
+0.44 ± 0.003
+0.67 ± 0.01
+0.64 ± 0.009
+0.54 ± 0.003
+0.63 ± 0.005
+0.5 ± 0.006
+0.45 ± 0.004
+0.19 ± 0.002
+0.3 ± 0.005
+0.45 ± 0.004
+0.25 ± 0.01
+0.52 ± 0.006
+0.57 ± 0.03
+0.3 ± 0.002
+0.54 ± 0.003
+0.45 ± 0.004
+0.29 ± 0.001
+0.66 ± 0.02
+0.46 ± 0.007
+0.3 ± 0.009
+
+0.54 ± 0.003
+0.48 ± 0.004
+0.52 ± 0.004
+0.49 ± 0.002
+0.48 ± 0.003
+0.38 ± 0.001
+0.59 ± 0.001
+0.6 ± 0.007
+0.55 ± 0.001
+0.38 ± 0.001
+0.28 ± 0.001
+0.27 ± 0.001
+0.6 ± 0.001
+0.56 ± 0.004
+0.55 ± 0.004
+0.52 ± 0.003
+0.5 ± 0.001
+0.47 ± 0.001
+0.58 ± 0.001
+0.6 ± 0.012
+0.52 ± 0.001
+0.6 ± 0.002
+0.67 ± 0.003
+0.62 ± 0.01
+
+TB-1[1]
+TB-1[2]
+TB-1[3]
+TB-2[1]
+TB-2[2]
+TB-2[3]
+TB-3[1]
+TB-3[2]
+TB-3[3]
+TB-4[1]
+TB-4[2]
+TB-4[3]
+TB-5[1]
+TB-5[2]
+TB-5[3]
+TB-6[1]
+TB-6[2]
+TB-6[3]
+TB-7[1]
+TB-7[2]
+TB-7[3]
+
+A-CYPa[1]
+A-CYPa[2]
+A-CYPa[3]
+A-CYPb[1]
+A-CYPb[2]
+A-CYPb[3]
+A-CYPc[1]
+A-CYPc[2]
+A-CYPc[3]
+A-PM[1]
+A-PM[2]
+A-PM[3]
+A-SOL[1]
+A-SOL[2]
+A-SOL[3]
+A-hERG[1]
+A-hERG[2]
+A-hERG[3]
+A-logD[1]
+A-logD[2]
+A-logD[3]
+A-MS[1]
+A-MS[2]
+A-MS[3]
+
+Assay
+
+0.56 ± 0.008
+0.58 ± 0.032
+0.52 ± 0.001
+0.49 ± 0.001
+0.51 ± 0.003
+0.39 ± 0.0
+0.58 ± 0.001
+0.58 ± 0.002
+0.56 ± 0.001
+0.38 ± 0.001
+0.29 ± 0.001
+0.27 ± 0.001
+0.59 ± 0.001
+0.54 ± 0.004
+0.55 ± 0.003
+0.51 ± 0.001
+0.5 ± 0.0
+0.47 ± 0.001
+0.57 ± 0.001
+0.57 ± 0.003
+0.49 ± 0.002
+0.59 ± 0.001
+0.64 ± 0.003
+0.61 ± 0.006
+
+0.56 ± 0.009
+0.44 ± 0.001
+0.77 ± 0.007
+0.64 ± 0.003
+0.53 ± 0.003
+0.7 ± 0.005
+0.55 ± 0.002
+0.46 ± 0.002
+0.21 ± 0.001
+0.3 ± 0.002
+0.46 ± 0.004
+0.22 ± 0.001
+0.37 ± 0.001
+0.52 ± 0.005
+0.29 ± 0.001
+0.66 ± 0.006
+0.45 ± 0.005
+0.29 ± 0.001
+0.58 ± 0.004
+0.42 ± 0.002
+0.27 ± 0.002
+
+MLPE-VA
+
+0.56 ± 0.012
+0.49 ± 0.01
+0.52 ± 0.012
+0.51 ± 0.008
+0.48 ± 0.015
+0.42 ± 0.018
+0.58 ± 0.006
+0.59 ± 0.01
+0.55 ± 0.002
+0.38 ± 0.003
+0.36 ± 0.018
+0.28 ± 0.006
+0.59 ± 0.002
+0.6 ± 0.013
+0.57 ± 0.022
+0.55 ± 0.022
+0.51 ± 0.004
+0.49 ± 0.01
+0.56 ± 0.003
+0.61 ± 0.022
+0.51 ± 0.005
+0.6 ± 0.018
+0.67 ± 0.009
+0.61 ± 0.01
+
+0.69 ± 0.014
+0.44 ± 0.013
+0.66 ± 0.023
+0.63 ± 0.011
+0.59 ± 0.053
+0.64 ± 0.024
+0.5 ± 0.014
+0.46 ± 0.015
+0.27 ± 0.012
+0.37 ± 0.013
+0.42 ± 0.018
+0.35 ± 0.058
+0.5 ± 0.036
+0.46 ± 0.022
+0.31 ± 0.007
+0.56 ± 0.008
+0.49 ± 0.025
+0.3 ± 0.006
+0.72 ± 0.032
+0.52 ± 0.027
+0.37 ± 0.048
+
+MLPMC
+
+0.55 ± 0.01
+0.48 ± 0.003
+0.52 ± 0.004
+0.5 ± 0.002
+0.52 ± 0.02
+0.39 ± 0.001
+0.58 ± 0.003
+0.62 ± 0.013
+0.56 ± 0.002
+0.37 ± 0.002
+0.29 ± 0.006
+0.27 ± 0.002
+0.59 ± 0.004
+0.59 ± 0.025
+0.58 ± 0.022
+0.52 ± 0.005
+0.49 ± 0.002
+0.48 ± 0.005
+0.56 ± 0.003
+0.6 ± 0.019
+0.5 ± 0.004
+0.6 ± 0.02
+0.65 ± 0.015
+0.61 ± 0.008
+
+0.65 ± 0.05
+0.43 ± 0.004
+0.79 ± 0.032
+0.65 ± 0.015
+0.53 ± 0.007
+0.67 ± 0.011
+0.55 ± 0.005
+0.45 ± 0.006
+0.2 ± 0.004
+0.31 ± 0.012
+0.44 ± 0.027
+0.23 ± 0.017
+0.39 ± 0.004
+0.52 ± 0.02
+0.28 ± 0.008
+0.65 ± 0.008
+0.44 ± 0.021
+0.28 ± 0.004
+0.72 ± 0.134
+0.47 ± 0.016
+0.27 ± 0.009
+
+MLPMC-P
+
+0.56 ± 0.016
+0.5 ± 0.004
+0.53 ± 0.004
+0.5 ± 0.003
+0.52 ± 0.025
+0.39 ± 0.002
+0.58 ± 0.002
+0.6 ± 0.017
+0.56 ± 0.002
+0.38 ± 0.002
+0.3 ± 0.005
+0.27 ± 0.002
+0.59 ± 0.004
+0.58 ± 0.023
+0.56 ± 0.015
+0.51 ± 0.005
+0.5 ± 0.001
+0.48 ± 0.004
+0.57 ± 0.003
+0.59 ± 0.009
+0.5 ± 0.004
+0.6 ± 0.028
+0.65 ± 0.015
+0.6 ± 0.005
+
+0.61 ± 0.065
+0.44 ± 0.004
+0.77 ± 0.038
+0.64 ± 0.007
+0.54 ± 0.009
+0.7 ± 0.013
+0.56 ± 0.008
+0.46 ± 0.005
+0.21 ± 0.003
+0.31 ± 0.009
+0.46 ± 0.018
+0.23 ± 0.013
+0.37 ± 0.003
+0.52 ± 0.022
+0.29 ± 0.006
+0.66 ± 0.008
+0.43 ± 0.027
+0.29 ± 0.003
+0.72 ± 0.125
+0.44 ± 0.012
+0.27 ± 0.008
+
+MLPMC-VA
+
+0.6 ± 0.01
+0.47 ± 0.002
+0.52 ± 0.004
+0.51 ± 0.002
+0.46 ± 0.0
+0.39 ± 0.005
+0.63 ± 0.002
+0.62 ± 0.029
+0.54 ± 0.004
+0.42 ± 0.003
+0.3 ± 0.007
+0.29 ± 0.004
+0.62 ± 0.039
+0.69 ± 0.001
+0.69 ± 0.001
+0.63 ± 0.002
+0.56 ± 0.017
+0.51 ± 0.006
+0.61 ± 0.006
+0.68 ± 0.005
+0.51 ± 0.006
+0.61 ± 0.008
+0.66 ± 0.013
+0.58 ± 0.009
+
+0.7 ± 0.003
+0.74 ± 0.021
+0.69 ± 0.002
+0.69 ± 0.001
+0.68 ± 0.006
+0.72 ± 0.02
+0.53 ± 0.004
+0.43 ± 0.006
+0.28 ± 0.009
+0.4 ± 0.01
+0.43 ± 0.005
+0.33 ± 0.008
+0.46 ± 0.008
+0.49 ± 0.017
+0.38 ± 0.032
+0.58 ± 0.007
+0.45 ± 0.01
+0.37 ± 0.01
+0.69 ± 0.0
+0.6 ± 0.029
+0.69 ± 0.002
+
+BNN
+
+0.56 ± 0.002
+0.48 ± 0.002
+0.53 ± 0.006
+0.52 ± 0.001
+0.47 ± 0.003
+0.39 ± 0.002
+0.59 ± 0.0
+0.63 ± 0.032
+0.55 ± 0.004
+0.42 ± 0.002
+0.31 ± 0.012
+0.28 ± 0.003
+0.6 ± 0.012
+0.69 ± 0.001
+0.7 ± 0.003
+0.58 ± 0.0
+0.54 ± 0.017
+0.5 ± 0.004
+0.6 ± 0.004
+0.66 ± 0.008
+0.52 ± 0.004
+0.61 ± 0.004
+0.64 ± 0.007
+0.58 ± 0.007
+
+0.71 ± 0.001
+0.62 ± 0.004
+0.69 ± 0.001
+0.67 ± 0.0
+0.63 ± 0.002
+0.81 ± 0.007
+0.54 ± 0.004
+0.38 ± 0.008
+0.21 ± 0.011
+0.37 ± 0.006
+0.45 ± 0.006
+0.28 ± 0.003
+0.42 ± 0.002
+0.47 ± 0.012
+0.38 ± 0.024
+0.58 ± 0.002
+0.41 ± 0.014
+0.3 ± 0.002
+0.82 ± 0.001
+0.55 ± 0.019
+0.33 ± 0.002
+
+BNN-P
+
+0.57 ± 0.025
+0.5 ± 0.004
+0.53 ± 0.006
+0.51 ± 0.003
+0.49 ± 0.002
+0.38 ± 0.001
+0.59 ± 0.002
+0.62 ± 0.04
+0.55 ± 0.003
+0.37 ± 0.002
+0.29 ± 0.001
+0.26 ± 0.008
+0.59 ± 0.013
+0.72 ± 0.049
+0.72 ± 0.068
+0.57 ± 0.001
+0.53 ± 0.014
+0.5 ± 0.002
+0.6 ± 0.004
+0.66 ± 0.01
+0.5 ± 0.005
+0.6 ± 0.005
+0.64 ± 0.006
+0.58 ± 0.005
+
+0.78 ± 0.137
+0.62 ± 0.037
+0.75 ± 0.064
+0.72 ± 0.047
+0.7 ± 0.101
+0.81 ± 0.007
+0.54 ± 0.023
+0.35 ± 0.005
+0.21 ± 0.001
+0.32 ± 0.003
+0.52 ± 0.014
+0.22 ± 0.003
+0.43 ± 0.001
+0.51 ± 0.02
+0.35 ± 0.037
+0.58 ± 0.029
+0.39 ± 0.003
+0.31 ± 0.003
+0.83 ± 0.098
+0.46 ± 0.008
+0.36 ± 0.076
+
+BNN-VA
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 7: Summary of the BCE (↓) scores for the uncertainty quantification models. BCE results for all three
+temporal settings of all TB and ADME-T assays are reported. The temporal setting is indicated in brackets after the
+assay abbreviation. Results for the uncalibrated uncertainty quantification models (deep ensembles (MLPE), MC
+dropout (MLPMC), and Bayesian neural network (BNN)), their Platt-scaled counterparts (MLPE-P, MLPMC-P and
+BNN-P) and the models calibrated with Venn-ABERS (VA) predictors (MLPE-VA, MLPMC-VA and BNN-VA) are
+reported. The models were trained with compounds from three time spans. Averages over 10 model repetitions are
+shown.
+
+24
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 8: Summary of the ACE (↓) scores for the baseline models. ACE results for all three temporal settings of
+all TB and ADME-T assays are reported. The temporal setting is indicated in brackets after the assay abbreviation.
+Results for the baselines (Random Forests (RF) and a multilayer perceptron (MLP)), Platt scaled models (RF-P and
+MLP-P) and models calibrated with Venn-ABERS (VA) predictors (RF-VA and MLP-VA) are reported. The models
+were trained with compounds from three time spans. Averages over 10 model repetitions are shown.
+Assay
+
+RF
+
+RF-P
+
+RF-VA
+
+MLP
+
+MLP-P
+
+MLP-VA
+
+TB-1[1]
+TB-1[2]
+TB-1[3]
+TB-2[1]
+TB-2[2]
+TB-2[3]
+TB-3[1]
+TB-3[2]
+TB-3[3]
+TB-4[1]
+TB-4[2]
+TB-4[3]
+TB-5[1]
+TB-5[2]
+TB-5[3]
+TB-6[1]
+TB-6[2]
+TB-6[3]
+TB-7[1]
+TB-7[2]
+TB-7[3]
+
+0.26 ± 0.011
+0.27 ± 0.006
+0.14 ± 0.018
+0.09 ± 0.01
+0.11 ± 0.011
+0.23 ± 0.007
+0.08 ± 0.014
+0.2 ± 0.016
+0.21 ± 0.009
+0.24 ± 0.033
+0.21 ± 0.026
+0.25 ± 0.018
+0.06 ± 0.009
+0.07 ± 0.006
+0.07 ± 0.01
+0.08 ± 0.013
+0.23 ± 0.008
+0.2 ± 0.005
+0.22 ± 0.006
+0.21 ± 0.014
+0.31 ± 0.009
+
+0.16 ± 0.027
+0.13 ± 0.011
+0.21 ± 0.023
+0.06 ± 0.014
+0.06 ± 0.008
+0.28 ± 0.011
+0.23 ± 0.015
+0.12 ± 0.014
+0.07 ± 0.01
+0.08 ± 0.018
+0.09 ± 0.014
+0.09 ± 0.015
+0.16 ± 0.018
+0.07 ± 0.013
+0.06 ± 0.012
+0.21 ± 0.019
+0.15 ± 0.008
+0.04 ± 0.01
+0.16 ± 0.029
+0.18 ± 0.016
+0.11 ± 0.013
+
+0.14 ± 0.018
+0.13 ± 0.009
+0.21 ± 0.006
+0.09 ± 0.018
+0.07 ± 0.019
+0.27 ± 0.012
+0.26 ± 0.01
+0.11 ± 0.007
+0.07 ± 0.01
+0.08 ± 0.024
+0.11 ± 0.015
+0.06 ± 0.017
+0.16 ± 0.025
+0.08 ± 0.012
+0.05 ± 0.009
+0.23 ± 0.024
+0.15 ± 0.019
+0.04 ± 0.009
+0.11 ± 0.035
+0.09 ± 0.03
+0.12 ± 0.026
+
+0.23 ± 0.055
+0.09 ± 0.016
+0.16 ± 0.034
+0.1 ± 0.016
+0.14 ± 0.067
+0.16 ± 0.025
+0.08 ± 0.016
+0.16 ± 0.018
+0.06 ± 0.008
+0.05 ± 0.016
+0.11 ± 0.008
+0.09 ± 0.066
+0.09 ± 0.001
+0.15 ± 0.012
+0.05 ± 0.005
+0.09 ± 0.011
+0.17 ± 0.035
+0.06 ± 0.013
+0.16 ± 0.074
+0.13 ± 0.045
+0.11 ± 0.078
+
+0.18 ± 0.039
+0.08 ± 0.003
+0.18 ± 0.028
+0.11 ± 0.02
+0.1 ± 0.012
+0.2 ± 0.004
+0.18 ± 0.005
+0.15 ± 0.005
+0.08 ± 0.007
+0.05 ± 0.018
+0.1 ± 0.012
+0.07 ± 0.02
+0.07 ± 0.001
+0.12 ± 0.005
+0.02 ± 0.003
+0.23 ± 0.007
+0.15 ± 0.013
+0.04 ± 0.004
+0.16 ± 0.107
+0.12 ± 0.027
+0.07 ± 0.012
+
+0.12 ± 0.019
+0.09 ± 0.008
+0.19 ± 0.02
+0.09 ± 0.008
+0.09 ± 0.014
+0.23 ± 0.006
+0.17 ± 0.006
+0.2 ± 0.061
+0.09 ± 0.003
+0.04 ± 0.007
+0.1 ± 0.009
+0.07 ± 0.032
+0.07 ± 0.001
+0.12 ± 0.005
+0.03 ± 0.003
+0.23 ± 0.006
+0.19 ± 0.047
+0.05 ± 0.004
+0.17 ± 0.098
+0.08 ± 0.02
+0.07 ± 0.013
+
+A-CYPa[1]
+A-CYPa[2]
+A-CYPa[3]
+A-CYPb[1]
+A-CYPb[2]
+A-CYPb[3]
+A-CYPc[1]
+A-CYPc[2]
+A-CYPc[3]
+A-PM[1]
+A-PM[2]
+A-PM[3]
+A-SOL[1]
+A-SOL[2]
+A-SOL[3]
+A-hERG[1]
+A-hERG[2]
+A-hERG[3]
+A-logD[1]
+A-logD[2]
+A-logD[3]
+A-MS[1]
+A-MS[2]
+A-MS[3]
+
+0.09 ± 0.003
+0.04 ± 0.013
+0.08 ± 0.004
+0.08 ± 0.005
+0.04 ± 0.007
+0.05 ± 0.005
+0.12 ± 0.003
+0.11 ± 0.012
+0.07 ± 0.013
+0.05 ± 0.003
+0.1 ± 0.003
+0.09 ± 0.001
+0.1 ± 0.009
+0.13 ± 0.006
+0.13 ± 0.008
+0.17 ± 0.005
+0.11 ± 0.004
+0.1 ± 0.001
+0.08 ± 0.013
+0.09 ± 0.007
+0.12 ± 0.012
+0.07 ± 0.011
+0.11 ± 0.007
+0.11 ± 0.006
+
+0.11 ± 0.011
+0.06 ± 0.017
+0.07 ± 0.009
+0.07 ± 0.004
+0.12 ± 0.011
+0.05 ± 0.006
+0.06 ± 0.013
+0.1 ± 0.008
+0.13 ± 0.011
+0.04 ± 0.004
+0.06 ± 0.005
+0.02 ± 0.005
+0.05 ± 0.009
+0.04 ± 0.007
+0.07 ± 0.005
+0.04 ± 0.004
+0.04 ± 0.008
+0.03 ± 0.003
+0.03 ± 0.008
+0.05 ± 0.006
+0.08 ± 0.01
+0.03 ± 0.006
+0.05 ± 0.009
+0.06 ± 0.006
+
+0.09 ± 0.01
+0.1 ± 0.029
+0.06 ± 0.006
+0.06 ± 0.006
+0.14 ± 0.009
+0.05 ± 0.006
+0.07 ± 0.015
+0.08 ± 0.007
+0.13 ± 0.012
+0.05 ± 0.003
+0.07 ± 0.006
+0.03 ± 0.008
+0.03 ± 0.005
+0.04 ± 0.007
+0.07 ± 0.006
+0.05 ± 0.006
+0.04 ± 0.01
+0.05 ± 0.006
+0.03 ± 0.008
+0.05 ± 0.007
+0.05 ± 0.005
+0.03 ± 0.009
+0.04 ± 0.004
+0.04 ± 0.003
+
+0.09 ± 0.014
+0.06 ± 0.01
+0.06 ± 0.012
+0.06 ± 0.012
+0.08 ± 0.016
+0.05 ± 0.017
+0.08 ± 0.003
+0.12 ± 0.021
+0.05 ± 0.012
+0.02 ± 0.005
+0.04 ± 0.007
+0.04 ± 0.01
+0.06 ± 0.004
+0.09 ± 0.021
+0.08 ± 0.019
+0.09 ± 0.031
+0.05 ± 0.004
+0.07 ± 0.01
+0.08 ± 0.008
+0.1 ± 0.021
+0.07 ± 0.007
+0.08 ± 0.022
+0.12 ± 0.017
+0.08 ± 0.01
+
+0.1 ± 0.005
+0.08 ± 0.004
+0.07 ± 0.004
+0.07 ± 0.003
+0.11 ± 0.008
+0.05 ± 0.003
+0.07 ± 0.003
+0.1 ± 0.005
+0.09 ± 0.002
+0.02 ± 0.001
+0.07 ± 0.007
+0.03 ± 0.002
+0.03 ± 0.003
+0.09 ± 0.027
+0.06 ± 0.023
+0.03 ± 0.007
+0.03 ± 0.009
+0.06 ± 0.007
+0.05 ± 0.002
+0.08 ± 0.02
+0.03 ± 0.003
+0.04 ± 0.006
+0.06 ± 0.017
+0.08 ± 0.009
+
+0.11 ± 0.027
+0.08 ± 0.008
+0.06 ± 0.005
+0.07 ± 0.004
+0.11 ± 0.01
+0.05 ± 0.004
+0.07 ± 0.001
+0.09 ± 0.006
+0.09 ± 0.002
+0.02 ± 0.003
+0.08 ± 0.024
+0.03 ± 0.002
+0.02 ± 0.003
+0.04 ± 0.007
+0.04 ± 0.005
+0.02 ± 0.003
+0.02 ± 0.003
+0.05 ± 0.007
+0.04 ± 0.002
+0.06 ± 0.016
+0.03 ± 0.003
+0.05 ± 0.02
+0.06 ± 0.007
+0.05 ± 0.005
+
+25
+
+MLPE-P
+
+0.21 ± 0.021
+0.08 ± 0.001
+0.21 ± 0.002
+0.1 ± 0.004
+0.09 ± 0.006
+0.2 ± 0.001
+0.18 ± 0.004
+0.15 ± 0.002
+0.08 ± 0.001
+0.03 ± 0.003
+0.1 ± 0.002
+0.05 ± 0.004
+0.07 ± 0.0
+0.12 ± 0.001
+0.02 ± 0.001
+0.23 ± 0.004
+0.14 ± 0.003
+0.04 ± 0.001
+0.12 ± 0.03
+0.12 ± 0.006
+0.07 ± 0.002
+
+0.1 ± 0.005
+0.12 ± 0.019
+0.07 ± 0.002
+0.07 ± 0.001
+0.11 ± 0.002
+0.05 ± 0.001
+0.07 ± 0.001
+0.11 ± 0.003
+0.08 ± 0.001
+0.01 ± 0.001
+0.07 ± 0.001
+0.03 ± 0.001
+0.04 ± 0.001
+0.04 ± 0.009
+0.05 ± 0.003
+0.03 ± 0.001
+0.03 ± 0.003
+0.06 ± 0.001
+0.05 ± 0.001
+0.08 ± 0.009
+0.03 ± 0.001
+0.04 ± 0.001
+0.05 ± 0.002
+0.08 ± 0.006
+
+MLPE
+
+0.28 ± 0.006
+0.1 ± 0.004
+0.13 ± 0.013
+0.09 ± 0.008
+0.11 ± 0.006
+0.17 ± 0.005
+0.09 ± 0.009
+0.15 ± 0.005
+0.06 ± 0.002
+0.04 ± 0.007
+0.1 ± 0.003
+0.08 ± 0.012
+0.09 ± 0.0
+0.14 ± 0.009
+0.05 ± 0.002
+0.1 ± 0.005
+0.16 ± 0.004
+0.05 ± 0.001
+0.19 ± 0.023
+0.12 ± 0.008
+0.11 ± 0.01
+
+0.08 ± 0.003
+0.08 ± 0.011
+0.05 ± 0.001
+0.06 ± 0.003
+0.06 ± 0.003
+0.04 ± 0.003
+0.08 ± 0.001
+0.12 ± 0.006
+0.05 ± 0.002
+0.02 ± 0.002
+0.05 ± 0.003
+0.04 ± 0.002
+0.05 ± 0.001
+0.08 ± 0.007
+0.04 ± 0.006
+0.06 ± 0.009
+0.04 ± 0.001
+0.05 ± 0.003
+0.08 ± 0.001
+0.08 ± 0.011
+0.07 ± 0.002
+0.08 ± 0.005
+0.12 ± 0.003
+0.07 ± 0.006
+
+TB-1[1]
+TB-1[2]
+TB-1[3]
+TB-2[1]
+TB-2[2]
+TB-2[3]
+TB-3[1]
+TB-3[2]
+TB-3[3]
+TB-4[1]
+TB-4[2]
+TB-4[3]
+TB-5[1]
+TB-5[2]
+TB-5[3]
+TB-6[1]
+TB-6[2]
+TB-6[3]
+TB-7[1]
+TB-7[2]
+TB-7[3]
+
+A-CYPa[1]
+A-CYPa[2]
+A-CYPa[3]
+A-CYPb[1]
+A-CYPb[2]
+A-CYPb[3]
+A-CYPc[1]
+A-CYPc[2]
+A-CYPc[3]
+A-PM[1]
+A-PM[2]
+A-PM[3]
+A-SOL[1]
+A-SOL[2]
+A-SOL[3]
+A-hERG[1]
+A-hERG[2]
+A-hERG[3]
+A-logD[1]
+A-logD[2]
+A-logD[3]
+A-MS[1]
+A-MS[2]
+A-MS[3]
+
+Assay
+
+0.09 ± 0.01
+0.14 ± 0.02
+0.07 ± 0.003
+0.07 ± 0.002
+0.11 ± 0.003
+0.05 ± 0.003
+0.07 ± 0.001
+0.09 ± 0.001
+0.09 ± 0.002
+0.02 ± 0.002
+0.07 ± 0.001
+0.03 ± 0.001
+0.02 ± 0.003
+0.03 ± 0.004
+0.03 ± 0.002
+0.02 ± 0.002
+0.02 ± 0.002
+0.05 ± 0.001
+0.04 ± 0.001
+0.05 ± 0.002
+0.03 ± 0.001
+0.05 ± 0.002
+0.06 ± 0.002
+0.05 ± 0.002
+
+0.13 ± 0.015
+0.09 ± 0.005
+0.18 ± 0.004
+0.09 ± 0.004
+0.08 ± 0.006
+0.23 ± 0.002
+0.17 ± 0.002
+0.16 ± 0.002
+0.09 ± 0.001
+0.04 ± 0.003
+0.1 ± 0.003
+0.05 ± 0.003
+0.07 ± 0.0
+0.12 ± 0.002
+0.03 ± 0.002
+0.24 ± 0.006
+0.15 ± 0.004
+0.05 ± 0.001
+0.05 ± 0.015
+0.06 ± 0.006
+0.07 ± 0.004
+
+MLPE-VA
+
+0.11 ± 0.025
+0.09 ± 0.022
+0.07 ± 0.025
+0.09 ± 0.019
+0.08 ± 0.021
+0.09 ± 0.032
+0.06 ± 0.003
+0.09 ± 0.016
+0.05 ± 0.008
+0.03 ± 0.006
+0.13 ± 0.02
+0.05 ± 0.009
+0.05 ± 0.004
+0.09 ± 0.016
+0.06 ± 0.018
+0.11 ± 0.031
+0.06 ± 0.008
+0.09 ± 0.016
+0.05 ± 0.006
+0.08 ± 0.018
+0.05 ± 0.007
+0.07 ± 0.014
+0.1 ± 0.016
+0.06 ± 0.012
+
+0.22 ± 0.055
+0.1 ± 0.019
+0.1 ± 0.022
+0.08 ± 0.012
+0.18 ± 0.051
+0.18 ± 0.023
+0.1 ± 0.022
+0.18 ± 0.016
+0.16 ± 0.011
+0.11 ± 0.012
+0.07 ± 0.006
+0.18 ± 0.044
+0.09 ± 0.002
+0.08 ± 0.024
+0.05 ± 0.005
+0.12 ± 0.015
+0.2 ± 0.023
+0.07 ± 0.012
+0.14 ± 0.08
+0.18 ± 0.023
+0.18 ± 0.041
+
+MLPMC
+
+0.1 ± 0.009
+0.08 ± 0.006
+0.06 ± 0.002
+0.06 ± 0.003
+0.11 ± 0.01
+0.05 ± 0.002
+0.07 ± 0.003
+0.11 ± 0.008
+0.08 ± 0.002
+0.01 ± 0.001
+0.06 ± 0.007
+0.03 ± 0.002
+0.04 ± 0.004
+0.07 ± 0.012
+0.07 ± 0.017
+0.04 ± 0.006
+0.03 ± 0.003
+0.06 ± 0.005
+0.05 ± 0.002
+0.08 ± 0.016
+0.03 ± 0.003
+0.04 ± 0.007
+0.06 ± 0.007
+0.07 ± 0.009
+
+0.17 ± 0.039
+0.08 ± 0.003
+0.2 ± 0.019
+0.1 ± 0.01
+0.09 ± 0.007
+0.21 ± 0.004
+0.17 ± 0.007
+0.15 ± 0.006
+0.07 ± 0.004
+0.03 ± 0.012
+0.09 ± 0.015
+0.06 ± 0.009
+0.07 ± 0.001
+0.12 ± 0.006
+0.02 ± 0.002
+0.22 ± 0.01
+0.14 ± 0.017
+0.04 ± 0.004
+0.16 ± 0.105
+0.12 ± 0.013
+0.06 ± 0.009
+
+MLPMC-P
+
+0.09 ± 0.017
+0.08 ± 0.006
+0.06 ± 0.004
+0.07 ± 0.003
+0.12 ± 0.012
+0.05 ± 0.004
+0.07 ± 0.001
+0.09 ± 0.005
+0.09 ± 0.003
+0.02 ± 0.002
+0.07 ± 0.007
+0.03 ± 0.002
+0.02 ± 0.004
+0.04 ± 0.01
+0.04 ± 0.004
+0.02 ± 0.003
+0.02 ± 0.003
+0.05 ± 0.008
+0.04 ± 0.003
+0.06 ± 0.006
+0.03 ± 0.003
+0.05 ± 0.02
+0.06 ± 0.005
+0.05 ± 0.005
+
+0.13 ± 0.022
+0.09 ± 0.008
+0.19 ± 0.018
+0.08 ± 0.01
+0.08 ± 0.01
+0.23 ± 0.005
+0.17 ± 0.007
+0.16 ± 0.008
+0.08 ± 0.003
+0.04 ± 0.006
+0.11 ± 0.011
+0.05 ± 0.005
+0.07 ± 0.002
+0.12 ± 0.005
+0.03 ± 0.003
+0.23 ± 0.009
+0.14 ± 0.024
+0.05 ± 0.003
+0.17 ± 0.09
+0.07 ± 0.017
+0.06 ± 0.011
+
+MLPMC-VA
+
+0.18 ± 0.013
+0.04 ± 0.01
+0.04 ± 0.008
+0.05 ± 0.005
+0.04 ± 0.004
+0.05 ± 0.011
+0.17 ± 0.003
+0.07 ± 0.007
+0.06 ± 0.01
+0.13 ± 0.004
+0.07 ± 0.01
+0.07 ± 0.007
+0.09 ± 0.047
+0.04 ± 0.005
+0.05 ± 0.003
+0.16 ± 0.003
+0.08 ± 0.005
+0.06 ± 0.014
+0.07 ± 0.002
+0.11 ± 0.01
+0.03 ± 0.011
+0.06 ± 0.011
+0.11 ± 0.016
+0.04 ± 0.013
+
+0.09 ± 0.007
+0.31 ± 0.021
+0.15 ± 0.003
+0.11 ± 0.003
+0.18 ± 0.009
+0.2 ± 0.022
+0.08 ± 0.012
+0.19 ± 0.006
+0.16 ± 0.009
+0.16 ± 0.009
+0.06 ± 0.005
+0.15 ± 0.007
+0.18 ± 0.009
+0.1 ± 0.016
+0.08 ± 0.015
+0.09 ± 0.018
+0.2 ± 0.01
+0.15 ± 0.011
+0.03 ± 0.003
+0.25 ± 0.024
+0.42 ± 0.001
+
+BNN
+
+0.11 ± 0.007
+0.07 ± 0.006
+0.06 ± 0.009
+0.06 ± 0.004
+0.06 ± 0.01
+0.05 ± 0.006
+0.1 ± 0.004
+0.09 ± 0.005
+0.08 ± 0.01
+0.13 ± 0.004
+0.08 ± 0.015
+0.04 ± 0.005
+0.04 ± 0.008
+0.03 ± 0.007
+0.1 ± 0.008
+0.05 ± 0.002
+0.04 ± 0.013
+0.03 ± 0.014
+0.05 ± 0.01
+0.08 ± 0.005
+0.06 ± 0.008
+0.07 ± 0.008
+0.06 ± 0.017
+0.04 ± 0.009
+
+0.11 ± 0.004
+0.21 ± 0.014
+0.12 ± 0.002
+0.04 ± 0.011
+0.09 ± 0.004
+0.28 ± 0.007
+0.1 ± 0.007
+0.14 ± 0.013
+0.09 ± 0.012
+0.12 ± 0.005
+0.09 ± 0.012
+0.1 ± 0.005
+0.13 ± 0.004
+0.08 ± 0.007
+0.09 ± 0.011
+0.09 ± 0.006
+0.16 ± 0.017
+0.04 ± 0.005
+0.24 ± 0.001
+0.21 ± 0.015
+0.11 ± 0.003
+
+BNN-P
+
+0.11 ± 0.023
+0.11 ± 0.006
+0.06 ± 0.002
+0.05 ± 0.002
+0.09 ± 0.002
+0.04 ± 0.003
+0.07 ± 0.007
+0.08 ± 0.012
+0.08 ± 0.004
+0.06 ± 0.006
+0.07 ± 0.001
+0.02 ± 0.003
+0.02 ± 0.003
+0.08 ± 0.068
+0.11 ± 0.066
+0.03 ± 0.006
+0.02 ± 0.005
+0.03 ± 0.002
+0.04 ± 0.003
+0.06 ± 0.003
+0.02 ± 0.003
+0.04 ± 0.003
+0.06 ± 0.001
+0.04 ± 0.003
+
+0.18 ± 0.105
+0.2 ± 0.031
+0.21 ± 0.034
+0.17 ± 0.05
+0.2 ± 0.101
+0.24 ± 0.007
+0.09 ± 0.04
+0.1 ± 0.007
+0.09 ± 0.002
+0.07 ± 0.003
+0.14 ± 0.006
+0.05 ± 0.003
+0.13 ± 0.004
+0.1 ± 0.014
+0.03 ± 0.016
+0.08 ± 0.053
+0.11 ± 0.002
+0.06 ± 0.006
+0.25 ± 0.063
+0.08 ± 0.011
+0.14 ± 0.067
+
+BNN-VA
+
+Temporal Distribution Shift in Real-World Pharmaceutical Data: Implications for Uncertainty Quantification in QSAR Models
+
+Table 9: Summary of the ACE (↓) scores for the uncertainty quantification models. ACE results for all three
+temporal settings of all TB and ADME-T assays are reported. The temporal setting is indicated in brackets after the
+assay abbreviation. Results for the uncalibrated uncertainty quantification models (deep ensembles (MLPE), MC
+dropout (MLPMC), and Bayesian neural network (BNN)), their Platt-scaled counterparts (MLPE-P, MLPMC-P and
+BNN-P) and the models calibrated with Venn-ABERS (VA) predictors (MLPE-VA, MLPMC-VA and BNN-VA) are
+reported. The models were trained with compounds from three time spans. Averages over 10 model repetitions are
+shown.
+
+26
+
+

@@ -1,0 +1,1380 @@
+arXiv:2502.09145v1 [math.ST] 13 Feb 2025
+
+On (in)consistency of M-estimators under
+contamination∗
+Jens Klooster† & Bent Nielsen‡
+February 13, 2025
+
+Abstract
+We consider robust location-scale estimators under contamination. We show
+that commonly used robust estimators such as the median and the Huber estimator
+are inconsistent under asymmetric contamination, while the Tukey estimator is
+consistent. In order to make nuisance parameter free inference based on the Tukey
+estimator a consistent scale estimator is required. However, standard robust scale
+estimators such as the interquartile range and the median absolute deviation are
+inconsistent under contamination.
+
+1
+
+Introduction
+
+In the early 1960s, there was an increasing awareness that standard estimators for normal models may not fare well under deviations from normality. Huber (1964) proposed
+maximum likelihood-type (M) estimators for location and scale and found that they
+are more robust to such deviations than traditional estimators. Since then, robustness
+means that an estimate is only distorted in a bounded way when adding arbitrary observations to the sample (Hampel, 1971). While statistical inference theory was developed
+for data with infinitesimal contamination (Heritier and Ronchetti, 1994), little theory is
+available for cases with more contamination.
+We analyze popular M-estimators for location and scale when a fixed proportion
+of observations is contaminated. We find that the Huber estimator for location is not
+consistent, whereas the Tukey estimator for location has better consistency properties.
+To conduct inference, the uncontaminated scale has to be estimated. Unfortunately,
+robust scale estimators such as the interquartile range (IQR) and the median absolute
+deviation (MAD) are inconsistent under contamination. Thus, valid statistical inference
+based on M-estimation seems to require detailed modelling of the contamination, which
+is typically not done in practice.
+∗
+
+We thank Mikhail Zhelonkin and Chen Zhou for helpful comments.
+Department of Economics, Econometrics and Finance, University of Groningen, The Netherlands.
+E-mail: j.klooster@rug.nl
+‡
+Nuffield College & Department of Economics, University of Oxford, United Kingdom. E-mail:
+bent.nielsen@nuffield.ox.ac.uk
+†
+
+1
+
+Huber’s article initiated the development of a large body of robust estimators, starting with the location-scale problem and later expanding to regression and many other
+statistical problems. An attractive feature of Huber’s work was the idea of developing
+estimators that are not strongly based in statistical models. However, when thinking
+about inference, statistical models are useful. The lack of models is perhaps the reason
+that inference theory remains incomplete for the contaminated case. A major problem
+in the inference theory is that we need consistent estimators for both location and scale.
+Location and scale are entwined. Without knowing one, it is hard to get to know the
+other. Huber (1964) was clearly aware of this.
+Huber’s ϵ-contamination model mixes a normal distribution with an ϵ proportion
+of a contamination distribution. This model has become the standard contamination
+model. It is well suited for analyzing the consequences of infinitesimal contamination
+(Hampel et al., 1986; Heritier and Ronchetti, 1994; Huber and Ronchetti, 2009); see
+Avella Medina and Ronchetti (2015); Yu and Yao (2017); Loh (2025) for recent reviews
+and Horowitz and Manski (1995) for a discussion of identification. But, when ϵ is not
+vanishing, standard scale estimators are inconsistent and asymptotic inference on the
+location depends on the contamination, which is usually unknown. Thus, inference for
+M-estimators is fraught under contamination.
+Another type of robustness analysis uses the breakdown point (Hampel, 1971). The
+finite sample breakdown point asks how many arbitrary observations can be added to a
+sample without distorting the estimator unboundedly (Donoho and Huber, 1983; Huber,
+1984). Location M-estimators typically have a high breakdown point. In practice, it is
+common to use M-estimators with a high breakdown point, which also maintain high
+efficiency under the normal model (Yohai, 1987; Coakley and Hettmansperger, 1993; Yu
+and Yao, 2017).
+Our approach is to consider a model where a proportion of the observations is contaminated. This matches the breakdown point idea. We consider two classes of Mestimators. The first class has an unbounded objective function. It includes the median
+and the Huber estimator. We find that these estimators are bounded in probability
+when more than half of the data is uncontaminated, which attests their robustness.
+Yet, these estimators are typically inconsistent under contamination.
+The second class has a bounded objective function and includes the Tukey estimator. We derive a lower bound on the proportion of contamination ensuring that these
+estimators are bounded in probability and consistent under contamination. However,
+nuisance parameter free inference requires a consistent scale estimator. We show that
+robust scale estimators such as the IQR and MAD are inconsistent under contamination.
+These results for M-estimators are disappointing. In the discussion of the results,
+we point to the least trimmed squares (LTS) estimator (Rousseeuw, 1984) which fares
+better.
+We first revisit M-estimation and classical approaches to the robustness problem.
+Next, we introduce a new contamination model and analyse boundedness, consistency
+and asymptotic normality properties. This leads to new insights into the behaviour of
+M-estimators under contamination. The results are illustrated in a simulation study.
+
+2
+
+2
+
+Background
+
+Suppose we have scalar observations yi for i = 1, . . . , n and we want to estimate a
+location-scale specification yi = µ + σεi where µ ∈ R and σ > 0. A model for the errors
+εi will be specified below.
+
+2.1
+
+M-estimators for location with known scale
+
+The case of a known scale, σ = 1 say, is the starting point for the M-estimation theory
+of
+The M-estimator µ̂ for location µ minimizes the objective function
+
+PnHuber (1964).
+i=1 ρ yi − µ .We focus on ρ functions that have a constant hence bounded derivative
+in the tails, as described in the following assumption. Note, this excludes the sample
+average with ρ(x) = x2 , which is not robust.
+Assumption 2.1. The function ρ is defined on R, positive apart from ρ(0) = 0, continuous, symmetric, and non-decreasing in x > 0, and there are x∗ , ρ∗ > 0 and ψ∗ ≥ 0
+such that ρ(x) = ρ∗ + ψ∗ (|x| − x∗ ) for |x| ≥ x∗ .
+We distinguish between two types of estimators. Non-redescending estimators have
+ψ∗ > 0 and include the median with ρ(x) = |x| and the Huber estimator with ρ(x) =
+(x2 /2)1(|x|≤c) + c(|x| − c/2)1(|x|>c) . Redescending estimators have ψ∗ = 0 as for the
+Tukey estimator with ρ(x) = (c2 /6){1 − (1 − x2 /c2 )3 1(|x|≤c) }. The parameter c > 0 is a
+tuning parameter that the researcher needs to set in advance. In Section 2.4, we discuss
+standard choices that are used in practice.
+
+2.2
+
+M-estimators with unknown scale
+
+In practice the scale σ will be unknown. Suppose a preliminary estimator σ̂ is available.
+Inserting this estimator in the above objective function for the location case gives a new
+objective function
+
+
+n
+X
+yi − µ
+.
+Rn (µ) =
+ρ
+σ̂
+i=1
+
+(2.1)
+
+Note, the median computed from ρ(x) = |x| is scale equivariant and is computable
+without knowing the scale.
+It is important that the scale estimator is also robust, because otherwise the location
+estimator can still easily be affected by ‘outliers’. Standard robust scale estimators
+include the IQR and the MAD (Huber and Ronchetti, 2009, Chapter 5). Letting q̂p
+denote the p quantile of the full sample, we write the estimators as
+σ̂IQR = k(q̂3/4 − q̂1/4 ), σ̂MAD = kmed yi − q̂1/2 .
+
+(2.2)
+
+The tuning parameters, k, must be set in advance by the researcher. Some standard
+choices are discussed in Section 2.4. We note that the combination of the median with
+the MAD is considered a simultaneous M-estimate of location and scale (Huber and
+Ronchetti, 2009, page 135).
+3
+
+2.3
+
+The Huber contamination model
+
+The Huber ϵ-contamination model (Huber, 1964) has become the standard way of thinking about and modelling contamination. In the ϵ-contaminated normal model, the errors
+εi are drawn from a mixture F = (1 − ϵ)Φ + ϵH with ϵ ∈ [0, 1), Φ denotes the standard normal distribution and H an unknown contamination distribution. Theory often
+requires symmetric contamination.
+In this model, the asymptotic distribution of M-estimators depends crucially on two
+unknown nuisance parameters: ϵ and H. To get valid inference, the user will have to
+model the contamination. However, in practice, it is common to use the asymptotic
+theory under the normal model even when there is contamination.
+
+2.4
+
+The infinitesimal approach
+
+In the infinitesimal approach the contamination proportion vanishes. This leads to the
+influence function theory, which describes the effect of an infinitesimal contamination
+of a point mass distribution on the estimator (Hampel, 1971). A condition for (local)
+robustness is that the influence function of an estimator is bounded.
+In Huber’s ϵ-contamination model with vanishing ϵ, it is common to conduct inference as if the distribution is normal without any contamination. This eliminates the
+nuisance parameter problem mentioned in Section 2.3. Then, the nuisance parameters c
+and k are chosen from a perspective of efficiency in the uncontaminated normal model.
+Usual choices are c = 1.345 for the Huber estimator and c = 4.685 for the Tukey estimator, which give 95% efficiency relative to the average (Maronna et al., 2006, pages
+27, 30). The motivation is a trade-off between efficiency and robustness. The sample
+average is fully efficient but can be arbitrarily distorted by one ‘outlier’. Thus, a less
+efficient, but more robust estimator is preferred. Tuning parameters that ensure consisΦ
+Φ
+Φ
+tency under normality are k = 1/(q3/4
+− q1/4
+) for IQR and k = 1/q1/4
+for MAD, where
+Φ
+qp is the standard normal p-quantile (Maronna et al., 2006, page 36).
+
+2.5
+
+The breakdown point
+
+The infinitesimal approach works well when the contamination proportion ϵ is very
+small. In empirical practice, this local property is not always a realistic assumption.
+Therefore, researchers are also interested in global robustness properties such as the
+breakdown point.
+The finite sample breakdown point with ϵ-contamination is defined as follows (Donoho
+and Huber, 1983). Let X be a sample of size h of ‘good’ observations. Adjoin n − h
+arbitrary values Y to get a sample X ∪ Y of size n. The sample X ∪ Y contains a
+fraction ϵ = (n − h)/n of arbitrary values. The breakdown point for an estimator T is
+then ϵ∗ (X, T ) = inf{ϵ : supY |T (X ∪ Y ) − T (X)| = ∞}. As X is finite, so is T (X) and
+breakdown happens if Y diverges.
+Huber (1984) analyzed the finite sample breakdown of M-estimators. For nonredescending estimators satisfying Assumption 2.1, the breakdown point is 1/2, while
+for redescending estimators, breakdown depends on the setup and the breakdown point
+is in general less than 1/2.
+4
+
+2.6
+
+Some drawbacks of standard practice
+
+The infinitesimal approach and the breakdown point approach are not compatible. The
+contamination proportion is vanishing for the former and non-vanishing for the latter.
+If one applies the breakdown point approach, then it is not a good idea to set the tuning
+parameters as if there is no contamination. For instance, it is not guaranteed that
+the M-estimator is consistent under contamination. Likewise, inference and efficiency
+considerations based on the normal model are not necessarily relevant.
+Although the two approaches are not compatible, it has become standard practice
+to combine them. There is a focus on the use and development of robust estimators
+with high efficiency under the normal model and a high breakdown point (Yohai, 1987;
+Coakley and Hettmansperger, 1993; Gervini and Yohai, 2002). Moreover, it is typically
+advised not to use estimators that have a high breakdown point, but low asymptotic
+efficiency under the normal model (Yu and Yao, 2017).
+Robustness and efficiency are often seen as unrelated problems. This may not be
+optimal. For example, even when an estimator has high efficiency under the normal
+model and a high breakdown point, then it is still not clear how that estimator behaves
+under contamination. Two estimators that satisfy both conditions, such as the Huber
+and Tukey estimators, might behave differently under contamination, and it unclear for
+a practitioner which estimator to choose. Yet, a high breakdown point estimator with
+a low asymptotic efficiency under the normal model may be preferable under contamination, see Section 4.1.
+
+2.7
+
+A different approach: modelling contamination
+
+The drawbacks mentioned in Section 2.6 stem from the fact that there are no clear
+asymptotic results for M-estimators under contamination. Therefore, we analyse asymptotic properties such as boundedness, consistency and asymptotic normality of Mestimators under contamination. To this end, we introduce a simple contamination
+model inspired by the breakdown point theory in Section 2.5. We assume that a sample
+of observations yi , with i = 1, . . . , n, has h ≤ n ‘good’ observations and n − h ‘outlier’ observations. Let ζn be the set of h elements from (1, . . . , n) with indices of the
+‘good’ observations, while ζnc denotes its complement, consisting of n − h indices of ‘outliers’. Throughout Section 3, we impose different assumptions on ‘good’ and ‘outlying’
+observations.
+
+3
+
+Asymptotic results
+
+3.1
+
+Asymptotic sequence of models
+
+We assume that a sample of observations yi , with i = 1, . . . , n, has h ≤ n ‘good’
+observations and n−h ‘outliers’. The models are indexed by n, so that h → ∞ as n → ∞
+and the proportion of ‘good’ observations satisfies h/n → λ with 1/2 < λ ≤ 1. Let ζn be
+a deterministic sequence of h-sets from (1, . . . , n) of indices of ‘good’ observations. The
+observations satisfy yi = µ◦ + σ◦ εi for fixed µ◦ , σ◦ . Throughout, we specify sufficient
+conditions for errors εi for ‘good’ i ∈ ζn and ‘outliers’ j ∈ ζnc .
+5
+
+3.2
+
+Boundedness
+
+We show that M-estimators are bounded in probability in the asymptotic setup of Section 3.1. The result requires a convergent scale estimator σ̂. Ideally, the scale estimator
+should be consistent, but Assumption 3.1(i) allows general limits expressed in terms
+of a consistency factor ς. Indeed, in Section 3.5, we show that standard robust scale
+estimators are typically inconsistent under contamination.
+Assumption 3.1.
+p
+(i): σ̂ → P
+ςσ◦ for some ς > 0.
+−1
+2
+(ii): h
+i∈ζn εi is bounded in probability.
+P
+p
+(iii): h−1 i∈ζn ρ(εi /α) → ρ̃α uniformly over α near ς, and where ρ̃α is continuous in
+α.
+Assumption 3.1(iii) is a uniform law of large numbers. When the scale is known,
+then a standard law of large numbers suffices. Note, we do not need to make any
+assumptions on the ‘outliers’.
+Theorem 3.1 (Boundedness).
+Suppose Assumptions 2.1, 3.1 and that
+(i): ψ∗ > 0 and λ > 1/2; or
+(ii): ψ∗ = 0 and λ > 1/(2 − ρ̃ς /ρ∗ ).
+Then, for large n, sets with large probability exist on which all minimizers µ̂ of Rn (µ)
+are uniformly bounded and at least one is measurable.
+In the redescending case, Theorem 3.1(ii) gives a lower bound to the proportion
+of ‘outliers’ that is greater than a half and which depends on the ρ function and the
+distribution of the ‘good’ observations. This exactly matches the finding in Donoho
+and Huber (1983); Huber (1984) regarding the finite sample breakdown points of these
+estimators. We explore this connection.
+The finite sample addition breakdown
+point for redescending M-estimators is ϵ∗ =
+P
+p
+⌈A⌉/(h + ⌈A⌉), where A = h − i∈ζn ρ{(yi − µ̂)/(ςσ◦ )}/ρ∗ (Huber, 1984). If µ̂ → µ◦ ,
+P
+then A/h and 1−h−1 i∈ζn ρ(εi /ς)/ρ∗ have the same limit 1− ρ̃ς /ρ∗ , due to Assumption
+3.1(iii). As a result, 1 − ϵ∗ → 1/(2 − ρ̃ς /ρ∗ ), as derived in Theorem 3.1(ii).
+Redescending M-estimators can tolerate more ‘outliers’ when the scale is over-estimated
+as the lower bound to λ in Theorem 3.1(ii) is decreasing in ς. However, when the scale
+is underestimated, then the redescending M-estimator can become unbounded. Indeed,
+as ς → 0, then ρ̃ς /ρ∗ → 1 so that 1/(2 − ρ̃ς /ρ∗ ) → 1. In Section 3.5, we show that the
+IQR and MAD typically overestimate in the presence of contamination. Huber (1984)
+also noted this in his finite sample breakdown point analysis. In Section 4.4, we explore
+this in simulations.
+
+3.3
+
+Asymptotics for redescending M-estimators
+
+We derive an oracle property for redescending M-estimators, such as the Tukey estimator.PThat is, the M-estimators for the contamination model are close to the minimizers
+of i∈ζn ρ{(yi − µ)/(σ◦ ς)} in which the set of ‘good’ observations is known. This is
+helpful, as the latter problem has been studied in the literature.
+6
+
+Assumption 3.2.
+p
+(i): ’Outlier’ errors: 1/(minj∈ζnc ε2j ) → 0.
+(ii): The function ρ is Lipschitz:
+∃C > 0: ∀x1 , x2 ∈ R: |ρ(x1 ) − ρ(x2 )| ≤ C|x1 − x2 |.
+P
+(iii): The minimizers of i∈ζn ρ{(yi − µ)/(σ◦ ς)} belong to a small neighbourhood of µ◦
+with large probability.
+In Assumption 3.2, part (i) requires that the smallest ‘outlier’ errors diverges. This
+holds, for example, if the ‘good’ errors are N(0, 1), while ‘outliers’ are outside the range
+of the ‘good’ errors. Part (ii) requires that ρ is Lipschitz, which holds for the Tukey
+estimator. Part (iii) requires that the infeasible M-estimator is close to µ◦ .
+Theorem 3.2 (Closeness).
+Suppose Assumptions 2.1, 3.1, 3.2, while ψ∗ = 0 and λ > 1/(2 − ρ̃ς /ρ∗ ). Then, for large
+n, large probability sets exist on which all minimizers of Rn (µ) are near µ◦ , and at least
+one is measurable and therefore consistent.
+We can get an asymptotic distribution for the M -estimator under some additional
+assumptions allowing asymmetric contamination.
+Assumption 3.3.
+(i) n1/2 (ˆ
+ς − ς) is bounded in probability.
+(ii) εi , i ∈ ζn , are i.i.d.; Eρ̈(εi /ς) > 0, Eεi ρ̈(εi /ς) = 0 and Var{εi ρ̈(εi /ς)} < ∞.
+(iii) ρ is has a Lipschitz continuous second derivative.
+P
+d
+(iv) i∈ζn ρ{(yi − µ)/(σ◦ ς)} has a measurable minimizer µ̂ζn so that h1/2 (µ̂ζn − µ◦ ) →
+N(0, σ◦2 Vς ), for a Vς > 0. Any other minimizer belongs to a neighbourhood of µ̂ζn that
+shrinks faster than n−1/2 with large probability.
+Theorem 3.3 (Asymptotic distribution).
+Suppose Assumptions 2.1, 3.1, 3.2, 3.3, while ψ∗ = 0 and λ > 1/(2 − ρ̃ς /ρ∗ ). Then,
+for sufficiently large n, there exist high-probability sets on which all minimizers lie in a
+neighbourhood of µ̂ζn shrinking faster than n−1/2 .
+A measurable minimizer µ̂ exists so that h1/2 (µ̂ − µ◦ ) is asymptotically N(0, σ◦2 Vς ).
+Sufficient conditions for Assumption 3.3 are given in Jurecková and Sen (1996), Chapter
+5.3. In particular, if the R‘good’ errors are independent
+standard normal and ρ is twice
+R
+2
+differentiable, then V1 = R {ρ̇(x)} dΦ(x)/{ R ρ̈(x)dΦ(x)}2 .
+Theorem 3.3 gives a basis for discussing asymptotic efficiency within the class of
+robust estimators with the oracle property that µ̂ − µ̂ζn is small. For example, if the
+‘good’ observations are all N(0, 1), then the benchmark is the fully efficient average of
+the h ‘good’ observations. Redescending M-estimators have efficiency 1/Vς . In particular, the Tukey estimator with known scale and c = 4.685 achieves 95% efficiency. Thus,
+the Tukey estimator achieves high efficiency in both the normal model without contamination (Maronna et al., 2006, page 30) and in the normal model with contamination.
+This does, however, require a consistent estimator of the scale σ◦ .
+
+3.4
+
+Inconsistency of non-redescending M-estimators
+
+Non-redescending M-estimators, such as the median and the Huber estimator, are inconsistent in the presence of asymmetric contamination. We illustrate this using a class
+7
+
+of data generating processes matching the setup for finite sample breakdown point considerations.
+Assumption 3.4. (i): σ̂ = σ◦ ,
+(ii): ‘Good’
+P errors are independent standard normal.
+(iii): h−1 i∈ζn ρ(εi − µ) → Eρ(ε1 − µ) in probability, uniformly over a µ-neighbourhood
+of zero.
+(iv): Eρ(ε1 − µ) has µ-derivative of 0 at µ = 0 for i ∈ ζn .
+(v): ‘Outlier’ errors: εj = maxi∈ζn εi + ξ for some ξ > 0.
+Note, Assumption 3.4(i)-(iii) implies Assumption 3.1, so that the boundedness Theorem
+3.1 applies. Part (v) provides a particular asymmetric contamination.
+Theorem 3.4. Suppose Assumptions 2.1, 3.4 and ψ∗ > 0, 1/2 < λ < 1. Then µ̂ is
+inconsistent for µ◦ .
+
+3.5
+
+Scale estimation
+
+Theorems 3.1(ii) and 3.2 depend on the scale estimator σ̂ via the consistency factor ς.
+Thus, it is important to find robust scale estimators that are bounded and consistent
+under contamination. We first show that the IQR and MAD defined in (2.2) are bounded
+in probability.
+Assumption 3.5. The p quantiles of εi for i ∈ ζn are bounded in probability for 0 <
+p < 1.
+Theorem 3.5. Suppose Assumption 3.5.
+(a): Let λ > 3/4. Then, σ̂IQR is bounded in probability.
+(b): Let λ > 1/2. Then σ̂MAD is bounded in probability.
+Theorem 3.5 shows that the IQR is bounded when the asymptotic proportion of
+‘good’ observations λ > 3/4, while the MAD requires λ > 1/2. This aligns with their
+finite sample breakdown points of 1/4 for the IQR and 1/2 for the MAD (Huber and
+Ronchetti, 2009, page 106).
+Next, we show that the two scale estimators are, in general, inconsistent under contamination. We normalize the estimators to be consistent for normal data, see Sections
+2.2, 2.4, but consider ‘good’ errors with a general distribution and allow contamination.
+Assumption 3.6. (i): ‘Good’ errors εi , i ∈ ζn are independent with a continuous
+distribution F.
+(ii): ‘Outliers’ are extreme: εj > maxi∈ζn |εi |, j ∈ ζnc .
+P
+p
+(iii): Proportion of left ‘outliers’: n−1 j∈ζnc 1(εj <0) → ϱ, where 0 ≤ ϱ ≤ 1 − λ.
+We define the consistency factors
+ςIQR =
+
+F
+F
+q(3/4−ϱ)/λ
+− q(1/4−ϱ)/λ
+Φ
+Φ
+q3/4
+− q1/4
+
+8
+
+,
+
+ςMAD =
+
+d
+Φ
+q3/4
+
+,
+
+(3.1)
+
+where d solves F(c + d) − F(c − d) = 1/(2λ) for a c solving F(c) = (1/2 − ϱ)/λ, where qpF
+and qpΦ are the F and normal p quantiles. When the ‘good’ errors are normal and λ = 1,
+so that ϱ = 0, then ςIQR = ςMAD = 1. In the Appendix, we show that when Assumption
+3.6 holds with ‘good’ normal errors and λ < 1, then both consistency factors are greater
+than unity, see Remarks A.1, A.2.
+Theorem 3.6. Suppose Assumption 3.6. Then,
+p
+(a): If 3/4 < λ ≤ 1, then σ̂IQR → ςIQR σ◦ .
+p
+(b): If 1/2 < λ ≤ 1, then σ̂MAD → ςMAD σ◦ .
+The scale estimators σ̂IQR and σ̂MAD are, in general, inconsistent under contamination. For the non-redescending median and Huber estimator, boundedness is not
+affected by the inconsistency of the scale (Theorem 3.1). However, these estimators
+are inconsistent under asymmetric contamination (Theorem 3.4). For redescending estimators, such as the Tukey estimator, the situation is more subtle. The boundedness
+result can tolerate more contamination when the scale is overestimated (Theorem 3.1),
+which it tends to be (Remarks A.1, A.2). This in line with the breakdown point analysis in Huber (1984). Further, inconsistency of the scale estimator does not affect the
+consistency of the location estimator. However, it does result in nuisance parameters
+when conducting inference (Theorem 3.2). In summary, conducting valid inference with
+M-estimators seems to require detailed modelling of the contamination.
+
+4
+
+Simulation study
+
+We study finite sample properties of four M-estimators of location (average, median,
+Huber, Tukey). We consider bias, the effect of scale estimation and boundedness.
+
+4.1
+
+Benchmark: Least Trimmed Squares
+
+In Section 3.3, we used the average, applied infeasibly to the set ζn of h ‘good’ observations, as a benchmark for efficiency. In practice, the set ζn is unknown and must be
+estimated. The Least Trimmed Squares (LTS) estimator (Rousseeuw, 1984) does this
+and it is asymptotically efficient.
+The LTS estimator requires that the user specifies there are h ‘good’ observations
+and n − h ‘outliers’. The LTS estimator minimizes the residual sum of squares over all
+h-subsets of the data. In the location-scale case, we can proceed as follows. Let ζ be a
+h-subset of (1, . . . , n) with indices of the ‘good’ observations. This is estimated by
+X
+ζ̂ = argmin ζ
+(yi − ȳζ )2 ,
+i∈ζ
+
+while the estimators of location and scale are
+µ̂LTS = ȳζ̂ ,
+
+2
+=
+σ̂LTS
+
+1X
+(yi − µ̂LTS )2 .
+h
+i∈ζ̂
+
+9
+
+The LTS estimator is maximum likelihood in a contamination model satisfying
+Assumption 3.1, where ‘good’ observations are i.i.d. normal and ‘outlier’ errors are
+more extreme than the ‘good’ errors as in Assumption 3.2(i), but otherwise unspecified
+(Berenguer-Rico et al., 2023). This LTS model matches the setup of the finite sample
+breakdown point, see Section 2.5. Indeed, the LTS estimator has a breakdown point
+of 50% and this result extends to a regression version of the estimator (Rousseeuw and
+Leroy, 1987). When applied to a clean normal sample, then the LTS estimator applied
+with h ≈ n/2 has an efficiency of about 7% relative to the full sample average (Butler 1982; Rousseeuw and Leroy 1987, page 180). However, under the LTS model, the
+standardized estimator h1/2 (µ̂LT S − µ◦ )/σ̂LT S has the oracle property that it equals the
+standardized average with large probability, so that it is asymptotically standard normal
+under the LTS model (Berenguer-Rico et al., 2023). This result generalizes to a regression model that allows leverage effects (Berenguer-Rico et al., 2023; Berenguer-Rico and
+Nielsen, 2023).
+In practice, the user will have to estimate the proportion λ of ‘good’ observations by
+estimating h/n. A standard method to estimate λ is the index plot method (Rousseeuw
+and Leroy, 1987, page 55). A detailed analysis is likely to show that this method is
+not consistent and therefore will not result in a fully efficient LTS estimator. Instead,
+we estimate λ using the cumulant based method of Berenguer-Rico et al. (2023). This
+estimator is consistent, but it remains work in progress to show that the resulting LTS
+estimator has the oracle property.
+
+4.2
+
+Simulation design
+
+The location estimators are as follows. At first, we consider the scale to be known. The
+sample average is used as a non-robust benchmark. Neither the average, the median
+nor the LTS estimator require initial scale estimation. The Huber and Tukey estimators
+require initial scale estimation and are used with tuning parameters c = 1.345 and
+c = 4.685, respectively, to achieve 95% efficiency. The LTS estimator requires a user
+choice of h to set trimming.
+At first, we let the scale σ◦ be known and choose h as 80% of n in the LTS estimation.
+Subsequently, we estimate σ◦ with the MAD and we estimate h using a cumulant based
+normality test (Berenguer-Rico et al., 2023).
+We consider six data generating processes (DGPs). For all DGPs we use µ◦ = 0 and
+σ◦ = 1, consider sample sizes n = 25, 100, 400 and use 105 repetitions.
+DGP1–2 have no contamination. DGP1 has independent N(0, 1) errors and DGP2
+has independent t(3) errors.
+DGP3–6 have contamination: DGP3–5 have h/n = λ = 0.8; DGP6 has h = n − 1.
+The ‘good’ errors are independent N(0, 1) for DGP3,4,6 and independent t(3) for DGP5.
+The ‘outlier’ errors satisfy εj = maxi∈ζn εi + ξ, j ∈ ζnc . We have ξ = 1 for DGP3 and
+ξ = 3 for DGP4–6. DGP6 mimics infinitesimal ϵ-contamination.
+
+4.3
+
+Bias
+
+Tables 1–2 report bias for different estimators when scale and trimming are, respectively,
+known and estimated. This only affects the Huber, Tukey and LTS estimators. As 105
+10
+
+Table 1: Bias for known scale and trimming.
+DGP1 DGP2 DGP3 DGP4 DGP5 DGP6
+n = 25
+Mean
+Median
+Huber
+Tukey
+LTS
+
+0.000
+0.001
+0.001
+0.001
+0.000
+
+0.002
+0.001
+0.001
+0.000
+0.002
+
+0.573
+0.315
+0.412
+0.394
+0.061
+
+0.973
+0.315
+0.412
+0.011
+0.000
+
+1.282
+0.353
+0.468
+0.003
+0.079
+
+0.198
+0.052
+0.067
+0.001
+0.000
+
+n = 100
+Mean
+Median
+Huber
+Tukey
+LTS
+
+0.000
+0.000
+0.001
+0.001
+0.000
+
+0.001
+0.000
+0.000
+0.000
+0.001
+
+0.685
+0.317
+0.414
+0.305
+0.004
+
+1.085
+0.317
+0.414
+0.001
+0.001
+
+1.754
+0.350
+0.469
+0.000
+0.043
+
+0.055
+0.012
+0.016
+0.001
+0.001
+
+n = 400
+Mean
+Median
+Huber
+Tukey
+LTS
+
+0.000
+0.000
+0.000
+0.000
+0.000
+
+0.000
+0.000
+0.000
+0.000
+0.000
+
+0.780
+0.318
+0.415
+0.176
+0.001
+
+1.180
+0.318
+0.415
+0.000
+0.000
+
+2.485
+0.320
+0.469
+0.000
+0.024
+
+0.015
+0.003
+0.004
+0.000
+0.000
+
+repetitions are used, the maximal Monte Carlo standard error was below 0.0005.
+DGP1 has no contamination and normal errors so that all methods perform well.
+In this case, the MAD is consistent for σ◦ . Thus, even with unknown scale, we see
+good performance of the Huber and Tukey estimators. Berenguer-Rico et al. (2023)
+give simulation evidence that the cumulant based estimator for h is consistent when the
+‘good’ errors are normal, so that the LTS estimator also performs well when estimating
+h.
+DGP2 has no contamination and t(3) errors. For this reason, all estimators are consistent. When σ◦ is unknown, the MAD overestimates, which does not negatively affect
+the consistency properties of the Huber and Tukey estimator as there is no contamination. The LTS estimator performs very well, even for unknown h.
+DGP3–DGP4 have normal ‘good’ errors and extreme ‘outliers’. The bias of the
+average grows as the sample size grows because the ‘outliers’ are larger for larger sample
+sizes. Moreover, the bias is increasing in the ‘outlier’ parameter ξ. The bias of the
+median and the Huber estimator remain constant when n and ξ grow, which shows
+their robustness. They are, however, inconsistent (Theorem 3.4). When σ◦ is unknown,
+the MAD overestimates (Theorem 3.6 and Remark A.2). Overestimation of the scale
+results in less downweighting of ‘outliers’, hence more bias. The Tukey estimator is
+consistent so that the bias decreases as the sample size grows (Theorem 3.2). When
+σ◦ is known, the Tukey estimator does not always penalize the ‘outliers’ in DGP3, so
+the bias is large in small samples. When σ◦ is unknown, the performance of the Tukey
+
+11
+
+Table 2: Bias for unknown scale and trimming.
+DGP1 DGP2 DGP3 DGP4 DGP5 DGP6
+n = 25
+Huber
+0.001 0.001 0.486 0.493
+0.624 0.068
+Tukey
+0.001 0.000 0.480 0.306
+0.357 0.010
+LTS
+0.002 0.001 0.018 0.001
+0.036 0.000
+n = 100
+Huber
+Tukey
+LTS
+
+0.001
+0.001
+0.001
+
+0.000
+0.000
+0.000
+
+0.499
+0.516
+0.002
+
+0.499
+0.196
+0.000
+
+0.626
+0.101
+0.000
+
+0.016
+0.000
+0.001
+
+n = 400
+Huber
+Tukey
+LTS
+
+0.000
+0.000
+0.000
+
+0.000
+0.000
+0.000
+
+0.501
+0.505
+0.002
+
+0.501
+0.087
+0.000
+
+0.626
+0.003
+0.000
+
+0.004
+0.000
+0.000
+
+estimator worsens and convergence is very slow for DGP3. Extra simulations showed
+biases of 0.458 and 0.386 for n = 1600, 6400, respectively. The LTS estimator performs
+very well, even when h is unknown.
+DGP5 has t(3) ‘good’ errors and extreme ’outliers’. As in DGP3–4 the average,
+median and Huber estimators are biased. The Tukey estimator performs very well.
+This happens, because the ‘outliers’ are generated by the maximal ‘good’ errors and
+tend to be larger than the ‘outliers’ in DGP4. These ‘outliers’ are down-weighted,
+which results in a good performance of the Tukey estimator. With unknown scale,
+the MAD overestimates, which results in slower convergence than in the known scale
+scenario. The LTS estimator performs very well, and even better when h is unknown.
+This happens because h is estimated using a cumulant based normality test, while the
+‘good’ observations are t(3), resulting in a beneficial underestimation.
+DGP6 mimics the situation of infinitesimal contamination. We see that all estimators
+are consistent as the bias decreases to zero as sample size increases. This happens,
+because the influence of the ‘outlier’ diminishes as the samples size increases. We do,
+however, see that the average is quite biased for smaller sample sizes. In particular, if
+ξ → ∞, then the bias of the average would diverge, while the bias of the other estimators
+would be unaffected.
+
+4.4
+
+Boundedness
+
+We explore how the bias of four M-estimators depends on the scale estimation. We use
+σ̂ = ςσ◦ and vary the consistency factor ς. Figure 1 has two graphs showing the bias of
+the estimator for varying ς and n = 100, 1000.
+We generate data from DGP4, albeit with h/n = 0.6. The Huber and Tukey estimators have the same tuning parameters, tuned for σ◦ = 1, as before.
+The average and median are biased, but constant in ς due to their scale invariance.
+For large n, the median approaches the 5/6 normal quantile, which is 0.97. The average
+12
+
+n = 1000
+7
+
+7
+
+n = 100
+
+4
+
+5
+
+6
+
+Average
+Median
+Huber
+Tukey
+
+0
+
+1
+
+2
+
+3
+
+Bias
+0
+
+1
+
+2
+
+3
+
+Bias
+
+4
+
+5
+
+6
+
+Average
+Median
+Huber
+Tukey
+
+0.1
+
+0.6
+
+1
+
+1.4
+
+1.9
+
+2.4
+
+2.9
+
+0.1
+
+ς
+
+0.6
+
+1
+
+1.4
+
+1.9
+
+2.4
+
+2.9
+
+ς
+
+Figure 1: Bias of different M-estimators in relation to the consistency factor ς. The red
+vertical line indicates the smallest ς for which boundedness holds for Tukey’s estimator
+according to Theorem 3.1(ii).
+p
+
+diverges as 0.4(maxi∈ζn εi + 3). We have maxi∈ζn εi /{2 log(0.6n)}1/2 → 1, see BerenguerRico and Nielsen (2023), Appendix B.
+Consider the Tukey estimator. When ς = 1, the estimator has zero bias. When ς > 1,
+the bias is zero up until ς = 1.2 (n = 100) or ς = 1.3 (n = 1000) and converges towards
+the bias of the average. When ς is large, the ‘outliers’ are not down-weighted so that the
+Tukey estimator behaves as the average. Nevertheless, it is consistent since the ‘outliers’
+diverge and therefore for any fixed ς > 1 the ‘outliers’ are, at some point, down-weighted.
+When ς < 1, the bias is zero down to ς = 0.65 (n = 100) or ς = 0.55 (n = 1000). Below
+those values, the Tukey estimator hones in on the outliers so that its bias diverges as
+maxi∈ζn εi + 3. This and the dependency on ξ shows unboundedness of the estimator.
+The red vertical line in Figure 1 indicates the smallest value of ς for which boundedness
+holds according to Theorem 3.1(ii). The simulations indicate that the first part of the
+bias curve converges to a function with a step at the red line as expected.
+Consider the Huber estimator. When ς → 0, it behaves as the median as the width
+of the central quadratic part of the objective function shrinks, so that the linear parts
+dominate. When ς → ∞, it behaves as the average as the quadratic part of the objective
+function now dominates.
+
+13
+
+5
+
+Discussion
+
+Robustness is the property that an estimator changes in a bounded way when adding
+contaminated observations to a sample. This is traditionally measured in terms of the
+finite sample breakdown point. M-estimators are known to have a high finite sample
+breakdown point for location-scale models (Donoho and Huber, 1983; Huber, 1984). The
+results on asymptotic boundedness confirm this for location estimators (Theorem 3.1)
+and for scale estimators (Theorem 3.5). These results do not generalize to regression
+M-estimators (He et al., 1990).
+Robust estimators that are consistent and have simple inferential properties under
+contamination are particularly desirable. Theorems 3.2, 3.4 showed that redescending
+M-estimators are consistent under contamination, while non-redescending M-estimators
+are not. Even so, simple inference based on redescending M-estimators requires a scale
+estimator that is consistent under contamination. This fails for robust scale estimators such as the IQR and MAD (Theorem 3.6). It remains an open problem to find
+robust M-estimators with simple inference when a proportion of the observations are
+contaminated.
+By simulation, we found that the LTS estimator performs better than various Mestimators, making it an attractive alternative. LTS estimators have a high breakdown
+point in location-scale models and in regression (Rousseeuw and Leroy, 1987, pages
+132 – 135). LTS estimators for location and scale, and more generally for regression
+coefficients, have the oracle property that inference is the same as for the infeasible
+least squares estimator on the ‘good’ observations only (Berenguer-Rico et al., 2023;
+Berenguer-Rico and Nielsen, 2023). Inference is, therefore, nuisance parameter free and
+it achieves full efficiency in the contaminated model (Section 3.3). These results do,
+however, require that the proportion of ‘good’ observations is known. One could say
+that the problem of estimating the scale has been replaced by the problem of estimating
+the proportion of the ‘good’ observations. This appears to be an easier problem to solve
+theoretically. Indeed, an estimator proposed in Berenguer-Rico et al. (2023) appeared
+successful in the simulations.
+
+A
+
+Proofs
+
+We consider estimators for µ that are location-scale invariant and estimators for σ that
+location invariant and scale equivariant. Thus, throughout we set µ◦ = 0 and σ◦ = 1,
+so that yi = εi and ςˆ = σ̂.
+Proof of Theorem 3.1. The proof is inspired by Berenguer-Rico and Nielsen P
+(2023); Joµ
+hansen and Nielsen (2019). Let ei = (yi −µ)/σ̂ = (εi −µ)/ˆ
+ς so that Rn (µ) = ni=1 ρ(eµi ).
+We show that {Rn (µ) − Rn (0)}/h ≥ L > 0 for large µ on a large probability set. Thus,
+no minimizer is large.
+Consider large |µ| > ςˆB0 for a B0 > 0 to be chosen. Splitting the sum in Rn (µ) over
+i in sums over ζn and ζnc while truncating by an A0 > 1 to be chosen gives
+P
+P
+Rn (µ) ≥
+ρ(eµj ) +
+ρ(eµi )1(|εi |≤A0 ) .
+c
+j∈ζn
+
+i∈ζn
+
+14
+
+By the reverse triangle inequality, |eµi | ≥ (|µ| − |εi |)/ˆ
+ς . We get |eµi | > B0 − A0 /ˆ
+ς when
+µ
+|εi | ≤ A0 as |µ| > ςˆB0 . Further, |ei | > x∗ if B0 ≥ x∗ + A0 /ˆ
+ς . By Assumption 2.1, we
+µ
+µ
+get ρ(ei ) = ρ∗ + ψ∗ (|ei | − x∗ ). Thus,
+P
+P
+{ρ∗ + ψ∗ (|eµi | − x∗ )}1(|εi |≤A0 ) .
+ρ(eµj ) +
+Rn (µ) ≥
+c
+j∈ζn
+
+As Rn (0) =
+
+P
+
+ς) +
+c ρ(εj /ˆ
+j∈ζn
+
+Rn (µ) − Rn (0) ≥
+
+P
+c
+j∈ζn
+
+i∈ζn
+
+P
+
+ς ), we get
+i∈ζn ρ(εi /ˆ
+
+{ρ(eµj ) − ρ(εj /ˆ
+ς )}
++
+
+
+P
+{ρ∗ + ψ∗ (|eµi | − x∗ )}1(|εi |≤A0 ) − ρ(εi /ˆ
+ς ) . (A.1)
+i∈ζn
+
+We bound the second term in (A.1). Argue as aboveP
+to show |eµi | ≥ (|µ| − A0 )/ˆ
+ς.
+2
+2
+−1
+2
+Further, we bound 1(|εi |≤A0 ) ≥ 1 − εi /A0 such that h
+i∈ζn 1(|εi |≤A0 ) ≥ 1 − Cn /A0 ,
+P
+P
+with Cn = h−1 i∈ζn ε2i . Let ρ̂ςˆ = h−1 i∈ζn ρ(εi /ˆ
+ς ). The second term is then at least
+2
+h[{ρ∗ + ψ∗ (|µ|/ˆ
+ς − A0 /ˆ
+ς − x∗ )}(1 − Cn /A0 ) − ρ̂ςˆ].
+We bound the summands rjµ = ρ(eµj ) − ρ(εj /ˆ
+ς ) in the first term of (A.1). We show
+µ
+that rj > −ρ∗ − ψ∗ |µ|/ˆ
+ς . Since ρ is symmetric, it suffices to consider µ > 0 and εj ∈ R.
+We check two main cases, each with three sub-cases.
+Case 1. Let µ > 0 and εj ≥ 0. Then εj > εj − µ.
+(a) If εj /ˆ
+ς > (εj − µ)/ˆ
+ς ≥ x∗ , then ρ is linear in both arguments, so that rjµ = ψ∗ (εj −
+µ)/ˆ
+ς − ψ∗ εj /ˆ
+ς = −ψ∗ µ/ˆ
+ς.
+(b) If εj /ˆ
+ς ≥ x∗ > (εj − µ)/ˆ
+ς , then the first ρ is at least 0 and the second is linear and
+ς.
+equal to ρ∗ + ψ∗ (εj /ˆ
+ς − x∗ ). Exploit that x∗ > (εj − µ)/ˆ
+ς to get rjµ > −ρ∗ − ψ∗ µ/ˆ
+∗
+(c) If x∗ ≥ εj /ˆ
+ς ≥ 0, then the first ρ is at least 0 and the second is at most ρ , so that
+µ
+rj ≥ 0 − ρ∗ = −ρ∗ .
+Case 2. Let µ > 0 and εj < 0. Then 0 > εj > εj − µ.
+(a) If εj /ˆ
+ς > (εj − µ)/ˆ
+ς ≥ −x∗ , then the first ρ is at least 0 and the second is at most
+ρ∗ , so that rjµ ≥ 0 − ρ∗ = −ρ∗ .
+(b) If εj /ˆ
+ς ≥ −x∗ > (εj − µ)/ˆ
+ς , the first ρ is linear and the second is at most ρ∗ . Then
+µ
+rj ≥ ψ∗ {(µ − εj )/ˆ
+ς − x∗ } ≥ 0.
+(c) If −x∗ > εj /ˆ
+ς > (εj − µ)/ˆ
+ς , then ρ is linear in both arguments, so that rjµ = ψ∗ µ/ˆ
+ς≥
+0.
+Now, insert the two bounds in (A.1). This gives a lower bound {Rn (µ) − Rn (0)}/h >
+Ln (µ), where
+Ln (µ) = −(ρ∗ + ψ∗ |µ|/ˆ
+ς )(n − h)/h
++ {ρ∗ + ψ∗ (|µ|/ˆ
+ς − A0 /ˆ
+ς − x∗ )}(1 − Cn /A20 ) − ρ̂ςˆ.
+Rearrange this lower bound as
+Ln (µ) = (2 − n/h − Cn /A20 )(ρ∗ + ψ∗ |µ|/ˆ
+ς ) − ρ̂ςˆ − (1 − Cn /A20 )ψ∗ (x∗ + A0 /ˆ
+ς ).
+By Assumption 3.1, then ∀ϵ > 0, ∃C, n0 > 0, ∀n > n0 we can find a set Sn with
+P(Sn ) > 1 − ϵ so that on Sn we have n/h < 1/λ + ϵ, Cn < C and |ˆ
+ς − ς| < ϵ and in turn
+|ρ̂ςˆ − ρ̃ς | < ϵ. We choose A0 so large that C/A20 < ϵ.
+15
+
+Consider the case ψ∗ = 0. Then Ln (µ) simplifies as
+Ln (µ) = (2 − n/h − Cn /A20 )ρ∗ − ρ̂ςˆ
+> (2 − 1/λ − 2ϵ)ρ∗ − ρ̃ς − ϵ = L.
+Since λ > 1/(2 − ρ̃ς /ρ∗ ), then L > 0 for small ϵ.
+Consider the case ψ∗ > 0. Since λ > 1/2, then −1/λ > −2 + 3ϵ, for small ϵ. Thus,
+on Sn , we get (2 − n/h − Cn /A20 ) > ϵ > 0. We can then bound Ln (µ) from below using
+|µ| > ςˆB0 and get, on Sn , that Ln (µ) > L where
+L = ϵ(ρ∗ + ψ∗ B0 ) − [ρ̃ς + ϵ + ψ∗ {x∗ + A0 /(ς − ϵ)}].
+Given A0 , we can now choose B0 so large that L > 0.
+For measurability, apply the argument of Jennrich (1969), see also Johansen and
+Nielsen (2019) and Clarke (2018), Chapter 4.
+P
+ς }.
+Proof of Theorem 3.2. The objective function (2.1) is then Rn (µ) = ni=1 ρ{(εi − µ)/ˆ
+Due to Theorem 3.1 using Assumptions 2.1, 3.1, it suffices to consider µ in a compact
+set.
+P
+Let Rnα (µ) = i∈ζn ρ{(εi − µ)/α} for α = ς, ςˆ. We show Rn (µ) = Rnςˆ (µ) + (n − h)ρ∗
+with large probability, uniformly in µ. By the reverse triangle inequality |εj − µ̂|/ˆ
+ς ≥
+p
+2 p
+c
+(|εj | − |µ̂|)/ˆ
+ς . Note, ςˆ → ς and minj∈ζn εj → ∞, due to Assumptions 3.1(i), 3.2(i). As
+µ is bounded, then |εj − µ̂|/ˆ
+ς ≥ x∗ for large n. Thus, ρ{(εj − µ)/ˆ
+ς } = ρ∗ and Rn (µ) has
+the desired form.
+ς } − ρ{(εi − µ)/ς}. Since
+We show Rnςˆ (µ) and Rnς (µ) are close. Let ri (µ) = ρ{(εi − µ)/ˆ
+−1
+ρ is Lipschitz by Assumption 3.2(ii), then |ri (µ)| ≤ C|εi − µ||ˆ
+ς − ς −1 |. Here, |εi − µ| ≤
+P
+p
+|εi | + |µ|. Since ςˆ → ς and µ is bounded, it suffices to argue that h−1 i∈ζn (|εi | + 1) is
+bounded in probability. This follows from Assumption 3.1(ii).
+The Rnς (µ) minimizers are near µ◦ = 0 by Assumption 3.2(iii). Thus, Rnς (µ) is
+bounded away from its minimum outside the vicinity of µ◦ . As Rnςˆ (µ) is close to Rnς (µ),
+the same applies to Rnςˆ (µ) and hence to Rn (µ).
+For measurability, apply the argument of Jennrich (1969).
+Proof of Theorem 3.3. Sums are taken over i ∈ ζn . Let ui = εi /ς, vi = εi − µ̂/ˆ
+ς,
+wi = (εi − µ̂ζn )/ς.
+P
+P
+For n large, the minimizers µ̂, µ̂ζn solve 0 = ρ̇(vi ) and 0 = ρ̇(wi ). The Mean
+Value Theorem gives
+P
+P
+0 = ρ̇(ui ) + ρ̈(vi∗ )(vi − ui ),
+P
+P
+0 = ρ̇(ui ) + ρ̈(wi∗ )(wi − ui ).
+for intermediate points vi∗ and wi∗ . Subtract the equations while writing vi − ui =
+(vi − wi ) + (wi − ui ) to get
+P
+P ∗
+0 = ρ̈(vi∗ )(vi − wi ) +
+ρ̈(vi ) − ρ̈(wi∗ ) (wi − ui ).
+Replace differences wi − ui = −µ̂ζn /ς and
+vi − ui = ui (ς/ˆ
+ς − 1) − µ̂ζn /ˆ
+ς − (µ̂ − µ̂ζn )/ˆ
+ς,
+16
+
+add & subtract ρ̈(ui ) to each ρ̈ and isolate µ̂ − µ̂ζn to get
+
+
+P
+(µ̂ − µ̂ζn ) ρ̈(ui ) + ρ̈(vi∗ ) − ρ̈(ui )
+
+
+P
+= (ς − ςˆ) ρ̈(ui ) + ρ̈(vi∗ ) − ρ̈(ui ) (ui − µ̂ζn /ς)
+P ∗
+− µ̂ζn (ˆ
+ς /ς)
+ρ̈(vi ) − ρ̈(wi∗ ) .
+Using the triangle inequality, we can bound
+P
+P
+|µ̂ − µ̂ζn |
+ρ̈(ui ) −
+ρ̈(vi∗ ) − ρ̈(ui )
+P
+≤ |ς − ςˆ| ρ̈(ui )(ui − µ̂ζn /ς)
+P
++ |ς − ςˆ| ρ̈(vi∗ ) − ρ̈(ui ) (|ui | + |µ̂ζn |/ς)
+P
++ |µ̂ζn |(ˆ
+ς /ς) { ρ̈(vi∗ ) − ρ̈(wi∗ ) .
+
+(A.2)
+
+By the Lipschitz property in Assumption 3.3(ii) we get
+ρ̈(vi∗ ) − ρ̈(ui ) ≤ C|vi∗ − ui | ≤ C|vi − ui |.
+By the above expansion of vi − ui , we find, ∀ϵ > 0, ∃ a set Sn with P (Sn ) > 1 − ϵ, on
+which
+
+P
+P
+ρ̈(vi∗ ) − ρ̈(ui ) ≤ C
+|ui ||ς − ςˆ| + |µ̂| /ˆ
+ς ≤ ϵn,
+P
+p
+as |ui | = Op (h) by Assumption 3.1(ii), as ςˆ → ς by Assumption 3.3(i), and given
+ϵ we choose Sn and find a C > 0 so that |µ̂| < Cn−1/2 on Sn by Theorem 3.2 using
+Assumptions 2.1, 3.1, 3.2. Similarly,
+P
+P
+ρ̈(vi∗ ) − ρ̈(ui ) |ui | ≤ ϵn,
+ρ̈(wi∗ ) − ρ̈(ui ) ≤ ϵn.
+Finally, Assumption 3.3(ii) implies
+h−1
+
+P
+
+p
+
+ρ̈(ui ) → Eρ̈(u1 ) > 0,
+
+P
+ui ρ̈(ui ) = Op (h1/2 ).
+
+Return to (A.2). Divide by h, insert the above bounds and use ςˆ−ς = Op (n−1/2 ) and
+|µ̂ζn | ≤ Cn−1/2 by Assumptions 3.3(i, iv). Then, ∀ϵ > 0, ∃a large probability set Sn , on
+which |µ̂ − µ̂ζn |Eρ̈(u1 )(1 − ϵ) ≤ ϵn−1/2 . Thus, ∀ϵ > 0, ∃Sn , on which |µ̂ − µ̂ζn | ≤ ϵn−1/2 .
+Use that ϵ is arbitrary.
+A measurable version of µ̂ is found as in Jennrich (1969). This has the assumed
+asymptotic distribution of µ̂ζn .
+Proof of Theorem 3.4. We have that σ̂ = 1 by Assumption 3.4(i), so that (yi − µ)/σ̂ =
+εi − µ.
+Since µ̂ is bounded in probability by Theorem 3.1 using Assumptions 2.1, 3.1, it
+suffices to consider |µ| ≤ B. Note that Assumption 3.4(i) − (iii) implies Assumption
+3.1.
+‘Outliers’ satisfy εj = ε(h) + ξ with ξ > 0 for j ̸∈ ζn , while ε(h) = maxi∈ζn εi → ∞
+in probability by Assumption 3.4(ii, v). As |εj − µ| ≥ |εj | − |µ| by the reverse triangle
+inequality, εj → ∞ and |µ| ≤ B, then |εj − µ| → ∞. Thus, ρ(εj − µ) = ρ∗ + ψ∗ {ε(h) +
+
+17
+
+ξ − µ − x∗ } due to Assumption 2.1 to ρ. We get that on a large probability set, then
+Rn (µ) = R̃n (µ) + C̃n , where
+P
+R̃n (µ) = i∈ζn {ρ(εi − µ)} − (n − h)ψ∗ µ,
+C̃n = (n − h)ψ∗ {ε(h) + ξ} + (n − h)(ρ∗ − ψ∗ x∗ ).
+Note, C̃n is constant
+in µ. Thus, we only analyze R̃n (µ).
+P
+Since h−1 i∈ζn ρ(εi − µ) → Eρ(ε1 − µ) in probability uniformly for µ near 0 by
+Assumption 3.4(iii), we get
+h−1 R̃n (µ) → E{ρ(ε1 − µ)} − (1/λ − 1)ψ∗ µ.
+In this limit, the first term has a zero derivative in µ at 0 by Assumption 3.4(iv). The
+second, subtracted, term is positive since, by assumption, ψ∗ > 0, λ < 1. Thus, the
+derivative at 0 is non-zero so µ̂ is inconsistent.
+Proof of Theorem 3.5. Let v̂p , v̂p◦ denote the p-quantiles of εi for i = 1, . . . , n and for
+◦
+i ∈ ζn , respectively. Similarly, let v̂p,abs , v̂p,abs
+be p-quantiles of |εi |.
+(a) We get worst bounds for v̂p by placing all ‘outliers’ on one side of the ‘good’
+observations:
+◦
+◦
+◦
+◦
+v̂1−3/(4λ)
+≤ v̂1/4 ≤ v̂1/(4λ)
+, v̂1−1/(4λ)
+≤ v̂3/4 ≤ v̂3/(4λ)
+.
+The ‘good’ quantiles are bounded in probability by Assumption 3.5 since 0 < 1 −
+3/(4λ) ≤ 1/(4λ) < 1 and 0 < 1 − 1/(4λ) ≤ 3/(4λ) < 1 when λ > 3/4 . Hence, σ̂IQR is
+bounded in probability.
+(b) Combine with the triangle inequality to get
+|yi − q̂1/2 | = |εi − v̂1/2 | ≤ |εi | + |v̂1/2 |.
+Taking the median, we get that σ̂MAD = med |yi − q̂1/2 | is bounded by v̂1/2,abs + |v̂1/2 |.
+◦
+◦
+◦
+◦
+Argue as in (a) that v̂1−1/(2λ)
+≤ v̂1/2 ≤ v̂1/(2λ)
+and v̂1−1/(2λ),abs
+≤ v̂1/2,abs ≤ v̂1/(2λ),abs
+. The
+‘good’ quantiles are bounded in probability when λ > 1/2. Hence σ̂MAD is bounded.
+p
+
+F
+Proof of Theorem 3.6. (a) By Assumption 3.6, q̂p → q(p−ϱ)/λ
+for p = 1/4, 3/4. Thus,
+p
+
+σ̂IQR → ςIQR .
+p
+F
+(b). Again, q̂1/2 → q(1/2−ϱ)/λ
+. The ‘good’ errors are continuously distributed by
+Assumption 3.6(i). Thus, we analyze med (|εi − c|), where F(c) = (1/2 − ϱ)/λ.
+We find a d such that # (i : |εi − c| ≤ d) = n/2. The ‘outlier’ errors drift to infinity
+by Assumption 3.6(ii), so as n → ∞ we have that, for any finite valued d,
+P {(i : |εi − c| ≤ d) = (i ∈ ζn : |εi − c| ≤ d)} → 1.
+For any finite valued d, as n → ∞,
+p
+
+h−1 # (i ∈ ζn : |εi − c| ≤ d) → F(c + d) − F(c − d).
+Solutions d to #(i ∈ ζn : |εi − c| ≤ d) = h/2 converge to solutions of F(c + d) − F(c − d) =
+1/2 as F is continuous. Then, solutions to #(i : |εi − q̂1/2 | ≤ d) = n/2 converge to
+solutions of λ{F(c + d) − F(c − d)} = 1/2.
+18
+
+Remark A.1. We argue that ςIQR > 1 for normal ‘good’ errors and 3/4 < λ < 1. Write
+Φ
+Φ
+. As sλ,ϱ = sλ,1−λ−ϱ , it suffices to
+− q(1/4−ϱ)/λ
+ςIQR = sλ,ϱ /s1,0 , where sλ,ϱ = q(3/4−ϱ)/λ
+analyze ϱ ≤ (1 − λ)/2.
+Φ
+Φ
+, which decreases to s1,0 as λ ↑ 1.
+− q1/2−1/(4λ)
+If ϱ = (1 − λ)/2, then sλ,ϱ = q1/2+1/(4λ)
+Thus, ςIQR > 1.
+Φ
+Φ
+If ϱ = (1−λ)/2−αλ for 0 < α < (1−λ)/(2λ) then sλ,ϱ = q1/2+1/(4λ)+α
+−q1/2−1/(4λ)+α
+.
+This increases in α, since the argument of the first term term is furthest from 1/2 for
+any α. Thus, ςIQR > 1 by the previous result.
+Remark A.2. We argue that ςMAD > 1 for normal ‘good’ errors, 1/2 < λ < 1 and any
+Φ
+.
+ϱ. Given c, we choose d so that Ac,d = Φ(c + d) − Φ(c − d) = 1/(2λ). We show d > q3/4
+Now, Ac,d ≤ Φ(d) − Φ(−d), which increases in d. Thus, d is least for c = 0. As λ < 1
+Φ
+then 1/(2λ) > 1/2, and d > q3/4
+, which solves Φ(d) − Φ(d) = 1/2.
+
+References
+Avella Medina, M. and Ronchetti, E. (2015). Robust statistics: A selective overview and
+new directions. Wiley Interdisciplinary Reviews Computational Statistics (WIREs),
+7(6):372–393.
+Berenguer-Rico, V., Johansen, S., and Nielsen, B. (2023). A model where the Least
+Trimmed Squares estimator is maximum likelihood. Journal of the Royal Statistical
+Society. Series B, 85(3):886–912.
+Berenguer-Rico, V. and Nielsen, B. (2023). Least trimmed squares asymptotics: Nuisance parameter free asymptotics. Econometric Theory. forthcoming.
+Butler, R. (1982). Nonparametric interval and point prediction using data trimmed by
+a Grubbs-type outlier rule. Annals of Statistics, 10:197–204.
+Clarke, B. R. (2018). Robustness Theory and Application. John Wiley & Sons, Hoboken,
+NJ.
+Coakley, C. W. and Hettmansperger, T. P. (1993). A bounded influence, high breakdown, efficient regression estimator. Journal of the American Statistical Association,
+88(423):872–880.
+Donoho, D. L. and Huber, P. J. (1983). The notion of breakdown point. In Bickel, P. J.,
+Doksum, K. A., and Hodges, J. L., editors, A Festschrift for Erich L. Lehmann.,
+pages 157–184. Wadsworth, Belmont, CA.
+Gervini, D. and Yohai, V. J. (2002). A class of robust and fully efficient regression
+estimators. Annals of Statistics, 30:583–616.
+Hampel, F. R. (1971). A general qualitative definition of robustness. Annals of Mathematical Statistics, 42(6):1887–1896.
+Hampel, F. R., Ronchetti, E. M., Rousseeuw, P. J., and Stahel, W. A. (1986). Robust
+Statistics: The Approach Based on Influence Functions. Wiley, New York.
+He, X., Jurečková, J., Koenker, R., and Portnoy, S. (1990). Tail behavior of regression
+estimators and their breakdown points. Econometrica, 58:1195–1214.
+Heritier, S. and Ronchetti, E. (1994). Robust bounded-influence tests in general parametric models. Journal of the American Statistical Association, 89:897–904.
+
+19
+
+Horowitz, J. L. and Manski, C. F. (1995). Identification and robustness with contaminated and corrupted data. Econometrica, 63:281–302.
+Huber, P. J. (1964). Robust estimation of a location parameter. Annals of Mathematical
+Statistics, 35:73–101.
+Huber, P. J. (1984). Finite sample breakdown of M-and P-estimators. Annals of Statistics, 12(1):119–126.
+Huber, P. J. and Ronchetti, E. M. (2009). Robust Statistics. Wiley, Hoboken, NJ, 2nd
+edition.
+Jennrich, R. I. (1969). Asymptotic properties of non-linear least squares estimators.
+Annals of Mathematical Statistics, 40(2):633–643.
+Johansen, S. and Nielsen, B. (2019). Boundedness of M-estimators for multiple linear
+regression in time series. Econometric Theory, 35:653–683.
+Jurecková, J. and Sen, P. K. (1996). Robust Statistical Procedures: Asymptotics and
+Interrelations. Wiley, New York.
+Loh, P.-L. (2025). A theoretical review of modern robust statistics. Annual Review of
+Statistics and Its Applications, 12:1 – 20.
+Maronna, R. A., Martin, R. D., and Yohai, V. J. (2006). Robust Statistics: Theory and
+Methods. Wiley, Chichester.
+Rousseeuw, P. J. (1984). Least median of squares regression. Journal of the American
+Statistical Association, 79(388):871–880.
+Rousseeuw, P. J. and Leroy, A. M. (1987). Robust Regression and Outlier Detection.
+Wiley, Hoboken, NJ.
+Yohai, V. J. (1987). High breakdown-point and high efficiency robust estimates for
+regression. Annals of Statistics, 15:642–656.
+Yu, C. and Yao, W. (2017). Robust linear regression: A review and comparison. Communications in Statistics. Simulation and Computation, 46(8):6261–6282.
+
+20
+
+

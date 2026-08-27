@@ -1,0 +1,22 @@
+model,rep,strategy,n_sigmas,n_rows,problems
+dnn_bnn_full,continuous_pdv,legacy,10,10000,missing sigmas: [0.4]
+dnn_bnn_full,continuous_pdv,valprop,10,10000,missing sigmas: [0.6]
+dnn_vbll,continuous_pdv,valprop,10,10000,missing sigmas: [0.7]
+gauche,ecfp4,legacy,10,10000,missing sigmas: [0.7]
+gauche,ecfp4,quantile,8,8000,"missing sigmas: [0.3, 0.5, 0.6]"
+gauche,morgan,valprop,5,43000,"missing sigmas: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]"
+gauche,pdv,threshold,10,10000,missing sigmas: [1.0]
+gauche,sns,legacy,10,10000,missing sigmas: [0.5]
+gauche,sns,outlier,8,8000,"missing sigmas: [0.2, 0.7, 1.0]"
+gauche,sns,threshold,9,9000,"missing sigmas: [0.8, 1.0]"
+mlp_bnn_full,continuous_pdv,legacy,10,10000,missing sigmas: [0.8]
+mlp_bnn_full,continuous_pdv,valprop,10,10000,missing sigmas: [0.9]
+mlp_vbll,continuous_pdv,valprop,10,10000,missing sigmas: [1.0]
+ngboost,continuous_pdv,quantile,10,10000,missing sigmas: [0.3]
+ngboost,ecfp4,legacy,10,10000,missing sigmas: [1.0]
+ngboost,ecfp4,quantile,10,10000,missing sigmas: [0.1]
+ngboost,ecfp4,threshold,9,9000,"missing sigmas: [0.5, 0.8]"
+ngboost,morgan,valprop,10,10000,missing sigmas: [0.1]
+ngboost,sns,legacy,10,10000,missing sigmas: [0.8]
+ngboost,sns,quantile,9,9000,"missing sigmas: [0.6, 0.9]"
+qrf,ecfp4,outlier,10,10000,missing sigmas: [0.1]

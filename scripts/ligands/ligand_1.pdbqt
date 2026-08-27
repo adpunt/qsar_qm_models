@@ -1,0 +1,17 @@
+REMARK  Name = ./ligands/ligand_1.pdb
+REMARK  3 active torsions:
+REMARK  status: ('A' for Active; 'I' for Inactive)
+REMARK    1  A    between atoms: C_1  and  C_2
+REMARK    2  A    between atoms: C_2  and  C_3
+REMARK    3  A    between atoms: C_3  and  C_4
+REMARK                            x       y       z     vdW  Elec       q    Type
+REMARK                         _______ _______ _______ _____ _____    ______ ____
+ROOT
+ATOM      1  C   UNL     1       1.009  -0.013   0.092  0.00  0.00    +0.000 C 
+ATOM      2  C   UNL     1       0.509   0.740   1.314  0.00  0.00    +0.000 C 
+ENDROOT
+BRANCH   2   3
+ATOM      3  C   UNL     1       1.009   2.184   1.329  0.00  0.00    +0.000 C 
+ATOM      4  C   UNL     1       0.497   2.940   2.545  0.00  0.00    +0.000 C 
+ENDBRANCH   2   3
+TORSDOF 1

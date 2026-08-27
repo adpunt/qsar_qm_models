@@ -11,6 +11,14 @@
 //! for a molecule RDKit could not parse — and both fired *after* the rest of the
 //! record was already on disk, leaving it 256 bytes short.
 //!
+//! Since 2026-08-27 the fingerprint is NOT computed here. 'ECFP4' means Morgan
+//! radius 2, and the only binding this side has is `rdk_fingerprint_mol`, which
+//! is RDKit's PATH fingerprint — a different fingerprint, which agreed with
+//! Morgan on 0 of the first 1,500 QM9 molecules and returned all zeros for
+//! methane, ammonia and water (RERUN_PLAN.md §2.13). Python computes it and this
+//! side carries the bytes through, so the fixtures below write the block into the
+//! input record and an all-zero block is what a failed featurisation looks like.
+//!
 //! These tests run the real binary over real fixtures and fail the build if that
 //! comes back.
 
@@ -28,16 +36,39 @@ fn expected_record_len(smiles: &str) -> usize {
     4 + n + 4 + n + 4 + 4 + 256
 }
 
+/// A stand-in for the 256-byte block Python writes. Not all zeros, and different
+/// per molecule, so a misaligned read cannot look correct by accident. `zero`
+/// asks for the all-zero block, which is what a failed featurisation looks like
+/// on this side now.
+fn ecfp4_block(smiles: &str, zero: bool) -> [u8; 256] {
+    let mut block = [0u8; 256];
+    if zero {
+        return block;
+    }
+    let seed = smiles.bytes().fold(7u8, |a, b| a.wrapping_mul(31).wrapping_add(b));
+    for (i, byte) in block.iter_mut().enumerate() {
+        *byte = seed.wrapping_add(i as u8).wrapping_mul(13) | 1;
+    }
+    block
+}
+
 fn write_split(dir: &Path, name: &str, file_no: usize, rows: &[(String, f32)]) {
+    write_split_with(dir, name, file_no, rows, &[])
+}
+
+/// `zero_rows` names the record indices whose ECFP4 block is written all-zero.
+fn write_split_with(dir: &Path, name: &str, file_no: usize, rows: &[(String, f32)],
+                    zero_rows: &[usize]) {
     let path = dir.join(format!("{}_{}.mmap", name, file_no));
     let mut out: Vec<u8> = Vec::new();
-    for (smiles, y) in rows {
+    for (i, (smiles, y)) in rows.iter().enumerate() {
         let b = smiles.as_bytes();
         out.extend_from_slice(&(b.len() as u32).to_le_bytes());
         out.extend_from_slice(b);
         out.extend_from_slice(&(b.len() as u32).to_le_bytes());
         out.extend_from_slice(b);
         out.extend_from_slice(&y.to_le_bytes());
+        out.extend_from_slice(&ecfp4_block(smiles, zero_rows.contains(&i)));
     }
     fs::write(path, out).unwrap();
 }
@@ -47,11 +78,21 @@ struct Fixture {
     file_no: usize,
     train: Vec<(String, f32)>,
     held: Vec<(String, f32)>,
+    /// Training record indices whose ECFP4 block is written all-zero. `reset`
+    /// re-writes the splits before every run, so it has to know about them --
+    /// without this it silently un-did the zeroing and the guard had nothing to
+    /// catch.
+    zero_rows: Vec<usize>,
 }
 
 /// `train` is the training column; the held-out splits reuse the first molecule
 /// so the fixture stays small and the arithmetic below stays readable.
 fn fixture(tag: &str, train: Vec<(String, f32)>) -> Fixture {
+    fixture_zeroing(tag, train, &[])
+}
+
+/// As `fixture`, with the named training records' ECFP4 block written all-zero.
+fn fixture_zeroing(tag: &str, train: Vec<(String, f32)>, zero_rows: &[usize]) -> Fixture {
     let dir = std::env::temp_dir().join(format!("writer_guards_{}_{}", tag, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -59,7 +100,7 @@ fn fixture(tag: &str, train: Vec<(String, f32)>) -> Fixture {
 
     let held: Vec<(String, f32)> = vec![("CCCCO".to_string(), 5.0), ("CCCCC".to_string(), 6.0)];
 
-    write_split(&dir, "train", file_no, &train);
+    write_split_with(&dir, "train", file_no, &train, zero_rows);
     write_split(&dir, "val", file_no, &held);
     write_split(&dir, "test", file_no, &held);
 
@@ -84,14 +125,14 @@ fn fixture(tag: &str, train: Vec<(String, f32)>) -> Fixture {
     )
     .unwrap();
 
-    Fixture { dir, file_no, train, held }
+    Fixture { dir, file_no, train, held, zero_rows: zero_rows.to_vec() }
 }
 
 impl Fixture {
     /// The injector rewrites the mmap files in place, so a second run would
     /// otherwise read its predecessor's output.
     fn reset(&self) {
-        write_split(&self.dir, "train", self.file_no, &self.train);
+        write_split_with(&self.dir, "train", self.file_no, &self.train, &self.zero_rows);
         write_split(&self.dir, "val", self.file_no, &self.held);
         write_split(&self.dir, "test", self.file_no, &self.held);
         let _ = fs::remove_file(
@@ -175,15 +216,16 @@ fn every_record_is_the_length_the_reader_expects() {
 }
 
 /// The regression test for the two deleted `continue` statements. One molecule in
-/// the middle cannot be parsed by RDKit. Before the fix its record was written
-/// 256 bytes short and every molecule after it read at the wrong offset.
+/// the middle has no fingerprint. Before the fix its record was written 256 bytes
+/// short and every molecule after it read at the wrong offset.
+///
+/// A failed featurisation now arrives as an ALL-ZERO block from the Python
+/// writer, which is what this side can see. (Python refuses to write one at all;
+/// this is the guard for a block that reaches here anyway.)
 #[test]
 fn an_unfingerprintable_molecule_does_not_shorten_its_record() {
-    let mut train = good_molecules();
-    // Not a molecule. RDKit returns an error rather than a mol.
-    train[4] = ("this-is-not-a-smiles".to_string(), 5.5);  // 20 chars: length-legal, RDKit-illegal
-
-    let f = fixture("bad", train.clone());
+    let train = good_molecules();
+    let f = fixture_zeroing("bad", train.clone(), &[4]);
 
     // Default behaviour: the run refuses to finish, because a zero fingerprint
     // would otherwise train as if it were real features.
@@ -220,13 +262,20 @@ fn an_unfingerprintable_molecule_does_not_shorten_its_record() {
     );
 }
 
+/// CONTROL for the test above: with no zero block anywhere, nothing is reported.
+#[test]
+fn a_full_fingerprint_is_not_reported_as_a_failure() {
+    let f = fixture("control", good_molecules());
+    let out = f.run(&[]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(f.failures_csv().is_none());
+}
+
 /// A zero fingerprint is a plausible-looking feature vector. The run must not be
 /// able to end quietly with one in it.
 #[test]
 fn a_zero_fingerprint_never_passes_silently() {
-    let mut train = good_molecules();
-    train[7] = ("%%%%%%".to_string(), 5.5);
-    let f = fixture("silent", train);
+    let f = fixture_zeroing("silent", good_molecules(), &[7]);
 
     let out = f.run(&[]);
     let stderr = String::from_utf8_lossy(&out.stderr);

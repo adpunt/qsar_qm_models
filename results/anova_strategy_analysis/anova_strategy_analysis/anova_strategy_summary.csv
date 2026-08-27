@@ -1,0 +1,7 @@
+Strategy,Perf_η²_Model,Perf_η²_Rep,Perf_η²_Interaction,Perf_n,Robust_η²_Model,Robust_η²_Rep,Robust_η²_Interaction,Robust_n
+Outlier,11.27,42.89,46.60,543,19.06,1.72,12.64,476
+Value-Proportional,16.89,47.21,39.11,529,58.75,7.12,29.03,461
+Quantile,13.77,43.49,46.05,543,37.75,6.29,14.71,497
+Gaussian,12.29,47.68,40.70,531,59.38,5.47,20.52,466
+Heteroscedastic,12.91,47.42,42.44,537,49.79,3.89,18.47,468
+Threshold,17.88,43.91,38.37,544,58.13,10.76,31.04,470

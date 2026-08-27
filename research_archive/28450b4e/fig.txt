@@ -1,0 +1,253 @@
+Title: Figure 2 - from Provisional Classification and in Silico
+
+URL Source: https://www.academia.edu/figures/22231077/figure-1-scatter-plots-with-error-bar-illustrating-the
+
+Markdown Content:
+close
+
+Welcome to Academia
+
+Sign up to get access to over 65 million papers
+
+By clicking Continue, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+![Image 1](https://a.academia-assets.com/images/google/google-color-transparent-bg-2.svg)Continue with Google![Image 2](https://a.academia-assets.com/images/apple/apple-black.svg)Continue with Apple![Image 3](https://a.academia-assets.com/images/facebook/facebook-color-transparent-bg-2.svg)Continue with Facebook email Continue with Email
+
+arrow_back
+Continue with Email
+
+Sign up or log in to continue.
+
+Email 
+
+Next arrow_forward
+
+arrow_back
+Welcome to Academia
+
+Sign up to continue.
+
+By clicking Sign Up, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+First name 
+
+Last name 
+
+Password 
+
+Sign Up arrow_forward
+
+arrow_back
+Hi,
+
+Log in to continue.
+
+Password 
+
+Reset password
+
+Log in arrow_forward
+
+arrow_back
+Password reset
+
+Check your email for your reset link.
+
+Your link was sent to
+
+Done
+
+arrow_back
+Facebook login is no longer available
+
+Reset your password to access your account:
+
+[Reset Password](https://www.academia.edu/reset_password)
+
+Please hold while we log you in
+
+[![Image 4: Academia.edu](https://a.academia-assets.com/images/academia-logo-redesign-2015-A.svg)![Image 5: Academia.edu](https://a.academia-assets.com/images/academia-logo-redesign-2015.svg)](https://www.academia.edu/)
+
+Log In Sign Up
+
+*   [Log In](https://www.academia.edu/login)
+*   [Sign Up](https://www.academia.edu/signup)
+*   more
+*       *   [About](https://www.academia.edu/about)
+    *   [Press](https://www.academia.edu/press)
+    *   [Papers](https://www.academia.edu/documents)
+    *   [Terms](https://www.academia.edu/terms)
+    *   [Privacy](https://www.academia.edu/privacy)
+    *   [Copyright](https://www.academia.edu/copyright)
+    *   [We're Hiring!](https://www.academia.edu/hiring)
+    *   [Help Center](https://support.academia.edu/hc/en-us)
+    *   less
+
+close
+
+Welcome to Academia
+
+Sign up to get access to over 65 million papers
+
+By clicking Continue, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+![Image 6](https://a.academia-assets.com/images/google/google-color-transparent-bg-2.svg)Continue with Google![Image 7](https://a.academia-assets.com/images/apple/apple-black.svg)Continue with Apple![Image 8](https://a.academia-assets.com/images/facebook/facebook-color-transparent-bg-2.svg)Continue with Facebook email Continue with Email
+
+arrow_back
+Continue with Email
+
+Sign up or log in to continue.
+
+Email 
+
+Next arrow_forward
+
+arrow_back
+Welcome to Academia
+
+Sign up to continue.
+
+By clicking Sign Up, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+First name 
+
+Last name 
+
+Password 
+
+Sign Up arrow_forward
+
+arrow_back
+Hi,
+
+Log in to continue.
+
+Password 
+
+Reset password
+
+Log in arrow_forward
+
+arrow_back
+Password reset
+
+Check your email for your reset link.
+
+Your link was sent to
+
+Done
+
+arrow_back
+Facebook login is no longer available
+
+Reset your password to access your account:
+
+[Reset Password](https://www.academia.edu/reset_password)
+
+Please hold while we log you in
+
+# Figure 2 - from "[Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)"
+
+[See full PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[download Download figure](https://figures.academia-assets.com/45377756/figure_002.jpg?response-content-disposition=attachment%3B+filename%3Dfigure-1-scatter-plots-with-error-bar-illustrating-the)
+
+more_vert
+
+[arrow_back](https://www.academia.edu/figures/22231107/table-2-classp-vsa-narc-catsd-al-dls-id-lgds-classp-me-nct)[arrow_forward](https://www.academia.edu/figures/22231082/figure-2-comparison-of-concordances-between-bcs-permeability)![Image 9: Figure 1. Scatter plots with error bar illustrating the sigmoidal and rank- order relationships between Caco-2 cell permeability (P,,,,) and human intestinal absorption (Fa). The fitting constants (A; B; C) of Fa function f(x) = AQ + B exp(—C-P,pp) were determined as (103.837; 0.001; 1.124). The pink and blue dotted lines express the high BCS permeability cutoff as defined by US FDA (Fa > 90%) and WHO (Fa > 85%) guidelines. The continuous red line indicates the high PBC permeability criterion derived from Caco-2 permeability of metoprolol. ](https://figures.academia-assets.com/45377756/figure_002.jpg)
+
+Figure 1. Scatter plots with error bar illustrating the sigmoidal and rank- order relationships between Caco-2 cell permeability (P,,,,) and human intestinal absorption (Fa). The fitting constants (A; B; C) of Fa function f(x) = AQ + B exp(—C-P,pp) were determined as (103.837; 0.001; 1.124). The pink and blue dotted lines express the high BCS permeability cutoff as defined by US FDA (Fa > 90%) and WHO (Fa > 85%) guidelines. The continuous red line indicates the high PBC permeability criterion derived from Caco-2 permeability of metoprolol.
+
+subdirectory_arrow_right
+Figure source:
+
+[![Image 10: Figure 1](https://figures.academia-assets.com/45377756/figure_001.jpg)](https://www.academia.edu/figures/22231074/figure-1-provisional-classification-and-in-silico-study-of)
+
+[![Image 11: Figure 1. Scatter plots with error bar illustrating the sigmoidal and rank- order relationships between Caco-2 cell permeability (P,,,,) and human intestinal absorption (Fa). The fitting constants (A; B; C) of Fa function f(x) = AQ + B exp(—C-P,pp) were determined as (103.837; 0.001; 1.124). The pink and blue dotted lines express the high BCS permeability cutoff as defined by US FDA (Fa > 90%) and WHO (Fa > 85%) guidelines. The continuous red line indicates the high PBC permeability criterion derived from Caco-2 permeability of metoprolol. ](https://figures.academia-assets.com/45377756/figure_002.jpg)](https://www.academia.edu/figures/22231077/figure-1-scatter-plots-with-error-bar-illustrating-the)
+
+[![Image 12: Figure 2. Comparison of concordances between BCS permeability classifications using calculated physicochemical properties (partition coefficient, distribution coefficient, and polar surface area) and intestinal absorption criteria (Al, B1, C1). The same procedure was carried out for comparing with the Caco-2 permeability classification (A2, B2, C2). The pink, blue, and red dotted lines express the high BCS permeability cutoff as defined by the US FDA (Fa > 90%), WHO (Fa > 85%), and Caco-2 permeability. The continuous red lines in Al, A2, B1, and B2 indicate the calculated log P/log D values of metoprolol. The continuous red lines in C1 and C2 are calculated PSA of labetalol. ](https://figures.academia-assets.com/45377756/figure_003.jpg) +10+9+8](https://www.academia.edu/figures/22231082/figure-2-comparison-of-concordances-between-bcs-permeability)
+
+[![Image 13: Figure 3. Relationship among intestinal absorption (Al), Caco-2 permeability (A2), and efflux ratios. The legend of pink and blue dotted lines and continuous red line are found in Figure 2 capture. The dotted gray line and continuous gray line show two criteria for defining substrate status (NES vs ES) according to in vitro data. ](https://figures.academia-assets.com/45377756/figure_004.jpg) +10+9+8](https://www.academia.edu/figures/22231089/figure-3-relationship-among-intestinal-absorption-al-caco)
+
+[![Image 14: Figure 5](https://figures.academia-assets.com/45377756/figure_005.jpg) +10+9+8](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)
+
+[![Image 15: Miguel Angel Cabrera Pérez](https://0.academia-photos.com/32629433/9742198/18890398/s65_miguel_angel.cabrera_p_rez.jpg)](https://uclv.academia.edu/MiguelAngelCabreraP%C3%A9rez)
+
+[![Image 16: Maikel Cruz Monteagudo](https://0.academia-photos.com/1781225/609597/757207/s65_maikel.cruz_monteagudo.jpg)](https://independent.academia.edu/MaikelCruzMonteagudo)
+
+[Miguel Angel Cabrera Pérez](https://uclv.academia.edu/MiguelAngelCabreraP%C3%A9rez), [Maikel Cruz Monteagudo](https://independent.academia.edu/MaikelCruzMonteagudo)
+
+[Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)
+
+Abstract: Today, early characterization of drug properties by the Biopharmaceutics Classification System (BCS) has attracted significant attention in pharmaceutical discovery and development. In this direction, the present report provides a systematic study of the development of a BCS-based provisional classification (PBC) for a set of 322 oral drugs. This classification, based on the revised aqueous solubility and the apparent permeability across Caco-2 cell monolayers, displays a high correlation (overall 76%) with the provisional BCS classification published by World Health Organization (WHO). Current database contains 91 (28.3%) PBC class I drugs, 76 (23.6%) class II drugs, 97 (31.1%) class III drugs, and 58 (18.0%) class IV drugs. Other approaches for provisional classification of drugs have been surveyed. The use of a calculated polar surface area with a labetalol value as a high permeable cutoff limit and aqueous solubility higher than 0.1 mg/mL could be used as alternative criteria for provisionally classifying BCS permeability and solubility in early drug discovery. To develop QSPR models that allow screening PBC and BCS classes of new molecular entities (NMEs), 18 statistical linear and nonlinear models have been constructed based on 803 0-2D Dragon and 126 Volsurf+ molecular descriptors to classify the PBC solubility and permeability. The voting consensus model of solubility (VoteS) showed a high accuracy of 88.7% in training and 92.3% in the test set. Likewise, for the permeability model (VoteP), accuracy was 85.3% in training and 96.9% in the test set. A combination of VoteS and VoteP appropriately predicts the PBC class of drugs (overall 73% with class I precision of 77.2%). This consensus system predicts an external set of 57 WHO BCS classified drugs with 87.5% of accuracy. Interestingly, computational assignments of the PBC class reasonably correspond to the Biopharmaceutics Drug Disposition Classification System (BDDCS) allocations of drugs (accuracy of 63.3−69.8%). A screening assay has been simulated using a large data set of compounds in different drug development phases (1, 2, 3, and launched) and NMEs. Distributions of PBC forecasts illustrate the current status in drug discovery and development. It is anticipated that a combination of the QSPR approach and well-validated in vitro experimentations could offer the best estimation of BCS for NMEs in the early stages of drug discovery.
+
+...Read more
+
+[description See full PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)
+
+Related topics:
+
+[Drug Discovery](https://www.academia.edu/Documents/in/Drug_Discovery)[Quantitative Structure Activity Relationship](https://www.academia.edu/Documents/in/Quantitative_Structure_Activity_Relationship)[Caco-2 cells](https://www.academia.edu/Documents/in/Caco-2_cells)[Molecular Pharmaceutics](https://www.academia.edu/Documents/in/Molecular_Pharmaceutics)
+
+![Image 17: Avatar 1](https://a.academia-assets.com/images/engagement_banner/avatar1.png)![Image 18: Avatar 2](https://a.academia-assets.com/images/engagement_banner/avatar2.png)![Image 19: Avatar 3](https://a.academia-assets.com/images/engagement_banner/avatar3.png)
+
+## Connect with 287M+ leading minds in your field
+
+Discover breakthrough research and expand your academic network
+
+[Join for free](https://www.academia.edu/signup)
+
+* * *
+
+## Related Figures
+
+arrow_back_ios
+
+*   [![Image 20: Figure 12](https://figures.academia-assets.com/3665496/figure_012.jpg)](https://www.academia.edu/figures/1428967/figure-12-phylogenetic-tree-construction-for-dna-haplogroups)
+*   [![Image 21: Table 1: Gender interaction pattern in dramas ](https://figures.academia-assets.com/34848562/table_001.jpg)](https://www.academia.edu/figures/2126543/table-1-gender-interaction-pattern-in-dramas)
+*   [![Image 22: Figure 15](https://figures.academia-assets.com/29652093/figure_015.jpg)](https://www.academia.edu/figures/2138152/figure-15-minimum-spanning-tree-route-for-major-tourist)
+*   [![Image 23: Figure 3. Evolution of PDI with monomer conversion for different values of DT constant C,,, in the particular case of Cx. = Cri, according to the equation PDI = {1 + (IMJo/[CTA lo) 2 + (2 - p)(1 — Cex)/Cex] ¥{pIM]o/(ICTA loll — (1 — p)°e)]} (conditions: [MIolICTA To = 100). ](https://figures.academia-assets.com/42302034/figure_012.jpg)](https://www.academia.edu/figures/2572552/figure-3-evolution-of-pdi-with-monomer-conversion-for)
+*   [![Image 24: Table 4: Deadlines for reports and presentations ](https://figures.academia-assets.com/46310583/table_015.jpg)](https://www.academia.edu/figures/2700095/table-4-deadlines-for-reports-and-presentations)
+*   [![Image 25: TABLE I. PROJECT REQUIREMENTS AFTER SIMULATED By Pvsy ST SOFTWARE TABLE II. AREA DESCRIPTIONS AFTER INSPECTED PROJECT SITE ](https://figures.academia-assets.com/52171789/table_001.jpg)](https://www.academia.edu/figures/3050231/table-1-project-requirements-after-simulated-by-pvsy-st)
+*   [![Image 26: Table 15](https://figures.academia-assets.com/48710706/table_015.jpg)](https://www.academia.edu/figures/3477511/table-15-living-the-drama-case-study-handbook-chapter)
+*   [![Image 27: Fig.1. Trunk sample of palm covered by nylon The trunk specimens were prepared in Ja hrom which is one of the most important horticultural centers in the south of Iran. The selected palm tree cultivar was Shahani which is the most popular cultivar in Jahrom. The prepared specimens with approximately 1 m in length and 45cm in diameter were transported to wood mechanical laboratory of Wood and Paper Science Faculty, University of Tehran as soon as was possible after cutting (The day after). Trunk specimens were covered wit evaporation during transportation (Fig.1). All range of 25-30 °C. h nylon in Jahrom to reduce its moisture experiments were carried out at a temperature 2.2. Moisture Content and Density of Trunk ](https://figures.academia-assets.com/116828661/figure_001.jpg)](https://www.academia.edu/figures/44233206/figure-1-trunk-sample-of-palm-covered-by-nylon-the-trunk)
+*   [![Image 28: through a part of the maze and a 3D Zoom mini-game for ordering a stack of scattered images. The learning content of both the 3D Quiz and the 3D Zoom game was generated along with the labyrinth using the formal game description. The maze design platform was applied in practical experiments for generation of maze games for entrepreneurship training with adaptation based on playing/learning styles, where styles were recognized implicitly and dynamically through playing an action-adventure game [31]. The playing style- based adaptation was used to adapt game tasks generated by the platform for each room and each tunnel of the maze for entrepreneurship training (Fig. 5). each room and each tunnel of the maze for entrepreneurship training (Fig. 5). Fig. 5. A style-adapted game task in the Mission room of a maze for learning strategic management ](https://figures.academia-assets.com/86839396/figure_005.jpg)](https://www.academia.edu/figures/44467531/figure-5-through-part-of-the-maze-and-zoom-mini-game-for)
+*   [![Image 29: Figure 7](https://figures.academia-assets.com/48733845/figure_007.jpg)](https://www.academia.edu/figures/46824202/figure-7-contrast-and-covert-contrast-the-phonetic)
+
+arrow_forward_ios
+
+[![Image 30: Academia](https://a.academia-assets.com/images/design_system/academia_logo_short_white.svg)](https://www.academia.edu/)
+
+*   Explore
+*   [Papers](https://www.academia.edu/documents)
+*   [Topics](https://www.academia.edu/topics)
+
+*   Features
+*   [Mentions](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fmentions)
+*   [Analytics](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fanalytics)
+*   [PDF Packages](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fresearch)
+*   [Advanced Search](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fsearch%2Fadvanced)
+*   [Search Alerts](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fsaved_searches)
+
+*   Journals
+*   [Academia.edu Journals](https://www.academia.edu/journals)
+*   [My submissions](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fjournals%2Fsubmissions)
+*   [Reviewer Hub](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fjournals%2Fsubmissions%23reviewer%2Finvitations)
+*   [Why publish with us](https://www.academia.edu/journals/about/why-publish-with-us)
+*   [Testimonials](https://www.academia.edu/journals/about/testimonials)
+
+*   Company
+*   [About](https://www.academia.edu/about)
+*   [Careers](https://www.academia.edu/hiring)
+*   [Press](https://www.academia.edu/press)
+*   [Help Center](https://support.academia.edu/hc/en-us)
+*   [Terms](https://www.academia.edu/terms)
+*   [Privacy](https://www.academia.edu/privacy)
+*   [Copyright](https://www.academia.edu/copyright)
+*   [Content Policy](https://www.academia.edu/content_policy)
+
+[![Image 31: Academia](https://a.academia-assets.com/images/design_system/academia_logo_white.svg)](https://www.academia.edu/)
+
+580 California St., Suite 400
+
+San Francisco, CA, 94104
+
+[© 2026 Academia. All rights reserved](https://www.academia.edu/copyright)

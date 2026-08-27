@@ -1,0 +1,176 @@
+## 1. `--uncertainty` / `-u` flag
+
+- **Declared**: `scripts/process_and_train.py:256` — `parser.add_argument("-u", "--uncertainty", type=str2bool, default=False, ...)`. **Default `False`.**
+- **Into the Rust config**: `scripts/process_and_train.py:1620` — `'uncertainty': args.uncertainty` inside the `config` dict built in `process_and_run` (`:1600`); written to `config.json` at `:1623-1624`.
+- **Rust side is DEAD**: `rust/src/main.rs:60` declares `uncertainty: bool,` in `struct Config`. `grep ".uncertainty"` over `rust/src/main.rs` returns **zero** use sites. The field is deserialized and never read.
+- **How it actually reaches the models**: it does **not** go via `config`. `args` is passed by object into `run_model(... args ...)` (`scripts/process_and_train.py:1239`, called at `:1816`), which forwards `args` to every `train_*` function (`:1251-1369`). Inside `models/models.py` every uncertainty branch is gated on the attribute `args.uncertainty` directly (e.g. `models/models.py:1393`, `:1525`, `:1554`, `:1734`, `:1763`, `:1974`, `:2154`, `:2269`, `:2466`, `:2489`, `:2712`, `:2760`, `:3190`, `:3395`, `:3995`, `:6849`, `:6975`, `:7181`).
+- Graph path: `run_qm9_graph_model(args, ...)` (`:1455`) likewise forwards `args` into `train_gnn` / `train_graph_gp` / `train_conformal_graph_model` (`:1512-1528`).
+- `args.uncertainty` is **never** used in `process_and_train.py` other than at `:256` and `:1620`.
+
+## 2. `scripts/utils.py::save_uncertainty_values`
+
+Defined `scripts/utils.py:200-268`.
+
+```python
+def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy,
+                           filepath, model_name, rep, sigma_noise, iteration, file_no,
+                           y_pred_std_calibrated=None, temperature=None,
+                           epistemic_uncertainty=None, aleatoric_uncertainty=None):
+    uncertainty_file = filepath.replace('.csv', '_uncertainty_values.csv')     # :210
+    y_orig  = np.asarray(y_true_original, dtype=np.float64)                    # :215
+    y_noisy = np.asarray(y_true_noisy,   dtype=np.float64)                     # :216
+    finite_mask = np.isfinite(y_orig) & np.isfinite(y_noisy)                   # :217
+    if finite_mask.sum() >= 10:                                                # :218
+        from scipy.stats import linregress
+        slope, intercept, _, _, _ = linregress(y_orig[finite_mask], y_noisy[finite_mask])
+        injected_noise = y_noisy - (slope * y_orig + intercept)                # :221
+    else:
+        injected_noise = y_noisy - y_orig   # fallback                          # :223
+    rows = []                                                                   # :225
+    for i in range(len(y_pred_mean)):                                           # :226
+        row = {'model','representation','sigma','iteration','file_no','sample_idx',
+               'y_pred_mean','y_pred_std_uncalibrated','y_true_original','y_true_noisy',
+               'injected_noise'}                                                # :227-239
+        # :242-247  y_pred_std_calibrated / temperature (else calibrated=uncalibrated, T=1.0)
+        # :250-253  epistemic_uncertainty  (else np.nan)
+        # :255-258  aleatoric_uncertainty  (else np.nan)
+    df = pd.DataFrame(rows)                                                     # :263
+    if os.path.exists(uncertainty_file):                                        # :265
+        df.to_csv(uncertainty_file, mode='a', header=False, index=False)        # :266
+    else:
+        df.to_csv(uncertainty_file, mode='w', header=True, index=False)         # :268
+```
+
+**Exact columns, in order** (`:229-258`): `model, representation, sigma, iteration, file_no, sample_idx, y_pred_mean, y_pred_std_uncalibrated, y_true_original, y_true_noisy, injected_noise, y_pred_std_calibrated, temperature, epistemic_uncertainty, aleatoric_uncertainty`.
+
+**Filename / directory**: no directory of its own — it is `args.filepath` with `.csv` → `_uncertainty_values.csv` (`:210`). With `-f ../results/uncertainty_outlier_pdv_qrf.csv` the output is `results/uncertainty_outlier_pdv_qrf_uncertainty_values.csv`. **Appends** (no dedup) if the file exists (`:265-266`).
+
+**Callers**: imported into `models/models.py` by `from utils import *` (`models/models.py:56`) and again explicitly inside two functions (`models/models.py:3075-3077`, `:3271-3273`). One further call at `scripts/noise_mitigation.py:742` — **stale/broken**: it passes `y_true=y_test` and omits `y_true_original`, `y_true_noisy`, `file_no`, and `save_uncertainty_values` is **never imported** in that file (imports listed `scripts/noise_mitigation.py:1-38`), so that line would raise `NameError`. Not reachable from `process_and_train.py` (only `scripts/scaffold_experiments.sh:281,290` invoke `noise_mitigation.py`).
+
+## 3. Every `save_uncertainty_values` call site in `models/models.py`
+
+| line | enclosing function (def line) | model family | arrays passed |
+|---|---|---|---|
+| 1403 | `train_rf_model` (:1340) | QRF only (`if model_type == 'qrf'` :1387) | **test**: `y_pred_mean=q50`, `y_pred_std=std_est=(q84-q16)/2`, `y_true_original=y_test_original`, `y_true_noisy=y_test` |
+| 1555 | `train_ngboost_model` (:1471) | NGBoost | **test**: `y_pred`, `y_pred_std_uncalibrated` (`dist.scale`), `y_test_original`, `y_test` |
+| 1793 | `train_gauche_model` (:1686) | Gauche GP (`gauche` / `gauche_rbf`, name :1787) | **test**: `y_pred` (GP mean), `sqrt(pred_vars)`, `y_test_original`, `y_test` |
+| 2155 | `train_dnn_model` (:1896) | DNN + BNN variants (`bnn_full`/`bnn_last`/`bnn_variational`/`bnn_full_variational`, :2047-2062); gated `args.uncertainty and is_bayesian` (:2154) | **test**: MC-sample mean/std over `x_test_tensor`, `y_test_original`, `y_test` |
+| 2272 | `train_bnn_last_standalone` (:2174) | `mlp_bnn_last` | **test**: 100 MC passes over `X_test_t` (:2255-2261), `y_test_original`, `y_test`; no temperature (T=1.0 hardcoded :2282) |
+| 2494 | `train_flexible_dnn_model` (:2289) | `flexible_dnn` / `flexible_bnn_*` (:2400-2415) | **test**; no epistemic/aleatoric passed |
+| 2761 | `train_mlp_variant_model` (:2511) | `mlp` / `mlp_bnn_*` (:2639-2650) | **test**; with VBLL or sampling decomposition |
+| 3196 | `train_gnn` (:3067) | GIN/GCN (`{model_type}_bayesian` :3191) | **test**: `predictions`, `total_unc`, and `test_targets` passed as **BOTH** `y_true_original` and `y_true_noisy` (positional, :3197-3201) |
+| 3397 | `train_graph_gp` (:3257) | `graph_gp` | **test**: `predictions`, `total`, `test_labels` as **both** original and noisy (:3398) |
+| 4000 | `train_conformal_graph_model` (:3748) | `conformal_{base}_{predictor}` graph | **test**: `y_pred`, `y_pred_std = interval_width/(2*1.645 or 1.96)` (:3997), `y_test_original.cpu().numpy().flatten()`, `y_test` |
+| 6851 | `train_heteroscedastic_gp` (:6712) | `het_gp_{kernel}` | **test**: `pred_mean`, `total_std`, `y_test_original`, `y_test` — epistemic/aleatoric computed (:6832-6839) but **not passed** |
+| 6977 | `train_evidential_kernel` (:6867) | `evidential_kernel_{kernel}` | **test**: `gamma`, `total_std`, `y_test_original`, `y_test` — decomposition computed (:6966-6968) but **not passed** |
+| 7183 | `train_ntk_gnn` (:6993) | `ntk_gnn_layers{n}` | **test**: `y_pred`, NTK posterior `uncertainty`, `y_test_original`, `y_test` |
+
+**No call site passes any training-set array.** `train_conformal_model` (:3485, tabular) does **not** call it at all — it only calls `save_conformal_intervals` (twice, duplicated, :3714 and :3728). `train_conformal_heteroscedastic` (:7198) also does not call it; it writes its own frame (:7381-7400+).
+
+## 4. QM9 models that produce a per-molecule uncertainty today
+
+From the SLURM roster actually run (`slurm_scripts_uncertainty/submit_all.sh`: qrf, ngboost, gauche, dnn/mlp × bnn_full/bnn_last/bnn_var, conformal rf/qrf/dnn):
+
+- **QRF** — quantile spread, per-molecule: `models/models.py:1388-1391` `q16,q50,q84 = model.predict(x_test, quantiles=[0.16,0.5,0.84]).T; std_est=(q84-q16)/2`. Aleatoric-only via `decompose_uncertainty_distributional` (:1395-1397). No temperature (`temperature=None`, :1400).
+- **NGBoost** — `model.pred_dist(x_test).scale` per-molecule; temperature-calibrated on `x_val_cal` (:1527-1533).
+- **Gauche GP** — `test_preds.variance` per-molecule (:1758-1760); `decompose_uncertainty_gp` gives per-molecule epistemic + constant aleatoric (:1776).
+- **DNN/MLP BNN variants** — MC sampling: `num_samples` stochastic forward passes, `preds.std(axis=0)` per-molecule (`:2107-2110`, `:2465-2466`, `:2711-2712`). VBLL models add a **constant** aleatoric term `sqrt(noise_var)` (`decompose_uncertainty_vbll`, `scripts/utils.py:169-193`).
+- **mlp_bnn_last standalone** — 100 MC passes, `predictions.std(axis=0)` (`:2255-2262`).
+- **Conformal (graph only)** — interval width / 2z, i.e. a **constant** per-molecule value for `split`/`aci` (`:3997`); tabular conformal writes no uncertainty file.
+- Not run in the uncertainty roster but coded: `graph_gp`, `het_gp_*`, `evidential_kernel_*`, `ntk_gnn_*`, `{gin,gcn}_bayesian`.
+- **RF (non-QRF), SVM, XGBoost, LGB produce none** — no call site.
+
+Known latent crashes on the graph branch (would abort before writing): `models/models.py:3133` `epistemic, aleatoric = decompose_uncertainty_sampling(predictions_array)` — missing required `num_samples` and unpacking 3 returns into 2; same at `:3162`; `models/models.py:3375` `epistemic, aleatoric = decompose_uncertainty_gp(std, best_noise)` unpacks 3 into 2.
+
+## 5. Is the noise strategy recorded?
+
+**NO.** Not a column of `save_uncertainty_values` (column list at `scripts/utils.py:229-258` contains `model, representation, sigma, iteration, file_no, sample_idx, ...` and no strategy), and not injected into the filename by `utils.py:210` (the name is purely `args.filepath`).
+
+The strategy survives **only because the caller bakes it into `-f`**: e.g. `slurm_scripts_uncertainty/unc_qrf_outlier.sh:24,26` — `--noise-strategy outlier ... -f ../results/uncertainty_outlier_pdv_qrf.csv`; `unc_dnn_bnn_full_legacy.sh:25,30` — `--noise-strategy legacy ... -f ../results/uncertainty_legacy_pdv_dnn_bnn_full.csv`.
+
+The consumer re-derives it by string-parsing the stem: `scripts/generate_paper_figures_v2.py:904-914` — strips `_uncertainty_values`, requires prefix `uncertainty_` or `anova_`, then matches against `VALID_STRATEGIES = {legacy, outlier, quantile, threshold, hetero, valprop, heteroscedastic, value_proportional}` (`:881-884`) with `STRATEGY_NORMALIZE` (`:885`). It also re-infers the BNN suffix from the filename because the CSV `model` column only says `dnn`/`mlp` (`:919-929`).
+
+Consequence for a patch: **a new output file must keep the `uncertainty_{strategy}_{rep}_{model}` stem convention or the strategy is unrecoverable.**
+
+## 6. `decompose_uncertainty_sampling*` — both quoted
+
+`scripts/utils.py:62-85`:
+```python
+def decompose_uncertainty_sampling(predictions_array, num_samples):
+    """... Args: predictions_array (num_samples, num_datapoints); num_samples ...
+    Returns: epistemic, aleatoric, total"""
+    epistemic = predictions_array.std(axis=0)
+    aleatoric = None
+    total = epistemic  # When aleatoric is unknown
+    return epistemic, aleatoric, total
+```
+`num_samples` is accepted and **never used**.
+
+`scripts/utils.py:88-110`:
+```python
+def decompose_uncertainty_sampling_heteroscedastic(mean_predictions, var_predictions):
+    """... mean_predictions/var_predictions: (num_samples, num_datapoints) ..."""
+    epistemic = mean_predictions.std(axis=0)
+    aleatoric = np.sqrt(var_predictions.mean(axis=0))
+    total = np.sqrt(epistemic**2 + aleatoric**2)
+    return epistemic, aleatoric, total
+```
+
+**Call sites of `decompose_uncertainty_sampling`**: `models/models.py:2121` (`train_dnn_model`, 2-arg, correct), `:2724` (`train_mlp_variant_model`, 2-arg, correct), `:3133` and `:3162` (`train_gnn`, **1-arg, broken**). Imported at `models/models.py:3077`.
+
+**Call sites of `decompose_uncertainty_sampling_heteroscedastic`**: **DOES NOT EXIST** — zero callers anywhere in either repo path (`grep -rn` over `/Users/apunt/repos/qsar_qm_models` returns only the definition at `scripts/utils.py:88` plus markdown mentions).
+
+## 7. Train/val/test arrays in scope at training time
+
+**Tabular path** — produced in `process_and_train.py::process_and_run`, the non-graph rep loop:
+- Fresh parse: `x_train, y_train, y_train_original = parse_mmap(files["train"], len(train_idx), rep, ...)` at `:1785-1788`; `x_test, y_test, y_test_original` `:1789-1792`; `x_val, y_val, y_val_original` `:1793-1796`.
+- Cached branch: `parsed_reps[rep]` at `:1773-1779` supplies `x_train, y_train, x_test, y_test, x_val, y_val, y_test_original`. The cache dict (`:1714-1720`) stores **no** `y_train_original` / `y_val_original`.
+- `continuous_pdv` z-scores `x_train/x_test/x_val` in place using train stats at `:1800-1809`.
+- Handed off: `run_model(x_train, y_train, x_test, y_test, x_val, y_val, model, args, iteration_seed, rep, iteration, s, file_no, y_test_original, domain_labels=domain_labels)` at `:1816-1820`; signature `:1239`.
+
+**Inside each trainer** — the six arrays `x_train, y_train, x_test, y_test, x_val, y_val` plus `y_test_original` are all parameters (signatures: `train_rf_model` :1340, `train_ngboost_model` :1471, `train_gauche_model` :1686, `train_dnn_model` :1896, `train_bnn_last_standalone` :2174, `train_flexible_dnn_model` :2289, `train_mlp_variant_model` :2511, `train_conformal_model` :3485). So **`x_train` is always in scope at prediction time**; adding a train-set prediction pass needs no signature change.
+
+Torch tensors already built for train:
+- `train_dnn_model`: `x_train_tensor` / `y_train_tensor` at `:1965-1966`, `x_test_tensor` `:1967`.
+- `train_flexible_dnn_model`: `x_train_tensor` `:2357`, `x_test_tensor` `:2359`.
+- `train_mlp_variant_model`: `x_train_tensor` `:2574`, `x_test_tensor` `:2576`.
+- `train_bnn_last_standalone`: `X_test_t` used at `:2258`.
+- `train_gauche_model`: `x_train_tensor = torch.from_numpy(x_train_full).double()` `:1740` where `x_train_full` = train (+ half or all of val, `:1732-1738`).
+
+**Caveats that will bite a train-set patch:**
+1. `y_train_original` is parsed at `:1785` and **discarded** (also `y_val_original` at `:1793`); the cache never stores it. To write `injected_noise` for training molecules you must plumb `y_train_original` through `run_model` → each trainer, and add it to `parsed_reps` (`:1714-1720`).
+2. `train_rf_model` **overwrites** `x_train`/`y_train` with train+val before fitting, unconditionally: `models/models.py:1383-1384` `x_train = np.vstack((x_train, x_val)); y_train = np.hstack((y_train, y_val))`, then `model.fit(x_train, y_train)` `:1386`. So post-fit `x_train` is train∪val for QRF, and `y_train_original` would need the same concatenation.
+3. `train_ngboost_model` (`:1972-1979`) and `train_gauche_model` (`:1732-1738`) build `x_train_full`/`x_val_train` = train + half of val when `args.uncertainty` is true; the DNN/MLP family instead splits val only for calibration (`:1974-1981`, `:2364-2371`, `:2581-2588`) and trains on `x_train` alone.
+
+**Graph path** — `run_qm9_graph_model` (`:1455`): `y_train_noisy, y_train_original` at `:1462-1465`, `y_test_noisy, y_test_original` `:1466-1469`, `y_val_noisy, y_val_original` `:1470-1473`; loaders `train_loader/test_loader/val_loader` `:1498-1500`; `train_graphs/test_graphs/val_graphs` built at `:1508-1510`. `y_train_noisy/y_test_noisy/y_val_noisy` are already forwarded into `train_gnn` and `train_conformal_graph_model` (`:1516-1528`), so the graph side already has train labels in scope; `y_train_original` is **not** forwarded.
+
+## 8. Conformal path — is there k-fold inside training?
+
+**No k-fold anywhere.** `grep -rn "KFold|cross_val_predict|n_splits"` over `scripts/` and `models/` returns exactly one hit: an unused import `from sklearn.model_selection import KFold` at `scripts/noise_mitigation.py:22` (no `KFold(` construction, no `kf.` usage anywhere in that file). `models/models.py` contains **no** `KFold` at all.
+
+`train_conformal_model` (`models/models.py:3485`) is pure **split conformal**: fit base model on `x_train` (`:3548`, `:3559`, or `train_nn` at `:3616`), then
+
+```python
+y_val_pred  = np.asarray(base_model.predict(x_val)).reshape(-1)      # :3636
+y_test_pred = np.asarray(base_model.predict(x_test)).reshape(-1)     # :3637
+...
+conformity_scores = np.abs(y_val - y_val_pred)                       # :3670
+n_cal = len(conformity_scores)                                       # :3682
+q_level = np.ceil((n_cal + 1) * (1 - alpha)) / n_cal                 # :3683
+q_level = min(q_level, 1.0)                                          # :3684
+quantile = np.quantile(conformity_scores, q_level)                   # :3685
+y_lower = y_test_pred - quantile                                     # :3697
+y_upper = y_test_pred + quantile                                     # :3698
+```
+
+Note `alpha_list` loop `:3679`; `predictor_type == 'aci'` (`:3687-3694`) is a comment-acknowledged copy of the split branch ("Full ACI would update this quantile adaptively"), i.e. identical arithmetic. The whole validation set is the calibration set (`n_cal=len(x_val)`, metadata `:3627`); `args.calibration_size` is accepted (`:3485`) but **never used** in this function.
+
+`train_conformal_heteroscedastic` (`:7198`) has `calibration_method` with choices `['split','cv','jackknife']` (`:7221`) — but only `if calibration_method == 'split':` is implemented (`:7299`); there is **no `cv` or `jackknife` branch**, and the non-tuning default is `'split'` (`:7231`). It splits validation once: `cal_size = int(len(x_val) * (args.calibration_size / 100.0))`, `x_val_cal = x_val_t[:cal_size]`, `x_val_proper = x_val_t[cal_size:]` (`:7240-7243`).
+
+**There is no existing cross-fitting template in this repo.** The nearest reusable pattern is the deterministic half-split used for temperature calibration, e.g. `models/models.py:1974-1981`:
+```python
+split_idx = len(x_val) // 2
+x_val_train = x_val[:split_idx]; y_val_train = y_val[:split_idx]
+x_val_cal   = x_val[split_idx:]; y_val_cal   = y_val[split_idx:]
+```
+(repeated at `:1502-1509`, `:1733-1738`, `:2364-2371`, `:2581-2588`) — an unshuffled contiguous split, not a fold scheme.

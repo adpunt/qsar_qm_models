@@ -1,0 +1,221 @@
+# COMPUTE-SIDE INVENTORY — /Users/apunt/repos/qsar_qm_models
+
+## 1. Directory census (30 `slurm_scripts_*` dirs)
+
+`.sh` counts (top level; `ls`):
+
+| dir | .sh | dir | .sh |
+|---|---|---|---|
+| slurm_scripts_analysis | 6 | slurm_scripts_pdv_investigation | 7 |
+| slurm_scripts_anova | 43 | slurm_scripts_pretrained_test | 1 |
+| slurm_scripts_continuous_pdv | 14 (+23 in `vbll_split/`) | slurm_scripts_remaining | 13 |
+| slurm_scripts_cpdv_missing | 25 | slurm_scripts_rerun | 17 |
+| slurm_scripts_deeper_dnn | 13 | slurm_scripts_svm | 7 |
+| slurm_scripts_figures | 1 | slurm_scripts_uncertainty | 73 |
+| slurm_scripts_fixup | 7 | slurm_scripts_validation_bnn | 13 |
+| slurm_scripts_fixup_timeout | 10 | slurm_scripts_validation_dnn | 13 |
+| slurm_scripts_full_vbll | 12 | slurm_scripts_validation_mlp | 37 |
+| slurm_scripts_gauche_mhggnn | 7 | slurm_scripts_validation_rerun | 92 |
+| slurm_scripts_gauche_rbf | 25 | slurm_scripts_validation_vbll | 13 |
+| slurm_scripts_missing | 38 | slurm_scripts_valprop_hetero | 23 |
+| slurm_scripts_mol2vec | 18 | slurm_scripts_vbll | 12 |
+| slurm_scripts_mol2vec_investigation | 3 | slurm_scripts_vbll_valprop_rerun | 3 |
+| slurm_scripts_mol2vec_missing | 5 | slurm_scripts_ngboost_mhggnn | 8 |
+
+No `slurm_scripts_validation` (plain) dir — the validation families are `_bnn/_dnn/_mlp/_vbll/_rerun`.
+
+### Representative A — `/Users/apunt/repos/qsar_qm_models/slurm_scripts_anova/lgb_valprop.sh` (verbatim)
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=lgb_valprop
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=23:59:00
+#SBATCH --partition=long
+#SBATCH --mem=256G
+#SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
+
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+cd /data/stat-cadd/scat9264/qsar_qm_models
+. setup.sh
+cd scripts
+
+# LightGBM for valprop
+
+# lgb/ecfp4
+python process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m lgb \
+    -r ecfp4 \
+    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
+    --noise-strategy value_proportional \
+    -n 10000 \
+    -b 10 \
+    --normalize True \
+    \
+    -f ../results/anova_valprop_ecfp4_lgb.csv
+
+# lgb/pdv        … (identical block, -r pdv,   -f ../results/anova_valprop_pdv_lgb.csv)
+# lgb/sns        … (identical block, -r sns,   -f ../results/anova_valprop_sns_lgb.csv)
+# lgb/smiles     … (identical block, -r smiles,-f ../results/anova_valprop_smiles_lgb.csv)
+# lgb/mhggnn     … (identical block, -r mhggnn,-f ../results/anova_valprop_mhggnn_lgb.csv)
+```
+(5 sequential blocks; only `-r` and `-f` differ. No `--account=stat-cadd`.)
+
+### Representative B — `/Users/apunt/repos/qsar_qm_models/slurm_scripts_validation_rerun/val_lightgbm_pdv_logd.sh` (verbatim)
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=val_LightGBM_pdv_logd
+#SBATCH --output=slurm-%j.out
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+#SBATCH --partition=long
+#SBATCH --time=8:00:00
+#SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
+#SBATCH --mail-type=END,FAIL
+
+export MAMBA_EXE="/data/stat-cadd/scat9264/bin/micromamba"
+eval "$("$MAMBA_EXE" shell hook --shell bash)"
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+cd /data/stat-cadd/scat9264/KIRBy
+. ../qsar_qm_models/setup.sh
+cd tests
+
+python alternative_data_noise_robustness.py \
+    --datasets logd \
+    --models LightGBM \
+    --reps PDV \
+    --results-root results/validation_rerun/pdv_logd
+
+echo "Done: LightGBM x PDV x logd"
+```
+
+## 2. Command lines / entrypoints
+
+Entrypoints (occurrence counts across all `slurm_scripts_*`):
+- `process_and_train.py` — 1293 (QM9 family; run from `qsar_qm_models/scripts`)
+- `alternative_data_noise_robustness.py` — 175 (validation family; run from `KIRBy/tests`)
+- `tune_svm_all_reps.py` 5, `investigate_pdv.py` 4, `merge_results.py` 4, `analyze_top_pairs.py` 1, `test_pretrained_for_qsar.py` 1
+- `generate_paper_figures.py` 2, `generate_paper_figures_v2.py` 1
+
+QM9 family flag values actually passed:
+- `-d QM9 -t homo_lumo_gap` (universal)
+- `-n 10000` — 1265/1265 invocations (no other value anywhere)
+- `-b 10` — 1107; `-b 1` — 154 (the `-b 1` set is the uncertainty runs)
+- `--normalize True` — 1293 (matches invocation count exactly)
+- `--noise-strategy`: `value_proportional` 239, `heteroscedastic` 237, `legacy` 194, `outlier` 187, `quantile` 184, `threshold` 184, `$STRATEGY` 39, `hetero` 2 (**`hetero` is not a valid value** — `process_and_train.py:259` accepts `heteroscedastic`)
+- `-r`: ecfp4 254, pdv 248, smiles 182, mhggnn 167, sns 152, mol2vec 127, continuous_pdv 80, randomized_smiles 48, `$REP` 29
+- `-m`: mlp 266, dnn 266, flexible_dnn 155, conformal 108, gauche 89 (+24 `gauche --kernel rbf`), ngboost 78, lgb 72, qrf 63, xgboost 50, rf 50, svm 46
+- `-f ../results/<name>.csv` on every invocation
+- Secondary flags in use: `--bayesian-transformation` 406, `--hidden-sizes` 109, `--cp-base-model` 108, `--kernel` 30, `-u True` 226 bare + ~318 alongside `--bayesian-transformation`, `--start-iteration` 20, `--n-trials` 5, `--random-seed` 2
+
+Validation family (`alternative_data_noise_robustness.py`) flags: `--datasets`, `--models`, `--reps`, `--results-root` only (175/175, 162/175 for `--reps`); `--sigmas` twice (smoke test only). Dataset values: logd 53, caco2 53, herg 29, herg_ki 26. Reps: PDV 42, ECFP4 41, SNS 39, MHG-GNN-pretrained 39. Models: DNN 24, SVM/RF 13, XGBoost/VBLL-Full/QRF/NGBoost/MLP-VBLL-Full/MLP-BNN-Full/MLP/LightGBM/BNN-Full 12 each, GP 3.
+
+### Distinct sigma grids (whole repo)
+1. `--sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0` — **1252 occurrences (the only real grid)**
+2. `--sigma $SIGMAS` — 7 (`SIGMAS` always = the same 11-point grid: `slurm_scripts_mol2vec_investigation/investigate_archs.sh:23`, `investigate_seeds.sh:23`, `slurm_scripts_ngboost_mhggnn/ngboost_mhggnn_all_sequential.sh:19`)
+3. `--sigma $SIGMA` — 6, array-index into the same 11-point grid (`slurm_scripts_fixup_timeout/anova_cpdv_*.sh:21-22`)
+4. `--sigma 0.4 0.5 0.6 0.7 0.8 0.9 1.0` — 1, only `slurm_scripts_fixup_timeout/anova_cpdv_svm_valprop.sh:24` (7-point resume grid)
+5. `--sigmas 0.0` — 2, validation smoke test only (`slurm_scripts_validation_rerun/smoke_test.sh:31,47`)
+
+**Effectively one grid: 11 points, 0.0→1.0 step 0.1.**
+
+## 3. Flags never passed anywhere (grep across all 30 slurm dirs)
+
+| flag | argparse location | occurrences in slurm dirs |
+|---|---|---|
+| `--strategy-params` | `scripts/process_and_train.py:260` (default `"noise_strategy_params.json"`) | **0 — DOES NOT APPEAR** |
+| `--strategy_params` (underscore spelling) | not an argparse name | **0 — DOES NOT EXIST as a flag either** |
+| `--distribution` | `scripts/process_and_train.py:241` (default `'gaussian'`) | **0** |
+| `--save-uncertainty` | **DOES NOT EXIST.** Real flag is `-u` / `--uncertainty`, `scripts/process_and_train.py:256`, `type=str2bool, default=False` | `--save-uncertainty` 0; `--uncertainty` long form **0**; `-u True` short form used ~544 times |
+| `-s` / `--split` | `scripts/process_and_train.py:245` (default `"scaffold"`) | **0 — never passed; every run uses the scaffold default** |
+
+Also never passed: `--tuning`, `--use-best-params`, `-p/--params`, `--shap`, `--epochs`, `--loss`, `--calibration-size`, `--domain-method`, `--alpha`, `--mol2vec-dim`, `--clean-smiles`, `--save-per-epoch-metrics`.
+
+Confirms the memory note independently: `noise_strategy_params.json` is never handed to the pipeline by any SLURM script.
+
+## 4. Full-QM9-re-run size
+
+Scope = `anova`, `missing`, `mol2vec`, `mol2vec_missing`, `mol2vec_investigation`, `vbll`, `full_vbll`, `vbll_valprop_rerun`, `continuous_pdv` (incl. `vbll_split/`), `cpdv_missing`, `gauche_rbf`, `gauche_mhggnn`. Generator `.py` templates (`generate_missing.py`, `generate_mol2vec.py`) excluded — their emitted `.sh` files are already on disk.
+
+**Job scripts (excluding `submit*`, `check_*`, `merge*`, `smoke*`): 216**
+
+| dir | job scripts | distinct `-f` CSV targets (loops expanded) |
+|---|---|---|
+| slurm_scripts_anova | 42 | 514 |
+| slurm_scripts_missing | 36 | 174 |
+| slurm_scripts_mol2vec | 17 | 102 |
+| slurm_scripts_mol2vec_missing | 4 | 15 |
+| slurm_scripts_mol2vec_investigation | 2 | 30 |
+| slurm_scripts_vbll | 12 | 60 |
+| slurm_scripts_full_vbll | 12 | 60 |
+| slurm_scripts_vbll_valprop_rerun | 2 | 10 |
+| slurm_scripts_continuous_pdv | 35 | 96 |
+| slurm_scripts_cpdv_missing | 24 | 24 |
+| slurm_scripts_gauche_rbf | 24 | 24 |
+| slurm_scripts_gauche_mhggnn | 6 | 6 |
+
+**DISTINCT OUTPUT CSV PATHS across the union: 906**
+- `../results/anova_*.csv` — 864
+- `../results/uncertainty_*_continuous_pdv_{ngboost,qrf}.csv` — 12
+- `../results/mol2vec_investigate_*.csv` — 30
+
+Per-strategy token in the 864 anova targets: legacy 144, quantile 144, threshold 144, outlier 144, hetero 130, valprop 130, `heteroscedastic` 14, `value_proportional` 14.
+
+**Naming inconsistency (real, not a memory claim):** `slurm_scripts_continuous_pdv/` loops over the *long* strategy names and interpolates them straight into the filename (`slurm_scripts_continuous_pdv/bnn_dnn.sh:22,34`, `fast_models.sh:25-26`, `vbll.sh:22-23`, `unc_qrf.sh:23`, `unc_ngboost.sh:23`, `gauche.sh:22`), producing `anova_heteroscedastic_continuous_pdv_*.csv` and `anova_value_proportional_continuous_pdv_*.csv`, while every other family writes `anova_hetero_*` / `anova_valprop_*`. 28 of the 906 targets carry the long spelling.
+
+Sequential invocations (raw `-f` lines, loops expanded, before dedup) across the 12 dirs = 919 → 906 distinct; only 13 duplicate targets, i.e. essentially no redundancy to reclaim.
+
+Local check: `/Users/apunt/repos/qsar_qm_models/results/` contains **0** `anova_*.csv` (33 `.csv` total, of which 30 are the `mol2vec_investigate_*` files). 876 of the 906 targets have no local counterpart — the QM9 result set lives only on ARC.
+
+## 5. Wall-time distribution
+
+Whole repo, 552 scripts carrying `#SBATCH --time`:
+
+| requested time | count |
+|---|---|
+| 47:59:00 | 240 |
+| 16:00:00 | 84 |
+| 23:59:00 | 74 |
+| 71:59:00 | 64 |
+| 8:00:00 | 48 |
+| 24:00:00 | 26 |
+| 05:59:00 | 9 |
+| 03:59:00 | 6 |
+| 02:00:00 | 3 |
+| 1:00:00 | 1 |
+| `{time}` / `{time_limit}` (generator templates) | 3 |
+
+Sum of requested wall-clock across all `slurm_scripts_*`: **20,142.5 h**.
+
+Restricted to the 216 QM9-re-run job scripts of §4 (array ranges expanded): **11,132.1 requested wall-hours; 44,528.3 requested core-hours** (`--cpus-per-task` is 4 in the QM9 families, 8 in validation). This is the *requested* ceiling, not measured usage.
+
+Per-dir wall-time mix, QM9 families: anova 36×47:59 + 6×23:59; missing 36×47:59; mol2vec 13×47:59 + 4×23:59; mol2vec_missing 2×47:59 + 2×24:00; mol2vec_investigation 2×47:59; vbll 12×47:59; full_vbll 12×47:59; vbll_valprop_rerun 2×47:59; continuous_pdv 5×71:59 + 6×47:59 + 2×23:59; cpdv_missing 24×47:59; gauche_rbf 24×71:59; gauche_mhggnn 6×71:59. Validation dirs are all 16:00 / 8:00 / 24:00. Array jobs exist only in `slurm_scripts_continuous_pdv/vbll_parallel.sh:3` and `vbll_uncertainty_parallel.sh:3` (`--array=0-11`) and `slurm_scripts_fixup_timeout/anova_cpdv_*.sh:3` (`--array=0-10`).
+
+## 6. Figure-regeneration scripts
+
+`/Users/apunt/repos/qsar_qm_models/slurm_scripts_analysis/run_figures_v2.sh` — 2:00:00, partition long, `--account=stat-cadd`, mem 128G, does `git pull` then from `scripts/`:
+```
+python generate_paper_figures_v2.py \
+  --qm9-dir ../results \
+  --validation-dir /data/stat-cadd/scat9264/KIRBy/tests/results/alternative_full \
+  --output-dir ../results/paper_figures_v2
+```
+Carries an in-file note that `--output-dir` **must** be given because v2's own default is the v1 dir — confirmed at `scripts/generate_paper_figures_v2.py:3974` (`default='../results/paper_figures'`).
+
+`/Users/apunt/repos/qsar_qm_models/slurm_scripts_analysis/run_figures.sh` — same SBATCH block (2:00:00, long, stat-cadd, 128G), does `git pull` then from `scripts/`:
+```
+python generate_paper_figures.py --qm9-dir ../results \
+  --validation-dir /data/stat-cadd/scat9264/KIRBy/tests/results/alternative_full
+```
+**No `--output-dir`** → falls through to `scripts/generate_paper_figures.py:4509` default `../results/paper_figures`. Both scripts therefore point at the same `--validation-dir`; only the output dir and the script version differ.
+
+Third, older variant: `/Users/apunt/repos/qsar_qm_models/slurm_scripts_figures/generate_paper_figures.sh` — runs `merge_results.py` first, then `python scripts/generate_paper_figures.py` from the **repo root** with all three paths absolute, and a **different** validation dir: `/data/stat-cadd/scat9264/KIRBy/tests/results/validation` (not `alternative_full`), output `/data/stat-cadd/scat9264/qsar_qm_models/results/paper_figures`.

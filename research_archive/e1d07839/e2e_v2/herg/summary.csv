@@ -1,0 +1,2 @@
+dataset,model,rep,strategy,baseline_r2,baseline_r2_std,baseline_rmse,auc_norm,weibull_tau,weibull_beta,retention_0.5,retention_1.0
+ChEMBL-hERG-Ki,GP,ECFP4,quantile,-0.6625865887577616,0.3057316969562098,1.1640357704788153,,,,,

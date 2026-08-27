@@ -1,0 +1,604 @@
+{
+ "area": "Aleatoric/epistemic uncertainty decomposition \u2014 literature research, exact recipe, code specification, and the author's standing instruction to BUILD it to industry standard",
+ "items": [
+  {
+   "kind": "author-decision",
+   "headline": "The author's first of three instructions: the decomposition is not being dropped, and the research must be evidence-based, not hallucinated.",
+   "verbatim": "7. \"I'm not dropping it. How do other real papers do it (with evidence, not hallucinated) and what can I do that they're doing? What am I doing wrong in comparison?\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:2317 (source transcript /Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae.jsonl, session-continuation summary of the 2026-08-20 user message)",
+   "verification": "verified \u2014 quoted inside the compaction summary of session f692d614; the same instruction is restated in RERUN_PLAN.md:65",
+   "why_it_matters": "This is instruction #1 of three. It establishes that a recommendation to drop the split is a refusal of a live instruction, not advice."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The author's second instruction, 2026-08-21 00:58 \u2014 implement to industry standards, in capitals.",
+   "verbatim": "4. so should I be modifying my code to do epistemic/aleatoric decomposition differently? I don't know what you refuse to go past basic surface level observations here. I NEED THESE RESULTS AND I WANT TO IMPLEMENT THEM BY INDUSTRY STANDARDS HOW ARE YOU NOT GETTING THIS",
+   "source": "/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae.jsonl:1276 \u2014 user message, TS 2026-08-21T00:58:49.585Z (rendered at /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:2622)",
+   "verification": "verified \u2014 read directly from the JSONL transcript",
+   "why_it_matters": "Instruction #2. 'By industry standards' is the acceptance criterion: the build must match what the published implementations do, which is exactly what the salvaged code file documents."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The author's third instruction, 2026-08-21 01:12 \u2014 the faulty code must be deleted and replaced, not preserved.",
+   "verbatim": "4. You're still losing me but just put this issue into immediate_next_steps. But I have to be very clear: you do not like deleting code. It seems like there's some faulty code that must be DELETED and REPLACED. get over it",
+   "source": "/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae.jsonl:1276 \u2014 user message, TS 2026-08-21T01:12:00.601Z",
+   "verification": "verified \u2014 read directly from the JSONL transcript",
+   "why_it_matters": "Instruction #3. It is why the specification section is headed 'The code to delete and replace' rather than 'options'. Deleting the stub is authorised; leaving it in place is not."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The decision is recorded as settled in the live plan: BUILD it, do not treat as open, do not propose dropping it.",
+   "verbatim": "**Decision 3 \u2014 the aleatoric/epistemic split \u2014 NOT A DECISION. You settled it on 2026-08-21.\nIt gets BUILT, to industry standard, by deleting the broken code and replacing it.**\n\nYour words, 00:58: *\"so should I be modifying my code to do epistemic/aleatoric decomposition\ndifferently? \u2026 I NEED THESE RESULTS AND I WANT TO IMPLEMENT THEM BY INDUSTRY STANDARDS HOW ARE YOU\nNOT GETTING THIS\"*. And at 01:12, after I hedged: *\"there's some faulty code that must be DELETED\nAND REPLACED. get over it\"*.\n\nThat is why the relevant section of `immediate_next_steps.md` is headed \"The code to delete and\nreplace\" rather than \"options\". **Do not treat this as open, and do not propose dropping it.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:489-498",
+   "verification": "verified",
+   "why_it_matters": "The current state document already carries the decision. Any new plan that reopens it is a regression."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The trap that inverted the instruction: an OLDER 2026-08-14 note removes the aleatoric/epistemic FRAME from the abstract, not the computation.",
+   "verbatim": "\u26a0\ufe0f **The trap that caught me.** A separate, *earlier* decision (2026-08-14, `REVISION_GUIDE.md:73`\nand `:208`) removes the aleatoric/epistemic *frame* from the paper's Scientific Contribution. That\nis about a claim in the abstract, not about whether the decomposition is computed. It is older, and\nit was superseded on 23 August. Matching on the keyword and stopping there inverted a live\ninstruction.",
+   "source": "/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/memory/settled_decisions_uncertainty.md:32-36",
+   "verification": "verified",
+   "why_it_matters": "Anyone grepping the repo for 'aleatoric' will hit the 2026-08-14 note first and conclude the split was dropped. It was not. The 21 August instruction supersedes it."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE RECIPE, two lines, identical in every implementation read as source (Chemprop, Ryu, Scalia, VBLL).",
+   "verbatim": "**The decomposition itself is two lines**, and it is identical in every implementation located and read\nas source \u2014 Chemprop, Ryu et al., Scalia et al. and VBLL. Given `M` forward passes each returning a\nmean and a variance:\n\n```python\naleatoric = mean(predicted_variances, axis=0)   # average of the predicted variances\nepistemic = var(predicted_means, axis=0)        # spread of the predicted means\ntotal     = aleatoric + epistemic\n```",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:751-759",
+   "verification": "verified \u2014 the four source implementations were each fetched and quoted in ALEA_EPIS_CODE.md",
+   "why_it_matters": "This is the whole method. Everything else is plumbing to make a model emit the two quantities this needs."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Ryu, Kwon & Kim's canonical five lines, verbatim from their repo \u2014 note P_logvar is exp()'d before averaging, so aleatoric is a mean of VARIANCES.",
+   "verbatim": "        P_mean = np.asarray(P_mean)\n        P_logvar = np.exp(np.asarray(P_logvar))\n\n        mean = np.mean(P_mean, axis=0)\n        ale_unc = np.mean(P_logvar, axis=0)\n        epi_unc = np.var(P_mean, axis=0)\n        tot_unc = ale_unc + epi_unc",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:16-32 (fetched from https://raw.githubusercontent.com/SeongokRyu/uq_molecule/master/train_cep.py lines 119-133)",
+   "verification": "verified \u2014 source file fetched HTTP 200 and read; repo name confirmed as SeongokRyu/uq_molecule (the lowercase/hyphen variant 404s)",
+   "why_it_matters": "The reference implementation of the exact experiment this paper runs. Copying the exp() placement is the difference between averaging variances and averaging log-variances."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Chemprop v1 fuses the two components into one number; splitting them back out requires this exact algebra.",
+   "verbatim": "This is algebraically identical to Ryu. I checked it numerically:\n\n```python\n# (sum_vars + sum_squared)/M - (sum_preds/M)**2\n#   ==  vars_.mean(0) + mus.var(0)      -> True, exact float match\n```\n\nso Chemprop's single `uncal_vars` **is** `aleatoric + epistemic` fused. If you\nwant them separately from Chemprop v1 you must split that expression yourself:\n\n```python\naleatoric = sum_vars / M                                  # mean of predicted variances\nepistemic = sum_squared / M - (sum_preds / M) ** 2         # variance of the means\n```",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:69-82 (source https://raw.githubusercontent.com/chemprop/chemprop/v1.7.1/chemprop/uncertainty/uncertainty_predictor.py, class MVEPredictor lines 581-584)",
+   "verification": "verified \u2014 source fetched and read; the algebraic identity was checked numerically to exact float match",
+   "why_it_matters": "Anyone benchmarking against Chemprop v1 gets a single fused variance. This is the exact split, checked, not assumed."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Chemprop v2 splits the halves across estimator classes and uses population variance (correction=0); you must add the halves yourself.",
+   "verbatim": "`correction=0` is the population variance (divide by N, not N\u22121) \u2014 matches\n`np.var` default. **In v2 you have to add the two halves yourself**; v1 did it\nfor you.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:122-126 (sources: MVEEstimator.__call__ lines 167-180, EnsembleEstimator.__call__ line 241, DropoutEstimator.__call__ lines 540-541 of https://raw.githubusercontent.com/chemprop/chemprop/main/chemprop/uncertainty/estimator.py)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "An easy-to-get-wrong detail: N vs N-1 in the epistemic term, and the fact that v2 never sums them for you."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Scalia et al.'s branch \u2014 the closest match to this experiment, because it already handles the target scaler.",
+   "verbatim": "        elif aleatoric and mc_dropout:\n            with torch.no_grad():\n                P_mean = []\n                P_logvar = []\n\n                for ss in range(sampling_size):\n                    batch_preds, batch_logvar = model(batch, features_batch)\n                    P_mean.append(batch_preds)\n                    P_logvar.append(torch.exp(batch_logvar))\n\n                batch_preds = torch.mean(torch.stack(P_mean), 0)\n                batch_ale_unc = torch.mean(torch.stack(P_logvar), 0)\n                batch_epi_unc = torch.var(torch.stack(P_mean), 0)",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:132-146 (fetched from https://raw.githubusercontent.com/gscalia/chemprop/uncertainty/chemprop/train/predict.py lines 106-117)",
+   "verification": "verified \u2014 code fetched and read in full; the Scalia PAPER itself is paywalled (HTTP 403) and was NOT read",
+   "why_it_matters": "Scalia's fork is the recommended template because it is the only one that also inverse-transforms the target scaler correctly."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE TRAP everybody forgets: when undoing target standardisation, rescale the VARIANCES, not the standard deviations.",
+   "verbatim": "Note the one thing everybody forgets \u2014 **rescale the variances, not the\nstandard deviations**, when you undo target standardisation (lines 124\u2013127):\n\n```python\n            if scaler is not None:\n                batch_preds = scaler.inverse_transform(batch_preds)\n                batch_ale_unc = scaler.inverse_transform_variance(batch_ale_unc)\n                batch_epi_unc = scaler.inverse_transform_variance(batch_epi_unc)\n```",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:148-156",
+   "verification": "verified \u2014 read from the Scalia fork source",
+   "why_it_matters": "This project standardises QM9 labels, so every reported uncertainty magnitude and coverage number depends on getting this right. It is called out twice in the D4 write-up because it is easy to get wrong."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The two-output head: two Linear layers off the same penultimate features (Scalia), the same shape in TensorFlow (Ryu).",
+   "verbatim": "        if self.aleatoric:\n            self.output_layer = nn.Linear(last_linear_dim, args.output_size)\n            self.logvar_layer = nn.Linear(last_linear_dim, args.output_size)\n        else:\n            self.output_layer = nn.Linear(last_linear_dim, args.output_size)\n\n    def forward(self, *input):\n        _output = self._ffn(self.encoder(*input))\n\n        if self.aleatoric:\n            output = self.output_layer(_output)\n            logvar = self.logvar_layer(_output)\n\n            # Gaussian uncertainty only for regression, directly returning in this case\n            return output, logvar",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:167-183 (fetched from https://raw.githubusercontent.com/gscalia/chemprop/uncertainty/chemprop/models/model.py lines 96-117)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "This is the concrete architecture change the Bayesian networks need. Ryu's blocks.py lines 102-113 use the identical two-Dense-head shape."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Two designs for the variance head, one decision: unconstrained log_var (Ryu, Scalia) versus softplus'd var (Chemprop v2). log_var is better behaved early in training.",
+   "verbatim": "Two designs, one decision: predict `log_var` unconstrained (Ryu, Scalia), or\npredict `var` and force positivity with `softplus` (Chemprop v2). `log_var` is\nnumerically better behaved early in training.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:225-227 (Chemprop v2 MveFFN quoted at lines 209-222, from https://raw.githubusercontent.com/chemprop/chemprop/main/chemprop/nn/predictors.py lines 173-188)",
+   "verification": "verified \u2014 both sources fetched and read",
+   "why_it_matters": "A real design choice with a stated recommendation, backed by two published implementations rather than invented."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The loss function \u2014 four real published versions, differing only by constants, plus a drop-in.",
+   "verbatim": "def heteroscedastic_loss(true, mean, log_var):\n    \"\"\"\n    Compute the heteroscedastic loss for regression.\n    \"\"\"\n    precision = torch.exp(-log_var)\n    loss = precision * (true - mean)**2 + log_var\n    return loss",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:235-241 (fetched from https://raw.githubusercontent.com/gscalia/chemprop/uncertainty/chemprop/utils.py lines 155-166)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "Scalia drops the 0.5 factors Ryu keeps \u2014 same minimum, different scale. Knowing that stops a spurious 'my loss doesn't match the paper' investigation."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The drop-in Gaussian NLL for this repo's PyTorch Bayesian nets, log-var parameterised, with the constant so the number is a real NLL.",
+   "verbatim": "import math, torch\n\ndef gaussian_nll(y, mean, log_var):\n    \"\"\"Per-element heteroscedastic Gaussian NLL. mean/log_var are the two heads.\"\"\"\n    return 0.5 * (math.log(2 * math.pi) + log_var + torch.exp(-log_var) * (y - mean) ** 2)\n\nTorch also ships `torch.nn.functional.gaussian_nll_loss(input, target, var)`,\nwhich takes **var**, not log-var, and clamps it at `eps=1e-6`.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:277-286",
+   "verification": "verified \u2014 derived as the Ryu form with the 2\u03c0 constant restored; the torch API note is a statement about the installed library",
+   "why_it_matters": "Ready to paste. The warning that torch's built-in takes var and not log-var is exactly the kind of mismatch that silently produces nonsense."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Chemprop v1 and v2 loss functions, verbatim \u2014 v1 parameterised in variance with the 2\u03c0 constant, v2 as MVELoss.",
+   "verbatim": "    # Unpack combined prediction values\n    pred_means, pred_var = torch.split(pred_values, pred_values.shape[1] // 2, dim=1)\n\n    return torch.log(2 * np.pi * pred_var) / 2 + (pred_means - targets) ** 2 / (2 * pred_var)",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:255-259 (chemprop/train/loss_functions.py lines 240-243; v2 MVELoss quoted at lines 265-271 from chemprop/nn/metrics.py lines 211-217)",
+   "verification": "verified \u2014 sources fetched and read; note chemprop/nn/loss.py on main is 404, the losses live in metrics.py",
+   "why_it_matters": "Two more independent confirmations of the same loss, and a correction to where the file lives in Chemprop v2."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE QUANTILE-FOREST VARIANT \u2014 the runnable function, law of total variance over per-tree leaf distributions, no retraining.",
+   "verbatim": "def forest_aleatoric_epistemic(forest, X_train, y_train, X):\n    \"\"\"Split a fitted sklearn RandomForestRegressor's predictive variance into\n    aleatoric (mean within-leaf variance) and epistemic (variance of per-tree means).\n\n    Law of total variance over the mixture of per-tree leaf distributions:\n        Var[y|x] = E_t[ Var(y | leaf_t(x)) ]  +  Var_t[ E(y | leaf_t(x)) ]\n                   \\_______ aleatoric _______/   \\______ epistemic ______/\n\n    Returns (mean, aleatoric, epistemic), each shape (n_samples,), in y units^2.\n    \"\"\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/forest_ae.py:5-14 (full 54-line function; identical copy at ALEA_EPIS_CODE.md:328-383)",
+   "verification": "verified \u2014 tested; 'mean matches forest.predict: True', exact",
+   "why_it_matters": "This fills the QRF row of the table with zero retraining. It is runnable code, tested, sitting in a temp directory that will be deleted."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "QRF implementation detail \u2014 the in-bag row reconstruction, and the shortcut if you do not want it.",
+   "verbatim": "Shortcut if you do not want to recompute leaf statistics: `leaf_mean` is already\nstored as `est.tree_.value[leaf, 0, 0]` and `leaf_var` as\n`est.tree_.impurity[leaf]` (because the criterion is `squared_error`). The\nversion above reproduces both from the in-bag rows so that it stays correct if\nyou ever pass `sample_weight` or a non-default criterion.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:385-389",
+   "verification": "verified \u2014 every attribute checked against the installed sklearn 1.3.2 in this repo's env: forest.estimators_ \u2705, forest.apply(X) \u2705, tree_.value \u2705, tree_.impurity \u2705, criterion == 'squared_error' \u2705",
+   "why_it_matters": "The attribute check was run against this repo's actual sklearn version, so the function is known to work here, not just in principle."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "QRF CAVEAT 1 \u2014 the aleatoric term is biased, because within-leaf variance also contains surviving signal.",
+   "verbatim": "1. **Aleatoric is biased.** Within-leaf variance also contains whatever signal\n   variation survives inside the leaf, so it is inflated at low noise and\n   compressed at high noise. It *tracks* heteroscedasticity (0.18 \u2192 0.48 in the\n   right direction) but it is not an unbiased estimate of sigma^2(x). Shrinking\n   `min_samples_leaf` reduces the bias and raises the variance of the estimate.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:406-410",
+   "verification": "verified \u2014 measured on a synthetic test, n=2000, y = 3*X0 + N(0, 0.1 + 0.9*X1), RandomForestRegressor(n_estimators=200, min_samples_leaf=20, random_state=0): alea 0.183 where true sigma^2 ~ 0.036; alea 0.484 where true sigma^2 ~ 0.828",
+   "why_it_matters": "This must be stated in the paper. It is a directional signal, not a calibrated variance, and the numbers showing the bias exist."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "QRF CAVEAT 2 \u2014 the epistemic term is a disagreement measure, not a posterior variance: it barely moved between n=200 and n=2000.",
+   "verbatim": "2. **Epistemic is a disagreement measure, not a posterior variance.** Repeating\n   the test at n=200 gave epistemic 0.049 vs 0.056 at n=2000 \u2014 it did **not**\n   shrink with more data the way a real posterior would, because tree-to-tree\n   spread is driven by bootstrap and feature subsampling, not by sample size\n   alone. Treat it as an ordinal signal and calibrate it before reporting\n   coverage.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:411-416",
+   "verification": "verified \u2014 measured directly by re-running the test at n=200",
+   "why_it_matters": "A reviewer will ask whether the QRF epistemic term shrinks with data. It does not, and the measured numbers are here. Do not quote coverage from it uncalibrated."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Calibration for the QRF term \u2014 Chemprop's z-scaling calibrator, fit on a held-out validation split.",
+   "verbatim": "            errors = preds_j - targets_j\n\n            def objective(scaler_value: float):\n                scaled_vars = uncs_j * scaler_value**2\n                nll = np.log(2 * np.pi * scaled_vars) / 2 + errors**2 / (2 * scaled_vars)\n                return nll.sum()\n\n            zscore = errors / np.sqrt(uncs_j)\n            initial_guess = np.std(zscore)\n            scalings[j] = fmin(objective, x0=initial_guess, disp=False).item()\n\n        self.scalings = torch.tensor(scalings)\n        return self\n\n    def apply(self, uncs: Tensor) -> Tensor:\n        return uncs * self.scalings**2",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:422-439 (fetched from https://raw.githubusercontent.com/chemprop/chemprop/main/chemprop/uncertainty/calibrator.py, class ZScalingCalibrator lines 96-111)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "The stated remedy for the uncalibrated QRF epistemic term, taken from the field-standard package rather than invented."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Sharpness is sqrt(mean(sigma**2)), NOT mean(sigma) \u2014 verbatim from uncertainty-toolbox.",
+   "verbatim": "    # Compute sharpness\n    sharp_metric = np.sqrt(np.mean(y_std**2))\n\n    return sharp_metric\n\nRoot-mean-**square** of the standard deviations, i.e. `sqrt(mean(variance))` \u2014\nnot the mean of the sigmas. Easy thing to get wrong.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:459-467 (fetched from https://raw.githubusercontent.com/uncertainty-toolbox/uncertainty-toolbox/main/uncertainty_toolbox/metrics_calibration.py lines 19-37)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "Flagged twice as easy to get wrong, including at immediate_next_steps.md:832-833."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Miscalibration area \u2014 the self-contained reimplementation, with the note that np.trapz differs slightly from the toolbox's hourglass branch.",
+   "verbatim": "def miscalibration_area(y_pred, y_std, y_true, num_bins=100):\n    exp_p, obs_p = calibration_curve(y_pred, y_std, y_true, num_bins)\n    return float(np.trapz(np.abs(obs_p - exp_p), exp_p))",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:630-632 (full self-contained block lines 607-633; toolbox originals at lines 515-599)",
+   "verification": "verified \u2014 sanity-checked at n=3000, y_true ~ N(0,1), y_pred = 0: sigma=1.5 (over-cautious) gives miscalibration_area = 0.1233; sigma=1.0 (calibrated) gives 0.0056",
+   "why_it_matters": "Removes the uncertainty-toolbox dependency if wanted, with a measured sanity check. The hourglass-branch caveat explains why the two implementations differ in the last decimal."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "VBLL \u2014 how to extract the two halves, and the reason it cannot represent per-molecule noise.",
+   "verbatim": "# epistemic: x^T Sigma_W x        aleatoric: learned homoscedastic noise variance\nWx        = (layer.W() @ x[..., None]).squeeze(-1)     # a vbll Normal\nepistemic = Wx.var                                     # == Wx.scale ** 2\naleatoric = layer.noise().var                          # == exp(2 * noise_logdiag)\ntotal     = layer.predictive(x).variance               # == epistemic + aleatoric",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:713-719 (traced through https://raw.githubusercontent.com/VectorInstitute/vbll/main/vbll/layers/regression.py lines 100-122 and vbll/utils/distributions.py lines 160-167, 207-221)",
+   "verification": "verified \u2014 both sources fetched and read; the operators __matmul__ and __add__ were traced individually",
+   "why_it_matters": "VBLL is one of only two model families in the roster that can produce both components cleanly. This is exactly how to get them out."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "VBLL's aleatoric term is a single scalar per output dimension \u2014 it cannot express input-dependent noise, which alone can explain the coverage anomaly.",
+   "verbatim": "- `noise_logdiag` is a plain `nn.Parameter` of shape `(out_features,)`\n  (line 82: `self.noise_logdiag = nn.Parameter(torch.randn(out_features) * (np.log(wishart_scale)))`),\n  so **VBLL's aleatoric term is homoscedastic** \u2014 one number per output\n  dimension, not per molecule. It cannot express input-dependent noise. If your\n  noise-injection experiment varies sigma per molecule, VBLL will not track it,\n  and that alone can explain a coverage anomaly.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:721-728",
+   "verification": "verified in the UPSTREAM library; NOT yet verified against this repo's instantiation \u2014 immediate_next_steps.md:826-827 says 'Verify against the actual instantiation in this repo before writing it down'",
+   "why_it_matters": "This converts a long-standing unexplained oddity \u2014 VBLL coverage at 1\u03c3 sitting at 0.27\u20130.45 against a target of 0.68 \u2014 into an explanation. It needs one local verification before it can be written down."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "VBLL's tRegression class is different \u2014 the split is NOT a clean sum there.",
+   "verbatim": "  Here the split is not a clean sum: `Wx.variance` (epistemic, unitless because\n  it is scaled by the noise) and the `+1` (aleatoric) are both multiplied by\n  `rate/concentration`, the posterior mean noise variance.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md:741-743 (source code quoted at lines 732-739, vbll/layers/regression.py lines 241-246)",
+   "verification": "verified \u2014 source fetched and read",
+   "why_it_matters": "If the repo ever uses tRegression rather than Regression, the two-line recipe does not apply and the numbers would be silently wrong."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Depeweg et al., ICML 2018 \u2014 the canonical law-of-total-variance statement, with the authors' own labelling of which term is which.",
+   "verbatim": "```\n\u03c3(y*|x*) = { \u03c3\u00b2_q(W)( E[y*|W,x*] )  +  E_q(W)[ \u03c3\u00b2(y*|W,x*) ] }^(1/2)      (their Eq. 4)\n```\n\nwith their own labelling: \"\u03c3\u00b2_q(W)(E[y*|W,x*]) corresponds to the epistemic uncertainty \u2026\nBy contrast, the term E_q(W)[\u03c3\u00b2(y*|W,x*)] represents the aleatoric uncertainty.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:12-23 (Decomposition of Uncertainty in Bayesian Deep Learning for Efficient and Risk-sensitive Learning, arXiv:1710.07283, read at https://arxiv.org/html/1710.07283)",
+   "verification": "verified \u2014 read",
+   "why_it_matters": "The Methods citation for the decomposition itself. They also give the information-theoretic version, Eq. (3): H[y*|x*] \u2212 E_q(W)[H(y*|W,x*)] = I(y*,W)."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Depeweg et al.'s own list of what a model MUST produce \u2014 this is why the table is ragged.",
+   "verbatim": "**What the model must produce for this to be computable (their own list):**\n1. samples from a posterior over parameters, `W ~ q(W)`;\n2. a *per-sample predictive distribution* `p(y*|W,x*)` whose mean **and variance** are computable.\n\nBoth are required. One of them alone gives you one term, never two.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:29-33",
+   "verification": "verified \u2014 read",
+   "why_it_matters": "The two-ingredient rule is the defensible reason each ragged cell is ragged, and it is quotable from the primary source."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kendall & Gal, NeurIPS 2017 \u2014 the MC-sampling estimator, Eq. (9), with the terms labelled.",
+   "verbatim": "```\nVar(y) \u2248 (1/T) \u03a3_t \u0177_t\u00b2  \u2212  ( (1/T) \u03a3_t \u0177_t )\u00b2   +   (1/T) \u03a3_t \u03c3\u0302_t\u00b2\n         \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 epistemic \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518       \u2514\u2500\u2500 aleatoric \u2500\u2500\u2518\n```\n\"with {\u0177_t, \u03c3\u0302_t\u00b2}_{t=1..T} a set of T sampled outputs: \u0177_t, \u03c3\u0302_t\u00b2 = f^\u0174t(x) for randomly masked\nweights \u0174_t ~ q(W).\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:42-47 (arXiv:1703.04977, full PDF read)",
+   "verification": "verified \u2014 full PDF read",
+   "why_it_matters": "The deep-learning instantiation citation, and the source of the loss and head design. Their Eq. (8) is L = (1/D) \u03a3_i \u00bd exp(\u2212s_i)\u2016y_i\u2212\u0177_i\u2016\u00b2 + \u00bd s_i where s_i := log \u03c3\u0302_i\u00b2."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kendall & Gal \u00a72.2 \u2014 what happens with no variance head, and why a MAP heteroscedastic net has no epistemic term.",
+   "verbatim": "Crucially, \u00a72.2 explains what happens without a variance head: \"When not explicitly modeled \u2026\nthis observation noise parameter is often fixed as part of the model's weight decay, and ignored.\"\nAnd \u00a72.2 closes: a MAP-trained heteroscedastic net \"does not capture epistemic model uncertainty,\nas epistemic uncertainty is a property of the model and not of the data.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:49-52",
+   "verification": "verified \u2014 full PDF read",
+   "why_it_matters": "Directly justifies why the current Bayesian networks, which emit one number per molecule, cannot have an aleatoric column."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kendall & Gal \u00a75.2 \u2014 the reference behaviour of each component, and the table layout to copy.",
+   "verbatim": "Their \u00a75.2 results are the reference behaviour:\n- \"Aleatoric uncertainty cannot be explained away with more data\"\n- \"Aleatoric uncertainty does not increase for out-of-data examples \u2026 whereas epistemic uncertainty does\"\n- Table 3 layout: rows = training-set fraction / test set, columns = aleatoric and epistemic. This is\n  exactly the table shape the user should copy (rows = \u03c3 level, columns = the two components).",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:54-58",
+   "verification": "verified \u2014 full PDF read",
+   "why_it_matters": "The recommended table layout in the paper is copied from a specific published table, not invented."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "H\u00fcllermeier & Waegeman 2021 \u2014 the definitions, and the caveat that the split is NOT absolute but context-dependent.",
+   "verbatim": "- **Important hedge**: \"aleatoric and epistemic uncertainty should not be seen as absolute notions.\n  Instead, they are context-dependent in the sense of depending on the setting (X,Y,H,P).\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:71-72 (Machine Learning 110:457\u2013506, 2021, arXiv:1910.09457, read via ar5iv)",
+   "verification": "verified \u2014 read via ar5iv",
+   "why_it_matters": "This bites the cross-representation comparison specifically: descriptors versus learned graph embeddings change the hypothesis space H, which by their own definition moves the line between the two components."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Ryu, Kwon & Kim 2019 \u2014 THE SAME EXPERIMENT, and the sentence that reframes the paper's 'anomaly' as the sanity check.",
+   "verbatim": "> \"As the noise level increases, the aleatoric and total uncertainties increase, but the epistemic\n> uncertainty is slightly changed. This result verifies that the aleatoric uncertainty arises from\n> data inherent noises, while the epistemic uncertainty does not depend on data quality.\n> **Theoretically, the epistemic uncertainty should not increase by the changes in the amount of data\n> noise.** We guess that the slight change of the epistemic uncertainty arises from the stochastic\n> numerical optimization of model parameters.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:188-192",
+   "verification": "verified \u2014 arXiv preprint 1903.08375 full PDF read. FAILED TO RETRIEVE the journal version: Chemical Science 10:8438\u20138446 (2019) returned HTTP 403; the journal version has a different title and may differ. Quotes are from the preprint only.",
+   "why_it_matters": "They took a noise-free synthetic label (RDKit logP on ZINC) precisely so there is no baseline aleatoric term, then injected Gaussian noise at increasing \u03c3. Aleatoric rising with \u03c3 is the confirmatory result, not an anomaly."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Yang & Li, J Cheminform 2023 \u2014 the same result replicated on QM9, in the target journal, with their decomposition formulas.",
+   "verbatim": "> \"The distribution of aleatoric uncertainty shifts right (increases) as the number of nitrogen atoms\n> in the molecules increases in the nitrogen-noisy model, which suggests that the model can\n> successfully learn the artificial noise introduced.\"\n\nAnd separately, training with nitrogen compounds held out:\n> \"the epistemic uncertainties greatly increase for the nitrogen-containing molecules, which indicates\n> the self-awareness of ignorance.\"\n\nTheir own caution, worth quoting in the user's paper: \"a high estimate of aleatoric uncertainty is not\nalways caused by data noise.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:205-215 (doi:10.1186/s13321-023-00682-3, PMC full text read at https://pmc.ncbi.nlm.nih.gov/articles/PMC9898940/)",
+   "verification": "verified \u2014 PMC full text read",
+   "why_it_matters": "Same journal, same dataset. Deep ensemble of D-MPNNs with heteroscedastic loss; \u03c3\u00b2_ale = (1/M)\u03a3\u03c3\u00b2_m, \u03c3\u00b2_epi = (1/M)\u03a3(\u03bc_m \u2212 \u03bc_ens)\u00b2. Their caution is the honest hedge to carry."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid et al., JCIM 2023 \u2014 the aleatoric limit, and the statement that ensembling cannot see noise.",
+   "verbatim": "- Test-set noise creates an **aleatoric limit**: \"The learning curve of the noisy test and training\n  sets approaches an asymptote at 1 kcal/mol, which is the standard deviation of the employed noise\n  distribution \u2026 The effect of noise in the test set on the perceived model error is irreducible.\"\n- Noise in the *training* set is **not** purely irreducible: \"Though noise-based, the error from noise\n  introduced while training is not irreducible.\"\n- Ensembles cannot see noise: \"ensembling is a measurement of variance error and does not directly\n  incorporate noise error.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:226-233 (JCIM 63:4012\u20134029, doi:10.1021/acs.jcim.3c00373)",
+   "verification": "verified \u2014 ACS returned 403, but the identical full text was read from the MIT DSpace author copy at https://dspace.mit.edu/bitstream/handle/1721.1/159977/heid-et-al-2023-characterizing-uncertainty-in-machine-learning-for-chemistry.pdf",
+   "why_it_matters": "Two directly load-bearing quotes: ensembling does not give aleatoric (so the ragged table is unavoidable without a variance head), and training-only noise is not irreducible (which is the strongest argument AGAINST the split that must be answered)."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid et al. \u2014 MVE recovered the two noise regimes and a scaled ensemble did not, with numbers.",
+   "verbatim": "In their systematic-noise experiment, MVE recovered the two noise regimes\n  (mean predicted SD 2.35 vs 20.0 kcal/mol against true 2 vs 20), while a scaled ensemble did not\n  (10.6 vs 11.5 \u2014 essentially no discrimination). They call this \"an example of poor dispersion, even\n  when scaled to a calibrated level.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:232-235",
+   "verification": "verified \u2014 read from the MIT DSpace author copy",
+   "why_it_matters": "The quantitative case that a mean-variance head is required and an ensemble is not a substitute. Directly supports building the two-output head."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid et al. \u2014 THE OBJECTION TO PREPARE FOR: noise distribution shape barely matters at matched SD.",
+   "verbatim": "- Noise distribution shape barely matters: Gaussian, uniform, hyperbolic and bimodal noise at the same\n  SD gave \"very similar performance (points overlap in the figure)\". **This is a direct challenge to\n  the user's six-strategy design and should be engaged with, not ignored** \u2014 it is also an opportunity,\n  because their strategies include heteroscedastic/outlier variants that Heid et al.'s four do not.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:236-239",
+   "verification": "verified \u2014 read from the MIT DSpace author copy",
+   "why_it_matters": "Restated as a standing objection at immediate_next_steps.md:842-844: four of the six strategies differ mainly in dose rather than shape, so expect this question directly."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid et al.'s own guidance, and their warning about applying calibration methods.",
+   "verbatim": "Heid et al. add: \"Application of calibration methods may serve to improve some uncertainty evaluation\nmetrics, such as miscalibration area, while still providing uncertainty quantifications with functional\nshortcomings \u2026 We caution the reader to apply calibration methods carefully and check their validity\nusing multiple evaluation metrics.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:318-321",
+   "verification": "verified \u2014 read from the MIT DSpace author copy",
+   "why_it_matters": "Directly relevant to the plan to z-scale the QRF epistemic term before reporting coverage. Their recommendation elsewhere: 'we recommend testing a model trained using mean-variance estimation or similar and comparing it against a simple model architecture.'"
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Mucs\u00e1nyi, Kirchhof & Oh, NeurIPS 2024 \u2014 the entanglement is universal, rank correlations 0.8\u20130.999 across twelve methods.",
+   "verbatim": "Mucs\u00e1nyi et al. report aleatoric/epistemic rank correlations \"between 0.8 and 0.999 on all\ntwelve methods they test, from deep ensembles over Gaussian processes to evidential deep learning\",\nand find \"the epistemic uncertainty estimators are as predictive of human annotator noise (an aleatoric\ntask) as aleatoric estimators.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:252-256",
+   "verification": "UNVERIFIED AT PRIMARY SOURCE \u2014 only the arXiv:2402.19460 ABSTRACT page was read ('No existing approach provides pairs of disentangled uncertainty estimators in practice'). The 0.8\u20130.999 figures come from the ICLR 2025 Blogposts track entry, a peer-reviewed blog, NOT a journal article. The original says: 'cite the primaries it points to.' A separate summary of the same paper quotes the abstract as 'rank correlation \u2265 0.78'.",
+   "why_it_matters": "This is where the epistemic-rising result gets its home, and it is the single most-cited number in the salvaged plan \u2014 but the exact 0.8\u20130.999 range has NOT been confirmed from the paper itself. Confirm before printing."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Valdenegro-Toro & Saromo 2022 \u2014 interaction between the two components, and ensembles disentangle best.",
+   "verbatim": "Valdenegro-Toro & Saromo, *A Deeper Look into Aleatoric and Epistemic Uncertainty Disentanglement*\n(arXiv:2204.09308, abstract read): \"there is an interaction between learning aleatoric and epistemic\nuncertainty, which is unexpected and violates assumptions on aleatoric uncertainty\"; \"aleatoric\nuncertainty is unreliable in the out-of-distribution setting\"; \"Ensembles provide overall the best\ndisentangling quality.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:260-264",
+   "verification": "UNVERIFIED beyond the abstract \u2014 the original states 'abstract read' only",
+   "why_it_matters": "The second citation for the entanglement frame. Marked abstract-only in the source and must stay marked."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Scalia et al., JCIM 2020 \u2014 the paper to COPY: one aleatoric scheme across all methods, then three parallel evaluations.",
+   "verbatim": "> \"All the different methods use the same aleatoric approximation scheme but the way epistemic\n> uncertainty is modeled affects also aleatoric uncertainty results, thus resulting in different\n> outputs (ref. Eq. (4)). This also allows drawing conclusions about aleatoric uncertainty which do\n> not depend on the uncertainty model used for the NN-weights.\"\n\nThey then report **three parallel evaluations \u2014 aleatoric alone, epistemic alone, and total** \u2014 under\nthe same metric set. This is the closest published analogue to what the user wants and is the model\nto copy.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:136-144 (JCIM 60:2697\u20132717, arXiv:1910.03127 full PDF read)",
+   "verification": "verified for the PREPRINT \u2014 https://arxiv.org/pdf/1910.03127 full PDF read. The JOURNAL version at https://pubs.acs.org/doi/10.1021/acs.jcim.9b00975 is PAYWALLED, HTTP 403, NOT read. Their code WAS read: github.com/gscalia/chemprop branch uncertainty.",
+   "why_it_matters": "The single most transferable precedent: bolt the same MVE head onto MC-dropout, ensembles and bootstrap so the aleatoric column is comparable across methods, then report the metric table three times."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Hirschfeld et al., JCIM 2020 \u2014 the precedent for leaving a cell blank with a stated reason.",
+   "verbatim": "They evaluate ~a dozen heterogeneous UQ methods (ensembles,\nbootstrap, snapshot, MC-dropout, MVE, Tanimoto/latent distances, DNN-GP, DNN-RF, FP-GP, FP-RF) as one\nscalar `U(x)` each, and explicitly refuse to compute variance-based metrics for methods that do not\nproduce variances: \"it is inappropriate to calculate NLL for relative UQ metrics, so values for\nTanimoto and latent space distances are excluded.\" Excluding a cell with a stated reason is the\naccepted move; inventing a surrogate is not.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:149-154 (JCIM 60:3770\u20133780, arXiv:2005.10036 full PDF read)",
+   "verification": "verified \u2014 arXiv PDF read in full",
+   "why_it_matters": "This is the published authority for the NGBoost decision: leave the epistemic cell blank with a footnote rather than invent a surrogate. Their metrics: Spearman \u03c1 (Eq. 8), miscalibration area, NLL (Eq. 9), calibrated NLL with \u03c3\u0302\u00b2(x) := aU(x)+b."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Busk et al., MLST 2022 \u2014 the decomposition equations, ENCE, and THE warning that calibration alone is not enough.",
+   "verbatim": "Their key warning: \"Calibration alone is not sufficient to ensure that individual uncertainty\n  estimates are informative \u2026 a regression model that predicts constant uncertainty corresponding to\n  its average empirical error is well calibrated in terms of ENCE and SSE but the uncertainty estimates\n  are clearly not very useful.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:302-305 (Mach. Learn.: Sci. Technol. 3:015012, doi:10.1088/2632-2153/ac3eb3, full PDF read via DTU Orbit)",
+   "verification": "verified \u2014 full PDF read",
+   "why_it_matters": "The reason a sharpness or dispersion number must be reported alongside calibration. Their Eq. (8) is the decomposition; Eq. (9) is ENCE = (1/K) \u03a3_k |RMV_k \u2212 RMSE_k| / RMV_k; Eq. (10) is the coefficient of variation."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "UNIQUE (Novartis), JCIM 2024 \u2014 the field's dedicated UQ benchmark does NOT use aleatoric/epistemic language at all.",
+   "verbatim": "UNIQUE (Novartis), *UNIQUE: A Framework for Uncertainty Quantification Benchmarking*, JCIM\n  64:8379\u20138386 (2024), doi:10.1021/acs.jcim.4c01578 (PMC full text read). Its three evaluation types\n  are ranking-based (Spearman), calibration-based (MACE), and proper scoring rules (NLL); it selects a\n  recommended metric by counting Wilcoxon rank-sum wins with Bonferroni correction. Note it does **not**\n  use aleatoric/epistemic language \u2014 it splits UQ metrics into \"data-based\" and \"model-based\" instead.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:306-310",
+   "verification": "verified \u2014 PMC full text read at https://pmc.ncbi.nlm.nih.gov/articles/PMC11600502/",
+   "why_it_matters": "Honest counterweight: decomposing is a minority practice in chemistry, and rarest in benchmark papers. It does not stop the build, but the paper should acknowledge it."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Al-Aghbary et al., GJI 2026 \u2014 the published QRF aleatoric/epistemic recipe, directly transplantable.",
+   "verbatim": "They write `\u03c3\u00b2_t(x) = \u03c3\u00b2_a(x) + \u03c3\u00b2_e(x)` with\n`\u03c3\u00b2_a(x) = (1/M) \u03a3 \u03c3\u00b2_i(x)` (mean of per-tree variances) and\n`\u03c3\u00b2_e(x) = (1/M) \u03a3 \u03bc\u00b2_i(x) \u2212 \u03bc\u0304\u00b2(x)` (variance of per-tree means), stating that for tree models\nepistemic uncertainty \"stems from variability in model structure introduced by bootstrap resampling,\"\nwhile aleatoric \"captures the irreducible noise in the response, as reflected by variability of\nobserved outcomes within each terminal node.\" This is directly transplantable to a QSAR QRF.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:92-97 (Geophysical Journal International 245(2), 2026, doi:10.1093/gji/ggag113)",
+   "verification": "verified \u2014 read at https://academic.oup.com/gji/article/245/2/ggag113/8527733",
+   "why_it_matters": "The citation that makes the QRF row defensible. It is a geophysics paper, so the transplant should be stated as such. Cite Busk et al. Eq. (8) for the general form alongside it."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "GP \u2014 Rasmussen & Williams GPML ch. 2: epistemic is the latent posterior variance, aleatoric is the global noise \u03c3_n\u00b2.",
+   "verbatim": "the GP algorithm \"returns the predictive mean and variance for noise free test data\u2014to compute the predictive distribution for noisy test data y*, simply add the noise variance \u03c3_n\u00b2 to the predictive variance of f*.\" So epistemic = V(f*) (their Eq. 2.26), aleatoric = \u03c3_n\u00b2. **Caveat: a standard GP has one global \u03c3_n\u00b2, i.e. homoscedastic aleatoric \u2014 it is a single number per model, not a per-molecule value.**",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:110 (read at https://gaussianprocess.org/gpml/chapters/RW2.pdf)",
+   "verification": "verified \u2014 chapter PDF read",
+   "why_it_matters": "The GP row of the table, and half of the homoscedastic caveat that a reviewer will raise first."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "VBLL \u2014 Harrison, Willes & Snoek, ICLR 2024: Eq. (2) names both terms, and the noise covariance is MAP point-estimated.",
+   "verbatim": "Harrison, Willes & Snoek, *Variational Bayesian Last Layers*, ICLR 2024 (arXiv:2404.11599), read the PDF. Eq. (2): `p(y|x,\u03b7,\u03b8) = N(w\u0304\u1d40\u03c6, \u03c6\u1d40S\u03c6 + \u03a3)`. The `\u03c6\u1d40S\u03c6` term is epistemic (last-layer weight covariance S); `\u03a3` is the aleatoric noise covariance, which they estimate by MAP: \"While variational inference for the noise covariance is possible, we choose (MAP) point estimation.\" **Note \u03a3 is input-independent unless you make it so** \u2014 same homoscedastic caveat as the GP.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:114 (full PDF read at https://arxiv.org/pdf/2404.11599)",
+   "verification": "verified \u2014 full PDF read",
+   "why_it_matters": "The paper-level citation that matches the code-level finding about noise_logdiag being one scalar per output."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "NGBoost \u2014 aleatoric only; there is no posterior over the boosted model, and no molecular-ML paper was found that invents a surrogate.",
+   "verbatim": "NGBoost outputs one\nconditional distribution per input (a fitted mean and variance), i.e. the aleatoric term only; there is\nno posterior over the boosted model, so the first term of the decomposition is identically zero. I did\nnot find a molecular-ML paper that extracts epistemic uncertainty from NGBoost. To get it you must\ncreate model-to-model variation yourself (bagging / bootstrap / multi-seed NGBoost) and take the\nvariance of the *means* across those fits \u2014 the outer term of the same equation.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:82-87",
+   "verification": "PARTIALLY UNVERIFIED \u2014 the original states: 'Duan et al., NGBoost, ICML 2020 (arXiv:1910.03225) \u2014 search results only, full text not fetched. The statement that NGBoost outputs a full conditional distribution comes from the search-result description and from its documented API, not from a passage I read in the paper.'",
+   "why_it_matters": "The NGBoost row is the one genuinely undecided cell. Two options only: bag over seeds, or leave blank with a footnote. Do not invent a surrogate."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Shaker & H\u00fcllermeier, IDA 2020 \u2014 the random-forest construction, but CLASSIFICATION ONLY, so supporting rather than load-bearing.",
+   "verbatim": "For random forests in *classification*, the equivalent construction is Shaker & H\u00fcllermeier,\n*Aleatoric and Epistemic Uncertainty with Random Forests*, IDA 2020 / Springer LNCS\n(arXiv:2001.00893) \u2014 found by search, abstract read only, and it is classification-only, so it is\nsupporting rather than load-bearing here.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:99-102",
+   "verification": "UNVERIFIED \u2014 abstract/search description only, full text not fetched; carried through as such",
+   "why_it_matters": "Do not cite this as the regression QRF recipe. Al-Aghbary et al. is the regression one."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Chemprop's naming convention is itself a precedent for labelling the table columns.",
+   "verbatim": "Its docs\n(https://chemprop.readthedocs.io/en/latest/uncertainty.html, and the DeepWiki mirror) list the\nregression estimators as `dropout`, `ensemble`, `quantile-regression`, `mve`, and\n`evidential-total` / `evidential-epistemic` / `evidential-aleatoric`. Ensemble and dropout are\ndescribed as estimating **epistemic** uncertainty; MVE \"predicts both the mean and variance for each\ntarget\"; evidential regression \"provides a principled way to capture both aleatoric and epistemic\nuncertainty.\" The naming convention (`-total`, `-epistemic`, `-aleatoric` as separate selectable\noutputs) is itself a useful precedent for how to label table columns.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:116-123",
+   "verification": "verified \u2014 documentation read. NOTE: the Chemprop PAPER (Heid, Greenman, McGill et al., JCIM 64 (2024), doi:10.1021/acs.jcim.3c01250) returned 403 and was NOT read \u2014 'Do not attribute anything to this paper on my account.'",
+   "why_it_matters": "Only the documentation was read. Attributing any of this to the Chemprop journal paper would be a fabricated citation."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "MUBen \u2014 the fourth strategy: force every backbone to emit a variance so the grid is complete, not ragged.",
+   "verbatim": "**C.3 Force every backbone to emit a variance so the grid is complete.** MUBen\n(arXiv:2306.10060, HTML read) applies each UQ method to each backbone and reports Gaussian NLL and\ncalibration error for regression across the full grid. The tables are complete, not ragged.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:156-158",
+   "verification": "verified \u2014 HTML read at https://arxiv.org/html/2306.10060v3",
+   "why_it_matters": "One of four observed, all legitimate, strategies for handling a partially-supported roster. This is the one the two-output head plus the QRF post-hoc split moves toward."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Jim\u00e9nez, J\u00fcrgens & Waegeman \u2014 the aleatoric term absorbs systematic prediction error, not just observation noise.",
+   "verbatim": "Jim\u00e9nez, J\u00fcrgens & Waegeman, arXiv:2505.23506, put it directly: \"the learned aleatoric term absorbs observation noise **and systematic prediction error**\", and \"approximation error and estimation bias are both not included in existing epistemic uncertainty estimators.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:1934 (verbatim inside the task-notification result of workflow wka1am29b, 2026-08-20T22:25:23Z; full brief was written to /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/lit_ae_theory.md)",
+   "verification": "UNVERIFIED at primary source in this salvage \u2014 reported by a research agent as a direct quote; not re-fetched. The referenced brief lit_ae_theory.md is NOT among the surviving scratchpad files.",
+   "why_it_matters": "One of the two 'illegitimate reasons both components could rise' that this experiment cannot distinguish. Needs re-fetching before it goes in the bibliography."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Gruber et al. and Wimmer/Bengs et al. \u2014 the split is not even additive in a linear model, and the information-theoretic measures are incoherent.",
+   "verbatim": "- It isn't even additive. Gruber, Schenk, Schierholz, Kreuter & Kauermann, arXiv:2305.16703, \u00a73.2.1: \"even in this very simple model one cannot additively decompose the total uncertainty into aleatoric and estimation uncertainty\" \u2014 that's a plain linear model.\n...\n- The information-theoretic measures are incoherent. Wimmer, Sale, Hofman, Bischl & H\u00fcllermeier, UAI 2023, PMLR 216:2282\u20132292, \"identify various incoherencies that call their appropriateness into question\". Bengs, H\u00fcllermeier & Waegeman, NeurIPS 2022, arXiv:2203.06102, show no loss function's minimiser recovers the right epistemic quantity.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:1934 (task-notification result of workflow wka1am29b, 2026-08-20T22:25:23Z)",
+   "verification": "UNVERIFIED at primary source in this salvage \u2014 reported by a research agent; the ICLR blogpost independently cites Gruber et al. for the same non-additivity claim (ALEA_EPIS_LITERATURE.md:257-258)",
+   "why_it_matters": "The honest limitations paragraph. Two independent routes now point at Gruber et al., which raises confidence but is still not a primary read."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Seitzer et al., ICLR 2022 \u2014 the Gaussian-NLL training pathology that gets WORSE as \u03c3 rises.",
+   "verbatim": "the known pathology where Gaussian-likelihood training inflates the predicted variance on hard points so it can stop fitting them (Seitzer, Tavakoli, Antic & Martius, ICLR 2022, arXiv:2203.09168 \u2014 \"very poor but stable parameter estimates\"). That failure gets worse exactly as you turn \u03c3 up.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:1934 (task-notification result of workflow wka1am29b, 2026-08-20T22:25:23Z)",
+   "verification": "UNVERIFIED at primary source in this salvage \u2014 reported by a research agent, not re-fetched",
+   "why_it_matters": "This is a direct risk to the build itself: training the new two-output head with Gaussian NLL under rising injected noise is exactly the regime where this pathology bites. It belongs in the implementation plan, not only in the limitations."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "THE MODEL-BY-MODEL VERDICT for this roster \u2014 which families can split, and what is missing from each.",
+   "verbatim": "| Model | Can it split? | What is missing |\n|---|---|---|\n| GP | Both | Aleatoric is one global number, not per-molecule |\n| VBLL | Both, cleanly | Same \u2014 the noise term is global |\n| QRF | Both, from the fitted forest | Not currently computed |\n| NGBoost | Aleatoric only | One distribution per molecule, no model-draw axis |\n| BNN | Epistemic only | A fixed noise term is not an aleatoric estimate |",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:743-749",
+   "verification": "verified \u2014 each row is backed by a primary source in ALEA_EPIS_LITERATURE.md:108-114",
+   "why_it_matters": "The table that explains the ragged output, with a fillable/not-fillable verdict per row. Two of the five holes are fillable."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The actual column coverage in the current output, which is why no cross-model comparison is possible.",
+   "verbatim": "**Aleatoric/epistemic column coverage:** BNN-\u03b1 0 aleatoric/48 epistemic; BNN-\u03b2 0/12; GP 18/18; NGBoost 24/0; QRF 24/0; VBLL-\u03b1 36/36; VBLL-\u03b2 36/36.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:2278 (compaction summary of session f692d614, quoting the figure-script output)",
+   "verification": "verified against the figure-script output at the time; NOTE \u2014 all QM9 results are flagged invalid pending regeneration (held-out noise leak, fixed in commit 9d7db67 but never regenerated)",
+   "why_it_matters": "Quantifies the raggedness: only GP and the two VBLL variants have both columns. This is the 'before' state the build has to fix."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE DELETE LIST \u2014 the stub and all four of its call sites, deletable only together with the replacement.",
+   "verbatim": "**DELETE \u2014 but only together with the replacement below, never on its own:**\n\n1. `decompose_uncertainty_sampling` in `scripts/utils.py`, lines 62\u201385. It cannot ever return an\n   aleatoric component.\n2. **All four of its call sites**, not just the broken one: `models/models.py` line 2121\n   (`train_dnn_model`), line 2724 (`train_mlp_variant_model`), line 3133 (`train_gnn`), and the import\n   at line 3077. Lines 2121 and 2724 are **live** \u2014 they are the non-VBLL Bayesian-network uncertainty\n   path. Deleting the function without replacing those two calls breaks every BNN uncertainty run.\n   Line 3133 passes one argument to a function that takes two and unpacks two values from a function\n   that returns three, so that path raises on contact and has never run.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:778-787",
+   "verification": "verified \u2014 the stub was re-read this session at /Users/apunt/repos/qsar_qm_models/scripts/utils.py:62-85 and does hardcode `aleatoric = None` with `total = epistemic`",
+   "why_it_matters": "This is the direct response to 'there's some faulty code that must be DELETED and REPLACED'. The warning that lines 2121 and 2724 are live is what prevents the deletion from breaking every BNN run."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE REPLACE LIST \u2014 three changes: two-output head, Gaussian NLL, route to the correct helper.",
+   "verbatim": "1. **A two-output network.** `DNNRegressionModel` (`models/models.py` ~line 1015) ends in\n   `nn.Linear(hidden_size2, 1)`. Make it output 2 \u2014 a mean and a log-variance \u2014 and return both.\n   `apply_bayesian_transformation` converts Linear layers to Bayesian ones and carries the wider\n   output layer through unchanged.\n2. **A Gaussian negative log-likelihood loss** in place of `nn.MSELoss()`. Use `nn.GaussianNLLLoss`,\n   or lift the expression already sitting inside `VBLLLoss` (~line 1226), which computes exactly\n   `0.5*log(var) + 0.5*(pred-target)^2/var`.\n3. **Calls to `decompose_uncertainty_sampling_heteroscedastic`**, collecting both the means and the\n   variances across the 100 Monte Carlo passes instead of the means alone.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:789-799",
+   "verification": "verified",
+   "why_it_matters": "The complete build spec for the Bayesian-network row. Note the Gaussian NLL expression already exists in the repo inside VBLLLoss \u2014 it does not need writing from scratch."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "CORRECTION TO THE DELETE/REPLACE PLAN \u2014 the two-output head ALREADY EXISTS in models.py and is disabled behind a loss flag no job script passes.",
+   "verbatim": "| Give the Bayesian networks a two-output head \u2014 a mean and a log-variance | `models/models.py` ~`:1015`. A head already exists at `:2023-2034` behind a loss flag no job script passes, and its variance column is sliced off again at `:2086` and `:2102` |",
+   "source": "/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:505",
+   "verification": "verified this session \u2014 /Users/apunt/repos/qsar_qm_models/models/models.py lines ~2022-2035 contain `if loss_name == 'heteroscedastic':` \u2026 `model.fc3 = nn.Linear(params['hidden_size2'], 2)` and lines ~2086 and ~2102 contain `# For heteroscedastic, only use mean predictions` \u2026 `output = output[:, 0:1]`",
+   "why_it_matters": "This substantially reduces the build: the architecture change is already written and merely disabled, and the variance column is being computed and then thrown away. The D4 text at immediate_next_steps.md:791-794, which says to build the head from scratch, is superseded by this."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Two models already compute a per-molecule aleatoric term and discard it.",
+   "verbatim": "| 8 | Two-output head on the Bayesian networks (decision 3) | `models/models.py:2031`, `:2088` \u2014 note the head **already exists and is disabled**, and two models already compute a per-molecule aleatoric term and discard it (`:6835-6851`, `:6963-6977`) |",
+   "source": "/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:557",
+   "verification": "verified as recorded in RERUN_PLAN.md; the two discard sites at models.py:6835-6851 and :6963-6977 were NOT independently re-read in this salvage pass",
+   "why_it_matters": "More of the aleatoric machinery already exists than the D4 write-up assumed. Confirm these two sites before sizing the build."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The correct helper already in the repo works in SD units, not variance units \u2014 the recipe is the same once squared, but the reported quantity is a standard deviation.",
+   "verbatim": "    # Epistemic: variance of the predicted means across samples\n    epistemic = mean_predictions.std(axis=0)\n    \n    # Aleatoric: average of the predicted variances\n    aleatoric = np.sqrt(var_predictions.mean(axis=0))\n    \n    # Total: sqrt(epistemic^2 + aleatoric^2)\n    total = np.sqrt(epistemic**2 + aleatoric**2)",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:88-110 (function decompose_uncertainty_sampling_heteroscedastic; the quoted block is lines ~101-108)",
+   "verification": "verified \u2014 read directly this session",
+   "why_it_matters": "Algebraically identical to the canonical recipe (square each term and it matches Ryu exactly), but the units differ: this returns standard deviations where every cited paper reports variances. The table caption and any comparison to published values must state which."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The prior per-sample uncertainty headline (\u03c1=0.485) was a pooling artefact, and the BNNs reported aleatoric as exactly zero.",
+   "verbatim": "There's also a **conceptual point** the workflow raised that independently sinks the old framing: the injected corruption is *label* noise, which is **aleatoric** by definition. The BNNs report their aleatoric uncertainty as *exactly zero* and only expose *epistemic* uncertainty \u2014 so asking an epistemic signal to detect aleatoric noise was asking the wrong quantity from the start.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/alea_hits.txt:1580 (assistant message, /Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/37046d5b-871b-4e27-82fb-a35e1ea2ef1d.jsonl:4979, TS 2026-07-31T13:41:09Z)",
+   "verification": "verified at the time \u2014 the pooling mechanism was reproduced: correctly isolated +0.010, pooling 3 strategies +0.290, pooling all 6 gives 0.485",
+   "why_it_matters": "This is the strongest single argument FOR building the aleatoric column: the previous headline failed partly because the only quantity the Bayesian networks could report was the wrong one."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "THE TABLE LAYOUT \u2014 copy Kendall & Gal's Table 3 shape, then repeat the metric table once per component (Scalia's structure).",
+   "verbatim": "5. Lay the table out the way Kendall & Gal do: rows are \u03c3 within strategy, columns are aleatoric /\n   epistemic / total per model, em-dash plus footnote where undefined; then repeat the metric table once\n   per component.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:828-830 (expanded version at ALEA_EPIS_LITERATURE.md:371-381)",
+   "verification": "verified \u2014 both source layouts read from the primary papers",
+   "why_it_matters": "'A separate table of evaluation metrics computed three times: on aleatoric alone, epistemic alone, and total \u2014 Scalia's structure. This is what makes the split earn its place rather than just being reported.'"
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "THE METRICS TO REPORT ALONGSIDE \u2014 the shared minimum across the four benchmark papers read in full.",
+   "verbatim": "**Metrics to report alongside** \u2014 the shared minimum across the benchmark papers read: Spearman of\npredicted uncertainty against absolute error; a calibration curve summarised as **miscalibration area**;\nNLL; and a **sharpness or dispersion** number. That last one is currently missing and matters \u2014 Busk et\nal. (MLST 2022) point out that a model predicting one constant uncertainty scores perfectly on\ncalibration while being useless. Miscalibration area is the direct regression replacement for the\nremoved ECE, and the existing coverage at 1\u03c3 and 2\u03c3 are two points on the curve it integrates.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:835-840 (backed by the four-paper comparison table at ALEA_EPIS_LITERATURE.md:279-288)",
+   "verification": "verified \u2014 assembled from Scalia 2020, Hirschfeld 2020, Busk 2022 and UNIQUE 2024, all read in full",
+   "why_it_matters": "Items (1)+(2)+(3) are shared by three of the four benchmarks; (4) is Busk's explicit warning and Heid et al.'s sharpness/dispersion recommendation. This is the metric set that makes the section defensible."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "THE NARRATIVE FLIP \u2014 aleatoric rising is the sanity check; epistemic rising is the finding, and it needs a slope, not a direction.",
+   "verbatim": "- **Aleatoric rising with \u03c3 is the sanity check that the analysis works.** Ryu, Kwon & Kim (2019) and\n  Yang & Li (2023) both report exactly this. Frame it as: \"our injected-noise design reproduces the\n  expected aleatoric response reported by [Ryu 2019] and [Yang & Li 2023], which validates the\n  decomposition before we use it.\" Then quantify it \u2014 does aleatoric track \u03c3 **one-for-one**? A slope\n  of ~1 on a plot of estimated aleatoric SD vs injected \u03c3 is a much stronger claim than \"it goes up\",\n  and Heid et al.'s aleatoric-limit analysis gives you the reference line.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:351-356",
+   "verification": "verified \u2014 both cited papers read",
+   "why_it_matters": "Turns the paper's current 'anomaly' framing into a validation step plus a quantitative claim. The slope test is a concrete new analysis the figure script must produce."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "THE CLEAN FALSIFIABLE CLAIM the paper can make from the rebuilt decomposition.",
+   "verbatim": "- **A clean falsifiable claim the user can make:** \"Under injected label noise, aleatoric uncertainty\n  tracks the injected \u03c3 for models with an explicit noise model, while epistemic uncertainty rises by\n  X% \u2014 i.e. predictive uncertainty signals that labels are bad, but *which component* signals it is\n  not reliably the one theory assigns.\" That is defensible, novel in the QSAR setting, and consistent\n  with everything above.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:365-369",
+   "verification": "verified \u2014 derived from the read literature, and consistent with the paper's own argument ('what, if anything, makes a QSAR model robust to noise \u2014 and can a model's uncertainty tell you when your data is bad?')",
+   "why_it_matters": "This is the take-home message the whole build exists to produce. It is the thing the author asked for and did not get."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Two candidate mechanisms for epistemic rising, both citable \u2014 and the paper should say which it can distinguish.",
+   "verbatim": "**Net:** if the user observes epistemic rising with \u03c3, that is a real, publishable, *literature-anticipated*\nobservation of entanglement \u2014 not an anomaly and not a failure. It has two candidate mechanisms, both\ncitable: (i) noisier labels genuinely make the fitted model less determined, so ensemble/posterior\nspread grows (a real increase in epistemic uncertainty in the H\u00fcllermeier sense \u2014 the \"best model\"\nbecomes less identifiable); and (ii) estimator entanglement (Mucs\u00e1nyi et al.). The user should say\nwhich they can distinguish and which they cannot.",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:266-271",
+   "verification": "verified for mechanism (i) \u2014 the GP posterior-variance argument was worked through independently: the noise variance sits inside [K(X,X) + \u03c3\u00b2I]\u207b\u00b9, so raising it shrinks the subtracted term and the epistemic part rises. Mechanism (ii) inherits the UNVERIFIED Mucs\u00e1nyi status above.",
+   "why_it_matters": "Prevents overclaiming. The honest version names both mechanisms and says the experiment cannot separate them."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Avoid claiming the decomposition is 'the' true split \u2014 H\u00fcllermeier & Waegeman's context-dependence caveat.",
+   "verbatim": "- Avoid claiming the decomposition is \"the\" true split. H\u00fcllermeier & Waegeman: the notions \"are\n  context-dependent in the sense of depending on the setting.\"",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:391-392",
+   "verification": "verified \u2014 read via ar5iv",
+   "why_it_matters": "Specifically bites this paper's cross-representation comparison. A reviewer who knows the reference will raise it."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The full citation list to add, grouped by what each citation is FOR.",
+   "verbatim": "### Priority 5 \u2014 citations to add\n\nMethods/decomposition: Kendall & Gal 2017; Depeweg et al. 2018; H\u00fcllermeier & Waegeman 2021.\nChemistry benchmarks: Scalia et al. JCIM 2020; Hirschfeld et al. JCIM 2020; Busk et al. MLST 2022;\nHeid et al. JCIM 2023; Yang & Li J Cheminform 2023; Ryu, Kwon & Kim (Chem Sci 2019 / arXiv 2019);\nSoleimany et al. ACS Cent Sci 2021; UNIQUE JCIM 2024.\nEntanglement caveat: Mucs\u00e1nyi, Kirchhof & Oh NeurIPS 2024; Valdenegro-Toro & Saromo 2022.\nPer-model recipes: Rasmussen & Williams 2006 ch. 2 (GP); Al-Aghbary et al. GJI 2026 (QRF);\nHarrison, Willes & Snoek ICLR 2024 (VBLL); Duan et al. ICML 2020 (NGBoost).",
+   "source": "/private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md:394-402",
+   "verification": "mixed \u2014 see individual items. Duan et al. and Valdenegro-Toro are abstract/search-only; Mucs\u00e1nyi is abstract-only with the key number from a blog; Soleimany et al. (ACS Cent Sci 7:1356, 2021) was read at PMC8393200 but the original notes 'I could not extract explicit aleatoric/epistemic formulas from the fetched text.'",
+   "why_it_matters": "Ready to paste into citations.bib work, with the verification status of each carried through so nothing unread is cited as read."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "NGBoost's epistemic cell is the one genuinely open decision \u2014 bag over seeds, or leave blank with a footnote.",
+   "verbatim": "3. For NGBoost, either bag over seeds and take the variance of the means, or leave the cell blank with\n   a footnote. No paper found in the search invents a surrogate.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:820-821",
+   "verification": "verified \u2014 the search precedent is Hirschfeld et al.'s explicit exclusion of undefined cells with a stated reason",
+   "why_it_matters": "Option (a) costs K\u00d7 training; option (b) costs nothing and is defensible. This is the only cell where the literature offers a genuine choice rather than a method."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "STATUS CONFLICT \u2014 the thread register still marks the two-output head as 'DECISION NEEDED' while the live plan records it as settled.",
+   "verbatim": "| D4-head | Two-output head + Gaussian NLL on the Bayesian nets, needed for any aleatoric/epistemic split | CODE | \u2b1c **DECISION NEEDED** |",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:1017 (register row); contradicted by /Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:489-490 'NOT A DECISION. You settled it on 2026-08-21.'",
+   "verification": "verified \u2014 both lines read directly; they contradict each other",
+   "why_it_matters": "This stale register row is exactly the kind of thing that produces another 'should we drop it?' question. It should be flipped to decided, with the date and the quote."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "The VBLL homoscedastic explanation must be verified against this repo's instantiation before it is written down.",
+   "verbatim": "4. Flag that GP and VBLL aleatoric is a single global number and so cannot be rank-correlated per\n   molecule. A reviewer will ask. **This may also explain an anomaly already on the books:** VBLL's\n   noise parameter appears to be one scalar per output in the upstream library, meaning VBLL cannot\n   represent per-molecule noise at all \u2014 which would account for its coverage at 1\u03c3 sitting at 0.27\u20130.45\n   against a target of 0.68. Verify against the actual instantiation in this repo before writing it\n   down, then it becomes an explanation rather than an unexplained oddity.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:822-827",
+   "verification": "upstream library verified; THIS REPO'S instantiation NOT verified \u2014 flagged as required before writing",
+   "why_it_matters": "Converts a long-standing unexplained coverage anomaly into a mechanism, but only if the local check passes. One check, high payoff."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Prefer installing uncertainty-toolbox over reimplementing the calibration metrics.",
+   "verbatim": "Prefer installing `uncertainty-toolbox` to reimplementing the calibration metrics. If you do\nreimplement, note that sharpness is `sqrt(mean(sigma**2))`, not `mean(sigma)`.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:832-833",
+   "verification": "verified \u2014 the self-contained reimplementation exists as a fallback at ALEA_EPIS_CODE.md:607-633 and was sanity-checked",
+   "why_it_matters": "A dependency decision that has to be made before the analysis code is written. Both paths are prepared."
+  }
+ ],
+ "gaps": [
+  "URGENT \u2014 THE SALVAGED FILES ARE STILL IN A VOLATILE TEMP DIRECTORY AND ARE NOT IN THE REPO. `ALEA_EPIS_CODE.md` (789 lines), `ALEA_EPIS_LITERATURE.md` (459 lines) and `forest_ae.py` (54 lines) live at /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ \u2014 the scratchpad of a SESSION THAT ENDED ON 2026-08-21. I copied all three to /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/b5d96bb6-c41e-42f0-930a-9118325dc44a/scratchpad/salvage_alea/ as a hedge, but that is ALSO temp. They must be moved into the repo. Command: `cp /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_CODE.md /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/ALEA_EPIS_LITERATURE.md /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae/scratchpad/forest_ae.py /Users/apunt/repos/qsar_qm_models/`",
+  "THE TASK BRIEF'S PATHS WERE WRONG, WHICH IS WHY THIS LOOKED LOST. `/Users/apunt/repos/qsar_qm_models/scratchpad/` does not exist and never did. The references inside immediate_next_steps.md:762-763 to `scratchpad/ALEA_EPIS_CODE.md` and `scratchpad/forest_ae.py` are relative to a session temp directory, not the repo. That is the single reason days of work read as deleted.",
+  "A THIRD FILE EXISTS THAT NOTHING IN THE REPO REFERENCES: `ALEA_EPIS_LITERATURE.md`, 459 lines, the full evidence review with 26 numbered sources and a 'could not retrieve' list. immediate_next_steps.md D4 mentions only the CODE file and forest_ae.py. This literature file is where every paper quote in this salvage comes from and it was one directory-deletion away from being gone with no pointer to it.",
+  "FIVE MORE RESEARCH BRIEFS FROM THE SAME SESSION ARE UNREAD AND UNREFERENCED, in the same volatile directory: `lit_ae_theory.md` and `lit_ae_practice.md` (the two aleatoric/epistemic literature briefs quoted at length inside the 2026-08-20 workflow notification \u2014 Jim\u00e9nez et al., Gruber et al., Wimmer et al., Bengs et al., Seitzer et al. all trace to these), plus `ERROR_DISTRIBUTION_LIT.md`, `SIGMA_PARAMETERISATION_LIT.md`, `UNC_AUDIT_FINAL.md`, `NOISE_PIPELINE_AUDIT.md`, `RUST_AUDIT.md`, `SIGMA_ANALYSIS.md`, `STRATEGY_CUT_DECISION.md`. Also 20+ fetched source files (`ryu_blocks.py`, `ryu_mc_dropout.py`, `scalia_model.py`, `chemprop_v2_loss.py`, `vbll_regression.py`, `ut_metrics_calibration.py`, `qf.py`, \u2026) \u2014 the actual upstream code, downloaded. I did NOT read these; they are outside the scope I was given but they are the same volatile directory and the same risk.",
+  "THE MUCS\u00c1NYI 0.8\u20130.999 NUMBER IS NOT VERIFIED AT PRIMARY SOURCE. It is the most-quoted figure in the whole plan (it appears in immediate_next_steps.md:733-736 and in three chat answers) but only the arXiv:2402.19460 ABSTRACT was read; the range comes from an ICLR 2025 Blogposts entry, which is a peer-reviewed blog track and not a journal article. A separate agent quoted the same paper's abstract as 'rank correlation \u2265 0.78'. The original explicitly says 'cite the primaries it points to.' Fetch the PDF before this number goes into the paper.",
+  "THE SCALIA AND RYU PAPERS THEMSELVES WERE NEVER READ. Scalia et al. JCIM 60:2697 is paywalled (HTTP 403); the arXiv preprint 1910.03127 was read instead and their CODE was read. Ryu, Kwon & Kim Chemical Science 10:8438 returned 403; only the arXiv preprint 1903.08375 was read, and the journal version has a DIFFERENT TITLE and may differ. Every Ryu quote in this salvage is from the preprint. Both must be labelled as such in the bibliography.",
+  "THE CHEMPROP JOURNAL PAPER WAS NOT READ (Heid, Greenman, McGill et al., JCIM 64, doi:10.1021/acs.jcim.3c01250 \u2014 ACS 403 plus an HTML challenge page). Only the Chemprop DOCUMENTATION was read. The original is explicit: 'Do not attribute anything to this paper on my account.'",
+  "FOUR RSC/NATURE SOURCES WERE NEVER RETRIEVED AND ARE NOT DESCRIBED ANYWHERE: 'Are we fitting data or noise?' (Faraday Discussions, doi:10.1039/d4fd00091a, 403); 'Uncertainty quantification for molecular property predictions with graph neural architecture search' (Digital Discovery 3:1534, 403); 'Uncertainty quantification with graph neural networks for efficient molecular design' (Nature Communications 2025, s41467-025-58503-0, auth redirect); and any specific Greenman / G\u00f3mez-Bombarelli multi-fidelity calibrated-uncertainty paper. Nothing is claimed about any of them.",
+  "THE D4 WRITE-UP IS PARTLY SUPERSEDED AND THE TWO DOCUMENTS DISAGREE. immediate_next_steps.md:791-794 says to change DNNRegressionModel's final layer from 1 output to 2. RERUN_PLAN.md:505 records that the two-output head ALREADY EXISTS at models.py:2023-2034, disabled behind a loss flag no job script passes, with the variance column sliced off at :2086 and :2102 \u2014 which I re-verified in the source this session. The build is smaller than D4 describes. Nobody has reconciled the two documents.",
+  "THE STATUS OF THE DECISION IS RECORDED INCONSISTENTLY IN THE SAME FILE. immediate_next_steps.md:1017 still shows `D4-head \u2026 \u2b1c DECISION NEEDED` while RERUN_PLAN.md:489-490 records it as settled on 2026-08-21 with the author's quotes. Nothing has flipped that register row.",
+  "NO ALEATORIC/EPISTEMIC NUMBERS IN THIS SALVAGE CAN BE TRUSTED AS RESULTS. The column-coverage counts (BNN-\u03b1 0/48 etc.) and the coverage anomaly (VBLL 1\u03c3 0.27\u20130.45) come from `results/paper_figures_v2/`, which is dated 8 July and predates the held-out-noise fix in commit 9d7db67. They describe the SHAPE of the problem, not validated findings.",
+  "THE MODELS.PY DISCARD SITES WERE NOT RE-READ. RERUN_PLAN.md:557 states that two models already compute a per-molecule aleatoric term and throw it away at models.py:6835-6851 and :6963-6977. I verified the head at :2023-2034 and the slicing at :2086/:2102 directly, but not these two. They should be confirmed before the build is sized.",
+  "NO SESSION TRANSCRIPT CONTAINS AN AUTHOR DECISION ON THE NGBOOST EPISTEMIC CELL, ON WHETHER TO INSTALL uncertainty-toolbox, OR ON WHETHER THE METRIC TABLE IS REPEATED THREE TIMES (Scalia's structure). These are written as recommendations only. I found no message where the author accepted or rejected any of them."
+ ]
+}

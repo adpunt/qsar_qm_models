@@ -19,7 +19,6 @@ use rand::rngs::StdRng;
 extern crate rdkit_sys;
 
 use rdkit_sys::ro_mol_ffi::{smiles_to_mol};
-use rdkit_sys::fingerprint_ffi::{rdk_fingerprint_mol, explicit_bit_vect_to_u64_vec}; // Assuming fingerprint generation is related to this type.
 use cxx::let_cxx_string;
 use cxx::UniquePtr;
 use cxx::CxxVector;
@@ -76,13 +75,26 @@ struct SmilesData {
     pdv_buf: [u8; 25],
     continuous_pdv_buf: [u8; 800],
     // The learned embeddings are 32-bit floats, four bytes a dimension:
-    // chemberta 768 dims, mhggnn 1024. They used to be one byte a dimension,
+    // chemberta 384 dims, mhggnn 1024. They used to be one byte a dimension,
     // min-max rescaled per molecule, which destroyed comparability between
     // molecules (RERUN_PLAN.md 2.8c). These widths and the Python writer's must
     // move together or every record after the first is read at the wrong offset.
-    chemberta_buf: [u8; 3072],
+    //
+    // chemberta was 768 until 2026-08-27, when both pipelines were settled on
+    // DeepChem/ChemBERTa-77M-MTR (384 wide). It must match CHEMBERTA_DIMS in
+    // scripts/process_and_train.py.
+    chemberta_buf: [u8; 1536],
     mhggnn_buf: [u8; 4096],
     avalon_buf: [u8; 256],
+    // ECFP4: Morgan radius 2, 2,048 bits, computed in Python and carried
+    // through. It used to be computed HERE with `rdk_fingerprint_mol`, which is
+    // RDKit's PATH fingerprint (RDKFingerprintMol) -- a different fingerprint
+    // from ECFP4 entirely. Measured on the first 1,500 QM9 molecules: the two
+    // agreed on ZERO of them, and methane, ammonia and water came back all-zero
+    // because a molecule with one heavy atom has no bond paths. The rdkit-sys
+    // binding offers only `morgan_fingerprint_mol`, hardcoded to radius 3, so
+    // there was no route to radius 2 on this side (RERUN_PLAN.md 2.13).
+    ecfp4_buf: [u8; 256],
 }
 
 #[derive(Serialize, Clone)]
@@ -2037,11 +2049,23 @@ fn read_smiles_data(
         String::from_utf8(buf).ok()
     }
 
-    // Read isomeric_smiles and check validity
+    // Read isomeric_smiles and check validity.
+    //
+    // A malformed record used to `return None` HERE, in the middle of a record.
+    // Every caller reads `if let Some(data) = read_smiles_data(...)` with no
+    // else, so a None is indistinguishable from end-of-data -- but the rest of
+    // THIS record was still unread in the buffer, so the next call started
+    // mid-record and every molecule after it decoded from the wrong offset. That
+    // is the one failure this file cannot survive (RERUN_PLAN.md 2.7, 2.13).
     let isomeric_smiles = read_len_prefixed_string(reader)?;
     if isomeric_smiles.len() < 5 || isomeric_smiles.len() > 300 || isomeric_smiles.contains(['\u{FFFD}', '\0', '\'', '�']) {
-        eprintln!("Skipping malformed isomeric_smiles: {:?}", isomeric_smiles);
-        return None;
+        panic!(
+            "malformed isomeric SMILES in the record stream: {:?} ({} bytes). \
+             Skipping it would leave the rest of its record unread, and every \
+             molecule after it would decode from the wrong offset.",
+            isomeric_smiles,
+            isomeric_smiles.len()
+        );
     }
 
     // Read canonical_smiles
@@ -2082,7 +2106,7 @@ fn read_smiles_data(
         reader.read_exact(&mut continuous_pdv_buf).ok()?;
     }
 
-    let mut chemberta_buf = [0u8; 3072];
+    let mut chemberta_buf = [0u8; 1536];
     if molecular_representations.contains(&"chemberta".to_string()) {
         reader.read_exact(&mut chemberta_buf).ok()?;
     }
@@ -2099,6 +2123,13 @@ fn read_smiles_data(
         reader.read_exact(&mut avalon_buf).ok()?;
     }
 
+    // ECFP4, LAST in the record. The Python writer appends it last and the
+    // output record below puts it last too; the two orderings have to agree.
+    let mut ecfp4_buf = [0u8; 256];
+    if molecular_representations.contains(&"ecfp4".to_string()) {
+        reader.read_exact(&mut ecfp4_buf).ok()?;
+    }
+
     // Store parsed data
     Some(SmilesData {
         isomeric_smiles,
@@ -2111,6 +2142,7 @@ fn read_smiles_data(
         chemberta_buf,
         mhggnn_buf,
         avalon_buf,
+        ecfp4_buf,
     })
 }
 
@@ -2186,49 +2218,6 @@ struct FeaturisationFailure {
 /// (RERUN_PLAN.md §2.7). The failure is not swallowed — it is recorded, and the
 /// run refuses to finish with any recorded failure unless explicitly permitted,
 /// so a zero fingerprint can never reach a model as if it were real features.
-fn prepare_ecfp4(isomeric_smiles: &str) -> (Vec<u8>, Option<String>) {
-    let_cxx_string!(smiles_cxx = isomeric_smiles.to_string());
-    match smiles_to_mol(&smiles_cxx) {
-        // RDKit's SmilesToMol returns a NULL pointer for a SMILES it cannot
-        // parse, and the binding wraps that null in a shared pointer and hands
-        // it back as Ok — only a thrown C++ exception becomes Err. So the old
-        // code's Err branch was unreachable for the ordinary bad-SMILES case:
-        // the fingerprint call dereferenced null and the process died with
-        // SIGSEGV, no message, no partial output. Verified 2026-08-26 by feeding
-        // "this-is-not-a-smiles" to the built binary (exit 139).
-        Ok(mol) if mol.is_null() => (
-            vec![0u8; 256],
-            Some("RDKit could not parse the SMILES (returned no molecule)".to_string()),
-        ),
-        Ok(mol) => {
-            let fingerprint = rdk_fingerprint_mol(&mol);
-            let cxx_vec_ptr: UniquePtr<CxxVector<u64>> = explicit_bit_vect_to_u64_vec(&fingerprint);
-            let cxx_vec_ref: &CxxVector<u64> = &*cxx_vec_ptr;
-            let u64_vec: Vec<u64> = cxx_vec_ref.iter().copied().collect();
-
-            if u64_vec.len() != 32 {
-                return (
-                    vec![0u8; 256],
-                    Some(format!(
-                        "fingerprint is not 2048 bits ({} chunks of 64, expected 32)",
-                        u64_vec.len()
-                    )),
-                );
-            }
-
-            let mut packed_fingerprint = vec![0u8; 256];
-            for (i, chunk) in u64_vec.iter().enumerate() {
-                packed_fingerprint[i * 8..(i + 1) * 8].copy_from_slice(&chunk.to_le_bytes());
-            }
-            (packed_fingerprint, None)
-        }
-        Err(e) => (
-            vec![0u8; 256],
-            Some(format!("RDKit raised an error: {}", e).replace(',', ";")),
-        ),
-    }
-}
-
 fn write_data(
     reader: &mut BufReader<File>,
     writer: &mut BufWriter<File>,
@@ -2262,18 +2251,20 @@ fn write_data(
                 println!("Writing data for index: {}", index);
             }
 
-            // Decided BEFORE a single byte of this record is written. The old
-            // code computed the fingerprint in place at the end of the record
-            // and used `continue` on failure, which left the record short by
-            // 256 bytes with everything before it already on disk.
+            // Carried through from the Python writer, which computes Morgan
+            // radius 2 and REFUSES an all-zero row. Nothing is computed here any
+            // more: this side had no route to radius 2 (see SmilesData). An
+            // all-zero block reaching this point means the writer's guard was
+            // bypassed, so it is recorded as a failure rather than written.
             let ecfp4_block = if wants_ecfp4 {
-                let (block, failure) = prepare_ecfp4(&smiles_data.isomeric_smiles);
-                if let Some(reason) = failure {
+                let block = smiles_data.ecfp4_buf.to_vec();
+                if block.iter().all(|b| *b == 0) {
                     failures.push(FeaturisationFailure {
                         split: split_name.to_string(),
                         index,
                         canonical_smiles: smiles_data.canonical_smiles.clone(),
-                        reason,
+                        reason: "ECFP4 is all zeros; a row with no features                                  would train as if it were featurised"
+                            .to_string(),
                     });
                 }
                 Some(block)
@@ -2351,7 +2342,7 @@ fn write_data(
                 }
             }
 
-            // chemberta (3072 bytes, float32)
+            // chemberta (1536 bytes = 384 float32)
             if config.molecular_representations.contains(&"chemberta".to_string()) {
                 let chemberta = smiles_data.chemberta_buf;
                 writer.write_all(&chemberta)?;
@@ -2446,12 +2437,18 @@ fn write_data(
                 println!("noisy y bytes: {:02X?}", processed_bytes);
             }
 
-            // Write domain label if applicable
+            // Write domain label if applicable.
+            //
+            // It is a LITERAL ZERO for every molecule, and the Python reader
+            // consumes the byte and does nothing with it. So `--k_domains > 1`
+            // does not carry a domain assignment through this file: whatever
+            // clustering produced it is thrown away here, and anything reading
+            // the byte sees one constant (RERUN_PLAN.md 2.13). Kept as a byte so
+            // the record layout does not change; refused above instead.
             if config.k_domains > 1 {
                 writer.write_all(&[0u8])?;
                 if log_writes {
-                    println!("domain_flag: 0");
-                    println!("domain_flag bytes: 00");
+                    println!("domain_flag: 0 (placeholder -- see the note above)");
                 }
             }
 

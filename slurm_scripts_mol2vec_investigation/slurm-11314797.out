@@ -1,0 +1,287 @@
+Using micromamba...
+Ensuring libstdc++ compatibility...
+warning  libmamba 'repo.anaconda.com', a commercial channel hosted by Anaconda.com, is used.
+    
+warning  libmamba Please make sure you understand Anaconda Terms of Services.
+    
+warning  libmamba See: https://legal.anaconda.com/policies/en/
+
+Pinned packages:
+
+  - python=3.10
+
+
+Transaction
+
+  Prefix: /data/stat-cadd/scat9264/conda_envs/env_test
+
+  All requested packages already installed
+
+
+Transaction starting
+
+Transaction finished
+
+Setting shared library paths...
+Ensuring RDKit .so symlinks exist...
+Installing PyTorch Geometric extensions...
+Looking in links: https://data.pyg.org/whl/torch-2.5.0+cpu.html
+Requirement already satisfied: torch-scatter in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (2.1.2+pt25cpu)
+Requirement already satisfied: torch-sparse in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (0.6.18+pt25cpu)
+Requirement already satisfied: torch-cluster in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (1.6.3+pt25cpu)
+Requirement already satisfied: torch-spline-conv in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (1.2.2+pt25cpu)
+Requirement already satisfied: scipy in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch-sparse) (1.15.2)
+Requirement already satisfied: numpy<2.5,>=1.23.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from scipy->torch-sparse) (1.26.4)
+Requirement already satisfied: tf-keras in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (2.19.0)
+Requirement already satisfied: tensorflow<2.20,>=2.19 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tf-keras) (2.19.0)
+Requirement already satisfied: absl-py>=1.0.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (2.2.2)
+Requirement already satisfied: astunparse>=1.6.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (1.6.3)
+Requirement already satisfied: flatbuffers>=24.3.25 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (25.2.10)
+Requirement already satisfied: gast!=0.5.0,!=0.5.1,!=0.5.2,>=0.2.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (0.6.0)
+Requirement already satisfied: google-pasta>=0.1.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (0.2.0)
+Requirement already satisfied: libclang>=13.0.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (18.1.1)
+Requirement already satisfied: opt-einsum>=2.3.2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (3.4.0)
+Requirement already satisfied: packaging in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (24.2)
+Requirement already satisfied: protobuf!=4.21.0,!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5,<6.0.0dev,>=3.20.3 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (5.29.4)
+Requirement already satisfied: requests<3,>=2.21.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (2.32.3)
+Requirement already satisfied: setuptools in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (78.1.0)
+Requirement already satisfied: six>=1.12.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (1.17.0)
+Requirement already satisfied: termcolor>=1.1.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (3.0.1)
+Requirement already satisfied: typing-extensions>=3.6.6 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (4.12.2)
+Requirement already satisfied: wrapt>=1.11.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (1.17.2)
+Requirement already satisfied: grpcio<2.0,>=1.24.3 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (1.71.0)
+Requirement already satisfied: tensorboard~=2.19.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (2.19.0)
+Requirement already satisfied: keras>=3.5.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (3.9.2)
+Requirement already satisfied: numpy<2.2.0,>=1.26.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (1.26.4)
+Requirement already satisfied: h5py>=3.11.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (3.13.0)
+Requirement already satisfied: ml-dtypes<1.0.0,>=0.5.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (0.5.1)
+Requirement already satisfied: tensorflow-io-gcs-filesystem>=0.23.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorflow<2.20,>=2.19->tf-keras) (0.37.1)
+Requirement already satisfied: wheel<1.0,>=0.23.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from astunparse>=1.6.0->tensorflow<2.20,>=2.19->tf-keras) (0.45.1)
+Requirement already satisfied: rich in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (14.0.0)
+Requirement already satisfied: namex in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (0.0.8)
+Requirement already satisfied: optree in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (0.15.0)
+Requirement already satisfied: charset-normalizer<4,>=2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorflow<2.20,>=2.19->tf-keras) (3.4.1)
+Requirement already satisfied: idna<4,>=2.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorflow<2.20,>=2.19->tf-keras) (3.10)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorflow<2.20,>=2.19->tf-keras) (2.4.0)
+Requirement already satisfied: certifi>=2017.4.17 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests<3,>=2.21.0->tensorflow<2.20,>=2.19->tf-keras) (2025.1.31)
+Requirement already satisfied: markdown>=2.6.8 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorboard~=2.19.0->tensorflow<2.20,>=2.19->tf-keras) (3.8)
+Requirement already satisfied: tensorboard-data-server<0.8.0,>=0.7.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorboard~=2.19.0->tensorflow<2.20,>=2.19->tf-keras) (0.7.2)
+Requirement already satisfied: werkzeug>=1.0.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from tensorboard~=2.19.0->tensorflow<2.20,>=2.19->tf-keras) (3.1.3)
+Requirement already satisfied: MarkupSafe>=2.1.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from werkzeug>=1.0.1->tensorboard~=2.19.0->tensorflow<2.20,>=2.19->tf-keras) (3.0.2)
+Requirement already satisfied: markdown-it-py>=2.2.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from rich->keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (3.0.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from rich->keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (2.19.1)
+Requirement already satisfied: mdurl~=0.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from markdown-it-py>=2.2.0->rich->keras>=3.5.0->tensorflow<2.20,>=2.19->tf-keras) (0.1.2)
+Requirement already satisfied: torchcp in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (1.2.1)
+Requirement already satisfied: torch>=2.1.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (2.5.1.post108)
+Requirement already satisfied: torchvision>=0.16.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (0.20.1)
+Requirement already satisfied: transformers>=4.20.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (4.51.3)
+Requirement already satisfied: numpy>=1.20.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (1.26.4)
+Requirement already satisfied: setuptools>=59.5.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (78.1.0)
+Requirement already satisfied: tqdm>=4.60.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (4.67.1)
+Requirement already satisfied: scikit-learn>=1.5.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (1.6.1)
+Requirement already satisfied: pandas>=2.1.4 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (2.2.3)
+Requirement already satisfied: Pillow>=10.3.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (11.1.0)
+Requirement already satisfied: torch_geometric>=2.4.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (2.6.1)
+Requirement already satisfied: torchsort>=0.1.9 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torchcp) (0.1.10)
+Requirement already satisfied: python-dateutil>=2.8.2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pandas>=2.1.4->torchcp) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pandas>=2.1.4->torchcp) (2025.2)
+Requirement already satisfied: tzdata>=2022.7 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pandas>=2.1.4->torchcp) (2025.2)
+Requirement already satisfied: scipy>=1.6.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from scikit-learn>=1.5.0->torchcp) (1.15.2)
+Requirement already satisfied: joblib>=1.2.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from scikit-learn>=1.5.0->torchcp) (1.4.2)
+Requirement already satisfied: threadpoolctl>=3.1.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from scikit-learn>=1.5.0->torchcp) (3.6.0)
+Requirement already satisfied: filelock in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (3.18.0)
+Requirement already satisfied: typing-extensions>=4.8.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (4.12.2)
+Requirement already satisfied: sympy!=1.13.2,>=1.13.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (1.13.3)
+Requirement already satisfied: networkx in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (3.4.2)
+Requirement already satisfied: jinja2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (3.1.6)
+Requirement already satisfied: fsspec in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch>=2.1.0->torchcp) (2025.3.2)
+Requirement already satisfied: aiohttp in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch_geometric>=2.4.0->torchcp) (3.11.16)
+Requirement already satisfied: psutil>=5.8.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch_geometric>=2.4.0->torchcp) (7.0.0)
+Requirement already satisfied: pyparsing in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch_geometric>=2.4.0->torchcp) (3.2.3)
+Requirement already satisfied: requests in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from torch_geometric>=2.4.0->torchcp) (2.32.3)
+Requirement already satisfied: huggingface-hub<1.0,>=0.30.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (0.30.2)
+Requirement already satisfied: packaging>=20.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (24.2)
+Requirement already satisfied: pyyaml>=5.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (6.0.2)
+Requirement already satisfied: regex!=2019.12.17 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (2024.11.6)
+Requirement already satisfied: tokenizers<0.22,>=0.21 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (0.21.1)
+Requirement already satisfied: safetensors>=0.4.3 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from transformers>=4.20.0->torchcp) (0.5.3)
+Requirement already satisfied: six>=1.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from python-dateutil>=2.8.2->pandas>=2.1.4->torchcp) (1.17.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from sympy!=1.13.2,>=1.13.1->torch>=2.1.0->torchcp) (1.3.0)
+Requirement already satisfied: aiohappyeyeballs>=2.3.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (2.6.1)
+Requirement already satisfied: aiosignal>=1.1.2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (1.3.2)
+Requirement already satisfied: async-timeout<6.0,>=4.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (5.0.1)
+Requirement already satisfied: attrs>=17.3.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (25.3.0)
+Requirement already satisfied: frozenlist>=1.1.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (1.5.0)
+Requirement already satisfied: multidict<7.0,>=4.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (6.4.3)
+Requirement already satisfied: propcache>=0.2.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (0.3.1)
+Requirement already satisfied: yarl<2.0,>=1.17.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from aiohttp->torch_geometric>=2.4.0->torchcp) (1.19.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from jinja2->torch>=2.1.0->torchcp) (3.0.2)
+Requirement already satisfied: charset-normalizer<4,>=2 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests->torch_geometric>=2.4.0->torchcp) (3.4.1)
+Requirement already satisfied: idna<4,>=2.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests->torch_geometric>=2.4.0->torchcp) (3.10)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests->torch_geometric>=2.4.0->torchcp) (2.4.0)
+Requirement already satisfied: certifi>=2017.4.17 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from requests->torch_geometric>=2.4.0->torchcp) (2025.1.31)
+Requirement already satisfied: gensim in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (4.4.0)
+Requirement already satisfied: numpy>=1.18.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from gensim) (1.26.4)
+Requirement already satisfied: scipy>=1.7.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from gensim) (1.15.2)
+Requirement already satisfied: smart_open>=1.8.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from gensim) (7.5.0)
+Requirement already satisfied: wrapt in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from smart_open>=1.8.1->gensim) (1.17.2)
+Requirement already satisfied: mol2vec in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (0.2.2)
+Requirement already satisfied: numpy in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (1.26.4)
+Requirement already satisfied: gensim in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (4.4.0)
+Requirement already satisfied: tqdm in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (4.67.1)
+Requirement already satisfied: joblib in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (1.4.2)
+Requirement already satisfied: pandas in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (2.2.3)
+Requirement already satisfied: matplotlib in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (3.10.1)
+Requirement already satisfied: IPython in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (8.35.0)
+Requirement already satisfied: seaborn in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from mol2vec) (0.13.2)
+Requirement already satisfied: scipy>=1.7.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from gensim->mol2vec) (1.15.2)
+Requirement already satisfied: smart_open>=1.8.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from gensim->mol2vec) (7.5.0)
+Requirement already satisfied: decorator in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (5.2.1)
+Requirement already satisfied: exceptiongroup in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (1.2.2)
+Requirement already satisfied: jedi>=0.16 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (0.19.2)
+Requirement already satisfied: matplotlib-inline in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (0.1.7)
+Requirement already satisfied: pexpect>4.3 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (4.9.0)
+Requirement already satisfied: prompt_toolkit<3.1.0,>=3.0.41 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (3.0.51)
+Requirement already satisfied: pygments>=2.4.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (2.19.1)
+Requirement already satisfied: stack_data in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (0.6.3)
+Requirement already satisfied: traitlets>=5.13.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (5.14.3)
+Requirement already satisfied: typing_extensions>=4.6 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from IPython->mol2vec) (4.12.2)
+Requirement already satisfied: contourpy>=1.0.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (1.3.1)
+Requirement already satisfied: cycler>=0.10 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (0.12.1)
+Requirement already satisfied: fonttools>=4.22.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (4.57.0)
+Requirement already satisfied: kiwisolver>=1.3.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (1.4.7)
+Requirement already satisfied: packaging>=20.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (24.2)
+Requirement already satisfied: pillow>=8 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (11.1.0)
+Requirement already satisfied: pyparsing>=2.3.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (3.2.3)
+Requirement already satisfied: python-dateutil>=2.7 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from matplotlib->mol2vec) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pandas->mol2vec) (2025.2)
+Requirement already satisfied: tzdata>=2022.7 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pandas->mol2vec) (2025.2)
+Requirement already satisfied: parso<0.9.0,>=0.8.4 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from jedi>=0.16->IPython->mol2vec) (0.8.4)
+Requirement already satisfied: ptyprocess>=0.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from pexpect>4.3->IPython->mol2vec) (0.7.0)
+Requirement already satisfied: wcwidth in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from prompt_toolkit<3.1.0,>=3.0.41->IPython->mol2vec) (0.2.13)
+Requirement already satisfied: six>=1.5 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from python-dateutil>=2.7->matplotlib->mol2vec) (1.17.0)
+Requirement already satisfied: wrapt in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from smart_open>=1.8.1->gensim->mol2vec) (1.17.2)
+Requirement already satisfied: executing>=1.2.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from stack_data->IPython->mol2vec) (2.2.0)
+Requirement already satisfied: asttokens>=2.1.0 in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from stack_data->IPython->mol2vec) (3.0.0)
+Requirement already satisfied: pure-eval in /data/stat-cadd/scat9264/conda_envs/env_test/lib/python3.10/site-packages (from stack_data->IPython->mol2vec) (0.2.3)
+Environment 'env_test' setup complete!
+Already up to date.
+================================================================================
+GENERATING PAPER FIGURES
+================================================================================
+
+[1/3] Loading data...
+Loaded QM9 ANOVA data: 79645 rows from 596 files
+Loaded uncertainty data: 54919808 rows
+  Fixed injected_noise via linear regression (12170 groups)
+Loaded validation data: 306 rows
+  Filtered out 66000 uncertainty rows from excluded graph models
+
+[2/3] Calculating metrics...
+  NDS calculated: 499 configs
+  Excluded (baseline R² < 0.6): 68 configs
+    Marginal (0.5 <= R² < 0.6): 22
+    Clearly excluded (R² < 0.5): 46
+
+[3/3] Generating figures...
+
+--- METHODS FIGURE ---
+✓ Saved fig_methods_noise_strategies.png
+✓ Saved fig_methods_noise_strategies_detailed.png
+
+--- PART 1: THE WHAT ---
+✓ Saved fig1_global_overview.png
+✓ Saved fig1_supp_ecfp4_overview.png (supplementary — compare to PDV)
+✓ Saved fig2_anova_decomposition.png
+✓ Saved table1_anova_summary.csv
+
+  ANOVA design:
+    Models excluded: ['conformal_dnn_split', 'conformal_qrf_split', 'conformal_rf_split', 'qrf']
+    Reps excluded: ['random_smiles', 'randomized_smiles', 'sns']
+    Models in ANOVA: ['bnn_full', 'bnn_last', 'bnn_variational', 'dnn', 'flexible_dnn', 'flexible_dnn_256_128_64', 'flexible_dnn_512_256', 'gauche', 'mlp', 'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational', 'ngboost', 'rf', 'svm', 'xgboost']
+    Reps in ANOVA: ['ecfp4', 'mhggnn', 'pdv', 'smiles']
+✓ Saved table1_supp_simple_effects.csv (220 rows)
+
+  Simple Effects Summary (η² for model effect within each representation):
+    ecfp4: Model η² = 49.5%
+    mhggnn: Model η² = 93.3%
+    pdv: Model η² = 44.2%
+    smiles: Model η² = 91.3%
+  Simple Effects Summary (η² for rep effect within each model):
+    bnn_full: Rep η² = 99.8%
+    bnn_variational: Rep η² = 99.7%
+    bnn_last: Rep η² = 99.7%
+    mlp_bnn_full: Rep η² = 99.7%
+    mlp_bnn_last: Rep η² = 99.6%
+    mlp_bnn_variational: Rep η² = 99.6%
+    ngboost: Rep η² = 98.2%
+    rf: Rep η² = 94.2%
+    xgboost: Rep η² = 90.2%
+    gauche: Rep η² = 75.6%
+    svm: Rep η² = 73.3%
+    flexible_dnn_256_128_64: Rep η² = 64.8%
+    flexible_dnn_512_256: Rep η² = 60.3%
+    flexible_dnn: Rep η² = 54.0%
+    dnn: Rep η² = 45.8%
+    mlp: Rep η² = 20.8%
+✓ Saved fig3_ranking_consistency.png
+✓ Saved fig3_supp_ecfp4_ranking.png (supplementary)
+✓ Saved fig_interaction.png
+✓ Saved fig_full_overview.png
+✓ Saved table_all_configurations.csv (499 rows)
+
+--- PART 2: THE WHY ---
+✓ Saved fig4_dnn_family.png (showing legacy vs hetero)
+✓ Saved fig5_mlp_rf_comparison.png (showing legacy vs hetero)
+✓ Saved fig6_uncertainty_quality.png (pdv, legacy)
+✓ Saved fig6_supp_ecfp4_legacy.png (supplementary)
+✓ Saved fig6_supp_pdv_hetero.png (supplementary)
+✓ Saved fig7_uncertainty_noise_tracking.png (pdv, legacy)
+✓ Saved fig7_supp_ecfp4_legacy.png (supplementary)
+✓ Saved fig7_supp_pdv_hetero.png (supplementary)
+
+--- TABLES ---
+✓ Saved table2_nds_by_strategy_pdv.csv
+✓ Saved table2_supp_nds_all_reps.csv (supplementary)
+✓ Saved table3_probabilistic_comparison.csv
+✓ Saved table3_wilcoxon_tests.csv
+✓ Saved table4_uncertainty_metrics.csv
+✓ Saved table5_sigma_rankings.csv
+✓ Saved table6_kendalls_w.txt
+✓ Saved table7_strategy_sensitivity_ratio.csv
+  tree Heteroscedastic/Gaussian ratio: mean=0.544 (range 0.536-0.550)
+  tree Outlier/Gaussian ratio: mean=0.336 (range 0.293-0.372)
+  tree Quantile/Gaussian ratio: mean=0.803 (range 0.430-0.936)
+  tree Threshold/Gaussian ratio: mean=1.997 (range 1.970-2.028)
+  tree Value-Prop./Gaussian ratio: mean=1.773 (range 1.751-1.803)
+  nn Heteroscedastic/Gaussian ratio: mean=0.558 (range 0.541-0.590)
+  nn Outlier/Gaussian ratio: mean=0.380 (range 0.336-0.550)
+  nn Quantile/Gaussian ratio: mean=0.899 (range 0.869-0.928)
+  nn Threshold/Gaussian ratio: mean=1.893 (range 1.797-1.949)
+  nn Value-Prop./Gaussian ratio: mean=1.703 (range 1.663-1.746)
+
+--- VALIDATION (GENERALISATION) ---
+⚠ No validation NDS data available — skipping validation figures
+
+--- SUPPLEMENTARY: ICC & REDUNDANCY ---
+✓ Saved table_supp_model_redundancy.csv (190 pairs)
+✓ Saved table_supp_rep_redundancy.csv (15 pairs)
+✓ Saved table_supp_icc.csv (190 model pairs)
+  High ICC pairs (>0.9, candidates for ANOVA exclusion):
+    mlp_bnn_last <-> mlp_bnn_variational: ICC=1.000, MAD=0.0020
+    conformal_dnn_split <-> flexible_dnn: ICC=1.000, MAD=0.0010
+    bnn_last <-> dnn: ICC=0.986, MAD=0.0064
+    bnn_last <-> bnn_variational: ICC=0.986, MAD=0.0071
+    bnn_last <-> flexible_dnn: ICC=0.986, MAD=0.0073
+    bnn_variational <-> flexible_dnn: ICC=0.985, MAD=0.0068
+    bnn_variational <-> conformal_dnn_split: ICC=0.983, MAD=0.0075
+    bnn_last <-> conformal_dnn_split: ICC=0.983, MAD=0.0077
+    mlp <-> mlp_bnn_variational: ICC=0.980, MAD=0.0157
+    mlp <-> mlp_bnn_last: ICC=0.979, MAD=0.0159
+
+--- REPORT ---
+✓ Saved ../results/paper_figures/paper_figures_report.txt
+
+================================================================================
+COMPLETE - All outputs in ../results/paper_figures
+================================================================================

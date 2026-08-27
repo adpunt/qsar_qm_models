@@ -1,0 +1,201 @@
+                                                                                                           107
+                                                                                                      Adopted:
+                                                                                                      27.07.95
+
+
+
+    OECD GU ID ELIN E FOR THE TES TIN G OF CHEMICALS
+
+                         Adopted by the Council on 27th July 1995
+
+              Partition Coefficient (n-octanol/water): Shake Flask Method
+
+
+
+IN TROD U CTION
+
+1.       This guideline is a revised version of the original Guideline 107 which was adopted in 1981.
+The only change is one of format. The substantive content of the original guideline was not changed.
+
+
+IN ITIAL CONSID ERATION S
+
+2.        POW values in the range log POW between -2 and 4 (occasionally up to 5) can be
+experimentally determined by the method set out in this guideline (1)(2). POW values in the range log
+POW between 0 and 6 can be estimated using high performance liquid chromatography as is set out in
+Guideline 117. Before deciding on what procedure to use, a preliminary estimate of the POW should
+be obtained from calculation (see the annex to Guideline 117), or where appropriate from the ratio of
+the solubilities of the test substance in the pure solvents (3).
+
+3.        Before determining POW it is useful to have preliminary information on the structural formula,
+dissociation constant, water solubility, hydrolysis, n-octanol solubility and surface tension of the
+substance.
+
+4.       The shake flask method is impossible to use with surface-active materials (for these, a POW
+can be calculated from individual solubilities in water and n-octanol).
+
+
+D EFIN ITION S AN D U N ITS
+
+5.       The partition coefficient (P) is defined as the ratio of the equilibrium concentrations of a
+dissolved substance in a two-phase system consisting of two largely immiscible solvents. In the case
+of n-octanol and water:
+
+
+
+
+The partition coefficient, being the quotient of two concentrations, or the quotient of the fractions of
+the test substance in the two phases multiplied by a fixed volume ratio, is dimensionless and is usually
+given in the form of its logarithm to base ten.
+
+
+
+
+                                                  1/4
+107                                                OCD E/OECD
+
+      R EFER EN CE SUBSTAN CES
+
+      6.       Reference substances do not need to be employed. They serve primarily to check the
+      performance of the method from time to time and to allow comparison with results from other
+      methods.
+
+
+      PRIN CIPLE OF THE METHOD
+
+      7.          The Nernst partition law applies at constant temperature, pressure and pH for dilute solutions.
+      It strictly applies to a pure substance dispersed between two pure solvents and when the concentration
+      of the solute in either phase is not more than 0.01 mol per litre. If several different solutes occur in
+      one or both phases at the same time, this may affect the results. Dissociation or association of the
+      dissolved molecules result in deviations from the partition law. Such deviations are indicated by the
+      fact that the partition coefficient becomes dependent upon the concentration. Measurements should
+      be made on ionizable substances only in their non-ionized form (free acid or free base) produced by
+      the use of an appropriate buffer with a pH of at least one unit below (free acid) or above (free base)
+      the pK.
+
+
+      D ES CRIPTION OF THE METHOD
+
+      Te st substanc e and solvents
+
+      8.        n-Octanol of analytical grade and distilled or double-distilled water should be used. Water
+      taken directly from an ion exchanger should not be used. A stock solution of known concentration
+      of the test substance in n-octanol, pre-saturated with water, is prepared. This solution should be
+      stored under conditions which ensure its stability.
+
+      9.        Before a partition coefficient is determined, the two solvents are mutually saturated at the
+      temperature of the experiment. To do this, it is practical to shake two large stock bottles, one
+      containing n-octanol and a sufficient quantity of water, and the other containing water and a sufficient
+      quantity of n-octanol, for 24 hours on a mechanical shaker, and then to let them stand long enough
+      to allow the phases to separate.
+
+      Te st conditions
+
+      10.       The test should be done at a temperature in the range 20 to 25°C, kept constant at ± 1°C.
+
+      11.      For a first run, a volume ratio of n-octanol to water and a quantity of substance are chosen
+      with regard given to:
+
+              - the preliminary estimation of the partition coefficient,
+              - the minimum concentration of test substance in each phase required for the analytical
+                procedure,
+              - a maximum concentration of the test substance in each phase of 0,01 mol per litre.
+
+              For a second run, the originally chosen volume ratio is divided by two, and, for a third run,
+      it is multiplied by two. In the second and third run the quantity of substance added may have to be
+      different from that used in the first run in order to fulfill the above criteria.
+
+      12.     Duplicate vessels containing accurately measured amounts of the two solvents and stock
+      solution are used in all three runs.
+
+
+
+                                                         2/4
+                                             OCD E/OECD                                                    107
+Establishment of the partition equilibrium
+
+13.     The two-phase system should nearly fill the entire volume of the test vessels. This will help
+prevent loss of material due to volatilisation.
+
+14.     The test vessels are placed in a mechanical shaker or are shaken by hand. When using a
+centrifuge tube as the test vessel, it is recommended to rotate the tube through 180° about its
+transverse axis (approximately a hundred times during five minutes), allowing the trapped air to rise
+through the two phases.
+
+Phase separation
+
+15.     The separation of the two phases, in general, is achieved by centrifugation. This should
+preferably be done at the test temperature. If a centrifuge without temperature control is used, the
+centrifuge tubes should be kept for equilibration at the test temperature for at least one hour before
+analysis.
+
+Analysis
+
+16.     It is necessary to determine the concentrations of the test substance in both phases. For the
+measurement, substance-specific methods are preferred. Analytical methods which may be appropriate
+are: photometry, gas chromatography and high performance liquid chromatography. The total quantity
+of substance present in both phases should be calculated and compared with the quantity originally
+introduced.
+
+17.      The aqueous phase should be sampled by a procedure that minimizes the risk of including
+traces of n-octanol. This can be done using a syringe with a removable needle. The syringe should
+initially be partially filled with air. Air should be gently expelled while passing the n-octanol layer.
+The adequate volume of the aqueous solution is withdrawn. The syringe is quickly withdrawn and
+the needle is detached.
+
+
+D ATA AN D R EPOR TIN G
+
+D ata
+
+18.      A POW value is calculated from the data of each run. Altogether six values are obtained since
+the test conditions are: three duplicate runs with different solvent ratios, and possibly also different
+quantities of test substance. The six log POW values should fall within a range of ± 0.3 units.
+
+Te st Report
+
+19.     The test report must include the following information:
+
+        - chemical identity and impurities;
+        - the results of the preliminary estimation (when the shake flask method is not applicable,
+          e.g. surface active material, a calculated value or an estimate based on the individual n-
+          octanol and water solubilities should be provided);
+        - all information relevant for the interpretation of the results, especially with regard to
+          impurities and physical state of the substance;
+        - the test conditions: temperature, the amount of test substance introduced in the test vessels,
+          the volume of each phase in each vessel and the calculated total amount of test substance
+          based on the analytical data;
+        - pH of the water used and of the aqueous phase during the experiment;
+
+
+                                                  3/4
+107                                            OCD E/OECD
+
+            - justification for the use of buffers; composition, concentration and pH of the buffers; pH
+              of the aqueous phase before and after the experiment;
+            - duration and speed of centrifugation, if used;
+            - the analytical procedures;
+            - the concentrations measured in each run (a total of 12 concentrations);
+            - POW values and their mean for each set of test conditions and the overall mean (if there
+              is the suggestion of concentration dependence of the partition coefficient, this should be
+              noted);
+            - the standard deviation of individual POW values about their mean;
+            - the overall mean expressed as its logarithm to base 10;
+            - the theoretical POW when it has been calculated or when the measured value is above 104.
+
+
+      LITERATURE
+
+      (1)   NF T 20-043 AFNOR (1985). Chemical products for industrial use - Determination of
+            partition coefficient - Shake flask method
+
+      (2)   40 CFR, 796.1550, Office of the Federal Register (1989)
+
+      (3)   Jübermann, O. (1958). in Houben-Weyl, Methoden der Organischen Chemie, Band I/1, 223-
+            339, Georg Thieme Verlag, Stuttgart
+
+
+
+
+                                                    4/4
+

@@ -1,0 +1,1521 @@
+MOMENTS OF STUDENT’S T-DISTRIBUTION: A UNIFIED
+APPROACH
+
+arXiv:1912.01607v3 [math.PR] 17 Dec 2024
+
+J. LARS KIRKBY, DANG H. NGUYEN, AND DUY NGUYEN
+
+Abstract. In this paper, we derive new closed form formulae for moments of (generalized)
+Student’s t-distribution in the one dimensional case as well as in higher dimensions through
+a unified probability framework. Interestingly, the closed form expressions for the moments
+of Student’s t-distribution can be written in terms of the familiar Gamma function, Kummer’s confluent hypergeometric function, and the hypergeometric function. This work aims
+to provide a concise and unified treatment of the moments for this important distribution.
+
+Contents
+1. Introduction
+2. Student’s t-distribution: One dimensional case
+3. Higher dimensional case
+4. Conclusion
+References
+
+2
+3
+7
+11
+11
+
+2010 Mathematics Subject Classification. 92D25, 37H15, 60H10, 60J60.
+Key words and phrases. Normal distribution, Student’s t-distribution, Moment, Raw Moment, Absolute
+Moment, Multivariate.
+1
+
+2
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+1. Introduction
+In probability and statistics, the location (e.g., mean), spread (e.g, standard deviation),
+skewness, and kurtosis play an important role in the modeling of random processes. One
+often uses the mean and standard deviation to construct confidence intervals or conduct hypothesis testing, and significant skewness or kurtosis of a data set indicates deviations from
+normality. Moreover, moment matching algorithms are among the most widely used fitting
+procedures in practice. As a result, it is important to be able to find the moments of a given
+distribution. In his popular note, Winkelbauer (2014) gave the closed form formulae for the
+moments as well as absolute moments of a normal distribution N(µ, σ 2 ). The obtained results
+are beautiful and have been well received. Recently, Ogasawara (2020) provides a unified,
+non-recursive formulae for moments of normal distribution with strip truncation. Also see
+(Nguyen 2021, Skorski 2024) for the binomial family. Given the close relationship between
+the normal and Student’s t-distributions, a natural question arises: Can we derive similar
+formulae for the family of Student’s t-distributions? From the authors’ best knowledge, no
+such set of formulae exist for (generalized) Student’s t-distributions. The purpose of this note
+is to provide a complete set of closed form formulae for raw moments, central raw moments,
+absolute moments, and central absolute moments for (generalized) Student’s t-distributions
+in the one-dimensional case and n-dimensional case. In particular, the formulae given in
+(2.5) - (2.8) and Proposition 3.1 are new in the literature. In this sense, we unify existing results and provide extensions to higher dimensions, within a common probabilistic framework.
+Notation: For later use, we denote the probability density function (pdf) of a Gamma
+distribution with parameters α > 0, β > 0 by
+Gamma(x|α, β) =
+
+β α α−1 −βx
+x e ,
+Γ(α)
+
+x ∈ (0, ∞).
+
+Similarly, the probability density function of a normal distribution X ∼ N(µ, σ 2 ) is denoted
+by
+
+
+1
+(x − µ)2
+2
+N(x|µ, σ ) = √
+, x ∈ (−∞, +∞).
+exp −
+2σ 2
+2πσ
+This is extended naturally to higher dimensional cases.
+We will also require two common special functions. The Kummer’s confluent hypergeometric function is defined by
+K(α, γ; z) ≡ 1 F1 (α, γ; z) =
+
+∞
+X
+αn z n
+n=0
+
+γ n n!
+
+.
+
+The hypergeometric function is defined by
+∞
+X
+an bn z n
+· ,
+2 F1 (a, b, c; z) =
+cn
+n!
+n=0
+
+where
+Γ(a + n)
+a =
+=
+Γ(a)
+n
+
+
+
+1
+n = 0,
+a(a + 1) . . . (a + n − 1) n > 0.
+
+3
+
+2. Student’s t-distribution: One dimensional case
+Recall the probability density function (pdf) of a standard Student’s t-distribution with
+ν ∈ {1, 2, 3, . . .} degrees of freedom, denoted by St(t|0, 1, ν), is given by
+(2.1)
+
+) 1
+Γ( ν+1
+2
+√
+St(t|0, 1, ν) =
+ν
+Γ( 2 ) νπ
+
+
+− ν+1
+2
+t2
+,
+1+
+ν
+
+−∞ < t < ∞,
+
+where the Gamma function is defined as
+Γ(z) =
+
+Z ∞
+
+tz−1 e−t dt.
+
+0
+
+More generally, the probability density function of a location-scale (or generalized) Student’s
+t-distribution with ν > 0 degrees of freedom is denoted by,
+(2.2)
+
+− ν+1
+Γ( ν+1
+)  σ  21 
+σ
+2
+2
+2
+St(t|µ, σ, ν) =
+1 + (t − µ)
+,
+ν
+Γ( 2 ) νπ
+ν
+
+−∞ < t < ∞,
+
+where µ ∈ (−∞, ∞) is the location, σ > 0 determines the scale, and ν ∈ {1, 2, 3, . . .}
+represents the number of the degrees of freedom. The thickness of its tails is determined by
+of Cauchy(µ, σ),
+the degrees of freedom. When ν = 1, the pdf in (2.2) reduces to the
+√ pdf
+2
+while the pdf in (2.2) converges to the pdf of the normal N(t|µ, (1/ σ) ) as ν → ∞.
+While the tails of the normal distribution decay at an exponential rate, the Student’s
+t-distribution is heavy-tailed, with a polynomial decay rate. Because of this, the Student’s tdistribution has been widely adopted in robust data analysis including (non) linear regression
+(Lange et al. 1989), sample selection models (Marchenko & Genton 2012), and linear mixed
+effect models (Pinheiro et al. 2001). It is also among the most widely applied distributions
+for financial risk modeling, see McNeil et al. (2015), Shaw (2006),Kwon & Satchell (2020).
+The reader is invited to refer to Kotz & Nadarajah (2004) for more.
+The mean and variance of a Student’s t-distribution T are well known and can be found
+in closed form by using the properties of the Gamma function. Specifically for ν > 2, we
+have (see, for example, Jackman (2009)):
+E(T ) = µ, Var(T ) =
+
+1 ν
+.
+σν−2
+
+However, for higher order raw or central moments, the calculation quickly becomes tedious.
+We note
+p that one can use the fact that 2the Student’s t-distribution can be written as
+T = X/ Z/ν where X ∼ N(0, 1), Z ∼ χν , X, Z are independent. From there, one can
+derive the probability density function of T . We adopt the mixture approach which is
+surprisingly simple and will be very useful in later derivations. It provides a representation
+of a conditional Student’s t-distribution in terms of a normal distribution, see, for example,
+Bishop (2006). More specifically, we have,
+Lemma 2.1. Assume that for ν > 0, Λ ∼ Gamma(λ|ν/2, ν/2). Additional, given Λ = λ,
+assume further that T |λ is a normal distribution with mean µ and variance 1/(σλ). Then T
+is a St(t|µ, σ, ν) Student’s t-distribution.
+
+4
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+Proof: As the proof is very concise, we reproduce it here for the reader’s convenience.
+Let fT (t) be the probability density function of T . We have
+Z ∞
+1
+ν ν
+fT (t) =
+N(t|µ,
+)Gamma(λ| , )dλ
+σλ
+2 2
+0
+Z ∞√
+σλ σλ
+ν
+ν ν/2
+2
+√ e− 2 (t−µ) ν/2
+λν/2−1 e− 2 λ dλ
+=
+2 Γ(ν/2)
+2π
+0
+√
+Z ∞
+ν/2
+)
+Γ( ν+1
+σ
+ν
+ν+1 ν σ
+2
+, + (t − µ)2 ))dλ
+=√
+Gamma(λ|
+ν+1
+ν/2 Γ(ν/2) ν
+σ
+2
+2
+2
+2 2
+2π
+( 2 + 2 (t − µ) ) 2 0
+√
+)
+Γ( ν+1
+σ
+ν ν/2
+2
+=√
+ν+1
+ν/2
+ν
+σ
+2π 2 Γ(ν/2) ( 2 + 2 (t − µ)2 ) 2
+= St(t|µ, σ, ν).
+This completes the proof of the Lemma.
+The following results are well known:
+
+
+
+Theorem 2.1. We have
+(1) If X ∼ N(0, σ 2 ) then
+E(X m ) =
+
+
+
+
+0,
+if m = 2k + 1, k ∈ N
+σ m m!
+, if m = 2k, k ∈ N.
+ m/2
+2 (m/2)!
+
+(2) If X ∼ Gamma(α, β), then E(X ν ) = β
+
+−ν Γ(ν+α)
+
+Γ(α)
+
+for −α < ν ∈ R.
+
+With this and Lemma 2.1 above, we are able to find moments of Student’s t-distribution.
+More specifically, we have the following comprehensive theorem in one dimension.
+Theorem 2.2. For k ∈ N+ , 0 < k < ν, the following results hold:
+
+(1) For T ∼ St(t|0, 1, ν), the raw and absolute moments satisfy
+( k+1
+Γ( 2 )
+ν k/2
+√
+· Qk/2
+, k even,
+k
+ν
+π
+(2.3)
+E(T ) =
+i=1 ( 2 −i)
+0,
+k odd.
+(2.4)
+
+E(|T |k ) =
+
+ν k/2 Γ((k + 1)/2)Γ((ν − k)/2)
+√
+.
+πΓ(ν/2)
+
+(2) If T ∼ St(t|µ, σ, ν), the raw moments satisfy
+
+k
+ν
+k+1
+2
+
+ (ν/σ)k/2 Γ(√2 ) Γ( 2 − 2 ) 2 F1 (− k , ν − k , 1 ; − µ σ ),
+k even,
+π
+Γ( ν2 )
+2 2 2 2
+ν
+(2.5)
+E(T k ) =
+
+)
+µ2 σ
+ 2µ(ν/σ)(k−1)/2 Γ( k2√+1) Γ( ν2 −νk−1
+k−1 3
+1−k ν
+2
+2 F1 ( 2 , 2 − 2 , 2 ; − ν ), k odd.
+π
+Γ( )
+2
+
+(2.6)
+
+E((T − µ)k ) =
+
+Γ( k+1 ) Γ( ν−k
+)
+(1 + (−1)k )
+2
+(ν/σ)k/2 √2
+.
+ν
+2
+π Γ( 2 )
+
+5
+
+(3) If T ∼ St(t|µ, σ, ν), the absolute moments satisfy
+(2.7)
+
+Γ( k+1 ) Γ( ν2 − k2 )
+k ν k 1 µ2 σ
+F
+(−
+E(|T |k ) = (ν/σ)k/2 √2
+, − , ;−
+).
+2
+1
+π
+Γ( ν2 )
+2 2 2 2
+ν
+
+(2.8)
+
+ν−k
+k+1
+k/2 Γ( 2 ) Γ( 2 )
+√
+.
+E(|T − µ| ) = (ν/σ)
+π Γ( ν2 )
+k
+
+In general, the moments are undefined when k ≥ ν.
+Proof: First assume that T ∼ St(t|0, 1, ν); we will find E(|T |k ). The proof for E(T k )
+follows from similar ideas in combination with the result obtained in Theorem 2.1. Assume
+Λ ∼ Gamma(λ|ν/2, ν/2). Additional, given Λ = λ, assume further that T |λ is a normal
+distribution with mean 0 and variance 1/λ. From the equation (17) in Winkelbauer (2014),
+we have
+k
+
+E(|T | |λ) =
+
+Z∞
+
+|t|
+
+k
+
+N(t|0, λ1 ) dt =
+
+−∞
+
+1
+λk/2
+
+2
+
+
+
+k 1
+√ K − , ;0 .
+2 2
+π
+
+k+1
+k/2 Γ( 2 )
+
+Hence we have
+E(|T |k ) = E(E(|T |k |λ))
+
+
+Z∞
+ ν 
+)
+1 k/2 Γ( k+1
+k 1
+ν ν/2
+ν/2−1
+2
+√ K − , ; 0 · ν/2 ν λ
+exp − λ dλ
+2
+=
+λk/2
+π
+2 2
+2 Γ( 2 )
+2
+0
+
+=2
+
+
+
+Z∞
+ ν 
+ν ν/2
+k 1
+√ K − , ; 0 · ν/2 ν
+λν/2−1−k/2 exp − λ dλ
+π
+2 2
+2 Γ( 2 )
+2
+
+k+1
+k/2 Γ( 2 )
+
+0
+
+∞
+
+
+ν−k
+k+1
+ν−k Z
+ ν 
+ν/2
+Γ(
+( ν2 ) 2 (ν−k)/2−1
+Γ(
+)
+)
+k
+1
+ν
+k/2
+2
+2
+√ K − , ; 0 · ν/2 ν ·
+=2
+λ
+exp
+− λ dλ
+ν−k
+π
+2 2
+2 Γ( 2 ) ( ν ) ν−k
+2
+)
+Γ(
+2
+2
+2
+0
+
+
+k+1
+)
+Γ( ν−k
+k 1
+ν ν/2
+k/2 Γ( 2 )
+2
+√
+=2
+K − , ; 0 · ν/2 ν ·
+ν−k
+π
+2 2
+2 Γ( 2 ) (ν/2) 2
+ν k/2 Γ((k + 1)/2)Γ((ν − k)/2)
+√
+=
+,
+πΓ(ν/2)
+
+where we have used the fact that K − k2 , 12 ; 0 = 1.
+Next, assume that T ∼ St(t|µ, σ, ν) and Λ ∼ Gamma(λ|ν/2, ν/2). Additional, given
+Λ = λ, assume further that T |λ is a normal distribution with mean µ and variance 1/(σλ).
+Using the following facts (obtained in Winkelbauer (2014))
+
+E((T − µ)k |λ) =
+
+Z∞
+
+−∞
+
+Γ( k+1 )
+1
+1
+) dt = (1 + (−1)k ) k/2 2k/2−1 σ −k/2 √2 ,
+(t − µ)k N(t|µ, λσ
+π
+λ
+
+6
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+and
+k
+
+E(|T − µ| |λ) =
+
+Z∞
+
+|t − µ|
+
+k
+
+)
+σ −k/2 k/2 Γ( k+1
+1
+√2 ,
+N(t|µ, λσ ) dt = k/2 2
+λ
+
+π
+
+−∞
+
+the derivations for E((T − µ)k ) and E(|T − µ|k ) follow similarly.
+Next assume that T ∼ St(t|µ, σ, ν). We would like to compute the absolute raw moment
+of T . From the equation (17) in Winkelbauer (2014), we have
+
+
+Z∞
+)
+k 1 µ2
+1 k/2 −k/2 Γ( k+1
+k
+k
+2
+1
+√ K − , ; − σλ .
+E(|T | |λ) =
+|t| N(t|µ, λσ ) dt = k/2 2 σ
+λ
+π
+2 2
+2
+−∞
+
+Hence, using Part 2) of Theorem 2.1, we have for k < ν
+E(|T |k ) = E(E(|T |k |λ))
+
+
+Z
+)
+1 k/2 −k/2 Γ( k+1
+k 1 µ2
+ν ν
+2
+√ K − , ; − σλ Gamma(λ| , )dλ
+=
+2 σ
+k/2
+λ
+π
+2 2
+2
+2 2
+Z
+∞
+Γ( k+1 ) X (−k/2)n (−µ2 /2)n σ n
+ν ν
+λn−k/2 Gamma(λ| , )dλ
+= σ −k/2 2k/2 √2
+n
+π n=0 (1/2)
+n!
+2 2
+
+∞
+k+1 X
+Γ(n − k/2 + ν/2)
+(−k/2)n (−µ2 /2)n σ n
+−k/2 k/2 Γ( 2 )
+√
+=σ
+2
+(ν/2)−n+k/2
+n
+π n=0 (1/2)
+n!
+Γ(ν/2)
+∞
+k X
+k+1
+ν
+(−k/2)n (−µ2 /2)n σ n
+ν k
+−k/2 k/2 Γ( 2 ) Γ( 2 − 2 )
+√
+=σ
+2
+(ν/2)−n+k/2 ( − )n
+ν
+n
+π
+Γ( 2 ) n=0 (1/2)
+n!
+2 2
+∞
+Γ( k+1 ) Γ( ν2 − k2 ) X (−k/2)n (−µ2 /2)n σ n
+k n
+−n ν
+= σ −k/2 2k/2 (ν/2)k/2 √2
+(ν/2)
+(
+−
+)
+ν
+π
+Γ( 2 ) n=0 (1/2)n
+n!
+2 2
+Γ( k+1 ) Γ( ν2 − k2 )
+k ν k 1 µ2 σ
+= (ν/σ)k/2 √2
+F
+(−
+, − , ;−
+).
+2
+1
+Γ( ν2 )
+2 2 2 2
+ν
+π
+
+Lastly, from the equation (12) in Winkelbauer (2014), we have
+Z∞
+1
+) dt
+E(T k |λ) =
+tk N(t|µ, λσ
+−∞
+
+
+)
+ σ −k/2 2k/2 Γ(√k+1
+2
+
+2
+1
+K(− k2 , 12 ; − µ2 σλ)
+π λk/2
+=
+k
+2
+1
+ µσ −(k−1)/2 2(k+1)/2 Γ( 2√+1) (k−1)/2
+K( 1−k
+, 32 ; − µ2 σλ)
+π λ
+2
+
+k even,
+k odd.
+
+Similar to the calculations done for E(|T |k ), we have
+
+k
+k+1
+ν
+2
+
+ (ν/σ)k/2 Γ(√2 ) Γ( 2 − 2 ) 2 F1 (− k , ν − k , 1 ; − µ σ ).
+k even,
+π
+Γ( ν2 )
+2 2 2 2
+ν
+E(T k ) =
+
+)
+µ2 σ
+ 2µ(ν/σ)(k−1)/2 Γ(√k2 +1) Γ( ν2 −νk−1
+k−1 3
+1−k ν
+2
+2 F1 ( 2 , 2 − 2 , 2 ; − ν ) k odd.
+π
+Γ( )
+2
+
+This completes the proof of the theorem.
+Remark 2.1.
+
+
+
+7
+
+(1) The formulae given in (2.5) - (2.8) are new in the literature. Also when T ∼
+St(t|0, 1, ν), E(T k ) is well known. Moreover, one can directly use the definition to find
+E(|T |k ) through the class of β-functions defined in Section 6.2 of Abramowitz & Stegun
+(1948) and arrive at the same formula. However, this direct approach no longer works
+for expectations of the form E(|T |k ), E(T k ) when T ∼ St(t|µ, σ, ν), or for higher dimensional moments considered in Section 3. Also, clearly (2.5) is reduced to (2.3)
+and (2.7) is reduced to (2.4) when µ = 0 and σ = 1.
+(2) If T ∼ St(t|µ, σ, ν), and once E((T − µ)i ), 0 ≤ i ≤ k have been computed, we can use
+them to compute E(T k ) for k < ν using the expansion
+k
+
+k
+
+E(T ) = E((T − µ + µ) ) =
+
+k
+X
+
+µ
+
+k−i
+
+i=0
+
+ 
+k
+E((T − µ)i ).
+i
+
+(3) We also note that an alternative proof of the central moment formula (2.6) was later
+provided in Bignozzi et al. (2024) based on a recursive formula.
+3. Higher dimensional case
+Now we consider the case when n ≥ 2. Denote t = (t1 , t2 , . . . , tn ) ∈ Rn . Denote the pdf of
+n-dimensional Normal random variable as
+1
+− 12 (x−µ)T Σ−1 (x−µ)
+, x ∈ Rn ,
+N(x|µ, Σ) =
+1 e
+n/2
+(2π) |Σ| 2
+where µ ∈ Rn and |Σ| is the determinant of the n×n - symmetric positive definite matrix Σ.
+Similar the 1-dimensional case, we have the probability density of n-dimensional Student’s
+t-distribution is defined as,
+Z ∞
+ν ν
+(3.1)
+St(t|µ, Σ, ν) =
+N(t|µ, (λΣ)−1)Gamma(λ| , )dλ,
+2 2
+0
+where µ is called the location, Σ is the scale matrix, and ν is the degrees of freedom
+parameter. Similar to Lemma 2.1, we have
+Z ∞
+
+
+
+ν ν
+St(t | µ, Σ, ν) =
+N(t | µ, (λΣ) )Gamma λ | ,
+dλ
+2 2
+0
+
+
+Z ∞
+1  ν ν/2 ν/2−1
+1
+νλ
+|λΣ|1/2
+T
+=
+exp
+−
+(t
+−
+µ)
+(λΣ)(t
+−
+µ)
+−
+λ
+dλ
+(2π)n/2
+2
+2 Γ(ν/2) 2
+0
+
+
+Z
+1
+νλ
+(ν/2)ν/2 |Σ|1/2 ∞
+T
+λn/2+ν/2−1 dλ.
+exp − (t − µ) (λΣ)(t − µ) −
+=
+n/2
+(2π) Γ(ν/2) 0
+2
+2
+−1
+
+Let’s define
+∆2 = (t − µ)T Σ(t − µ),
+λ
+z = (∆2 + ν),
+2
+then we have
+
+8
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+n/2+ν/2−1
+2z
+2
+exp(−z)
+dz
+· 2
+2
+∆ +ν
+∆ +ν
+0
+
+n/2+ν/2 Z ∞
+2
+(ν/2)ν/2 |Σ|1/2
+exp(−z)z n/2+ν/2−1 dz
+=
+(2π)n/2 Γ(ν/2) ∆2 + ν
+0
+
+n/2+ν/2
+ν/2
+1/2
+2
+(ν/2) |Σ|
+ν+n
+=
+)
+Γ(
+n/2
+2
+(2π) Γ(ν/2) ∆ + ν
+2
+− ν+n
+1 
+2
+) |Σ| 2
+Γ( ν+n
+1
+T
+2
+.
+(t
+−
+µ)
+Σ(t
+−
+µ)
+=
+1
++
+n
+Γ( ν2 ) (νπ) 2
+ν
+
+(ν/2)ν/2 |Σ|1/2
+St(x | µ, Σ, ν) =
+(2π)n/2 Γ(ν/2)
+
+(3.2)
+
+
+
+Z ∞
+
+Note that in the standardized case of µ = 0 and Σ = I, the representation in (3.1) is reduced
+to
+Z ∞
+ν ν
+1
+(3.3)
+St(t|0, I, ν) =
+N(t|0, I)Gamma(λ| , )dλ.
+λ
+2 2
+0
+Let’s write T = (T1 , T2 , . . . , Tn ), and k = (k1 , k2, . . . , kn ) with 0 ≤ ki ∈ N. For ν > 2, it is
+known that (see, for example, Bishop (2006)),
+ν
+E[T ] = µ, Cov(T ) =
+Σ−1 .
+ν −2
+For the rest of this section, we are interested in higher moments of T . The k moment of T
+is defined as
+Z
+tk11 tk22 . . . tknn · St(t|µ, Σ, ν)dt1 . . . dtn .
+
+E(T k ) =
+
+Similarly,
+
+Z
+
+|t1 |k1 |t2 |k2 . . . |tn |kn · St(t|µ, Σ, ν)dt1 . . . dtn .
+Q
+P Q
+P
+To simplify the notations, in the following, we use
+ki , ki to denote ni=1 ki , ni=1 ki ,
+respectively. From the authors’ best knowledge, the following are new:
+P
+Theorem 3.1. For
+ki < ν, we have
+k
+
+E(|T | ) =
+
+(1) If T ∼ St(t|0, I, ν) then
+• The raw moments satisfy
+
+if at least one ki is odd,
+ 0,
+P
+Q
+ν− ki
+P
+k
+ki Γ(
+)
+E(T ) =
+(k )!
+2
+P
+Qi
+ ν 2
+, if all ki are even.
+ν
+(
+k
+)
+i
+Γ( 2 ) 2
+(ki /2)!
+• The absolute moments satisfy
+k
+
+E(|T | ) = ν
+
+P
+
+ki
+2
+
+P
+
+Γ( ν− 2 ki ) Y Γ( ki2+1 )
+√
+.
+Γ( ν2 )
+π
+
+(2) If T ∼ St(t|µ, Σ, ν), denote Σ−1 = (σ ij ) and ei = (0, . . . , 1, . . . , 0) - the ith unit
+vector of Rn . Then we have the following recursive formula to compute the moments
+
+9
+
+of T :
+E(T
+
+k+ei
+
+n
+ν X
+) = µi E(T ) +
+σ ij kj E(T k−ej ).
+ν − 2 j=1
+k
+
+Proof:
+For 1), first from (3.3), we have
+
+Z ∞
+
+k
+
+E(T ) =
+
+0
+
+where E(X
+
+k
+
+ν ν
+1
+E(X k |0, I)Gamma(t| , )dt,
+t
+2 2
+
+|0, 1t I) is the k moment of a N(0, 1t I). Using Theorem 2.1, we have
+
+
+
+n
+Y
+
+1
+1
+E(X k |0, I) =
+E(Xiki |0, ) =
+
+t
+t
+i=1
+
+0,Q
+if at least one ki is odd,
+(ki )!
+P
+Q
+, if all ki are even.
+2( ki )/2 (ki /2)!
+t−
+
+P
+
+ki /2
+
+As a result,
+
+if at least one ki is odd,
+ 0,
+Q
+Z ∞ P
+k
+ν ν
+(ki )!
+E(T ) =
+t− ki /2 Gamma(t| , )dt, if all ki are even.
+ (P ki )/2 Q
+2
+(ki /2)! 0
+2 2
+
+if at least one ki is odd,
+ 0,
+P
+Q
+ν− ki
+P
+ki Γ(
+)
+=
+(k )!
+2
+P
+Qi
+ ν 2
+, if all ki are even.
+ν
+(
+k
+)
+i
+Γ( 2 ) 2
+(ki /2)!
+Similarly, we have
+
+k
+
+E(|T |) =
+where
+
+Z ∞
+0
+
+ν ν
+1
+E(|X1 |k1 |X2 |k2 . . . |Xn |kn |0, I)Gamma(t| , )dt
+t
+2 2
+
+n
+ki +1
+Y
+Y 1
+1
+1
+ki
+ki /2 Γ( 2 )
+√
+E(|X1 | |X2 | . . . |Xn | |0, I) =
+E(|Xi | |0, ) =
+2
+.
+t
+t
+tki /2
+π
+i=1
+k1
+
+k2
+
+kn
+
+Therefore,
+
+Y Γ( ki +1 ) Z ∞ P
+ν ν
+√2
+E(|T |) = 2
+t− ki /2 Gamma(t| , )dt
+2 2
+π
+0
+P
+ν− ki Y
+P
+X
+ki Γ(
+)
+Γ( ki2+1 )
+2
+√
+=ν 2
+if
+ki < ν.
+Γ( ν2 )
+π
+P
+
+k
+
+ki /2
+
+For 2), from (3.1)
+
+k
+
+(3.4)
+
+E(T ) =
+
+Z ∞
+0
+
+k
+
+where E(X ) ≡ E(X
+is given by
+
+k
+
+ν ν
+1
+E(X k |µ, Σ−1 )Gamma(t| , )dt,
+t
+2 2
+
+|µ, 1t Σ−1 ) is the k moment of N(µ, 1t Σ−1 ). Recall the pdf of N(µ, 1t Σ−1 )
+
+1
+1
+− 12 (x−µ)T tΣ(x−µ)
+e
+.
+N(x|µ, Σ−1 ) =
+1
+t
+(2π)n/2 | 1 Σ−1 | 2
+t
+
+10
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+Similar to Theorem 1 in Kan & Robotti (2017), we have
+∂N(x|µ, 1t Σ−1 )
+1
+= tΣ(x − µ)N(x|µ, Σ−1 ).
+−
+∂x
+t
+Hence
+−
+
+Z
+
+x
+
+1 −1
+k ∂N(x|µ, t Σ )
+
+∂x
+
+dx =
+
+Z
+
+1
+xk tΣ(x − µ)N(x|µ, Σ−1 )dx.
+t
+
+By integration by parts, we arrive at
+Z
+Z
+1 −1
+1
+k−ej
+kj x
+N(x|µ, Σ )dx = xk tΣ(x − µ)N(x|µ, Σ−1 )dx.
+t
+t
+Or equivalently
+Z
+Z
+1
+1 −1
+1 −1
+k
+kj xk−ej N(x|µ, Σ−1 )dx.
+x (x − µ)N(x|µ, Σ )dx = Σ
+t
+t
+t
+This in turn implies that
+n
+
+E(X
+
+k+ei
+
+1X
+) = µi E(X ) +
+σ ij kj E(X k−ej ).
+t j=1
+k
+
+Plugging this into the equation (3.4), we have the following recursive equation
+Z ∞
+n
+X
+1
+ν ν
+k−ej
+k+ei
+k
+σ ij kj E(T
+)
+E(T
+) = µi E(T ) +
+Gamma(t| , )dt
+t
+2 2
+0
+j=1
+n
+
+= µi E(T k ) +
+= µi E(T k ) +
+
+ν Γ( ν2 − 1) X
+σ ij kj E(T k−ej )
+2 Γ( ν2 ) j=1
+
+n
+ν X
+σ ij kj E(T k−ej ).
+ν − 2 j=1
+
+This completes the proof of the theorem.
+
+
+
+Lastly, for a = (a1 , a2 , . . . , an ) and b = (b1 , b2 , . . . , bn ) ∈ Rn , let a(j) is the vector obtained
+from a by deleting the jth element of a. For Σ = (σij ), let σi2 = σii and Σi,(j) stand for the
+ith row of Σ with its jth element removed. Analogously, let Σ(i),(j) stand for the matrix Σ
+with ith row and jth column removed.
+Consider the following truncated k moment
+Z b
+Z bn
+Z b1
+n
+k
+tk11 . . . tknn St(x|µ, Σ, ν)dt1 . . . dtn .
+Fk (a, b; µ, Σ, ν) =
+...
+t St(x|µ, Σ, ν)dt ≡
+a1
+
+a
+
+We have
+(3.5)
+
+Fkn (a, b; µ, Σ, ν) =
+
+Z ∞
+0
+
+an
+
+
+
+1 −1
+ν ν
+k
+E 1{a≤X≤b} X µ, Σ
+Gamma(t| , )dt,
+t
+2 2
+
+11
+
+where X k ∼ N(x|µ, 1t Σ−1 ). Using Theorem 1 in Kan & Robotti (2017), we have for n > 1
+
+
+1 −1
+1 −1
+n
+n
+E(Xk+ei ; a, b, µ, Σ ) := E 1{a≤X≤b} Xk+ei µ, Σ
+t
+t
+
+
+1 −1
+1
+n
+−1
+= µi E 1{a≤X≤b} Xk µ, Σ
++ e⊤
+(3.6)
+i Σ ck ,
+t
+t
+where ck satisfies
+1b
+1
+1
+k
+n
+b aj , Σ
+; a(j) , b(j) , µ
+ck,j = kj E(Xk−e
+; a, b, µ, Σ−1 ) + aj j N(aj |µj , σ 2j )E(Xkn−1
+j)
+i
+(j)
+t
+t
+t
+1b
+1
+k
+b bj , Σ
+; a(j) , b(j) , µ
+− bj j N(bj |µj , σ 2j )E(Xkn−1
+j ), j = 1, 2, . . . , n,
+(j)
+t
+t
+with
+
+aj −µj
+b aj = µ(j) + Σ−1
+µ
+,
+
+(j),j
+
+σ 2j
+
+b
+−µ
+j
+j
+b bj = µ(j) + Σ−1
+µ
+(3.7)
+(j),j σ 2j ,
+
+
+ Σ
+b j = Σ−1 − 12 Σ−1 Σ−1 .
+(j),(j)
+
+σj
+
+(j),j
+
+j,(j)
+
+Thus, we have the following recursive formula
+
+n
+Fk+e
+(a, b; µ, Σ, ν) = µi Fkn (a, b; µ, Σ, ν) +
+i
+
+where
+
+ν
+e⊤
+Σdk ,
+ν−2 i
+
+k
+n
+b ν)
+b aj , Σ,
+dk,j =kj Fk−e
+(a, b; µ, Σ, ν) + aj j St(aj |µj , σ2j , ν)Fkn−1
+(a(j) , b(j) ; µ
+i
+(j)
+k
+
+b bj , b
+(a(j) , b(j) ; µ
+Σ, ν), j = 1, 2, . . . , n.
+− bj j St(bj |µj , σ2j , ν)Fkn−1
+(j)
+
+Note by convention that the first term, second term, and third term in the expression of dk,j
+equal 0 when kj = 0, aj = ∞, bj = −∞, respectively.
+4. Conclusion
+We derive the closed form formulae for the raw moments, absolute moments, and central
+moments of Student’s t-distribution with arbitrary degrees of freedom. We provide results
+in one and n-dimensions, which unify and extend the existing literature for the Student’s tdistribution. It would be interesting to investigate tail quantile approximations or asymptotic
+tail properties of higher (generalized) Student’s t-distribution as done in Schlüter & Fischer
+(2012) and Finner et al. (2008). We leave this as an interesting project for future studies.
+References
+Abramowitz, M. & Stegun, I. A. (1948), Handbook of mathematical functions with formulas,
+graphs, and mathematical tables, Vol. 55, US Government printing office.
+Bignozzi, V., Merlo, L. & Petrella, L. (2024), ‘Inter-order relations between equivalence
+for Lp -quantiles of the Student’s t distribution’, Insurance: Mathematics and Economics
+116, 44–50.
+Bishop, C. M. (2006), Pattern recognition and machine learning, Springer Science+ Business
+Media.
+Finner, H., Dickhaus, T. & Roters, M. (2008), ‘Asymptotic tail properties of Student’s tdistribution’, Communications in Statistics-Theory and Methods 37(2), 175–179.
+
+12
+
+J.L. KIRKBY, D.H. NGUYEN, AND D. NGUYEN
+
+Jackman, S. (2009), Bayesian Analysis for the Social Sciences, John Wiley and Sons.
+Kan, R. & Robotti, C. (2017), ‘On moments of folded and truncated multivariate normal
+distributions’, Journal of Computational and Graphical Statistics 26(4), 930–934.
+Kotz, S. & Nadarajah, S. (2004), Multivariate t-distributions and their applications, Cambridge University Press.
+Kwon, O. K. & Satchell, S. (2020), ‘The distribution of cross sectional momentum returns
+when underlying asset returns are Student’s t-distributed’, Journal of Risk and Financial
+Management 13(2), 27.
+Lange, K. L., Little, R. J. & Taylor, J. M. (1989), ‘Robust statistical modeling using the t
+distribution’, Journal of the American Statistical Association 84(408), 881–896.
+Marchenko, Y. V. & Genton, M. G. (2012), ‘A heckman selection-t model’, Journal of the
+American Statistical Association 107(497), 304–317.
+McNeil, A., Frey, R. & Embrechts, P. (2015), Quantitative Risk Management: Concepts,
+Techniques, and Tools, 2 edn, Princeton Series in Finance.
+Nguyen, D. (2021), ‘A probabilistic approach to the moments of binomial random variables
+and application’, The American Statistician 75(1), 101–103.
+Ogasawara, H. (2020), ‘Unified and non-recursive formulas for moments of the normal
+distribution with stripe truncation’, Communications in Statistics-Theory and Methods
+51(19), 1–38.
+Pinheiro, J. C., Liu, C. & Wu, Y. N. (2001), ‘Efficient algorithms for robust estimation in linear mixed-effects models using the multivariate t distribution’, Journal of Computational
+and Graphical Statistics 10(2), 249–276.
+Schlüter, S. & Fischer, M. (2012), ‘A tail quantile approximation for the Student’s t distribution’, Communications in Statistics-Theory and Methods 41(15), 2617–2625.
+Shaw, W. (2006), ‘Sampling Student’s t distribution—use of the inverse cumulative distribution function’, J. Computational Finance 9, 37–73.
+Skorski, M. (2024), ‘Handy formulas for binomial moments’, Modern Stochastics: Theory
+and Applications pp. 1–15.
+Winkelbauer, A. (2014), ‘Moments and absolute moments of the normal distribution’, arXiv
+preprint arXiv:1209.4340 .
+School of Industrial and Systems Engineering, Georgia Institute of Technology, Atlanta, GA 30318, United States
+Email address: jkirkby3@gatech.edu
+Department of Mathematics, University of Alabama, Tuscaloosa, AL 35487, United States
+Email address: dangnh.maths@gmail.com
+Department of Mathematics, Marist College, Poughkeepsie, NY 12601, United States
+Email address: nducduy@gmail.com
+
+

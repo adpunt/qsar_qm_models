@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.2.0'
+SPEC_VERSION = '1.3.0'
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +254,22 @@ BAYESIAN_DEFAULTS = {
     # torchbnn BayesLinear, via torchhk transform_model
     'bnn_prior_mu': 0.0,
     'bnn_prior_sigma': 0.1,
+    # How heavily the KL term counts against the fit.
+    #
+    # Settled 2026-08-27 by the author. Until then there was NO KL term anywhere:
+    # BNN-alpha and BNN-beta were trained with plain MSE, so nothing pulled the
+    # variational posterior toward the prior and prior_sigma was only an
+    # initialisation. torchbnn samples weights in train AND eval mode, so the
+    # posterior width received MSE gradients, which drive it toward zero. What
+    # was reported as "epistemic uncertainty" was whatever residual weight noise
+    # the fit happened to leave. The VBLL variants DID carry a KL term, so the
+    # two families were not comparable (RERUN_PLAN.md 2.12).
+    #
+    # 'elbo' means the ELBO scaling, 1 / n_train: the objective is
+    # sum_i NLL_i + KL, and the criterion here is the MEAN over the batch, so
+    # dividing the KL by the number of training molecules puts the two on the
+    # same footing. A float instead of 'elbo' is used verbatim.
+    'bnn_kl_weight': 'elbo',
     # VBLLLayer (Harrison 2024) -- models.py:1131
     'vbll_prior_mu': 0.0,
     'vbll_prior_sigma': 1.0,
@@ -496,6 +512,17 @@ def spec_hash():
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
+def bnn_kl_weight(n_train):
+    """The multiplier on the KL term for a torchbnn network, from the spec."""
+    setting = BAYESIAN_DEFAULTS['bnn_kl_weight']
+    if setting == 'elbo':
+        if not n_train:
+            raise ValueError('bnn_kl_weight: n_train is required for the ELBO '
+                             'scaling and was %r' % (n_train,))
+        return 1.0 / float(n_train)
+    return float(setting)
+
+
 def sklearn_params(model_key, **overrides):
     """Constructor keywords for one model. Raises on an unknown name rather than
     quietly returning an empty dict."""
@@ -520,6 +547,11 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------------------
 # CHANGE LOG
 # ---------------------------------------------------------------------------
+# 1.3.0  2026-08-27  BNN-alpha and BNN-beta gained the KL term they never had.
+#                    Decided by the author after being shown that no KL, ELBO or
+#                    BKLLoss existed anywhere in either pipeline while the VBLL
+#                    variants carried one. INVALIDATES every BNN-alpha and
+#                    BNN-beta number on both pipelines.
 # 1.2.0  2026-08-27  The scaling exemption widened from binary features to
 #                    SPARSE COUNTS, decided by
 #                    scripts/parity_test_count_scaling.py against a rule fixed

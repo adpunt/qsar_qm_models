@@ -1173,7 +1173,7 @@ def ecfp4_fingerprint(smiles):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise RuntimeError(f"ECFP4: RDKit could not parse {smiles!r}")
-    bits = np.array(Chem.RDKFingerprint(mol), dtype=np.uint8)
+    bits = np.array(_ECFP4_GENERATOR.GetFingerprint(mol), dtype=np.uint8)
     if bits.size != ECFP4_BITS:
         raise RuntimeError(
             f"ECFP4: got {bits.size} bits, the record slot holds {ECFP4_BITS}")

@@ -5,9 +5,17 @@ This repository contains a comprehensive framework for testing and evaluating QS
 ## Features
 
 ### Molecular Representations
-- **Bit Vector-Based Representations**: Includes ECFP4, Sort & Slice fingerprints, and One-Hot Encoded (OHE) SMILES.
-- **Graph-Based Representations**: Supports GIN, GCN, GATv2, and MPNN architectures with advanced molecular embedding methods.
-- **Alternative SMILES**: Generates canonical and alternative SMILES representations with customizable randomization.
+
+The study's set, settled 2026-08-26, is six: **ECFP4** (Morgan radius 2, 2,048
+bits, computed in Python and carried through the record), **PDV**
+(`continuous_pdv`, 200 RDKit descriptors as float32), **Sort & Slice**
+(`sns`, 1,024 substructure counts as uint16), **MHG-GNN**, **Avalon** and
+**ChemBERTa** (`DeepChem/ChemBERTa-77M-MTR`, 384 wide).
+
+Anything else is refused by name: one-hot SMILES, randomized SMILES and the
+binary `pdv` still build but are not part of the study, and mol2vec is deleted.
+Graph representations (GIN, GCN, GATv2, MPNN) exist for QM9 and are not in the
+job generator's roster.
 
 ### Machine Learning Models
 - **Standard Models**: Random Forest (RF), Support Vector Machine (SVM), Gradient Boosting (GB), and Gaussian Processes (GP).
@@ -81,10 +89,50 @@ are caused by invalid molecules in the QM9 dataset. These can be ignored.
 
 ## Testing
 
-Run unit tests to ensure the framework is functioning correctly:
-python -m unittest scripts/test_run_qm_models.py
+Every check below RUNS the code. None matches source text: a string match passes
+whether or not the line it matched ever executes, and that is how a dead block
+survived in this repo for two days.
 
-This runs baseline tests for RF/ECFP4, GB/ECFP4, SVM/ECFP4, RF/SMILES, GB/SMILES, SVM/SMILES, and GIN/Graph. Each experiment checks for R-squared values greater than 0.7.
+Run them all:
+
+```
+for t in scripts/test_*.py; do python "$t" || echo "FAILED $t"; done
+cd rust && cargo test --release
+```
+
+| check | what it guards |
+|---|---|
+| `scripts/test_qm9_split_alignment.py` | the graph models' molecules, labels and split composition |
+| `scripts/test_ecfp4_identity.py` | `ecfp4` is a Morgan radius-2 fingerprint, on both pipelines |
+| `scripts/test_figure_conditions.py` | the noise condition on a row, the level axis, the uncertainty column, sibling files |
+| `scripts/test_result_row_condition.py` | the condition reaches the row; the manifest header and join |
+| `scripts/test_no_shadowed_definitions.py` | no top-level definition in either pipeline is shadowed by a later one |
+| `scripts/test_bnn_kl_term.py` | the Bayesian networks are fitted on the ELBO, not plain MSE |
+| `scripts/test_spec_is_live.py` | changing a value in `models/model_defaults.py` changes what is built |
+| `scripts/test_generated_job_flags.py` | every flag the job generator emits is one the program has |
+| `scripts/test_uncertainty_writer.py` | the per-molecule uncertainty writer and both its call sites |
+| `scripts/test_record_alignment.py` | the packed record cannot be silently misaligned |
+| `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
+| `rust/tests/noise_gates.rs` (28) | the injector: dose, shape, targeting, provenance |
+| `rust/tests/writer_guards.rs` (5) | the record writer: length, alignment, featurisation failures |
+
+The experimental pipeline's checks live in the KIRBy checkout, under
+`tests/smoke/`: `smoke_kirby_uncertainty.py` (80 checks),
+`smoke_kirby_splits.py`, `smoke_kirby_target_scaling.py`,
+`smoke_kirby_merge.py`.
+
+Several checks carry a CONTROL: the rule they replaced, run on the same data, so
+the number the check would have taken under the old behaviour is printed beside
+the one it takes now.
+
+And the checks themselves are checked. `scripts/check_fixes_fail_when_removed.py`
+breaks each fix in the real file, runs its check, and puts the file back. A check
+that stays green with its fix removed guards nothing. Two did, the first time it
+was run.
+
+`scripts/test_run_qm_models.py` is the older baseline suite (RF/ECFP4, GB/ECFP4,
+SVM/ECFP4 and so on, each asserting R-squared above 0.7). It predates the noise
+redesign.
 
 ---
 

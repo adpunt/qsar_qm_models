@@ -1,0 +1,233 @@
+# FIGURE AND TABLE PLAN — J Cheminform submission
+
+**Target met: 5 main figures, 4 main tables** (Kolmar & Grulke 2021 carries 6 figures / 4 with results). Current draft: 8 figures, 6 tables. Net −3 figures, −2 tables.
+
+**Governing constraint that drives every decision below:** QM9 results at σ>0 are invalid (`rust/src/main.rs:740-748`; fix uncommitted at `:623`, `:750`, `:1028`/`:1055`/`:1082`; no `rust/target/release/` exists). QM9 at σ=0 is clean (`scripts/process_and_train.py:1609` `'noise': s > 0`; `rust/src/main.rs:750`). The KIRBy/external pipeline is clean at all σ (`KIRBy/tests/alternative_data_noise_robustness.py:760`, noise into `y_train` only). **So the main-text results floats must be carried by the external datasets and by analytic injector properties; QM9 enters as a σ=0 facet and as a post-re-run addition.**
+
+---
+
+## 1. TAKEAWAY → FLOAT MATRIX
+
+| Takeaway | Audit verdict | Main-text float |
+|---|---|---|
+| NM1 — six strategies differ in dose and in concentration, analytically | SURVIVES | **Figure 1** a,c |
+| NM6 — σ does not control dose; 4.0× spread at σ=1 (0.502→2.000 eV) refutes `paper.tex:222` and `:354` | SURVIVES (missed) | **Figure 1** (headline) |
+| NM4 — threshold's raw ±1.0 cut makes it a different strategy per endpoint (100 / 85.4 / 9.2 / 100 % at 2σ) | SURVIVES | **Figure 1** b |
+| NM5 — Rust valprop factor 0.1 (`main.rs:1177`) vs NoiseInject 0.05 (`NoiseInject/noiseInject/core.py:157`): QM9 and external ran different injectors | SURVIVES | **Table 1** |
+| A1 + M1 + K4 + A3-as-contingency — baseline failure is a property of the model×representation pair, not of either alone; hERG×PDV breaks all six neural models | SURVIVES-WITH-CAVEAT | **Figure 2** |
+| A4 + M2 — catastrophic run-to-run variance inside a fixed (model, rep, fold) cell; deterministic models have zero replicate variance | SURVIVES-WITH-CAVEAT | **Figure 2** (per-run annotation) |
+| K3 — best-by-retention ≠ best-by-accuracy-under-noise (agree 18/72 cells; LogD 0/24) | SURVIVES-WITH-CAVEAT | **Figure 3** |
+| K2 — η²(model) tracks strategy dose, ρ = −1.00 | SURVIVES-WITH-CAVEAT | **Figure 4** b |
+| NM2 — retention ordering across strategies is explained by dose (ρ = −1.00 / −0.943 / −1.000 / −0.943) | SURVIVES-WITH-CAVEAT | **Figure 4** b |
+| K-missed — strategy severity re-orders across datasets (threshold rank 6/6 on QM9+LogD, 2/6 on Caco-2) | SURVIVES (missed) | **Figure 4** a |
+| U1 (folded) — predicted uncertainty inflates faster than error; unc/err 1.12→2.01 | SURVIVES-WITH-CAVEAT | **Figure 5** row 1 |
+| U6 — uncertainty stops discriminating between molecules; CV 0.398→0.156, 27/27 | SURVIVES (missed) | **Figure 5** row 2 |
+| U2 — within-σ ρ(unc, \|err\|) collapses 0.289→0.069, 27/27 | SURVIVES-WITH-CAVEAT | **Figure 5** row 3 |
+| U3 + U7 + U8 — 1σ coverage drifts 0.635→0.884; three families start in three regimes; worst on the smallest dataset | SURVIVES-WITH-CAVEAT | **Figure 5** row 4 |
+| U4 — pooled `Unc-Noise ρ` is a σ-ramp artifact; within-σ values ≈0 (max \|0.076\|) | arithmetic SURVIVES, float DIES | **Table 3** (column deleted + retraction) |
+| Retention + clean accuracy per model across 6 strategies, external only | — | **Table 2** |
+| Metric definitions (auc_norm once; NDS and ECE purged) | — | **Table 4** |
+
+**Takeaways with no float — main-text prose:**
+- **A5** — the validation ANOVA is rank-deficient (residual η² = 0.0 on all three datasets; max cell size 1; `_two_way_eta2_unbalanced` @`scripts/generate_paper_figures_v2.py:1394-1437`, gate @`:1593`,`:1596`). Prose = the cut rationale, not a claim.
+- **M3** — η² is not identified until the R²-transform is stated (flooring flips neural rep 53.5→8.1 on LogD). Prose = the cut rationale for T3/F2.
+- **K5** — rank transfer across strategies (median 0.702) is no better than across representations (0.704); `table6_kendalls_w.txt` collapses reps (`:3711`) so W = 0.9121 at `paper.tex:433` is not a per-representation coefficient. One sentence; the comparative half the float existed for did not reproduce.
+- **NM3 salvaged core** — at matched dose, hetero and threshold collapse onto the Gaussian curve (\|gap\| −83%, −49%). One sentence; needs the valprop truncation-window fix before the residual numbers are quotable.
+- **U5** — no model in `MODEL_ORDER` (`:283-289`) produces a per-molecule aleatoric term (`scripts/utils.py:80, 130, 162, 188`); GP and VBLL aleatoric are scalars broadcast. Limitations paragraph.
+- **NM7** — resolved by Figure 1; no prose needed beyond the new caption.
+
+**Structural consequence for the research questions:** Q2's second half (`paper.tex:188`, "whether their per-sample uncertainty estimates track which individual labels have been corrupted") **cannot be supported by any float**. `injected_noise` is scrambled pre-fix and identically zero post-fix; the KIRBy schema has no such column at all (`:1184-1186`, `:1218`). Rewrite Q2 to what Figure 5 answers: *how predicted uncertainty responds to label noise it cannot see* — inflation, homogenisation, coverage drift.
+
+---
+
+## 2. FLOATS THAT ARE CUT
+
+| Float | paper.tex | Why cut |
+|---|---|---|
+| **T3 `tab:anova_decomposition`** | L385-404 | A2 DIES (Model not largest in 16/72 external cells). M3: η² inverts under the unstated `r2.clip(lower=0)`. Source is QM9 R² @ σ=0.3 — contaminated. Body already disagrees with prose (79.3 vs 83.6; 41.0 vs 77.4). |
+| **F2 `fig:anova_decomposition`** | L406-411 | Same source, same defect. `create_figure2()` @`:2788-2870`. |
+| **T5 `tab:wilcoxon_bnn`** | L468-484 | Metric is NDS (never defined in Methods). `wilcoxon_paired_test` @`:1892-1913` ignores its `strategy` arg and pairs across every rep×strategy, while the reported AUC column is PDV+Gaussian (`:3315`) — the two columns are not from the same data. QM9 σ>0 contaminated. |
+| **F3 `fig:interaction`** | L415-420 | ρ = 0.82 is QM9 auc_norm at σ>0. Absorbed into Figure 2. `create_interaction_figure()` @`:3765-3873`. |
+| **F4 `fig:global_overview`** | L424-429 | Both panels are QM9 σ>0. Panel b falls back silently to all reps if PDV is empty (`:2686-2688`). `create_figure1()` @`:2647-2726`. |
+| **F5 `fig:nn_family_comparison`** | L486-491 | QM9 σ>0. No surviving takeaway. Q2a is answered by Table 2 (the external roster carries all 13 models incl. BNN-Full, VBLL-Full, QRF). |
+| **F6 `fig:uncertainty_combined`** | L533-538 | QM9 uncertainty CSVs **DO NOT EXIST locally** (0 files matching `uncertainty_*_uncertainty_values.csv` in `results/`); VBLL uncertainty CSVs do not exist anywhere in either repo. Panel b's aleatoric/epistemic split is a scalar broadcast (U5). Superseded by Figure 5. |
+| **F7 `fig:validation_overview`** | L544-549 | Absorbed into Table 2 (same content, model×strategy per dataset, and a table reports baseline R² alongside where a heatmap cannot). |
+| **F8 `fig:validation_combined`** | L553-558 | Averages over all 6 strategies, all reps, and (panel b) all 3 external datasets — `:1704-1784`, `:1710`, `:1725`, `:1728`. The single most aggregated artifact in the script. Metric labelled NDS. |
+| **Supp `fig_validation_anova` + `table_validation_anova`** (AF10) | L668 | A5: residual η² = 0.0 exactly on all three datasets, rows sum to 100.0, max cell size = 1, n = 19/19/18 against 21 possible cells → rank-deficient. Roster is `dnn, lgb, ngboost, qrf, rf, svm, xgboost` — every model that carries the interaction is absent. |
+| **T1 `tab:metrics_summary`** | L266-310 | **Kept**, but currently referenced 0 times. Rewritten as Table 4; must be cited from Methods or cut. |
+
+---
+
+## 3. PROPOSED MAIN FLOATS — FULL SPECIFICATION
+
+### Figure 1 — What σ actually injects
+**Type:** 3-panel methods figure, textwidth.
+**Replaces:** `create_methods_figure()` @ `scripts/generate_paper_figures_v2.py:2529-2639` (which plots a synthetic 3-component Gaussian mixture, `:2538-2546`, and re-implements valprop additively at `:2557` and threshold as a median split at `:2563-2565` — neither matches `rust/src/main.rs:313` and `:364-373`).
+
+- **(a)** Distribution of the per-molecule noise scale σ_i at σ=1, one density strip per strategy, x on log scale, in eV. Computed analytically from the Rust formulas applied to the actual QM9 training labels. Annotate each strip with RMS dose and CV(σ_i): legacy 1.000/0.000, threshold 2.000/0.000, valprop 1.701/0.077, quantile 0.899/1.582, hetero 0.669/0.074, outlier 0.502/2.629.
+- **(b)** 4 (dataset) × 6 (strategy) heatmap of RMS dose at σ=1 expressed in units of that dataset's label SD; cell text also gives % of molecules receiving the high multiplier. Carries NM4: threshold hits 100 / 85.4 / 9.2 / 100 % on QM9 / LogD / Caco-2 / hERG.
+- **(c)** Lorenz curve of injected variance vs molecule rank, one line per strategy, QM9. Annotate top-10% share: 10.0 / 10.0 / 12.4 / 12.6 / 49.4 / 96.3.
+
+**Held constant:** σ = 1 exactly. Ratios are σ-invariant for all six (the multipliers and cut-points do not depend on σ), so a single σ is sufficient and must be stated.
+**Error bars:** none — deterministic function of the label vector.
+**Data columns:** `gap` from `/Users/apunt/repos/qsar_qm_models/data/QM9/raw/gdb9.sdf.csv` × 27.2114, rows `[:10000]` then the first 8,000 of the scaffold train split (`scripts/process_and_train.py:625, 640, 667`); external labels from `/Users/apunt/repos/KIRBy/tests/data_cache/openadmet_train.csv` (LogD col; Caco-2 Efflux col, log10) and `chembl_herg_ki.csv`. **All four verified present.** Formula constants: `rust/src/main.rs:309-317, 322-352, 355-376, 379-404, 406-415`; defaults `:1169-1217`.
+**No column DOES NOT EXIST.**
+**No-averaging check:** nothing collapsed. No model, rep, replicate or σ axis is involved.
+**Cannot be built until:** buildable today — *but* blocked on the `--strategy_params` decision, because valprop's factor is 0.1 in Rust and 0.05 in NoiseInject. Until decided, panel (a) must show both (1.701σ vs 1.350σ on the QM9 train set).
+
+---
+
+### Figure 2 — Baseline failure is a property of the pair
+**Type:** 4-facet heatmap + strip inset, textwidth (`figure*`).
+**Replaces:** `create_figure1()` @`:2647-2726` and `create_interaction_figure()` @`:3765-3873`.
+
+Facets: QM9, LogD, Caco-2, hERG K_i. Each = model (rows) × representation (cols) heatmap of **median clean R² at σ = 0**. Diverging palette centred on 0.3 (the gate value, `VALIDATION_BASELINE_THRESHOLD` @`:435`); cells < 0 hatched. Cell text: median R², and beneath it `k/n` = runs with R² < 0 out of runs in the cell.
+
+Load-bearing cells to keep legible: hERG × PDV, all six neural models below 0.3 (BNN-Full −0.141, MLP-VBLL-Full −0.066, MLP-BNN-Full −0.034, VBLL-Full 0.095, MLP 0.126, DNN 0.183; 82/180 runs negative) against LogD/Caco-2 × PDV at 0/180 — the inversion that refutes `paper.tex:462`, `:493` and `:567`. GP × hERG × PDV = −0.156 must be visible so the family label reads "SVM never fails; GP does", not "kernel models never fail".
+
+**Held constant:** σ = 0.0 exactly.
+**Collapsed:** replicate/fold → **median**. Justified: at σ=0 all six strategy runs are the same experiment (`process_and_train.py:1609`; `rust/src/main.rs:750`), so this is not collapsing the strategy axis, it is de-duplicating it. Mandatory annotation, in Methods and the caption: for LightGBM, QRF, SVM and XGBoost the six σ=0 runs are byte-identical duplicates (100% of cells have exactly zero across-strategy SD), so n_independent = 5, not 30; RF 80/70/5%; all neural models 0%.
+**Error bars:** the `k/n` negative-run count carries dispersion. Optional inset strip: one marker per run for the four worst cells, showing within-(model,rep,fold) SD up to 39.94 (LogD) / 54.34 (Caco-2) / 1159.97 (hERG) — takeaway A4.
+**Data columns:** `sigma, r2, model, rep, strategy, fold, dataset` from `/Users/apunt/repos/KIRBy/tests/results/validation/{logd,caco2,herg}/all_results.csv` (**header verified**, 16,170×10 each). QM9 facet needs `results/anova_*.csv`.
+**DOES NOT EXIST locally:** `results/anova_*.csv` — zero files; the QM9 result set lives only on ARC.
+**Cannot be built until:** external 3 facets buildable today. QM9 facet needs the ARC `anova_*.csv` set — **no re-run required** (σ=0 rows are not bug-affected); only running v2 on ARC or copying the σ=0 slice down.
+
+---
+
+### Figure 3 — Retention and accuracy under noise are different rankings
+**Type:** 3-facet scatter, textwidth.
+**Replaces:** `create_figure3()` @`:2910-2957` (QM9/PDV/legacy-only single scatter; accepts `validation_df` and `val_auc_df` at `:2911` and never references them).
+
+Facets: LogD, Caco-2, hERG. Each: x = R² at σ = 0.6, y = auc_norm. One point per (model, rep). Marker = model, fill = rep. Spearman ρ annotated per facet (median across models = −0.105). Corner inset: count of cells where argmax(retention) = argmax(R²@0.6) — 0/24 LogD, 14/24 Caco-2, 4/24 hERG, 18/72 total. Label LightGBM (tops R²@0.6 in 21 cells, retention in 0) and NGBoost (tops retention in 24, accuracy in 11).
+
+**Held constant:** strategy = `legacy` (Gaussian), stated explicitly. σ = 0.6 for the x-axis, justified in Methods: σ = 0.6 ≈ one unit of real assay error (published SDs: hERG pKi 0.54, logD 0.27–0.62, Caco-2 ~0.43).
+**Collapsed:** fold → mean of 5, with ±1 SD whiskers on **both** axes.
+**Error bars:** ±1 SD across the 5 CV folds.
+**Data columns:** `sigma, r2, model, rep, strategy, fold` (verified) + `auc_norm`, `baseline_r2` from `results/paper_figures_v2/table_validation_auc_full.csv` (**header verified**: `dataset,model,rep,strategy,auc_norm,baseline_r2`).
+**DOES NOT EXIST:** per-fold `auc_norm`. `calculate_validation_auc()` @`:1318-1393` averages folds at `:1379` before integrating, and `table_validation_auc_full.csv` has no `fold` column. The y-axis error bar requires computing auc_norm per fold.
+**Do not include QM9:** R² at σ=0.6 on QM9 is bug-contaminated, and `calculate_robustness()` @`:1803-1846` emits only `auc_norm`/`baseline_r2`/`n_sigma` — no per-σ R² exists for QM9 in any artifact.
+**Cannot be built until:** `calculate_validation_auc()` @`:1318-1393` is changed to group by `fold` before integrating and to emit per-σ R². No re-run, no ARC access.
+**Caption must say:** the hERG GP cell (clean R² = −0.156) is removed by the ≥0.3 gate; do not draw an R²=0 reference line implying it is visible.
+
+---
+
+### Figure 4 — Strategy severity is dose, and dose is set by the label scale
+**Type:** 2-panel, textwidth.
+**Replaces:** `create_figure2()` @`:2788-2870` (the ANOVA figure being cut) and the strategy axis of `create_figure1()` panel b.
+
+- **(a)** 4 (dataset) × 6 (strategy) matrix of mean auc_norm, each cell carrying an IQR bar across (model, rep, fold). Shows the re-ordering: threshold 0.587 / 0.821 / **0.707** / 0.540 and outlier 0.944 / 0.940 / 0.625 / 0.873 on QM9 / LogD / Caco-2 / hERG — threshold is rank 6/6 on QM9 and LogD, rank 2/6 on Caco-2.
+- **(b)** Scatter: x = analytic RMS dose at σ=1 in label-SD units (from Figure 1b), y = mean auc_norm. 24 points (4 datasets × 6 strategies), coloured by dataset. Per-dataset Spearman ρ annotated: QM9 −1.000, LogD −0.943, Caco-2 −1.000, hERG −0.943. Second y-series (right axis, open markers): QM9 `Robust_Model_η²` from `table1_anova_summary.csv` — 10.29 / 13.99 / 36.79 / 43.77 / 52.54 / 54.68 against retention 0.944 / 0.908 / 0.846 / 0.825 / 0.654 / 0.587, ρ = −1.00 (takeaway K2).
+
+**Held constant:** nothing fixed; σ is integrated into auc_norm by definition of the metric, which is not an averaging choice.
+**Collapsed:** model, rep, fold → mean within (dataset, strategy). **This is the one float that deliberately collapses model and rep.** Justification: (i) the claim is about strategies and all six are shown; (ii) the per-cell IQR bar exposes the spread; (iii) the ordering was verified monotone for all 11 QM9 models individually, so the mean hides no reversal on QM9; (iv) the full model×strategy version goes to supplementary (Table S2). The caption **must** state that LogD and hERG invert quantile/Gaussian at the aggregate level. Do **not** report the pooled 24-cell p-value: the four datasets share nearly the same dose ordering, so they are four correlated replications.
+**Error bars:** IQR across (model, rep, fold) per cell in (a); none in (b) — each point is the cell mean already shown in (a).
+**Data columns:** `auc_norm` per (dataset, model, rep, strategy) from `table_validation_auc_full.csv` (verified); QM9 row from `table2_supp_auc_all_reps.csv`; η² from `table1_anova_summary.csv` (**header verified**). Dose from Figure 1.
+**Cannot be built until:** LogD / Caco-2 / hERG rows buildable today. **QM9 row and the η² series require the ARC re-run** (both are σ>0 QM9 quantities). Publish the 3-dataset version if the re-run slips.
+
+---
+
+### Figure 5 — What label noise does to predicted uncertainty
+**Type:** 4 rows × 3 columns of small multiples, `figure*`.
+**Replaces:** `_create_combined_uncertainty_figure()` @`:3058-3220` and `create_uncertainty_figure()` @`:3222-3239`.
+
+Columns = model family: QRF, NGBoost, GP. x = σ, 11 points 0.0→1.0, in every panel. One line per (dataset, representation): 12 for QRF and NGBoost, 3 for GP (PDV only — GP was never run on ECFP4/SNS/MHG-GNN). Colour = dataset (ordered by n_test: Caco-2 432, hERG 283, LogD 1007 — the U8 ordering), line style = representation.
+
+- **Row 1** — mean predicted uncertainty ÷ mean \|error\|, within σ. Median rises 1.12 → 2.01. (Report this, not the ratio-of-ratios: mean \|error\| at σ=0 is floored by irreducible model bias, mean uncertainty is not.)
+- **Row 2** — coefficient of variation of predicted uncertainty across molecules. 0.398 → 0.156, declining in 27/27. GP 0.398 → 0.098. **This row is the mechanism**; it makes rows 1, 3 and 4 one story.
+- **Row 3** — within-σ Spearman ρ(uncertainty, \|error\|). 0.289 → 0.069, declining 27/27.
+- **Row 4** — empirical 1σ coverage, horizontal reference at 0.68. 0.635 → 0.884, rising 27/27. Family split at σ=0 is visible because families are the columns: NGBoost 0.587 (under), QRF 0.674 (nominal), GP 0.732 (over) → all over-covering by σ=1.
+
+**Held constant:** strategy = Gaussian. This is a data limitation, not a choice — KIRBy saves uncertainty for `legacy` only (gate at `alternative_data_noise_robustness.py:1030`). State it.
+**Collapsed:** molecules → the named summary statistic within each σ. That is the statistic, not an averaging choice. **Nothing is collapsed across σ** — that is the entire point against the pooled columns at `:3437-3452` and `:3426-3430`. Dataset and representation are separate lines, never averaged. One fold per file (the schema has no fold axis).
+**Error bars:** none — each point summarises 283–1,007 test molecules. Optional bootstrap CI on row 3.
+**Data columns:** `sigma, sample_idx, y_true, y_pred, uncertainty` — **schema and all 27 files verified present** at `/Users/apunt/repos/KIRBy/tests/results_server/validation_rerun/{ecfp4,mhg_gnn_pretrained,pdv,sns}_{caco2,herg,logd}/*/{QRF,NGBoost,GP}_*_uncertainty_values.csv`. `y_true` is bit-identical across all 11 σ in 27/27 — test labels never noised.
+**DOES NOT EXIST in this schema:** `injected_noise` (so no noise-tracking panel is possible), `epistemic_uncertainty` / `aleatoric_uncertainty` (so no decomposition panel), `strategy` (inferred from the run directory), `fold`.
+**Cannot be built until:** **buildable today.** No ARC access, no re-run, no code change beyond a new plotting function.
+**Caption must exclude or dash:** the four QRF × Caco-2 cells that go negative-R² at σ=1 — ECFP4 −0.793, MHG-GNN-pretrained −0.485, PDV −0.268, SNS −0.910 — these are the trivial near-constant-prediction case.
+**Provenance note for Methods:** these files sit in `results_server/`, the older tree. I confirm the audit's cross-check basis is sound — `tests/results/**` contains **0** `*_uncertainty_values.csv`, so `results_server/validation_rerun` is the only source, and its R² agrees with the canonical tree to ≤0.005 at every σ.
+
+---
+
+### Table 1 — Noise injector specification and realised dose
+**Replaces:** T2 `tab:regression_noise` (`paper.tex:318-350`).
+Rows = 6 strategies. Columns: (1) σ_i as executed on QM9 by Rust, with the line reference; (2) σ_i as executed on the external datasets by NoiseInject; (3) agree?; (4) RMS dose at σ=1 in label-SD units, one sub-column per dataset; (5) CV(σ_i) per dataset.
+**Non-negotiable corrections to the current T2 body:** threshold is stated at `paper.tex:354` as "\|y\| > 1.0 (on normalized data)"; the code compares the **raw** label (`rust/src/main.rs:364-373`; raw read at `:542`; normalisation only later at `:759-761`). Value-proportional differs between the two injectors (0.1 vs 0.05). Quantile is not bit-identical either — Rust indexes `sorted_values[(n*0.9) as usize]` (`:325-334`) where NumPy interpolates.
+**No-averaging check:** nothing collapsed; specification table.
+**Cannot be built until:** buildable today; blocked on the `--strategy_params` decision (`scripts/process_and_train.py:260` declares the flag and it is passed nowhere — `:1628-1641`).
+
+### Table 2 — Retention and clean accuracy by model, per external dataset
+**Replaces:** T4 `tab:auc_ranking` (`paper.tex:435-457`) and absorbs F7 `fig:validation_overview`.
+Rows = 13 models × 3 datasets, representation fixed to PDV. Columns: baseline R² (σ=0), auc_norm under each of the six strategies (six columns, all shown), R² at σ=0.6.
+**Deleted vs T4:** the `MEAN` and `STD` columns across the six strategies (`:3272-3273`) — the direct no-averaging violation. Ranking is by strategy or not at all.
+**No-averaging check:** representation fixed at PDV and stated; the full model × rep × strategy version goes to supplementary. Fold → mean of 5, SD in parentheses. σ collapsed into auc_norm by definition; the σ=0 and σ=0.6 columns are given raw so retention is never quoted without its baseline.
+**Data:** `table_validation_auc_full.csv` (verified) + per-σ R² from `all_results.csv`.
+**DOES NOT EXIST:** `R² at σ=0.6` as a column in any artifact; per-fold SD (folds collapsed at `:1379`).
+**Cannot be built until:** the same `calculate_validation_auc()` @`:1318-1393` change as Figure 3. No re-run.
+
+### Table 3 — Uncertainty metrics by σ
+**Replaces:** T6 `tab:top_unc_noise` (`paper.tex:501-529`).
+Rows = 9 (3 models × 3 datasets, rep = PDV); all 27 configurations to supplementary. Column groups at σ ∈ {0.0, 0.5, 1.0}: mean uncertainty, CV of uncertainty, ρ(unc, \|error\|), 1σ coverage, R².
+**Deleted vs T6, with reasons the Results text must state:** `Unc-Noise ρ` — a σ-ramp artifact; the script itself says so (`:3423-3424`, "kept only for comparison, do NOT report as per-sample"), the within-σ values are ≈0 (max \|0.076\|, NGBoost/SNS), and the underlying column is scrambled pre-fix / identically zero post-fix. `ECE` — removed from the codebase 2026-08-19. `Mean Aleatoric` / `Mean Epistemic` — not per-molecule for any roster model.
+**Landmine to avoid:** the within-σ=0.3 `Unc-Noise ρ` column in `table4_supp_uncertainty_by_strategy_rep.csv` is populated for all six strategies and Outlier's median is 0.105 (max 0.388). That is bimodal outlier dosing plus a leakage term from `fix_injected_noise` grouping on `{model, rep, sigma, iteration}` only (`:995`, omitting `strategy` and `file_no`). Do not report it as detection anywhere.
+**No-averaging check:** nothing collapsed across σ, dataset, rep or model. Molecules → the named statistic.
+**Data:** the 27 verified files. **Cannot be built until:** buildable today.
+
+### Table 4 — Metrics summary
+**Keeps** T1 `tab:metrics_summary` (`paper.tex:266-310`) with edits: delete the ECE row; define auc_norm once; add "realised RMS dose" pointing at Table 1. **NDS must be purged from the whole paper** — it is used at `:387, :470, :475, :556, :462, :464, :493, :495, :551, :571, :573, :620` and in Additional files 2–11, and it is never defined in Methods. T1 is currently referenced **0 times**; cite it from Methods or cut it and reduce to 3 tables.
+
+---
+
+## 4. NO-AVERAGING CHECK — SUMMARY
+
+| Float | Collapsed | Justification |
+|---|---|---|
+| Fig 1 | nothing | analytic; no model/rep/replicate axis exists |
+| Fig 2 | replicate/fold → median | at σ=0 the six strategy runs are the same experiment; de-duplication, not averaging. Negative-run count `k/n` restores dispersion. Methods must state n_independent = 5 for deterministic models |
+| Fig 3 | fold → mean ± SD | folds are exchangeable CV splits; SD shown on both axes. σ collapsed into auc_norm by metric definition |
+| Fig 4 | model, rep, fold → mean | **deliberate violation.** All 6 strategies shown; IQR bar per cell; ordering verified monotone across all 11 QM9 models individually; disaggregated version in supplementary; aggregate-level quantile/Gaussian inversions on LogD and hERG stated in the caption |
+| Fig 5 | molecules → summary statistic | that is the statistic. σ, dataset, rep and model family all retained as separate axes/lines — this float exists precisely to undo the pooling at `:3437-3452` |
+| Tab 1 | nothing | specification |
+| Tab 2 | fold → mean ± SD; rep fixed to PDV | all 6 strategies as columns; cross-strategy MEAN/STD deleted; full model×rep table in supplementary |
+| Tab 3 | molecules → summary statistic | σ, dataset, model all retained |
+| Tab 4 | n/a | definitions |
+
+---
+
+## 5. ADDITIONAL FILES (supplementary) — what moves out
+
+Renumber; the current AF list at `paper.tex:659-670` describes NDS throughout and AF5 misstates its own threshold (0.6 in the description, 0.3 in text at `:247`/`:422`).
+
+| New AF | Content | Source |
+|---|---|---|
+| S1 | Default hyperparameters, QM9 | keep AF1 |
+| S2 | Default hyperparameters, external, with representation-specific SVM kernels | keep AF12. Also fix `paper.tex:197` — the SVM/Tanimoto claim is wrong; SVM is RBF throughout |
+| S3 | Retention (auc_norm) for every model × representation × strategy, all four datasets, with baseline R² beside every value | `table2_supp_auc_all_reps.csv` + `table_validation_auc_full.csv` — the disaggregated backing for Figure 4 and Table 2 |
+| S4 | Uncertainty metrics for all 27 model × dataset × representation configurations, per σ | full version of Table 3 |
+| S5 | Configurations excluded by the baseline gate: 48 QM9 rows ({dnn_bnn_full, dnn_vbll, mlp_bnn_full, mlp_vbll} × {mhggnn, mol2vec} × 6), baselines −0.190…+0.072; plus catastrophic-iteration log (245 rows) | `excluded_configs.csv`, `filtered_catastrophic_iterations.csv` (headers verified). **Fix the threshold statement to 0.3.** Note `calculate_robustness` @`:1820-1827` silently drops configs with <3 σ points and never logs them |
+| S6 | Model–model and representation–representation redundancy (Spearman) + ICC | `table_supp_model_redundancy.*`, `table_supp_rep_redundancy.*`, `table_supp_icc.*`. Relabel NDS→auc_norm. Note `table_supp_icc.csv` averages across the six strategies (`:2452`) |
+| S7 | Rank-transfer distributions: strategy-pair agreement (n=180, median 0.702, IQR 0.51–0.84) vs representation-pair agreement (n=108, median 0.704, IQR 0.49–0.86) | new; backs the K5 prose sentence |
+| S8 | Per-run strip plots for every (model, rep, fold) cell at σ=0, all four datasets | backs A4/M2; the SD extremes (39.94 / 54.34 / 1159.97) live here |
+
+**Removed from the AF list:** AF2–4 as NDS profiles (relabelled into S6); AF6 (QM9 ECFP4 overview — σ>0 contaminated, and Figure 2 now shows every representation at σ=0); AF7 (baseline-vs-NDS scatter — replaced by Figure 3 on clean data); AF8 (Wilcoxon by representation — same broken pairing as T5); AF9 (ECFP4 uncertainty with ECE and Unc-Noise ρ — both metrics retracted); AF10 (validation ANOVA — degenerate, A5); AF11 (RF vs QRF NDS — `table_validation_probabilistic.csv` only ever contains the hardcoded RF/QRF pair because the auto-generated NN pairs look for `_bnn_variational`, which `GLOBAL_MODELS_EXCLUDE` @`:120-121` removes at load; fold into S3).
+
+---
+
+## 6. CANNOT-BE-BUILT-UNTIL — CONSOLIDATED
+
+| Float | Blocker | Class |
+|---|---|---|
+| Fig 1 | `--strategy_params` decision (0.1 vs 0.05) | decision, not compute |
+| Fig 2 (3 external facets) | none | **today** |
+| Fig 2 (QM9 facet) | ARC `anova_*.csv` σ=0 slice — 0 files locally | file transfer / run v2 on ARC. **No re-run** |
+| Fig 3 | `calculate_validation_auc()` @`:1318-1393` must retain `fold` and emit per-σ R² | code change, ~20 lines, no compute |
+| Fig 4a,b (3 external rows) | none beyond Fig 1 | **today** |
+| Fig 4 (QM9 row + η² series) | full QM9 re-run: commit `rust/src/main.rs` `apply_noise` fix, `cargo build --release` on ARC, resubmit. 216 job scripts, 906 distinct output CSVs, 11,132 requested wall-hours / 44,528 core-hours | **compute** |
+| Fig 5 | none | **today** |
+| Tab 1 | same as Fig 1 | decision |
+| Tab 2 | same as Fig 3 | code change |
+| Tab 3 | none | **today** |
+| Tab 4 | NDS/ECE purge in paper.tex (author) | editorial |
+
+**Three of five figures and two of four tables are buildable now.** Only Figure 4's QM9 row and Figure 2's QM9 facet depend on ARC, and only Figure 4's QM9 row depends on the re-run.
+
+**Two code changes gate everything else, both in `scripts/generate_paper_figures_v2.py`:** (1) `calculate_validation_auc()` @`:1318-1393` — group by `fold` before integrating, emit per-σ R². (2) delete `fix_injected_noise()` @`:980-1021` — it duplicates `scripts/utils.py:212-223` with strictly worse grouping and its output backs no surviving float.

@@ -763,16 +763,30 @@ def load_anova_data(results_dir):
 
     unnamed = []
 
+    # Every sibling the same run writes off the SAME base path. The glob
+    # `anova_*.csv` matches all of them, and only `_uncertainty_values` was
+    # skipped -- so the noise manifest and the per-epoch metrics were read as
+    # results files and concatenated into the results frame (RERUN_PLAN.md 2.13).
+    SIBLING_SUFFIXES = ('_uncertainty_values.csv', '_noise_manifest.csv',
+                        '_per_epoch.csv')
     anova_files = sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime)
     total_mb = sum(p.stat().st_size for p in anova_files) / 1e6
     print(f"  load_anova_data: {len(anova_files)} anova_*.csv files, {total_mb:.0f} MB total", flush=True)
+    skipped = []
     for i, f in enumerate(anova_files):
-        if '_uncertainty_values' in f.name:
+        if f.name.endswith(SIBLING_SUFFIXES):
+            skipped.append(f.name)
             continue
         if i % 50 == 0 and i > 0:
             print(f"    ...read {i}/{len(anova_files)} files", flush=True)
         try:
             df = pd.read_csv(f)
+            # And a belt-and-braces check on the CONTENT: a results file has
+            # these columns, and nothing else written off the same base path
+            # does.
+            if not {'sigma', 'model', 'rep', 'r2'} <= set(df.columns):
+                skipped.append(f.name)
+                continue
             # The condition comes from the `noise_type` column the pipeline
             # writes. The filename is only a fallback, for files written before
             # that column existed.
@@ -798,6 +812,10 @@ def load_anova_data(results_dir):
         except Exception as e:
             print(f"Warning: Could not load {f.name}: {e}")
 
+    if skipped:
+        print(f"  Skipped {len(skipped)} file(s) that match anova_*.csv but are "
+              f"not results files: {', '.join(sorted(skipped)[:6])}"
+              + (f", and {len(skipped) - 6} more" if len(skipped) > 6 else ""))
     report_unnamed_conditions(unnamed, 'the QM9 results directory')
 
     if all_data:
@@ -1087,7 +1105,11 @@ def load_uncertainty_data(results_dir):
 
     unnamed = []
 
-    patterns = ["uncertainty_*_uncertainty_values.csv", "*_uncertainty_values.csv"]
+    # ONE pattern. It used to be
+    #   ["uncertainty_*_uncertainty_values.csv", "*_uncertainty_values.csv"]
+    # and the second is a strict superset of the first, so every
+    # `uncertainty_*` file was read and concatenated TWICE (RERUN_PLAN.md 2.13).
+    patterns = ["*_uncertainty_values.csv"]
 
     for pattern in patterns:
         for f in sorted(results_dir.glob(pattern), key=lambda p: p.stat().st_mtime):
@@ -1135,8 +1157,11 @@ def load_uncertainty_data(results_dir):
         # without them collapses distinct molecules onto one another.
         # `strategy` is never absent now -- attach_condition names every file --
         # so a condition can no longer be dropped out of the key.
+        # `canonical_smiles` where it exists: sample_idx is a row position within
+        # one (split, file_no) and identifies no molecule on its own.
         dedup_cols = [c for c in ['model', 'rep', 'strategy', 'split', 'sigma',
-                                  'file_no', 'iteration', 'sample_idx']
+                                  'file_no', 'iteration', 'canonical_smiles',
+                                  'sample_idx']
                       if c in combined.columns]
         if 'strategy' not in dedup_cols:
             raise RuntimeError(
@@ -1198,6 +1223,12 @@ REQUIRED_UNCERTAINTY_COLUMNS = [
 
 def require_uncertainty_schema(df, source):
     """Refuse a per-molecule uncertainty frame that predates the pipeline rewrite.
+
+    (The docstring below described a bug that was never in the writer: it said
+    `injected_noise = y_true_noisy - y_true_original` in different scales, while
+    the writer had computed a regression residual since before this reader was
+    written. Neither is true now -- the injector's recorded value is what the
+    column holds, RERUN_PLAN.md 2.11.)
 
     This replaces `fix_injected_noise`, which reconstructed `injected_noise` by
     fitting a line to `y_true_noisy` against `y_true_original` per
@@ -1338,11 +1369,21 @@ def _normalize_validation_names(df):
         'MLP-BNN-Full': 'mlp_bnn_full',
         'MLP-VBLL-Full': 'mlp_vbll',
     }
+    # The per-molecule uncertainty FILENAMES strip hyphens
+    # (`model_name.replace('-', '')`). The runner writes model/rep/dataset into
+    # the file as columns, so the filename is only a fallback -- but for files
+    # written before it did, 'BNN-Full' arrived as 'BNNFull', matched no key, and
+    # `.fillna(str.lower())` turned it into 'bnnfull': a model name nothing else
+    # in the study uses (RERUN_PLAN.md 2.13). Both spellings map to one name now.
+    for _name, _target in list(val_model_map.items()):
+        val_model_map.setdefault(_name.replace('-', ''), _target)
     val_rep_map = {
         'ECFP4': 'ecfp4', 'PDV': 'continuous_pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
-        'SMILES': 'smiles',
+        'SMILES': 'smiles', 'ChemBERTa': 'chemberta', 'Avalon': 'avalon',
     }
+    for _name, _target in list(val_rep_map.items()):
+        val_rep_map.setdefault(_name.replace('-', ''), _target)
     # Map directory names → display names for datasets
     # herg_fluid is classification (no r2), excluded from regression auc_norm analysis
     val_dataset_map = {
@@ -3944,6 +3985,11 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                         y_true = y_pred = None
 
                     if y_true is not None:
+                        # GLOBAL_MODELS_EXCLUDE drops every conformal wrapper
+                        # at load time, so this branch cannot execute. Left in
+                        # place, and said so, rather than deleted -- it is the
+                        # right handling if the conformal arm ever returns
+                        # (RERUN_PLAN.md 2.13).
                         is_conformal = 'conformal' in model
                         if is_conformal:
                             # For conformal models, uncertainty is pseudo-std derived from
@@ -4379,12 +4425,77 @@ def create_interaction_figure(auc_df, raw_df, output_dir):
 # REPORT
 # =============================================================================
 
-def generate_report(auc_df, excluded_df, output_dir):
+def provenance_report(frames):
+    """What the provenance columns on the rows say.
+
+    Both pipelines write spec_version, spec_hash, params_source, gp_fit_method,
+    gp_collapsed, noise_type, level_units, delivered_dose and file_no, and NOTHING
+    read any of them -- grep over this whole file returned no hits. A results row
+    asserting which parameter spec produced it is worth nothing if no reader ever
+    looks (RERUN_PLAN.md 2.13).
+    """
+    lines = ["", "=" * 80, "PROVENANCE ON THE ROWS", "=" * 80]
+    columns = ['spec_version', 'spec_hash', 'params_source', 'loss_function',
+               'gp_fit_method', 'gp_collapsed', 'noise_type', 'level_units',
+               'file_no']
+    for label, frame in frames:
+        if frame is None or len(frame) == 0:
+            lines.append(f"\n{label}: no rows")
+            continue
+        lines.append(f"\n{label}: {len(frame)} rows")
+        for col in columns:
+            if col not in frame.columns:
+                lines.append(f"  {col:16} ABSENT")
+                continue
+            values = frame[col].dropna().astype(str)
+            values = values[values != '']
+            if values.empty:
+                lines.append(f"  {col:16} present but empty on every row")
+                continue
+            counts = values.value_counts()
+            shown = ", ".join(f"{v} ({n})" for v, n in counts.head(6).items())
+            more = "" if len(counts) <= 6 else f", and {len(counts) - 6} more"
+            lines.append(f"  {col:16} {shown}{more}")
+        # More than one parameter spec in one frame is a mixed run.
+        if 'spec_hash' in frame.columns and frame['spec_hash'].nunique(dropna=True) > 1:
+            lines.append(f"  WARNING: {label} mixes "
+                         f"{frame['spec_hash'].nunique()} parameter specs. Rows "
+                         f"from different specs are different models.")
+        if 'gp_collapsed' in frame.columns:
+            collapsed = pd.to_numeric(frame['gp_collapsed'],
+                                      errors='coerce').fillna(0).astype(int).sum()
+            if collapsed:
+                lines.append(f"  WARNING: {int(collapsed)} row(s) came from a "
+                             f"Gaussian process that collapsed to a constant "
+                             f"prediction. Those are failed fits, not bad "
+                             f"representations.")
+    return lines
+
+
+def generate_report(auc_df, excluded_df, output_dir, raw_frames=()):
     """Generate text report summarizing findings."""
     lines = []
     lines.append("=" * 80)
     lines.append("PAPER FIGURES GENERATION REPORT")
     lines.append("=" * 80)
+
+    # What is POOLED in the numbers below, said out loud.
+    #
+    # `unc_err_corr`, the coverage columns and `Mean Uncertainty` are computed
+    # over every noise level and every replicate for a (model, rep) at once, and
+    # the headline cross-dataset figures average auc_norm over every condition
+    # and every representation. Neither is visible in the output, and a coverage
+    # number pooled across levels is not a coverage at any level
+    # (RERUN_PLAN.md 2.13).
+    lines.append("")
+    lines.append("WHAT IS POOLED IN THESE NUMBERS")
+    lines.append("-" * 80)
+    lines.append("  Table 4's Unc-Error rho, Coverage 1s/2s and Mean Uncertainty")
+    lines.append("  are computed over ALL noise levels and ALL replicates for a")
+    lines.append("  (model, representation) at once. They are not a value at any")
+    lines.append("  one level.")
+    lines.append("  The cross-dataset bar and scatter average auc_norm over every")
+    lines.append("  noise condition and every representation for a model.")
 
     lines.append(f"\nCatastrophic iteration threshold: R² < {CATASTROPHIC_R2_THRESHOLD}")
     catastrophic_path = output_dir / 'filtered_catastrophic_iterations.csv'
@@ -4464,6 +4575,8 @@ def generate_report(auc_df, excluded_df, output_dir):
                 lines.append(f"\nNN-α auc_norm: {dnn_auc:.4f}")
                 lines.append(f"BNN-α auc_norm: {bnn_auc:.4f}")
                 lines.append(f"Improvement: {(bnn_auc - dnn_auc):.4f}")
+
+    lines.extend(provenance_report(raw_frames))
 
     report_path = output_dir / 'paper_figures_report.txt'
     with open(report_path, 'w') as f:
@@ -4866,7 +4979,10 @@ def main():
     compute_icc_and_redundancy(auc_df, output_dir)
 
     print("\n--- REPORT ---")
-    generate_report(auc_df, excluded_df, output_dir)
+    generate_report(auc_df, excluded_df, output_dir,
+                    raw_frames=[('QM9 results', qm9_df),
+                                ('QM9 uncertainty', unc_df),
+                                ('experimental results', validation_df)])
 
     print("\n" + "=" * 80)
     print(f"COMPLETE - All outputs in {output_dir}")

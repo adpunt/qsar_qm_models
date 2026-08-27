@@ -1,0 +1,708 @@
+%Version 3 December 2023
+% See section 11 of the User Manual for version history
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%                                                                 %%
+%% Please do not use \input{...} to include other tex files.       %%
+%% Submit your LaTeX manuscript as one .tex document.              %%
+%%                                                                 %%
+%% All additional figures and files should be attached             %%
+%% separately and not embedded in the \TeX\ document itself.       %%
+%%                                                                 %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%\documentclass[referee,sn-basic]{sn-jnl}% referee option is meant for double line spacing
+
+%%=======================================================%%
+%% to print line numbers in the margin use lineno option %%
+%%=======================================================%%
+
+%%\documentclass[lineno,sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
+
+%%======================================================%%
+%% to compile with pdflatex/xelatex use pdflatex option %%
+%%======================================================%%
+
+%%\documentclass[pdflatex,sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
+
+
+%%Note: the following reference styles support Namedate and Numbered referencing. By default the style follows the most common style. To switch between the options you can add or remove Numbered in the optional parenthesis. 
+%%The option is available for: sn-basic.bst, sn-vancouver.bst, sn-chicago.bst%  
+ 
+%%\documentclass[pdflatex,sn-nature]{sn-jnl}% Style for submissions to Nature Portfolio journals
+%%\documentclass[pdflatex,sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
+
+
+% ==========================================================================
+% BUILD TOGGLE: choose ONE submission target by flipping the line below.
+%   JCI (Journal of Cheminformatics): line numbers + double spacing  -> \arxivfalse
+%   arXiv: single-spaced, no line numbers (not referee mode)         -> \arxivtrue
+% Content is identical for both builds; only the class options differ.
+% ==========================================================================
+\newif\ifarxiv
+\arxivtrue % <-- TRUE for the arXiv build, FALSE for the JCI build
+\ifarxiv
+  \documentclass[pdflatex,sn-basic]{sn-jnl}% arXiv: single-spaced, no line numbers
+\else
+  \documentclass[referee,pdflatex,sn-basic]{sn-jnl}% JCI: double spacing (referee) + page numbers; clean line numbers added via the lineno package below (sn-jnl's own lineno vruler mis-numbers under double spacing)
+\fi
+
+
+%%\documentclass[pdflatex,sn-mathphys-ay]{sn-jnl}% Math and Physical Sciences Author Year Reference Style
+%%\documentclass[pdflatex,sn-aps]{sn-jnl}% American Physical Society (APS) Reference Style
+%%\documentclass[pdflatex,sn-vancouver,Numbered]{sn-jnl}% Vancouver Reference Style
+%%\documentclass[pdflatex,sn-apa]{sn-jnl}% APA Reference Style 
+%%\documentclass[pdflatex,sn-chicago]{sn-jnl}% Chicago-based Humanities Reference Style
+
+%%%% Standard Packages
+%%<additional latex packages if required can be included here>
+
+\usepackage{graphicx}%
+\usepackage{multirow}%
+\usepackage{amsmath,amssymb,amsfonts}%
+\usepackage{amsthm}%
+\usepackage{mathrsfs}%
+\usepackage[title]{appendix}%
+\usepackage{xcolor}%
+\usepackage{textcomp}%
+\usepackage{manyfoot}%
+\usepackage{booktabs}%
+\usepackage{algorithm}%
+\usepackage{algorithmicx}%
+\usepackage{algpseudocode}%
+\usepackage{listings}%
+\usepackage{hyperref}%
+\usepackage{enumitem}%
+\usepackage{threeparttable}%
+\usepackage{morefloats}%
+
+%% --- Clean line numbering for the JCI (referee / \arxivfalse) build --------
+%% sn-jnl's built-in `lineno' option uses a fixed-pitch "vruler" that prints two
+%% numbers per text line under double spacing. We disable it (option removed
+%% above) and use the standard lineno package instead: one number per real text
+%% line, spacing-independent, patched so amsmath display environments are
+%% numbered rather than breaking the count.
+\ifarxiv\else
+  \usepackage{lineno}%
+  \newcommand*\patchAmsMathEnvironmentForLineno[1]{%
+    \expandafter\let\csname old#1\expandafter\endcsname\csname #1\endcsname
+    \expandafter\let\csname oldend#1\expandafter\endcsname\csname end#1\endcsname
+    \renewenvironment{#1}%
+      {\linenomath\csname old#1\endcsname}%
+      {\csname oldend#1\endcsname\endlinenomath}}%
+  \newcommand*\patchBothAmsMathEnvironmentsForLineno[1]{%
+    \patchAmsMathEnvironmentForLineno{#1}%
+    \patchAmsMathEnvironmentForLineno{#1*}}%
+  \AtBeginDocument{%
+    \patchBothAmsMathEnvironmentsForLineno{equation}%
+    \patchBothAmsMathEnvironmentsForLineno{align}%
+    \patchBothAmsMathEnvironmentsForLineno{flalign}%
+    \patchBothAmsMathEnvironmentsForLineno{alignat}%
+    \patchBothAmsMathEnvironmentsForLineno{gather}%
+    \patchBothAmsMathEnvironmentsForLineno{multline}}%
+  \linenumbers
+\fi
+%%%%
+
+%%%%%=============================================================================%%%%
+%%%%  Remarks: This template is provided to aid authors with the preparation
+%%%%  of original research articles intended for submission to journals published 
+%%%%  by Springer Nature. The guidance has been prepared in partnership with 
+%%%%  production teams to conform to Springer Nature technical requirements. 
+%%%%  Editorial and presentation requirements differ among journal portfolios and 
+%%%%  research disciplines. You may find sections in this template are irrelevant 
+%%%%  to your work and are empowered to omit any such section if allowed by the 
+%%%%  journal you intend to submit to. The submission guidelines and policies 
+%%%%  of the journal take precedence. A detailed User Manual is available in the 
+%%%%  template package for technical guidance.
+%%%%%=============================================================================%%%%
+
+%% as per the requirement new theorem styles can be included as shown below
+\theoremstyle{thmstyleone}%
+\newtheorem{theorem}{Theorem}%  meant for continuous numbers
+%%\newtheorem{theorem}{Theorem}[section]% meant for sectionwise numbers
+%% optional argument [theorem] produces theorem numbering sequence instead of independent numbers for Proposition
+\newtheorem{proposition}[theorem]{Proposition}% 
+%%\newtheorem{proposition}{Proposition}% to get separate numbers for theorem and proposition etc.
+
+\theoremstyle{thmstyletwo}%
+\newtheorem{example}{Example}%
+\newtheorem{remark}{Remark}%
+
+\theoremstyle{thmstylethree}%
+\newtheorem{definition}{Definition}%
+
+\raggedbottom
+%%\unnumbered% uncomment this for unnumbered level heads
+
+\begin{document}
+\title[Article Title]{NoiseInject: A Benchmarking Framework to Study Noise Robustness in QSAR Models}
+%%=============================================================%%
+%% GivenName    -> \fnm{Joergen W.}
+%% Particle -> \spfx{van der} -> surname prefix
+%% FamilyName   -> \sur{Ploeg}
+%% Suffix   -> \sfx{IV}
+%% \author*[1,2]{\fnm{Joergen W.} \spfx{van der} \sur{Ploeg} 
+%%  \sfx{IV}}\email{iauthor@gmail.com}
+%%=============================================================%%
+
+\author[1]{\fnm{Adelaide} \sur{Punt}}
+
+\author[2]{\fnm{Thierry} \sur{Hanser}}
+
+\author[2]{\fnm{St\'ephane} \sur{Werner}}
+
+\author*[1]{\fnm{Garrett} \sur{Morris}}\email{garrett.morris@stats.ox.ac.uk}
+
+\affil*[1]{\orgdiv{Department of Statistics}, \orgname{University of Oxford}, \orgaddress{\street{24-29 St Giles'}, \city{Oxford}, \postcode{OX1 3LB}, \country{UK}}}
+
+\affil[2]{\orgdiv{Lhasa Limited}, \orgname{Granary Wharf House}, \orgaddress{\street{2 Canal Wharf}, \city{Leeds}, \postcode{LS11 5PS}, \country{UK}}}
+
+%%==================================%%
+%% Sample for unstructured abstract %%
+%%==================================%%
+\abstract{Quantitative structure–activity relationship (QSAR) models are widely used to screen compounds in drug discovery by predicting their molecular properties. However, experimental measurements used to train these models can contain inherent noise arising from assay variability, measurement error, and heterogeneous data sources. While the impact of noisy labels on QSAR modeling has been studied, the relative contributions of the choice of molecular representation and machine learning model architecture remains unclear. We present a new software framework called ``NoiseInject'' and use it to carry out a comprehensive investigation into noise robustness in QSAR modeling, by comparing a wide variety of molecular representations and architectures under controlled artificial noise injection. Experiments were conducted using the QM9 dataset and HOMO–LUMO gap prediction as the reference task, as well as ADME datasets with experimentally-obtained labels: LogD, Caco-2 efflux, and hERG ${K_i}$. While noise is typically modeled as Gaussian, we developed six noise injection strategies to investigate other patterns of noise. Noise robustness was measured as the slope of predictive performance degradation across increasing amounts of additional label noise. We found that model architecture was the dominant factor in performance degradation, with NGBoost and SVMs showing the strongest robustness to noise. We also found that applying Bayesian transformations to feed-forward neural networks improves their noise robustness; and that NGBoost and Gaussian Processes displayed the strongest correlations between per-sample estimated uncertainty and injected noise.
+\newline
+
+\textbf{Scientific contribution}. This study introduces NoiseInject, an open-source benchmarking framework that performs controlled artificial noise injections and provides analysis tools to determine the impact of label noise. We demonstrate that the choice of model, rather than molecular representation, is the primary determinant of QSAR-model noise robustness, a conclusion we reached by comparing a model's relative ranking across different types of label noise. We further show that per-sample uncertainty estimates track injected label noise for some certain models, 
+
+only for models with an explicit aleatoric noise term such as the observation-noise variance of a Gaussian Process or the predicted scale of NGBoost, whereas models whose uncertainty is purely epistemic, such as Bayesian Neural Networks, do not.}
+
+%%================================%%
+%% Sample for structured abstract %%
+%%================================%%
+
+% \abstract{\textbf{Purpose:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
+% 
+% \textbf{Methods:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
+% 
+% \textbf{Results:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
+% 
+% \textbf{Conclusion:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.}
+
+\keywords{QSAR, machine learning, uncertainty quantification, molecular property prediction, noise robustness, molecular representations, drug discovery, ADME}
+
+%%\pacs[JEL Classification]{D8, H51}
+
+%%\pacs[MSC Classification]{35A01, 65L10, 65L12, 65L20, 65L70}
+
+\maketitle
+
+\section{Introduction}\label{sec1}
+
+New avenues in the drug discovery pipeline have opened up thanks to advances in large data set collection, analysis, and computation. Therapeutic targets are identified, potential drug candidates are screened and optimized, and the most promising of these go on to pre-clinical and clinical trials \citep{Lill2007}. There are various methods by which potential drug candidates can be screened. Virtual screening allows for the rapid and large-scale analysis of libraries of compounds, and is a particularly useful approach used to speed up the drug discovery process \citep{Neves2018}. One standard screening method is the prediction of bioactivities and pharmacological properties of such candidates. There is a long history of using Quantitative Structure-Activity Relationship (QSAR) models to make these predictions, to act as a filter for compounds with undesirable properties, and thus reduce the time and cost associated with experimental screening \citep{Sabando2021}. QSAR models aim to predict the relationship between a molecule's molecular features as encoded within a particular molecular representation and a desired molecular property \citep{Sabando2021} of interest. A QSAR model typically consists of a molecular representation paired with a machine learning (ML) model. An ideal molecular representation will allow a model to learn only the relevant information about each molecule with respect to the target property. Representations are either `static' hand-crafted descriptors or circular fingerprints that encode predefined structural and physicochemical features \citep{Rogers2010, David2020, sns}; or learned representations, where the encoding is derived from a predictive model, often taken from the activations of the final layer of a neural network, or a latent space embedding \citep{Sabando2021, kishimoto2023}. 
+
+QSAR models are of course, sensitive to the quality of the input data on which they are trained. Experimental noise can arise from measurement errors, variability under experimental conditions, varying provenance of the data, and intrinsic biological and chemical variability. Even the very measures of model performance may be flawed if test and validation sets are laden with noise. \citet{Kolmar2021} show that the variance associated with experimental data can contribute more to prediction error than the model’s own error. There is also a limit to how much noise the model can tolerate; \citet{jorner2021} found that once the model error approaches the magnitude of the experimental measurement error on labels, adding more training data yields diminishing returns in prediction accuracy. In the context of activity prediction, the inherent variability within experimental setups and assays, batch effects, measurement errors, and biological variability introduce additional layers of complexity \citep{Kolmar2021, Fourches2010}. All of this increases the likelihood of encountering noise in the data \citep{Fang2022}. Even the molecular representations in the training data themselves may be incorrect or misleading \citep{Walters2023}. 
+
+Numerous studies have explored Learning with Noisy Labels (LNL) in the broader context of ML, as well as specifically for QSAR models. \citet{Song2022} provide a comprehensive review of Deep LNL, identifying five main approaches: (i) modifying architectures to better handle noise in training; (ii) employing regularization to reduce overfitting to noise; (iii) adjusting loss functions to be less sensitive to outliers or label flips; (iv) post-processing to adjust the weights for noisy data; and (v) sample selection to select presumably clean data to pre-train. \citet{Cortes2015} examined 12 different algorithms across 12 datasets and 10 noise levels, finding that no single algorithm was overall best at maintaining predictive performance in the presence of noise; certain algorithms perform better or worse at different levels of noise. This is a recurring theme in LNL research: there is no universal solution to handling noise with experimental endpoints. This is consistent with the `No Free Lunch Theorem', which states that, \emph{there is no single learning algorithm that can outperform all others in all data distributions} \citep{Wolpert1997}. 
+
+Although numerous studies have explored the effects of noise on ML algorithms for molecular property prediction and have used a handful of representations as inputs to these algorithms \citep{Kolmar2021}, direct comparisons between different molecular representations and how they respond to label noise remain limited. The choice of molecular representation certainly affects the predictive performance of QSAR models. \citet{Deng2023} conducted a large-scale evaluation of 62,820 models and found that Extended Connectivity Fingerprint (ECFP) fingerprints frequently outperform the representations of  learned graph neural networks. Additionally, experimental noise is often modeled as Gaussian-distributed --- the argument being that according to the Central Limit Theorem, aggregated experimental measurements from multiple independent sources of error exhibit a Gaussian distribution \citep{Kolmar2021}. However, \citet{Heid2023} used mean-variance estimation and bias-variance decomposition to show that noise can be tied to specific modalities, for example structure dependence. 
+
+% TODO: edit this
+This research addresses three main aspects of the robustness of QSAR models under label noise. First, we investigate the contributions of molecular representation and model architecture on both overall predictive performance and, more specifically, noise robustness. Second, we compare how noise-robust probabilistic models perform versus their deterministic counterparts, and whether their uncertainty estimates correlate with prediction error or label noise under noisy conditions. Third, we assess the generalizability of noise-robustness patterns across different noise-injection mechanisms and molecular properties. Together, these questions aim to identify what, if anything, makes a QSAR model robust to noise. Finally, we introduce NoiseInject, an open-source Python package for benchmarking noise robustness and uncertainty quantification in machine learning models.
+
+\section{Methods}\label{sec2}
+
+\subsection{Dataset}
+The majority of experiments were conducted on the QM9 molecular property dataset \citep{Ramakrishnan2014}, which contains approximately 130,000 small organic molecules with pre-computed quantum-mechanical properties obtained from density functional theory (DFT) calculations at the B3LYP/6-31G(2df,p) level of theory \citep{Ramakrishnan2014}. Each experiment was replicated 10 times with a distinct random seed and a randomized subset of $N = 10{,}000$ molecules. Preliminary experiments were done with $N = 5{,}000$, $10{,}000$, $20{,}000$, and $30{,}000$, resulting in similar performance at all sizes except $N = 5{,}000$ which experience minor degradation. Experiments that involved tracking uncertainty values were only run once. For each experimental replicate, a new scaffold-based train/validation/test split (80/10/10) implemented by DeepChem \citep{deepchem} was generated from this fixed subset. Scaffold splits were used to minimize structural overlap between sets. While predictive performance typically drops when switching from random splitting to a more challenging scenario like scaffold splitting, the use of scaffold splitting discourages the QSAR model from overfitting \citep{Heid2023}.
+
+We selected HOMO--LUMO energy gap as the primary prediction target in QM9, as it captures electronic characteristics relevant to molecular reactivity and stability \citep{Islam2019, Hllermeier2021}. The HOMO--LUMO gap is a well-established target for quantum chemistry benchmarks, and is defined as the difference between the highest occupied and lowest unoccupied molecular orbital energies, directly relating to a molecule's electronic excitability, charge transfer capability, and chemical stability \citep{Fediai2023}. We also assumed that thanks to the consistent calculation method, and notwithstanding approximations in the level of theory used, the QM data were ``free'' of noise.
+
+To assess whether noise robustness results generalize beyond the HOMO--LUMO gap, we evaluated model configurations across three additional molecular property datasets with experimentally measured endpoints. From the OpenADMET initiative \citep{openadmet}, we used LogD (lipophilicity, $N = 5{,}039$) and Caco-2 efflux permeability ($N = 2{,}161$). We also selected hERG Ki data from ChEMBL \citep{Zdrazil2023}, following a protocol inspired by \citet{landrum2024}: filter for binding assays and deduplicate by median pChEMBL value. We then removed compounds with inter-assay standard deviation $> 1.0$ log unit \citep{Zdrazil2023}. This results in N = 1,482 compounds. All three datasets were evaluated using all six noise injection strategies and eleven levels of noise as used in the QM9 experiments. 5-fold scaffold cross-validation was conducted using GroupKFold on Murcko scaffolds. Models used the hyperparameters listed in Additional file~1, with representation-specific SVM kernels detailed in Additional file~12. For binary vector-based representations, a Tanimoto kernel was used for SVM, while an RBF kernel was used for continuous-valued vectors. 
+
+Prior to modeling, all molecular structures were sanitized and canonicalized using \texttt{RDKit} to remove invalid valence states and standardize atom and bond typing \citep{rdkit}. Target values were mean-centered and normalized to zero mean and unit variance. Data loading and pre-processing were performed with a global random seed to ensure reproducibility.
+
+\subsection{Molecular Representations}
+
+In this study, we evaluated a variety of molecular representations spanning path-based fingerprints, circular fingerprints, physicochemical descriptors, string encodings, and pretrained embeddings. We used two binary fingerprints: an ECFP4 fingerprint and the \emph{Sort \& Slice} (SNS) fingerprint \citep{sns}. The ECFP4 fingerprint uses circular substructures with radius $r=2$, hashing them into a standard $d=2048$-bit vector using \texttt{RDKit} \citep{rdkit}. Each bit encodes the presence of one or more substructures capturing the local chemical environment around each atom. One downside of hashed fingerprints is bit collisions, in which chemically distinct substructures map to the same index, resulting effectively in representation-level noise. To address this issue, the SNS fingerprint uses a collision-free alternative based on the same Morgan circular substructures with radius $r=2$ \citep{sns}. Substructures are sorted by prevalence in the training set, and the top $L$ ($L=1024$) are sliced to create a binary vector, providing the substructure-based circular fingerprint in our comparison. We also used 200-dimensional physicochemical descriptor vectors (PDVs) computed from RDKit molecular descriptors (\texttt{MolecularDescriptorCalculator}), encompassing molecular weight, LogP, topological polar surface area, topological connectivity indices, partial charges, VSA bins, EState indices, hydrogen bond donor/acceptor counts, and functional group counts, among others \citep{Cherkasov2014}. These PDV features are z-score normalized such that the mean and standard deviation are computed on the training set, with constant-variance features set to unit scale. We also used one-hot-encoded (OHE) SMILES strings \citep{Bertoni2020}, generated with \texttt{RDKit} \citep{rdkit} as well as mol2vec embeddings \citep{jaeger2018mol2vec}, which apply a Word2Vec-inspired approach to molecular substructures. Finally, as a representative GNN-based learned representation, we included graph embeddings generated by Molecular Hypergraph Grammar GNNs (MHG-GNN) \citep{kishimoto2023}. MHG-GNNs are a GIN-based autoencoder pre-trained on 1.34 million PubChem molecules using $\beta$-VAE loss, producing 1024-dimensional embeddings through iterative message passing. MHG-GNN was originally developed for material science, and has demonstrated strong performance on property prediction tasks for polymers, photoresistors, and chromophores \citep{kishimoto2023}. 
+
+All representations were precomputed using a hybrid Rust-Python pipeline. Rust was used to perform various heavy-computation tasks involved in feature extraction and serialization, while Python was used for model training and evaluation. 
+
+\subsection{Models}
+To understand model behavior in the presence of label noise, we explored a wide range of model architectures. One key issue with QSAR models is the standard assumption that labels represent true values. Most chemical data sets rely on experimentally-derived labels and lack sufficient replications to provide a robust statistical representation of the underlying distributions \citep{Kolmar2021}. A single measurement, or even multiple measurements for a given label, do not guarantee that a given label accurately reflects the population mean \citep{Kolmar2021}. Most ML models rely on the assumption that the training data is, in fact, an accurate reflection of the population. Therefore, they treat these potentially noisy labels as discrete quantities rather than distributions, which opens the door to overfitting to noise and giving unduly optimistic assessments of the models. All hyperparameters for the models below are included in Additional file~1.
+
+Random Forests (RFs) are one of the most common choices for QSAR modeling thanks to their robustness and interpretability \citep{Svetnik2003}. During bootstrapping, each tree trains on a separate subset of data, reducing the influence of any one individual label. This mechanism is particularly useful when working with noisy labels, particularly outlier noise \citep{Breiman2001}. Quantile Regression Forests (QRFs) extend RF predictions to full distributions by keeping the distribution of training labels in each leaf and computing quantiles across all trees for a given prediction \citep{Meinshausen2006}. It inherently accounts for heteroscedasticity, such that the quantiles will reflect the spread of a target variable's domain. We also used eXtreme Gradient Boosting (XGBoost) \citep{Mustapha2016, Tian2022}, Light Gradient-Boosting Machine (LightGBM) \citep{ke2017lightgbm}, and Natural Gradient Boosting (NGBoost) \citep{Duan2020}. NGBoost extends deterministic gradient boosting by treating the parameters of a chosen parametric distribution as regression targets and learns them via boosting with a natural gradient update rule \citep{Duan2020}. Computationally, NGBoost scales like standard boosting in $N$ but with larger constants that depend on the number of distributional parameters $p$: each iteration fits $p$ learner series and inverts $N$ matrices of size $p \times p$, adding $O(Np^3)$ cost per iteration \citep{Duan2020}. Even with a two-parameter Gaussian distribution, this additional cost is non-trivial and may limit scalability to larger datasets.
+
+Support Vector Machines (SVMs) are a well-established baseline in QSAR modeling, mapping inputs into a high-dimensional feature space where a maximum-margin hyperplane separates predictions \citep{Vapnik1995, Svetnik2003}. A radial basis function (RBF) with $C = 1.0$ and $\gamma = \texttt{scale}$ was used as the kernel. 
+
+One ML method that has had particular success in molecular property prediction are Gaussian Processes (GPs) \citep{Obrezanova2007, gauche}, a non-parametric class of models that use a kernel to produce a Gaussian predictive distribution over every data point \citep{Obrezanova2007}. One of the major limitations of using GPs in practice is computational scaling; inference has $O(N^3)$ time complexity and $O(N^2)$ memory, where $N$ is the number of training points \citep{Rasmussen2005}. This can be mitigated with sparse GP approximations, but these introduce approximation error and can be more difficult to tune \citep{quinonero2005}. Tree-based ensembles are typically more efficient for larger data sizes \citep{lakshminarayanan2017}. We implemented GP models using the \texttt{Gauche} framework \citep{gauche}, which provides kernels optimized for molecular input \citep{gauche}. For fingerprint-based representations, we used the Tanimoto kernel \citep{Ralaivola2005, moss2020, gauche}, which operates on binary vectors. For PDV, we used a radial basis function (RBF). Preliminary tests indicated that for GPs using the Tanimoto kernel where applicable offered significant performance benefits; however for SVM, the RBF kernel was sufficient for all types of data. 
+
+While standard feed-forward neural networks (NNs) are deterministic, they can be transformed into probabilistic models. We tested two architectures: (i) NN-$\alpha$ with two hidden layers of sizes [128, 64] and dropout after each hidden layer and (ii) NN-$\beta$ with two hidden layers of size [128, 128] and dropout applied before the output layer. Each model was trained using the Adam optimizer with early stopping on validation loss. We used Bayesian transformations to convert NNs into Bayesian neural networks (BNNs), and implemented them using \texttt{PyTorch} \citep{pytorchGeometric} with ReLU activations and dropout regularization ($p=0.2$).BNNs introduce priors on the weights and compute a posterior distribution given the data, providing uncertainty quantification. This can be done by approximations such as Monte Carlo dropout, variational inference, or ensembles \citep{gal2016}. One straightforward yet computationally expensive approach is to replace all linear layers with Bayesian layers (full-BNN), using Gaussian priors $\mathcal{N}(0, 0.1^2)$ on all weights. The second approach we implemented was Variational Bayesian Last Layers (VBLL), which maintains a mean-field variational posterior $q(\mathbf{W}) = \mathcal{N}(\boldsymbol{\mu}_W, \text{diag}(\boldsymbol{\sigma}_W^2))$ over the last-layer weights and is trained by maximizing the evidence lower bound, which can be thought of as minimizing the reconstruction loss plus KL divergence $D_{\text{KL}}(q(\mathbf{W}) \| p(\mathbf{W}))$ from a standard normal prior, scaled by $1/N$ \citep{Harrison2024} (VBLL transformation). The VBLL also learns a scalar observation noise variance. All BNN variants estimated predictive distributions with 100 Monte Carlo forward passes at inference.
+
+We decomposed the uncertainty values derived from the probabilistic methods into epistemic and aleatoric components when applicable. Epistemic uncertainty is model-driven and can be reduced by collecting either more or higher quality training data. Aleatoric is data-driven and reflects the intrinsic noise in the labels. For the GP and VBLL models, we derive epistemic uncertainty from the posterior variance or weight sampling and aleatoric uncertainty from a learned observation noise term \citep{Rasmussen2005, Harrison2024}. We did not decompose the uncertainty from other models such as BNN variants, in which the variance across Monte Carlo weight samples primarily reflects epistemic uncertainty \citep{kendall2017, gal2016}; and NGBoost and QRF, in which there is no straightforward mechanism to separate the aleatoric and epistemic components of uncertainty from learned distributional parameters or quantiles \citep{Duan2020, Meinshausen2006}.
+
+\subsection{Performance Metrics}
+
+Root mean squared error (RMSE) and the coefficient of determination ($R^2$) were primarily used to compare QSAR predictive performance. $\sigma$ is the noise scaling factor shared by all strategies (Table~\ref{tab:regression_noise}): each strategy uses $\sigma$ to control the magnitude of injected noise, so that $\sigma = 0$ corresponds to clean labels and increasing $\sigma$ produces progressively noisier labels, regardless of how the noise is distributed across samples. 
+
+Pairwise statistical comparisons between deterministic and probabilistic architecture counterparts (e.g., NN-$\alpha$ vs NN-$\alpha$ BNN variants, RF vs QRF) were conducted using the Wilcoxon signed-rank test, with $\alpha = 0.05$ (two-sided). To assess whether model rankings remain consistent across different noise injection strategies, we computed Kendall's coefficient of concordance (Kendall's W), which ranges from 0 (no agreement) to 1 (complete agreement). Values above 0.7 indicate strong agreement in rankings across strategies.
+
+When evaluating uncertainty, we assessed the relationship between predicted uncertainty and prediction quality. Spearman's rank correlation coefficient ($\rho$) was used to quantify the relationship between predicted uncertainty ($u_i$) and absolute error ($|y_i - \hat{y}_i|$), as well as between predicted uncertainty and injected noise magnitude. Higher correlations indicate that the model's uncertainty estimates reliably identify predictions that are likely to be incorrect.
+
+For probabilistic models, empirical coverage was evaluated at $1\sigma$ and $2\sigma$ confidence intervals by computing the proportion of test predictions where the true value falls within $\hat{y}_i \pm k\hat{u}_i$:
+$$
+\text{Coverage}(k\sigma) = \frac{1}{N}\sum_{i=1}^{N} 1\big[|y_i - \hat{y}_i| \leq k\hat{u}_i\big],
+$$
+such that $\hat{u}_i$ is the predicted uncertainty for sample $i$ and $k \in \{1, 2\}$. Theoretical target coverages are defined as 68\% at $1\sigma$ and 95\% at $2\sigma$ for Gaussian distributions.
+
+The Expected Calibration Error (ECE) was computed by binning predictions into deciles by predicted uncertainty and measuring the weighted average absolute difference between predicted uncertainty and observed error:
+$$
+\text{ECE} = \sum_{b=1}^{B} \frac{|B_b|}{N} \big| \bar{u}_b - \bar{e}_b \big|,
+$$
+where $B_b$ is the set of predictions in bin $b$, $\bar{u}_b$ is the mean predicted uncertainty in that bin, and $\bar{e}_b$ is the mean absolute error. Lower ECE indicates better-calibrated uncertainty estimates.
+
+% Edit mark
+To evaluate the effect of label noise, we examined model performance degradation under increasing artificial noise with $\sigma \in \{0, 0.1, 0.2, \ldots, 1.0\}$ using the Noise Degradation Slope (NDS), calculated as the slope of R$^2$ versus noise level:
+$$
+\text{NDS} = \frac{dR^2}{d\sigma}.
+$$
+
+Values closer to zero indicate that noise has less of an effect on performance, negative values indicate a higher sensitivity to noise. Positive slopes, which were not observed in this study, would indicate that the noise \textit{improves} model performance. Configurations with baseline R$^2 \leq 0.6$ were excluded from robustness analysis, as poor performance on clean labels tends to remain poor for noisy labels as well, producing misleadingly shallow or even positive slopes that represent poor performance across the board.
+
+A two-way analysis of variance (ANOVA) decomposition was conducted separately for each noise strategy to identify the relative contributions of molecular representation and model architecture choice on both predictive performance and noise robustness. We chose ANOVA with $\eta^2$ effect sizes rather than pairwise significance tests because our primary question is variance attribution: how much of the variation in robustness is explained by model architecture versus molecular representation. Pairwise tests can establish whether two models differ significantly but cannot partition the total variance among factors---the key distinction our analysis requires. This per-strategy approach avoids inappropriate aggregation across fundamentally different noise types. For a given metric $y$ (either $R^2$ at fixed noise or NDS):
+$$
+y_{ijr} = \mu + \alpha_i + \beta_j + (\alpha\beta)_{ij} + \epsilon_{ijr},
+$$
+where $\alpha_i$ represents the effect of model architecture $i$, $\beta_j$ represents the effect of molecular representation $j$, $(\alpha\beta)_{ij}$ is the interaction term, and $\epsilon_{ijr}$ is the residual for replicate $r$.
+
+The proportion of variance explained by each factor was calculated as the effect size $\eta^2$:
+$$
+\eta^2_{\text{factor}} = \frac{SS_{\text{factor}}}{SS_{\text{total}}},
+$$
+using Type I (sequential) sum of squares, where $SS$ denotes the sum of squares. Both factors (model architecture and molecular representation) are treated as fixed effects, and the 10 experimental replicates per scenario provide the error term.
+
+ANOVA relies on the assumption that observations both within and across groups are independence. Across the whole set of models and representations in this study, some pairs produced similar predictions that are not independent. This causes the residual degrees of freedom to increase, while the residual sum of squares barely moves. To handle this issue, we computed pairwise Spearman rank correlations between all models and between all representations across noise strategies. Models whose profiles correlated at $\rho > 0.99$ with another model were excluded, including quantile regression forests (QRF), which were very similar to RF, as well as different NN architectures. The GP model was also excluded because different kernels are used for different molecular representations. This was not a problem with SVM as the RBF was used across all representations. 
+
+Across representations, SNS correlated at $\rho > 0.90$ with the ECFP4 fingerprint and was excluded to avoid inflating representation degrees of freedom, as both encode overlapping circular substructure information. We also computed intraclass correlation coefficients ICC(1,1) for all model pairs. ICC(1,1) measures the proportion of total variance attributable to between-subject differences, with values near 1.0 indicating that two models rank configurations almost identically. The full redundancy and ICC tables are reported in Additional files~2--4.
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabular}{p{2.5cm} p{4.5cm} p{6cm}}
+\toprule
+\textbf{Metric} & \textbf{Definition} & \textbf{Used to assess} \\
+\midrule
+RMSE
+  & $\sqrt{\frac{1}{N}\sum_i (y_i - \hat{y}_i)^2}$
+  & Predictive accuracy (lower is better) \\
+$R^2$
+  & $1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}$
+  & Variance explained by the model; comparable across datasets and noise levels \\
+NDS
+  & $dR^2 / d\sigma$ (slope of $R^2$ vs $\sigma$)
+  & Robustness to label noise; values near zero indicate stability, more negative values indicate sensitivity \\
+Wilcoxon signed-rank
+  & Paired non-parametric test, $\alpha=0.05$ (two-sided)
+  & Pairwise comparison of probabilistic vs deterministic counterparts (e.g.\ NN-$\alpha$ vs BNN-$\alpha$) \\
+Kendall's $W$
+  & Coefficient of concordance, $[0, 1]$
+  & Stability of model rankings across noise strategies; $W > 0.7$ indicates strong agreement \\
+ANOVA $\eta^2$
+  & $SS_{\text{factor}} / SS_{\text{total}}$ (Type~I)
+  & Variance attribution to model architecture vs molecular representation \\
+ICC(1,1)
+  & Intraclass correlation, $[0, 1]$
+  & Profile-level redundancy between models prior to ANOVA \\
+Spearman's $\rho$
+  & Rank correlation, $[-1, 1]$
+  & Calibration of predicted uncertainty against (i) absolute error and (ii) injected noise magnitude \\
+Coverage
+  & $\frac{1}{N}\sum_i \mathbb{1}[|y_i - \hat{y}_i| \le k\hat{u}_i]$
+  & Fraction of test points whose true value lies within $\hat{y}\pm k\hat{u}$; targets 68\% at $k=1$, 95\% at $k=2$ \\
+ECE
+  & $\sum_b \frac{|B_b|}{N}\,|\bar{u}_b - \bar{e}_b|$
+  & Calibration of predicted uncertainty: deviation between binned predicted uncertainty and mean error (lower is better) \\
+\bottomrule
+\end{tabular}
+\caption{Summary of metrics used in this study, their definitions, and their
+intended interpretation. $\hat{y}_i$ and $\hat{u}_i$ denote the predicted
+value and predicted uncertainty for sample $i$; $\sigma$ is the noise scaling
+factor (Table~\ref{tab:regression_noise}).}
+\label{tab:metrics_summary}
+\end{table}
+
+\subsection{Noise Strategies}
+Our objective is to evaluate the robustness of QSAR models against label noise. To do so, we ``inject'' artificial noise into the labels during training. Validation and test data remain free of noise. This artificial noise simulates real-world experimental noise. The clean target label $y_i$ is replaced by a noisy label $\tilde{y}_i = y_i + \epsilon_i$, where $\epsilon_i$ is the artificial noise injected at the index $i$, the value of which is determined by a specified noise strategy.  
+
+Experimental noise is often modeled as homoscedastic Gaussian noise and is added evenly across all labels. However, not all experimental noise is random. It may be heteroscedastic, where the variance depends on the molecule itself or experimental factors, or systematic, where biases from factors like assay conditions are introduced. We used a variety of noise strategies to model the different types of possible experimental noise that could arise in assay data coming from wet labs. 
+
+% requires \usepackage{amsmath} and \usepackage{booktabs}
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{l l l}
+\toprule
+\textbf{Noise Type} & \textbf{Per-point scale $s_i$} & \textbf{Simulated real-world source} \\
+\midrule
+Gaussian & $\sigma$ & Random measurement error \\
+\addlinespace
+Outlier &
+$\begin{cases} 3\sigma & |z_i| > 2 \\ 0.1\sigma & |z_i| \leq 2 \end{cases}$
+& Transcription errors, batch effects \\
+\addlinespace
+Quantile &
+$\begin{cases} 2\sigma & y_i < Q_{10} \text{ or } y_i > Q_{90} \\ 0.1\sigma & Q_{10} \leq y_i \leq Q_{90} \end{cases}$
+& Systematic error in tail domains \\
+\addlinespace
+Threshold &
+$\begin{cases} 2\sigma & |y_i| > 1 \\ 0.1\sigma & |y_i| \leq 1 \end{cases}$
+& Regime-dependent assay errors \\
+\addlinespace
+Valprop & $\sigma\,(1 + 0.1\,|y_i|)$ & Percentage-based measurement uncertainty \\
+\addlinespace
+Hetero & $\sigma\sqrt{0.1 + 0.05\,|y_i|}$ & Heteroscedastic measurement precision \\
+\bottomrule
+\end{tabular}
+\caption{Regression noise injection strategies. For each point $i$, noise
+$\varepsilon_i \sim \mathcal{N}(0, s_i^2)$ is added to the target $y_i$, where
+the scale $s_i$ is defined per row. Here $z_i = (y_i - \bar{y})/\sigma_y$ is the
+standardised target and $Q_{10}, Q_{90}$ are the $10$th and $90$th percentiles
+of the target distribution.}
+\label{tab:regression_noise}
+\end{table}
+
+Although classification tasks were not explicitly tested in this study, NoiseInjects implements six strategies that mirror the regression set: uniform, class-imbalance, binary-asymmetric, instance, class-dependent, and confusion-directed flipping. This is conducted with stochastic label flipping with flip probability $p$, such that $p$ replaces $\sigma$ as the noise scaling factor. 
+
+The parameter $\sigma$ serves as a noise scaling factor across all strategies. For Gaussian noise, $\epsilon_i \sim \mathcal{N}(0, \sigma^2)$ is applied uniformly. For outlier noise, samples identified as outliers ($z$-score $> 2.0$) receive noise from $\mathcal{N}(0, (3\sigma)^2)$ while normal samples receive $\mathcal{N}(0, (0.1\sigma)^2)$. For quantile noise, samples above the 90th or below the 10th percentile of the target distribution receive noise scaled by $2.0\times$, while central samples receive $0.1\times$. For threshold noise, samples with $|y| > 1.0$ (on normalized data) receive the higher $2.0\times$ multiplier, while those within receive $0.1\times$. For value-proportional, $\epsilon_i \sim \mathcal{N}(0, (\sigma(1 + 0.1|y_i|))^2)$, using a multiplicative formulation where noise scales proportionally with the absolute target value. And finally, for heteroscedastic, noise variance is computed as $\alpha \sigma^2 + \beta \sigma^2 |y_i|$ with $\alpha = 0.1$ and $\beta = 0.05$. All other multipliers remained constant, meaning that while the relative noise distribution differs between strategies, the difficulty scaling controlled by $\sigma$ is consistent. The detailed progression of label corruption across noise levels is seen in Figure~\ref{fig:noise_strategies}. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_methods_noise_strategies.png}
+\caption{Effect of each noise injection strategy on the QM9 HOMO–LUMO gap label distribution (blue) at $\sigma = 0.5$. The RMSE annotated in each panel is computed between the clean and the noisy labels for that strategy (i.e.\ the magnitude of perturbation). a) Gaussian (red); b) Outlier (brown); c) Quantile (green); d) Threshold (purple); e) Value-Proportional (orange); and f) Heteroscedastic (pink).}
+
+\label{fig:noise_strategies}
+\end{figure}
+
+\subsection{NoiseInject Framework}
+
+In an extension of this work, we developed an open-source benchmarking framework called NoiseInject to evaluate model robustness and uncertainty calibration under artificial label noise for both regression and classification tasks. The framework operates on label arrays (NumPy arrays or pandas Series) and applies artificial noise to the training labels while preserving the integrity of the test set.
+
+The framework computes standard regression metrics (RMSE, $R^2$, mean absolute error [MAE]) and classification metrics (accuracy, precision, recall, and F1 score, both macro- and weighted-averaged, with per-class breakdowns). For probabilistic models, it additionally computes uncertainty-calibration metrics: expected calibration error (ECE), empirical coverage at $1\sigma$ and $2\sigma$, mean prediction-interval width, and the Spearman correlations between predicted uncertainty and both absolute error and injected noise. It reports noise robustness metrics, including the noise-performance degradation slope and retention percentage, to quantify performance degradation across noise levels. Results are returned as structured \texttt{pandas} DataFrames (per-noise-level values and an aggregate summary) for downstream analysis.
+
+The evaluation pipeline is model-agnostic: it operates on the predictions of any externally trained estimator, including scikit-learn-compatible models and \texttt{PyTorch} networks. Optional reference wrappers that turn a point estimator into one producing per-sample uncertainty are also provided: a Gaussian process (via Gauche), split-conformal prediction for scikit-learn-compatible models, and Monte Carlo dropout for \texttt{PyTorch} networks. Worked examples demonstrating integration with common QSAR workflows (molecular descriptors, fingerprints, and GNN embeddings) are provided in the repository.
+
+The software is available under an MIT license \citep{noiseinject} and is designed to integrate into existing cheminformatics or other data pipelines, allowing for systematic benchmarking of QSAR noise robustness.
+
+
+\section{Results}
+
+\subsection{Variance decomposition}
+
+Considering the two main components of a QSAR model, the molecular representation and the model architecture, we sought to understand how each contributes to predictive performance and noise robustness. ANOVA decomposition across six noise strategies on models to predict HOMO--LUMO gap from QM9 demonstrates that for predictive performance (R$^2$ at $\sigma = 0.3$), the model--representation interaction term is the  largest source of variance across all six strategies, followed by model architecture and representation (Table~\ref{tab:anova_decomposition}; Figure~\ref{fig:anova_decomposition}a). However, for noise robustness as measured by the noise degradation slope (NDS), this ordering shifts. The choice of model architecture is instead the largest source of variance, while the interaction term drops to second and representation third. This observed inversion makes sense because the molecular representation dictates the chemical information the model receives, while the architecture determines how efficiently that information is used. The interaction term reflects the idea that these two are not independent. In the context of label noise robustness, representation has less of an impact since the features are not corrupted by noise. Meanwhile, the model's regularization, ensembling, and uncertainty handling have a stronger impact on how it handles noise. 
+
+The impact varied by type of noise, represented by noise strategy (Figure~\ref{fig:anova_decomposition}b). The strategies which degraded in performance the most, threshold and value-proportional, both corrupted label regions, forcing models to rely on their inductive biases. This translates to the model architecture explaining a significant portion of the variance. On the other hand, outlier noise only affects statistical outliers. For outlier noise, model and interaction effects were both smaller.
+
+\begin{table}[htbp]
+\centering
+\caption{ANOVA variance decomposition by noise strategy on the QM9 HOMO--LUMO gap. Each cell reports $\eta^2$ (\%), the share of variance explained by that factor. Columns: \textbf{Model} = model architecture effect; \textbf{Rep} = molecular representation effect; \textbf{Inter.}\ = model$\times$representation interaction; \textbf{Resid.}\ = residual unexplained variance. ``Performance'' uses R$^2$ at $\sigma = 0.3$ as the outcome; ``Robustness'' uses the noise degradation slope (NDS). Bold entries highlight the dominant factor in each row.}
+\label{tab:anova_decomposition}
+\small
+\begin{tabular}{lcccccccc}
+\toprule
+& \multicolumn{4}{c}{\textbf{Performance ($\eta^2$, \%)}} & \multicolumn{4}{c}{\textbf{Robustness ($\eta^2$, \%)}} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+\textbf{Strategy} & \textbf{Model} & \textbf{Rep} & \textbf{Inter.} & \textbf{Resid.} & \textbf{Model} & \textbf{Rep} & \textbf{Inter.} & \textbf{Resid.} \\
+\midrule
+Gaussian        & 24.6 & 22.8 & \textbf{48.1} &  4.5 & \textbf{48.7} &  8.2 & 11.9 & 31.2 \\
+Quantile        & 25.1 & 22.4 & \textbf{46.9} &  5.6 & \textbf{47.9} &  6.8 & 14.9 & 30.4 \\
+Threshold       & 25.0 & 21.2 & \textbf{48.0} &  5.8 & \textbf{48.0} & 10.1 & 28.0 & 13.9 \\
+Heteroscedastic & 27.9 & 23.5 & \textbf{46.2} &  2.5 & \textbf{37.0} &  4.5 & 17.5 & 41.0 \\
+Value-prop.     & 27.8 & 22.0 & \textbf{46.5} &  3.8 & \textbf{52.8} &  6.9 & 22.2 & 18.2 \\
+Outlier         & 25.3 & 22.0 & \textbf{49.2} &  3.5 & 12.7 &  3.2 &  4.7 & \textbf{79.3} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{fig2_anova_decomposition.png}
+    \caption{ANOVA variance decomposition ($\eta^2$, \%) for a) predictive performance (R$^2$ at $\sigma=0.3$) and b) noise robustness, quantified by the noise degradation slope (NDS), by noise strategy. Lower (more negative) NDS indicates faster performance loss under noise.}
+    \label{fig:anova_decomposition}
+\end{figure}
+
+The interaction between model architecture and representation is seen in Figure~\ref{fig:interaction}. While some model architectures, like SVM and full BNNs maintain consistent noise robustness scores across all representations, others like NN-$\beta$ display greater variation. Model robustness on one representation strongly predicts robustness on another (Spearman $\rho = 0.73$, $p = 0.007$ for ECFP4 vs PDV; 11 models). However, the scatter around the diagonal reflects the interaction term identified by the ANOVA. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_interaction.png}
+\caption{Representation--model interaction effects on the QM9 HOMO--LUMO gap. a) Noise degradation slope (NDS) heatmap showing model robustness across representations under Gaussian noise; lower (more negative) NDS indicates faster degradation. ``N/A'' indicates configurations excluded due to baseline $R^2 < 0.6$ or kernel incompatibility (GP uses a Tanimoto kernel defined on binary vectors, which is incompatible with PDV). b) NDS on PDV versus ECFP4 fingerprint for each model under Gaussian noise, with Spearman correlation.}
+\label{fig:interaction}
+\end{figure}
+
+We filtered out model--representation configurations with baseline predictive performance R$^2 < 0.6$, excluding 66 configurations where poor clean-data performance would produce misleadingly shallow degradation slopes (Additional file~5). We evaluated all model architectures under increasing label noise on the PDV representation across six strategies, considering both predictive performance as measured by $R^2$ as well as the noise degradation slope (NDS). We observe that NDS varies substantially across architectures and noise strategies, as seen in Figure~\ref{fig:global_overview}. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig1_global_overview.png}
+\caption{Global overview of noise robustness on the QM9 HOMO--LUMO gap. a) Performance degradation curves (PDV, Gaussian noise) showing R$^2$ versus noise level $\sigma$ for representative models. b) Noise degradation slope (NDS) heatmap across all model architectures and noise strategies on PDV; lower (more negative) NDS indicates faster degradation under noise. The Tanimoto GP is absent because its kernel is incompatible with PDV (see Section~\ref{sec2}); a separate GP with an RBF kernel is included for PDV-specific analyses.}
+\label{fig:global_overview}
+\end{figure}
+
+\subsection{Robustness across noise strategies}
+
+NGBoost and SVM showed the smallest degradation in predictive performance across all strategies, while NN-$\beta$ showed the steepest (Table~\ref{tab:nds_ranking}). When sorting models by NDS, their ranks across noise strategies were consistent: Kendall's $W = 0.92$ ($p = 2.7 \times 10^{-8}$; 11 models, 6 strategies), indicating that a model's relative robustness is largely strategy-independent. The same ranking pattern holds on the ECFP4 fingerprint (Additional file~6). Robustness is also largely decoupled from baseline predictive performance: across models on PDV under Gaussian noise, NDS clusters near $-0.38$ regardless of baseline R$^2$ (Additional file~7), so a high-performing model is not automatically a more robust one.
+
+\begin{table}[htbp]
+\centering
+\caption{Noise degradation slope (NDS) by model on PDV (QM9 HOMO--LUMO gap), ranked by mean across six strategies. Lower $|$NDS$|$ (slope closer to zero) indicates greater robustness. Strategy abbreviations: \textbf{Gauss.}\ = Gaussian, \textbf{Quant.}\ = Quantile, \textbf{Thresh.}\ = Threshold, \textbf{Hetero.}\ = Heteroscedastic, \textbf{Val.-P.}\ = Value-Proportional. Bold rows mark the two most robust models; bold cell entries mark each strategy's most robust configuration.}
+\label{tab:nds_ranking}
+\small
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Model} & \textbf{Gauss.} & \textbf{Outlier} & \textbf{Quant.} & \textbf{Thresh.} & \textbf{Hetero.} & \textbf{Val.-P.} & \textbf{Mean} \\
+\midrule
+\textbf{NGBoost}    & $\mathbf{-0.33}$ & $-0.12$ & $\mathbf{-0.29}$ & $\mathbf{-0.65}$ & $\mathbf{-0.18}$ & $\mathbf{-0.58}$ & $\mathbf{-0.36}$ \\
+\textbf{SVM}        & $-0.36$ & $\mathbf{-0.11}$ & $-0.30$ & $-0.71$ & $-0.20$ & $-0.63$ & $-0.38$ \\
+RF                  & $-0.36$ & $-0.12$ & $-0.30$ & $-0.71$ & $-0.20$ & $-0.63$ & $-0.39$ \\
+LightGBM            & $-0.36$ & $-0.13$ & $-0.32$ & $-0.72$ & $-0.20$ & $-0.64$ & $-0.40$ \\
+VBLL-$\alpha$       & $-0.38$ & $-0.16$ & $-0.35$ & $-0.68$ & $-0.22$ & $-0.60$ & $-0.40$ \\
+XGBoost             & $-0.37$ & $-0.13$ & $-0.33$ & $-0.72$ & $-0.20$ & $-0.65$ & $-0.40$ \\
+VBLL-$\beta$        & $-0.39$ & $-0.14$ & $-0.34$ & $-0.70$ & $-0.23$ & $-0.64$ & $-0.41$ \\
+BNN-$\alpha$        & $-0.38$ & $-0.15$ & $-0.35$ & $-0.72$ & $-0.21$ & $-0.64$ & $-0.41$ \\
+BNN-$\beta$         & $-0.38$ & $-0.15$ & $-0.36$ & $-0.72$ & $-0.21$ & $-0.65$ & $-0.41$ \\
+NN-$\alpha$         & $-0.41$ & $-0.16$ & $-0.37$ & $-0.77$ & $-0.23$ & $-0.68$ & $-0.44$ \\
+NN-$\beta$          & $-0.49$ & $-0.17$ & $-0.42$ & $-0.88$ & $-0.26$ & $-0.79$ & $-0.50$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The strategies differed not only in predictive performance severity, but also in their ability to discriminate between architectures. The spread of NDS across models differed by noise strategy, with outlier noise having a spread of 0.06 and threshold noise having 0.23, presumably exposing architectural differences that are masked by other types of noise. As seen in Table~\ref{tab:nds_ranking}, NGBoost was the most resistant to noise across strategies. With respect to the Variational Bayesian Last Layer (VBLL) models, VBLL-$\alpha$ showed a similar pattern, outperforming all tree-based models except NGBoost under threshold and value-proportional noise despite ranking below them under Gaussian noise. This suggests that its learned noise variance is most beneficial when label corruption is systematic rather than uniform. This observation with VBLL is not alone; predictive performance on clean data is not well-correlated with noise robustness. In fact, some of the models with the lowest NDS across strategies such as NGBoost and SVM did not perform particularly well on clean data. These models may be more prone to picking up on noise rather than underlying signals in the data. 
+
+As established by the ANOVA, model architecture and the model--representation interaction term dominate NDS variance. A handful of models stood out as being noise-robust regardless of representation, namely SVM and full BNNs. Both methods rely on inductive biases, SVM on margin maximization and BNN on weight priors. However, other models like RF and NN-$\beta$ show the opposite pattern. These models can be robust to noise, but only when paired with particular representations. The pairings differ by model; however, PDV stood out as having particularly strong robustness to noise. This suggests that PDVs are preferable when dealing with noisy data. 
+
+To further explore the impact of model architecture on noise robustness, we examined variants of the same core architecture. Specifically, Bayesian transformations were used to explore the impact of the Bayesian framework on noise. By comparing models with the same core architecture, we observe that with full Bayesian transformations, representation explains less than $11\%$ of NDS variance ($p > 0.25$) while variational Bayesian inference on the same NNs is representation-dependent. On MHG-GNN and mol2vec representations, VBLL models were unstable, such that all 24 VBLL $\times$ \{MHG-GNN, mol2vec\} configurations were excluded due to baseline R$^2 < 0.6$. Further work could involve more thoroughly-tuning these models and exploring different core architectures to adapt to these embedding-style inputs. 
+
+In general, the full Bayesian transformations reduced the degradation in performance with Gaussian noise the most, as seen in Figure~\ref{fig:nn_family_comparison}. Both full BNN and VBLL transformations significantly improved robustness for both NN-$\alpha$ and NN-$\beta$ (Table~\ref{tab:wilcoxon_bnn}). Full transformations are more computationally expensive, making VBLL a potentially stronger approach to handling noise with NNs when working with larger data sets or modeling architectures. The choice of transformation varies by representation, as seen in Additional file~8, with SMILES receiving the largest benefits from Bayesian transformations. QRF was significantly less robust than RF (Table~\ref{tab:wilcoxon_bnn}), suggesting that quantile regression adds complexity and flexibility which may result in overfitting.
+
+\begin{table}[htbp]
+\centering
+\caption{Wilcoxon signed-rank tests for Bayesian and probabilistic transformations on the QM9 HOMO--LUMO gap. \textbf{Base} is the deterministic reference model; \textbf{Variant} is the probabilistic/Bayesian transformation tested against it. \textbf{$\Delta$ NDS} = mean change in noise degradation slope (NDS) from base to variant; positive values mean the variant is more robust (slope closer to zero). \textbf{Sig.}\ marks pairs that are statistically significant at $p < 0.05$ (asterisk).}
+\label{tab:wilcoxon_bnn}
+\small
+\begin{tabular}{llrrl}
+\toprule
+\textbf{Base} & \textbf{Variant} & \textbf{$\Delta$ NDS} & \textbf{$p$-value} & \textbf{Sig.} \\
+\midrule
+NN-$\alpha$ & BNN-$\alpha$ & $+0.056$ & $2.9 \times 10^{-10}$ & \textbf{*} \\
+NN-$\alpha$ & VBLL-$\alpha$ & $+0.061$ & $1.2 \times 10^{-6}$ & \textbf{*} \\
+NN-$\beta$ & BNN-$\beta$ & $+0.096$ & $2.9 \times 10^{-11}$ & \textbf{*} \\
+NN-$\beta$ & VBLL-$\beta$ & $\mathbf{+0.124}$ & $1.2 \times 10^{-7}$ & \textbf{*} \\
+RF  & QRF  & $\mathbf{-0.022}$ & $1.6 \times 10^{-10}$ & \textbf{*} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{fig_nn_family_comparison.png}
+    \caption{Neural network family comparison on the QM9 HOMO--LUMO gap with N=10k: R$^2$ versus $\sigma$ under Gaussian noise on the physicochemical descriptor vector (PDV) representation for a) NN-$\alpha$ family, b) NN-$\beta$ family, and c) RF versus QRF. Heteroscedastic results (not shown) are qualitatively consistent.}
+    \label{fig:nn_family_comparison}
+\end{figure}
+
+While representation may not be a dominant determinant in NDS variance, the model--representation interaction term does have an impact. For SMILES, model choice explains over 91\% of robustness variance, while on PDV, model choice explains 72\%. Across all six noise strategies, PDV configurations produced the shallowest mean NDSs across representations, with its best performance coming with models with strong inductive biases like SVM and full BNN. It appears that PDV's compact feature space complements margin-based and Bayesian regularization. Embeddings struggled, particularly when paired with NNs. These patterns are aligned with the importance of the model--representation interaction term, indicating that representation choice modulates noise robustness within a given architecture. 
+
+Taking a closer look at model choice for noise robustness, we ranked all model--representation configurations on QM9 by their Gaussian NDS. Tree-based ensembles dominate the top 10: NGBoost appears five times, XGBoost and RF twice each, and LightGBM once. No neural-network configuration appears the top 10. Rankings are consistent across strategies and the top QM9 configurations maintain their advantage on ADME datasets, though SVM configurations rank higher on these ADME datasets than NGBoost.
+
+
+\subsection{Uncertainty estimation under label noise}
+\citet{Kolmar2021} found that the mean predicted uncertainty derived from the GPs increases with the amount of label noise in the training data. We go beyond the population level and instead ask if a model's per-sample uncertainty tracks label noise. One key sign that a model is able to handle noise is its ability to track it, represented by the per-sample Spearman correlation between predicted uncertainty and noise magnitude (Table~\ref{tab:top_unc_noise}). While GPs and NGBoost gave the strongest correlations, BNNs were moderate. Learned embeddings (MHG-GNN and mol2vec) struggled, so much so that their correlations dropped to near zero or below on every model tested. 
+
+\begin{table}[htbp]
+\centering
+\caption{Strongest and weakest model--representation combinations for uncertainty--noise correlation on the QM9 HOMO--LUMO gap (Gaussian noise strategy). Columns: \textbf{Unc-Noise $\rho$} = Spearman correlation between predicted uncertainty and injected noise magnitude $|\epsilon|$ (higher = better noise detection); \textbf{Unc-Error $\rho$} = Spearman correlation between predicted uncertainty and absolute prediction error; \textbf{ECE} = expected calibration error (lower = better-calibrated); \textbf{Cov.\ $1\sigma$} / \textbf{$2\sigma$} = empirical coverage at the $1\sigma$ (68\% target) and $2\sigma$ (95\% target) intervals.}
+\label{tab:top_unc_noise}
+\small
+\begin{tabular}{llrrrrr}
+\toprule
+\textbf{Model} & \textbf{Rep.} & \textbf{Unc-Noise $\rho$} & \textbf{Unc-Error $\rho$} & \textbf{ECE} & \textbf{Cov. $1\sigma$} & \textbf{Cov. $2\sigma$} \\
+\midrule
+\textbf{GP}    & \textbf{SNS}    & \textbf{0.56} & 0.23 & 0.14 & 71.2\% & 94.6\% \\
+GP             & Morgan          & 0.53 & 0.22 & 0.14 & 71.4\% & 95.4\% \\
+\textbf{NGBoost} & \textbf{SNS}  & \textbf{0.47} & 0.16 & 0.13 & 69.3\% & 95.4\% \\
+\textbf{NGBoost} & \textbf{PDV}  & \textbf{0.47} & \textbf{0.29} & \textbf{0.11} & 69.0\% & 95.2\% \\
+NGBoost        & PDV (binary)    & 0.44 & 0.25 & 0.13 & 69.8\% & 95.4\% \\
+NGBoost        & Morgan          & 0.44 & 0.20 & 0.14 & 69.8\% & 95.3\% \\
+BNN-$\alpha$   & SNS             & 0.42 & 0.21 & 0.17 & 73.4\% & 95.1\% \\
+BNN-$\beta$    & SNS             & 0.40 & 0.21 & 0.18 & 73.5\% & 95.1\% \\
+BNN-$\beta$    & Morgan          & 0.38 & 0.20 & 0.18 & 72.1\% & 95.0\% \\
+BNN-$\beta$    & PDV             & 0.38 & 0.24 & 0.19 & 72.1\% & 94.0\% \\
+\midrule
+\multicolumn{7}{l}{\textit{Contrast: lowest correlations (graph/embedding representations)}} \\
+\midrule
+BNN-$\beta$ & mol2vec & $-0.05$ & 0.02 & 1.33 & 50.6\% & 76.4\% \\
+VBLL-$\alpha$ & MHG-GNN & $-0.05$ & 0.09 & 13.41 & 26.6\% & 38.6\% \\
+VBLL-$\beta$ & MHG-GNN & $-0.03$ & 0.10 & 15.34 & 31.1\% & 47.1\% \\
+VBLL-$\beta$ & mol2vec & $-0.03$ & 0.15 & 23.86 & 44.8\% & 58.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Samples containing label noise tend to produce large residuals in training, and every model has its own way of handling them. NGBoost contains predicted scales that increase to absorb residual \citep{Duan2020}. The GP contains has a single global observation noise term. It does not absorb individual residuals, so its per-sample uncertainty derives primarily from the posterior variance rather than label noise  \citep{Rasmussen2005, Obrezanova2007}. BNNs treat these large residuals differently; they broaden their weight posteriors, increasing predicted uncertainty without explicitly modeling observation noise \citep{gal2016, kendall2017}. VBLL adds a learned noise variance to the BNN loss \citep{Harrison2024}, but this value is a global scalar, independent of the input. As seen in Table~\ref{tab:top_unc_noise} and Additional file~9, both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations. Among models that learn separate distributional parameters during training, GP and NGBoost produced the strongest correlations between uncertainty and label noise, though QRF, which separates parameters using quantile distributions, produced both poor label predictions and uncertainty-noise correlations. At the population level, mean predicted uncertainty increases with artificial noise. Although we expect to see aleatoric uncertainty increase with injected noise, for VBLL both the aleatoric and epistemic components increased (Figure~\ref{fig:uncertainty_combined}b).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_uncertainty_combined.png}
+\caption{Uncertainty estimates under label noise on the QM9 HOMO--LUMO gap. a) Mean predicted uncertainty versus $\sigma$ for probabilistic models (PDV, Gaussian strategy). b) Aleatoric and epistemic uncertainty components versus $\sigma$ for VBLL models.}
+\label{fig:uncertainty_combined}
+\end{figure}
+
+The choice of representation has a much stronger impact on per-sample uncertainty tracking than on noise robustness. Fingerprints and physicochemical descriptors provided a clear signal with which models such as GP and NGBoost could separate noise-induced residuals from structural variation. However, learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations (Table~\ref{tab:top_unc_noise}). Although these learned embeddings can be effective representations for many tasks, this research suggests that they provide challenges for per-sample noise tracking. However, there is room for further investigation, as only two embeddings were tested. 
+
+\subsection{Validation on experimental datasets}
+
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_overview.png}
+\caption{Noise degradation slope (NDS) heatmaps for three external validation datasets: a) LogD, b) Caco-2 Efflux, and c) hERG K$_i$. Lower (more negative) NDS indicates faster degradation under noise. Black cells indicate baseline R$^2 < 0.3$ for that (model, strategy) pair; ``N/A'' indicates filtered extreme values ($|$NDS$| > 2$). Models whose baseline R$^2$ fell below 0.3 across all strategies are omitted entirely, accounting for the smaller set of rows on hERG K$_i$.}
+\label{fig:validation_overview}
+\end{figure*}
+
+In addition to working with ``clean'' quantum molecular properties, we tested our findings on experimentally-obtained data, replicating our process of adding artificial noise. Unlike QM9, where $\sigma = 0$ corresponds to a noise-free baseline, the experimental endpoints carry their own measurement noise in both training and test labels; the injected $\sigma$ therefore stacks on top of an unknown noise floor. Per-dataset NDS heatmaps across all model architectures and noise strategies are shown in Figure~\ref{fig:validation_overview}. The ANOVA on these additional datasets confirms that model architecture dominates robustness variance on all three datasets, as seen in Additional file~10, and that the trends with respect to noise robustness generalize. NGBoost ranks first on both QM9 and external datasets, SVM also transfer quite well. Some models' predictive capabilities are limited on these external datasets, likely due to a combination of smaller training sets, narrower chemical coverage, and the unknown experimental noise in the labels. XGBoost and BNN variants suffer the most here, as seen in Figure~\ref{fig:validation_combined}a.
+
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_validation_combined.png}
+\caption{Comparison of noise robustness on QM9 (HOMO--LUMO gap, $N = 10{,}000$) and three external validation datasets: LogD ($N = 5{,}039$), Caco-2 Efflux ($N = 2{,}161$), and hERG K$_i$ ($N = 1{,}482$). a) Model robustness measured by the noise degradation slope (NDS) across all four datasets; lower (more negative) NDS indicates faster degradation under noise. b) QM9 vs external robustness: models with inherent robustness mechanisms (NGBoost, SVM) maintain their relative standing, while ensemble-dependent models (XGBoost) degrade on the external datasets.}
+\label{fig:validation_combined}
+\end{figure*}
+
+QRF was consistently less robust than RF on every external data set (Additional file~11). As seen with QM9, choice of molecular representation has a minimal effect on noise robustness across all three external datasets, reinforcing the finding that model architecture, not representation, is the main driver of noise robustness. 
+
+These results lead to two main conclusions. The first is that noise robustness, defined as the rate at which predictive performance degrades with increasing label noise, is primarily determined by the model's training mechanism. The margin maximization of SVM, the weight priors of BNNs, and the ensembling in tree methods all appear to keep those models from fitting to noise. The choice of representation has a stronger influence on predictive performance than noise robustness, accounting for less than \~10\% of the variance in robustness. The interaction term between representation and model has a stronger impact; some models like SVM and full BNNs remain robust across all representations, while RF and NNs are robust only with certain ones. While the pattern of noise has a strong impact on predictive performance, it does not influence noise robustness rankings between models or representations much.
+
+The second conclusion concerns whether a model's uncertainty estimates track per-sample label noise. Some models struggle, particularly those like BNNs whose uncertainty comes from a posterior over weights or QRF which does produce a full quantile, but is unable to successfully track noise. 
+Models that fit a separate, per-sample scale or observation-noise parameter during training are able to track that label noise more effectively. NGBoost identifies noisy labels through a per-sample predicted scale that absorbs large residuals. Similarly, the GP absorbs these larger residuals with a per-sample posterior variance. Among representations, uncertainty tracking collapses with the learned embeddings MHG-GNN and mol2vec, while fingerprints and descriptors produce a viable signal. Neither strong predictive performance nor noise robustness implies noise tracking; again it is up to the model's architecture and how it handles loss. 
+
+Although the choice of representation carries less weight than that of models, we observed an interesting phenomenon. PDVs produce the strongest predictive performance on clean data, but are the least noise-resistant. Embeddings, particularly mol2vec, are the most robust to noise yet perform the worst noise tracking. At the end of the day, the choice of both model and representation comes down to your problem, including the amount of noise in your data, your objectives, and your compute limits. 
+
+\section{Conclusion}\label{sec13} 
+
+We investigated how a wide variety of molecular representations and model architectures perform under a regime of increasing label noise in QSAR modeling. We used ANOVA variance decomposition across six noise injection strategies on the QM9 HOMO--LUMO gap task to show that with regards to predictive performance, the interaction term between model and representation accounts for the most variance, with representation and model architecture contributing comparatively less. For predictive performance degradation under label noise, we look at the noise degradation slope (NDS), defined as the slope of $R^2$ with respect to the noise scaling factor $\sigma$, and see that model architecture is the dominant factor, while representation explains less than 10\% of variance for most types of label noise.
+
+Threshold and value-proportional noise produce the widest spread of NDS across models; outlier noise barely separates them. Model rankings are highly concordant across strategies (Kendall's $W = 0.92$), suggesting that a model's robustness to noise is independent of type of noise. Predictive performance on clean data is not correlated with noise robustness; NGBoost and SVM, the most noise-robust models, did not perform particularly well on clean data. SVM and full BNNs maintained consistent NDS across all representations, while embeddings (MHG-GNN, mol2vec) struggled with regards to noise robustness, especially with neural network architectures. On the flip side, QRF was significantly less noise-robust than RF across datasets, suggesting that quantile regression may be overfitting to noisy labels rather than absorbing them.
+
+With regard to uncertainty estimation, models that learn a separate scale or noise parameter during training, particularly NGBoost and Gaussian Processes, produced the strongest per-sample correlation between estimated uncertainty and injected noise magnitude. Fingerprint-based representations produced moderate-to-strong uncertainty-noise correlations, while the learned embedding MHG-GNN produced near-zero or negative correlations for all models. QM9 served as a relatively clean baseline; it is computationally-derived with negligible measurement noise. The validation datasets, LogD, Caco-2 \citep{openadmet}, and hERG Ki \citep{Zdrazil2023}, tested are smaller and cover a narrow range of the chemical and biological space, and have an unknown inherent amount of noise from experimentally-determined values, on top of the added artificial noise. These validation datasets supported the QM9 findings, with XGBoost the notable exception, degrading on the external datasets. Future work should extend this type of noise robustness benchmarking to classification tasks and larger experimental datasets with better-known uncertainty estimates.
+
+When working with noisy experimental data in QSAR settings, it is important to keep in mind that noise robustness and noise-aware uncertainty estimation are primarily driven by the model's mechanism of training, and to a certain extent the choice of molecular representation, usually with respect to the model. While Bayesian transformations on neural networks improve noise robustness, they do not produce uncertainty estimates that correlate particularly strongly with noise. Models like NGBoost and GPs, which include a learned noise or scale parameter in the training objective, are the most robust to noise across both various types of noise and datasets and often produce uncertainty estimates which track per-sample label noise. Pairing these models with fingerprint-based representations provides additional benefits in restricting, and potentially detecting and mitigating label noise. 
+
+\section*{Abbreviations}
+
+\begin{description}[leftmargin=3.2cm,labelwidth=3cm,labelsep=0.5em,labelindent=0pt,align=left,itemsep=0.2em,parsep=0pt,font=\normalfont\bfseries]
+    \item[ADME:] Absorption, distribution, metabolism, and excretion
+    \item[ANOVA:] Analysis of variance
+    \item[BNN:] Bayesian neural network
+    \item[DFT:] Density functional theory
+    \item[ECFP:] Extended-connectivity fingerprint
+    \item[ECE:] Expected calibration error
+    \item[GNN:] Graph neural network
+    \item[GP:] Gaussian process
+    \item[HOMO:] Highest occupied molecular orbital
+    \item[ICC:] Intraclass correlation coefficient
+    \item[LightGBM:] Light Gradient Boosting Machine
+    \item[LNL:] Learning with noisy labels
+    \item[LUMO:] Lowest unoccupied molecular orbital
+    \item[MAE:] Mean absolute error
+    \item[MHG-GNN:] Molecular Hypergraph Grammar Graph Neural Network
+    \item[ML:] Machine learning
+    \item[NDS:] Noise degradation slope
+    \item[NGBoost:] Natural gradient boosting
+    \item[NN:] Neural network
+    \item[NN-$\alpha$:] Neural network architecture $\alpha$ ([128, 64], dropout after each layer)
+    \item[NN-$\beta$:] Neural network architecture $\beta$ ([128, 128], dropout before output)
+    \item[PDV:] Physicochemical descriptor vector
+    \item[QRF:] Quantile regression forest
+    \item[QSAR:] Quantitative structure--activity relationship
+    \item[QSPR:] Quantitative structure--property relationship
+    \item[RF:] Random forest
+    \item[RMSE:] Root mean squared error
+    \item[SMILES:] Simplified molecular input line entry system
+    \item[SNS:] Sort \& Slice
+    \item[SVM:] Support vector machine
+    \item[VBLL:] Variational Bayesian Last Layer
+    \item[XGBoost:] eXtreme Gradient Boosting
+\end{description}
+
+\section*{Declarations}
+
+\subsection*{Availability of data and materials}
+
+The NoiseInject benchmarking framework, implementing all six regression and six classification noise injection strategies together with the robustness metrics (noise degradation slope and retention) and uncertainty-calibration metrics (ECE, coverage at $1\sigma$/$2\sigma$, mean interval width, and uncertainty--error / uncertainty--noise correlation) described in this work, is available as an open-source Python package under an MIT license \citep{noiseinject}. It also contains optional reference wrappers (a Gaussian process, split-conformal prediction, and Monte Carlo dropout) that produce per-sample uncertainty for use with these metrics. NoiseInject is model-agnostic, operates on label arrays (NumPy arrays or pandas Series), and is designed to integrate into existing cheminformatics or other data pipelines. Worked examples covering molecular-descriptor, fingerprint, and GNN-embedding workflows are provided in the repository.
+
+\begin{itemize}
+    \item Project name: NoiseInject
+    \item Project home page: \url{https://github.com/adpunt/noise_inject}
+    \item Archived version: \url{https://doi.org/10.5281/zenodo.20532710}
+    \item Operating system(s): Platform independent
+    \item Programming language: Python
+    \item Other requirements: See repository \texttt{requirements.txt} for the full dependency list
+    \item License: MIT
+    \item Any restrictions to use by non-academics: None
+\end{itemize}
+
+The datasets used in this study are publicly available. The QM9 dataset is available on Figshare \citep{qm9_dataset} and is also redistributed through the OpenADMET benchmark suite \citep{Ramakrishnan2014, openadmet}. The LogD and Caco-2 datasets are available in the OpenADMET repository \citep{openadmet}. The hERG-Ki dataset was derived from ChEMBL \citep{Zdrazil2023} following the curation protocol described in Section~\ref{sec2}, and can be regenerated from ChEMBL using that protocol.
+
+\subsection*{Competing interests}
+
+The authors declare no competing interests.
+
+\subsection*{Funding}
+
+This research was supported by the University of Oxford's UK EPSRC Centre For Doctoral Training in Sustainable Approaches to Biomedical Science: Responsible and Reproducible Research (EP/S024093/1) and by the not-for-profit organization Lhasa Limited \citep{lhasa}.
+
+\subsection*{Authors' contributions}
+
+A.P. implemented the NoiseInject framework, conducted all experiments, and drafted the manuscript. T.H., S.W., and G.M. supervised the project, contributed to the experimental design, and revised the manuscript. All authors read and approved the final manuscript.
+
+\subsection*{Acknowledgements}
+
+Not applicable.
+
+\subsection*{Declaration of generative AI in the writing process}
+In the preparation of this work, Claude was used as an assistant for programming, LaTeX typesetting, and improving the wording within the manuscript. The author reviewed the AI-modified output and takes full responsibility for the content of the publication. 
+
+\section*{Description of additional data files}
+
+The following additional files are submitted alongside this manuscript and are referenced in the text in the order listed below.
+
+\begin{description}[style=unboxed,leftmargin=0cm,itemsep=0.6em,parsep=0pt,topsep=0.4em]
+    \item[Additional file 1 (PDF):] \textit{Default hyperparameters for all models evaluated in this study.} Default hyperparameter settings used for every model architecture on the QM9 HOMO--LUMO gap experiments.
+    \item[Additional file 2 (PDF):] \textit{Pairwise Spearman rank correlations between model NDS profiles.} Model--model NDS correlations ($\rho \geq 0.95$) on QM9; flags pairs excluded from the ANOVA for near-redundancy.
+    \item[Additional file 3 (PDF):] \textit{Pairwise Spearman rank correlations between representation NDS profiles.} Representation--representation NDS correlations on QM9; flags pairs excluded from the ANOVA.
+    \item[Additional file 4 (PDF):] \textit{Intraclass correlation coefficients (ICC(1,1)) for model pairs.} ICC(1,1) on QM9 NDS profiles for pairs with ICC $\geq 0.5$, with Family-grouping (Tree, $\alpha$/$\beta$, $\alpha$, Cross).
+    \item[Additional file 5 (PDF):] \textit{Configurations excluded from robustness analysis.} Model$\times$representation cells removed because baseline R$^2 \leq 0.6$ on QM9, summarized by number of strategies excluded.
+    \item[Additional file 6 (PDF):] \textit{Global overview of noise robustness on the ECFP4 representation.} Performance degradation curves and the NDS heatmap across all model architectures and noise strategies, for ECFP4 on QM9.
+    \item[Additional file 7 (PDF):] \textit{Baseline R$^2$ versus NDS scatter (PDV, Gaussian).} Per-model scatter of baseline predictive performance against NDS on QM9 (PDV, Gaussian noise).
+    \item[Additional file 8 (PDF):] \textit{Neural-network Bayesian transformation effects by representation.} Wilcoxon signed-rank tests on QM9 showing how BNN and VBLL transformations change NDS for each representation.
+    \item[Additional file 9 (PDF):] \textit{Uncertainty quantification metrics for probabilistic models on the ECFP4 representation.} Unc-Noise $\rho$, Unc-Error $\rho$, ECE, and coverage at $1\sigma$/$2\sigma$ for probabilistic models under Gaussian noise on QM9.
+    \item[Additional file 10 (PDF):] \textit{ANOVA variance decomposition on external validation datasets.} $\eta^2$ contributions from model, representation, and interaction for LogD, Caco-2 Efflux, and hERG K$_i$.
+    \item[Additional file 11 (PDF):] \textit{RF vs QRF on validation datasets.} NDS comparison of random forest and quantile regression forest on the three external validation datasets.
+    \item[Additional file 12 (PDF):] \textit{Default hyperparameters used for external validation experiments.} Hyperparameter settings for LogD, Caco-2 Efflux, and hERG K$_i$, including representation-specific SVM kernels.
+\end{description}
+
+%%=============================================%%
+%% For submissions to Nature Portfolio Journals %%
+%% please use the heading ``Extended Data''.   %%
+%%=============================================%%
+
+%%=============================================================%%
+%% Sample for another appendix section                 %%
+%%=============================================================%%
+
+%% \section{Example of another appendix section}\label{secA2}%
+%% Appendices may be used for helpful, supporting or essential material that would otherwise 
+%% clutter, break up or be distracting to the text. Appendices can consist of sections, figures, 
+%% tables and equations etc.
+
+%%===========================================================================================%%
+%% If you are submitting to one of the Nature Portfolio journals, using the eJP submission   %%
+%% system, please include the references within the manuscript file itself. You may do this  %%
+%% by copying the reference list from your .bbl file, paste it into the main manuscript .tex %%
+%% file, and delete the associated \verb+\bibliography+ commands.                            %%
+%%===========================================================================================%%
+
+\bibliography{sn-bibliography}% common bib file
+%% if required, the content of .bbl file can be included here once bbl is generated
+%%\input sn-article.bbl
+
+
+\end{document}
