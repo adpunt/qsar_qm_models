@@ -1808,6 +1808,41 @@ so does an all-zero feature row.
   it reads `data.y`, so it would be trained and scored on CLEAN labels at every
   level and its flat curve would read as robustness. It refuses by name.
 
+### 2.15 ✅ SETTLED 2026-08-27 — what a spread on auc_norm is, and what it is not
+
+**What was happening.** Every fold writes its own row: 5 folds x 7 levels per
+model, representation and condition, all in `all_results.csv` with a `fold`
+column. `summary.csv` then averaged the 5 folds at each level into one curve and
+computed auc_norm once from that average. The only spread kept anywhere was
+`baseline_r2_std` -- the 5 folds at level 0, and nothing else. QM9 writes no
+spread at all; `save_results` has no std in it. **So auc_norm had no error bar on
+either side.**
+
+**What is there now.** auc_norm is computed on each fold's own curve, and
+`summary.csv` carries `auc_norm_fold_mean`, `auc_norm_fold_std` and
+`auc_norm_n_folds` beside it. `auc_norm` itself is unchanged -- still the
+fold-averaged curve -- so nothing that already reads it changes meaning. No extra
+fits: the per-fold rows were already written.
+
+Measured, hERG / forest / ECFP4 / gaussian: auc_norm 0.7988 from the averaged
+curve, 0.7942 as the mean of the five per-fold values, **spread 0.0848** across
+them, against a baseline R2 of 0.5435 +/- 0.0672. **The fold spread is about 11%
+of auc_norm.** A claim that one model is more robust than another on one dataset
+needs a gap larger than that.
+
+**The two sides' spreads are NOT the same quantity, and no compute makes them so.**
+A QM9 replicate reshuffles all 129,428 molecules and takes the first
+`--sample-size`, so it redraws WHICH MOLECULES as well as the split: its spread
+contains sampling variance. LogD has 5,039 molecules and that is all of them --
+there is no pool to draw from, so the only thing that could vary is the fold
+assignment, which gives a split-to-split spread and not a sample-to-sample one.
+The folds also partition one fixed dataset and share training molecules, so their
+errors move together.
+
+They therefore go in separate columns, and **must not share an axis or a
+significance test**. QM9's per-replicate equivalent is computed in the figure
+script rather than the pipeline, so it waits for that rewrite.
+
 ### 2.14 The audit of 2026-08-26, closed
 
 All 151 candidates in `research_archive/audit_2026_08_26/` now carry a verdict.
@@ -4350,6 +4385,57 @@ It is in both live generators — `slurm_scripts_uncertainty_rerun/generate_scri
 on disk for it, so it has no table here. Its reporting level is still to be set, and unlike the other
 three it has a **measured** label spread to set it against: 0.9143 over all 1,415 molecules
 (`NOISE_DESIGN.md` §4c).
+
+---
+
+### 13.12 🔴 HANDOFF — what the close-out audit found, for whoever picks up D and G
+
+27 agents ran every gate both chats claim and traced every file, line and commit either one cites.
+Each finding was then given to a separate agent told to refute it; only what survived is here.
+**Two are already fixed (`7652694`) and struck through. The rest are open.**
+
+**What was proved working, so nobody re-audits it:** the per-task configuration file with no default
+path; all-or-nothing record writing; the reader that errors instead of guessing; `morgan` gone and
+refused by name; the injector's exit code stopping the run; all five writer guards; all 28 noise
+gates over four consecutive runs; both raised seed counts (20 → 200, one draw → 50); the settled
+condition set read and enforced by five independent readers; and the singleton-scaffold rule on the
+split in both the pipeline and the harness.
+
+#### For chat D
+
+| # | Kind | What | Fix |
+|---|---|---|---|
+| ~~D1~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — Avalon returned an all-zero fingerprint for an unparseable molecule and for any exception. Nothing caught it downstream | Raises now, plus the all-zero case RDKit produces from `''`. Guard: `scripts/test_avalon_failure.py` |
+| **D2** | code | **Three live job scripts are submittable with no activation guard** — `slurm_scripts_validation_rerun/val_svm_pdv_herg.sh:13-14`, `val_svm_sns_herg.sh:13-14`, `smoke_test.sh:16-17` still carry the dead micromamba lines. Their regenerated siblings check `CONDA_PREFIX` and assert `env_test`; these three do not. All 92 files there are tracked in git, so they look sanctioned | Regenerate the three, or paste in the same guard block and delete the `MAMBA_EXE` lines |
+| **D3** | code | **The environment probe is wired into one generator of three.** `slurm_scripts_uncertainty_rerun/` and `slurm_scripts_validation_rerun/` emit the activation guard but never call `check_environment.py`, so those runs launch with no model-buildability check | Emit the same `python check_environment.py --models {model} || exit 2` line from both |
+| **D4** | code | **Orphaned doc comment.** The `///` block at `rust/src/main.rs:2212-2220` described `prepare_ecfp4`, which is deleted. It now sits above `fn write_data`, which does something else, and contradicts a `//` comment 14 lines below | Delete or retarget it |
+| **D5** | code | **A guard with no test.** `parse_mmap`'s uniform-width check (`scripts/process_and_train.py:1666-1676`) is live code with nothing exercising it — the short-record case in the alignment test is caught by an earlier branch | Add a case packing records of two different widths |
+| **D6** | doc | **§2.7 items 1-3 name deleted code in the present tense** — `prepare_ecfp4` and its null check (that route went when ECFP4 moved to Python), and `read_train_labels`, now `read_split_labels`. §2.13b already records the deletion, so the document contradicts itself | Past tense, and point at §2.13b and the Python guards |
+| **D7** | doc | **§8 gate 8's description is wrong.** It says the test feeds the binary an unparseable molecule. It plants an all-zero block — the test says so itself | Rewrite the description |
+| **D8** | doc | **Four wrong facts.** §2.8a says the task id masks 64 bits; the code masks 63. §2.8h cites `setup.sh:83` for the PATH prepend; it is `:124`, and the stale citation is copied into the QM9 generator. §2.8d says the runbook diffs two cluster interpreters; the runbook now says the second must not be used. §13.2 warns that checked-in `.sh` files under `slurm_scripts_qm9_rerun/` are stale — that directory has no `.sh` files | Correct the four |
+| **D9** | doc | **§13.2 says only two files in the validation directory are tracked and the other 85 never were.** All 92 are tracked. That sentence is what makes D2 look harmless | Correct it, and disclose `smoke_test.sh` alongside the two reverts |
+| **D10** | cluster | The substantive half of gate 10 skips on this laptop, so §8's claim that all three halves passed cannot be re-confirmed off the cluster | Run `python scripts/test_config_isolation.py --end-to-end` under `env_test` and record the output |
+| **D11** | cluster | `check_environment.py` exits 1 on the laptop interpreter — requirement conflicts, a quantile-forest fit failure, four OpenMP runtimes reachable. **The gate is behaving correctly**; this is the threading conflict and the environment rebuild, explicitly not chat D's | Run under `env_test`; nothing in chat D's scope changes |
+| **D12** | cluster | §2.8d's KIRBy citations are in another repository and were not checked; that commit hash does not resolve here | Verify in KIRBy, or mark those lines cross-repo and unverified |
+
+#### For chat G
+
+| # | Kind | What | Fix |
+|---|---|---|---|
+| **G1** | code | 🔴 **The documented launch preflight EXITS 1 on 4,000 real QM9 molecules.** Gate 11 — *"validation is dosed against the clean training spread, not its own"* — fails on Student-t ν=3: train 0.665, validation 0.909, +36.5% against a 21.2% band. Deterministic, reproduced by two verifiers independently, with and without the scaffold file. **It passes on the full 133,885 column.** The cause is the exact pattern chat G fixed twice and missed here: a **single draw**, `seed: 42` at `rust/src/main.rs:1943`, on the heaviest-tailed shape — whose own per-run dose spread the same self-test measures at 14.5%. Gate 11 is chat F's code, but it is the gate an operator is pointed at | Average gate 11 over seeds the way the other two now do, then re-run the preflight at both sizes and paste both outputs into this document |
+| ~~G2~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — the evidence file could not be re-analysed by its own script | The analysis reads its roster from the file, drops non-roster models by name, and says so |
+| **G3** | code | **Guard 8 quietly makes Ridge an eleven-replicate result** — replicate 2's clean R² of −16.99 is dropped by the accuracy floor, removing 28 rows. The row labelled "what twelve replicates could have detected" has an upper end computed on eleven | Relabel, or recompute on the twelve-replicate models only |
+| **G4** | code | **A docstring states the opposite of what the code does.** `scripts/setting_selection_test.py:430-431` says the split keeps raw scaffolds and only the noise grouping is corrected. Both call sites hand the corrected ids to the splitter, and the real pipeline corrects the split too — so both halves of the sentence are false, and they contradict the fix chat G claims | Delete or invert it |
+| ~~G5~~ | ~~doc~~ | ✅ **PARTLY FIXED 2026-08-27** — §13.9's headline numbers were Ridge rows; the correction table is now at the head of §13.9 and `noise_conditions.json`'s Laplace entry no longer quotes a Ridge number | **Still open:** `NOISE_DESIGN.md` §5.8 carries the same numbers and whole uncaveated Ridge columns; two more `0.0058` quotes sit at `RERUN_PLAN.md:2760` and `NOISE_DESIGN.md:1828` |
+| **G6** | doc | **Recommendation 4's "(largest 0.0058)" is wrong twice.** Across both levels the largest Laplace-minus-Gaussian difference is 0.0362, and 0.0058 is a Ridge row at one level only. **The recommendation survives** — 0.0362 is half the replicate wobble, p = 0.222 — but the number cited for it does not | Quote the level-1.5 figure and its ratio, on models in the study |
+| **G7** | doc | 🔴 **Laplace reads as still open in six places** although the author settled it on 2026-08-27 and the conditions file records it as kept with no optional marker. Two of them are the **first lines a reader lands on** in each state document, so the next session is told a settled decision is still waiting on the author. One of them asserts the conditions file marks it optional, which is false. No code disagrees | Update both headers, the two condition tables and `NOISE_DESIGN.md` §7, and stamp the date — it still says last updated 2026-08-26 |
+| **G8** | doc | **Gate counts are wrong in four places** — this document says 14, 15, and 15 + 4. The real numbers are **28 noise gates and 5 writer guards, 33 in total** | Correct all four |
+
+**One thing the audit is emphatic about, and it is the reason G5 and G6 matter:** the condition set
+itself is **not** overturned by removing Ridge. Without it the heavy-tailed and contamination ladders
+stay flat at 0.0027, and grouped-shifted still separates at level 1.5 on both tree models at
+p ≤ 0.0023. What is wrong is every number quoted for those verdicts, in a file that other files cite
+as their evidence.
 
 ---
 
