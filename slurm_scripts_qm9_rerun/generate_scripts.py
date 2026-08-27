@@ -439,19 +439,19 @@ exit $status
 
 # Stage defaults, RERUN_PLAN.md §13.1. Stage 0 is replicate 0 of stage 1, so
 # stage 1 starts at iteration 1 and both write to the same file.
-# The screen and the main grid default to the full-grid conditions MINUS anything the
-# settled file restricts to a pair subset. Censoring is asked for by name, on named models
-# and reps, or it does not run -- rather than the default invocation refusing and the next
-# person working around the refusal.
-_FULL_BREADTH = [c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
+# The screen and the main grid default to the conditions that run on all 78 pairs, minus
+# anything the settled file restricts to a few pairs. Censoring is asked for by name, on
+# named models and reps, or it does not run -- rather than the default invocation refusing
+# and the next person working around the refusal.
+_ALL_PAIRS = [c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
 # The deep run drops them too. Censoring has its own run on its own five pairs, so
 # including it here would either refuse (the deep run is more pairs than its subset) or
 # quietly run it at deep-run breadth, which is the cost the subset decision removed.
 _DEEP = [c for c in STAGE2_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
 
 STAGE_DEFAULTS = {
-    0: dict(replicates=1,  start=0, conditions=_FULL_BREADTH),
-    1: dict(replicates=9,  start=1, conditions=_FULL_BREADTH),
+    0: dict(replicates=1,  start=0, conditions=_ALL_PAIRS),
+    1: dict(replicates=9,  start=1, conditions=_ALL_PAIRS),
     2: dict(replicates=10, start=0, conditions=_DEEP),
 }
 

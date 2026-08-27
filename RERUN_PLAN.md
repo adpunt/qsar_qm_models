@@ -4542,6 +4542,29 @@ writes results that look exactly like the new ones. The uncertainty jobs have re
 injector by name since 2026-08-27. The validation jobs, which use the **same runner and the same
 injector**, did not. Fixed: the same check, generated into all 88 scripts.
 
+#### 🔴 The merge step discarded three quarters of the validation results
+
+**Found on the same review pass, and it is the worst of the three because it destroys data that
+the jobs correctly produced.** `slurm_scripts_validation_rerun/merge_results.py` deduplicated on
+`['model', 'rep', 'strategy', 'sigma', 'fold']`, filtered to the columns present. The runner
+renamed that column to `noise_type`; the filter **drops a missing name silently rather than
+raising**, so the key became `(model, rep, sigma, fold)` and every noise condition on a cell
+deduplicated against every other, `keep='last'`.
+
+Measured, on a frame built from the runner's real columns: **four conditions in, one row out** —
+only `censoring` survived. Every job would have run correctly, written correctly, and then had
+three quarters of its output thrown away at merge time with nothing printed.
+
+The overlap mask had the same shape: it dropped every existing row matching a re-run
+`(model, rep)`, so conditions the re-run did not produce were discarded along with the ones it
+replaced. That matters more now the default is four of seven.
+
+**Fixed.** The condition column is resolved once, `noise_type` or `strategy`, and **asserted to
+exist** rather than silently skipped; the overlap mask matches on the condition too; the merge
+prints the key it used, how many rows it dropped and which conditions it kept. Old files written
+with `strategy` still merge. Guarded by `the_merge_keeps_every_condition` in the new test, which
+fails at "collapsed 4 conditions to 1" when the fix is removed.
+
 #### The validation family had no job-script test at all
 
 Which is why both of the above, and the `--datasets herg` defect, survived. QM9 has
@@ -4653,15 +4676,15 @@ QM9, at all seven of its levels, 10 replicates.**
   one of only two conditions that can answer the which-molecules question. The scope is QM9 only and
   the file says so.
 - The QM9 generator reads that block rather than hardcoding it. **The screen and the main grid now
-  default to the three full-breadth conditions** — verified: both report
+  default to Gaussian, grouped-wider and grouped-shifted** — verified: both report
   `conditions: gaussian grouped_wider grouped_shifted`. Asking for censoring without `--models` and
   `--reps` is refused with a message naming this section. Asking for it on more than twice `n_pairs`
   is also refused, and says to change the file rather than the flag.
 - Guard: `scripts/test_noise_conditions.py` check 8 runs the real generator and asserts all four
   behaviours. **Proved to catch a regression** — reverting the default made it fail.
-- §13.1 item 3's arithmetic prices the main grid at four conditions × 7 levels. With censoring off
-  full breadth that becomes three conditions × 7 levels plus 350, so the main grid drops from
-  21,840 runs to **16,730**.
+- §13.1 item 3's arithmetic prices the main grid at four noise types on all 78 pairs. With
+  censoring off that list it becomes three, plus censoring's own small run. Current totals are in
+  §13.14, read off the generator.
 
 **What the paper has to say, because this is a reduced design and reduced designs get asked about:**
 censoring was run on a named subset to measure the size of its effect, not to compare models and
@@ -4711,50 +4734,79 @@ the Methods should say it.
 
 ### 13.14 The run design — what runs, and what each part costs
 
-**Read off the generator on 2026-08-27, not from arithmetic in this document.** Every number below
-is what `slurm_scripts_qm9_rerun/generate_scripts.py` prints when asked to build that part. Rebuild
-this table by re-running it, never by editing the numbers.
+**Read off `slurm_scripts_qm9_rerun/generate_scripts.py` on 2026-08-27, not derived here.** Rebuild
+this table by re-running the generator, never by editing the numbers.
 
 QM9 has 13 models × 6 representations = **78 pairs**.
 
-| Part | What runs | Pairs | Replicates | Training runs |
+| Part | Noise types | Pairs | Replicates | Training runs |
 |---|---|---|---|---|
-| **The screen** | the three full-breadth conditions, all levels | 78 | 1 | **1,680** |
-| **The main grid** | the same three, all levels | 78 | 9 more | **15,120** |
-| **Censoring** | censoring only, its own axis | **5** | 10 | **270** |
-| **The deep run** | all six dose-matched conditions | 12 (example: 4 models × 3 reps) | 10 | **5,040** |
-| **QM9 total** | | | | **22,110** |
+| **The screen** | Gaussian, grouped-wider, grouped-shifted | 78 | 1 | **1,680** |
+| **The main grid** | the same three | 78 | 9 more | **15,120** |
+| **Censoring** | censoring | **5** | 10 | **300** |
+| **The deep run** | the three above **plus** Student-t, outlier, Laplace | 12 (example: 4 models × 3 reps) | 10 | **5,040** |
+| **QM9 total** | | | | **22,140** |
 
-The screen is replicate 0 of the main grid and is reused, not thrown away — which is why the main
-grid adds nine replicates rather than ten.
+The screen is replicate 0 of the main grid and is reused, so the main grid adds nine more rather
+than ten.
 
-**The three full-breadth conditions are gaussian, grouped_wider and grouped_shifted.** Censoring is
-excluded from the screen, the main grid and the deep run by default (§13.13) and asked for by name on
-named pairs. The deep run adds student_t_nu5, outlier_p10 and laplace.
+**Why Gaussian, grouped-wider and grouped-shifted are the three that run on all 78 pairs, and the
+other three do not.** Every one of the six needs its own accuracy-versus-level curve to enter the
+per-noise-type decomposition, and running one on all 78 pairs costs about 5,000 runs. The three
+above are structurally different from each other — noise spread evenly, noise concentrated on whole
+scaffold families and centred, and the same families pushed one direction — so each needs its own
+curve. Student-t, the outlier condition and Laplace were **measured** to be indistinguishable from
+Gaussian in accuracy (§13.9), so paying 5,000 runs each for a curve that would lie on top of
+Gaussian's buys nothing. They run in the deep run, on a dozen pairs, where the question is whether a
+small difference exists at all rather than how it varies across every model.
 
-**Only gaussian runs the clean level.** The other conditions get the clean row copied in afterwards
-by `copy_zero_rows.py`, because at level 0 every condition is the same run by construction. That is
-what makes the level counts uneven — 7 levels for gaussian, 6 for each of the others.
+**Only Gaussian runs the clean level.** At zero noise the pipeline adds no noise, and the replicate
+seed depends only on the replicate number, so the clean run is **bit-identical whichever condition it
+is labelled with** — measured to the last digit on all four conditions. Running it once per condition
+would cost 11% of the grid to recompute a number already on disk. `copy_zero_rows.py` fills the rest
+in afterwards, and refuses to overwrite a clean row a job actually computed — it checks it against
+the reference instead, which is a free four-way agreement test on production runs.
 
-#### 🔴 One ordering constraint the censoring run creates
+#### Censoring can use Gaussian's clean rows. It just has to run second.
 
-A censoring-only run has no gaussian in it, so **nothing in it runs the clean level and
-`copy_zero_rows.py` has no source to copy from.** The generator warns about this at build time. The
-censoring run must therefore be queued **after** the main grid, and its five pairs must be pairs the
-main grid covered — which they are, since the main grid covers all 78. Do not run censoring first.
+An earlier note here implied it could not. It can. `copy_zero_rows.py` indexes **every** results file
+in the directory by its configuration, so once the main grid has produced Gaussian's clean rows for
+all 78 pairs, censoring's five pairs are already covered.
+
+**The only constraint is ordering: run the copy step after the main grid, not on a censoring-only
+results directory.** The generator warns when it builds a condition set with no Gaussian in it,
+because at that moment there is nothing to copy from — not because the two runs cannot share.
+
+#### Do the censoring runs need ten replicates?
+
+| Replicates | Runs | What it gives |
+|---|---|---|
+| 1 | 30 | The size of the effect, no spread at all |
+| 3 | 90 | A range. Not enough for a significance test — a paired test on three pairs floors at p = 0.25 |
+| **10** | **300** | Same footing as everything else. A paired test floors at p = 0.002 |
+
+**Recommendation: keep 10.** The saving is 270 runs out of 22,140 — **1.2%** — and at any smaller
+number censoring's results carry a different error bar from the rest of the study, which then needs
+explaining in the caption. The effect is large enough (about twelve times anything else) that
+precision is not the reason to keep them; consistency is. **Cut to 3 only if the run is being
+squeezed for time**, in which case say in the Methods that censoring carries a smaller spread.
 
 #### The uncertainty runs, which are not on this grid at all
 
-Three experimental datasets × 4 representations × 7 models, on the four main-grid conditions plus
-`outlier_p10` (§13.1 item 6), one replicate plus a permutation null (§13.1 item 2). **336 array
-tasks**, sized in `slurm_scripts_uncertainty_rerun/generate_scripts.py` rather than here, because
-the fit count per task depends on the cross-fitting folds.
+Three experimental datasets × 4 representations × 7 models, on the four main-grid conditions plus the
+outlier one (§13.1 item 6), one replicate plus a permutation null (§13.1 item 2). **336 jobs.**
+
+**Why the training-run count is not given here.** Each job trains its model more than once. To ask
+"is the model unsure about the molecules whose labels were corrupted", every training molecule needs
+a score from a model that never saw it — so the training set is split into folds and the model is
+refitted once per fold. How many times depends on a setting in that generator, so the total lives
+there rather than here.
 
 #### What this replaces
 
-§13.1's cost table prices the design at 22,400 runs across the screen and main grid, on four
-conditions at full breadth. That predates the censoring decision. The figure above is the current
-one; §13.1's table is kept for the reasoning about replicate counts, not for its totals.
+§13.1's cost table prices the design at 22,400 runs across the screen and main grid, on four noise
+types at 78 pairs. That predates the censoring decision. The table above is current; §13.1 is kept
+for its reasoning about replicate counts, not for its totals.
 
 ---
 
