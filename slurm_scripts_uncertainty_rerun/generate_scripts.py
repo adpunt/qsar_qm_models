@@ -12,22 +12,89 @@ Two questions, one set of jobs:
 
   (B) Does the model learn WHERE the data is unreliable?  Measured on TEST
       molecules against the noise scale their region of the label distribution
-      receives.  Five of the six strategies corrupt some molecules far more
-      than others, so there is a pattern to learn; Gaussian ('legacy') hits
-      every molecule equally and is therefore the control.
-      Needs  --unc-strategies all.
+      receives.  Only some conditions give different molecules different
+      amounts, so only those have a pattern to learn -- see the next section.
+      Needs  --unc-conditions all.
+
+WHAT CHANGED ON 2026-08-27, AND WHY THE OLD SCRIPTS COULD NOT RUN
+-----------------------------------------------------------------
+This generator was written against the noise scheme that has since been
+replaced (NOISE_DESIGN.md). It listed six noise strategies -- legacy, outlier,
+quantile, hetero, threshold, valprop -- which were deleted in noiseInject 1.0.0
+because they were one strategy at six doses: at a common nominal setting they
+delivered between 0.49x and 2.00x the same amount of noise, and their whole
+apparent severity ordering was that. It emitted `--strategies`,
+`--unc-strategies` and `--threshold-quantile`, none of which the runner has any
+more; it now takes `--conditions` and `--unc-conditions`, and `--conditions`
+carries `choices=`, so a job asking for a deleted name dies at argument
+parsing. Every script this file used to write would have failed there.
+
+WHICH CONDITIONS THIS RUN USES, AND WHY IT DOES NOT CHOOSE THEM ITSELF
+----------------------------------------------------------------------
+noise_conditions.json is the settled set. It is read by tests on both
+injectors, by the QM9 job generator, and here -- restating it is how the two
+injectors drifted apart for the life of the project.
+
+This run takes the four conditions the main grid runs and adds one, which is
+RERUN_PLAN.md 13.1 item 2's recorded default: gaussian, grouped_wider,
+grouped_shifted, censoring, outlier_p10.
+
+The reason for the fifth is the whole shape of the two questions. Under a
+condition that gives every molecule the SAME amount of noise, "does the
+uncertainty find which molecules were corrupted" is undefined, not zero -- so
+only the conditions with a per-molecule pattern can answer it at all:
+
+  gaussian          the same amount for every molecule. Question A's condition,
+                    and the leakage check.
+  grouped_shifted   also the same amount for every molecule -- whole scaffold
+                    families are pushed one way, by a constant. Question A's.
+  grouped_wider     whole scaffold families get a LARGER amount. A real
+                    per-molecule pattern, keyed to the scaffold.
+  censoring         values past the assay limit recorded as the limit, so the
+                    damage is keyed to the label. A real per-molecule pattern.
+  outlier_p10       a tenth of the molecules take nearly all of the noise. The
+                    only depth-only condition that is not flat by design, and
+                    the only concentrated-noise condition left in the study --
+                    which is the case the question was raised about. Adding it
+                    costs 25% of this run; the other two depth-only conditions
+                    are flat and would buy nothing here.
+
+Both grouped conditions are keyed to something a scaffold split holds out
+whole, which is RERUN_PLAN.md 3.1d: on HELD-OUT molecules the grouped pattern
+is flat, truthfully, and the predicted-label control is degenerate for it. That
+is a Methods sentence, not a defect here. Censoring and outlier are keyed to the
+label and to the draw, so neither is affected.
+
+--main-grid-only drops back to the inherited four; --include-deep-conditions
+adds Student-t and Laplace as well, both flat by design. Whichever is run, the
+Methods must say which.
+
+The levels are NOT passed. The runner anchors them per dataset to published
+assay error (logD 0.15, Caco-2 0.35, hERG 0.54 log units) and sweeps censoring
+on its own axis -- the fraction of labels clipped -- because it has no variance
+parameter and cannot be dose-matched. Passing --sigmas would override both with
+one shared ladder, which is six different experiments on these three datasets.
 
 DESIGN NOTES
 ------------
-* One array TASK per (dataset, representation, strategy); one SCRIPT per model.
+* One array TASK per (dataset, representation, condition); one SCRIPT per model.
 * Every task writes to its OWN --results-root.  The pipeline merges results by
   read-modify-write, so two concurrent tasks sharing a directory would race and
   silently lose rows.  merge_results.py stitches them back together afterwards.
 * Cross-fitting is applied only to models that emit a per-molecule uncertainty
   (the pipeline enforces this too, via UNCERTAINTY_MODELS).
 * GP must be told which reps to run on (--gp-reps); it defaults to PDV only.
+* One replicate, plus a permutation null (RERUN_PLAN.md 13.1 item 3, the
+  recorded default). The runner has no replicate axis; the five scaffold folds
+  are the only repeat, and the null is computed afterwards by
+  scripts/uncertainty_stats.py.
+
+Checked by scripts/test_uncertainty_job_scripts.py, which generates real
+scripts and runs the command line each one emits through the runner's own
+argument parser.
 """
 import argparse
+import json
 from pathlib import Path
 
 # Models that emit a per-molecule uncertainty. Must match UNCERTAINTY_MODELS in
@@ -38,7 +105,10 @@ MODELS = {
     # 128G for these same models on these same datasets); this run additionally
     # holds the per-molecule uncertainty frames in memory, so do not go lower.
     # Wall times are deliberately generous: the out-of-fold pass multiplies the
-    # fit count by (1 + oof_folds) and nothing here has been timed on ARC.
+    # fit count by (1 + oof_folds) and nothing here has been timed on ARC. They
+    # were set against the old eleven-level ladder and are left alone now that
+    # it is six levels -- a task that finishes early costs nothing, one that is
+    # killed at the wall costs the whole task.
     'QRF':            (1, 8,  '128G', 36, 'quantile spread; strongest error-ranker in existing results'),
     'NGBoost':        (1, 8,  '128G', 47, '500 estimators; slowest of the tree models by far'),
     'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)'),
@@ -48,8 +118,40 @@ MODELS = {
     'MLP-VBLL-Full':  (2, 8,  '128G', 47, '100 stochastic forward passes'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
+# A subset of the runner's ALL_REPS. The four the uncertainty work has always
+# used; the two the study added later (Avalon, ChemBERTa) are a 50% cost
+# increase on this grid and belong to the same open question as which models and
+# representations go deep (RERUN_PLAN.md 13.1 item 4). Pass --reps to change it.
 REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']
-STRATEGIES = ['legacy', 'outlier', 'quantile', 'hetero', 'threshold', 'valprop']
+
+# ---------------------------------------------------------------------------
+# Noise conditions -- read, never restated
+# ---------------------------------------------------------------------------
+NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
+_SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
+
+# The four the main grid runs, and the three that are depth-only. The JSON keys
+# are the settled file's own; the names used here are the run design's.
+MAIN_GRID_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']]
+DEEP_RUN_CONDITIONS = [c['name'] for c in _SETTLED['stage_2_depth_only']]
+KNOWN_CONDITIONS = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
+
+# The one depth-only condition this run adds to the inherited four, because it
+# is the only one of the three that can answer question B at all
+# (RERUN_PLAN.md 13.1 item 2). Named rather than derived from FLAT_BY_DESIGN so
+# that a new depth-only condition does not silently join the run.
+ADDED_FOR_QUESTION_B = ['outlier_p10']
+
+# Conditions that give EVERY molecule the same amount. Question B has nothing to
+# find in them -- the correlation is undefined, not zero. Printed at generate
+# time so the split is visible before the queue is spent, and cross-checked
+# against the real injector by preflight section 4b.
+FLAT_BY_DESIGN = {'gaussian', 'laplace', 'grouped_shifted',
+                  'student_t_nu5', 'student_t_nu3', 'student_t_nu10'}
+
+# Question A needs a condition whose noise is even across molecules; dropping
+# every one of them leaves the run unable to answer it.
+QUESTION_A_CONDITION = 'gaussian'
 
 KIRBY_DIR = '/data/stat-cadd/scat9264/KIRBy'
 QSAR_DIR = '/data/stat-cadd/scat9264/qsar_qm_models'
@@ -60,8 +162,16 @@ TEMPLATE = '''#!/bin/bash
 # Uncertainty re-run — model: {model}
 # {note}
 # ============================================================================
-# Array task -> (dataset, representation, strategy).
-#   {n_ds} datasets x {n_rep} reps x {n_st} strategies = {n_tasks} tasks
+# Array task -> (dataset, representation, noise condition).
+#   {n_ds} datasets x {n_rep} reps x {n_cond} conditions = {n_tasks} tasks
+#
+# Conditions: {condition_list}
+# These are the settled set (noise_conditions.json), inherited from the main
+# grid. Every one of them delivers the SAME amount of noise at a given level, so
+# a difference between them is a difference of shape, not of dose.
+#
+# Levels are NOT passed: the runner anchors them per dataset to published assay
+# error, and sweeps censoring on its own axis (the fraction of labels clipped).
 #
 # --account and --partition are LIVE STATE: pass them at submit time. Confirm
 # with  bash tests/slurm_scripts/where_to_submit.sh  in the KIRBy repo first.
@@ -87,7 +197,38 @@ TEMPLATE = '''#!/bin/bash
 
 set -uo pipefail
 
-cd {kirby_dir}
+KIRBY_DIR="{kirby_dir}"
+
+# Which KIRBy checkout this is, and whether it carries the redesigned runner.
+#
+# There are two checkouts on the cluster. 125 of the 127 job scripts in the
+# KIRBy repository itself use /data/stat-ecr/scat9264/KIRBy -- the move was made
+# on 2026-05-07 when stat-cadd hit 99.9% of its quota -- and two use stat-cadd,
+# which is what this generator has always pointed at (RERUN_PLAN.md 2.8b). That
+# cannot be settled from a laptop, so it is settled here, at the top of the job:
+# a checkout without the redesigned command line is refused by name rather than
+# producing 336 tasks' worth of results from the wrong code.
+if [ ! -d "$KIRBY_DIR" ]; then
+    echo "ERROR: no KIRBy checkout at $KIRBY_DIR."
+    echo "       The other checkout is /data/stat-ecr/scat9264/KIRBy, which is what"
+    echo "       125 of KIRBy's own 127 job scripts use. Regenerate with"
+    echo "       --kirby-dir <path> rather than editing this file."
+    exit 2
+fi
+RUNNER="$KIRBY_DIR/tests/alternative_data_noise_robustness.py"
+if [ ! -f "$RUNNER" ]; then
+    echo "ERROR: $RUNNER does not exist."; exit 2
+fi
+if ! grep -q -- "'--conditions'" "$RUNNER"; then
+    echo "ERROR: $RUNNER has no --conditions flag, so this checkout predates the"
+    echo "       noise redesign (noiseInject 1.0.0, 2026-08-26). Running it would"
+    echo "       produce a full set of results from the old six strategies."
+    echo "       Pull it, or point --kirby-dir at the other checkout."
+    exit 2
+fi
+echo "=== KIRBy: $KIRBY_DIR  ($(git -C "$KIRBY_DIR" log --oneline -1 2>/dev/null || echo 'not a git checkout'))"
+
+cd "$KIRBY_DIR"
 . {qsar_dir}/setup.sh
 
 # Activation is not optional. micromamba has never worked on this cluster, so
@@ -128,6 +269,28 @@ if [ "$(basename "$CONDA_PREFIX")" != "env_test" ]; then
 fi
 echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
 
+# The injector must be the redesigned one, and it must be the checkout that was
+# pulled rather than a stale copy on the path. A task that runs the old injector
+# writes results that look exactly like the new ones and are a different
+# experiment.
+python - <<'PYCHECK' || exit 2
+import sys, inspect
+try:
+    import noiseInject
+    from noiseInject import CONDITIONS
+except Exception as exc:
+    print(f"ERROR: noiseInject does not import: {{type(exc).__name__}}: {{exc}}")
+    sys.exit(1)
+print(f"=== noiseInject: {{inspect.getfile(noiseInject)}} "
+      f"version {{getattr(noiseInject, '__version__', 'unknown')}}")
+missing = [c for c in {condition_list_py} if c not in CONDITIONS]
+if missing:
+    print(f"ERROR: this noiseInject does not know {{missing}}. Known: {{sorted(CONDITIONS)}}.")
+    print("       That is the pre-1.0.0 injector -- the six deleted strategies.")
+    print("       pip install --no-deps -e <the NoiseInject checkout you pulled>")
+    sys.exit(1)
+PYCHECK
+
 # A private scratch directory per task.
 #
 # Hygiene, not a fix for any known defect here: joblib, matplotlib, numba and
@@ -155,11 +318,11 @@ cd tests
 
 DATASETS=({datasets})
 REPS=({reps})
-STRATS=({strategies})
+CONDS=({conditions})
 
-n_st=${{#STRATS[@]}}
+n_cond=${{#CONDS[@]}}
 n_rep=${{#REPS[@]}}
-n_tasks=$(( ${{#DATASETS[@]}} * n_rep * n_st ))
+n_tasks=$(( ${{#DATASETS[@]}} * n_rep * n_cond ))
 
 # Guard: under `set -u` an unset SLURM_ARRAY_TASK_ID would abort with a cryptic
 # message. This makes a non-array invocation run task 0 and say so.
@@ -170,19 +333,21 @@ fi
 if [ "$i" -ge "$n_tasks" ]; then
     echo "ERROR: task $i is out of range (0..$(( n_tasks - 1 )))"; exit 2
 fi
-st="${{STRATS[$(( i % n_st ))]}}"
-rep="${{REPS[$(( (i / n_st) % n_rep ))]}}"
-ds="${{DATASETS[$(( i / (n_st * n_rep) ))]}}"
+cond="${{CONDS[$(( i % n_cond ))]}}"
+rep="${{REPS[$(( (i / n_cond) % n_rep ))]}}"
+ds="${{DATASETS[$(( i / (n_cond * n_rep) ))]}}"
 
-# One directory per task — no cross-task write races.
+# One directory per task — no cross-task write races. merge_results.py splits
+# this name back apart on the DOUBLE underscore, so the condition's own single
+# underscores are safe.
 rep_slug=$(echo "$rep" | tr 'A-Z' 'a-z' | tr -d '-')
-OUT="{results_root}/{model_slug}__${{ds}}__${{rep_slug}}__${{st}}"
+OUT="{results_root}/{model_slug}__${{ds}}__${{rep_slug}}__${{cond}}"
 
 if [ -z "${{SLURM_JOB_PARTITION:-}}" ]; then
     echo "ERROR: no partition. Submit with --partition=medium (see RUNBOOK step 4)."; exit 2
 fi
 
-echo "=== task $i: model={model} dataset=$ds rep=$rep strategy=$st"
+echo "=== task $i: model={model} dataset=$ds rep=$rep condition=$cond"
 echo "=== out: $OUT"
 echo "=== started: $(date)"
 
@@ -190,8 +355,8 @@ echo "=== started: $(date)"
     --datasets "$ds" \\
     --models "{model}" \\
     --reps "$rep" \\
-    --strategies "$st" \\
-    --unc-strategies all \\
+    --conditions "$cond" \\
+    --unc-conditions all \\
     --oof-folds {oof} \\
     {extra_args}{gp_args}--results-root "$OUT"
 
@@ -202,37 +367,89 @@ exit $status
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description='Generate the uncertainty re-run job arrays.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='Conditions come from noise_conditions.json; this file does not choose them.')
     ap.add_argument('--oof-folds', type=int, default=5,
                     help='Cross-fitting folds for the training-set uncertainty (default 5). '
-                         'Cost is (1 + this) fits per noise level.')
+                         'Cost is (1 + this) fits per noise level. The runner refuses 1: with '
+                         'one fold the fit set and the scored set are the same molecules.')
     ap.add_argument('--oof-outer-folds', type=int, default=None,
                     help='Cross-fit only the first N of the 5 scaffold folds. All 5 folds are '
                          'trained regardless, so TEST-side uncertainty is free for all of them; '
                          'this only limits the expensive out-of-fold TRAINING pass. '
                          '1 cuts the added cost about threefold.')
-    ap.add_argument('--threshold-quantile', type=float, default=None,
-                    help='Make threshold noise cut at quantiles of the training labels instead '
-                         'of the absolute +/-1.0. Without this, threshold is CONSTANT on hERG '
-                         '(every pChEMBL value clears 1.0) and that arm cannot answer question B. '
-                         'Turning it on changes the injected noise, so those results are not '
-                         'comparable with runs made without it.')
-    ap.add_argument('--drop-strategies', nargs='+', default=[],
-                    help='Strategies to leave out. Note heteroscedastic and value-proportional '
-                         'rank molecules IDENTICALLY (Spearman 1.000), so for the uncertainty '
-                         'questions they are one arm: dropping hetero reclaims 84 tasks and '
-                         'loses no rank information.')
+    ap.add_argument('--conditions', nargs='+', default=None, choices=KNOWN_CONDITIONS,
+                    help='Run exactly these noise conditions instead of the four the main grid '
+                         'runs. Names come from noise_conditions.json.')
+    ap.add_argument('--include-deep-conditions', action='store_true',
+                    help=f'Run every depth-only condition ({", ".join(DEEP_RUN_CONDITIONS)}) '
+                         f'alongside the main grid\'s four, rather than only '
+                         f'{", ".join(ADDED_FOR_QUESTION_B)}. This TESTS the settled set on the '
+                         f'experimental datasets rather than inheriting it (RERUN_PLAN.md 13.1 '
+                         f'item 6). The two it adds are flat by design, so they buy shape '
+                         f'coverage for question A and nothing for question B.')
+    ap.add_argument('--main-grid-only', action='store_true',
+                    help=f'Inherit the main grid\'s four conditions exactly, without '
+                         f'{", ".join(ADDED_FOR_QUESTION_B)}. Saves 20% of the run and leaves '
+                         f'two conditions that can answer question B instead of three.')
+    ap.add_argument('--drop-conditions', nargs='+', default=[], choices=KNOWN_CONDITIONS,
+                    help='Conditions to leave out. gaussian is the one condition that spreads '
+                         'the noise evenly across molecules, which is what makes it question '
+                         "A's condition and the leakage check; grouped_wider and censoring are "
+                         'the only two with a per-molecule pattern for question B. Dropping any '
+                         'of the three removes a question, not a duplicate.')
+    ap.add_argument('--reps', nargs='+', default=None,
+                    help=f'Representations to run (default: {" ".join(REPS)}). Must be names the '
+                         f"runner's --reps accepts.")
+    ap.add_argument('--kirby-dir', default=KIRBY_DIR,
+                    help=f'KIRBy checkout on the cluster (default {KIRBY_DIR}). There are two; '
+                         f'the generated scripts refuse one that predates the noise redesign '
+                         f'rather than running it (RERUN_PLAN.md 2.8b).')
     ap.add_argument('--throttle', type=int, default=6,
                     help='Max concurrent tasks per array (the %%N in --array).')
     ap.add_argument('--out-dir', default=str(Path(__file__).parent))
     args = ap.parse_args()
 
-    strategies = [x for x in STRATEGIES if x not in set(args.drop_strategies)]
-    if args.drop_strategies:
-        print(f"Dropping strategies: {args.drop_strategies} -> {len(strategies)} remain")
+    if args.conditions:
+        conditions = list(dict.fromkeys(args.conditions))
+        source = 'named on the command line'
+    elif args.include_deep_conditions:
+        conditions = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
+        source = f'the main grid plus every depth-only condition ({NOISE_CONDITIONS_FILE.name})'
+    elif args.main_grid_only:
+        conditions = list(MAIN_GRID_CONDITIONS)
+        source = f"the main grid's four, inherited ({NOISE_CONDITIONS_FILE.name})"
+    else:
+        conditions = MAIN_GRID_CONDITIONS + ADDED_FOR_QUESTION_B
+        source = (f"the main grid's four plus {', '.join(ADDED_FOR_QUESTION_B)} "
+                  f"({NOISE_CONDITIONS_FILE.name}; RERUN_PLAN.md 13.1 item 2)")
+    dropped = set(args.drop_conditions)
+    conditions = [c for c in conditions if c not in dropped]
+    if not conditions:
+        raise SystemExit('every condition was dropped — there is nothing to run.')
+
+    reps = list(args.reps) if args.reps else list(REPS)
     out = Path(args.out_dir)
     (out / 'logs').mkdir(parents=True, exist_ok=True)
-    n_tasks = len(DATASETS) * len(REPS) * len(strategies)
+    n_tasks = len(DATASETS) * len(reps) * len(conditions)
+
+    print(f"Conditions: {source}")
+    for c in conditions:
+        role = ('no per-molecule pattern — question A and the leakage check'
+                if c in FLAT_BY_DESIGN else
+                'a per-molecule pattern — question B can be asked here')
+        print(f"    {c:18s} {role}")
+    if dropped:
+        print(f"  Dropped: {', '.join(sorted(dropped))}")
+    if QUESTION_A_CONDITION not in conditions:
+        print(f"  WARNING: {QUESTION_A_CONDITION} is not in this run. It is the only condition "
+              f"that spreads the noise evenly across molecules, so question A has no clean "
+              f"reference and the leakage check cannot be made.")
+    if not any(c not in FLAT_BY_DESIGN for c in conditions):
+        print("  WARNING: every condition in this run gives every molecule the same amount of "
+              "noise, so question B is undefined throughout — the run can only answer A.")
 
     # Optional flags, built as ONE string each carrying its own line
     # continuation, so that when nothing optional is set the line collapses
@@ -243,8 +460,6 @@ def main():
     extra_bits = []
     if args.oof_outer_folds:
         extra_bits.append(f'--oof-outer-folds {args.oof_outer_folds}')
-    if args.threshold_quantile:
-        extra_bits.append(f'--threshold-quantile {args.threshold_quantile:g}')
     extra_args = ''.join(f'{b} \\\n    ' for b in extra_bits)
 
     written = []
@@ -258,11 +473,13 @@ def main():
         body = TEMPLATE.format(
             model=model, note=note, jobslug=slug, model_slug=slug,
             cpus=cpus, mem=mem, hours=hours, oof=args.oof_folds,
-            kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR, results_root=RESULTS_ROOT,
+            kirby_dir=args.kirby_dir, qsar_dir=QSAR_DIR, results_root=RESULTS_ROOT,
             datasets=' '.join(DATASETS),
-            reps=' '.join(f'"{r}"' for r in REPS),
-            strategies=' '.join(strategies),
-            n_ds=len(DATASETS), n_rep=len(REPS), n_st=len(strategies),
+            reps=' '.join(f'"{r}"' for r in reps),
+            conditions=' '.join(conditions),
+            condition_list=', '.join(conditions),
+            condition_list_py=repr(conditions),
+            n_ds=len(DATASETS), n_rep=len(reps), n_cond=len(conditions),
             n_tasks=n_tasks, last=n_tasks - 1, throttle=args.throttle,
             script_name=script_name, gp_args=gp_args, gp_line='',
             extra_args=extra_args)
@@ -270,9 +487,10 @@ def main():
         (out / script_name).chmod(0o755)
         written.append((tier, script_name, model, hours))
 
-    print(f"Wrote {len(written)} array scripts, {n_tasks} tasks each "
+    print(f"\nWrote {len(written)} array scripts, {n_tasks} tasks each "
           f"({len(written) * n_tasks} tasks total), oof-folds={args.oof_folds}, "
           f"oof-outer-folds={args.oof_outer_folds or 'all 5'}")
+    print(f"  {len(DATASETS)} datasets x {len(reps)} reps x {len(conditions)} conditions")
     for tier in (1, 2):
         print(f"\n  Tier {tier}:")
         for t, name, model, hours in written:

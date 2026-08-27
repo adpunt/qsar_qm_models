@@ -53,8 +53,10 @@ frame uses:
     noise_pattern, noise_pattern_pred, oof_folds_ok, source_file
 
 ``condition`` is the noise type. It is read from whichever of ``condition``,
-``strategy``, ``noise_type`` or ``task_strategy`` the producer wrote, and from
-the file name for QM9 files that carry none of them.
+``noise_type``, ``task_condition`` or the legacy ``strategy``/``task_strategy``
+the producer wrote, and from the file name for QM9 files that carry none of
+them. The merge step writes ``task_condition``; files merged before 2026-08-27
+carry ``task_strategy``, and both are accepted so an old merge still loads.
 
 ``y_true_clean`` is the UNCORRUPTED label on both producers: QM9 writes it as
 ``y_true_original``; on KIRBy ``y_true`` is already the clean label and the
@@ -286,7 +288,8 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
     out['model'] = df['model']
     rep = _pick(df, ['rep', 'representation'])
     out['rep'] = rep
-    cond = _pick(df, ['condition', 'strategy', 'noise_type', 'task_strategy'])
+    cond = _pick(df, ['condition', 'noise_type', 'task_condition',
+                      'strategy', 'task_strategy'])
     if cond is None:
         cond = _condition_from_name(Path(path).stem)
         if cond is None:
@@ -356,7 +359,8 @@ def _normalise_kirby(df, path, strict, dataset_name):
     out['model'] = model
     out['rep'] = rep
 
-    cond = _pick(df, ['condition', 'noise_type', 'strategy', 'task_strategy'])
+    cond = _pick(df, ['condition', 'noise_type', 'task_condition',
+                      'strategy', 'task_strategy'])
     missing = []
     if cond is None:
         missing.append('condition (written as noise_type/strategy)')

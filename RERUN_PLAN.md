@@ -1368,20 +1368,22 @@ level check beside it expected eleven levels; the ladder is six per dataset, and
 censoring, which sweeps the clipped fraction instead.
 
 **What it runs now.** The four conditions the main grid runs — `gaussian`, `grouped_wider`,
-`grouped_shifted`, `censoring` — read from `noise_conditions.json`, not restated. That is §13.1
-item 2's recorded default, inherit rather than test, and `--include-deep-conditions` is the other
-choice. 3 datasets × 4 representations × 4 conditions = **48 tasks per model script, 336 in
-total**, down from 504. Levels are not passed at all: the runner anchors them per dataset to
-published assay error, and `--sigmas` would replace that with one shared ladder, which is six
-different experiments across these three datasets.
+`grouped_shifted`, `censoring` — plus `outlier_p10`, which is §13.1 item 2's recorded default. All
+five are read from `noise_conditions.json`, not restated. 3 datasets × 4 representations × 5
+conditions = **60 tasks per model script, 420 in total**, against 504 before. `--main-grid-only`
+inherits the four exactly (336 tasks); `--include-deep-conditions` runs all three depth-only
+conditions (588). Levels are not passed at all: the runner anchors them per dataset to published
+assay error, and `--sigmas` would replace that with one shared ladder, which is six different
+experiments across these three datasets.
 
-**The four split cleanly across the two questions**, which is the thing to say in the Methods.
+**The five split cleanly across the two questions**, which is the thing to say in the Methods.
 `gaussian` and `grouped_shifted` give every molecule the same amount, so "does uncertainty find
 *which* molecules are corrupted" is undefined there, not zero — they answer question A and serve
-as the leakage check. `grouped_wider` (keyed to the scaffold) and `censoring` (keyed to the label)
-are the only two with a pattern to find. Both patterned ones are keyed to something a scaffold
-split holds out whole, which is §3.1d: on held-out molecules the grouped pattern is flat,
-truthfully, and the predicted-label control is degenerate for it.
+as the leakage check. `grouped_wider` (keyed to the scaffold), `censoring` (keyed to the label) and
+`outlier_p10` (keyed to the draw) are the three with a pattern to find. Both grouped conditions are
+keyed to something a scaffold split holds out whole, which is §3.1d: on held-out molecules the
+grouped pattern is flat, truthfully, and the predicted-label control is degenerate for it.
+Censoring and outlier are not affected by that.
 
 **Three defects found alongside it, all fixed.**
 
@@ -1389,16 +1391,17 @@ truthfully, and the predicted-label control is degenerate for it.
 |---|---|
 | `merge_results.py` | The six deleted names hard-coded as the expected cells, and "11 levels" as the expected ladder. Both are now read — conditions from the generated `unc_*.sh`, level counts parsed out of the runner's own source — so neither can drift again. `task_strategy` becomes `task_condition`; `scripts/uncertainty_stats.py` accepts both, so a merge made before today still loads |
 | `preflight.sh` | Section 4b still reached for `m.STRATEGIES`, which the runner no longer defines, and read `STRATS=(...)` out of the job scripts. It reads `CONDS=(...)` and `m.NOISE_CONDITIONS`, and warns rather than guessing if it finds a script that predates the redesign. Its advice for a flat condition — regenerate with `--threshold-quantile` — pointed at a deleted flag; a condition that is flat where it should not be is now reported as a fact about the dataset |
-| the generated scripts | They hard-coded `/data/stat-cadd/scat9264/KIRBy` and took it on trust (§2.8b: 125 of KIRBy's own 127 job scripts use `/data/stat-ecr`). Each script now checks the directory exists, that the runner in it has `--conditions`, and that the installed injector knows the conditions being asked for — exiting 2 and naming the other checkout rather than producing 336 tasks' worth of results from the old code. `--kirby-dir` regenerates against the other path |
+| the generated scripts | They hard-coded `/data/stat-cadd/scat9264/KIRBy` and took it on trust (§2.8b: 125 of KIRBy's own 127 job scripts use `/data/stat-ecr`). Each script now checks the directory exists, that the runner in it has `--conditions`, and that the installed injector knows the conditions being asked for — exiting 2 and naming the other checkout rather than producing a full run's worth of results from the old code. `--kirby-dir` regenerates against the other path |
 
 **The gate.** `python scripts/test_uncertainty_job_scripts.py` — it generates real scripts, pulls
 the command line out of each one, substitutes the shell variables with values the array dispatch
 can actually produce, and runs the result through the runner's **own argument parser**, not a
-string match against its source. Seven checks: every emitted command line parses (28 of them, one
-per script per condition); no deleted name or flag survives; the conditions match the settled file;
-dropping every even condition or every patterned one is called out by name; the model,
-representation and dataset rosters match the runner's; the scripts are valid bash; and all 48 array
-indices map to 48 distinct tasks with the header promising the same range. It needs a KIRBy
+string match against its source. Seven checks: every emitted command line parses (35 of them, one
+per script per condition); no deleted name or flag survives; the conditions match the settled file,
+and the one condition added to them is one that is *not* flat by design — which is the only reason
+to add it; dropping every even condition or every patterned one is called out by name; the model,
+representation and dataset rosters match the runner's; the scripts are valid bash; and all 60 array
+indices map to 60 distinct tasks with the header promising the same range. It needs a KIRBy
 checkout (`--kirby-dir`, `$KIRBY_DIR`, or a sibling directory) and refuses to run without one.
 
 **Still to do here, and it is not this fix's.** Whether the uncertainty runs use four
@@ -3832,7 +3835,21 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    note: *"I believe I was doing 10 and holding off replicates for uncertainty."* **This item read
    🔴 open for a day after it was settled three lines above, and that contradiction cost a session:
    chat D twice told the author the replicate count was the thing blocking launch.** It is not.
-2. ⏸️ **DEFERRED 2026-08-27 to the chat that writes the uncertainty job scripts — default recorded: one replicate plus a permutation null.** **Is one replicate for the uncertainty runs still right?** The uncertainty statistics are
+2. ✅ **SETTLED 2026-08-27 by the author — one replicate for the uncertainty runs, plus a
+   permutation null.** *"Yes one replicate for uncertainty runs."* Do not reopen it.
+   **What this commits the paper to saying**, because it is no longer optional: the uncertainty
+   results have **no run-to-run error bar**. The five scaffold folds are a partition, not repeats,
+   so their spread mixes randomness with scaffold difficulty and cannot stand in for one (§3.3).
+   The permutation null is what tells the reader whether an observed correlation is distinguishable
+   from chance; it is not a substitute for a repeat, and the Methods must say so in those words.
+   **Where it is enforced:** the runner has no replicate axis at all
+   (`slurm_scripts_uncertainty_rerun/generate_scripts.py:77-80`), and the null is built and tested
+   at `scripts/uncertainty_stats.py:760` (`permutation_null`), which permutes the noise within one
+   cell and fold and returns the observed value against a 2.5–97.5 band. Recorded in the audit
+   script's manual checklist so it cannot be forgotten at writing time. **Original reasoning, kept
+   because it is the answer to "why is one enough":** the uncertainty statistics are correlations
+   over thousands of molecules, so their precision comes from the molecule count, not the replicate
+   count. The uncertainty statistics are
    correlations over thousands of molecules, so their precision comes from the molecule count, not
    the replicate count — one replicate is defensible **provided** a permutation null is reported so
    the reader has a reference distribution. Without repeats there is no run-to-run error bar at all.
@@ -3948,8 +3965,8 @@ Checked 2026-08-27, by reading the files rather than the notes:
 - ✅ **The uncertainty job generator was stale; it was rewritten on 2026-08-27 (§2.8j).** It
   listed the six deleted strategies and emitted flags the runner no longer has, so every task
   would have died at argument parsing. It now reads `noise_conditions.json`. **Items 2 and 3 were
-  settled by their recorded defaults in the rewrite**: it inherits the main grid's four conditions
-  (item 2) and runs one replicate, the permutation null being computed afterwards by
+  settled by their recorded defaults in the rewrite**: the main grid's four conditions plus
+  `outlier_p10` (item 2), and one replicate with the permutation null computed afterwards by
   `scripts/uncertainty_stats.py` (item 3). Either can be changed with a flag; neither is now
   blocking anything.
 - **The deep run cannot be built without item 4 and refuses to try** —
@@ -3960,8 +3977,8 @@ Checked 2026-08-27, by reading the files rather than the notes:
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
 | 1 | **1.5.** It is measured, 1.0 is not; both roster models still fit there (R² 0.62 and 0.68); and it is where both the grouped-shifted result and the boosting-versus-forest reversal are visible. Report the clean column beside it | chat J, at figure-script rebuild |
-| 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | the uncertainty job-script chat |
-| 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | the uncertainty job-script chat |
+| 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ built 2026-08-27, §2.8j. `--main-grid-only` and `--include-deep-conditions` are the two other choices |
+| 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | Nothing to default. The screen runs, the author looks, the author chooses | after the screen |
 
 #### Item 1 — the level changes which model wins, so it is not a presentational choice

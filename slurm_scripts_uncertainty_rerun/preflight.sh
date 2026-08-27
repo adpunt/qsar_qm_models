@@ -247,16 +247,21 @@ from noiseInject import NoiseInjectorRegression as NI
 
 DATASETS = ['logd', 'caco2', 'herg_ki']
 REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']
-# Read the condition list from the GENERATED scripts, not from the module: after
-# --drop-strategies the two differ and the printed indices would be wrong.
+# Read the condition list from the GENERATED scripts, not from the module: the
+# jobs run whatever the generator wrote, which after --drop-conditions or
+# --include-deep-conditions is not the module's default, and the printed indices
+# would then be wrong.
 import re as _re, glob as _glob
 _sh = sorted(_glob.glob('/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_*.sh'))
-STRATS = m.STRATEGIES
+CONDS = list(m.NOISE_CONDITIONS)
 if _sh:
-    _mm = _re.search(r'^STRATS=\((.*?)\)', open(_sh[0]).read(), _re.M)
+    _mm = _re.search(r'^CONDS=\((.*?)\)', open(_sh[0]).read(), _re.M)
     if _mm:
-        STRATS = _mm.group(1).split()
-        print(f"  (condition list read from {_sh[0].split('/')[-1]}: {STRATS})")
+        CONDS = _mm.group(1).split()
+        print(f"  (condition list read from {_sh[0].split('/')[-1]}: {CONDS})")
+    else:
+        print(f"  WARNING: {_sh[0].split('/')[-1]} has no CONDS=(...) line — it predates the "
+              f"noise redesign and would die at argument parsing. Regenerate it.")
 
 labels = {}
 df = m.download_openadmet()
@@ -268,15 +273,15 @@ labels['herg_ki'] = m.load_chembl_herg()[1]
 
 print("  distinct noise scales per (dataset, condition) -- 1 means it is CONSTANT,")
 print("  so 'which molecules are unreliable' is UNDEFINED there, not zero")
-print(f"  {'dataset':9s} " + " ".join(f"{s:>10s}" for s in STRATS))
+print(f"  {'dataset':9s} " + " ".join(f"{s:>16s}" for s in CONDS))
 degenerate = []
 for ds in DATASETS:
     y = labels[ds]
     row = []
-    for st in STRATS:
+    for st in CONDS:
         n = len(np.unique(np.round(
             NI.from_condition(st, random_state=0).noise_scale(y, 1.0, reference=y), 12)))
-        row.append(f"{n:>10d}")
+        row.append(f"{n:>16d}")
         # Constant BY DESIGN for the shape-only conditions and grouped-shifted:
         # every molecule gets the same scale there, so question B is undefined
         # rather than answerable. Only flag a condition that should have a pattern.
@@ -296,17 +301,21 @@ if degenerate:
     print("  DEGENERATE ARMS (constant noise scale -> question B undefined):")
     for ds, st in degenerate:
         print(f"    {ds} x {st}")
-    n_st, n_rep = len(STRATS), len(REPS)
+    n_st, n_rep = len(CONDS), len(REPS)
     idx = []
     for ds, st in degenerate:
-        d_i, s_i = DATASETS.index(ds), STRATS.index(st)
+        d_i, s_i = DATASETS.index(ds), CONDS.index(st)
         for r_i in range(n_rep):
             idx.append(d_i * (n_st * n_rep) + r_i * n_st + s_i)
     print()
-    print("  Either skip these array indices in EVERY unc_*.sh:")
+    print("  Skip these array indices in EVERY unc_*.sh:")
     print("    " + ",".join(str(i) for i in sorted(idx)))
-    print("  or regenerate with --threshold-quantile 0.1 so the cut-points come from the")
-    print("  label distribution (note: that changes the injected noise).")
+    print("  A condition that SHOULD have a per-molecule pattern and turns out flat on a")
+    print("  dataset is a fact about that dataset's labels, not a setting to turn up:")
+    print("  grouped_wider goes flat only if the scaffolds collapse to one group, and")
+    print("  censoring only if no label reaches the limit. Check the dataset before")
+    print("  spending the tasks -- and if it is real, drop that (dataset, condition)")
+    print("  rather than reporting an undefined correlation as a zero.")
 else:
     print("  No degenerate arms.")
 PY
