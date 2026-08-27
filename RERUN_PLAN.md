@@ -2314,7 +2314,7 @@ digit. Report it for censoring; do not report it as a control for the grouped co
 
 ### 3.1e ✅ FIXED 2026-08-27 — the out-of-fold pass asked for validation rows no model fits
 
-**Found by running the pilot, not by reading it.** The first NGBoost cell died at the guard:
+**Found by running NGBoost on QM9 rather than by reading the code.** It died at the guard:
 *the model fits 4000 rows but the recorded noise covers 4250*.
 
 When the author settled on 2026-08-27 that **no model stacks validation into its training set**
@@ -4626,16 +4626,25 @@ uncertainty).
 | 2 | Do the uncertainty runs inherit the settled noise conditions, or test them? | G | D | nothing |
 | 3 | Is one replicate right for the uncertainty runs? | earlier, §13.1 item 2 | D | nothing |
 | 4 | Which models and representations go deep | earlier, §13.1 item 4 | D, E, G | nothing, and it is not askable yet |
-| 5 | **How many noise conditions the three experimental datasets run** | D, 2026-08-27 | — | the validation jobs, which are otherwise ready |
+| ~~5~~ | ~~**How many noise conditions the three experimental datasets run**~~ | D, 2026-08-27 | — | ✅ **SETTLED by the author 2026-08-27** — match QM9: three conditions at full breadth, censoring on a named pair subset |
 
-**Item 5, added 2026-08-27.** Those jobs never stated their conditions, so they inherited the
-runner's own list of seven — one of which, `outlier_p05`, the author had already retired
-(§"The validation jobs were running a retired noise condition"). The generator now states them,
-and defaults to the full grid's four, which is what §6.3 specifies for these datasets. The three
-depth-only conditions are one flag away (`--include-depth-conditions`). **Four is a default, not
-a ruling** — it was never put to the author, because until today nobody knew the number was seven.
-Recommendation: keep four. The depth-only three belong to the depth run, and running them here
-costs 75% more for conditions §13.9 measured as indistinguishable from Gaussian on accuracy.
+**Item 5, raised and settled 2026-08-27.** Those jobs never stated their conditions, so they
+inherited the runner's own list of seven — one of which, `outlier_p05`, the author had already
+retired. Naming them raised the real question: censoring runs on **about five
+model-and-representation pairs** on QM9, not the full grid, and nothing said what it should do on
+the experimental datasets.
+
+✅ **The author's ruling: match QM9.** So the experimental robustness runs are **gaussian,
+grouped_wider and grouped_shifted at full breadth**, plus **censoring on a named pair subset**.
+`noise_conditions.json` carries the widened scope — `applies_to: ["qm9_grid",
+"validation_robustness"]` — and the validation generator now refuses to put censoring in a script
+unless the models and representations are named, exactly as the QM9 generator does. Which pairs
+comes from the screen (§13.13).
+
+⚠️ **The uncertainty runs are the exception and keep censoring at full breadth**, recorded in the
+same entry as `full_breadth_in: ["uncertainty_runs"]`. It is one of only two conditions there that
+can answer which molecules were damaged, so restricting it would remove the question rather than
+cheapen it. `scripts/test_noise_conditions.py` asserts all three behaviours.
 
 **Item 1 was one question that changed answer, not two questions.** Chat G proposed 0.5 while
 measuring only accuracy differences between noise conditions, where 0.5 and 1.5 agree. Chat D
