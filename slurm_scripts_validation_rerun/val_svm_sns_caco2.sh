@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=val_SVM_sns_herg
+#SBATCH --job-name=val_SVM_sns_caco2
 #SBATCH --output=slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -118,10 +118,10 @@ PYCHECK
 cd tests
 
 python alternative_data_noise_robustness.py \
-    --datasets herg_ki \
+    --datasets caco2 \
     --models SVM \
     --reps SNS \
     --conditions gaussian grouped_wider grouped_shifted censoring \
-    --results-root results/validation_rerun/sns_herg
+    --results-root results/validation_rerun/sns_caco2
 
-echo "Done: SVM x SNS x herg"
+echo "Done: SVM x SNS x caco2"

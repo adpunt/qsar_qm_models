@@ -194,6 +194,7 @@ cd rust && cargo test --release
 | `scripts/test_injector_wiring.py` | the Python noise wiring, on a machine with no training stack |
 | `scripts/test_noise_conditions.py` | the settled condition set binds the Python injector too |
 | `scripts/test_uncertainty_job_scripts.py` | every uncertainty job's command line, through the runner's own parser |
+| `scripts/test_validation_job_scripts.py` | every validation job's command line, its conditions, its three guards |
 | `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
 | `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
 | `scripts/check_environment.py` | this interpreter can build every model the job asks for |

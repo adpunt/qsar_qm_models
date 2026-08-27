@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=val_SVM_sns_herg
+#SBATCH --job-name=val_DNN_ecfp4_logd
 #SBATCH --output=slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 #SBATCH --partition=long
-#SBATCH --time=16:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
 #SBATCH --mail-type=END,FAIL
 
@@ -84,8 +84,8 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
 # (the HAS_* flags at alternative_data_noise_robustness.py:253-333) rather than
 # to stop -- so a missing package here is silent by design. This is seconds per
 # task and turns that into an exit 2 before any data is loaded.
-python "$QSAR_DIR/scripts/check_environment.py" --validation-models SVM || {
-    echo "ERROR: this interpreter cannot build SVM. See above."
+python "$QSAR_DIR/scripts/check_environment.py" --validation-models DNN || {
+    echo "ERROR: this interpreter cannot build DNN. See above."
     exit 2
 }
 
@@ -118,10 +118,10 @@ PYCHECK
 cd tests
 
 python alternative_data_noise_robustness.py \
-    --datasets herg_ki \
-    --models SVM \
-    --reps SNS \
+    --datasets logd \
+    --models DNN \
+    --reps ECFP4 \
     --conditions gaussian grouped_wider grouped_shifted censoring \
-    --results-root results/validation_rerun/sns_herg
+    --results-root results/validation_rerun/ecfp4_logd
 
-echo "Done: SVM x SNS x herg"
+echo "Done: DNN x ECFP4 x logd"

@@ -89,12 +89,39 @@ python "$QSAR_DIR/scripts/check_environment.py" --validation-models SVM || {
     exit 2
 }
 
+# The injector must be the redesigned one.
+#
+# The runner does `from noiseInject import CONDITIONS` at module scope, so a
+# stale checkout does not fail -- it runs the pre-1.0.0 scheme, where the six
+# strategies were one strategy at six doses and a level meant something else
+# entirely. The results look exactly like the new ones and are a different
+# experiment. The uncertainty jobs have carried this check since 2026-08-27;
+# these did not, and they use the same runner and the same injector.
+python - <<'PYCHECK' || exit 2
+import sys, inspect
+try:
+    import noiseInject
+    from noiseInject import CONDITIONS
+except Exception as exc:
+    print(f"ERROR: noiseInject does not import: {type(exc).__name__}: {exc}")
+    sys.exit(1)
+print(f"=== noiseInject: {inspect.getfile(noiseInject)} "
+      f"version {getattr(noiseInject, '__version__', 'unknown')}")
+missing = [c for c in ['gaussian', 'grouped_wider', 'grouped_shifted', 'censoring'] if c not in CONDITIONS]
+if missing:
+    print(f"ERROR: this noiseInject does not know {missing}. Known: {sorted(CONDITIONS)}.")
+    print("       That is the pre-1.0.0 injector -- the six deleted strategies.")
+    print("       pip install --no-deps -e <the NoiseInject checkout you pulled>")
+    sys.exit(1)
+PYCHECK
+
 cd tests
 
 python alternative_data_noise_robustness.py \
     --datasets herg_ki \
     --models SVM \
     --reps PDV \
+    --conditions gaussian grouped_wider grouped_shifted censoring \
     --results-root results/validation_rerun/pdv_herg
 
 echo "Done: SVM x PDV x herg"

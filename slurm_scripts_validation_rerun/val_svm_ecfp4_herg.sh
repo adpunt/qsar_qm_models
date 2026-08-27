@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=val_SVM_sns_herg
+#SBATCH --job-name=val_SVM_ecfp4_herg
 #SBATCH --output=slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -120,8 +120,8 @@ cd tests
 python alternative_data_noise_robustness.py \
     --datasets herg_ki \
     --models SVM \
-    --reps SNS \
+    --reps ECFP4 \
     --conditions gaussian grouped_wider grouped_shifted censoring \
-    --results-root results/validation_rerun/sns_herg
+    --results-root results/validation_rerun/ecfp4_herg
 
-echo "Done: SVM x SNS x herg"
+echo "Done: SVM x ECFP4 x herg"

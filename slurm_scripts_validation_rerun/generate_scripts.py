@@ -7,11 +7,13 @@ This avoids race conditions from parallel jobs writing the same file.
 
 After all jobs complete, run merge_results.py to combine into results/validation/.
 """
+import argparse
+import json
 import os
+from pathlib import Path
 
 MODELS_ALL = ['RF', 'QRF', 'XGBoost', 'DNN', 'GP', 'NGBoost', 'SVM', 'LightGBM']
-MODELS_NO_GP = ['RF', 'QRF', 'XGBoost', 'DNN', 'NGBoost', 'SVM', 'LightGBM']
-NON_PDV_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained']
+ALL_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained', 'PDV']
 
 KIRBY_DIR = '/data/stat-cadd/scat9264/KIRBy'
 QSAR_DIR = '/data/stat-cadd/scat9264/qsar_qm_models'
@@ -37,6 +39,27 @@ DATASETS = [
     ('caco2', 'caco2'),
     ('herg', 'herg_ki'),
 ]
+
+# ---------------------------------------------------------------------------
+# Noise conditions -- read, never restated
+# ---------------------------------------------------------------------------
+# These jobs used to pass no --conditions at all, so they inherited the runner's
+# own NOISE_CONDITIONS literal (alternative_data_noise_robustness.py:168). That
+# literal contains outlier_p05, which noise_conditions.json lists under not_run:
+# it was retired on 2026-08-27 in favour of outlier_p10. Every one of these 87
+# scripts would have run a retired setting and skipped the settled one, silently,
+# because a condition name is not something a result file makes you look at.
+#
+# The fix is the rule the rest of the project already follows: read the settled
+# file, state the conditions on the command line, never restate them here. The
+# runner's --conditions carries choices=sorted(CONDITIONS), so a name this file
+# emits that the injector does not know stops the task at argument parsing
+# instead of part way through.
+NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
+_SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
+FULL_GRID = [c['name'] for c in _SETTLED['stage_1_full_grid']]
+DEPTH_ONLY = [c['name'] for c in _SETTLED['stage_2_depth_only']]
+RETIRED = [c['name'] for c in _SETTLED['not_run']]
 
 TIME_LIMITS = {
     'RF': '8:00:00',
@@ -127,6 +150,32 @@ python "$QSAR_DIR/scripts/check_environment.py" --validation-models {model} || {
     echo "ERROR: this interpreter cannot build {model}. See above."
     exit 2
 }}
+
+# The injector must be the redesigned one.
+#
+# The runner does `from noiseInject import CONDITIONS` at module scope, so a
+# stale checkout does not fail -- it runs the pre-1.0.0 scheme, where the six
+# strategies were one strategy at six doses and a level meant something else
+# entirely. The results look exactly like the new ones and are a different
+# experiment. The uncertainty jobs have carried this check since 2026-08-27;
+# these did not, and they use the same runner and the same injector.
+python - <<'PYCHECK' || exit 2
+import sys, inspect
+try:
+    import noiseInject
+    from noiseInject import CONDITIONS
+except Exception as exc:
+    print(f"ERROR: noiseInject does not import: {{type(exc).__name__}}: {{exc}}")
+    sys.exit(1)
+print(f"=== noiseInject: {{inspect.getfile(noiseInject)}} "
+      f"version {{getattr(noiseInject, '__version__', 'unknown')}}")
+missing = [c for c in {condition_list_py} if c not in CONDITIONS]
+if missing:
+    print(f"ERROR: this noiseInject does not know {{missing}}. Known: {{sorted(CONDITIONS)}}.")
+    print("       That is the pre-1.0.0 injector -- the six deleted strategies.")
+    print("       pip install --no-deps -e <the NoiseInject checkout you pulled>")
+    sys.exit(1)
+PYCHECK
 """
 
 # The header and the body are formatted SEPARATELY and concatenated, never
@@ -155,6 +204,7 @@ python alternative_data_noise_robustness.py \\
     --datasets {dataset_cli} \\
     --models {model} \\
     --reps {rep} \\
+    --conditions {conditions} \\
     --results-root results/validation_rerun/{rep_safe}_{dataset}
 
 echo "Done: {model} x {rep} x {dataset}"
@@ -220,10 +270,38 @@ def safe_name(rep):
 
 
 def main():
-    output_dir = os.path.dirname(os.path.abspath(__file__))
+    ap = argparse.ArgumentParser(
+        description='Generate the validation re-run job scripts.',
+        epilog='Conditions come from noise_conditions.json; this file does not choose them.')
+    ap.add_argument('--out-dir', default=None,
+                    help='Where to write the scripts (default: this directory). A test needs '
+                         'this: without it the only way to see what the generator emits is to '
+                         'run it, which overwrites the committed scripts. Probing it that way '
+                         'is what silently rewrote all 87 of them on 2026-08-27.')
+    ap.add_argument('--include-depth-conditions', action='store_true',
+                    help=f'Also run the depth-only conditions ({", ".join(DEPTH_ONLY)}). '
+                         f'Off by default: RERUN_PLAN.md 6.3 puts them in the depth run, so '
+                         f'they enter the experimental datasets only if that is run here too. '
+                         f'Adds {len(DEPTH_ONLY)} of {len(FULL_GRID) + len(DEPTH_ONLY)} '
+                         f'conditions, so roughly {100 * len(DEPTH_ONLY) // len(FULL_GRID)}% '
+                         f'more compute.')
+    args = ap.parse_args()
+
+    conditions = list(FULL_GRID) + (list(DEPTH_ONLY) if args.include_depth_conditions else [])
+    bad = [c for c in conditions if c in RETIRED]
+    assert not bad, f"retired condition(s) reached the job scripts: {bad}"
+    condition_args = ' '.join(conditions)
+
+    print(f"Conditions ({len(conditions)}, from {NOISE_CONDITIONS_FILE.name}): "
+          f"{condition_args}")
+    if not args.include_depth_conditions:
+        print(f"  depth-only, NOT run: {', '.join(DEPTH_ONLY)}  (--include-depth-conditions)")
+    print(f"  retired, never run:  {', '.join(RETIRED)}")
+
+    output_dir = args.out_dir or os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(output_dir, exist_ok=True)
     scripts = []
 
-    ALL_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained', 'PDV']
     for model in MODELS_ALL:
         for rep in ALL_REPS:
             # GP is PDV-only in the code
@@ -236,10 +314,12 @@ def main():
                                         partition='long',
                                         time_limit=TIME_LIMITS[model])
                     + PREAMBLE.format(kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR,
-                                      model=model)
+                                      model=model,
+                                      condition_list_py=repr(conditions))
                     + SLURM_BODY.format(dataset=dataset, dataset_cli=dataset_cli,
                                         model=model, rep=rep,
-                                        rep_safe=safe_name(rep))
+                                        rep_safe=safe_name(rep),
+                                        conditions=condition_args)
                 )
                 filename = f"val_{model.lower()}_{safe_name(rep)}_{dataset}.sh"
                 with open(os.path.join(output_dir, filename), 'w') as f:
@@ -251,7 +331,8 @@ def main():
     smoke = (
         SLURM_HEADER.format(safe_name='smoke', mem='128G', partition='short',
                             time_limit='1:00:00')
-        + PREAMBLE.format(kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR, model='RF SVM')
+        + PREAMBLE.format(kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR, model='RF SVM',
+                          condition_list_py=repr(conditions))
         + SMOKE_BODY.format(dataset=herg_path, dataset_cli=herg_cli)
     )
     with open(os.path.join(output_dir, 'smoke_test.sh'), 'w') as f:

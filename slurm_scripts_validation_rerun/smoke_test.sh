@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=val_SVM_sns_herg
+#SBATCH --job-name=val_smoke
 #SBATCH --output=slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --partition=long
-#SBATCH --time=16:00:00
+#SBATCH --partition=short
+#SBATCH --time=1:00:00
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
 #SBATCH --mail-type=END,FAIL
 
@@ -84,8 +84,8 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
 # (the HAS_* flags at alternative_data_noise_robustness.py:253-333) rather than
 # to stop -- so a missing package here is silent by design. This is seconds per
 # task and turns that into an exit 2 before any data is loaded.
-python "$QSAR_DIR/scripts/check_environment.py" --validation-models SVM || {
-    echo "ERROR: this interpreter cannot build SVM. See above."
+python "$QSAR_DIR/scripts/check_environment.py" --validation-models RF SVM || {
+    echo "ERROR: this interpreter cannot build RF SVM. See above."
     exit 2
 }
 
@@ -117,11 +117,48 @@ PYCHECK
 
 cd tests
 
+TESTDIR=results/validation_smoke_test/ecfp4_herg
+
+echo "=== STEP 1: RF x ECFP4 x herg (level 0.0 only) ==="
+python alternative_data_noise_robustness.py \
+    --datasets herg_ki \
+    --models RF \
+    --reps ECFP4 \
+    --sigmas 0.0 \
+    --results-root $TESTDIR
+
+if [ ! -f $TESTDIR/herg/all_results.csv ]; then
+    echo "FAIL: no output"
+    exit 1
+fi
+echo "Rows: $(wc -l < $TESTDIR/herg/all_results.csv)"
+
+echo ""
+echo "=== STEP 2: SVM x ECFP4 x herg (level 0.0, should merge with RF) ==="
 python alternative_data_noise_robustness.py \
     --datasets herg_ki \
     --models SVM \
-    --reps SNS \
-    --conditions gaussian grouped_wider grouped_shifted censoring \
-    --results-root results/validation_rerun/sns_herg
+    --reps ECFP4 \
+    --sigmas 0.0 \
+    --results-root $TESTDIR
 
-echo "Done: SVM x SNS x herg"
+echo "Rows: $(wc -l < $TESTDIR/herg/all_results.csv)"
+
+# The model column by NAME, not by position. `cut -d, -f6` was reading whatever
+# column happened to be sixth, and it silently reads the wrong one the moment a
+# column is added.
+MODELS=$(python -c "import pandas,sys; \
+print(' '.join(sorted(pandas.read_csv(sys.argv[1])['model'].unique())))" \
+    $TESTDIR/herg/all_results.csv)
+echo "Models: $MODELS"
+
+if echo "$MODELS" | grep -q RF && echo "$MODELS" | grep -q SVM; then
+    echo ""
+    echo "=== SMOKE TEST PASSED ==="
+else
+    echo ""
+    echo "=== FAIL: RF was overwritten by SVM ==="
+    exit 1
+fi
+
+rm -rf results/validation_smoke_test

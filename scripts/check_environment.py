@@ -91,10 +91,17 @@ QM9_MODELS = {
 # UNCERTAINTY_MODELS at :182. VBLL has no external package -- VBLLLayer is
 # written out in that file on top of torch -- so it maps to torch.
 #
-# The value is (modules, attr): EVERY module must import, and attr -- when it is
-# not None -- is looked up on the first of them and constructed. GP needs three
-# packages, and gauche or botorch missing is exactly the case that turned into a
-# silent skip before.
+# The value is (requirements, attr). Each requirement is either "module", or
+# "module:name" for a name that must exist inside it, or "module:a|b" when
+# either of two names will do. attr -- when it is not None -- is looked up on
+# the FIRST requirement's module and constructed.
+#
+# The ":name" form is not decoration. KIRBy does
+# `from torchhk import transform_model, transform_layer`, so a torchhk that
+# imports but has lost those two names sets HAS_BAYESIAN_TORCH = False and the
+# BNN rows are silently dropped -- which a plain `import torchhk` would not
+# catch. Same for botorch, where the fit function was renamed and KIRBy tries
+# the new name then falls back to the old one.
 VALIDATION_MODELS = {
     # the validation roster (slurm_scripts_validation_rerun MODELS_ALL)
     "RF": (("sklearn.ensemble",), "RandomForestRegressor"),
@@ -103,11 +110,11 @@ VALIDATION_MODELS = {
     "XGBoost": (("xgboost",), "XGBRegressor"),
     "LightGBM": (("lightgbm",), "LGBMRegressor"),
     "NGBoost": (("ngboost",), "NGBRegressor"),
-    "GP": (("gpytorch", "gauche", "botorch"), None),
+    "GP": (("gpytorch", "gauche", "botorch.fit:fit_gpytorch_mll|fit_gpytorch_model"), None),
     "DNN": (("torch",), None),
     # the uncertainty roster's additions (UNCERTAINTY_MODELS)
-    "BNN-Full": (("torchbnn", "torchhk"), None),
-    "MLP-BNN-Full": (("torchbnn", "torchhk"), None),
+    "BNN-Full": (("torchbnn", "torchhk:transform_model", "torchhk:transform_layer"), None),
+    "MLP-BNN-Full": (("torchbnn", "torchhk:transform_model", "torchhk:transform_layer"), None),
     "VBLL-Full": (("torch",), None),
     "MLP-VBLL-Full": (("torch",), None),
 }
@@ -294,7 +301,12 @@ def check_declared_requirements(failures, models):
         else:
             continue
         for mod in mods:
-            root = mod.split(".")[0]
+            # Requirements may be "module", "module.sub" or "module:name" -- take
+            # the top-level package. Splitting on "." alone left "torchhk:transform_model"
+            # intact, which matches nothing in VERSION_REPORT, so torchhk quietly
+            # dropped out of the requirements report the moment the ":name" form
+            # was introduced.
+            root = mod.partition(":")[0].split(".")[0]
             relevant.add(dist_of.get(root, root))
     relevant |= {"torch", "numpy", "scipy", "scikit-learn"}
     names = [n for n in VERSION_REPORT
@@ -852,14 +864,26 @@ def check_validation_models(models, failures, resource_failures):
         models = [m for m in models if m in VALIDATION_MODELS]
 
     for model in sorted(set(models)):
-        modules, attr = VALIDATION_MODELS[model]
+        requirements, attr = VALIDATION_MODELS[model]
 
-        def _build(modules=modules, attr=attr):
-            mods = [importlib.import_module(m) for m in modules]
+        def _build(requirements=requirements, attr=attr):
+            first = None
+            for req in requirements:
+                mod_name, _, wanted = req.partition(":")
+                mod = importlib.import_module(mod_name)
+                if first is None:
+                    first = mod
+                if wanted:
+                    options = wanted.split("|")
+                    if not any(hasattr(mod, o) for o in options):
+                        raise ImportError(
+                            f"{mod_name} imports but has none of {options}. KIRBy imports "
+                            f"that name at module scope, so this model would be silently "
+                            f"dropped from the run rather than failing.")
             if attr is not None:
-                getattr(mods[0], attr)()  # constructed, not merely imported
+                getattr(first, attr)()  # constructed, not merely imported
 
-        probe(f"{model:<16s} ({', '.join(modules)})", _build, failures, resource_failures)
+        probe(f"{model:<16s} ({', '.join(requirements)})", _build, failures, resource_failures)
     print()
 
 
