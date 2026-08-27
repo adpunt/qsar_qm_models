@@ -4732,6 +4732,87 @@ the Methods should say it.
 
 ---
 
+### 13.15 ✅ The roster level screen — the evidence the QM9 reporting level rests on
+
+`results/roster_level_screen.csv`, 420 rows, run 2026-08-27. QM9, PDV, 4,000 molecules per
+replicate drawn fresh, real Murcko scaffold split, noise on training labels only, scored on clean
+test labels. **Seven models, ten replicates, levels 0.5, 1.0 and 1.5 plus the clean baseline.**
+
+**Replicate 2 is excluded and named.** Both neural models diverged on it and so did Ridge in the
+earlier screen — it is a scaffold split those model families cannot fit, not a model fault. Nine
+replicates everywhere below.
+
+**Not in the screen, and why:** the quantile forest cannot be built in this environment
+(scikit-learn 1.3.2 rejects `monotonic_cst`); the Gaussian process segfaults in a process that has
+already loaded the boosting libraries (§2.8e); the four Bayesian variants are variants of the DNN and
+MLP. **Ridge is not in the study and is not here.**
+
+⚠️ **Each model was run in its own process.** Fitting the neural models and the boosting models in
+one process **hangs** — see §2.8e-ter, found doing exactly this. The replicate seeds depend only on
+the replicate index and the level, so the separate processes draw the same molecules, the same split
+and the same noise; XGBoost gives the same clean R² to four decimals either way.
+
+#### Median R² over nine replicates — plain Gaussian
+
+| Model | clean | 0.5 | 1.0 | 1.5 |
+|---|---|---|---|---|
+| **NGBoost** | **0.871** (last) | 0.860 | **0.836** | **0.798** |
+| DNN | 0.907 | 0.866 | 0.799 | 0.775 |
+| MLP | 0.902 | 0.854 | 0.791 | 0.772 |
+| SVM | 0.874 | 0.849 | 0.795 | 0.722 |
+| Random forest | 0.895 | 0.867 | 0.798 | 0.681 |
+| XGBoost | 0.903 | 0.872 | 0.783 | 0.639 |
+| LightGBM | 0.902 | 0.871 | 0.784 | 0.611 |
+
+#### Median R² — grouped-shifted noise
+
+| Model | 0.5 | 1.0 | 1.5 |
+|---|---|---|---|
+| NGBoost | 0.853 | 0.794 | 0.671 |
+| SVM | 0.826 | 0.744 | 0.597 |
+| Random forest | 0.857 | 0.765 | 0.589 |
+| XGBoost | 0.861 | 0.725 | 0.535 |
+| LightGBM | 0.857 | 0.726 | 0.502 |
+| MLP | 0.835 | 0.691 | 0.397 |
+| DNN | 0.833 | 0.682 | 0.363 |
+
+#### Which model is best, counted per replicate rather than averaged
+
+| Level | Winner |
+|---|---|
+| clean | LightGBM 3/9, DNN 2, XGBoost 2, MLP 2 |
+| 0.5 | LightGBM 4/9, MLP 2, forest 1, XGBoost 1, DNN 1 |
+| **1.0** | **NGBoost 8/9**, MLP 1 |
+| **1.5** | **NGBoost 7/9**, MLP 1, DNN 1 |
+
+#### 🔴 The result, and it is the study's argument in one line
+
+**The least accurate model on clean labels is by far the most robust.** NGBoost is last on clean
+data at 0.871 and first by a clear margin at both 1.0 and 1.5, winning 8 of 9 and 7 of 9 replicates.
+LightGBM is first on clean data and loses the most of anyone — 0.902 down to 0.611.
+
+**This is exactly what the paper set out to test**, and it is not visible at level 0.5, where the
+ordering is still the clean ordering and every model sits within 0.03 of its clean score.
+
+#### Why the QM9 reporting level is 1.0 rather than 1.5
+
+| | at 0.5 | at 1.0 | at 1.5 |
+|---|---|---|---|
+| Is the robustness result visible? | no | **yes, 8/9** | yes, 7/9 |
+| Grouped-shifted visible? | 0–3 of 9 | 9/9 neural, 1–4 of 9 trees | 6–9 of 9, every model |
+| Every model still fitting? | yes | yes | yes on QM9, **no on Caco-2** |
+
+1.5 shows the grouped-shifted result in every model rather than only the neural ones, which is its
+one advantage. It is outweighed by Caco-2, where two of four models fall below zero at 1.5 and the
+reporting level has to work on every dataset (§13.11).
+
+**What the paper must therefore say about grouped-shifted at level 1.0:** it damages both neural
+models in 9 of 9 replicates and the random forest and XGBoost in 1 of 9. That is a real finding —
+neural models are far more damaged by systematic family-level bias than trees are — and it has to be
+written as that, not as a single pooled claim.
+
+---
+
 ### 13.14 The run design — what runs, and what each part costs
 
 **Read off `slurm_scripts_qm9_rerun/generate_scripts.py` on 2026-08-27, not derived here.** Rebuild
