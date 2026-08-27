@@ -19,10 +19,8 @@
     "delivering the same amount of noise. Shape and contamination do not earn",
     "separate settings; direction does."
   ],
-
   "settled": "2026-08-27",
   "evidence": "RERUN_PLAN.md 13.9, NOISE_DESIGN.md 5.8",
-
   "stage_1_full_grid": [
     {
       "name": "gaussian",
@@ -41,7 +39,6 @@
       "why": "Values past the assay limit recorded as the limit. The most prevalent real mechanism, not zero-mean, and it cannot be dose-matched, so it runs on its own axis (fraction of labels clipped)."
     }
   ],
-
   "stage_2_depth_only": [
     {
       "name": "student_t_nu5",
@@ -53,11 +50,9 @@
     },
     {
       "name": "laplace",
-      "optional": true,
-      "why": "Indistinguishable from Gaussian on every model at both levels (largest 0.0058 R2). Its value in NOISE_DESIGN.md section 2 is citational -- it is the distribution actually fitted to real bioactivity differences -- not empirical. Dropping it saves 720 training runs and costs nothing but the citation."
+      "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every model at both levels tested (largest 0.0058 R2), so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
     }
   ],
-
   "not_run": [
     {
       "name": "student_t_nu10",
@@ -81,7 +76,6 @@
       "why": "A centred Gamma draw, asymmetric by draw rather than by mechanism. Tested in scripts/setting_selection_test.py and NOT built into either injector. Nothing at the reporting level; -0.045 R2 for the random forest alone at level 1.5 and nothing for the other two models. The asymmetry story is carried by censoring and by grouped_shifted, both of which are mechanisms with sources behind them rather than a chosen distribution."
     }
   ],
-
   "settings_that_follow": {
     "_comment": "The CLI defaults that make the single-setting decisions operative. Both injectors are tested against these.",
     "nu": 5.0,

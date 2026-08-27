@@ -1936,7 +1936,11 @@ two have been applied and one is answered by measurement:
 | ~~**Uncertainty calibration**~~ ✅ **SETTLED 2026-08-26 by measurement — RAW as primary**, calibrated kept as a labelled secondary. See §3.4.4f. Set in the shared spec as `UNCERTAINTY_DEFAULTS['primary_column']`; the figure script must now name the column it reads (chat J) | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
 | **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | ✅ **SETTLED 2026-08-26 — standardise.** Approved as part of chat C's plan and implemented: `CONTINUOUS_REPS` in `process_and_train.py` now covers PDV and all three learned embeddings, fitted on the training split. It changes every embedding number, which is why it is recorded here rather than left implicit |
 
-**Decision 4 — sign off the noise design.** ✅ **Almost entirely closed 2026-08-27.**
+**Decision 4 — sign off the noise design.** ✅ **CLOSED 2026-08-27.** Laplace is **kept, at depth**
+(*"Keep laplace"*) — out of the full grid on measurement, in the depth stage for the citation, 720
+runs. `noise_conditions.json` records it without the `optional` marker so the file states the
+decision rather than deferring it. `NOISE_DESIGN.md` §7 now has nothing open. The record of what the
+decision rested on:
 The condition set is settled (§13.9) and enforced by `noise_conditions.json` plus a gate on each
 side. The positive-control question is answered by censoring (§3.2). **What is left is one narrow
 yes/no: is Laplace queued at depth at all?** It is out of the full grid — measured indistinguishable
@@ -2716,7 +2720,7 @@ Nothing here is started. Steps 1 and 2 are the only ones that need you.
 | # | Step | Blocked on |
 |---|---|---|
 | 1 | Settle the five open decisions in §4 (the sixth was withdrawn — already decided 2026-08-14) | you |
-| 2 | **One decision, not a document.** `NOISE_DESIGN.md` §7 is down to a single open item — whether Laplace is queued **at depth**, now that it is out of the full grid on measurement (§13.9). 720 runs, and it buys a citation rather than a result. The dose-matching rule was approved 2026-08-21; the positive-control question and the level grids were closed 2026-08-26; the condition set was settled 2026-08-27. Context is §4 Decision 4 and §13.5 | you |
+| 2 | ✅ **CLOSED 2026-08-27 — `NOISE_DESIGN.md` §7 has nothing open.** Laplace is kept at depth, the dose-matching rule was approved 2026-08-21, the positive-control question and the level grids were closed 2026-08-26, and the condition set was settled 2026-08-27 | — |
 | 3 | **Do NOT blanket-cancel the Gaussian-process jobs.** I previously said to kill job range 12822669–12822694. That was wrong: you submitted them deliberately on 2026-08-19 to settle a live question — *"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* Their zero-noise rows answer that question whatever happens to the noise scheme, because no noise is drawn there. **Let the zero-noise point land, harvest the kernel comparison, then cancel the rest.** Check state first: `sacct -j 12822669-12822694 --format=JobID,JobName%24,State,Elapsed` | you |
 | 4 | Archive the current results before anything overwrites them — they are the only record of what the paper claims today | — |
 | 5 | Delete and build the noise scheme in Rust (§5.1 items 1–4) | 2 |

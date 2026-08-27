@@ -1693,7 +1693,14 @@ verified flat across noise types.**
 
 ### Still open
 
-**1. Is Laplace worth one extra run — at depth?** *(Built and verified either way — chat A,
+**Nothing.** The last item closed 2026-08-27.
+
+**1. ✅ CLOSED 2026-08-27 — Laplace is kept, at depth.** *("Keep laplace".)* It runs in the depth
+stage and not in the full grid. `noise_conditions.json` carries it without the `optional` marker, so
+the file now says what was decided rather than leaving it to whoever reads it. The reasoning below
+stands as the record of what the decision was made on.
+
+**The question as it was:** *(Built and verified either way — chat A,
 2026-08-26. Nothing is blocked on this: it is a question of whether the condition is queued, not
 whether it exists.)*
 
