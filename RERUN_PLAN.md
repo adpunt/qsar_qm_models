@@ -2141,6 +2141,39 @@ for a *group-keyed* one: a predicted label does not change a molecule's scaffold
 shape is identical to the true one. Measured on both datasets — the two correlations agree to every
 digit. Report it for censoring; do not report it as a control for the grouped conditions.
 
+### 3.1e ✅ FIXED 2026-08-27 — the out-of-fold pass asked for validation rows no model fits
+
+**Found by running the pilot, not by reading it.** The first NGBoost cell died at the guard:
+*the model fits 4000 rows but the recorded noise covers 4250*.
+
+When the author settled on 2026-08-27 that **no model stacks validation into its training set**
+(§2.12), the fitting code changed and the provenance slices did not. Three of the five callers in
+`models/models.py` went on describing the old regime: the forest took the `slice(None)` default,
+and NGBoost and the Gauche GP each passed the first half of validation. Every one of them asked
+the recorded noise for molecules its model no longer sees.
+
+**The out-of-fold pass was therefore dead for all three tree and kernel uncertainty models** from
+the moment the merge was removed, and it would have taken the deep run with it. The guard refused
+rather than attributing one molecule's noise to another — which is the original QM9 defect, and
+exactly what the guard is for.
+
+`val_slice` now defaults to `None`, so forgetting is the safe case; a family that genuinely fits
+part of validation has to say so. Proved on QM9 at 5,000 molecules, ECFP4, level 1.5, three
+cross-fit folds: NGBoost and the quantile forest each wrote 4,000 out-of-fold rows against 4,000
+fitted, 3 of 3 inner folds, R² 0.695 and 0.713.
+
+✅ **The experimental pipeline does not have it.** `KIRBy`
+`tests/alternative_data_noise_robustness.py` never merges validation into training — there is no
+`vstack` or `concatenate` in the file — and both out-of-fold calls (`:1542` tree, `:1716` neural)
+pass `X_train` with the `y_noisy` drawn for that same split. Checked, not assumed.
+
+⚠️ **Two things this says about the QM9 uncertainty results that already exist.** Any QM9 run made
+with cross-fitting since the merge was removed wrote **no training rows at all** for the quantile
+forest, NGBoost or the Gaussian process — the question about which molecules were corrupted has
+never been answerable from them. And the local environment hid it: every QRF fit on this laptop
+raises `Invalid parameter 'monotonic_cst'` (scikit-learn 1.3.2 against a 1.6.1 pin), so the one
+model most likely to have surfaced this never ran here.
+
 ### 3.2 What the noise redesign does to the uncertainty questions
 
 Nobody has written this down, and it is the one place where the two workstreams collide.
