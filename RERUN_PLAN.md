@@ -2060,7 +2060,7 @@ is real, and it is fixed.
 
 **Every check was broken on purpose to see it go red.**
 `scripts/check_fixes_fail_when_removed.py` edits the real file, runs the check,
-and puts the file back. Twenty cases now; of the first twelve, ten went red
+and puts the file back. Twenty-four cases now; of the first twelve, ten went red
 first time and **two stayed green**, which is the point of running it:
 
 - The QM9 split check asserted each split is more than 10% acyclic. Under
@@ -2071,7 +2071,7 @@ first time and **two stayed green**, which is the point of running it:
   did not guard the name rule at all. Its fixture's manifest now carries the
   results columns.
 
-**The checks.** Fourteen suites, all executing, none matching source text:
+**The checks.** Eighteen suites, all executing, none matching source text:
 
 | where | what it guards |
 |---|---|
@@ -2084,10 +2084,12 @@ first time and **two stayed green**, which is the point of running it:
 | `scripts/test_spec_is_live.py` | changing the spec changes what is built |
 | `scripts/test_generated_job_flags.py` | every flag the generator emits is one the program has |
 | `scripts/test_uncertainty_writer.py`, `test_record_alignment.py` | as before |
-| `rust/tests/` (33) | the injector, and the record writer |
+| `rust/tests/` (33 — 28 injector gates, 5 writer guards) | the injector, and the record writer |
+| `scripts/test_noise_arms.py` | both injectors deliver the same amount on the shifted grouped condition, under all three shapes |
 | KIRBy `tests/smoke/smoke_kirby_splits.py` | scaffold key, acyclic groups, the validation carve |
 | KIRBy `tests/smoke/smoke_kirby_target_scaling.py` | what the models are fitted on, and the noise pattern |
 | KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce, and a model with no rows is named |
+| KIRBy `tests/smoke/smoke_kirby_dose_error.py` | a fatal injection failure reaches the surface instead of being swallowed as one printed line |
 | `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |

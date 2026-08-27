@@ -158,8 +158,9 @@ CASES = [
 
  # Swallow the injector's dose failure the way an ordinary model failure is
  # swallowed: the cell vanishes as one printed line and the job finishes green
- # having reported a noise level it never received.
- ("a failed injection stops the run instead of vanishing",
+ # having reported a noise level it never received. The injector warns rather
+ # than raising today, so this guards the route rather than a live failure.
+ ("a fatal injection failure reaches the surface",
   f"{KIRBY}/tests/alternative_data_noise_robustness.py",
   "                except (RunIntegrityError, DoseError):",
   "                except (RunIntegrityError,):",
