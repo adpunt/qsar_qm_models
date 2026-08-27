@@ -1466,6 +1466,190 @@ on any repeated top-level definition.
 
 ---
 
+### 2.13b ✅ FIXED 2026-08-27 (chat E) — 'ECFP4' was not ECFP4
+
+The QM9 side computed `ecfp4` with `rdk_fingerprint_mol`, which is
+`RDKFingerprintMol` — RDKit's **path** fingerprint. The experimental side computes
+`rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)`, which is what
+ECFP4 means.
+
+Measured on the first 1,500 QM9 molecules: **the two agreed on 0 of 1,500.**
+Methane, ammonia and water came back **all zero** under the path fingerprint,
+because a molecule with one heavy atom has no bond paths — and those rows passed
+the featurisation gate, which only refuses a fingerprint that FAILED to compute.
+
+The rdkit-sys binding exposes only `morgan_fingerprint_mol`, hardcoded to radius
+3, so there was no route to radius 2 on the Rust side at all. ECFP4 is computed in
+Python now and carried through the record, like Avalon; `prepare_ecfp4` and its
+binding are deleted. The Python writer refuses an all-zero fingerprint by name,
+and an all-zero block reaching Rust is recorded as a featurisation failure.
+
+**The check:** `scripts/test_ecfp4_identity.py`, and a real QM9 run: 240 of 240
+dumped training rows match a direct Morgan radius-2 fingerprint, 0 of 240 match
+the old one. ⚠️ **Every QM9 ECFP4 result is void.**
+
+### 2.13c ✅ FIXED 2026-08-27 (chat E) — the QM9 split trained on a population it never scored
+
+`dc.splits.ScaffoldSplitter` keys on `MurckoScaffoldSmiles`, which returns the
+EMPTY STRING for an acyclic molecule, and does not special-case it — so every
+acyclic molecule joined one pseudo-group, and DeepChem fills training from the
+largest group first.
+
+Measured on the first 2,000 QM9 molecules: **851 (42.5%) are acyclic, and they
+were 53.2% of training and 0.0% of validation and of test.** Half the training
+population never appeared in what the models were scored on.
+
+`scaffold_split_indices` replaces it: each acyclic molecule is its own group (as
+QM9's own noise grouping and the experimental pipeline's CV grouping already do),
+and groups are filled in a seeded random order rather than largest-first —
+largest-first leaves the singletons for the held-out splits, which made validation
+100% acyclic and test 82%. Same 2,000 molecules now: 39.6 / 65.5 / 43.0% against a
+population of 42.5%, and **0 scaffold groups shared between train and test.**
+
+**The check:** `scripts/test_qm9_split_alignment.py`.
+
+### 2.13d ✅ FIXED 2026-08-27 (chat E) — the experimental pipeline's splits and targets
+
+Four faults, each measured, each with a check that carries the old rule as a
+control (`KIRBy tests/smoke/smoke_kirby_splits.py`,
+`smoke_kirby_target_scaling.py`, `smoke_kirby_merge.py`).
+
+- **The CV scaffold key carried stereochemistry.** `Chem.MolToSmiles` defaults to
+  `isomericSmiles=True`, so stereoisomers of one framework landed in different
+  groups and could be split between train and test — while `create_ecfp4` leaves
+  `includeChirality` False, so those molecules are bit-identical in the
+  fingerprint. Test rows whose ECFP4 vector is identical to a training molecule's
+  in their own fold: **LogD 263/5,039 = 5.22% → 4/5,039 = 0.08%; Caco-2 72/2,161 =
+  3.33% → 2/2,161 = 0.09%; hERG 20/1,415 = 1.41% → 0/1,415 = 0.00%.** QM9 was
+  chirality-blind all along, so this is also what makes 'scaffold split' one
+  protocol.
+- **The early-stopping split was the first fifth of each fold's training block in
+  alphabetical SMILES order.** It shared scaffolds with training, and the same
+  low-index molecules sit at the front of four folds out of five. On a
+  600-molecule/120-group fixture: **5 scaffold groups in both training and
+  validation, and 112 of 600 molecules (19%) in no training set in any fold.**
+  Both are 0 under `scaffold_validation_carve`.
+- **The target was raw log units on the tree and kernel path** while QM9 fits every
+  model on a z-scored label, and the shared spec is written for a unit-variance
+  target — SVR's `epsilon` 0.1 is a tenth of a standard deviation on QM9 and a
+  large dead zone on a label whose spread is a few tenths of a log unit. Both
+  sides z-score now, **fitted on the CLEAN training labels**: the noisy target's
+  spread grows with the dose (1.0000 at level 0, 1.5984 at 0.6 on the fixture)
+  instead of being renormalised back to 1 at every level, which is what made the
+  same nominal level a different optimisation problem.
+- **`noise_pattern` described an injection that never happened.** It is the
+  level-free shape the zero-level subtraction rests on, and WHO gets hit was
+  seeded from the injector's seed, which carries the level. Measured on a
+  120-molecule fixture: for `outlier_p10` the pattern and the realised scale had
+  **Spearman −0.101 and −0.087**, top-15% overlap **3/18 and 4/18**; for
+  `grouped_wider`, 0.375 and −0.250. `NoiseInjectorRegression` gained an optional
+  `selection_state` (defaulting to `random_state`, so nothing else changes) and
+  the runner pins it to (stream, condition) with no level. Now **Spearman 1.000
+  and 18/18 at every level.**
+
+Also closed here: a `--conditions` job rewrote `all_results.csv` and `summary.csv`
+with its own rows alone and destroyed every other condition in the file — the
+merge guard knew about `--models` and `--reps` and not about the flag the runbook
+says the jobs are split by. The neural stream is seeded per cell, so a
+`--models BNN-Full` job reproduces the same cell as a full-roster job. A fit whose
+validation loss is never finite raises instead of losing the cell to
+`load_state_dict(None)`. A representation that failed to build stops the job, and
+so does an all-zero feature row.
+
+### 2.13e ✅ FIXED 2026-08-27 (chat E) — the uncertainty columns were the wrong quantity
+
+- **The Gaussian process reported the LATENT posterior spread**, not the
+  predictive one: `model(x)` rather than `likelihood(model(x))`, so the
+  observation noise was excluded — while `total = sqrt(posterior_variance +
+  likelihood_noise)` was computed on the very next line and thrown away. A
+  coverage number is a statement about observations.
+- **VBLL reported the spread of its Monte Carlo passes**, which is the epistemic
+  term alone, and discarded the layer's learned observation noise. Measured on a
+  fixture: total 1.1117 against an MC spread of 0.9926. A plain BNN has no learned
+  noise, so nothing moves there.
+- **The Graph GP's per-molecule uncertainty was one constant** —
+  `np.ones(n) * sqrt(best_noise)`. The posterior variance is computed from the
+  Cholesky factor already in scope; 8 distinct values on a fixture where the old
+  rule gave 1.
+- **Three unpack faults meant no graph-model uncertainty could ever be written:**
+  `decompose_uncertainty_gp` and `decompose_uncertainty_sampling` return three
+  values and were unpacked into two, and the second was called with one argument
+  where it takes two.
+- `train_ntk_gnn` takes the three noisy-label arrays and reads none of them —
+  it reads `data.y`, so it would be trained and scored on CLEAN labels at every
+  level and its flat curve would read as robustness. It refuses by name.
+
+### 2.14 The audit of 2026-08-26, closed
+
+All 151 candidates in `research_archive/audit_2026_08_26/` now carry a verdict.
+`unverified.json` is empty; `verdicts.json` holds all 111 with the evidence for
+each; `confirmed_35.json` and `refuted_5.json` each carry a
+`recheck_2026_08_27` field.
+
+| | count |
+|---|---|
+| real, fixed | 75 |
+| real, still open — yours to decide | 14 |
+| duplicate of another entry | 14 |
+| partly fixed | 4 |
+| refuted | 2 |
+| not a fault | 2 |
+
+Of the 35 already marked confirmed: 27 real and fixed, 7 plain duplicates (four
+entries for the ECFP4 fault alone, two for each graph-model unpack), 1 still open.
+Of the 5 marked refuted: three refutations stand, one is half-real (the
+validation-stacking half was real and is fixed), and **one is misfiled** — entry 4,
+the Graph GP constant, is refuted in name while its own evidence confirms it. It
+is real, and it is fixed.
+
+**The checks.** Fourteen suites, all executing, none matching source text:
+
+| where | what it guards |
+|---|---|
+| `scripts/test_qm9_split_alignment.py` | the graph models' molecules, labels and split composition |
+| `scripts/test_ecfp4_identity.py` | ECFP4 is Morgan radius 2 on both sides |
+| `scripts/test_figure_conditions.py` | conditions, the level axis, the uncertainty column, sibling files |
+| `scripts/test_result_row_condition.py` | the condition on the row, the manifest header, the manifest join |
+| `scripts/test_no_shadowed_definitions.py` | no definition in either pipeline is shadowed |
+| `scripts/test_bnn_kl_term.py` | the Bayesian networks are fitted on the ELBO |
+| `scripts/test_spec_is_live.py` | changing the spec changes what is built |
+| `scripts/test_generated_job_flags.py` | every flag the generator emits is one the program has |
+| `scripts/test_uncertainty_writer.py`, `test_record_alignment.py` | as before |
+| `rust/tests/` (33) | the injector, and the record writer |
+| KIRBy `tests/smoke/smoke_kirby_splits.py` | scaffold key, acyclic groups, the validation carve |
+| KIRBy `tests/smoke/smoke_kirby_target_scaling.py` | what the models are fitted on, and the noise pattern |
+| KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce |
+| KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
+
+**Still yours.** Fourteen entries are real and unfixed because fixing them is a
+decision, not a repair:
+
+1. **Which auc_norm the paper reports** (§2.12). Both columns are written now.
+2. **`--calibration-size`** for the conformal models: honour it, or refuse it by
+   name. Nothing uses it today and the whole validation split is the calibration
+   set, which is the better estimator now that no model trains on it.
+3. **The heteroscedastic and evidential heads.** Their predicted variance is
+   sliced off at every prediction site, so they report the same quantity as a
+   plain MC-dropout network. Neither loss is in the roster. Making the head's
+   variance the reported aleatoric term changes what those models are.
+4. **`grouped_shifted` off-registry**, and the naming of off-registry conditions.
+   Latent: the settled roster pairs it with Gaussian only, where all three
+   implementations coincide.
+5. **Table 4's pooling** across noise levels, and the cross-dataset figure's
+   pooling across conditions and representations. The report now says out loud
+   what is pooled; computing them per level changes the table's shape.
+6. **`rmse` and `mae` in different units** across the two pipelines. Recoverable —
+   the standardisation constants are on every QM9 uncertainty row now.
+7. **hERG N.** `paper.tex` says 1,482; the cached extract holds 1,415, and so does
+   the module docstring. The loader reproduces 1,415 exactly.
+8. The remaining spec literals in models.py (batch size, the MC pass count, the
+   flexible/conformal hidden sizes), the retired-scheme methods figure, and the
+   latent `randomized_smiles` routes — all listed in `verdicts.json`.
+
+`paper.tex` was not touched.
+
+---
+
 ## 3. Two pipelines, one design
 
 This is the structural fact that organises the whole re-run, and it was never written down
@@ -3533,15 +3717,19 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    Gaussian, and they do: every setting within 0.006 R² at the reporting level. **Stage 1 at four
    types is 25 level-conditions, 19,500 runs, and the staged total becomes 48% of the old design.**
 
-   ⚠️ **Correction to that arithmetic, 2026-08-27 (chat M).** "25 level-conditions" counts the clean
-   level once and shares it across the four conditions. The generator cannot do that yet, and it is
-   not the generator's call: `auc_norm` is a retention fraction anchored on the level-0 row *within*
-   each (model, representation, condition) group, so dropping level 0 from three of the four would
-   leave those three with nothing to normalise against. So it emits **28 level-conditions, 22,400
-   training runs across stages 0 and 1**, not 25 and 19,500 — 11% more. Those three extra cells are
-   bit-identical by construction, which makes them four independent tasks that must agree exactly:
-   a real check on the path that switches noise off. Sharing one anchor across conditions is a
-   figure-script change (chat J), and the 11% is available the day it lands.
+   ✅ **The 25 is now what actually runs, 2026-08-27 (chat M).** The clean level is trained ONCE, under
+   Gaussian, and copied into the other three conditions afterwards by
+   `slurm_scripts_qm9_rerun/copy_zero_rows.py`. At level 0 the pipeline does not add noise at all and
+   the replicate seed depends only on the replicate number, so the clean run is bit-identical
+   whichever condition it is labelled with — measured on 400 QM9 molecules, random forest on ECFP4,
+   all four conditions returning R² = 0.7579128047581825 and RMSE = 0.5176004014184159 to the last
+   digit. It cannot simply be left out, because `auc_norm` divides each condition's curve by that
+   condition's own clean accuracy, so a condition with no clean row produces nothing at all.
+
+   The copy refuses to overwrite a clean row a job actually computed: it checks that row against the
+   reference instead and stops the whole copy if any disagrees, which turns every resubmitted clean
+   task into a free four-way agreement test on production data. Proven both ways — three rows copied
+   into empty files, then a corrupted row detected and the copy refused, exit 1.
 4. ⏸️ **NOT A DECISION YET, 2026-08-27.** It is chosen from the screen's output, and the generator already refuses to build the deep run without explicit choices, so nothing can run ahead of it. **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
    it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
@@ -4336,10 +4524,12 @@ remove the Gaussian-process cap, and repeat seeds on the experimental side.
 
 ---
 
-#### Chat L — Work through all 151 audit candidates 🔴 TODO
+#### Chat L — Work through all 151 audit candidates ✅ DONE 2026-08-27 (see §2.10b–§2.14)
 
-**Does:** finishes the full audit of both pipelines run on 2026-08-26. Every candidate gets a
-verdict. **All of them, cosmetic included — the author's instruction.**
+**Done.** All 151 carry a verdict: 75 real and fixed, 14 real and still yours to decide, 14
+duplicates, 4 partly fixed, 2 refuted, 2 not faults. `unverified.json` is empty and
+`verdicts.json` holds the evidence for each. The tally, the fourteen checks and the fourteen
+open decisions are in §2.14. The findings themselves are §2.10b–§2.13e.
 
 **Where everything is.** `research_archive/audit_2026_08_26/`:
 

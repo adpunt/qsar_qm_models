@@ -52,14 +52,25 @@ and level 0 is one seventh of the cost.
 **Stage 0: 14 array scripts, 320 tasks**, each 7 training runs — 2,240 training runs.
 **Stage 1: the same 320 tasks**, each 63 training runs — 20,160. **22,400 in total.**
 
-Three of the four conditions repeat the level-0 cell, which is bit-identical every
-time because level 0 switches the noise path off. That is 11% of the grid, and it is
-kept because the figure script anchors retention on the level-0 row *within* each
-(model, representation, condition) group, so dropping it would leave three quarters
-of the conditions with nothing to normalise against. It also gives four independent
-tasks that must agree exactly, which is a real check on the level-0 path. Sharing one
-anchor across conditions is a figure-script change, and `RERUN_PLAN.md` §13.1 prices
-the grid as though it had already happened.
+**The clean level runs once, under Gaussian, and is copied into the other three.**
+At level 0 the pipeline does not add noise at all, and the replicate seed depends only
+on the replicate number, so the clean run is bit-identical whichever condition it is
+labelled with — measured on 400 QM9 molecules, random forest on ECFP4, all four
+conditions returning R² = 0.7579128047581825 and RMSE = 0.5176004014184159 to the last
+digit. Running it four times would spend 11% of the grid recomputing a number already
+on disk.
+
+It cannot simply be left out, because `auc_norm` divides each condition's curve by that
+condition's own clean accuracy, so a condition with no clean row produces nothing. After
+the array finishes, run:
+
+```bash
+python copy_zero_rows.py --results ../results
+```
+
+It refuses to overwrite a clean row a job actually computed — it checks that row against
+the reference instead, and stops the whole copy if any of them disagrees. Run it again
+after any resubmission; it does not duplicate.
 
 ### What is in, and what is deliberately out
 
@@ -114,6 +125,16 @@ cd rust && cargo build --release && cd ..
 ls -l rust/target/release/rust_processor      # must exist and be executable
 ```
 
+> 🔴 **Checked on the cluster 2026-08-27: the binary there was built on 27 February** —
+> six months old, and months before the noise redesign. Its command-line flags have
+> changed since (`--sigma` and `--noise-strategy` are refused by name), so it is not
+> merely stale, it cannot be driven by the current pipeline. Rebuilding is not
+> optional. Confirm the date afterwards:
+>
+> ```bash
+> ls -l --time-style=full-iso rust/target/release/rust_processor
+> ```
+
 Confirm the fix is in the binary you just built:
 
 ```bash
@@ -159,27 +180,39 @@ conda activate env_test
 python -c "import sys; print(sys.executable)"     # must NOT be under /apps/system
 python -m pip check | grep -i scikit-learn || echo "no scikit-learn conflicts"
 
-cd scripts && python check_environment.py --deep
+python scripts/check_environment.py --deep --validation
 ```
-
-`--deep` also imports `models/models.py` itself, which is the only check that
-proves the training code can start at all. It costs about a minute, which is why
-it is not in the per-task guard — the tasks run the fast form.
 
 `check_environment.py` names the interpreter, prints every relevant package
 version, **constructs** each model rather than importing its package, and fits
 the two that construct cleanly and fail on contact. It must end
 `OK: everything requested can be constructed`.
 
-If `env_test` is missing, `. setup.sh` builds it from `env.yml` — but note that
-setup.sh also runs four network `pip install` calls **on every invocation**, so
-every task in a 390-task campaign re-installs packages at startup. Build the
-environment once, interactively, before submitting.
+`--deep` adds the checks that cost minutes and belong in a preflight rather than
+a per-task guard: it imports `models/models.py` for real, checks that `env.yml`
+describes this interpreter, checks that `noiseInject` and `kirby` are importable,
+counts the **distinct** OpenMP runtime files a job would load, and runs the two
+failures that forced the environment rebuild — a LightGBM fit and a
+Gaussian-process fit with the boosting libraries already loaded. `--validation`
+adds the KIRBy roster. Run both flags: the environment is shared, and passing one
+half at the other's expense is exactly the trap (RERUN_PLAN.md §2.8i).
 
-### The other interpreter
+If `env_test` is missing or its threading check fails, rebuild it — **before a
+launch, never during one**. The copy-paste block is RERUN_PLAN.md §2.8i. Sourcing
+`setup.sh` is now cheap on the ordinary path: it installs the extras only when a
+hash of `env.yml` + `pip-constraints.txt` has changed, so a task in a 390-task
+array can no longer write into the shared environment while another reads it.
 
-`/data/stat-cadd/scat9264/py311-kirby` is a separate environment that the
-uncertainty work has used. Check it too if you submit anything against it:
+### The other interpreter — do not use it
+
+`/data/stat-cadd/scat9264/py311-kirby` is **missing eight of the packages the roster
+needs**, measured on the cluster 2026-08-27: `quantile_forest`, `gpytorch`, `gauche`,
+`botorch`, `torch`, `torchbnn`, `torchhk` and `torch_geometric`. It cannot build the
+neural, Bayesian, Gaussian-process or quantile-forest halves of the roster at all.
+
+This is the environment the two dead Gaussian-process jobs actually used. It is not
+worth repairing — nothing should be submitted against it. It is listed here so that
+the next person who finds it knows why, and checks rather than assumes:
 
 ```bash
 /data/stat-cadd/scat9264/py311-kirby/bin/python \

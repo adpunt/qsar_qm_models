@@ -139,6 +139,30 @@ CONDITION_FLAGS = {
     'laplace':         ('--noise-shape laplace --noise-targeting uniform', DOSE_LEVELS),
 }
 
+# The clean level is run ONCE, under the reference condition, and copied into the
+# others by copy_zero_rows.py after the array finishes.
+#
+# At level 0 the pipeline does not add noise at all -- it switches the noise step
+# off for every split -- and the replicate seed depends only on the replicate
+# number, so the clean run is bit-identical whichever condition it is labelled
+# with. Measured on 400 QM9 molecules with the random forest on ECFP4: all four
+# conditions returned R2 = 0.7579128047581825 and RMSE = 0.5176004014184159, to
+# the last digit.
+#
+# Running it four times costs 11% of the QM9 grid to recompute a number we
+# already have. It cannot simply be dropped, because auc_norm divides each
+# condition's curve by that condition's OWN clean accuracy, so a condition with
+# no clean row has nothing to divide by -- hence the copy.
+REFERENCE_CONDITION = 'gaussian'
+
+
+def levels_for(name, levels):
+    """The levels a condition actually runs. Only the reference runs the clean one."""
+    if name == REFERENCE_CONDITION:
+        return levels
+    return ' '.join(v for v in levels.split() if float(v) != 0.0)
+
+
 STAGE1_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']]
 STAGE2_CONDITIONS = STAGE1_CONDITIONS + [c['name'] for c in _SETTLED['stage_2_depth_only']]
 
@@ -154,7 +178,8 @@ for _group in ('stage_1_full_grid', 'stage_2_depth_only'):
                 f"does not know how to ask for it. Add it to CONDITION_FLAGS, or the study runs "
                 f"a set the job scripts cannot produce.")
         _flags, _levels = CONDITION_FLAGS[_name]
-        CONDITIONS[_name] = (_flags, _levels, _group == 'stage_1_full_grid', _entry['why'])
+        CONDITIONS[_name] = (_flags, levels_for(_name, _levels),
+                             _group == 'stage_1_full_grid', _entry['why'])
 
 _unused = sorted(set(CONDITION_FLAGS) - set(CONDITIONS))
 if _unused:
@@ -484,12 +509,13 @@ def main():
 
     # Every condition on the grid has the same number of levels, and the wall
     # clock is priced per training run, so one number covers the whole script.
-    level_counts = {len(CONDITIONS[c][1].split()) for c in conditions}
-    if len(level_counts) != 1:
-        raise SystemExit(f'conditions have different level counts {sorted(level_counts)}; the '
-                         f'--time request below assumes one number. Generate them separately.')
-    n_lev = level_counts.pop()
+    # The reference condition runs one level more than the others -- the clean one.
+    # The wall clock is requested for the longest, so no task is short of time.
+    n_lev = max(len(CONDITIONS[c][1].split()) for c in conditions)
     runs_per_task = n_lev * n_reps_run
+    if REFERENCE_CONDITION not in conditions:
+        print(f"  note: {REFERENCE_CONDITION} is not in this set, so nothing here runs the clean "
+              f"level and copy_zero_rows.py will have no source to copy from.")
 
     written = []
     grand = 0
@@ -523,7 +549,10 @@ def main():
     print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total")
     print(f"  conditions: {' '.join(conditions)}")
     print(f"  replicates: {n_reps_run}, numbered {first_iter}..{first_iter + n_reps_run - 1}")
-    print(f"  each task: {n_lev} levels x {n_reps_run} replicate(s) = {runs_per_task} training runs")
+    print(f"  each task: up to {n_lev} levels x {n_reps_run} replicate(s) = "
+          f"{runs_per_task} training runs")
+    print(f"  the clean level runs under {REFERENCE_CONDITION} only; "
+          f"copy_zero_rows.py fills in the rest afterwards")
     print(f"  grid total: {grand * runs_per_task:,} training runs")
     if args.sample_size != 10000:
         print(f"  ⚠ sample size {args.sample_size}, NOT the production 10000")
