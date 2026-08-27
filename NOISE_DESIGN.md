@@ -1749,32 +1749,82 @@ dose — the original confound, reproduced on demand.
 8. **The recorded noise reconstructs the label exactly**: `y_clean + epsilon == y_noisy`, every
    condition, every level.
 
-### 6.4 THE NOISE LEVELS — revised, and this supersedes the old σ ladder
+### 6.4 THE NOISE LEVELS — one shared ladder. This section is the only place they live.
 
-The old approach set one knob and let each noise type deliver whatever it delivered. That is
-gone. The revision has two parts, per §1:
+**✅ SETTLED 2026-08-27 by the author** (recorded in `RERUN_PLAN.md` §2.12). This supersedes both
+the old σ ladder and the per-dataset log-unit grids that stood here until 2026-08-27 — those are at
+the bottom of this section, kept only so the change is visible.
 
-**Experimental datasets — choose levels in log units, anchored to real assay error.**
+#### The ladder every dataset runs
 
-| Dataset | One unit of real error | Proposed levels (log units) |
+| | |
+|---|---|
+| **Levels** | **0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5** |
+| **Units** | a fraction of that fold's **clean training label spread** |
+| **Applies to** | QM9, logD, Caco-2 and hERG — all four, the same seven points |
+| **In code** | `DOSE_LEVELS`, `slurm_scripts_qm9_rerun/generate_scripts.py:101` |
+
+Set by the range-finding run (§5.5): below 0.2 the models are indistinguishable from clean, and 1.5
+is kept because it is the only level where the noise types separate at all.
+
+Each experiment runner multiplies the level by that fold's clean training spread before the dose
+reaches the injector, so the row's `sigma` stays the shared ladder and `level_units` reads
+`label_sd` on both sides.
+
+#### Censoring runs on its own axis
+
+| | |
+|---|---|
+| **Levels** | **0, 10, 20, 25, 30, 40, 50 %** of labels clipped |
+| **Units** | fraction of labels clipped — already dimensionless, so it is **not** scaled by the label spread |
+| **In code** | `CENSOR_LEVELS`, same file, `:105` |
+
+Censoring has no variance parameter and is not zero-mean, so it cannot be dose-matched. Set by the
+range-finding run (§5.5): there is no sharp knee, damage accelerates smoothly, serious around 20%
+and severe past 30%. Scaling this axis by a spread puts it outside [0, 1], which the smoke suite
+catches.
+
+#### What the shared ladder costs, and it belongs in the caption
+
+A level is no longer a stated multiple of assay error, and the multiple differs sixfold between
+datasets. At the top of the ladder logD carries about **11.9×** its 0.15 within-lab error, Caco-2
+about **1.9×** its 0.35, hERG about **2.5×** its 0.54. That asymmetry cannot be removed: one unit of
+real error is 0.13 of the label spread on logD and ≈0.8 on Caco-2, so whichever axis is held
+constant, the other varies. The old grids below held realism constant; this one holds comparability
+constant. §4c converts every published anchor onto this ladder; §4d gives the noise the experimental
+labels already carry before anything is injected.
+
+#### The reporting levels — which single level each table quotes
+
+Settled 2026-08-27 by the author. These are points on the ladder above, not a separate scale.
+
+| Dataset | Reporting level |
+|---|---|
+| QM9 | **1.0** |
+| logD | **1.0** |
+| Caco-2 | **0.2** |
+| hERG | not yet set |
+
+`0.25` is **not on the ladder** and cannot be reported. Every level runs on every dataset regardless,
+so a per-dataset reporting level costs no compute. `RERUN_PLAN.md` §13.11 records why the three
+differ and the one consequence on Caco-2.
+
+<details><summary>Superseded 2026-08-27 — the per-dataset log-unit grids that stood here</summary>
+
+Kept so the change is visible, and because §4's assay-error anchors are still live evidence. **Do
+not run these.**
+
+| Dataset | One unit of real error | Levels (log units) |
 |---|---|---|
 | logD | 0.15 within a lab; 0.50 between methods | 0, 0.15, 0.3, 0.5, 0.75, 1.0 |
 | Caco-2 | 0.35 between 11 labs | 0, 0.1, 0.2, 0.35, 0.5, 0.7 |
 | hERG | 0.54 (stand-in) | 0, 0.15, 0.3, 0.54, 0.8, 1.1 |
 
-Each grid brackets one unit of real error and runs to roughly twice it. Report the resulting
-fraction-of-spread alongside, because **one unit of real error is 0.13 of the label spread on
-logD but 0.76 on Caco-2** — a factor of six. A single shared ladder would mean six different
-experiments.
+Each grid bracketed one unit of real error and ran to roughly twice it. The reason they were
+replaced: two `auc_norm` values are on the same footing only if the axis under them is the same
+quantity over the same span, and these three axes were neither.
 
-**QM9 — no assay error exists**, so fraction-of-label-spread is the only honest axis.
-**Grid set by the range-finding run (§5.5): 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5.** Below 0.2 the
-models are indistinguishable from clean; 1.5 is retained because it is the only level where
-the noise types separate at all.
-
-**Censoring is swept separately** on its own axis — fraction of labels clipped — because it
-has no variance parameter and is not zero-mean. **Grid set by the range-finding run (§5.5): 0, 10, 20, 25, 30, 40, 50%.** There is no sharp
-knee — damage accelerates smoothly, becoming serious around 20% and severe past 30%.
+</details>
 
 ### 6.5 ORDER OF WORK — the noise scheme only
 
