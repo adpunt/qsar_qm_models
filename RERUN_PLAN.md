@@ -6604,7 +6604,14 @@ quantile forest, NGBoost and the Gaussian process) and the censoring name normal
 
 #### Chat H — Job scripts, preflight, gates, launch
 
-**Blocked** on A, B, C, D, E, G and the run design in §13.1.
+**Blocked** on the run design in §13.1. A, B, C, D, E and G are all done, so that is the only
+remaining block, and it applies to the QM9 half only.
+
+🟡 **The uncertainty half is already done, 2026-08-27 (§2.8j).**
+`slurm_scripts_uncertainty_rerun/` — generator, merge step, preflight and runbook — is off the six
+deleted noise types and onto the settled set, gated by
+`scripts/test_uncertainty_job_scripts.py`. What chat H still owns there is submitting it, and it
+should not be submitted before chat N has chosen the two lists.
 
 **Does:** regenerates one deduplicated set of job scripts from the settled design; wires every gate
 in §8 into a preflight that must pass; clears the caches; launches one task, then the grid.
@@ -6649,7 +6656,8 @@ hyperparameters anyone thinks it uses.
 
 #### Chat I — The uncertainty decomposition build
 
-🔴 **Blocked on chat F.** The author's assessment: *"seems like this needs a massive look. We really
+🔴 **UNBLOCKED 2026-08-27 — chat F is done, and nothing was updated here to say so.** This is now
+the largest open build in the plan and nothing is in front of it. The author's assessment: *"seems like this needs a massive look. We really
 need to discuss the objectives and what's going wrong. Another chat may have to handle that it feels
 big."* Agreed — it is the largest single build in the plan.
 
