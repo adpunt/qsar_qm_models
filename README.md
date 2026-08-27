@@ -18,13 +18,37 @@ Graph representations (GIN, GCN, GATv2, MPNN) exist for QM9 and are not in the
 job generator's roster.
 
 ### Machine Learning Models
-- **Standard Models**: Random Forest (RF), Support Vector Machine (SVM), Gradient Boosting (GB), and Gaussian Processes (GP).
+- **Standard Models**: Random Forest (`rf`), quantile forest (`qrf`), Support
+  Vector Machine (`svm`, RBF kernel), XGBoost (`xgboost`), LightGBM (`lgb`),
+  NGBoost (`ngboost`) and Gaussian processes (`gauche`, `gauche_rbf`).
 - **Graph-Based Neural Networks**: Includes GIN, GCN, and Co-Teaching methods.
 - **Custom Architectures**: Supports Gauche GP implementation and various deep learning models.
 
 ### Noise Simulation
-- Introduces controlled artificial noise (Gaussian, uniform, and other distributions) to simulate real-world variability.
-- Supports domain-specific noise injection with clustering-based sampling.
+
+Label noise is injected to simulate real assay error. The scheme was redesigned
+on 2026-08-26 (`NOISE_DESIGN.md`) and the old one is gone, not deprecated.
+
+A noise condition is a **shape** (how one draw is distributed) crossed with a
+**targeting rule** (who gets hit and how hard):
+
+- shapes: Gaussian, Student-t, Laplace
+- targeting: uniform, grouped-wider, grouped-shifted, outlier, censoring
+
+The **level** is the amount of noise actually **delivered** -- by default a
+fraction of the clean training labels' standard deviation, or the label's own
+units with `--dose-units label`. Every condition solves for whatever internal
+scale hits the level it was asked for, so the same number means the same amount
+of corruption under every condition. That was not true before: the six old
+strategies were one strategy at six doses, delivering between 0.49x and 2.00x
+the same amount at a common setting, and their whole apparent severity ordering
+was that.
+
+The settled condition set lives in `noise_conditions.json` and is read, never
+restated, by both injectors and by every job generator.
+
+⚠️ Held-out labels are never noised. Validation carries its own independently
+drawn noise, dosed against the **clean training** spread rather than its own.
 
 ### Efficiency
 - Memory-safe processing with Rust integration for pre-processing and data manipulation.
@@ -51,36 +75,86 @@ Install the necessary Python packages:
 pip install numpy torch torch-geometric rdkit bayesian-optimization altair pandas scikit-learn xgboost catboost deepchem polaris
 
 ### 3. Rust Requirements
-Ensure Rust is installed. Instructions are available at https://www.rust-lang.org/tools/install. Once installed, build the Rust processor:
-cd rust_processor
+Ensure Rust is installed. Instructions are available at https://www.rust-lang.org/tools/install.
+Once installed, build the processor (the crate lives in `rust/`, and the binary the pipeline
+looks for is `rust/target/release/rust_processor`):
+
+```bash
+cd rust
 cargo build --release
+cargo test --release          # 28 noise gates + 5 writer guards
+```
 
 ## Usage
 
 ### Running the Framework
 The framework uses command-line arguments for configuration. Below are the available arguments:
 
-#### Required Arguments
-- `-q`, `--qm_property`: The QM property to predict (e.g., `homo_lumo_gap`, `alpha`).
-- `-m`, `--models`: Models to use for prediction (e.g., `rf`, `svm`, `gb`).
-- `-r`, `--molecular_representations`: Molecular representations to use (e.g., `smiles`, `ecfp4`).
-- `-n`, `--sample-size`: Number of samples to use.
+The entry point is **`scripts/process_and_train.py`**.
+`scripts/run_qm_qsar_models.py` is superseded and no longer works against the
+current Rust binary.
 
-#### Optional Arguments
-- `--random-seed`: Random seed for reproducibility (default: `42`).
-- `-b`, `--bootstrapping`: Number of bootstrapping iterations (default: `1`).
-- `--sampling-proportion`: Proportion of the dataset to which artificial noise will be added.
-- `--noise`: Flag to generate artificial Gaussian noise (default: `False`).
-- `--sigma`: Standard deviation(s) of artificially added Gaussian noise.
-- `--distribution`: Distribution of artificial noise (default: `gaussian`).
-- `-t`, `--hyperparameter-tuning`: Enable hyperparameter tuning (default: `False`).
-- `-d`, `--dataset`: Dataset to run experiments on (`QM9` or PolarisHub datasets).
-- `-s`, `--split`: Method for splitting data (default: `random`).
+#### Required Arguments
+- `-m`, `--models`: model(s) to run, e.g. `rf svm lgb`.
+- `-r`, `--molecular_representations`: representation(s), e.g. `ecfp4 continuous_pdv`.
+
+#### Commonly used
+- `-d`, `--dataset`: dataset (default `QM9`).
+- `-t`, `--target`: property to predict (default `homo_lumo_gap`).
+- `-n`, `--sample-size`: molecules per repetition (default `10000`).
+- `-b`, `--repetitions`: repetitions, i.e. replicates (default `1`).
+- `-s`, `--split`: split method (default **`scaffold`**; every experiment in the
+  study uses scaffold splits).
+- `--random-seed`: random seed (default `42`).
+- `-f`, `--filepath`: where to write the results CSV.
+
+#### Noise
+- `--noise-level`: one or more levels. The amount **delivered**, not a knob
+  (default `0.0`). For censoring it is the fraction of labels clipped instead.
+- `--dose-units`: `spread` (a fraction of the clean training label standard
+  deviation, the default) or `label` (the label's own units, e.g. log units on
+  the experimental datasets).
+- `--noise-shape`: `gaussian`, `student_t` or `laplace`.
+- `--noise-targeting`: `uniform`, `grouped_wide`, `grouped_shift`, `outlier` or
+  `censoring`.
+- Condition parameters: `--nu`, `--noise-lambda`, `--group-fraction`,
+  `--group-variance-share`, `--outlier-p`, `--censor-side`. Their defaults are
+  the settled values and are sourced in `NOISE_DESIGN.md`.
+
+> **Retired flags are refused by name, not ignored.** `--sigma`,
+> `--distribution`, `--noise-strategy` and `--strategy-params` all exit with a
+> message naming the replacement. A job script written against the old scheme
+> would otherwise run silently under the new one, where the level means
+> something different.
 
 #### Example
-python scripts/run_qm_qsar_models.py -q homo_lumo_gap -m rf svm -r ecfp4 smiles -n 10000 --noise True --sigma 1.0 --distribution gaussian
 
-This command predicts the `homo_lumo_gap` property using RF and SVM models with ECFP4 and SMILES representations, introducing Gaussian noise with a standard deviation of 1.0.
+Run it **from `scripts/`** — that is what the job scripts do (`cd scripts` first),
+and the default output path is relative to it.
+
+```bash
+cd scripts
+python process_and_train.py \
+    -d QM9 -t homo_lumo_gap \
+    -m rf lgb -r ecfp4 continuous_pdv \
+    -n 10000 -b 10 -s scaffold \
+    --noise-level 0.0 0.5 1.0 --noise-shape gaussian --noise-targeting uniform \
+    -f ../results/example.csv
+```
+
+Random forest and LightGBM on ECFP4 and PDV, ten replicates of 10,000 molecules
+on a scaffold split, at three noise levels: none, half the clean training label
+spread, and one whole spread.
+
+#### Before submitting anything to a cluster
+```bash
+python scripts/check_environment.py --deep --validation
+```
+It names the interpreter, **constructs** each model rather than importing its
+package, and runs the two fits that fail on contact in a bad environment. The
+job scripts run a cheap version of it themselves -- `--models <label>` for the
+QM9 family, `--validation-models <label>` for the validation and uncertainty
+families, which use a different set of model names.
 
 ### Warnings to Ignore
 Warnings such as:
@@ -111,7 +185,19 @@ cd rust && cargo test --release
 | `scripts/test_spec_is_live.py` | changing a value in `models/model_defaults.py` changes what is built |
 | `scripts/test_generated_job_flags.py` | every flag the job generator emits is one the program has |
 | `scripts/test_uncertainty_writer.py` | the per-molecule uncertainty writer and both its call sites |
+| `scripts/test_uncertainty_stats.py` | the uncertainty statistics, against data whose answer is known by construction |
 | `scripts/test_record_alignment.py` | the packed record cannot be silently misaligned |
+| `scripts/test_config_isolation.py` | two tasks running at once cannot corrupt each other's data |
+| `scripts/test_failure_propagation.py` | a failure inside the noise injector stops the run |
+| `scripts/test_avalon_failure.py` | Avalon refuses an unparseable molecule instead of returning zeros |
+| `scripts/test_embedding_storage.py` | the learned embeddings are stored without damaging their geometry |
+| `scripts/test_injector_wiring.py` | the Python noise wiring, on a machine with no training stack |
+| `scripts/test_noise_conditions.py` | the settled condition set binds the Python injector too |
+| `scripts/test_uncertainty_job_scripts.py` | every uncertainty job's command line, through the runner's own parser |
+| `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
+| `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
+| `scripts/check_environment.py` | this interpreter can build every model the job asks for |
+| `scripts/check_bib_and_docs.py` | the bibliography resolves; the two design documents have not re-drifted |
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | `rust/tests/noise_gates.rs` (28) | the injector: dose, shape, targeting, provenance |
 | `rust/tests/writer_guards.rs` (5) | the record writer: length, alignment, featurisation failures |
@@ -129,6 +215,15 @@ And the checks themselves are checked. `scripts/check_fixes_fail_when_removed.py
 breaks each fix in the real file, runs its check, and puts the file back. A check
 that stays green with its fix removed guards nothing. Two did, the first time it
 was run.
+
+Two scripts in `scripts/` match `test_*.py` but are **not** part of this suite,
+and the loop above will run them:
+
+- `scripts/test_noise_arms.py` — design exploration from 2026-08-24, written
+  against five *proposed* noise conditions before the set was settled. It is
+  evidence behind `NOISE_DESIGN.md`, not a guard, and it needs the raw QM9 CSV.
+- `scripts/test_hybrid.py` — a manual check for the hybrid-representation
+  feature, which is not part of the study's roster.
 
 `scripts/test_run_qm_models.py` is the older baseline suite (RF/ECFP4, GB/ECFP4,
 SVM/ECFP4 and so on, each asserting R-squared above 0.7). It predates the noise

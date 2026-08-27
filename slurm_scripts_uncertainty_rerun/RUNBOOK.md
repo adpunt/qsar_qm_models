@@ -311,6 +311,26 @@ incompatible and every QRF fit raises `Invalid parameter 'monotonic_cst'`. If
 that reproduces on the cluster, fix the environment before submitting `unc_qrf.sh`
 (`pip install -U quantile-forest`), or submit the other six scripts first.
 
+**Each array also checks itself.** Since 2026-08-27 every generated script runs
+
+```
+python "$QSAR_DIR/scripts/check_environment.py" --validation-models "<model>" || exit 2
+```
+
+once, before its task loop. Seconds, and it closes the gap the preflight cannot:
+the preflight proves the environment was good when you ran it on the login node,
+not that the compute node the array lands on can build the model. Jobs 12822693
+and 12822694 ran to completion and wrote nothing because `gpytorch` was absent,
+and the runner is built to **skip** a model whose backend will not import rather
+than to stop — so a missing package is silent by design and this is what makes
+it loud.
+
+Note the flag: `--validation-models`, not `--models`. These jobs use KIRBy's
+model names (`BNN-Full`, `LightGBM`) and the QM9 pipeline uses its own (`lgb`),
+so the probe keeps the two namespaces separate. `check_environment.py
+--audit-roster` checks that every name this generator can emit is one the probe
+knows.
+
 ## 4. Choose account and partition
 
 ```bash

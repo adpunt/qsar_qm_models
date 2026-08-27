@@ -1,7 +1,7 @@
 # QM9 re-run — runbook
 
 > ✅ **BROUGHT UP TO DATE 2026-08-27 (chat M).** The generator now emits the new noise CLI,
-> the settled six representations and the staged design; the array sizes, script names, smoke
+> the settled six representations and the two-pass design; the array sizes, script names, smoke
 > test and completeness check below all follow from it. Nothing here has been run on the
 > cluster yet — §1b is still a launch blocker, and the wall times in §5 are the generator's
 > arithmetic, not measurement.
@@ -47,10 +47,12 @@ and level 0 is one seventh of the cost.
 | Representations | ECFP4, PDV (`continuous_pdv`), MHG-GNN, Avalon, ChemBERTa, Sort & Slice |
 | Noise conditions | 4 at full grid: gaussian, grouped-wider, grouped-shifted, censoring |
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
-| Replicates | 10, as stage 0 (1) plus stage 1 (9) |
+| Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**Stage 0: 14 array scripts, 320 tasks**, each 7 training runs — 2,240 training runs.
-**Stage 1: the same 320 tasks**, each 63 training runs — 20,160. **22,400 in total.**
+**The screen (`--stage 0`): 14 array scripts, 320 tasks**, each 7 training runs — 2,240
+training runs.
+**The main grid (`--stage 1`): the same 320 tasks**, each 63 training runs — 20,160.
+**22,400 in total.**
 
 **The clean level runs once, under Gaussian, and is copied into the other three.**
 At level 0 the pipeline does not add noise at all, and the replicate seed depends only
@@ -197,6 +199,22 @@ Gaussian-process fit with the boosting libraries already loaded. `--validation`
 adds the KIRBy roster. Run both flags: the environment is shared, and passing one
 half at the other's expense is exactly the trap (RERUN_PLAN.md §2.8i).
 
+**The per-task guard, in all three job families.** Every generated script runs a
+cheap version of the same probe before it loads any data — seconds, not minutes,
+because it constructs only the one model that task runs and does not import
+`models/models.py`. The two families use different flags because they use
+different model names:
+
+| Family | Flag | Names |
+|---|---|---|
+| `slurm_scripts_qm9_rerun/` | `--models lgb` | as `process_and_train.py -m` spells them |
+| `slurm_scripts_validation_rerun/` | `--validation-models LightGBM` | as KIRBy's `--models` spells them |
+| `slurm_scripts_uncertainty_rerun/` | `--validation-models BNN-Full` | same |
+
+`python scripts/check_environment.py --audit-roster` checks that every label all
+three generators can emit is known to the probe, so a new model cannot fail its
+own guard for the guard's own reason. It imports nothing and takes no time.
+
 If `env_test` is missing or its threading check fails, rebuild it — **before a
 launch, never during one**. The copy-paste block is RERUN_PLAN.md §2.8i. Sourcing
 `setup.sh` is now cheap on the ordinary path: it installs the extras only when a
@@ -223,9 +241,13 @@ the next person who finds it knows why, and checks rather than assumes:
 `--wrap` submissions with no output path: they inherited whatever interpreter
 was active and left no log saying which.
 
-> ✅ **The generator carries the activation guard and the new noise CLI**, so both land in
-> whatever is regenerated. Regenerate rather than editing a `.sh` by hand — a hand-edit is lost
-> the next time anyone runs the generator, and it is not covered by the generator's test.
+> ✅ **The generator carries the activation guard, the model-buildability probe and the new noise
+> CLI**, so all three land in whatever is regenerated. Regenerate rather than editing a `.sh` by
+> hand. A hand-edit is not covered by the generator's test, and it is worse than lost: a
+> hand-edited script gets SKIPPED the next time the directory is regenerated, so it keeps whatever
+> it had. Three scripts in the validation directory sat for weeks with the dead micromamba lines
+> and no activation guard for exactly that reason, looking as sanctioned as their 85 siblings
+> (RERUN_PLAN.md §13.2, chat D). If a script needs to differ, change the generator.
 
 ## 2. Archive the current results before anything overwrites them
 
@@ -250,9 +272,15 @@ sinfo -o "%.12P %.12l" | grep -E "medium|long"         # confirm >= 48 h wall
 
 ## 4. Generate the scripts, then run ONE task — do not submit the grid blind
 
-Stage 0 is the screen: every model on every representation, the four stage-1 noise
-conditions, one replicate. It is reused as replicate 0 of stage 1 rather than thrown
-away, which is why stage 1 starts at replicate 1 and both write to the same files.
+**The screen** — `--stage 0` on the command line — is every model on every representation,
+the main grid's four noise conditions, one replicate. It is kept and reused as replicate 0
+of the main grid rather than thrown away, which is why the main grid starts at replicate 1
+and the two write to the same files.
+
+(The generator's flag is still spelled `--stage`. The words for the four passes are **the
+screen**, **the main grid**, **the deep run** and **the uncertainty runs** — RERUN_PLAN.md
+§13. "Stage N" meant four different things across three weeks of this project and is not
+used in prose here.)
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
@@ -313,8 +341,8 @@ sbatch --account=$ACCT --partition=$PART --array=0-23%4 qm9_s0_gauche_rbf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-7%4  qm9_s0_gauche.sh   # fingerprints only
 ```
 
-Stage 1 is the same grid at replicates 1–9, appending to the same files, so it is
-submitted the same way once stage 0 has landed and been checked:
+The main grid is the same 320 tasks at replicates 1–9, appending to the same files, so it
+is submitted the same way once the screen has landed and been checked:
 
 ```bash
 python generate_scripts.py --stage 1
@@ -344,7 +372,7 @@ import glob, os, re, sys
 sys.path.insert(0, '.')
 import generate_scripts as gen
 
-STAGE = 0                                    # or 1
+STAGE = 0                                    # 0 = the screen, 1 = the main grid
 conds = gen.STAGE_DEFAULTS[STAGE]['conditions']
 want = {(c, r, m) for m, (_, _, _, _, reps) in gen.MODELS.items()
         for r in reps for c in conds}
@@ -397,12 +425,12 @@ python generate_scripts.py --bootstrapping 5
 
 **A large free saving that is NOT applied here.** For every noise level and every
 replicate the pipeline re-shuffles QM9, redoes the scaffold split, and recomputes
-every molecular representation from scratch — then the Rust stage re-reads and
+every molecular representation from scratch — then the Rust step re-reads and
 rewrites the whole file. None of that depends on the noise level; only the labels
 change. Measured locally, the RDKit descriptor set alone takes **220 seconds per
 10,000 molecules** and is recomputed 110 times per output file — about 6.7 hours
 of which 6.1 is pure repetition. Caching the prepared split per replicate would
-cut the preparation stage by roughly 91%.
+cut the preparation step by roughly 91%.
 
 It is not applied because it is a change to the QM9 data path that **cannot be
 tested on this laptop** — the local Python environment cannot import

@@ -3542,9 +3542,13 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
     Until 2026-08-26 the pipeline never inspected the injector's return code, so every gate in
     this list that the Rust half enforces was reported to a pipe nobody read (§2.8g). **No
     Rust-side gate was enforced end to end before that commit.**
-9b. ✅ **The interpreter can build what the job asks for.** `python scripts/check_environment.py
-    --models <what this job runs>`, wired into the job template; runbook §1b runs it under both
-    cluster interpreters and diffs them (§2.8d).
+9b. ✅ **The interpreter can build what the job asks for.** Wired into **all three** job
+    templates (2026-08-27): `--models <label>` for QM9, `--validation-models <label>` for the
+    validation and uncertainty families, which use KIRBy's model names rather than
+    `process_and_train.py`'s. `--audit-roster` checks that every label all three generators can
+    emit is known to the probe, so no job can fail its own guard for the guard's own reason.
+    The runbook no longer diffs two cluster interpreters — `py311-kirby` is missing eight of the
+    roster's packages and the runbook now says not to use it, so there is one (§2.8d).
 10. ✅ **Two tasks running at once do not corrupt each other.** Implemented (chat D):
     `python scripts/test_config_isolation.py` launches two binaries concurrently in one directory
     with different representations and asserts each keeps its own data, plus an instant static
@@ -4459,8 +4463,17 @@ only that the logD choice cannot be checked against existing numbers before the 
 #### hERG was never cut
 
 It is in both live generators — `slurm_scripts_uncertainty_rerun/generate_scripts.py:120` and
-`slurm_scripts_validation_rerun/generate_scripts.py:15`. There are simply no old noise-sweep results
-on disk for it, so it has no table here. Its reporting level is still to be set, and unlike the other
+`slurm_scripts_validation_rerun/generate_scripts.py:34`. There are simply no old noise-sweep results
+on disk for it, so it has no table here.
+
+⚠️ **hERG is spelled two different ways and both spellings are load-bearing.** On the command line
+it is `herg_ki` — `alternative_data_noise_robustness.py`'s `--datasets` carries
+`choices=['logd', 'caco2', 'herg_ki', 'all']`, so `herg` is rejected by argparse and the task dies
+before it loads anything. In every path it is `herg` — the runner writes to
+`Path(results_root) / 'herg'`, and `merge_results.py` matches result directories by the
+`_{dataset}` suffix. Collapsing them to one name breaks one end or the other. The validation
+generator now carries both as a two-column table; before 2026-08-27 it emitted `herg` on the
+command line and 28 of its scripts would have died at argument parsing (§13.2, chat D). Its reporting level is still to be set, and unlike the other
 three it has a **measured** label spread to set it against: 0.9143 over all 1,415 molecules
 (`NOISE_DESIGN.md` §4c).
 
@@ -5093,6 +5106,13 @@ three live generators and the uncertainty preflight are all fixed:
 (`slurm_scripts_mol2vec`, `slurm_scripts_vbll`, `slurm_scripts_gauche_rbf`, and about twenty
 more) still carry them and are deliberately left alone: they are superseded runs, and nothing in
 them should be submitted again.
+
+Two of those historical scripts also carry the wrong hERG dataset name —
+`slurm_scripts_fixup/val_ngboost_herg.sh:22` and `slurm_scripts_remaining/val_ngboost_herg.sh:22`
+pass `--datasets herg`, which the runner now rejects at argument parsing. Left as they are, for
+the same reason: they are superseded. Noted so that anyone tempted to resubmit from those
+directories knows they will exit at the first line, and knows the live copies are in
+`slurm_scripts_validation_rerun/`.
 
 ✅ **Corrected 2026-08-27 — this warning is out of date and the directory it names has no `.sh`
 files.** The 22 stale scripts under `slurm_scripts_qm9_rerun/` were deleted on the close-out pass
