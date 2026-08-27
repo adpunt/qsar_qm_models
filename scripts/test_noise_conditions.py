@@ -117,6 +117,76 @@ def check_generator(spec, failures):
         print(f"  job generator     : full grid {sorted(generator_stage_1)} — agrees")
 
 
+def check_pair_subset_scope():
+    """A condition the settled file restricts to a pair subset must actually be restricted.
+
+    Censoring is the only one today (RERUN_PLAN.md 13.13, the author's call 2026-08-27): on
+    QM9 it runs on about five model-and-representation pairs rather than all 78, because the
+    question there is how big the effect is and not which model resists it best. That is 350
+    runs instead of 5,460.
+
+    Three things have to hold together or the saving silently evaporates:
+      1. the scope lives in noise_conditions.json, not in the generator
+      2. the QM9 generator's default condition set for the screen and the main grid excludes it
+      3. asking for it by name without --models and --reps is refused, not defaulted
+
+    The scope is QM9 ONLY. Censoring stays a full condition in the uncertainty runs on the
+    experimental datasets, where it is one of only two conditions that can answer the
+    which-molecules question -- so this also asserts the uncertainty generator still carries it.
+    """
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / 'noise_conditions.json').read_text())
+
+    scoped = {c['name']: c['qm9_scope']
+              for g in ('stage_1_full_grid', 'stage_2_depth_only')
+              for c in spec[g]
+              if c.get('qm9_scope', {}).get('mode') == 'pair_subset'}
+    assert 'censoring' in scoped, \
+        "noise_conditions.json no longer restricts censoring to a pair subset on QM9 " \
+        "(RERUN_PLAN.md 13.13). If that is deliberate the plan has to say so first."
+    n = scoped['censoring']['n_pairs']
+    assert 1 <= n <= 20, f"censoring's n_pairs is {n}, which is not a small subset"
+
+    gen = repo / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py'
+
+    def run(*args):
+        return subprocess.run([sys.executable, str(gen), *args],
+                              capture_output=True, text=True, cwd=gen.parent)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        for stage in ('0', '1'):
+            r = run('--stage', stage, '--out-dir', tmp)
+            assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
+            line = [l for l in r.stdout.splitlines() if 'conditions:' in l]
+            assert line, f"stage {stage} did not report its conditions"
+            assert 'censoring' not in line[0], (
+                f"stage {stage} still runs censoring at full breadth by default: {line[0].strip()}")
+
+        r = run('--stage', '1', '--conditions', 'censoring', '--out-dir', tmp)
+        assert r.returncode != 0, \
+            "asking for censoring without --models and --reps was accepted; it must be refused"
+        assert '13.13' in r.stderr, \
+            f"the refusal does not point at the decision:\n{r.stderr[-400:]}"
+
+        r = run('--stage', '1', '--conditions', 'censoring',
+                '--models', 'lgb', 'rf', '--reps', 'continuous_pdv', '--out-dir', tmp)
+        assert r.returncode == 0, \
+            f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
+
+    unc = (repo / 'slurm_scripts_uncertainty_rerun' / 'generate_scripts.py').read_text()
+    assert 'qm9_scope' not in unc, \
+        "the uncertainty generator has picked up the QM9 pair-subset scope; censoring must " \
+        "stay a full condition there (RERUN_PLAN.md 13.1 item 6)"
+    assert 'censoring' in [c['name'] for c in spec['stage_1_full_grid']], \
+        "censoring left the main-grid group, which removes it from the uncertainty runs too"
+
+
 def main():
     spec = load_settled()
     failures = []
@@ -200,6 +270,13 @@ def main():
           "censoring is not in the full grid. It is not zero-mean and cannot be dose-matched, "
           "so it runs on its own axis -- and it is the largest effect in the whole study "
           "(NOISE_DESIGN.md 5.3b)", failures)
+
+    # --- 8. censoring is restricted to a pair subset on QM9 ------------------
+    # RERUN_PLAN.md 13.13, the author's call 2026-08-27. This runs the real generator.
+    try:
+        check_pair_subset_scope()
+    except AssertionError as e:
+        failures.append(str(e))
 
     # --- report -------------------------------------------------------------
     if failures:

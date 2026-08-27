@@ -163,6 +163,19 @@ def levels_for(name, levels):
     return ' '.join(v for v in levels.split() if float(v) != 0.0)
 
 
+# Conditions the settled file restricts to a subset of model-and-representation pairs on
+# QM9. Censoring is the only one today: the question there is how big the effect is, not
+# which model resists it best, so it runs on about five pairs instead of all 78
+# (RERUN_PLAN.md 13.13). The scope is QM9 only -- censoring stays a full condition in the
+# uncertainty runs. Read from the file rather than hardcoded, so the file stays the place
+# the decision lives.
+PAIR_SUBSET_CONDITIONS = {
+    c['name']: c['qm9_scope']
+    for g in ('stage_1_full_grid', 'stage_2_depth_only')
+    for c in _SETTLED[g]
+    if c.get('qm9_scope', {}).get('mode') == 'pair_subset'
+}
+
 STAGE1_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']]
 STAGE2_CONDITIONS = STAGE1_CONDITIONS + [c['name'] for c in _SETTLED['stage_2_depth_only']]
 
@@ -426,9 +439,15 @@ exit $status
 
 # Stage defaults, RERUN_PLAN.md §13.1. Stage 0 is replicate 0 of stage 1, so
 # stage 1 starts at iteration 1 and both write to the same file.
+# The screen and the main grid default to the full-grid conditions MINUS anything the
+# settled file restricts to a pair subset. Censoring is asked for by name, on named models
+# and reps, or it does not run -- rather than the default invocation refusing and the next
+# person working around the refusal.
+_FULL_BREADTH = [c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS]
+
 STAGE_DEFAULTS = {
-    0: dict(replicates=1,  start=0, conditions=STAGE1_CONDITIONS),
-    1: dict(replicates=9,  start=1, conditions=STAGE1_CONDITIONS),
+    0: dict(replicates=1,  start=0, conditions=_FULL_BREADTH),
+    1: dict(replicates=9,  start=1, conditions=_FULL_BREADTH),
     2: dict(replicates=10, start=0, conditions=STAGE2_CONDITIONS),
 }
 
@@ -492,6 +511,28 @@ def main():
     if args.stage == 2 and not (args.models and args.reps):
         ap.error('--stage 2 needs --models and --reps. Which models and representations go '
                  'deep is chosen from what stage 0 shows; see RERUN_PLAN.md §13.1 item 4.')
+
+    # A pair-subset condition may not be generated at full breadth. Without this the four
+    # main-grid conditions look interchangeable and censoring would quietly cost 5,460 runs
+    # instead of 350. Same shape as the stage-2 refusal above: name the choice, do not
+    # invent one.
+    restricted = [c for c in conditions if c in PAIR_SUBSET_CONDITIONS]
+    if restricted and not (args.models and args.reps):
+        first = PAIR_SUBSET_CONDITIONS[restricted[0]]
+        ap.error(
+            f"{', '.join(restricted)} runs on about {first['n_pairs']} model-and-representation "
+            f"pairs on QM9, not the full grid, so it needs --models and --reps. Which pairs is "
+            f"chosen from the screen; see RERUN_PLAN.md 13.13. To run the rest of the grid "
+            f"without it, pass --conditions "
+            f"{' '.join(c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS)}.")
+    if restricted and args.models and args.reps:
+        n = len(args.models) * len(args.reps)
+        if n > 2 * PAIR_SUBSET_CONDITIONS[restricted[0]]['n_pairs']:
+            ap.error(
+                f"--models x --reps is {n} pairs, and {', '.join(restricted)} is meant to run on "
+                f"about {PAIR_SUBSET_CONDITIONS[restricted[0]]['n_pairs']}. If that is deliberate, "
+                f"say so in RERUN_PLAN.md 13.13 first and raise n_pairs in "
+                f"{NOISE_CONDITIONS_FILE.name} -- the file is where the decision lives.")
 
     if n_reps_run < 1:
         ap.error(f'--replicates must be at least 1, got {n_reps_run}')

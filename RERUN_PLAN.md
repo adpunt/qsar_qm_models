@@ -4580,13 +4580,22 @@ QM9, at all seven of its levels, 10 replicates.**
 **No code change is needed.** The generator already takes the flags:
 `--conditions censoring --models <...> --reps <...>`.
 
-**Two things this changes elsewhere, both small.**
+✅ **APPLIED IN THE FILES 2026-08-27.**
 
-- `noise_conditions.json` lists censoring under the full-grid group. Move it, or add a note there,
-  so the file states what actually runs. It is read by tests on three sides, so the move has to be
-  made in the file rather than only in prose.
+- `noise_conditions.json` carries a **`qm9_scope`** block on censoring — `mode: pair_subset`,
+  `n_pairs: 5`, with the reason and the sentence the paper owes. Censoring **stays in the
+  full-grid group**, because moving it would also remove it from the uncertainty runs, where it is
+  one of only two conditions that can answer the which-molecules question. The scope is QM9 only and
+  the file says so.
+- The QM9 generator reads that block rather than hardcoding it. **The screen and the main grid now
+  default to the three full-breadth conditions** — verified: both report
+  `conditions: gaussian grouped_wider grouped_shifted`. Asking for censoring without `--models` and
+  `--reps` is refused with a message naming this section. Asking for it on more than twice `n_pairs`
+  is also refused, and says to change the file rather than the flag.
+- Guard: `scripts/test_noise_conditions.py` check 8 runs the real generator and asserts all four
+  behaviours. **Proved to catch a regression** — reverting the default made it fail.
 - §13.1 item 3's arithmetic prices the main grid at four conditions × 7 levels. With censoring off
-  the full grid that becomes three conditions × 7 levels plus 350, so the main grid drops from
+  full breadth that becomes three conditions × 7 levels plus 350, so the main grid drops from
   21,840 runs to **16,730**.
 
 **What the paper has to say, because this is a reduced design and reduced designs get asked about:**
@@ -5738,7 +5747,15 @@ in the study; every one of them got smaller):
 | Largest \|mean ΔR²\| against Gaussian | **0.0047** — Outlier p=0.01 / random forest |
 | Largest ratio to the replicate-to-replicate wobble | **0.29** — the same row |
 | Smallest paired *p* | 0.178 |
-| What twelve replicates could have detected | 0.0064 – 0.0130 |
+| What twelve replicates could have detected, **for the model carrying each effect** | 0.0068 – 0.0120 |
+
+⚠️ **That last row is paired, and it was not before 2026-08-27.** It used to take the largest effect
+across models and the smallest detection threshold across models — two different rows presented as
+one comparison, on six of the ten conditions, and always in the flattering direction. Student-t
+ν = 10 read *"largest 0.0017, could have seen 0.0064"* when the model carrying that 0.0017 could
+only have seen **0.0119**, nearly double. Each effect is now quoted against its own model's
+resolution; `scripts/setting_selection_test.py` reports the best-case threshold separately and says
+so. **No verdict moves** — every effect is well under even its own model's threshold.
 
 Every one of them is under a third of the run-to-run wobble. **This is not "we could not see it" —
 the test's own resolution is stated beside every number, and the effects sit at or below it.**

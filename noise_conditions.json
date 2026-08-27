@@ -36,17 +36,24 @@
     },
     {
       "name": "censoring",
-      "why": "Values past the assay limit recorded as the limit. The most prevalent real mechanism, not zero-mean, and it cannot be dose-matched, so it runs on its own axis (fraction of labels clipped)."
+      "why": "Values past the assay limit recorded as the limit. The most prevalent real mechanism, not zero-mean, and it cannot be dose-matched, so it runs on its own axis (fraction of labels clipped).",
+      "qm9_scope": {
+        "mode": "pair_subset",
+        "n_pairs": 5,
+        "settled": "2026-08-27",
+        "why": "The author's call: on QM9 censoring runs on about five model-and-representation pairs, not all 78, because the question there is how big the effect is and not which model resists it best. 350 runs instead of 5460. Which five comes from the screen, like the deep run's selection (RERUN_PLAN.md 13.13). This scope is QM9 ONLY -- censoring stays a full condition in the uncertainty runs on the experimental datasets, where it is one of only two conditions that can answer the which-molecules question.",
+        "paper_must_say": "Censoring was run on a named subset of pairs to measure the size of its effect, not to compare models or representations under it. No claim about WHICH model resists censoring best can rest on this run."
+      }
     }
   ],
   "stage_2_depth_only": [
     {
       "name": "student_t_nu5",
-      "why": "One tail weight, not three. The three settings are within 0.0036 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.0064 to 0.0107. Every figure here is on the two roster models at twelve replicates; the wider ranges quoted before 2026-08-27 were Ridge rows, and Ridge is not in the study. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
+      "why": "One tail weight, not three. The three settings are within 0.0036 R2 of each other and of Gaussian at the reporting level, against a test that could have seen 0.0076 to 0.0120 -- that being what the model carrying each effect could itself have detected, not the best model's threshold quoted against another model's effect, which is what this file said before 2026-08-27. Every figure here is on the two roster models at twelve replicates; the wider ranges quoted before 2026-08-27 were Ridge rows, and Ridge is not in the study. nu = 10 is nearly Gaussian by construction; nu = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. nu = 5 is mid-ladder and well-behaved."
     },
     {
       "name": "outlier_p10",
-      "why": "One contamination fraction, not three. Same evidence: every step of the 1% -> 5% -> 10% ladder is under 0.0049 R2, and the largest of the three against Gaussian is 0.0047. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
+      "why": "One contamination fraction, not three. Same evidence: the largest step of the 1% -> 5% -> 10% ladder is 0.0049 R2 and the largest of the three against Gaussian is 0.0047. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there."
     },
     {
       "name": "laplace",
