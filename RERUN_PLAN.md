@@ -2871,6 +2871,49 @@ Three of the five are smaller than they look, because the machinery is already t
 | Representation by noise type | **Does not exist in the figure script at all.** The nearest thing is in the standalone script being folded in, and it averages over a model roster that is not held constant across representations — so it compares different rosters | New function in the tables section, with the roster held constant and stated |
 | Experimental-dataset variance decomposition | **The machinery is correct and is not the problem.** It uses sequential sums of squares from nested fits specifically so the residual is pure within-cell variance. It is being fed **one observation per cell**, so the saturated fit reproduces the data exactly and the residual is arithmetically zero | Do not rewrite it. Fix the two places that discard folds (`:1368-1372`, and the dedup at `:1148`) and it starts working |
 
+#### 5.4a A rank-versus-level line graph — the author's proposal, 2026-08-27
+
+**The idea, in the author's words:** *"a line graph showing the model or rep ranks (with a FIXED
+model or rep counterpart) across different noise levels. That gives us an option that shows us all
+the noise levels and ranks at the same time."*
+
+**Why it earns a place.** Every ranking table in the paper has to pick one noise level, and the
+reporting level is exactly the decision that cost this project two sessions (§13.10, §13.11). This
+figure does not pick one. It puts the whole ladder on the x-axis and lets the reader see where the
+order changes — which on QM9 is between 0.5 and 1.0, and is invisible at 0.5.
+
+**The specification.**
+
+| | |
+|---|---|
+| x-axis | The noise level ladder, including the clean point, **as an ordered category, not a numeric axis** — the ladder is unevenly spaced (0.2, 0.3, 0.5, 0.75, 1.0, 1.5) and a numeric axis would compress the top where the interesting change happens |
+| y-axis | Rank, 1 at the top. Invert it, so "up" means "better" |
+| one line per | model, with the representation held fixed — **or** representation, with the model held fixed. Two panels, one of each |
+| the fixed counterpart | Named in the caption and in the panel title. `PRIMARY_REP` for the model panel; the model choice is the author's and must not be inferred from the data |
+| band around each line | The spread of that line's rank across replicates — a rank that swings from 2nd to 6th between replicates is not a rank, and a line without the band would hide it |
+
+**The guards it has to honour, because a rank figure trips three of them (§0.6).**
+
+- **Guard 3.** Rank **within each replicate first**, then aggregate the ranks. Ranking an averaged
+  score is not the same operation and gives a different answer.
+- **Do not sort by mean rank.** The author rejected mean-rank ordering on 2026-08-14 and two existing
+  ranking functions still do it (§5.4 table above). Order the legend by rank at the clean level, so
+  the reading is "here is where everything starts, and here is where it ends up".
+- **Guard 8.** A failed fit is not a low rank — it is a missing observation. A replicate where any
+  model in the panel failed must be dropped from that panel and named, the way replicate 2 was in
+  the level screen (§13.10). Otherwise one diverged neural run silently promotes every other model.
+- **Guard 4.** A rank has no units and hides the size of the gap. **Print the underlying R² beside
+  it**, either as a companion panel or as a data table under the figure. Two models tied within 0.005
+  R² and two separated by 0.16 look identical on a rank axis.
+
+**One limit to state in the caption.** Only QM9 has replicates. The experimental side is one fit per
+cell (§4 decision 3b), so those panels get a line and **no band** — and the caption has to say that
+the absence of a band means "not measured", not "no variability".
+
+**Where it goes:** a new function in the figures section of the consolidated script, and it replaces
+neither of the two existing ranking functions — those are being rebuilt anyway (§5.4 table,
+"Side-by-side ranking table"). Chat J.
+
 **Two roster questions the script encodes and the paper never states.** The robustness
 decomposition runs on seven models while the accuracy one runs on eleven, because four Bayesian
 variants do not train on two of the representations. That one belongs in the Methods.

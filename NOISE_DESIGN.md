@@ -141,7 +141,7 @@ perturbed continuous label is nothing but magnitude.
 | 4a | **Grouped — wider** | Whole scaffold groups get wider errors, still centred on the true value | **Best-evidenced of the set.** Within-laboratory error must be multiplied by about three to reach between-laboratory error (§3.3). The only zero-mean condition where noise is predictable from structure, so the only one that tests whether a model can *spot* bad data | `τ` | λ = 3, affected **molecule** fraction ≈ 0.2 |
 | 4b | **Grouped — shifted** ✅ | Whole scaffold groups have their labels pushed in one direction by a constant | 62% of real measurement variance sits **between** laboratories (§3.3) — and that describes laboratory *averages* differing, which is an offset, not a widening. Added 2026-08-26; see §2a | `τ` | ρ = 0.62, from the source |
 | 5 | **Outlier** | A random few labels are simply wrong | Real contamination is transcription errors, wrong target, wrong assay (§3.4). Formally Huber's contamination model | `τ` | **p = 10%**, λ = 3, settled 2026-08-27 — one setting, not three (§5.8) |
-| 6 | **Censoring** ✅ | Values past the assay limit recorded as the limit | The most *prevalent* real mechanism (§3.5), and the only one that is not zero-mean | **cannot be dose-matched** — separate axis | fraction censored: 10%, 25%, 40% |
+| 6 | **Censoring** ✅ | Values past the assay limit recorded as the limit | The most *prevalent* real mechanism (§3.5), and the only one that is not zero-mean | **cannot be dose-matched** — separate axis | its own axis, §6.4 |
 
 Strategies 1–5 are dose-matched. 1, 2, 3, 4a and 5 are zero-mean; **4b is zero-mean in
 expectation but not in any one run — that asymmetry is its mechanism, not a defect**. Strategy 6
