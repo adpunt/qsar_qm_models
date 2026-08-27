@@ -1216,9 +1216,20 @@ blocks them for the guard's own reason.
 One pin was wrong on the first build and the check caught it: conda-forge ships `lightning`
 as `2.5.1.post0`, not `2.5.1`. That is the truthfulness check doing its job on its first run.
 
-⚠️ **This was measured on osx-64, on the laptop.** It proves the recipe resolves, builds,
-and clears both blockers; it does not prove the cluster's answer. The `/proc/self/maps`
-check is Linux-only and has not run yet. Run the block below on ARC.
+The other two code bases were run against the same fresh environment on the same day:
+
+| check | result |
+|---|---|
+| `scripts/test_noise_conditions.py` — the settled conditions resolve on both sides | ✅ 7 conditions, Python injector and job generator agree |
+| `scripts/crosscheck_injectors.py` — Rust and Python injectors agree | ✅ **342 of 342**, on all 133,885 real QM9 labels |
+| KIRBy `alternative_data_noise_robustness.py` imports and builds its parser | ✅ reads the shared model spec, offers the 11 settled conditions |
+
+⚠️ **All of this was measured on osx-64, on the laptop.** It proves the recipe resolves,
+builds, and clears both blockers, and that all three code bases run against it. **It does not
+prove the cluster's answer**, and the cluster is where the failure was found: `linux-64` has
+been verified only as a *solve*, never as a build, and the `/proc/self/maps` check is
+Linux-only and has not run at all. Until `sbatch scripts/rebuild_env.sh` comes back clear,
+this section is verified on one platform out of two.
 
 #### Packages the roster was missing, now in the recipe
 
@@ -1257,6 +1268,36 @@ when a hash of `env.yml` + `pip-constraints.txt` changes, recorded in a stamp fi
 environment. A running task cannot mutate the environment any more.
 
 #### Copy-paste: the rebuild on ARC
+
+**One submission does all of it** — records the old environment, rebuilds in the same prefix,
+runs the gate, runs both blockers standalone, and checks the noise injectors and the KIRBy
+pipeline. It writes one file, `~/env_rebuild_report.txt`, and ends with a verdict:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git pull
+REBUILD_DRY_RUN=1 bash scripts/rebuild_env.sh    # optional: see what it would do
+sbatch scripts/rebuild_env.sh
+```
+
+It **refuses to start while any of your jobs are queued or running** — a rebuild changes
+numbers, and rows written under two different environments in one results file, with nothing
+recording which, is the failure this whole section exists to prevent. `FORCE_REBUILD=1`
+overrides it deliberately.
+
+It rebuilds **in the prefix env_test already occupies**, read from `conda env list`. Creating
+by name would put a multi-gigabyte environment in whichever `envs_dir` comes first, which on
+this cluster can be the home quota.
+
+It is a job, not a login-node paste, because a login node caps memory per user — the same cap
+that made an earlier audit report sixteen phantom failures (§2.8d).
+
+**Rollback**, if it is ever wanted: step 1 writes
+`research_archive/env_test_before_rebuild_<date>.txt`, a `conda list --explicit` of the old
+environment. `conda create --prefix <prefix> --file <that file>` puts it back, then rerun
+`setup.sh` for the extras.
+
+If you would rather drive it by hand:
 
 ```bash
 # 0. Keep a record of what the OLD environment was, before it is destroyed.
@@ -1313,6 +1354,57 @@ bash scripts/server_audit.sh          # section 5 is the Gaussian-process probe
 - §2.8e-bis's second option — importing each backend lazily in `models/models.py` — is not
   needed for the threading defect once this lands. It remains worth doing on its own merits
   (a LightGBM job has no business loading gpytorch), and it is still nobody's yet.
+
+### 2.8j ✅ FIXED 2026-08-27 — the uncertainty jobs asked for six conditions that no longer exist
+
+**The defect.** `slurm_scripts_uncertainty_rerun/generate_scripts.py` still listed the six deleted
+strategies — `legacy, outlier, quantile, hetero, threshold, valprop` — and emitted `--strategies`,
+`--unc-strategies` and `--threshold-quantile`, none of which the runner has any more. It takes
+`--conditions` and `--unc-conditions` now, and `--conditions` carries `choices=`, so every one of
+the 504 tasks would have died at argument parsing. The same six were hard-coded a second time in
+`merge_results.py`, where they set the expected cells of the coverage report: had the jobs somehow
+run, every cell would have read `MISSING` and nothing that did run would have been checked. The
+level check beside it expected eleven levels; the ladder is six per dataset, and seven for
+censoring, which sweeps the clipped fraction instead.
+
+**What it runs now.** The four conditions the main grid runs — `gaussian`, `grouped_wider`,
+`grouped_shifted`, `censoring` — read from `noise_conditions.json`, not restated. That is §13.1
+item 2's recorded default, inherit rather than test, and `--include-deep-conditions` is the other
+choice. 3 datasets × 4 representations × 4 conditions = **48 tasks per model script, 336 in
+total**, down from 504. Levels are not passed at all: the runner anchors them per dataset to
+published assay error, and `--sigmas` would replace that with one shared ladder, which is six
+different experiments across these three datasets.
+
+**The four split cleanly across the two questions**, which is the thing to say in the Methods.
+`gaussian` and `grouped_shifted` give every molecule the same amount, so "does uncertainty find
+*which* molecules are corrupted" is undefined there, not zero — they answer question A and serve
+as the leakage check. `grouped_wider` (keyed to the scaffold) and `censoring` (keyed to the label)
+are the only two with a pattern to find. Both patterned ones are keyed to something a scaffold
+split holds out whole, which is §3.1d: on held-out molecules the grouped pattern is flat,
+truthfully, and the predicted-label control is degenerate for it.
+
+**Three defects found alongside it, all fixed.**
+
+| Where | What |
+|---|---|
+| `merge_results.py` | The six deleted names hard-coded as the expected cells, and "11 levels" as the expected ladder. Both are now read — conditions from the generated `unc_*.sh`, level counts parsed out of the runner's own source — so neither can drift again. `task_strategy` becomes `task_condition`; `scripts/uncertainty_stats.py` accepts both, so a merge made before today still loads |
+| `preflight.sh` | Section 4b still reached for `m.STRATEGIES`, which the runner no longer defines, and read `STRATS=(...)` out of the job scripts. It reads `CONDS=(...)` and `m.NOISE_CONDITIONS`, and warns rather than guessing if it finds a script that predates the redesign. Its advice for a flat condition — regenerate with `--threshold-quantile` — pointed at a deleted flag; a condition that is flat where it should not be is now reported as a fact about the dataset |
+| the generated scripts | They hard-coded `/data/stat-cadd/scat9264/KIRBy` and took it on trust (§2.8b: 125 of KIRBy's own 127 job scripts use `/data/stat-ecr`). Each script now checks the directory exists, that the runner in it has `--conditions`, and that the installed injector knows the conditions being asked for — exiting 2 and naming the other checkout rather than producing 336 tasks' worth of results from the old code. `--kirby-dir` regenerates against the other path |
+
+**The gate.** `python scripts/test_uncertainty_job_scripts.py` — it generates real scripts, pulls
+the command line out of each one, substitutes the shell variables with values the array dispatch
+can actually produce, and runs the result through the runner's **own argument parser**, not a
+string match against its source. Seven checks: every emitted command line parses (28 of them, one
+per script per condition); no deleted name or flag survives; the conditions match the settled file;
+dropping every even condition or every patterned one is called out by name; the model,
+representation and dataset rosters match the runner's; the scripts are valid bash; and all 48 array
+indices map to 48 distinct tasks with the header promising the same range. It needs a KIRBy
+checkout (`--kirby-dir`, `$KIRBY_DIR`, or a sibling directory) and refuses to run without one.
+
+**Still to do here, and it is not this fix's.** Whether the uncertainty runs use four
+representations or all six is the same open question as which models and representations go deep
+(§13.1 item 4). Four is what the generator has always used and what it still uses; `--reps` changes
+it without editing anything.
 
 ### 2.9 The Methods figure does not show the experiment
 
@@ -3853,10 +3945,13 @@ Checked 2026-08-27, by reading the files rather than the notes:
 - **The QM9 job generator does not have the concept.** `slurm_scripts_qm9_rerun/generate_scripts.py`
   reads `noise_conditions.json` and sweeps `DOSE_LEVELS = 0.0 0.2 0.3 0.5 0.75 1.0 1.5` (`:101`).
   Every level runs. Choosing one to report changes nothing about what is queued.
-- **The uncertainty job generator is stale and must be rewritten anyway.**
-  `slurm_scripts_uncertainty_rerun/generate_scripts.py:53` still lists the six deleted strategies
-  (`legacy, outlier, quantile, hetero, threshold, valprop`). Items 2 and 3 are questions for
-  whoever rewrites it, and cannot be spent on before that.
+- ✅ **The uncertainty job generator was stale; it was rewritten on 2026-08-27 (§2.8j).** It
+  listed the six deleted strategies and emitted flags the runner no longer has, so every task
+  would have died at argument parsing. It now reads `noise_conditions.json`. **Items 2 and 3 were
+  settled by their recorded defaults in the rewrite**: it inherits the main grid's four conditions
+  (item 2) and runs one replicate, the permutation null being computed afterwards by
+  `scripts/uncertainty_stats.py` (item 3). Either can be changed with a flag; neither is now
+  blocking anything.
 - **The deep run cannot be built without item 4 and refuses to try** —
   `generate_scripts.py:467-469` errors on `--stage 2` without `--models` and `--reps`.
 
