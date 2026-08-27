@@ -4990,7 +4990,20 @@ of range, no environment, wrong environment, missing binary) and requires each t
 `--end-to-end` runs one real training task at 400 molecules. The runbook and the completeness check
 follow from the generator rather than restating it.
 
-**🔴 The cluster — this is yours, and nothing else can answer it.** One command, about five minutes:
+**🔴 The cluster — submitted 2026-08-27 as job `12914447`, waiting on the report.** A login node
+cannot answer it: the audit imports torch, and the per-user memory cap there makes the
+model-construction checks come back inconclusive. Submitted as a batch job instead — 4 cores, 16 GB,
+25 minutes, `--account=stat-cadd --partition=short` — because an interactive session was not being
+scheduled. Check it with:
+
+```bash
+squeue -j 12914447
+sacct -j 12914447 --format=JobID,JobName%16,State,Elapsed,ExitCode
+cat ~/server_audit_report.txt
+```
+
+**When that report exists, everything below is answered and this item closes.** The original
+one-command form, for reference:
 
 ```bash
 ssh <arc>
