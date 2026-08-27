@@ -163,6 +163,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 18 | Paper-side fixes needing no compute | 🔴 not started — **deliberately parked**, see §12 | parked |
 | 19 | The two documents had drifted apart | ✅ **done 2026-08-26** (chat K). Ownership rule stated, ten disagreements resolved, two of them a document contradicting itself. Guarded by `scripts/check_bib_and_docs.py` | §13 chat K ✅ |
 | 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
+| 21 | Hyperparameter tuning — replacing Optuna | 🟠 **built 2026-08-27, not yet run** — the experiment, the roster/name map and three checks are in; the sweep is priced but waits on decisions 7 and 8. Found and fixed two live defects on the way in: NN-β's Bayesian variants could not run at all (§5.7c), and the tuned-parameter reader would have raised NameError the first time it fired (§5.7g) | §5.7 |
 
 ---
 
@@ -1416,6 +1417,49 @@ bash scripts/server_audit.sh          # section 5 is the Gaussian-process probe
   imports it regardless. Import hygiene closes one direction of the conflict; only one
   threading runtime closes both.
 
+#### The first cluster attempt, 2026-08-27 21:47 — what it cost and what it changed
+
+`scripts/rebuild_env.sh` was run on an ARC **login node**. The conda solve was killed part way
+through `Collecting package metadata (repodata.json)` — the message is the single word `Killed`,
+which is the per-user memory cap, not the recipe. Four defects showed themselves at once, all now
+fixed, and every one of them would have fired again on the next attempt:
+
+1. **`setup.sh` deleted the old environment before building the new one.** The solve then died and
+   the account was left with no `env_test` at all. It now moves the old prefix to `<prefix>.old`,
+   builds at the real path, and puts the old one back if the build fails. Aside-then-build rather
+   than build-then-move because a conda environment is not relocatable: every console script in
+   `bin/` carries its build path in the shebang.
+2. **`setup.sh` carried on after the failed build.** Its activation check asked only whether
+   `CONDA_PREFIX` was set, and the system Anaconda's was, so the four extras installed themselves
+   into `/apps/.../Anaconda3` and `~/.local/lib/python3.9`. It now requires the activated prefix to
+   be the one that was asked for and refuses otherwise.
+3. **`rebuild_env.sh` sourced `setup.sh` through a pipe** (`. ./setup.sh | tee`). The left side of a
+   pipe is a subshell, so the activation was discarded and every check below it ran against
+   whatever python was on `PATH` — python 3.9 from the system Anaconda, which is why the report
+   showed sixteen absent packages and six failures that were not tests of `env_test` at all.
+   Process substitution now keeps the source in the calling shell, and the script stops with one
+   line if the build did not produce the environment.
+4. **It warned about the login node and continued.** It now re-executes itself inside an allocation
+   (`srun --account=stat-cadd --cpus-per-task=8 --mem=48G --time=03:00:00`) rather than asking for a
+   second paste, and puts the conda package cache beside the environment instead of letting it
+   default into the home quota.
+
+Two further hardenings came out of the same log. `PYTHONNOUSERSITE=1` is now exported, because
+`~/.local/lib/python3.X/site-packages` is read by every interpreter of that version — this account
+has a `torch 2.2.2+cu121` sitting in one, a second set of OpenMP runtimes arriving by a route
+neither `env.yml` nor `pip-constraints.txt` can see. `PIP_USER=0` is exported with it, so pip fails
+rather than silently falling back to `--user` when it cannot write to site-packages.
+
+**Cost:** the old `env_test` at `/data/stat-cadd/scat9264/conda_envs/env_test` is gone. It was
+recorded first — `research_archive/env_test_before_rebuild_2026-08-27.txt`, 190 lines,
+`conda list --explicit`, enough to rebuild it exactly — and the next run is a first build at that
+same prefix rather than a rebuild. Nothing was lost that the recipe does not carry, and the old
+environment held two distinct OpenMP runtime files, so it was not an environment worth keeping.
+
+The three-way behaviour was tested against a stubbed conda before this went back to the cluster:
+a failed build leaves the old environment in place, a successful one keeps it at `.old` and says
+how to delete it, and an activation that lands elsewhere refuses to install anything.
+
 ### 2.8j ✅ FIXED 2026-08-27 — the uncertainty jobs asked for six conditions that no longer exist
 
 **The defect.** `slurm_scripts_uncertainty_rerun/generate_scripts.py` still listed the six deleted
@@ -1862,6 +1906,43 @@ They therefore go in separate columns, and **must not share an axis or a
 significance test**. QM9's per-replicate equivalent is computed in the figure
 script rather than the pipeline, so it waits for that rewrite.
 
+### 2.16 ✅ FIXED 2026-08-27 — one noise condition, one name
+
+Audit entry 39, the naming half of what was item 4 below. The amount-of-noise
+half is entry 34, fixed the same day and written up with it.
+
+The two injectors named the same condition differently as soon as a shape other
+than Gaussian was asked for. QM9 composed `outlier_p05_laplace`; the Python
+injector returned `outlier/laplace`. Rows carrying those two strings cannot be
+joined, and the join failure is silent — a filter simply returns nothing.
+
+Worse than a mismatch: `outlier/laplace` was also what 1% and 10% contamination
+came out as. The contaminated fraction is in no results column — `RESULT_COLUMNS`
+carries `noise_type`, `level_units` and `delivered_dose` — so a name that drops
+it loses it from the results entirely.
+
+**Settled: QM9's rule, on both sides.** Targeting, then the contaminated
+fraction where the targeting has one, then the shape, with the shape left off
+when it is Gaussian. The eleven settled conditions keep the names they have
+always had; the rule reproduces them. This is also what the label-noise
+benchmarks do — corruption type and severity recorded as separate fields — and
+the amount of noise is already its own column here.
+
+The expected name for every condition is written down once, in
+`condition_names.json`, and `scripts/test_condition_names.py` checks both
+injectors against it: the QM9 one through the real binary's `--self-test --json`
+mode, so it reads the shipped executable rather than a restatement of it. 19
+conditions, both sides, all passing.
+
+Second half of the same entry: `--noise-targeting` took `grouped_wide` while
+every results row, manifest and figure said `grouped_wider`, so typing the name
+read off a row killed the run. Both spellings are now accepted. The emitted name
+is unchanged, and the table spells the targeting the way the rows do, so
+removing that fix fails the check.
+
+No results need re-running. Every condition the study runs is one of the seven in
+`noise_conditions.json`, and the old and new rules agree on all of them.
+
 ### 2.14 The audit of 2026-08-26, closed
 
 All 151 candidates in `research_archive/audit_2026_08_26/` now carry a verdict.
@@ -1871,8 +1952,8 @@ each; `confirmed_35.json` and `refuted_5.json` each carry a
 
 | | count |
 |---|---|
-| real, fixed | 75 |
-| real, still open — yours to decide | 14 |
+| real, fixed | 77 |
+| real, still open — yours to decide | 12 |
 | duplicate of another entry | 14 |
 | partly fixed | 4 |
 | refuted | 2 |
@@ -1887,8 +1968,8 @@ is real, and it is fixed.
 
 **Every check was broken on purpose to see it go red.**
 `scripts/check_fixes_fail_when_removed.py` edits the real file, runs the check,
-and puts the file back. Twelve fixes; ten went red first time and **two stayed
-green**, which is the point of running it:
+and puts the file back. Twenty cases now; of the first twelve, ten went red
+first time and **two stayed green**, which is the point of running it:
 
 - The QM9 split check asserted each split is more than 10% acyclic. Under
   DeepChem's largest-first ordering WITH singletons, validation comes out 100%
@@ -1915,10 +1996,11 @@ green**, which is the point of running it:
 | KIRBy `tests/smoke/smoke_kirby_splits.py` | scaffold key, acyclic groups, the validation carve |
 | KIRBy `tests/smoke/smoke_kirby_target_scaling.py` | what the models are fitted on, and the noise pattern |
 | KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce, and a model with no rows is named |
+| `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
-**Still yours.** Fourteen entries are real and unfixed because fixing them is a
+**Still yours.** Twelve entries are real and unfixed because fixing them is a
 decision, not a repair:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
@@ -1930,9 +2012,9 @@ decision, not a repair:
    sliced off at every prediction site, so they report the same quantity as a
    plain MC-dropout network. Neither loss is in the roster. Making the head's
    variance the reported aleatoric term changes what those models are.
-4. **`grouped_shifted` off-registry**, and the naming of off-registry conditions.
-   Latent: the settled roster pairs it with Gaussian only, where all three
-   implementations coincide.
+4. ~~`grouped_shifted` off-registry, and the naming of off-registry conditions~~
+   — **settled**: the QM9 rule on both sides, checked against
+   `condition_names.json` (§2.16), and the amount of noise fixed with it.
 5. **Table 4's pooling** across noise levels, and the cross-dataset figure's
    pooling across conditions and representations. The report now says out loud
    what is pooled; computing them per level changes the table's shape.
@@ -2777,6 +2859,30 @@ the Methods. My recommendation is yes — training noisy, validation noisy from 
 draw, test clean — because the alternative is that seven models get a tenth of their labels free
 and the neural models early-stop against an oracle.
 
+**Decision 7 — the tuning sweep: how many settings, on what labels, and when a tuned value wins.**
+§5.7. Three answers, and one of them changes what the sweep costs.
+
+- **(a) How many settings per pairing?** The cost is linear in this number and the arithmetic is
+  in §5.7f, priced from one fit of every pairing at its shared default. My recommendation is 12:
+  a random search of 12 covers each parameter's range better than a grid of 12 once more than two
+  parameters matter, and the models here have three to ten.
+- **(b) Clean labels, or repeated per noise level?** Clean is one sweep. Repeating it at every
+  level of the main grid multiplies it by seven, and makes "the tuned setting" a different setting
+  at every level, which the two JSON files cannot express — they are keyed by model and
+  representation, with no level. My recommendation is clean only, with a Methods sentence saying
+  the hyperparameters are fixed across the noise axis so that the axis is the only thing moving.
+- **(c) Does a tuned value have to beat the shared default by a margin?** `--write-master
+  --margin X` adopts a setting only when it beats `models/model_defaults.py` by X of validation R².
+  A margin of 0 adopts anything that wins on one split, which on one split is partly luck. My
+  recommendation is 0.01, and that pairings below it keep the shared default — which is the file
+  both pipelines already read, so the fallback is the parity-checked value, not a library one.
+
+**Decision 8 — do the other ten models get their own tuned entry?** §5.7a. As the code stands,
+only svm, xgboost, lgb and ngboost can be handed a setting that reaches them alone. Giving the
+quantile forest, the four Bayesian networks and the two Gaussian processes their own entries is
+one changed literal per call site in `models/models.py`. Cost: about half an hour of edits and a
+re-run of the two checks. Not doing it means the sweep measures 80 pairings and can deliver 24.
+
 **Decision 3 — the aleatoric/epistemic split — NOT A DECISION. You settled it on 2026-08-21.
 It gets BUILT, to industry standard, by deleting the broken code and replacing it.**
 
@@ -3155,6 +3261,132 @@ branch, every job script, and the figure script's representation lists and label
 
 ⚠️ **Watch for substring matches when renaming**: `pdv` occurs inside `continuous_pdv`, so a naive
 find-and-replace will corrupt one while fixing the other.
+
+### 5.7 🟠 BUILT 2026-08-27, NOT YET RUN — the local hyperparameter tuning experiment
+
+**It replaces Optuna, which no job ever used.** `--tuning` appears in no script
+`slurm_scripts_qm9_rerun/generate_scripts.py` writes, and four of its suggested values never
+reached a model at all: the quantile at `models/models.py:1660`, `alpha` and `predictor_type` at
+`:4255-4256`, and the loss parameters at `:2561`.
+
+**Shape.** One scaffold split of QM9 — train, validation, test — and no folds. Every pairing tuned
+on its own by a small random search, each setting scored on **validation** R², the best setting
+written out. The test split is never touched by the search. Clean labels; the noise level is a
+question for you, below.
+
+**What was built.**
+
+| file | what it is |
+|---|---|
+| `scripts/tune_hyperparameters.py` | the experiment: `--time` prices it, `--sweep` runs it, `--write-master` writes the two files the pipeline reads |
+| `models/tuning_rosters.py` | the pairing list, imported from `generate_scripts.py` and never retyped, plus the QM9 ↔ experimental name map |
+| `scripts/test_tuned_params_reach_models.py` | a tuned value in the two JSON files must change the model that gets built |
+| `scripts/test_tuning_rosters.py` | the names in those files must be the roster's names |
+| `scripts/test_bnn_criterion_order.py` | NN-β must train on the loss its Bayesian transformation wrapped (§5.7c) |
+
+All three checks are cases in `scripts/check_fixes_fail_when_removed.py`.
+
+**A candidate reaches the model the way the cluster will deliver it.** The script does not rebuild
+the models. It calls `train_<family>_model` with `load_best_hyperparameters` replaced by a stub
+returning the candidate — the same branch, in the same function, that `--use-best-params` fires.
+So a parameter name the builder ignores cannot score well here and then do nothing on the cluster.
+
+⚠️ **The flag in the runbook is wrong.** `--use_best_params True` is not accepted: the option is
+declared `--use-best-params` with `action='store_true'` (`process_and_train.py:379`), so it takes
+no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
+already the default.
+
+#### 5.7a 🔴 THE ROSTER IS 80 PAIRINGS, AND ONLY 24 OF THEM CAN BE DELIVERED TODAY
+
+Counted from the generator, not from memory: thirteen models on all six representations plus the
+Tanimoto Gaussian process on the two binary fingerprints is **80**, not 74. (74 is 80 minus the
+quantile forest's six, which cannot be fitted on this laptop at all — see 5.7b.)
+
+`load_best_hyperparameters(model_type, rep)` is called with a **hard-coded string**, and for seven
+of the fourteen models that string is not the model's own name:
+
+| model | reads the entry keyed | at |
+|---|---|---|
+| `qrf` | `rf` | `models.py:1631` — one function builds both forests and the literal is `'rf'` |
+| `dnn_bnn_full`, `dnn_bnn_full_variational` | `dnn` | `models.py:2450` |
+| `mlp_bnn_full`, `mlp_bnn_full_variational` | `mlp` | `models.py:3200`, via `model_type`, which is `'mlp'` for every variant |
+| `gauche_rbf`, `gauche` | `gauche` | `models.py:2129` |
+
+So **only svm, xgboost, lgb and ngboost — 24 of the 80 pairings — can be handed a tuned setting
+that reaches them and nothing else.** The quantile forest would silently take the plain forest's
+setting. The four Bayesian networks would take their deterministic base's. And the two Gaussian
+processes share one entry per representation, which on `ecfp4` and `sns` is the *same* entry and
+carries `kernel_name` — so a tuned entry there would force one kernel on both and delete the
+RBF-versus-Tanimoto comparison the roster exists to make.
+
+`models/tuning_rosters.py` records the collapse rather than hiding it, and `--write-master`
+refuses to write a shared key. **Widening it is one changed literal per call site.** It is a
+decision for you, not a silent edit, because it changes which models the cluster can be told
+about.
+
+#### 5.7b Local limits, all measured on this laptop 2026-08-27
+
+- `OMP_NUM_THREADS=1`, or `torch.randperm` segfaults after the import stack. The script sets it
+  itself, before torch is imported.
+- **LightGBM segfaults even at one thread** — exit 139, no traceback — because it loads its own
+  OpenMP runtime alongside MKL's. `KMP_DUPLICATE_LIB_OK=TRUE` cures it; the script sets that too.
+  Same class of failure as §2.8e, by a different route.
+- `quantile_forest` 1.4.1 against scikit-learn 1.3.2 raises `Invalid parameter 'monotonic_cst' for
+  estimator DecisionTreeRegressor`. **qrf cannot be fitted here at all**; its six pairings are
+  written to the output as `blocked` with the reason, not dropped.
+- The Gaussian process runs on one thread through `GP_DEFAULTS['single_thread_fit']`, which
+  `models.py` already honours.
+- QM9 is 130k molecules. The sample is **10,000**, which is what the QM9 jobs themselves run, so a
+  setting is tuned at the size it will be used at. It is recorded in every output row.
+
+#### 5.7c ✅ FIXED 2026-08-27 — NN-β's Bayesian variants could not run, and would have had no KL term
+
+Found by the first smoke run of the tuner. `train_mlp_variant_model` built its base loss **after**
+the Bayesian transformation and then overwrote it:
+
+- `criterion = bnn_elbo_criterion(criterion, model, len(x_train))` read `criterion` before it
+  existed, so **MLP-BNN-Full raised `UnboundLocalError` and produced no rows at all**;
+- and had it got past that, the unconditional `criterion = get_loss_function(...)` on the next line
+  would have thrown the ELBO wrapper away and trained NN-β's Bayesian variants on plain MSE with
+  **no KL term** — the exact defect the KL term was added on 2026-08-27 to fix (`model_defaults.py`
+  1.3.0), reintroduced by ordering.
+
+`train_dnn_model` has always built the loss first. NN-β now does the same, and
+`scripts/test_bnn_criterion_order.py` asserts the loss that reaches the trainer, for both bases and
+every transformation.
+
+#### 5.7d The experimental pipeline has no reader — RAISED, NOT BUILT
+
+`alternative_data_noise_robustness.py` builds every model from `sklearn_params(...)` and
+`NEURAL_DEFAULTS`, so a tuned value cannot reach LogD, Caco-2 or hERG today. Adding one is a
+second change and is not made here. The name map in `models/tuning_rosters.py` is checked against
+that pipeline's own display names so it is ready if you want it.
+
+#### 5.7g ✅ FIXED 2026-08-27 — the tuned-parameter path would have crashed on the cluster
+
+`load_best_hyperparameters` calls `json.load` twice, and **`models.py` never imported `json`**.
+Every other use of json in that file is a function-local `import json`; this one is not. `os` was
+no better — it arrived only through one of the star-imports.
+
+So the moment both files existed and a job ran `--use-best-params`, the tuned branch would have
+raised `NameError: name 'json' is not defined`. It has never been reached, for one reason only:
+`results/hyperparameter_decisions.json` has never existed, so the function returned early every
+time. **The entire tuned path has been dead code, not merely unused.** Both imports are now at the
+top of the file, and `scripts/test_tuned_params_reach_models.py` reads the two files through the
+real reader, so this cannot come back unnoticed.
+
+#### 5.7e The old file on disk was a landmine
+
+`results/master_tuned_hyperparameters.json`, dated 28 February, was keyed by `pdv`, `smiles`,
+`randomized_smiles` and `graph` and carried `gcn`, `gin`, `residual_mlp`, `factorization_mlp`,
+`mtl`, `flexible_dnn` and `conformal` — a representation set and a model set from before the
+roster was settled. Its `rf` entry contained `use_default_max_depth`, an Optuna bookkeeping flag
+that is **not an argument of `RandomForestRegressor`**: under `--use-best-params` the forest would
+have raised `TypeError` on construction. It never fired only because
+`results/hyperparameter_decisions.json` has never existed.
+
+Renamed to `results/master_tuned_hyperparameters.superseded_2026-02.json` so nothing can read it.
+`scripts/test_tuning_rosters.py` now fails on any of those names.
 
 ---
 

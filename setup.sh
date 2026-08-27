@@ -65,6 +65,13 @@ setup_env_exists() {
     fi
 }
 
+# Where env_test actually lives, whether it was asked for by name or by path.
+setup_prefix_of_name() {
+    "$SETUP_TOOL" env list 2>/dev/null \
+        | awk -v n="$ENV_NAME" '$1==n{print $NF}' | head -1
+}
+SETUP_TARGET="${ENV_TEST_PREFIX:-$(setup_prefix_of_name)}"
+
 setup_activate() {
     if [ "$SETUP_TOOL" = "micromamba" ]; then
         micromamba activate "${ENV_SELECT[@]}" 2>/dev/null || micromamba activate "$ENV_LABEL"
@@ -73,32 +80,92 @@ setup_activate() {
     fi
 }
 
-# --- rebuild on request ----------------------------------------------------
-if [ "${SETUP_REBUILD:-0}" = "1" ] && setup_env_exists; then
-    echo "SETUP_REBUILD=1: removing $ENV_LABEL"
-    "$SETUP_TOOL" env remove "${ENV_SELECT[@]}" -y
-fi
-
-# --- create ----------------------------------------------------------------
-if ! setup_env_exists; then
-    echo "Creating $ENV_LABEL from $YML_FILE (one OpenMP runtime; see the header there)"
+# --- build -----------------------------------------------------------------
+# The old environment is NEVER deleted before its replacement exists. On
+# 2026-08-27 it was: SETUP_REBUILD=1 removed env_test, the conda solve was then
+# killed for memory on a login node, and the account was left with no
+# environment at all. So: move the old one aside, build at the real path, and
+# put the old one back if the build fails.
+#
+# Aside rather than build-then-move, because a conda environment is not
+# relocatable -- every console script in bin/ carries the build path in its
+# shebang, so an environment built at one prefix and moved to another has a pip
+# that cannot run.
+setup_create() {  # setup_create <select args...>
     # strict priority is set here because an environment file cannot carry it:
     # conda's valid keys are name, dependencies, prefix, channels, variables,
     # and a `channel_priority:` line in the yml is silently ignored.
     if [ "$SETUP_TOOL" = "micromamba" ]; then
-        CONDA_CHANNEL_PRIORITY=strict micromamba create -y "${ENV_SELECT[@]}" -f "$YML_FILE"
+        CONDA_CHANNEL_PRIORITY=strict micromamba create -y "$@" -f "$YML_FILE"
     else
-        CONDA_CHANNEL_PRIORITY=strict "$SETUP_TOOL" env create "${ENV_SELECT[@]}" -f "$YML_FILE"
+        CONDA_CHANNEL_PRIORITY=strict "$SETUP_TOOL" env create "$@" -f "$YML_FILE"
+    fi
+}
+
+setup_build_failed() {  # setup_build_failed <exit code>
+    echo ""
+    echo "BUILD FAILED (exit $1). Nothing has been installed."
+    echo "  A solve that stops at 'Killed' with no other message is memory, not"
+    echo "  the recipe. Build inside an allocation, never on a login node:"
+    echo "    srun --account=stat-cadd --cpus-per-task=8 --mem=48G --time=03:00:00 \\"
+    echo "         bash scripts/rebuild_env.sh"
+}
+
+if [ "${SETUP_REBUILD:-0}" = "1" ] || ! setup_env_exists; then
+    if [ -n "$SETUP_TARGET" ] && [ -e "$SETUP_TARGET" ]; then
+        SETUP_ASIDE="${SETUP_TARGET}.old"
+        rm -rf "$SETUP_ASIDE"
+        echo "Moving the old environment aside: $SETUP_TARGET -> $SETUP_ASIDE"
+        mv "$SETUP_TARGET" "$SETUP_ASIDE" || {
+            echo "Could not move it. Refusing to build over a live environment."
+            return 1 2>/dev/null || exit 1
+        }
+        echo "Creating $SETUP_TARGET from $YML_FILE (one OpenMP runtime; see the header there)"
+        setup_create -p "$SETUP_TARGET"
+        SETUP_RC=$?
+        if [ "$SETUP_RC" -ne 0 ] || [ ! -x "$SETUP_TARGET/bin/python" ]; then
+            setup_build_failed "$SETUP_RC"
+            echo "  Putting the old environment back."
+            rm -rf "$SETUP_TARGET"
+            mv "$SETUP_ASIDE" "$SETUP_TARGET"
+            return 1 2>/dev/null || exit 1
+        fi
+        echo "Built. The previous environment is still on disk at $SETUP_ASIDE"
+        echo "  -- delete it once the gate passes:  rm -rf $SETUP_ASIDE"
+    else
+        echo "Creating $ENV_LABEL from $YML_FILE (one OpenMP runtime; see the header there)"
+        setup_create "${ENV_SELECT[@]}"
+        SETUP_RC=$?
+        if [ "$SETUP_RC" -ne 0 ]; then
+            setup_build_failed "$SETUP_RC"
+            return 1 2>/dev/null || exit 1
+        fi
     fi
 fi
 
 setup_activate
 
-# --- verify activation -----------------------------------------------------
+# --- verify activation ------------------------------------------------------
+# Not "is something active" -- "is the RIGHT thing active". The weaker check let
+# a failed build fall through on 2026-08-27 with the system Anaconda still
+# active, and the four extras below then installed themselves into
+# /apps/.../Anaconda3 and ~/.local/lib/python3.9. Refuse instead.
 if [ -z "${CONDA_PREFIX:-}" ]; then
     echo "Environment activation failed. CONDA_PREFIX not set."
     return 1 2>/dev/null || exit 1
 fi
+if [ -n "$SETUP_TARGET" ] && [ "$CONDA_PREFIX" != "$SETUP_TARGET" ]; then
+    echo "Activation landed in the WRONG environment. Refusing to install anything."
+    echo "  wanted: $SETUP_TARGET"
+    echo "  got:    $CONDA_PREFIX"
+    return 1 2>/dev/null || exit 1
+fi
+if [ -z "$SETUP_TARGET" ] && [ "$(basename "$CONDA_PREFIX")" != "$ENV_NAME" ]; then
+    echo "Activation landed in '$CONDA_PREFIX', which is not $ENV_NAME."
+    echo "  Refusing to install anything into it."
+    return 1 2>/dev/null || exit 1
+fi
+SETUP_TARGET="$CONDA_PREFIX"
 
 # --- shared library paths --------------------------------------------------
 echo "Setting shared library paths..."
@@ -122,6 +189,15 @@ fi
 # --- isolate from Homebrew and any system Python ---------------------------
 unset PYTHONPATH
 export PATH="$CONDA_PREFIX/bin:$PATH"
+# ~/.local/lib/python3.X/site-packages is read by every interpreter of that
+# version, this environment included, and this account has a torch and a
+# scikit-learn sitting in one -- a second set of OpenMP runtimes arriving by the
+# back door, outside anything env.yml or pip-constraints.txt can control.
+export PYTHONNOUSERSITE=1
+# and pip may not write there either: with no writable site-packages it silently
+# falls back to --user, which is how packages meant for env_test ended up in
+# ~/.local/lib/python3.9 on 2026-08-27.
+export PIP_USER=0
 
 # ---------------------------------------------------------------------------
 # The four things no channel can supply.

@@ -47,6 +47,23 @@ section() { say ""; say "=======================================================
 REPO="${QSAR_QM_MODELS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO" || { echo "cannot cd to $REPO"; exit 1; }
 
+# --- run this where there is memory -----------------------------------------
+# Measured 2026-08-27: on a login node the conda solve for env.yml is killed
+# part way through "Collecting package metadata", with no message but "Killed".
+# That is the per-user memory cap, not the recipe. Rather than print advice and
+# leave it to a second paste, put itself in an allocation.
+if [ -z "${SLURM_JOB_ID:-}" ] && [ "${REBUILD_NO_SRUN:-0}" != "1" ] \
+   && command -v srun &>/dev/null; then
+    echo "Not inside an allocation, and the conda solve needs more memory than a"
+    echo "login node allows. Re-running this script inside one:"
+    echo "  srun --account=${REBUILD_ACCOUNT:-stat-cadd} --cpus-per-task=8 --mem=48G --time=03:00:00"
+    echo "If it sits here for a while that is the wait for a node. Leave it."
+    echo ""
+    exec srun --account="${REBUILD_ACCOUNT:-stat-cadd}" --nodes=1 --ntasks=1 \
+              --cpus-per-task=8 --mem=48G --time=03:00:00 \
+              --job-name=rebuild_env bash "$0" "$@"
+fi
+
 section "ENVIRONMENT REBUILD  --  $(date)  --  $(hostname)"
 say "user: $(whoami)"
 say "repo: $REPO"
@@ -126,7 +143,26 @@ OLD_PREFIX="$(conda env list | awk '$1=="env_test"{print $NF}')"
 if [ -z "$OLD_PREFIX" ]; then
     OLD_PREFIX="$(conda env list | grep -E '/env_test$' | awk '{print $NF}' | head -1)"
 fi
+# env_test may not be there to ask -- the 2026-08-27 build removed it and then
+# died. Its location is recorded in the archive this script wrote before doing
+# so, and building by NAME instead would drop several gigabytes into the home
+# quota, so recover the path rather than guess.
+if [ -z "$OLD_PREFIX" ]; then
+    OLD_PREFIX="${REBUILD_ENV_PREFIX:-$(grep -h '^# prefix:' \
+        "$REPO"/research_archive/env_test_before_rebuild_*.txt 2>/dev/null \
+        | tail -1 | awk '{print $3}')}"
+    [ -n "$OLD_PREFIX" ] && say "  env_test is not registered; using the last recorded prefix"
+fi
 say "  current prefix: ${OLD_PREFIX:-<env_test not found>}"
+
+# The package cache defaults to ~/.conda/pkgs when the conda install itself is
+# not writable, and a full solve pulls down several gigabytes -- straight into
+# the home quota. Keep it beside the environment.
+if [ -z "${CONDA_PKGS_DIRS:-}" ] && [ -n "$OLD_PREFIX" ]; then
+    export CONDA_PKGS_DIRS="$(dirname "$OLD_PREFIX")/conda_pkgs"
+    mkdir -p "$CONDA_PKGS_DIRS"
+    say "  package cache: $CONDA_PKGS_DIRS  (off the home quota)"
+fi
 
 ARCHIVE="$REPO/research_archive/env_test_before_rebuild_$(date +%Y-%m-%d).txt"
 if [ -n "$OLD_PREFIX" ] && [ -x "$OLD_PREFIX/bin/python" ]; then
@@ -181,10 +217,31 @@ if [ -n "$OLD_PREFIX" ]; then
     say "   can be your home quota)"
 fi
 say ""
-SETUP_REBUILD=1 . ./setup.sh 2>&1 | tee -a "$REPORT"
+# NOT `. ./setup.sh | tee`: the left-hand side of a pipe runs in a subshell, so
+# the activation it performs is thrown away and everything below this line runs
+# against whatever python was already on PATH -- which on 2026-08-27 was the
+# system Anaconda's 3.9. Process substitution keeps the source in this shell.
+SETUP_REBUILD=1 . ./setup.sh > >(tee -a "$REPORT") 2>&1
+BUILD_RC=$?
 say ""
 say "  interpreter now: $(command -v python)"
 say "  python:          $(python -c 'import sys; print(sys.version.split()[0])' 2>&1)"
+
+# If the build did not produce the environment, stop here. Six cascading
+# failures against the wrong interpreter say nothing that this line does not.
+if [ "$BUILD_RC" -ne 0 ] || [ -z "${CONDA_PREFIX:-}" ] \
+   || [ "$(basename "${CONDA_PREFIX:-none}")" != "env_test" ]; then
+    section "STOPPING -- the environment was not built"
+    say "  setup.sh exit code: $BUILD_RC"
+    say "  active prefix:      ${CONDA_PREFIX:-<none>}"
+    say ""
+    say "  Nothing below would be a test of env_test, so nothing below was run."
+    say "  The previous environment, if there was one, has been left in place or"
+    say "  put back -- see the build output above."
+    say ""
+    say "written to: $REPORT"
+    exit 1
+fi
 
 # --- 3. the gate ------------------------------------------------------------
 section "3. THE GATE -- check_environment.py --deep --validation"
