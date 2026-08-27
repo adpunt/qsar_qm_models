@@ -182,6 +182,13 @@ def _normalise_condition(name):
 
 _DEFAULT_MIN_N = 20
 
+# How far the clean label plus the recorded noise may sit from the corrupted
+# label before the frame is refused as mis-scaled. The columns are written as
+# float32, so a correctly scaled file misses by about 2e-6; a file read on the
+# wrong scale misses by the standardisation mean over the spread, which is 5.3
+# on QM9. Nothing lands between the two.
+_SCALE_TOLERANCE = 1e-3
+
 
 # ---------------------------------------------------------------------------
 # small numeric helpers
@@ -351,7 +358,37 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
     out['mol_id'] = (df['canonical_smiles'] if 'canonical_smiles' in df.columns
                      else np.nan)
     out['sample_idx'] = df['sample_idx'] if 'sample_idx' in df.columns else np.nan
-    out['y_true_clean'] = pd.to_numeric(df['y_true_original'], errors='coerce')
+    # ---- the two scales in one row -----------------------------------------
+    # QM9 writes y_pred_mean, y_pred_std_* and y_true_noisy on the STANDARDISED
+    # scale the model was fitted on, and y_true_original, injected_noise,
+    # noise_scale and noise_pattern in the label's own units. utils.py
+    # UNCERTAINTY_COLUMNS says so, and puts standardisation_mean and
+    # standardisation_sd on every row for exactly this reason.
+    #
+    # Reading them as one scale is not a rounding error. On QM9 the clean label
+    # averages 6.89 eV, so |y_true_clean - y_pred| becomes that constant plus a
+    # small residual, the absolute value never folds, and the statistic ranks the
+    # SIGNED residual instead of the size of the error. Measured on a real run
+    # before this was fixed: q4_error_ratio returned rho_error = -0.024 at level
+    # 1.5, where the corrupted labels are by construction the largest errors.
+    # q6_error_ranking was wrong the same way. Everything is put on the model's
+    # scale here, because that is the scale y_pred and the uncertainty are on and
+    # neither carries the constants needed to go the other way.
+    std_mean = (pd.to_numeric(df['standardisation_mean'], errors='coerce')
+                if 'standardisation_mean' in df.columns
+                else pd.Series(np.nan, index=df.index))
+    std_sd = (pd.to_numeric(df['standardisation_sd'], errors='coerce')
+              if 'standardisation_sd' in df.columns
+              else pd.Series(np.nan, index=df.index))
+    # A file written with --normalize False, or by the writer before 2026-08-27,
+    # leaves these blank; then every column is already on one scale and nothing
+    # is converted. The consistency check below fires either way.
+    to_model_scale = std_mean.notna() & std_sd.notna() & (std_sd > 0)
+    sd_safe = std_sd.where(to_model_scale, 1.0)
+    mean_safe = std_mean.where(to_model_scale, 0.0)
+
+    y_clean_raw = pd.to_numeric(df['y_true_original'], errors='coerce')
+    out['y_true_clean'] = (y_clean_raw - mean_safe) / sd_safe
     out['y_pred'] = pd.to_numeric(df['y_pred_mean'], errors='coerce')
 
     if uncertainty_column == 'calibrated':
@@ -365,12 +402,40 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
                 f"{path}: no column '{uncertainty_column}'.")
     out['uncertainty'] = pd.to_numeric(unc, errors='coerce')
 
+    # The noise columns are amounts, not positions, so they take the spread and
+    # not the mean. noise_scale = level x noise_pattern holds either side of the
+    # division, which is what check_noise_scale_redundancy verifies.
     for c in ('injected_noise', 'noise_scale', 'noise_pattern',
               'noise_pattern_pred'):
-        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+        out[c] = (pd.to_numeric(df[c], errors='coerce') / sd_safe
+                  if c in df.columns else np.nan)
     out['oof_folds_ok'] = (pd.to_numeric(df['oof_folds_ok'], errors='coerce')
                            if 'oof_folds_ok' in df.columns else np.nan)
     out['source_file'] = str(path)
+
+    # The check that makes a scale mismatch an error rather than a quiet wrong
+    # number. The file carries the corrupted label the model trained on, so
+    # y_true_clean + injected_noise == y_true_noisy is checkable on every row
+    # without reference to anything outside the file. It holds to float32 on a
+    # correctly scaled frame, and misses by the standardisation constants on a
+    # wrongly scaled one -- 5.3 in units of the spread on QM9.
+    if 'y_true_noisy' in df.columns:
+        noisy = pd.to_numeric(df['y_true_noisy'], errors='coerce')
+        gap = (out['y_true_clean'] + out['injected_noise'] - noisy).abs()
+        worst = float(gap.max()) if gap.notna().any() else 0.0
+        if worst > _SCALE_TOLERANCE:
+            raise UncertaintySchemaError(
+                f"{path}: the clean label, the injected noise and the corrupted "
+                f"label are not on one scale -- max |y_true_clean + "
+                f"injected_noise - y_true_noisy| = {worst:.4g}, tolerance "
+                f"{_SCALE_TOLERANCE:g}. QM9 writes y_pred and y_true_noisy "
+                f"standardised and y_true_original and injected_noise in the "
+                f"label's own units, and this loader converts with "
+                f"standardisation_mean / standardisation_sd. If those columns "
+                f"are blank the file predates 2026-08-27, and every error-based "
+                f"statistic on it would rank the signed residual by the raw "
+                f"label instead of the size of the error; re-run rather than "
+                f"loading it.")
     return out
 
 

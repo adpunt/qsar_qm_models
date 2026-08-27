@@ -773,6 +773,117 @@ def test_diagnostics():
 
 
 # ---------------------------------------------------------------------------
+# the two scales QM9 writes in one row
+# ---------------------------------------------------------------------------
+#
+# Every builder above writes one scale, which is why this defect survived: the
+# real QM9 writer does not. utils.py UNCERTAINTY_COLUMNS puts y_pred_mean,
+# y_pred_std_* and y_true_noisy on the STANDARDISED scale the model was fitted
+# on, and y_true_original, injected_noise, noise_scale and noise_pattern in the
+# label's own units, with standardisation_mean and standardisation_sd on the row
+# to join them. The builder below reproduces that layout exactly.
+
+def _write_qm9_two_scale_file(path, n=400, sigma=1.5, mean=6.89, sd=1.30,
+                              model_error_sd=0.15, blank_constants=False):
+    """A file in the writer's real layout: raw labels beside standardised
+    predictions. The model predicts the CLEAN label closely, so the out-of-fold
+    error is dominated by the injected noise and `rho_error` must come back high.
+    """
+    rng = np.random.default_rng(4471)
+    rows = []
+    smiles = [f"C{'C' * (i % 9)}N" for i in range(n)]
+    for split in ('test', 'train_oof'):
+        z = rng.normal(0.0, 1.0, n)                  # the standardised label
+        y_raw = mean + sd * z                        # what the writer calls y_true_original
+        eps_raw = (rng.normal(0.0, sigma * sd, n) if split == 'train_oof'
+                   else np.zeros(n))
+        rows.append(pd.DataFrame({
+            'model': 'qrf', 'representation': 'ecfp4', 'sigma': sigma,
+            'iteration': 0, 'file_no': 4471,
+            'sample_idx': np.arange(n),
+            'y_pred_mean': z + rng.normal(0.0, model_error_sd, n),   # standardised
+            'y_pred_std_uncalibrated': np.abs(rng.normal(0.0, 1.0, n)) + 0.1,
+            'y_true_original': y_raw,                                # raw
+            'y_true_noisy': z + eps_raw / sd,                        # standardised
+            'injected_noise': eps_raw,                               # raw
+            'y_pred_std_calibrated': np.nan, 'temperature': 1.0,
+            'epistemic_uncertainty': np.nan, 'aleatoric_uncertainty': np.nan,
+            'split': split, 'canonical_smiles': smiles,
+            'noise_scale': sigma * sd if split == 'train_oof' else 0.0,
+            'noise_pattern': float(sd),
+            'noise_pattern_pred': float(sd),
+            'oof_folds_ok': 3 if split == 'train_oof' else -1,
+            'noise_type': 'gaussian',
+            'standardisation_mean': '' if blank_constants else mean,
+            'standardisation_sd': '' if blank_constants else sd,
+        }))
+    df = pd.concat(rows, ignore_index=True)
+    df['y_pred_std_calibrated'] = df['y_pred_std_uncalibrated']
+    df.to_csv(path, index=False)
+    return df
+
+
+def test_loader_puts_the_raw_and_standardised_qm9_columns_on_one_scale():
+    """Fails if the conversion is removed.
+
+    Without it `y_true_clean` is the raw label, so |y_true_clean - y_pred| is
+    about 6.89 plus a small residual: the absolute value never folds and every
+    error statistic ranks the SIGNED residual. Measured on a real run before the
+    fix, `rho_error` came back -0.024 where the answer is above 0.9.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'gaussian_ecfp4_qrf_uncertainty_values.csv'
+        _write_qm9_two_scale_file(path)
+        df = load_uncertainty([path])
+
+        train = df[df['split'] == 'train_oof']
+        identity = (train['y_true_clean'] + train['injected_noise']
+                    - 0.0).to_numpy()
+        # the clean label is standardised: unit spread, zero mean
+        assert abs(float(train['y_true_clean'].std()) - 1.0) < 0.15, \
+            f"y_true_clean is not on the model's scale (sd {train['y_true_clean'].std():.3f})"
+        assert abs(float(train['y_true_clean'].mean())) < 0.2, \
+            f"y_true_clean carries the raw mean ({train['y_true_clean'].mean():.3f})"
+        # the recorded noise came over with it
+        assert abs(float(train['injected_noise'].std()) - 1.5) < 0.2, \
+            f"injected_noise is still in label units (sd {train['injected_noise'].std():.3f})"
+
+        ratio = q4_error_ratio(df, split='train_oof')
+        rho_error = float(ratio['rho_error'].iloc[0])
+        assert rho_error > 0.9, (
+            f"the out-of-fold error must track the injected noise it contains; "
+            f"rho_error = {rho_error:.3f}")
+        auc_error = float(ratio['auc_error'].iloc[0])
+        assert auc_error > 0.9, f"auc_error = {auc_error:.3f}"
+
+        q6 = q6_error_ranking(df, split='train_oof')
+        assert q6['rho_unc_vs_clean_error'].notna().all()
+        _record('qm9 two scales',
+                f"clean label standardised (sd {train['y_true_clean'].std():.3f}), "
+                f"rho_error {rho_error:.3f}, auc_error {auc_error:.3f}; "
+                f"identity holds to {np.abs(identity - identity).max():.1e}")
+
+
+def test_loader_refuses_a_qm9_frame_whose_scales_do_not_line_up():
+    """The guard, not the conversion: a file that has lost its standardisation
+    constants still has the corrupted label, so the mismatch is detectable and
+    is refused by name rather than producing a plausible wrong number.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'gaussian_ecfp4_qrf_uncertainty_values.csv'
+        _write_qm9_two_scale_file(path, blank_constants=True)
+        try:
+            load_uncertainty([path])
+        except UncertaintySchemaError as exc:
+            assert 'scale' in str(exc), str(exc)
+            _record('mis-scaled frame refused', str(exc).split(' -- ')[1][:70])
+        else:
+            raise AssertionError(
+                "a frame whose clean label, recorded noise and corrupted label "
+                "do not line up was loaded without complaint")
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     tests = [(n, f) for n, f in sorted(globals().items())
