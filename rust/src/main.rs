@@ -175,13 +175,6 @@ impl NoiseShape {
         }
     }
 
-    /// One draw rescaled to unit variance. Used by the two-component types, where
-    /// the shape's own spread has to be divided out before the components are
-    /// combined.
-    fn draw_unit_variance(&self, rng: &mut StdRng) -> f32 {
-        self.draw(rng) / self.unit_sd()
-    }
-
     fn name(&self) -> String {
         match self {
             NoiseShape::Gaussian => "gaussian".to_string(),
@@ -962,7 +955,15 @@ fn build_noise_plan(
         // Two components: a group-level offset carrying `rho` of the variance and a
         // within-molecule term carrying the rest, so the two sum to the target.
         //   eps_i = solved * ( sqrt(rho) * z_g(i) + sqrt(1-rho) * w_i )
-        // with z_g and w_i both unit-variance, hence G = 1 by construction.
+        // z_g and w_i are draws at the SHAPE'S OWN SPREAD, exactly as every other
+        // targeting draws them, and `solved` is what the dose solver returned — so
+        // the two variances sum to the target the way they do everywhere else.
+        //
+        // They used to be rescaled to unit variance here while the solver still put
+        // the shape's spread into G, so this type alone delivered the target divided
+        // by that spread: 0.71x under Laplace and 0.77x under Student-t at nu=5.
+        // Gaussian has unit spread, and the condition roster is Gaussian at every
+        // entry, which is why no gate ever saw it (RERUN_PLAN.md §2.14).
         NoiseTargeting::GroupedShift {
             group_variance_share,
         } => {
@@ -988,7 +989,7 @@ fn build_noise_plan(
                         continue;
                     }
                 }
-                let b = spec.shape.draw_unit_variance(&mut rng);
+                let b = spec.shape.draw(&mut rng);
                 group_offsets.insert(*gid, b);
             }
             params.insert(
@@ -1002,7 +1003,7 @@ fn build_noise_plan(
             ids.iter()
                 .map(|gid| {
                     let b = group_offsets[gid];
-                    let w = spec.shape.draw_unit_variance(&mut rng);
+                    let w = spec.shape.draw(&mut rng);
                     solved * (rho.sqrt() * b + (1.0 - rho).sqrt() * w)
                 })
                 .collect()
@@ -1492,18 +1493,29 @@ fn condition_roster(with_groups: bool) -> Vec<(NoiseShape, NoiseTargeting, f32)>
 /// injector. This ties the reference to the PIPELINE — without it the pipeline could
 /// drift from both and nothing would notice, which is the exact failure the gate
 /// exists to prevent.
+/// `only` runs ONE named shape-and-targeting pair instead of the roster. The roster
+/// is Gaussian at every entry, which is right -- it is what the study runs -- but it
+/// leaves the pipeline's grouped-shift under a heavy tail unreachable, so nothing
+/// could compare it against the Python injector. This is the way in, and nothing but
+/// a test uses it: both `--noise-shape` and `--noise-targeting` must be given, and
+/// no caller of the roster path passes either.
 fn self_test_json(
     labels: &[f32],
     groups: Option<&HashMap<String, u32>>,
     canonical: &[String],
     k: f32,
     seeds: u64,
+    only: Option<(NoiseShape, NoiseTargeting)>,
 ) {
     let clean_sd = population_sd(labels);
     let target = k * clean_sd;
     let mut rows: Vec<String> = Vec::new();
 
-    for (shape, targeting, censor_level) in condition_roster(groups.is_some()) {
+    let roster = match only {
+        Some((shape, targeting)) => vec![(shape, targeting, f32::NAN)],
+        None => condition_roster(groups.is_some()),
+    };
+    for (shape, targeting, censor_level) in roster {
         let level = if censor_level.is_nan() { k } else { censor_level };
         let mut delivered: Vec<f32> = Vec::new();
         let mut last: Option<NoisePlan> = None;
@@ -3145,7 +3157,12 @@ fn main() -> io::Result<()> {
         .unwrap_or("uniform")
     {
         "uniform" => NoiseTargeting::Uniform,
-        "grouped_wide" => {
+        // Both spellings. The keyword was `grouped_wide` while every results row,
+        // every manifest and every figure says `grouped_wider`, so typing the name
+        // read off a row killed the run with "unknown --noise-targeting". Same for
+        // the shifted pair. The EMITTED name is unchanged -- `NoiseTargeting::name`
+        // above still returns one string per condition, and that is what rows join on.
+        "grouped_wide" | "grouped_wider" => {
             assert!(
                 group_variance_share.is_finite(),
                 "--group-variance-share is not used by grouped_wide"
@@ -3155,7 +3172,7 @@ fn main() -> io::Result<()> {
                 group_fraction,
             }
         }
-        "grouped_shift" => {
+        "grouped_shift" | "grouped_shifted" => {
             assert!(
                 (0.0..=1.0).contains(&group_variance_share),
                 "--group-variance-share must be in [0, 1]"
@@ -3176,7 +3193,8 @@ fn main() -> io::Result<()> {
         }
         "censoring" => NoiseTargeting::Censoring { side: censor_side },
         other => panic!(
-            "unknown --noise-targeting '{}'. Valid: uniform, grouped_wide, grouped_shift, outlier, censoring",
+            "unknown --noise-targeting '{}'. Valid: uniform, grouped_wide (or grouped_wider), \
+             grouped_shift (or grouped_shifted), outlier, censoring",
             other
         ),
     };
@@ -3211,7 +3229,14 @@ fn main() -> io::Result<()> {
                 .get_one::<String>("noise_level")
                 .map(|v| v.parse().expect("--noise-level must be a valid float"))
                 .unwrap_or(0.5);
-            self_test_json(&labels, groups.as_ref(), &canonical, k, seeds);
+            let only = if matches.get_one::<String>("noise_targeting").is_some()
+                && matches.get_one::<String>("noise_shape").is_some()
+            {
+                Some((shape, targeting))
+            } else {
+                None
+            };
+            self_test_json(&labels, groups.as_ref(), &canonical, k, seeds, only);
             return Ok(());
         }
         let failures = self_test(&labels, groups.as_ref(), &canonical);

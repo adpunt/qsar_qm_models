@@ -1,0 +1,35 @@
+{
+  "what_this_is": "One name per noise condition, and the ONLY place the expected name is written down. Both injectors are checked against it by scripts/test_condition_names.py: the QM9 one through its --self-test --json mode, the Python one through NoiseInjectorRegression.condition. Results rows from the two pipelines are joined on this string, so a second naming rule anywhere means they cannot be joined.",
+
+  "the_rule": "Targeting first, then the contaminated fraction where the targeting has one, then the shape -- and the shape is left off when it is Gaussian, so the eleven settled conditions keep the short names they have always had. Uniform targeting is named by its shape alone. Censoring is named by the percentage clipped, which is its level.",
+
+  "why_the_fraction_is_in_the_name": "Nothing else records it. RESULT_COLUMNS in scripts/utils.py carries noise_type, level_units and delivered_dose and has no column for the outlier fraction, so a name that drops it loses it from the results. The Python injector used to return 'outlier/laplace' for 1%, 5% and 10% alike.",
+
+  "settled": "2026-08-27. RERUN_PLAN.md section 2.14, audit entry 39.",
+
+  "names": [
+    {"targeting": "uniform",         "shape": "gaussian",                "name": "gaussian"},
+    {"targeting": "uniform",         "shape": "laplace",                 "name": "laplace"},
+    {"targeting": "uniform",         "shape": "student_t", "nu": 3.0,    "name": "student_t_nu3"},
+    {"targeting": "uniform",         "shape": "student_t", "nu": 5.0,    "name": "student_t_nu5"},
+    {"targeting": "uniform",         "shape": "student_t", "nu": 10.0,   "name": "student_t_nu10"},
+
+    {"targeting": "grouped_wider",   "shape": "gaussian",                "name": "grouped_wider"},
+    {"targeting": "grouped_wider",   "shape": "laplace",                 "name": "grouped_wider_laplace"},
+    {"targeting": "grouped_wider",   "shape": "student_t", "nu": 5.0,    "name": "grouped_wider_student_t_nu5"},
+
+    {"targeting": "grouped_shifted", "shape": "gaussian",                "name": "grouped_shifted"},
+    {"targeting": "grouped_shifted", "shape": "laplace",                 "name": "grouped_shifted_laplace"},
+    {"targeting": "grouped_shifted", "shape": "student_t", "nu": 5.0,    "name": "grouped_shifted_student_t_nu5"},
+
+    {"targeting": "outlier", "p": 0.01, "shape": "gaussian",             "name": "outlier_p01"},
+    {"targeting": "outlier", "p": 0.05, "shape": "gaussian",             "name": "outlier_p05"},
+    {"targeting": "outlier", "p": 0.10, "shape": "gaussian",             "name": "outlier_p10"},
+    {"targeting": "outlier", "p": 0.01, "shape": "laplace",              "name": "outlier_p01_laplace"},
+    {"targeting": "outlier", "p": 0.05, "shape": "laplace",              "name": "outlier_p05_laplace"},
+    {"targeting": "outlier", "p": 0.05, "shape": "student_t", "nu": 5.0, "name": "outlier_p05_student_t_nu5"},
+
+    {"targeting": "censoring", "side": "upper", "level": 0.25, "shape": "gaussian", "name": "censoring_25"},
+    {"targeting": "censoring", "side": "lower", "level": 0.25, "shape": "gaussian", "name": "censoring_lower_25"}
+  ]
+}
