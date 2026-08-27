@@ -3615,7 +3615,7 @@ requirement is not met, that question cannot be answered and the run should not 
 |---|---|---|---|---|
 | **Q1** | Is noise robustness decided by the model, the representation, or their pairing? | Two-way variance decomposition, model × representation, reported as the share of variance each term explains, with the residual shown | One value per (model, representation, replicate) cell, **separately for each noise type** | ≥2 replicates per cell for the residual to be real; **≥6 for any paired follow-up test** (§13.1); one roster and one exclusion rule applied everywhere |
 | **Q2** | Does the *kind* of noise matter, or only the amount? | (a) Spread in accuracy across noise types at matched delivered amount; (b) paired signed-rank test, each type against Gaussian, per model, **not pooled** | Paired on the replicate, within one representation and one noise level | Delivered amount verified flat across types (§8 gate 1). Six replicates minimum, or no result can reach significance |
-| **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset (§6.1); the QM9 reporting level still 🔴 TODO |
+| **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset. ✅ **All four settled 2026-08-27** — QM9 1.0, logD 1.0, Caco-2 0.2, hERG still to set (§13.11) |
 | **Q4** | Can a model's uncertainty tell you which labels are bad? | **Two numbers, settled 2026-08-26, reported side by side under names that cannot be confused.** (a) The plain Spearman correlation between predicted uncertainty and the size of the injected noise, **within each noise level**, scored **out-of-fold** — near zero by design, because the scoring model never saw that molecule's draw and under an even condition every molecule gets the same amount. (b) The answer: take the out-of-fold error `\|y_clean + injected − y_pred\|`, which does track the noise, and ask whether dividing it by the predicted uncertainty ranks corrupted labels better than the error alone. Both with a permutation null | Per (dataset, model, representation, noise type, level) — never pooled | The noise **recorded**, not reconstructed (§5.2); out-of-fold scoring on scaffold groups; a zero-noise run of the same type to subtract. ✅ **All three now exist on both pipelines** (§3.1c). Built in `scripts/uncertainty_stats.py` |
 | **Q5** | Does noisy training data make a model less sure about new molecules? | Mean predicted uncertainty against noise level — a **population-level** statement, and it must be labelled as one | Per (model, representation, noise type), across levels | Uncertainty magnitudes on a fixed scale — needs the standardisation fix (§2.4), which currently makes them shrink as noise rises |
 | **Q6** | With noisy training data, does uncertainty still rank which predictions to trust? | Spearman correlation between predicted uncertainty and absolute error **against the clean label** | Per (model, representation, noise type, level) | Clean test labels retained alongside noisy ones. Free — every run already produces both |
@@ -5090,6 +5090,28 @@ the Methods should say it.
 ---
 
 ### 13.15 ✅ The roster level screen — the evidence the QM9 reporting level rests on
+
+#### 🔴 What this data IS and IS NOT, before anything is quoted from it
+
+**It was run to answer one design question: at what noise level should the tables report?** That is
+Q3's outstanding requirement (§7.0). It answered it — level 1.0 (§13.11).
+
+**It is not a result and nothing in the paper may cite it.** It is a screening harness, not the
+pipeline:
+
+| | The screen | The real run |
+|---|---|---|
+| molecules per replicate | 4,000 | 10,000 |
+| representations | PDV only | six |
+| models | 7 | 13 |
+| noise conditions | 2 | 3 at all 78 pairs, 6 in the deep run |
+| target | the HOMO–LUMO gap | the same, but through `process_and_train.py` |
+| code path | `scripts/setting_selection_test.py` | the training pipeline |
+
+**So the NGBoost finding below is a LEAD, not an answer.** It bears on Q1 (is robustness decided by
+the model or the representation) and Q3 (what model choice buys you), and both of those are answered
+by the real run on the full grid or not at all. What it earns is a place on the shortlist for the
+deep run (§13.1 item 4) — it was not in the earlier three-model screen at all.
 
 `results/roster_level_screen.csv`, 420 rows, run 2026-08-27. QM9, PDV, 4,000 molecules per
 replicate drawn fresh, real Murcko scaffold split, noise on training labels only, scored on clean
