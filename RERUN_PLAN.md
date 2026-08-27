@@ -3864,58 +3864,63 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | **1.5.** It is measured, 1.0 is not; the models all still fit there (R² 0.62–0.77); and it is where both the grouped-shifted result and the boosting-versus-linear flip are visible. Report the clean column beside it | chat J, at figure-script rebuild |
+| 1 | **1.5.** It is measured, 1.0 is not; both roster models still fit there (R² 0.62 and 0.68); and it is where both the grouped-shifted result and the boosting-versus-forest reversal are visible. Report the clean column beside it | chat J, at figure-script rebuild |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | the uncertainty job-script chat |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | the uncertainty job-script chat |
 | 4 | Nothing to default. The screen runs, the author looks, the author chooses | after the screen |
 
 #### Item 1 — the level changes which model wins, so it is not a presentational choice
 
-Recomputed 2026-08-27 from `results/setting_selection_test.csv` (QM9, PDV, plain Gaussian, twelve
-replicates, Ridge replicate 2 excluded and named — its clean R² is −0.35, a scaffold split ridge
-could not fit).
+⚠️ **Corrected 2026-08-27. Ridge is not in the study.** `scripts/setting_selection_test.py:75`
+screens `['LGBM', 'RF', 'Ridge']`, and its own docstring at `:384` says why: *"Ridge has no entry
+there; it is the cheap linear reference the pilots used, kept at alpha = 1.0 for continuity with
+them."* It is a scratch model in the local screening harness and it is **not** in the thirteen-model
+roster (`slurm_scripts_qm9_rerun/generate_scripts.py:205-219`). No conclusion may rest on it. The
+first version of this section led with a boosting-versus-linear story built on it; that is withdrawn.
+LightGBM and the random forest **are** in the roster, and both take their settings from
+`models/model_defaults.py`, the file both pipelines read.
 
-**Order of the three models, counted per replicate, not averaged:**
+Recomputed on those two only, from `results/setting_selection_test.csv` — QM9, PDV, plain Gaussian,
+twelve replicates, counted per replicate, nothing averaged:
 
-| Level | Order, and in how many replicates |
-|---|---|
-| clean | LightGBM > forest > ridge in **11 of 12** |
-| 0.5 | LightGBM > forest > ridge in 7 of 12; forest first in 4 |
-| 1.5 | **ridge first in 9 of 12** — LightGBM > forest > ridge in none |
+| Level | LightGBM ahead | Random forest ahead |
+|---|---|---|
+| clean | **11 of 12** | 1 of 12 |
+| 0.5 | 8 of 12 | 4 of 12 |
+| 1.5 | 1 of 12 | **11 of 12** |
 
-**R² per model, so the flip can be read as a result rather than a collapse:**
-
-| Model | clean median | 0.5 median | 1.5 median |
+| Model | clean median R² | 0.5 median | 1.5 median |
 |---|---|---|---|
 | LightGBM | 0.902 | 0.871 | 0.619 |
 | Random forest | 0.895 | 0.866 | 0.683 |
-| Ridge | 0.862 | 0.845 | **0.765** |
 
-Nothing is broken at 1.5 — every model still fits. The boosting model is the most accurate on clean
-labels and loses the most; the linear model is the least accurate on clean labels and loses the
-least. **That contrast is the paper's argument, and level 0.5 does not show it**: at 0.5 all three
-sit within 0.03 of their clean score and the order is still the clean order.
+The order reverses completely between the clean labels and level 1.5, and both models are still
+fitting there. The boosting model is more accurate on clean labels and loses more; the forest is
+marginally less accurate on clean labels and loses less. **Level 0.5 does not show it** — both sit
+within 0.03 of their clean score and the clean order still holds in 8 of 12.
 
 Grouped-shifted, counted the same way (replicates in which it is worse than Gaussian by more than
-0.05 R²):
+0.05 R²), roster models only:
 
-| | LightGBM | Random forest | Ridge |
-|---|---|---|---|
-| level 0.5 | 1 / 12 | 1 / 12 | 2 / 11 |
-| level 1.5 | 8 / 12 | 8 / 12 | 11 / 11 |
+| | LightGBM | Random forest |
+|---|---|---|
+| level 0.5 | 1 / 12 | 1 / 12 |
+| level 1.5 | 8 / 12 | 8 / 12 |
 
 **The file contains only levels 0.5 and 1.5.** 1.0 has never been measured on QM9, so the standing
 recommendation of "1.0 or 1.5" was half a recommendation for an unmeasured point.
 
-**The same instability on real data.** `results/validation_full/openadmet_logd/all_results.csv`,
-plain Gaussian, one fit per cell, seventeen model-and-representation pairs ranked at each level.
-Rank agreement with the clean ranking: **+0.94 at 0.5, +0.56 at 1.0**. Individual pairs move a long
-way — the neural network on ECFP4 goes 3rd → 8th → 12th, the forest on the PDV goes 10th → 7th →
-2nd. This is one fit per cell with no replicates, so it is corroboration, not a measurement.
+**Independent corroboration, on roster models and real data.**
+`results/validation_full/openadmet_logd/all_results.csv`, plain Gaussian, seventeen
+model-and-representation pairs across five roster models (DNN, GP, QRF, RF, XGBoost) and four
+representations. Rank agreement with the clean ranking: **+0.94 at level 0.5, +0.56 at level 1.0**.
+Individual pairs move a long way — the neural network on ECFP4 goes 3rd → 8th → 12th, the forest on
+the PDV goes 10th → 7th → 2nd. One fit per cell, no replicates, so this is corroboration rather than
+a measurement — but no part of it involves ridge.
 
 **Recommendation: report at 1.5**, with the clean column beside it. It is measured, it is where the
-grouped-shifted result is visible, the models are all still fitting, and the rank flip is the
-finding rather than an artefact of a broken regime.
+grouped-shifted result is visible, both models are still fitting, and the reversal is the finding
+rather than an artefact of a broken regime.
 
 #### Item 2 — two of the three conditions on offer cannot answer the question at all
 
