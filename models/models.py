@@ -18,16 +18,30 @@ import gpytorch
 from typing import Union
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GroupKFold
-from quantile_forest import RandomForestQuantileRegressor
+# lightgbm, xgboost, quantile_forest and grakel are imported INSIDE the
+# functions that use them, not here.
+#
+# At module scope every job loaded every one of them whatever model it was
+# asked to run, so a Gaussian-process task sat in a process with both boosting
+# libraries resident -- and that is the precondition of the segfault in
+# RERUN_PLAN.md 2.8e. Measured after this change: importing this module no
+# longer loads lightgbm, xgboost or quantile_forest at all.
+#
+# What CANNOT move, and why the environment fix is the real one: torch,
+# torch_geometric, gpytorch and gauche are needed to DEFINE this module --
+# classes below inherit from nn.Module, MessagePassing, gpytorch.models.ExactGP
+# and SIGP. A lightgbm job therefore still loads the whole Gaussian-process
+# stack, and no rearrangement of imports can change that. grakel is the same
+# story from the other side: gauche.kernels.graph_kernels imports it, so it
+# arrives anyway. The local import below is honesty about the dependency, not
+# a saving.
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from sklearn.svm import SVR, SVC
-from xgboost import XGBRegressor
 from torch.nn.utils import parameters_to_vector as Params2Vec, vector_to_parameters as Vec2Params
 import matplotlib.pyplot as plt
 import torchbnn as bnn
 from torchhk import transform_model, transform_layer
-import lightgbm as lgb
 try:
     from botorch.fit import fit_gpytorch_mll as fit_gpytorch_model
 except ImportError:
@@ -50,8 +64,6 @@ from sklearn.isotonic import IsotonicRegression
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
 from rdkit import Chem
-from grakel import Graph
-from grakel.kernels import WeisfeilerLehman, VertexHistogram
 
 
 from utils import * 
@@ -66,8 +78,35 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from model_defaults import (
     SPEC_VERSION, BAYESIAN_DEFAULTS, GP_DEFAULTS, NEURAL_DEFAULTS,
     SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, gp_fit_threads, provenance_columns,
-    sklearn_params, spec_hash,
+    bnn_kl_weight, sklearn_params, spec_hash,
 )
+
+def bnn_elbo_criterion(base_criterion, model, n_train):
+    """Wrap a plain loss so a torchbnn network is fitted on the ELBO.
+
+    BNN-alpha and BNN-beta were trained with plain MSE until 2026-08-27. There
+    was no KL, ELBO or BKLLoss anywhere in either pipeline, so nothing pulled the
+    variational posterior toward the prior and `prior_sigma` was only an
+    initialisation. torchbnn samples weights in train AND eval mode, so the
+    posterior width received MSE gradients, which drive it toward zero: what was
+    reported as epistemic uncertainty was the residual weight noise the fit
+    happened to leave. The VBLL variants carried a KL term all along, so the two
+    families were never on equal footing (RERUN_PLAN.md 2.12).
+
+    The weight comes from the shared spec: 'elbo' means 1 / n_train, because the
+    objective is sum_i NLL_i + KL and the criterion here is the MEAN over a
+    batch.
+    """
+    kl = bnn.BKLLoss(reduction='mean', last_layer_only=False)
+    weight = bnn_kl_weight(n_train)
+
+    def criterion(output, target, *rest):
+        return base_criterion(output, target, *rest) + weight * kl(model)
+
+    criterion.kl_weight = weight
+    criterion.base = base_criterion
+    return criterion
+
 
 # TODO: reorder imports
 
@@ -1026,8 +1065,11 @@ def apply_bayesian_transformation(model):
         nn.Linear, 
         bnn.BayesLinear, 
         args={
-            "prior_mu": 0, 
-            "prior_sigma": 0.1, 
+            # From the shared spec, not restated here: a number typed into this
+            # file cannot be changed from model_defaults.py, while every results
+            # row carries a spec_hash asserting that it can (RERUN_PLAN.md 2.13).
+            "prior_mu": BAYESIAN_DEFAULTS['bnn_prior_mu'],
+            "prior_sigma": BAYESIAN_DEFAULTS['bnn_prior_sigma'],
             "in_features": ".in_features",
             "out_features": ".out_features", 
             "bias": ".bias"
@@ -1070,8 +1112,9 @@ def apply_bayesian_transformation_last_layer(model):
         nn.Linear,
         bnn.BayesLinear,
         args={
-            "prior_mu": 0,
-            "prior_sigma": 0.1,
+            # From the shared spec (RERUN_PLAN.md 2.13).
+            "prior_mu": BAYESIAN_DEFAULTS['bnn_prior_mu'],
+            "prior_sigma": BAYESIAN_DEFAULTS['bnn_prior_sigma'],
             "in_features": ".in_features",
             "out_features": ".out_features",
             "bias": ".bias"
@@ -1099,21 +1142,28 @@ class VBLLLayer(nn.Module):
     over the weight matrix, with a standard normal prior p(W) = N(0, I).
     Uses the reparameterization trick for gradient estimation.
     """
-    def __init__(self, in_features, out_features, prior_mu=0.0, prior_sigma=1.0):
+    def __init__(self, in_features, out_features, prior_mu=None, prior_sigma=None):
         super(VBLLLayer, self).__init__()
+        # From the shared spec, not restated here (RERUN_PLAN.md 2.13).
+        _init_log_sigma = BAYESIAN_DEFAULTS['vbll_init_log_sigma']
+        _init_log_noise = BAYESIAN_DEFAULTS['vbll_init_log_noise_var']
         self.in_features = in_features
         self.out_features = out_features
-        self.prior_mu = prior_mu
-        self.prior_sigma = prior_sigma
+        self.prior_mu = (BAYESIAN_DEFAULTS['vbll_prior_mu']
+                         if prior_mu is None else prior_mu)
+        self.prior_sigma = (BAYESIAN_DEFAULTS['vbll_prior_sigma']
+                            if prior_sigma is None else prior_sigma)
 
         # Variational posterior parameters
         self.weight_mu = nn.Parameter(torch.zeros(out_features, in_features))
-        self.weight_log_sigma = nn.Parameter(torch.full((out_features, in_features), -3.0))
+        self.weight_log_sigma = nn.Parameter(
+            torch.full((out_features, in_features), _init_log_sigma))
         self.bias_mu = nn.Parameter(torch.zeros(out_features))
-        self.bias_log_sigma = nn.Parameter(torch.full((out_features,), -3.0))
+        self.bias_log_sigma = nn.Parameter(
+            torch.full((out_features,), _init_log_sigma))
 
         # Learned log observation noise (aleatoric uncertainty)
-        self.log_noise_var = nn.Parameter(torch.tensor(-2.0))
+        self.log_noise_var = nn.Parameter(torch.tensor(_init_log_noise))
 
         # Initialize weight_mu with Kaiming uniform
         nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
@@ -1150,18 +1200,19 @@ class VBLLLayer(nn.Module):
         return kl_w + kl_b
 
     def forward(self, x):
-        if self.training:
-            # Reparameterization trick: W = mu + sigma * epsilon
-            weight_sigma = torch.exp(self.weight_log_sigma)
-            weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
-            bias_sigma = torch.exp(self.bias_log_sigma)
-            bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
-        else:
-            # At eval time, sample from posterior (for MC uncertainty estimation)
-            weight_sigma = torch.exp(self.weight_log_sigma)
-            weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
-            bias_sigma = torch.exp(self.bias_log_sigma)
-            bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+        # Weights are SAMPLED in eval mode too, deliberately: the Monte Carlo
+        # uncertainty passes need it. So a VBLL point prediction is the mean of
+        # 100 stochastic passes, while a plain DNN's is one deterministic pass.
+        #
+        # This used to be written as `if self.training: ... else: ...` with the
+        # two branches textually identical, which reads as though eval does
+        # something different -- the posterior mean, say -- and is a trap for
+        # anyone reasoning about whether a VBLL prediction is deterministic
+        # (RERUN_PLAN.md 2.13). One branch now, and the reason with it.
+        weight_sigma = torch.exp(self.weight_log_sigma)
+        weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
+        bias_sigma = torch.exp(self.bias_log_sigma)
+        bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
         return F.linear(x, weight, bias)
 
 
@@ -1566,6 +1617,7 @@ def _held_out_noise_columns(train_noise, n_rows, y_pred=None):
 
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None, train_noise=None):
+    from quantile_forest import RandomForestQuantileRegressor
     params = {}
     params_source = 'default'
 
@@ -1604,8 +1656,13 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
         if trial is not None:
             trial.set_user_attr("quantile", quantile)
 
-    x_train = np.vstack((x_train, x_val))
-    y_train = np.hstack((y_train, y_val))
+    # Settled 2026-08-27 by the author: NO model stacks validation into its
+    # training set. It used to differ by model family -- forest, SVM, XGBoost and
+    # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+    # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+    # factor confounded model family with training-set size, and nothing in the
+    # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+    # Validation stays held out, for early stopping and for calibration.
 
     model.fit(x_train, y_train)
 
@@ -1695,8 +1752,13 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             params = sklearn_params('svm')
             params_source = 'default'
 
-    x_train = np.vstack((x_train, x_val))
-    y_train = np.hstack((y_train, y_val))
+    # Settled 2026-08-27 by the author: NO model stacks validation into its
+    # training set. It used to differ by model family -- forest, SVM, XGBoost and
+    # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+    # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+    # factor confounded model family with training-set size, and nothing in the
+    # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+    # Validation stays held out, for early stopping and for calibration.
 
     model = SVR(**params)
 
@@ -1737,14 +1799,21 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     
     # STEP 1: Split validation for calibration
     if args.uncertainty:
-        split_idx = len(x_val) // 2
-        x_val_train = np.vstack((x_train, x_val[:split_idx]))
-        y_val_train = np.hstack((y_train, y_val[:split_idx]))
-        x_val_cal = x_val[split_idx:]
-        y_val_cal = y_val[split_idx:]
+        # Settled 2026-08-27 by the author: NO model stacks validation into its
+        # training set. It used to differ by model family -- forest, SVM, XGBoost and
+        # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+        # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+        # factor confounded model family with training-set size, and nothing in the
+        # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+        # Validation stays held out, for early stopping and for calibration.
+        x_val_train = x_train
+        y_val_train = y_train
+        x_val_cal = x_val
+        y_val_cal = y_val
     else:
-        x_val_train = np.vstack((x_train, x_val))
-        y_val_train = np.hstack((y_train, y_val))
+        # Same split with --uncertainty off: validation is never trained on.
+        x_val_train = x_train
+        y_val_train = y_train
     
     # Dist and Score come from the shared spec by NAME, so the experimental
     # pipeline resolves the same two classes. A tuned-parameter dict has neither
@@ -1843,6 +1912,7 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     return metrics[3]
 
 def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None, train_noise=None):
+    from xgboost import XGBRegressor
     params = {}
     params_source = 'default'
 
@@ -1880,9 +1950,13 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             params = sklearn_params('xgboost')
             params_source = 'default'
 
-    if x_val is not None and y_val is not None:
-        x_train = np.vstack((x_train, x_val))
-        y_train = np.hstack((y_train, y_val))
+    # Settled 2026-08-27 by the author: NO model stacks validation into its
+    # training set. It used to differ by model family -- forest, SVM, XGBoost and
+    # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+    # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+    # factor confounded model family with training-set size, and nothing in the
+    # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+    # Validation stays held out, for early stopping and for calibration.
 
     model = XGBRegressor(random_state=iteration_seed, **params)
     model.fit(x_train, y_train)
@@ -1897,6 +1971,7 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
 
 
 def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial=None, train_noise=None):
+    import lightgbm as lgb
     params = {}
     params_source = 'default'
 
@@ -1923,9 +1998,13 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             params = sklearn_params('lightgbm')
             params_source = 'default'
 
-    if x_val is not None and y_val is not None:
-        x_train = np.vstack((x_train, x_val))
-        y_train = np.hstack((y_train, y_val))
+    # Settled 2026-08-27 by the author: NO model stacks validation into its
+    # training set. It used to differ by model family -- forest, SVM, XGBoost and
+    # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+    # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+    # factor confounded model family with training-set size, and nothing in the
+    # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+    # Validation stays held out, for early stopping and for calibration.
 
     model = lgb.LGBMRegressor(random_state=iteration_seed, verbose=-1, **params)
     model.fit(x_train, y_train)
@@ -2076,14 +2155,21 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
 
     # STEP 1: Split validation for calibration
     if args.uncertainty:
-        split_idx = len(x_val) // 2
-        x_train_full = np.vstack((x_train, x_val[:split_idx]))
-        y_train_full = np.hstack((y_train, y_val[:split_idx]))
-        x_val_cal = x_val[split_idx:]
-        y_val_cal = y_val[split_idx:]
+        # Settled 2026-08-27 by the author: NO model stacks validation into its
+        # training set. It used to differ by model family -- forest, SVM, XGBoost and
+        # LightGBM took all of validation (90% of the data), NGBoost and the Gauche GP
+        # took half (85%), the neural models took none (80%) -- so the ANOVA's model
+        # factor confounded model family with training-set size, and nothing in the
+        # results row recorded which regime produced it (RERUN_PLAN.md 2.12).
+        # Validation stays held out, for early stopping and for calibration.
+        x_train_full = x_train
+        y_train_full = y_train
+        x_val_cal = x_val
+        y_val_cal = y_val
     else:
-        x_train_full = np.vstack((x_train, x_val))
-        y_train_full = np.hstack((y_train, y_val))
+        # Same split with --uncertainty off: validation is never trained on.
+        x_train_full = x_train
+        y_train_full = y_train
 
     x_train_tensor = torch.from_numpy(x_train_full).double()
     x_test_tensor = torch.from_numpy(x_test).double()
@@ -2108,15 +2194,23 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     # STEP 2: Get predictions and calibrate
     with torch.no_grad():
         # Test predictions
+        # `model(x)` is the LATENT f posterior; `likelihood(model(x))` is the
+        # PREDICTIVE distribution of an observation, which is the latent variance
+        # PLUS the likelihood noise. The reported std used to be the latent one,
+        # so it was epistemic-only -- while the very next block computed
+        # `total = sqrt(posterior_variance + likelihood_noise)` and threw it away.
+        # A coverage number is a statement about observations, so it needs the
+        # predictive variance (RERUN_PLAN.md 2.13).
         test_preds = model(x_test_tensor)
-        y_pred = test_preds.mean.numpy()
-        pred_vars = test_preds.variance.numpy()
-        y_pred_std_uncalibrated = np.sqrt(pred_vars)
-        
+        observed_preds = likelihood(test_preds)
+        y_pred = observed_preds.mean.numpy()
+        pred_vars = test_preds.variance.numpy()          # latent: the epistemic part
+        y_pred_std_uncalibrated = np.sqrt(observed_preds.variance.numpy())
+
         if args.uncertainty:
             # Calibration predictions
             x_val_cal_tensor = torch.from_numpy(x_val_cal).double()
-            cal_preds = model(x_val_cal_tensor)
+            cal_preds = likelihood(model(x_val_cal_tensor))
             y_cal_pred_mean = cal_preds.mean.numpy()
             y_cal_pred_std = np.sqrt(cal_preds.variance.numpy())
             
@@ -2489,9 +2583,11 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
         model_name = "bnn_full"
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
         model_name = "bnn_last"
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = "bnn_variational"
@@ -2547,9 +2643,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
         preds = np.stack(preds, axis=0)  # Shape: (num_samples, num_datapoints, 1)
         y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
-        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
-        
+
         # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
         # Use the LAST VBLLLayer (output layer) for observation noise
         vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
@@ -2560,6 +2654,20 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
         else:
             epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
+
+        # The TOTAL predictive spread, not the spread of the MC passes.
+        #
+        # `preds.std(axis=0)` is the epistemic term alone. For a VBLL the layer
+        # also carries a learned observation noise, and `total` -- computed just
+        # above -- is sqrt(epistemic^2 + aleatoric^2). The reported column used to
+        # be the MC spread, so the learned noise was computed and thrown away and
+        # the VBLL models' coverage was a statement about the latent function
+        # rather than about an observation (RERUN_PLAN.md 2.13). A plain BNN has
+        # no learned noise, so total equals the MC spread there and nothing moves.
+        y_pred_std_uncalibrated = (np.asarray(total).flatten()
+                                   if total is not None
+                                   else preds.std(axis=0).flatten())
+        y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
 
         # Apply calibration to epistemic (aleatoric stays None for standard BNN)
         if epistemic is not None:
@@ -2618,8 +2726,10 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
         if args.bayesian_transformation == "full":
             m = apply_bayesian_transformation(m)
+            crit = bnn_elbo_criterion(crit, m, n_fit)
         elif args.bayesian_transformation == "last_layer":
             m = apply_bayesian_transformation_last_layer(m)
+            crit = bnn_elbo_criterion(crit, m, n_fit)
         elif args.bayesian_transformation == "variational":
             m = apply_bayesian_transformation_last_layer_variational(m)
             crit = VBLLLoss(m, n_data=n_fit)
@@ -2699,29 +2809,51 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
                                args, s, rep, iteration, iteration_seed, file_no, 
                                y_test_original, train_noise=None):
     """
-    Standalone BNN-Last training that matches phase2_train.py exactly
+    Standalone BNN-Last training that matches phase2_train.py exactly.
+
+    Four things were wrong here and all four are fixed (RERUN_PLAN.md 2.13).
+    It built 128 then 64, which is NEURAL_DEFAULTS['dnn']['hidden_sizes'], and
+    saved the row as 'mlp_bnn_last' -- NEURAL_DEFAULTS['mlp'] is 128 then 128.
+    The row is named for the architecture it builds now. Its early-stopping loop
+    counted patience but never snapshotted or restored weights, so it returned
+    whatever epoch the counter stopped on, up to ten epochs past the validation
+    optimum spent memorising corrupted labels -- the defect train_nn was
+    rewritten to fix, and this was the last function still carrying it. Every
+    constant was a literal; they come from the spec now. And it was fitted with
+    plain MSE, like the other torchbnn models were until 2026-08-27.
+
+    Reachable only as model_type 'mlp_bnn_last_standalone'
+    (process_and_train.py), which no job script requests.
     """
     import torch
     import torch.nn as nn
     from torch.utils.data import TensorDataset, DataLoader
     import torchbnn as bnn
     import numpy as np
-    
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
+    torch.manual_seed(iteration_seed)
+
+    _t = NEURAL_DEFAULTS['training']
+    h1, h2 = NEURAL_DEFAULTS['dnn']['hidden_sizes']
+    _drop = NEURAL_DEFAULTS['dnn']['dropout_rate']
+
     # Create model directly (not transform)
     model = nn.Sequential(
-        nn.Linear(x_train.shape[1], 128),
+        nn.Linear(x_train.shape[1], h1),
         nn.ReLU(),
-        nn.Dropout(0.2),
-        nn.Linear(128, 64),
+        nn.Dropout(_drop),
+        nn.Linear(h1, h2),
         nn.ReLU(),
-        nn.Dropout(0.2),
-        bnn.BayesLinear(in_features=64, out_features=1, prior_mu=0, prior_sigma=0.1)
+        nn.Dropout(_drop),
+        bnn.BayesLinear(in_features=h2, out_features=1,
+                        prior_mu=BAYESIAN_DEFAULTS['bnn_prior_mu'],
+                        prior_sigma=BAYESIAN_DEFAULTS['bnn_prior_sigma'])
     ).to(device)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.MSELoss()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'])
+    criterion = bnn_elbo_criterion(nn.MSELoss(), model, len(x_train))
     
     # Tensors - Y is shape (N,) not (N, 1)
     X_tr_t = torch.FloatTensor(x_train).to(device)
@@ -2730,14 +2862,17 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
     y_val_t = torch.FloatTensor(y_val).to(device)
     X_test_t = torch.FloatTensor(x_test).to(device)
     
-    train_loader = DataLoader(TensorDataset(X_tr_t, y_tr_t), batch_size=32, shuffle=True)
-    
+    train_loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
+                              batch_size=_t['batch_size'], shuffle=True)
+
     # Training with early stopping
     best_val_loss = float('inf')
-    patience = 10
+    patience = _t['patience']
     patience_counter = 0
-    
-    for epoch in range(100):
+    best_state = None
+    best_epoch = -1
+
+    for epoch in range(int(getattr(args, 'epochs', _t['epochs']) or _t['epochs'])):
         model.train()
         for batch_X, batch_y in train_loader:
             optimizer.zero_grad()
@@ -2759,18 +2894,25 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
         if epoch % 5 == 0:
             print(f"Epoch {epoch}, Val Loss: {val_loss:.4f}")
         
-        if val_loss < best_val_loss:
+        if val_loss < best_val_loss - _t['improvement_tolerance']:
             best_val_loss = val_loss
             patience_counter = 0
+            best_epoch = epoch
+            best_state = {k: v.detach().clone()
+                          for k, v in model.state_dict().items()}
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 print(f"Early stopping at epoch {epoch}")
                 break
-    
+
+    if _t['restore_best_weights'] and best_state is not None:
+        model.load_state_dict(best_state)
+        print(f"Restored epoch {best_epoch} (val loss {best_val_loss:.4f})")
+
     # BNN prediction with MC sampling
     model.eval()
-    n_samples = 100
+    n_samples = _t['mc_passes']
     predictions = []
     
     with torch.no_grad():
@@ -2787,7 +2929,9 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
     # Use your existing metrics function
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     
-    save_results(args.filepath, s, iteration, 'mlp_bnn_last', rep, args.sample_size, 
+    # The row is named for the network this function BUILDS: 128 then 64 is the
+    # DNN topology, not the MLP's 128 then 128.
+    save_results(args.filepath, s, iteration, 'dnn_bnn_last', rep, args.sample_size,
                  metrics, 'default', 'mse')
     
     # Always Bayesian (dedicated BNN Last function), consistent with train_dnn_model/train_mlp_model
@@ -2799,7 +2943,7 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
-            model_name='mlp_bnn_last',
+            model_name='dnn_bnn_last',
             rep=rep,
             sigma_noise=s,
             iteration=iteration,
@@ -2928,9 +3072,11 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_full")
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_last")
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_variational")
@@ -3164,9 +3310,11 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     if args.bayesian_transformation == "full":
         model = apply_bayesian_transformation(model)
         model_name = f"{model_type}_bnn_full"
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "last_layer":
         model = apply_bayesian_transformation_last_layer(model)
         model_name = f"{model_type}_bnn_last"
+        criterion = bnn_elbo_criterion(criterion, model, len(x_train))
     elif args.bayesian_transformation == "variational":
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = f"{model_type}_bnn_variational"
@@ -3322,6 +3470,11 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         crit = get_loss_function(loss_name, **loss_kwargs)
         if args.bayesian_transformation in ("variational", "full_variational"):
             crit = VBLLLoss(m, n_data=n_fit)
+        elif args.bayesian_transformation in ("full", "last_layer"):
+            # The KL term, on the cross-fitting models too -- otherwise the
+            # out-of-fold uncertainty comes from a different objective than the
+            # test-set one it is compared with.
+            crit = bnn_elbo_criterion(crit, m, n_fit)
         return m, crit
 
     def _train_mlp_for_fold(built, x_fit, y_fit, x_es, y_es):
@@ -3616,35 +3769,69 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     model = create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3, dropout=0.1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
-    
+
+    _t = NEURAL_DEFAULTS['training']
+
     # Training
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'])
     criterion = nn.MSELoss()
-    
-    print(f"Training {model_type.upper()} for 100 epochs...")
-    for epoch in range(100):
+
+    def _batch_targets(batch):
+        # float(): the loader collates the per-graph scalar into a one-element
+        # tensor, so reading it raw makes the target array (n, 1) against an
+        # (n,) prediction -- which pearsonr refuses ('x and y must have the same
+        # length along axis').
+        return torch.tensor([float(data.y_noisy) for data in batch.to_data_list()],
+                            dtype=torch.float32, device=device)
+
+    # Early stopping, on the same rule as the tabular neural models.
+    #
+    # This loop used to be `for epoch in range(100)` with no validation loss in
+    # it and no break, and `args.epochs` was never read. So the GNN fitted
+    # corrupted labels for the whole budget while DNN, MLP and flexible_dnn
+    # rolled back to their validation optimum, and any comparison of GNN
+    # robustness against them was confounded by the stopping rule, in the
+    # direction that makes the GNN look less robust (RERUN_PLAN.md 2.13).
+    epochs = int(getattr(args, 'epochs', _t['epochs']) or _t['epochs'])
+    patience = _t['patience']
+    tolerance = _t['improvement_tolerance']
+    best_val, patience_ctr, best_state, best_epoch = float('inf'), 0, None, -1
+
+    print(f"Training {model_type.upper()} for up to {epochs} epochs "
+          f"(patience {patience})...")
+    for epoch in range(epochs):
         model.train()
-        train_loss = 0
-        
         for batch in train_loader:
             batch = batch.to(device)
-            
-            # CRITICAL: Use .y_noisy from Data objects (properly shuffled with graphs)
-            # float(): the loader collates the per-graph scalar into a
-            # one-element tensor, so reading it raw makes the target array
-            # (n, 1) against an (n,) prediction -- which pearsonr refuses
-            # ('x and y must have the same length along axis').
-            targets = torch.tensor([float(data.y_noisy) for data in batch.to_data_list()], 
-                                  dtype=torch.float32, device=device)
-            
+            targets = _batch_targets(batch)
             optimizer.zero_grad()
-            predictions = model(batch)
-            loss = criterion(predictions, targets)
+            loss = criterion(model(batch), targets)
             loss.backward()
             optimizer.step()
-            
-            train_loss += loss.item()
-    
+
+        model.eval()
+        with torch.no_grad():
+            val_sum, val_n = 0.0, 0
+            for batch in val_loader:
+                batch = batch.to(device)
+                targets = _batch_targets(batch)
+                val_sum += criterion(model(batch), targets).item() * targets.numel()
+                val_n += targets.numel()
+        val_loss = val_sum / max(val_n, 1)
+
+        if val_loss < best_val - tolerance:
+            best_val, patience_ctr, best_epoch = val_loss, 0, epoch
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        else:
+            patience_ctr += 1
+            if patience_ctr >= patience:
+                break
+
+    if _t['restore_best_weights'] and best_state is not None:
+        model.load_state_dict(best_state)
+    print(f"  stopped at epoch {epoch + 1}, restored epoch {best_epoch + 1} "
+          f"(validation loss {best_val:.6f})")
+
     # Evaluation
     model.eval()
     
@@ -3664,8 +3851,14 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         predictions_array = np.array(predictions_list)
         predictions = predictions_array.mean(axis=0)
         
-        # Decompose uncertainty
-        epistemic, aleatoric = decompose_uncertainty_sampling(predictions_array)
+        # decompose_uncertainty_sampling(predictions_array, num_samples) returns
+        # THREE values. This called it with one argument and unpacked two, so the
+        # Bayesian branch of train_gnn raised TypeError on its first line and the
+        # caller's blanket handler turned it into a missing row -- one of two
+        # reasons no QM9 graph-model uncertainty has ever been written
+        # (RERUN_PLAN.md 2.13).
+        epistemic, aleatoric, _total = decompose_uncertainty_sampling(
+            predictions_array, predictions_array.shape[0])
         
     else:
         # Deterministic
@@ -3694,7 +3887,8 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         
         val_predictions_array = np.array(val_preds_list)
         val_predictions = val_predictions_array.mean(axis=0)
-        val_epistemic, _ = decompose_uncertainty_sampling(val_predictions_array)
+        val_epistemic, _val_aleatoric, _ = decompose_uncertainty_sampling(
+            val_predictions_array, val_predictions_array.shape[0])
         
         # Get val targets
         val_targets = []
@@ -3724,7 +3918,10 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     
     # Save
     model_name = f"{model_type}_bayesian" if args.bayesian_transformation else model_type
-    save_results(args.filepath, s, iteration, model_name, 'graph', len(test_targets), metrics)
+    # args.sample_size, like every other model. These two wrote len(test set)
+    # into the same column, so `sample_size` meant the whole sample for most
+    # rows and a tenth of it for the graph rows (RERUN_PLAN.md 2.13).
+    save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics)
     
     if args.uncertainty:
         total_unc = epistemic if epistemic is not None else np.zeros_like(predictions)
@@ -3755,8 +3952,6 @@ Works with lists of PyG Data objects that have .y_noisy and .smiles
 import numpy as np
 import torch
 from rdkit import Chem
-from grakel import Graph
-from grakel.kernels import WeisfeilerLehman, VertexHistogram
 
 
 # Removed 2026-08-27: a duplicate top-level definition that a later one in
@@ -3778,6 +3973,7 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
         val_graphs: List of PyG Data objects with .y_noisy
         y_val_noisy: Ignored
     """
+    from grakel.kernels import WeisfeilerLehman, VertexHistogram
     from utils import (calculate_regression_metrics, save_results,
                       save_uncertainty_values, calibrate_uncertainty_simple,
                       decompose_uncertainty_gp)
@@ -3861,7 +4057,20 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     alpha = torch.cholesky_solve(train_labels.unsqueeze(-1), L).squeeze()
     
     predictions = (K_test_train_tensor @ alpha).numpy()
-    std = np.ones(len(test_grakel)) * np.sqrt(best_noise)
+
+    # The GP POSTERIOR variance, per molecule:
+    #     var(x*) = k(x*, x*) - k*^T (K + sigma^2 I)^-1 k*
+    #
+    # `std` used to be `np.ones(len(test_grakel)) * np.sqrt(best_noise)` -- one
+    # constant repeated for every molecule, which is the likelihood noise, not a
+    # posterior. Every per-molecule statistic computed from it was degenerate,
+    # and a "Graph GP uncertainty" column held one number (RERUN_PLAN.md 2.13).
+    # The Cholesky factor is already here, so this costs one triangular solve.
+    #
+    # The kernel is built with normalize=True, so k(x*, x*) = 1 by construction.
+    _v = torch.linalg.solve_triangular(L, K_test_train_tensor.T, upper=False)
+    _post_var = (1.0 - (_v ** 2).sum(dim=0)).clamp_min(0.0)
+    std = torch.sqrt(_post_var + best_noise).numpy()
     
     # Validation for calibration
     print(f"Converting {len(val_graphs)} validation molecules to grakel format...")
@@ -3879,11 +4088,15 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     K_val_train_tensor = torch.tensor(K_val_train, dtype=torch.float32)
     
     val_predictions = (K_val_train_tensor @ alpha).numpy()
-    val_std = np.ones(len(val_grakel)) * np.sqrt(best_noise)
+    _vv = torch.linalg.solve_triangular(L, K_val_train_tensor.T, upper=False)
+    val_std = torch.sqrt((1.0 - (_vv ** 2).sum(dim=0)).clamp_min(0.0)
+                         + best_noise).numpy()
     
-    # Decompose uncertainty
-    epistemic, aleatoric = decompose_uncertainty_gp(std, best_noise)
-    val_epistemic, val_aleatoric = decompose_uncertainty_gp(val_std, best_noise)
+    # decompose_uncertainty_gp returns THREE values. These unpacked two, so
+    # train_graph_gp raised ValueError here every time it was reached
+    # (RERUN_PLAN.md 2.13).
+    epistemic, aleatoric, _total = decompose_uncertainty_gp(std, best_noise)
+    val_epistemic, val_aleatoric, _ = decompose_uncertainty_gp(val_std, best_noise)
     
     # Calibrate
     n_cal = len(val_predictions) // 2
@@ -3901,7 +4114,10 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     print(f"Graph GP - R²: {metrics[3]:.4f}, RMSE: {metrics[2]:.4f}")
     
     # Save
-    save_results(args.filepath, s, iteration, 'graph_gp', 'graph', len(test_labels), metrics)
+    # args.sample_size, like every other model. These two wrote len(test set)
+    # into the same column, so `sample_size` meant the whole sample for most
+    # rows and a tenth of it for the graph rows (RERUN_PLAN.md 2.13).
+    save_results(args.filepath, s, iteration, 'graph_gp', 'graph', args.sample_size, metrics)
     
     if args.uncertainty:
         # Same array twice, same reason as train_gnn above. Test split, no
@@ -3922,6 +4138,7 @@ def pyg_to_grakel(data):
     
     CRITICAL: Use STRING atomic symbols, not atomic numbers!
     """
+    from grakel import Graph
     # Map atomic numbers to symbols
     atomic_num_to_symbol = {
         1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'
@@ -3996,6 +4213,7 @@ def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3
 
 
 def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, base_model_type, calibration_size, y_test_original, trial=None, train_noise=None):
+    from quantile_forest import RandomForestQuantileRegressor
     from torchcp.regression.predictor import SplitPredictor, ACIPredictor
     from torchcp.regression.score import ABS
     from torch.utils.data import TensorDataset, DataLoader
@@ -4099,9 +4317,12 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
             'Otsuka': gauche.kernels.fingerprint_kernels.otsuka_kernel.OtsukaKernel,
         }
         
-        x_full = np.vstack((x_train, x_val))
-        y_full = np.hstack((y_train, y_val))
-        
+        # The conformity scores below are computed on validation, so validation
+        # must stay out of the fit -- and no model stacks it in any case (settled
+        # 2026-08-27, RERUN_PLAN.md 2.12).
+        x_full = x_train
+        y_full = y_train
+
         x_train_tensor = torch.from_numpy(x_full).double()
         x_test_tensor = torch.from_numpy(x_test).double()
         y_train_tensor = torch.from_numpy(y_full).double()
@@ -4525,7 +4746,13 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
     logging_flag = args.distribution not in ["domain_mpnn", "domain_tanimoto"]
     if not logging_flag:
         calculate_domain_metrics(y_pred, y_test, domain_labels_subset, target_domain)
-    metrics = calculate_regression_metrics(y_pred, y_test, logging=logging_flag)
+    # (y_test, prediction), in that order. It was the other way round, and
+    # r2_score is not symmetric: r2_score(y_pred, y_test) measures how well the
+    # TRUTH explains the PREDICTION. This function's return value is what Optuna
+    # maximises, so the search optimised the reversed statistic too
+    # (RERUN_PLAN.md 2.13). MAE, MSE, RMSE and Pearson are symmetric and were
+    # unaffected.
+    metrics = calculate_regression_metrics(y_test, y_pred, logging=logging_flag)
     
     # Calculate coverage
     coverage = np.mean((y_test >= y_lower) & (y_test <= y_upper))
@@ -4540,7 +4767,13 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
     
     if args.uncertainty:
         interval_width = y_upper - y_lower
-        y_pred_std = interval_width / (2 * 1.645) if alpha == 0.1 else interval_width / (2 * 1.96)
+        # z for the requested alpha, from the normal quantile -- not two
+        # hardcoded numbers that are right for alpha 0.1 and 0.05 and wrong for
+        # everything else (RERUN_PLAN.md 2.13). A conformal interval is not
+        # Gaussian, so this is a pseudo-standard-deviation either way; it is at
+        # least the right pseudo-standard-deviation now.
+        from scipy.stats import norm as _norm
+        y_pred_std = interval_width / (2 * _norm.ppf(1 - alpha / 2))
         
         save_uncertainty_values(
             y_pred_mean=y_pred,
@@ -4575,11 +4808,26 @@ def load_best_hyperparameters(model_type, rep, results_dir='results'):
     """
     Load best hyperparameters from master config if available
     Returns: dict of hyperparameters or None if not found
+
+    `results_dir` is resolved against THIS FILE, not the working directory. The
+    job scripts `cd scripts` before running, and `scripts/results/` does not
+    exist, so a relative path meant the tuned branch could never fire -- and it
+    said nothing, it just fell through to the defaults and reset params_source
+    to 'default' (RERUN_PLAN.md 2.13). A job asked for tuned parameters and got
+    library ones, with nothing on the row to show it.
     """
+    if not os.path.isabs(results_dir):
+        results_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            results_dir)
     master_file = os.path.join(results_dir, 'master_tuned_hyperparameters.json')
     decisions_file = os.path.join(results_dir, 'hyperparameter_decisions.json')
-    
-    if not os.path.exists(master_file) or not os.path.exists(decisions_file):
+
+    missing = [f for f in (master_file, decisions_file) if not os.path.exists(f)]
+    if missing:
+        # Say so, by name. Degrading quietly to the defaults is what hid this.
+        print(f"      [tuned params] not used for {model_type}/{rep}: "
+              f"{', '.join(missing)} does not exist", flush=True)
         return None
     
     with open(decisions_file, 'r') as f:
@@ -7396,6 +7644,12 @@ def train_heteroscedastic_gp(
         save_uncertainty_values(
             y_pred_mean=pred_mean,
             y_pred_std=total_std,
+            # These two are the whole point of this model, and the call used to
+            # omit them, so the columns came out NaN. It and evidential_kernel
+            # are the only models in the file that produce a per-molecule
+            # ALEATORIC term (RERUN_PLAN.md 2.13).
+            epistemic_uncertainty=epistemic_std,
+            aleatoric_uncertainty=aleatoric_std,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -7522,6 +7776,12 @@ def train_evidential_kernel(
         save_uncertainty_values(
             y_pred_mean=gamma,
             y_pred_std=total_std,
+            # These two are the whole point of this model, and the call used to
+            # omit them, so the columns came out NaN. It and evidential_kernel
+            # are the only models in the file that produce a per-molecule
+            # ALEATORIC term (RERUN_PLAN.md 2.13).
+            epistemic_uncertainty=epistemic_std,
+            aleatoric_uncertainty=aleatoric_std,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -7540,7 +7800,21 @@ def train_ntk_gnn(
     y_test_original, trial,
     y_train_noisy=None, y_test_noisy=None, y_val_noisy=None
 , train_noise=None):
-    """Neural Tangent Kernel of GNN for molecular graphs"""
+    """Neural Tangent Kernel of GNN for molecular graphs.
+
+    REFUSED. It takes y_train_noisy, y_test_noisy and y_val_noisy and never
+    references any of them -- it reads `data.y`, the untouched PyG attribute, so
+    it trains and scores on the CLEAN labels whatever noise level the run is at.
+    Its degradation curve would be flat by construction, and that flatness would
+    read as robustness (RERUN_PLAN.md 2.13). It is not in the job generator's
+    roster and has never produced a number.
+    """
+    raise NotImplementedError(
+        "train_ntk_gnn ignores the noisy labels entirely -- it reads data.y, "
+        "the clean PyG attribute, so it would be trained and scored on clean "
+        "labels at every noise level and its flat curve would read as "
+        "robustness. It is not in the study roster. See RERUN_PLAN.md 2.13.")
+
     import torch
     import torch.nn as nn
     from torch_geometric.nn import GINConv, global_mean_pool

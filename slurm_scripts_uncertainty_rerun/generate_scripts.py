@@ -407,6 +407,10 @@ def main():
                     help=f'KIRBy checkout on the cluster (default {KIRBY_DIR}). There are two; '
                          f'the generated scripts refuse one that predates the noise redesign '
                          f'rather than running it (RERUN_PLAN.md 2.8b).')
+    ap.add_argument('--qsar-dir', default=QSAR_DIR,
+                    help=f'This repository on the cluster (default {QSAR_DIR}), the checkout '
+                         f'whose setup.sh activates the environment. Changing it is how the '
+                         f'smoke test runs a real generated script off the cluster.')
     ap.add_argument('--throttle', type=int, default=6,
                     help='Max concurrent tasks per array (the %%N in --array).')
     ap.add_argument('--out-dir', default=str(Path(__file__).parent))
@@ -473,7 +477,7 @@ def main():
         body = TEMPLATE.format(
             model=model, note=note, jobslug=slug, model_slug=slug,
             cpus=cpus, mem=mem, hours=hours, oof=args.oof_folds,
-            kirby_dir=args.kirby_dir, qsar_dir=QSAR_DIR, results_root=RESULTS_ROOT,
+            kirby_dir=args.kirby_dir, qsar_dir=args.qsar_dir, results_root=RESULTS_ROOT,
             datasets=' '.join(DATASETS),
             reps=' '.join(f'"{r}"' for r in reps),
             conditions=' '.join(conditions),

@@ -161,12 +161,14 @@ a second**, before python was ever reached. And a dangling line-continuation tha
   (`tests/smoke/smoke_nine_fixes.py`), including that a scaffold never spans the
   fit/score boundary, that a truncated out-of-fold pass is reported, and that
   re-flushing a fold neither duplicates nor overwrites.
-- The generated job scripts were **executed** with a stubbed python: hyphenated
-  representation names survive quoting, and all three guards fire (missing
-  partition, index out of range, unset `CONDA_PREFIX`). The array dispatch is
-  re-checked for **every** index by
-  `scripts/test_uncertainty_job_scripts.py`, which also runs the command line
-  each script emits through the runner's own argument parser.
+- The generated job scripts are **executed** with a stubbed python, on every
+  run of `scripts/smoke_uncertainty_job_scripts.sh`: hyphenated representation
+  names survive quoting, all 60 indices write 60 distinct results directories,
+  and six guards fire (missing partition, index out of range, unset
+  `CONDA_PREFIX`, the wrong environment, a KIRBy checkout with no
+  `--conditions`, and no KIRBy checkout at all).
+  `scripts/test_uncertainty_job_scripts.py` runs the command line each script
+  emits through the runner's own argument parser.
 
 ---
 
@@ -284,11 +286,14 @@ cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
 python generate_scripts.py            # add --kirby-dir if stat-ecr is the live checkout
 ```
 
-On a laptop, prove they will parse before they are copied anywhere — this runs each generated
-command line through the runner's own argument parser:
+On a laptop, prove they work before they are copied anywhere. The first runs each generated
+command line through the runner's own argument parser; the second **executes** a generated script
+60 times against a stubbed environment, checking that the happy path reaches the runner and that
+each of six guards stops the job it exists to stop. About a minute for both.
 
 ```bash
 python ~/repos/qsar_qm_models/scripts/test_uncertainty_job_scripts.py --kirby-dir ~/repos/KIRBy
+bash   ~/repos/qsar_qm_models/scripts/smoke_uncertainty_job_scripts.sh --kirby-dir ~/repos/KIRBy
 ```
 
 Two of the preflight's checks caught real failures locally.

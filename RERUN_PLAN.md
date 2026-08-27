@@ -1351,9 +1351,19 @@ bash scripts/server_audit.sh          # section 5 is the Gaussian-process probe
 - `GP_DEFAULTS['single_thread_fit']` stays **True** until the gate above has passed on the
   cluster. It costs 11% on the Gaussian process alone and it is the net under exactly this
   failure; it comes down after the cluster says one runtime, not before.
-- §2.8e-bis's second option — importing each backend lazily in `models/models.py` — is not
-  needed for the threading defect once this lands. It remains worth doing on its own merits
-  (a LightGBM job has no business loading gpytorch), and it is still nobody's yet.
+- **§2.8e-bis's second option is now done, as far as it can go.** `lightgbm`, `xgboost`,
+  `quantile_forest` and `grakel` are imported inside the functions that use them, so
+  importing `models/models.py` no longer loads any of the three boosting/tree backends —
+  measured 2026-08-27. A Gaussian-process task therefore no longer sits in a process with
+  both boosting libraries resident, which was the stated precondition of the §2.8e segfault.
+
+  **It goes no further, and this is why the environment fix is the real one.** `torch`,
+  `torch_geometric`, `gpytorch` and `gauche` are needed to *define* the module — classes
+  inherit from `nn.Module`, `MessagePassing`, `gpytorch.models.ExactGP` and `SIGP` — so a
+  LightGBM job still loads the whole Gaussian-process stack, and no rearrangement of imports
+  can change that. `grakel` is the same from the other side: `gauche.kernels.graph_kernels`
+  imports it regardless. Import hygiene closes one direction of the conflict; only one
+  threading runtime closes both.
 
 ### 2.8j ✅ FIXED 2026-08-27 — the uncertainty jobs asked for six conditions that no longer exist
 
@@ -1393,16 +1403,32 @@ Censoring and outlier are not affected by that.
 | `preflight.sh` | Section 4b still reached for `m.STRATEGIES`, which the runner no longer defines, and read `STRATS=(...)` out of the job scripts. It reads `CONDS=(...)` and `m.NOISE_CONDITIONS`, and warns rather than guessing if it finds a script that predates the redesign. Its advice for a flat condition — regenerate with `--threshold-quantile` — pointed at a deleted flag; a condition that is flat where it should not be is now reported as a fact about the dataset |
 | the generated scripts | They hard-coded `/data/stat-cadd/scat9264/KIRBy` and took it on trust (§2.8b: 125 of KIRBy's own 127 job scripts use `/data/stat-ecr`). Each script now checks the directory exists, that the runner in it has `--conditions`, and that the installed injector knows the conditions being asked for — exiting 2 and naming the other checkout rather than producing a full run's worth of results from the old code. `--kirby-dir` regenerates against the other path |
 
-**The gate.** `python scripts/test_uncertainty_job_scripts.py` — it generates real scripts, pulls
-the command line out of each one, substitutes the shell variables with values the array dispatch
-can actually produce, and runs the result through the runner's **own argument parser**, not a
-string match against its source. Seven checks: every emitted command line parses (35 of them, one
-per script per condition); no deleted name or flag survives; the conditions match the settled file,
-and the one condition added to them is one that is *not* flat by design — which is the only reason
-to add it; dropping every even condition or every patterned one is called out by name; the model,
-representation and dataset rosters match the runner's; the scripts are valid bash; and all 60 array
-indices map to 60 distinct tasks with the header promising the same range. It needs a KIRBy
-checkout (`--kirby-dir`, `$KIRBY_DIR`, or a sibling directory) and refuses to run without one.
+**Two gates, and they check different halves.** Both need a KIRBy checkout (`--kirby-dir`,
+`$KIRBY_DIR`, or a sibling directory) and refuse to run without one.
+
+`python scripts/test_uncertainty_job_scripts.py` checks that the command line each script **emits**
+is one the runner accepts. It generates real scripts, pulls the command line out of each one,
+substitutes the shell variables with values the array dispatch can actually produce, and runs the
+result through the runner's **own argument parser**, not a string match against its source. Seven
+checks: every emitted command line parses (35 of them, one per script per condition); no deleted
+name or flag survives; the conditions match the settled file, and the one condition added to them
+is one that is *not* flat by design — which is the only reason to add it; dropping every even
+condition or every patterned one is called out by name; the model, representation and dataset
+rosters match the runner's; the scripts are valid bash; and all 60 array indices map to 60 distinct
+tasks with the header promising the same range.
+
+`bash scripts/smoke_uncertainty_job_scripts.sh` checks the other half — that a script gets far
+enough to emit it. It **executes** a real generated script, 60 times, with two things stubbed and
+nothing else: a `setup.sh` that activates an environment called `env_test`, and a `python` that
+records the argument list instead of running the 47-hour job. Everything between the top of the
+file and the python call runs for real, including the injector check, which genuinely imports
+`noiseInject`. 12 checks, about 40 seconds: four representative tasks reach the runner with no
+retired flag in the command; all 60 indices write 60 distinct results directories covering exactly
+the five conditions; and each of six guards stops the job it exists to stop, with the message it
+exists to print — an index past the end, no partition, a KIRBy checkout with no `--conditions`, no
+KIRBy checkout at all, the wrong environment, and no environment at all. `--qsar-dir` was added to
+the generator to make this possible: the path to this repository on the cluster was hard-coded, so
+a generated script could not be run anywhere else.
 
 **Still to do here, and it is not this fix's.** Whether the uncertainty runs use four
 representations or all six is the same open question as which models and representations go deep
@@ -1746,9 +1772,10 @@ validation-stacking half was real and is fixed), and **one is misfiled** — ent
 the Graph GP constant, is refuted in name while its own evidence confirms it. It
 is real, and it is fixed.
 
-**Every check was broken on purpose to see it go red.** A harness edits the real
-file, runs the check, and puts the file back. Twelve fixes; ten went red first
-time and **two stayed green**, which is the point of running it:
+**Every check was broken on purpose to see it go red.**
+`scripts/check_fixes_fail_when_removed.py` edits the real file, runs the check,
+and puts the file back. Twelve fixes; ten went red first time and **two stayed
+green**, which is the point of running it:
 
 - The QM9 split check asserted each split is more than 10% acyclic. Under
   DeepChem's largest-first ordering WITH singletons, validation comes out 100%
@@ -1774,7 +1801,8 @@ time and **two stayed green**, which is the point of running it:
 | `rust/tests/` (33) | the injector, and the record writer |
 | KIRBy `tests/smoke/smoke_kirby_splits.py` | scaffold key, acyclic groups, the validation carve |
 | KIRBy `tests/smoke/smoke_kirby_target_scaling.py` | what the models are fitted on, and the noise pattern |
-| KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce |
+| KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce, and a model with no rows is named |
+| `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
 **Still yours.** Fourteen entries are real and unfixed because fixing them is a
