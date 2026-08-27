@@ -748,7 +748,7 @@ directories were created and are **empty** for all three datasets.
 
 **What the logs show.** Every one of the five folds printed its train and test sizes, then
 `ERROR: No results for <dataset>`. Nothing between. That gap is the diagnosis: the per-experiment
-progress line at `alternative_data_noise_robustness.py:1342` never printed once, so **the
+progress line at `alternative_data_noise_robustness.py:1342` (that line number is from August and no longer points there) never printed once, so **the
 experiment list was empty**. The folds looped over nothing.
 
 The two tracebacks at the end are downstream noise — an empty summary file gets written and then
@@ -4992,7 +4992,7 @@ split in both the pipeline and the harness.
 | ~~D9~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — corrected, `smoke_test.sh` disclosed, and the consequence traced through to the defect it was hiding (D2) | ✅ Done |
 | **D10** | cluster | The substantive half of gate 10 skips on this laptop, so §8's claim that all three halves passed cannot be re-confirmed off the cluster | Run `python scripts/test_config_isolation.py --end-to-end` under `env_test` and record the output |
 | **D11** | cluster | `check_environment.py` exits 1 on the laptop interpreter — requirement conflicts, a quantile-forest fit failure, four OpenMP runtimes reachable. **The gate is behaving correctly**; this is the threading conflict and the environment rebuild, explicitly not chat D's | Run under `env_test`; nothing in chat D's scope changes |
-| **D12** | cluster | §2.8d's KIRBy citations are in another repository and were not checked; that commit hash does not resolve here | Verify in KIRBy, or mark those lines cross-repo and unverified |
+| ~~D12~~ | ~~cluster~~ | ✅ **VERIFIED 2026-08-27** — checked against the KIRBy checkout at `~/repos/KIRBy`. Commit `333f005` resolves, its message is exactly as quoted, and the guard it added (refusing to exit 0 when every model-and-condition combination raised) is in the file. The one stale part is the line number: `:1342` no longer points at the progress line, because that file has moved on since August. The claim is sound; the citation is a moment in time | ✅ Done |
 
 #### For chat G
 
