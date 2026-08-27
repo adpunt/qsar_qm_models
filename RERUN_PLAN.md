@@ -937,6 +937,38 @@ job thread settings: the fit completes and the thread count is restored.
 **Still worth running on the cluster**, because the crash is environment-specific and the fix
 should be confirmed there rather than assumed: `scripts/server_audit.sh`.
 
+### 2.8e-ter 2026-08-27 — the same conflict DEADLOCKS as well as segfaulting, and it hit a real run
+
+Found on the laptop while running the roster screen (`scripts/setting_selection_test.py`), not on the
+cluster. **One process fitting the neural models and the boosting models in turn stopped dead**: 40
+minutes of wall clock against 2 minutes 55 of CPU, 0% CPU, no error, no output, no crash. It had
+completed the clean fits — which is where torch first builds its thread pool — and hung on the first
+boosting fit after that.
+
+**This matters because it is a new failure mode for a known defect.** §2.8e and §2.8e-bis describe
+the conflict as a segfault. A segfault is loud and the exit code carries it. This is silent: a job
+that hangs at 0% CPU looks like a job that is working, and on the cluster it would burn its whole
+wall-time allocation and be killed by the scheduler with no diagnostic. **A preflight that only
+checks for the segfault will pass a job that then hangs.**
+
+Both failures were reproduced in the same session on the same machine: a separate probe that fitted
+NGBoost, then the DNN, then the MLP in one process exited 139 after printing all three results — the
+segfault, at interpreter shutdown, results intact.
+
+**The workaround that works, and it is the one the screen now uses: one process per model.** The
+screen's per-replicate seeds depend only on the replicate index and the level
+(`setting_selection_test.py`, `noise_seed = 60000 + rep * 100 + int(level * 10)`; subsample and split
+seeded from the replicate alone), so seven separate processes draw the same molecules, the same
+split and the same noise. The paired comparison across models survives the split — confirmed by
+XGBoost reporting a clean R² of 0.9054 on replicate 0 both inside the combined process and in its
+own.
+
+**For the cluster:** the job scripts already put one model per script, so the queue does not hit
+this. What is exposed is anything that fits several model families in one process — the preflight,
+the parity audit, and any future combined harness.
+
+---
+
 ### 2.8e-bis The threading-runtime conflict, measured — and why no import order fixes it
 
 Chat D reproduced §2.8e's silent Gaussian-process death on 2026-08-27 while running the real
