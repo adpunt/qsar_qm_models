@@ -143,6 +143,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done, sourced, and the settings **settled 2026-08-27** (§13.9), in `noise_conditions.json` with a gate on each side | §13 chats A, B, G |
+| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | 🔴 open — the set was settled on **accuracy**, and corruption detection is a different question (§13.1 item 6) | yours to decide, chat H to queue, chat F's material first |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -1422,7 +1423,7 @@ I verified the five highest-severity findings myself, in the source, before writ
 |---|---|---|---|
 | **ECFP4** | **not a circular fingerprint at all** — `rdk_fingerprint_mol` (`rust/src/main.rs:22`, called at `:822`) binds `RDKFingerprintMol`, RDKit's Daylight-style **topological path** fingerprint | a genuine Morgan radius-2 fingerprint via `GetMorganGenerator(radius=2, fpSize=2048)` | ❌ **different family** |
 | **PDV** | `pdv` is **binarised** — `(pdv > 0).astype(np.uint8)` then packed (`process_and_train.py:377`). The real one is the separate `continuous_pdv` | continuous descriptors, standardised | ❌ the merge layer must map to `continuous_pdv` |
-| **SNS** | counts computed (`sub_counts=True`) then **thrown away** — `np.array(sns_fp, dtype=np.uint8)` then `packbits` makes every nonzero a 1 (`:366-371`) | raw counts, then standardised | ❌ binary vs standardised counts |
+| **SNS** | ~~counts computed (`sub_counts=True`) then **thrown away** by `packbits`~~ ✅ **FIXED 2026-08-27 (chat M)** — 1,024 counts as 16-bit integers, and neither side standardises them (§3.4.3a) | raw counts, and no longer standardised | ✅ **now agrees** |
 | **MHG-GNN / ChemBERTa** | ~~per-molecule min-max to 8 bits, never standardised~~ ✅ **FIXED 2026-08-26** — 32-bit floats, standardised per feature on the training split, so both pipelines now build the same features (§2.8c). mol2vec had the same defect and has been deleted | full precision, no quantisation, standardised | ✅ **now agrees** |
 
 **The fingerprint one is the most serious thing found in this whole audit.** `paper.tex:203`
@@ -1434,9 +1435,12 @@ It is a wrong-function bug rather than a naming slip: the same crate file ships
 `morgan_fingerprint_mol` and it is never imported. Note that binding is **radius 3**, so it is
 ECFP6 — switching to it would still not give ECFP4, and a new binding is needed.
 
-**A second, quieter data-loss bug in the same area.** Because the substructure counts are cast to
-`uint8` *before* being packed, a count that is an exact multiple of 256 wraps to zero and the
-substructure records as **absent**. Rare, silent, wrong.
+**A second, quieter data-loss bug in the same area — ✅ FIXED with the first.** Because the
+substructure counts were cast to `uint8` *before* being packed, a count that was an exact multiple
+of 256 wrapped to zero and the substructure recorded as **absent**. Rare, silent, wrong. The record
+now holds 16-bit counts and the writer **refuses** a value that will not fit rather than wrapping
+it. Guarded in `scripts/test_embedding_storage.py` §6 and §7, which store a count of exactly 256 and
+require the old path to fail on it.
 
 **Only one representation pair is genuinely comparable across the two studies:** QM9's
 `continuous_pdv` against the experimental `PDV`. Both end as train-only per-feature standardised
@@ -1555,10 +1559,31 @@ experimental side is the CONTINUOUS one. One name, opposite correct answers — 
 only. That follows the data when the binarised vector and the flattened counts are fixed, with no
 list for anyone to forget.
 
-**Not yet measured, and it becomes live the moment chat A fixes the count storage:** sparse
-**counts** under standardisation. They read as binary today so they go unscaled; once they are real
-counts this rule will start scaling them, and sparse counts may have the same problem as sparse
-bits. Measure it then. The note is in the code where it will be seen.
+✅ **MEASURED AND SETTLED 2026-08-27 (chat M) — sparse counts are exempt too.**
+`scripts/parity_test_count_scaling.py`, results in `results/parity_tests/count_scaling.csv`. Sort &
+Slice counts through the pipeline's own featuriser, scaffold split, five seeds, the same
+radial-kernel support vector machine, against a decision rule fixed before the run. Standardised
+counts minus raw counts:
+
+| | per seed | mean | seed-to-seed spread | standardising wins |
+|---|---|---|---|---|
+| QM9, 4,000 molecules | −0.070, −0.061, −0.107, −0.039, −0.089 | **−0.073** | 0.026 | 0/5 |
+| hERG Ki, 1,415 compounds | +0.009, −0.022, −0.061, +0.015, +0.084 | +0.005 | 0.053 | 3/5 |
+
+QM9 loses on every seed by nearly three times its own run-to-run spread; hERG is a coin flip. So it
+is the same harm as the binary case — rare features blown up until they dominate the distances — and
+it does not go away when a presence bit becomes a count. **The exemption is now written as a rule
+about sparse features rather than binary ones** (`is_sparse_count_matrix`: non-negative integers,
+under 25% dense, at least one value above 1). The forest control moved by at most 0.005, as it
+should: standardising is monotone per feature and trees split on thresholds.
+
+**Why the threshold is where it is.** The substructure counts run at 1.3% density on QM9 and 4.7% on
+hERG. The descriptor vector is the only other candidate — half its columns hold non-negative
+integers — and it runs at 39% density and is not all-integer anyway. Nothing is near the threshold
+from either side.
+
+Guard: `python scripts/parity_test_count_scaling.py --self-test`, which fails if the rule is taken
+back out, in a second and without data.
 
 **A second defect found while repairing a bug I introduced here.** The record reader chose its
 storage type from that same name list, so any representation not on it was cast to an 8-bit
@@ -2266,12 +2291,14 @@ where that is a real mechanism rather than a simulation. The single-setting cond
 Student-t at ν = 5 and Outlier at p = 10% — belong to the depth stage, so they enter here only if
 the depth stage is run on the experimental side.
 
-**One thing to check before pricing this, not to assume.** §13.9 measured redundancy **on QM9**, one
-representation and three tree/linear models. The experimental datasets are smaller and noisier, and
-the uncertainty question is about which *molecules* are corrupted rather than how much accuracy is
-lost — §5.3 of `NOISE_DESIGN.md` notes a model can lose the same accuracy while being much better or
-worse at spotting corruption. So the condition set is settled for the **accuracy** grid; whoever
-builds the uncertainty runs should say explicitly whether they are inheriting it or testing it.
+**One thing to check before pricing this, not to assume — and it is §13.1 open item 6, not just a
+note here.** §13.9 measured redundancy **on QM9**, one representation and three tree/linear models.
+The experimental datasets are smaller and noisier, and the uncertainty question is about which
+*molecules* are corrupted rather than how much accuracy is lost — §5.3 of `NOISE_DESIGN.md` notes a
+model can lose the same accuracy while being much better or worse at spotting corruption. So the
+condition set is settled for the **accuracy** grid and is **not** established for corruption
+detection. Inheriting it is the honest default and costs nothing; testing it costs two extra
+conditions across the whole uncertainty grid. Either way the Methods must say which was done.
 
 ### 6.4 The levers, in the order they cost you least
 
@@ -3109,8 +3136,28 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    heavy-tailed and sparse-contamination types were what stage 2 was expected to show behave like
    Gaussian, and they do: every setting within 0.006 R² at the reporting level. **Stage 1 at four
    types is 25 level-conditions, 19,500 runs, and the staged total becomes 48% of the old design.**
-4. 🔴 **Which models and representations go deep in stage 2?** Cannot be chosen before stage 0 runs.
-5. 🔴 **The QM9 reporting level** (§6.1). Every table that reports accuracy at one level needs it.
+4. 🔴 **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
+   it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
+   screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
+   rather than inventing a default, so nothing can run ahead of the decision.
+5. 🔴 **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
+   it, but every table that reports accuracy at one level needs it, and it is the level §13.9 states
+   its verdict at. Standing suggestion 0.5. Chat G measured 0.5 and 1.5, which bracket every other
+   point on the grid and agree, so any choice from the grid leaves the settings verdict standing
+   (§13.9); the intermediate levels are bracketed rather than measured.
+6. 🔴 **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
+   chat H to queue, and it needs chat F's material first.** The set was settled on chat G's
+   measurement of **accuracy on QM9** — one representation, three tree and linear models (§13.9).
+   The uncertainty question is a different one: `NOISE_DESIGN.md` §5.3 notes that a model can lose
+   the same accuracy while being much better or worse at spotting *which* labels were corrupted, and
+   concentrated noise — the heavy tails and sparse contamination this screen found redundant — is
+   exactly where that was expected to show. So "shape does not matter" is established for accuracy
+   and is **not** established for corruption detection.
+   **The options and what they cost:** inherit the four full-grid conditions (free, and the honest
+   default) — or add the two single-setting conditions to the uncertainty grid to test it, which is
+   two conditions × 3 datasets × 7 models × 4 representations × 6 levels × 5 folds. Recommend
+   inheriting, and saying so in the Methods rather than implying it was tested. Raised by chat G
+   2026-08-27; the scope of the uncertainty runs is already §4 Decision 1.
 
 **One caution to hold on to.** A staged design is only honest if the reduced set in stage 1 is
 justified by what stage 0 and stage 2 show, and the paper says so. "We ran everything under Gaussian
@@ -4222,7 +4269,13 @@ hyperparameters anyone thinks it uses.
 **🔴 TODO:** the compute ceiling, once §13.1 is settled.
 
 > **Prompt.** Generate one deduplicated set of cluster job scripts from the settled design, wire the
-> verification gates into a preflight, clear the caches, and launch. The design is `RERUN_PLAN.md`
+> verification gates into a preflight, clear the caches, and launch. **Two things chat G left you
+> specifically.** The noise conditions are settled and live in `noise_conditions.json` — read them
+> rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight beside the
+> other gates; it already checks that the QM9 generator agrees with the file, and it will fail if the
+> two drift. And §13.1 item 6 is a decision the author has to make before the uncertainty jobs are
+> queued, not after: whether those runs inherit the settled set or test it. Bring it to them with the
+> price rather than choosing quietly. The design is `RERUN_PLAN.md`
 > §13.1 (the four stages and the replicate counts) and §6 (the noise types and levels); the gates are
 > §8. Read `slurm_scripts_qm9_rerun/RUNBOOK.md` and
 > `slurm_scripts_uncertainty_rerun/RUNBOOK.md` first — their reasoning about what is in and out, the
