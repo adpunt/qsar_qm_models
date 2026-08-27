@@ -317,7 +317,14 @@ def parse_arguments():
                         choices=["gaussian", "student_t", "laplace"],
                         help="Shape of each individual draw.")
     parser.add_argument("--noise-targeting", type=str, default="uniform",
-                        choices=["uniform", "grouped_wide", "grouped_shift", "outlier", "censoring"],
+                        # Both spellings, matching the injector. Every results row,
+                        # manifest and figure says grouped_wider / grouped_shifted,
+                        # so the name read off a row has to be one this accepts --
+                        # and argparse refuses an unlisted choice before the value
+                        # ever reaches the injector (NOISE_DESIGN.md 6.2b).
+                        choices=["uniform", "grouped_wide", "grouped_wider",
+                                 "grouped_shift", "grouped_shifted", "outlier",
+                                 "censoring"],
                         help="Who gets hit and how hard.")
     parser.add_argument("--nu", type=float, default=5.0,
                         help="Degrees of freedom for Student-t. Must be > 2 or the variance is "

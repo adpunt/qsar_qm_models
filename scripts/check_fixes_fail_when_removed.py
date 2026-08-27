@@ -174,6 +174,17 @@ CASES = [
   "        \"grouped_wide\" | \"grouped_wider\" => {",
   "        \"grouped_wide\" => {",
   [sys.executable, f"{QSAR}/scripts/test_condition_names.py", "--rebuild"]),
+
+ # The driver's own parser refuses an unlisted choice before the value reaches
+ # the injector, so the Rust half of that fix is not enough on its own.
+ ("the driver takes the name the rows carry",
+  f"{QSAR}/scripts/process_and_train.py",
+  "                        choices=[\"uniform\", \"grouped_wide\", \"grouped_wider\",\n"
+  "                                 \"grouped_shift\", \"grouped_shifted\", \"outlier\",\n"
+  "                                 \"censoring\"],",
+  "                        choices=[\"uniform\", \"grouped_wide\", \"grouped_shift\", "
+  "\"outlier\", \"censoring\"],",
+  [sys.executable, f"{QSAR}/scripts/test_generated_job_flags.py"]),
 ]
 
 
