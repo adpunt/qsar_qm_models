@@ -4175,6 +4175,23 @@ effect, and it spends nothing on eight settings that produce none.
 Grouped and Censoring. Grouped is **two** conditions, and the difference between them is the largest
 zero-mean effect measured anywhere in this study — so it is four, not three.
 
+#### The QM9 reporting level is still open (§13.1 item 5), and this does not reopen the answer
+
+Everything above is stated "at the reporting level", and that level is **assumed to be 0.5** — the
+standing suggestion in §6.1, not yet a decision. The QM9 grid is 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5,
+so a different choice is possible.
+
+**It would not change the recommendation, and here is why rather than an assurance.** The test
+measured 0.5 and 1.5, which **bracket every other point on the grid**, and both ends give the same
+answer: grouped-shifted separates and nothing else does. The intermediate levels are therefore
+bracketed rather than measured, which is weaker than measured and is said so here.
+
+**One exception at the top end, so it is not overstated.** At level 1.5 the skewed draw reaches
+−0.045 R² for the random forest at *p* = 0.007 — one model of three, at the highest level on the
+grid, and nothing at all at 0.5. It does not survive as a reason to build the condition, but if the
+reporting level were moved to 1.5 it would be worth re-reading that row before repeating "nothing but
+direction matters".
+
 #### What this test cannot settle, stated rather than buried
 
 One representation and three cheap models on 4,000 molecules. A setting that matters for a neural
