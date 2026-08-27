@@ -4115,7 +4115,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | **1.0**, the author's leaning and now the recommendation. At 1.5 two of four models on Caco-2 fall below zero, and the shared grid means one level must work on every dataset. At 1.0 everything is alive, QM9 already shows the reversal, and twice published hERG error is 1.21 | chat J, at figure-script rebuild |
+| 1 | **Per dataset, matched on TOTAL noise — the author's call, 2026-08-27.** The experimental labels already carry measurement error and QM9 does not, so one nominal level is not one amount of noise (`NOISE_DESIGN.md` §4d). QM9 reports at **1.0**. The three experimental levels wait on one measurement, because the Caco-2 baseline currently in the documents is provably too high | chat J, and one check on the cluster first |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ **CONFIRMED by the author 2026-08-27** and built, §2.8j. Not optional: there is no flag to run fewer than the five |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |

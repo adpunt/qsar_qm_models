@@ -540,6 +540,64 @@ statement about the range being realistic for *some* endpoint, not about QM9.
 after a scaffold split. One unit of real error on hERG is therefore **0.59 of the whole-set spread**
 and 0.60 of the training fold's — the two agree, so the hERG row of the table above is safe.
 
+### 4d. The experimental labels are already noisy — what that does to a shared level
+
+Raised by the author 2026-08-27: *"the validation sets presumably start with some level of noise
+already."* They do, and QM9 does not. Injecting the same level on both therefore does not put the
+same amount of noise in the labels.
+
+Noise adds in quadrature, so at injected level `L` on a dataset whose labels already carry `b` of
+their own spread as measurement error, the total is `sqrt(b² + L²)`:
+
+| Dataset | Already there | Inject 0.5 | Inject 1.0 | Inject 1.5 |
+|---|---|---|---|---|
+| QM9 | 0.00 | 0.50 | 1.00 | 1.50 |
+| logD | 0.13 | 0.52 | 1.01 | 1.51 |
+| hERG | 0.60 | 0.78 | 1.17 | 1.62 |
+| Caco-2 | 0.79 | 0.93 | 1.27 | 1.70 |
+
+**One nominal level is up to 27% more noise on Caco-2 than on QM9**, and the gap is widest at the
+low end — level 0.5 is 0.93 on Caco-2, nearly twice what it is on QM9. To carry the *same total*
+noise, each dataset needs a different injected level:
+
+| Target total | QM9 | logD | hERG | Caco-2 |
+|---|---|---|---|---|
+| 1.00 | 1.00 | 0.99 | 0.80 | 0.61 |
+| 1.25 | 1.25 | 1.24 | 1.10 | 0.97 |
+| 1.50 | 1.50 | 1.49 | 1.37 | 1.28 |
+
+**This does not reopen the shared-grid decision** (`RERUN_PLAN.md` §2.12, settled 2026-08-27). Which
+levels get RUN and which single level the tables REPORT are different choices. Every level runs on
+every dataset either way, so a per-dataset reporting level costs no compute at all.
+
+#### 🔴 And the arithmetic exposes a defect in the Caco-2 anchor
+
+Kramer's identity — a model cannot explain the part of the variance that is measurement error — caps
+R² at `1 − b²`:
+
+| Dataset | Ceiling implied by its baseline |
+|---|---|
+| logD | 0.983 |
+| hERG | 0.640 |
+| **Caco-2** | **0.376** |
+
+**The observed clean R² on Caco-2 is 0.565** for the DNN on ECFP4, with three other models at
+0.469–0.494 (`results/validation_full/openadmet_caco2/`). **0.565 exceeds the 0.376 ceiling, which is
+impossible if both inputs are right.** The largest baseline consistent with R² = 0.565 is **0.66**,
+and a model that does not reach its ceiling implies less still.
+
+**The likely cause, and it needs checking rather than assuming.** Bentz et al. 2013's 0.35 is
+variability **between eleven laboratories**. Between-laboratory variance does not apply inside a
+single-source dataset — for that, within-laboratory error is the right figure, and Prieto et al. 2010
+(*ATLA* 38(5):367–386) puts Caco-2 within-lab CV at 10.4% and 14.7%, far below 0.35 log units. If the
+Caco-2 set used here comes from one source, **its baseline is much smaller than 0.79 and every
+statement anchored on that number is wrong by the same factor.**
+
+**What to check, and it is quick:** whether the Caco-2 and logD sets are single-source or pooled
+across laboratories, and the clean training label SD of each. Nothing in either document records
+either fact today. Until then the Caco-2 baseline of 0.76–0.79 must be treated as an **upper bound
+that is known to be too high**, not as the dataset's actual noise.
+
 ⚠️ **One number needs settling and it is a one-line check.** §6.4 of this document says one unit of
 real error is **0.76** of the Caco-2 label spread; `RERUN_PLAN.md` §2.12 says **0.79**. The two imply
 Caco-2 label spreads of 0.461 and 0.443. Nothing in either document records the spread directly —
