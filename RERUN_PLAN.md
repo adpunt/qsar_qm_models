@@ -4752,31 +4752,42 @@ one process **hangs** — see §2.8e-ter, found doing exactly this. The replicat
 the replicate index and the level, so the separate processes draw the same molecules, the same split
 and the same noise; XGBoost gives the same clean R² to four decimals either way.
 
-#### Median R² over nine replicates — plain Gaussian
+#### R² at replicate 0 — plain Gaussian
+
+**Replicate 0, named, with the range across the other eight beside it.** No median and no mean: a
+median over replicates collapses the run-to-run spread, which is the thing this study measures. The
+author's rule, 2026-08-27: *"Never median. Fixed rep only."* Replicate 0 is the one to fix on — it is
+the screen's replicate and is reused as replicate 0 of the main grid.
 
 | Model | clean | 0.5 | 1.0 | 1.5 |
 |---|---|---|---|---|
-| **NGBoost** | **0.871** (last) | 0.860 | **0.836** | **0.798** |
-| DNN | 0.907 | 0.866 | 0.799 | 0.775 |
-| MLP | 0.902 | 0.854 | 0.791 | 0.772 |
-| SVM | 0.874 | 0.849 | 0.795 | 0.722 |
-| Random forest | 0.895 | 0.867 | 0.798 | 0.681 |
-| XGBoost | 0.903 | 0.872 | 0.783 | 0.639 |
-| LightGBM | 0.902 | 0.871 | 0.784 | 0.611 |
+| **NGBoost** | **0.871** `[0.846–0.892]` | 0.860 `[0.829–0.878]` | **0.836** `[0.799–0.854]` | **0.807** `[0.751–0.828]` |
+| DNN | 0.915 `[0.857–0.922]` | 0.866 `[0.828–0.892]` | 0.804 `[0.719–0.834]` | 0.775 `[0.653–0.809]` |
+| MLP | 0.911 `[0.840–0.921]` | 0.864 `[0.831–0.880]` | 0.813 `[0.774–0.860]` | 0.772 `[0.686–0.831]` |
+| SVM | 0.883 `[0.830–0.901]` | 0.861 `[0.790–0.872]` | 0.810 `[0.743–0.825]` | 0.728 `[0.691–0.770]` |
+| Random forest | 0.898 `[0.862–0.920]` | 0.870 `[0.836–0.888]` | 0.791 `[0.745–0.822]` | 0.681 `[0.625–0.733]` |
+| XGBoost | 0.905 `[0.878–0.925]` | 0.878 `[0.833–0.883]` | 0.783 `[0.697–0.800]` | 0.638 `[0.555–0.739]` |
+| LightGBM | 0.902 `[0.882–0.925]` | 0.880 `[0.843–0.895]` | 0.753 `[0.723–0.805]` | 0.597 `[0.558–0.730]` |
 
-#### Median R² — grouped-shifted noise
+#### R² at replicate 0 — grouped-shifted noise
 
 | Model | 0.5 | 1.0 | 1.5 |
 |---|---|---|---|
-| NGBoost | 0.853 | 0.794 | 0.671 |
-| SVM | 0.826 | 0.744 | 0.597 |
-| Random forest | 0.857 | 0.765 | 0.589 |
-| XGBoost | 0.861 | 0.725 | 0.535 |
-| LightGBM | 0.857 | 0.726 | 0.502 |
-| MLP | 0.835 | 0.691 | 0.397 |
-| DNN | 0.833 | 0.682 | 0.363 |
+| NGBoost | 0.816 `[0.812–0.876]` | 0.813 `[0.753–0.835]` | 0.651 `[0.647–0.783]` |
+| SVM | 0.772 `[0.784–0.861]` | 0.797 `[0.692–0.802]` | 0.469 `[0.562–0.694]` |
+| Random forest | 0.816 `[0.824–0.883]` | 0.765 `[0.742–0.801]` | 0.492 `[0.515–0.723]` |
+| XGBoost | 0.823 `[0.826–0.893]` | 0.773 `[0.701–0.779]` | 0.425 `[0.469–0.646]` |
+| LightGBM | 0.823 `[0.829–0.884]` | 0.741 `[0.691–0.778]` | 0.384 `[0.438–0.629]` |
+| MLP | 0.783 `[0.771–0.881]` | 0.649 `[0.591–0.779]` | **0.120** `[0.167–0.630]` |
+| DNN | 0.748 `[0.792–0.888]` | 0.585 `[0.610–0.721]` | 0.476 `[0.122–0.734]` |
 
-#### Which model is best, counted per replicate rather than averaged
+⚠️ **Read the ranges here, not the point values.** Under grouped-shifted noise several ranges do not
+contain replicate 0's own value — the MLP at level 1.5 is 0.120 in replicate 0 against 0.167–0.630
+elsewhere. That is the point of showing a fixed replicate with its spread rather than a summary
+number: **this condition's effect varies enormously between scaffold splits**, and any single number
+would hide it. The neural models are where it is worst.
+
+#### Which model is best, counted per replicate
 
 | Level | Winner |
 |---|---|
