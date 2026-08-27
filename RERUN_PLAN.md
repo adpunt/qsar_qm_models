@@ -3886,7 +3886,68 @@ despite being marked disproved.
 
 ---
 
-#### Chat M — Three loose ends: the cluster, sparse counts, and the QM9 job scripts 🔴 TODO
+#### Chat M — Three loose ends: the cluster, sparse counts, and the QM9 job scripts
+
+✅ **TWO OF THREE DONE 2026-08-27. The third needs you, and it is one command.**
+
+**Sparse counts — measured, answered, and the storage defect it was waiting on is fixed too.**
+The question was what happens to the substructure fingerprint when its counts stop being flattened
+to presence bits. The answer is that it must NOT be standardised (§3.4.3a: QM9 loses 0.073 R² on
+every one of five seeds), and the rule in `models/model_defaults.py` now says so as a rule about
+sparse features rather than binary ones. Spec version 1.2.0.
+
+While measuring it, the thing it was waiting for turned out to be small enough to finish here, so
+it is finished: the record holds **1,024 counts as 16-bit integers** instead of 128 bytes of packed
+bits, on both sides of the record — `write_to_mmap`, `parse_mmap` and the Rust reader's buffer
+width, which are the three that have to move together. That closes both halves of the §3.4.1 SNS
+row, including the wrap where a count of exactly 256 recorded as *absent*; the writer now refuses a
+count that will not fit rather than wrapping it. Proven on a real run: 320 training molecules,
+counts up to 7, 15.9% of present substructures appearing more than once, and the scaling rule
+correctly declining to standardise them. Guards: `scripts/test_embedding_storage.py` §6–§7 and
+`python scripts/parity_test_count_scaling.py --self-test`, both of which run the retired storage
+through the assertion and require it to fail.
+
+**The QM9 job generator — rebuilt, and it now has a test that executes its output.** It emitted
+`--sigma`, `--noise-strategy`, `-b`, and two representations refused by name, so every script it
+wrote would have died at argument parsing. What it emits now: the new noise CLI, the settled six
+representations, the staged design (§13.1), and `--bayesian-transformation last_layer` rather than
+the `last` that falls through every branch and files a plain network as a Bayesian one.
+
+It no longer decides which conditions exist — it **reads `noise_conditions.json`** and only
+translates a condition name into flags, which is the one job that genuinely belongs to it. A name
+there that it cannot produce, or one it can produce that nobody decided to run, stops it at import.
+
+`slurm_scripts_qm9_rerun/test_generate_scripts.py` is what stops this repeating. It generates every
+script for stages 0, 1 and 2, **runs each array task** against a stub checkout that satisfies every
+guard, and feeds the command line each one builds through `process_and_train.py`'s own parser —
+1,185 task runs and 1,180 command lines. It also fires each guard in turn (no partition, index out
+of range, no environment, wrong environment, missing binary) and requires each to refuse, and
+`--end-to-end` runs one real training task at 400 molecules. The runbook and the completeness check
+follow from the generator rather than restating it.
+
+**🔴 The cluster — this is yours, and nothing else can answer it.** One command, about five minutes:
+
+```bash
+ssh <arc>
+cd /data/stat-cadd/scat9264/qsar_qm_models && git pull
+bash scripts/server_audit.sh
+# then send back ~/server_audit_report.txt
+```
+
+It answers, in one file: which checkout is live, whether the two interpreters agree, whether every
+model can be constructed, whether the quantile forest fits, whether the Gaussian process still
+crashes with the boosting libraries loaded, whether the two pipelines report the same spec hash,
+whether the Rust binary is built and carries the new CLI, and — added here — whether every command
+line the job generator emits is accepted by the pipeline **as installed on the cluster**. That last
+one is the check that would have caught the stale generator months ago.
+
+Until that file comes back, §2.8e stays open: on this laptop the Gaussian process still segfaults
+once the boosting libraries are loaded, and whether the cluster's environment has the same single
+OpenMP runtime problem cannot be established from here.
+
+<details>
+<summary>The original brief for this chat</summary>
+
 
 Three unrelated items, grouped because each is small and none belongs to another chat.
 
@@ -3933,6 +3994,8 @@ censoring. Regenerating from it reproduces the breakage.
 > is not finished.
 >
 > Do not touch `paper.tex`.
+
+</details>
 
 ---
 
@@ -4225,8 +4288,8 @@ zero-mean effect measured anywhere in this study — so it is four, not three.
 #### The QM9 reporting level is still open (§13.1 item 5), and this does not reopen the answer
 
 Everything above is stated "at the reporting level", and that level is **assumed to be 0.5** — the
-standing suggestion in §6.1, not yet a decision. The QM9 grid is 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5,
-so a different choice is possible.
+standing suggestion in §6.1, not yet a decision. The QM9 grid has seven points
+(`NOISE_DESIGN.md` §6.4 owns them), so a different choice is possible.
 
 **It would not change the recommendation, and here is why rather than an assurance.** The test
 measured 0.5 and 1.5, which **bracket every other point on the grid**, and both ends give the same
