@@ -70,6 +70,7 @@ only ever a grouping key.
 
 from __future__ import annotations
 
+import re
 import warnings
 from pathlib import Path
 
@@ -147,6 +148,37 @@ _CONDITION_NORMALISE = {
     'heteroscedastic': 'hetero',
     'value_proportional': 'valprop',
 }
+
+# Censoring is the one condition whose written name carries its own level: both
+# injectors name it `censoring_<percent clipped>` (Rust `condition_name`, and
+# noiseInject's provenance row), so a clean run is `censoring_0` and a run at
+# 30% is `censoring_30`.
+#
+# That silently voids the condition. `_subtract_zero_level` pairs a noisy row
+# with its clean one on (dataset, model, rep, condition, split), so under two
+# different names censoring has no clean partner, the subtraction produces NaN,
+# and question B — the one censoring is in the study to answer — comes out empty
+# rather than wrong. The two injectors AGREE on this name, so the cross-check
+# between them cannot catch it.
+#
+# The level is already carried by its own column, so the name does not need it.
+# Normalising here rather than renaming in the injectors keeps every file ever
+# written readable, including the ones already on disk.
+_CENSORING_LEVEL_SUFFIX = re.compile(r'^(censoring(?:_lower)?)_\d+$')
+
+
+def _normalise_condition(name):
+    """The condition name a row should be grouped under.
+
+    Strips the level that censoring's name carries, and applies the retired-name
+    map. Anything else is returned unchanged.
+    """
+    if not isinstance(name, str):
+        return name
+    m = _CENSORING_LEVEL_SUFFIX.match(name)
+    if m:
+        name = m.group(1)
+    return _CONDITION_NORMALISE.get(name, name)
 
 _DEFAULT_MIN_N = 20
 
@@ -301,7 +333,7 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
             cond = 'unspecified'
     out['condition'] = cond
     out['condition'] = out['condition'].map(
-        lambda c: _CONDITION_NORMALISE.get(c, c) if isinstance(c, str) else c)
+        _normalise_condition)
 
     out['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
     fno = df['file_no'].astype(str) if 'file_no' in df.columns else None
@@ -382,7 +414,7 @@ def _normalise_kirby(df, path, strict, dataset_name):
     # all-NaN column would let a pooled frame slip past `assert_single_cell`.
     out['condition'] = cond if cond is not None else 'unspecified'
     out['condition'] = out['condition'].map(
-        lambda c: _CONDITION_NORMALISE.get(c, c) if isinstance(c, str) else c)
+        _normalise_condition)
 
     out['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
     out['fold'] = df['fold'].astype(str) if 'fold' in df.columns else '0'

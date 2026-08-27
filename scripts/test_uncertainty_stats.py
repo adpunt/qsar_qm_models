@@ -704,6 +704,42 @@ def test_missing_column_is_named_not_reconstructed():
 # 7. the two diagnostics
 # ---------------------------------------------------------------------------
 
+
+def test_censoring_levels_pair_despite_the_level_in_their_name():
+    """Censoring's written name carries its own level, and that voided it.
+
+    Both injectors write `censoring_<percent clipped>`, so a clean run is
+    `censoring_0` and a 30% run is `censoring_30`. The zero-level subtraction
+    pairs a noisy row with its clean one on the condition NAME, so under two
+    names censoring had no clean partner and question B — the question censoring
+    is in the study to answer — came out empty rather than wrong. Both injectors
+    agree on the name, so the cross-check between them cannot catch it.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / 'uncertainty_censoring_ecfp4_qrf_uncertainty_values.csv'
+        _write_qm9_file(p, sigmas=(0.0, 0.30))
+        raw = pd.read_csv(p)
+        raw['strategy'] = [f"censoring_{int(round(s * 100))}" for s in raw['sigma']]
+        raw.to_csv(p, index=False)
+        assert set(raw['strategy']) == {'censoring_0', 'censoring_30'}, \
+            "the fixture must reproduce the two different names"
+
+        df = load_uncertainty(p)
+        assert set(df['condition']) == {'censoring'}, \
+            f"both levels must group under one condition, got {set(df['condition'])}"
+
+        eff = confound_controlled_effect(df, split='train_oof', min_n=5)
+        noisy = eff[~np.isclose(eff['sigma'].astype(float), 0.0)]
+        assert len(noisy), "no noisy row survived"
+        assert noisy['rho_pattern_at_sigma0'].notna().all(), \
+            "the clean run did not pair with the noisy one — censoring is void again"
+        assert noisy['effect'].notna().all(), "question B produced no effect"
+        _record('censoring_name_carries_its_level',
+                f"censoring_0 and censoring_30 load as one condition and pair: "
+                f"baseline defined on {int(noisy['rho_pattern_at_sigma0'].notna().sum())} "
+                f"of {len(noisy)} noisy rows, effect "
+                f"{float(noisy['effect'].iloc[0]):+.3f}")
+
 def test_diagnostics():
     rng = np.random.default_rng(91)
     pattern = np.where(np.arange(400) % 3 == 0, 3.0, 1.0)
