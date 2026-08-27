@@ -4099,7 +4099,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
   constant at all. It has to be rebuilt for the new seven-point grid regardless (chat J), and that
   rebuild is where a reporting level would be set.
 - **The QM9 job generator does not have the concept.** `slurm_scripts_qm9_rerun/generate_scripts.py`
-  reads `noise_conditions.json` and sweeps `DOSE_LEVELS = 0.0 0.2 0.3 0.5 0.75 1.0 1.5` (`:101`).
+  reads `noise_conditions.json` and sweeps the QM9 level grid from `NOISE_DESIGN.md` §6.4 (`:101`).
   Every level runs. Choosing one to report changes nothing about what is queued.
 - ✅ **The uncertainty job generator was stale; it was rewritten on 2026-08-27 (§2.8j).** It
   listed the six deleted strategies and emitted flags the runner no longer has, so every task
