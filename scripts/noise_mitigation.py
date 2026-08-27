@@ -23,6 +23,13 @@ from sklearn.model_selection import KFold
 
 import scipy.spatial.distance as distance
 
+# save_uncertainty_values lives in scripts/utils.py beside this file and was never
+# imported, so the one call to it (in train_baseline_model) would have raised
+# NameError before it could raise TypeError. Resolve utils from this file's own
+# location so the import works whatever the working directory is.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import save_uncertainty_values
+
 from torch_geometric.datasets import QM9
 import xgboost as xgb
 import matplotlib.pyplot as plt
@@ -739,15 +746,22 @@ def train_baseline_model(X_train, y_train, X_test, y_test, model_type='random_fo
                 # Save uncertainty if requested
                 if save_uncertainty and 'uncertainty_info' in kwargs:
                     info = kwargs['uncertainty_info']
+                    # This call raised TypeError on contact until 2026-08-26: `y_true`
+                    # is not a parameter and three required ones were missing, so it
+                    # had never run. The test split is never noised, so the clean and
+                    # the noisy label are the same array and injected_noise is 0.0.
                     save_uncertainty_values(
                         y_pred_mean=y_pred,
                         y_pred_std=np.sqrt(pred_vars),
-                        y_true=y_test,
+                        y_true_original=y_test,
+                        y_true_noisy=y_test,
                         filepath=info['filepath'],
                         model_name="gauche",
                         rep=info['rep'],
                         sigma_noise=info['sigma'],
-                        iteration=info['iteration']
+                        iteration=info['iteration'],
+                        file_no=info.get('file_no', 0),
+                        split='test'
                     )
                 
                 # Calculate metrics
@@ -877,7 +891,8 @@ def run_noise_mitigation_experiment(args):
             'filepath': args.output_path,
             'rep': args.molecular_representation,
             'sigma': noise_level,
-            'iteration': 0
+            'iteration': 0,
+            'file_no': 0
         }
         clean_metrics = train_baseline_model(
             X_train, y_train_clean_norm, X_test, y_test_norm, 

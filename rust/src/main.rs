@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use regex::Regex;
 use std::io::{self, BufReader, BufRead, Read, Seek, SeekFrom};
@@ -251,6 +251,64 @@ struct NoiseSpec {
     seed: u64,
 }
 
+/// The region-level targeting decisions. Drawn ONCE, on the training labels, and
+/// then reused by every other split.
+///
+/// A scaffold group whose measurements are three times worse in training has three
+/// times worse measurements in validation as well: "this scaffold is hard to
+/// measure" is a property of the scaffold, not of which split a molecule landed in.
+/// Redrawing the selection per split would make the validation split a different
+/// condition wearing the training condition's name.
+///
+/// It is also what makes a HELD-OUT molecule's `noise_pattern_raw` answerable at
+/// all. That column is "the shape this molecule's region receives", and whether its
+/// region is one of the affected ones is a training-side decision — there is
+/// nothing to look up without this.
+#[derive(Debug, Clone, Default)]
+struct TargetingState {
+    /// GroupedWide: the scaffold groups carrying the wider error.
+    affected_groups: HashSet<u32>,
+    /// GroupedShift: the offset drawn once per scaffold group, at unit variance.
+    group_offsets: HashMap<u32, f32>,
+}
+
+/// Which split is being planned, and against what.
+///
+/// Everything that defines the CONDITION — the amount of noise, the assay limit,
+/// which scaffold groups are hit — is a property of the clean TRAINING labels, and
+/// is measured against them whichever split is being noised. Only the draws
+/// themselves are per split.
+///
+/// Anchoring on the validation split's own spread instead is the mistake this type
+/// exists to prevent: validation is a tenth the size and, after a scaffold split,
+/// need not have the training column's spread at all, so "the same noise level"
+/// would mean a different number of label units on each split.
+struct PlanContext<'a> {
+    /// The clean TRAINING labels. The dose and every cut-point are measured here.
+    reference_labels: &'a [f32],
+    /// The training split's region-level decisions. `None` when this IS the
+    /// training split and they are being made.
+    shared: Option<&'a TargetingState>,
+    /// Whether this split's labels actually receive the noise. A split that does
+    /// not still gets its `noise_pattern_raw` — the shape its region would
+    /// receive — but every `epsilon_raw` and `noise_scale_raw` is exactly zero.
+    apply: bool,
+    /// For gate messages.
+    split_name: &'a str,
+}
+
+impl<'a> PlanContext<'a> {
+    /// The training split: it defines the condition, so it is its own reference.
+    fn training(labels: &'a [f32]) -> Self {
+        PlanContext {
+            reference_labels: labels,
+            shared: None,
+            apply: true,
+            split_name: "train",
+        }
+    }
+}
+
 /// Everything the run injected, plus everything needed to prove what it injected.
 /// Nothing here is reconstructed after the fact — it is recorded where it is drawn.
 #[derive(Debug, Clone)]
@@ -260,6 +318,26 @@ struct NoisePlan {
     /// The canonical SMILES each epsilon belongs to. Carried so the write path can
     /// assert it is applying a molecule's own noise rather than a row position's.
     canonical: Vec<String>,
+    /// Per molecule, RAW label units: the amount of noise this molecule receives at
+    /// THIS level. For the dose-matched types it is the standard deviation of that
+    /// molecule's own draw, which is `level * noise_pattern` exactly. For censoring
+    /// — which has no dose axis — it is the size of the shift actually applied.
+    /// Exactly zero on a split that receives no noise, and at level zero.
+    noise_scale: Vec<f32>,
+    /// Per molecule, RAW label units: the same quantity at a FIXED reference level
+    /// of 1.0. Identical at every level INCLUDING zero, by construction, because
+    /// nothing in it depends on the level.
+    ///
+    /// This is what makes the zero-level subtraction possible: the model trained at
+    /// level zero saw the same labels and no corruption, so its correlation with
+    /// this column is exactly the label-magnitude confound and can be subtracted off.
+    /// Without it there is no negative control on QM9 at all.
+    noise_pattern: Vec<f32>,
+    /// The region-level decisions this plan made (training) or inherited.
+    targeting_state: TargetingState,
+    /// The spread the dose was measured against: the CLEAN TRAINING label spread,
+    /// on every split. Equals `clean_label_sd` on the training plan itself.
+    dose_reference_sd: f32,
 
     noise_type: String,
     shape_name: String,
@@ -392,21 +470,88 @@ fn resolve_groups(canonical: &[String], groups: &HashMap<String, u32>) -> (Vec<u
 /// particular, real Murcko scaffold groups are very unevenly sized, so the
 /// fraction of molecules in a fifth of the groups is not a fifth of the molecules
 /// (NOISE_DESIGN.md §2, implementation point 2).
+///
+/// `shared` carries the training split's region-level decisions. When it is given,
+/// the affected scaffold groups are LOOKED UP rather than drawn again, so a
+/// held-out molecule in an affected group carries that group's multiplier.
+///
+/// `apply` says whether this split's labels actually receive noise. It only matters
+/// for the outlier type, whose selection is per molecule and has no region to look
+/// up: a split that receives noise draws its own contamination (a held-out
+/// measurement is as likely to be a bad one as a training measurement), and a split
+/// that does not receives the multiplier of an uncontaminated molecule rather than a
+/// fabricated coin flip.
 fn scale_map(
     targeting: &NoiseTargeting,
     n: usize,
     groups: Option<&[u32]>,
+    shared: Option<&TargetingState>,
+    apply: bool,
     rng: &mut StdRng,
-) -> (Vec<f32>, f32) {
+) -> (Vec<f32>, f32, HashSet<u32>) {
     match targeting {
-        NoiseTargeting::Uniform => (vec![1.0; n], 1.0),
+        NoiseTargeting::Uniform => (vec![1.0; n], 1.0, HashSet::new()),
 
-        NoiseTargeting::GroupedShift { .. } => (vec![1.0; n], 1.0),
+        NoiseTargeting::GroupedShift { .. } => (vec![1.0; n], 1.0, HashSet::new()),
 
         NoiseTargeting::GroupedWide {
             lambda,
             group_fraction,
         } => {
+            let g = groups.expect("grouped noise requires scaffold group assignments");
+
+            // A split that inherits the training split's selection does not draw one.
+            //
+            // EXCEPT when the inherited selection reaches none of this split's
+            // molecules, which under a scaffold split is the ORDINARY case, not an
+            // edge case: the splitter holds whole scaffold groups out, so validation
+            // and test share no scaffold with training by construction. Looking the
+            // training groups up then multiplies every molecule by 1.0 and the shape
+            // comes out flat — no molecule is in an affected region, so the condition
+            // has no structure on this split at all.
+            //
+            // A flat shape is not a smaller effect. It is an absent one: the
+            // "does the model become less certain where the data is unreliable"
+            // question has nothing to correlate against, and validation would carry
+            // plain Gaussian noise under a name that says otherwise.
+            //
+            // So this split draws its OWN selection, under the identical rule and at
+            // the same molecule fraction, from its own seed. Decision 3 (2026-08-26)
+            // is that validation carries the same kind and amount of noise as
+            // training, drawn independently; for a scaffold-keyed condition, drawn
+            // independently is the only thing it can mean.
+            if let Some(state) = shared {
+                let scales: Vec<f32> = g
+                    .iter()
+                    .map(|gi| if state.affected_groups.contains(gi) { *lambda } else { 1.0 })
+                    .collect();
+                let hits = scales.iter().filter(|s| **s != 1.0).count();
+                // A split that RECEIVES no noise keeps the lookup even when it finds
+                // nothing. Its recorded shape is "what this molecule's region would
+                // have got", and for a scaffold-keyed condition the honest answer on
+                // an unseen scaffold is that the condition never reached it. Drawing
+                // a selection here instead would record an injection that did not
+                // happen, and question B would be scored against it.
+                //
+                // A consequence to state rather than paper over: for the grouped
+                // conditions under a scaffold split, the held-out shape is FLAT, so
+                // "does the model become less certain where the data is unreliable"
+                // is undefined on held-out molecules for those conditions. It is
+                // answerable on the out-of-fold training rows, where the regions are
+                // ones the model was actually exposed to.
+                if hits > 0 || !apply {
+                    let affected = hits as f32 / n.max(1) as f32;
+                    return (scales, affected, state.affected_groups.clone());
+                }
+                println!(
+                    "  grouped_wide: none of this split's {} molecules is in a scaffold \
+                     group the training split marked, and this split DOES receive noise, \
+                     so it draws its own selection at the same molecule fraction ({:.2}). \
+                     Expected under a scaffold split, which holds whole groups out.",
+                    n, group_fraction
+                );
+            }
+
             // Rule 1 of NOISE_DESIGN.md §2a: select groups until a MOLECULE fraction
             // is reached, never by counting groups.
             //
@@ -417,7 +562,6 @@ fn scale_map(
             // would swing eightfold from replicate to replicate. Dose matching
             // survives either way, because the solver uses whatever fraction actually
             // resulted — but who gets hit is the condition, not noise in it.
-            let g = groups.expect("grouped noise requires scaffold group assignments");
             let mut sizes: HashMap<u32, usize> = HashMap::new();
             for gi in g.iter() {
                 *sizes.entry(*gi).or_insert(0) += 1;
@@ -460,20 +604,51 @@ fn scale_map(
                 .collect();
             let affected =
                 scales.iter().filter(|s| **s != 1.0).count() as f32 / n.max(1) as f32;
-            (scales, affected)
+            (scales, affected, bad)
         }
 
         NoiseTargeting::Outlier { p, lambda } => {
+            // No region to inherit: contamination is drawn per measurement. A split
+            // that receives noise draws its own; a split that does not gets the
+            // uncontaminated multiplier rather than a coin flip nothing acts on.
+            if !apply {
+                return (vec![1.0; n], 0.0, HashSet::new());
+            }
             let scales: Vec<f32> = (0..n)
                 .map(|_| if rng.random::<f32>() < *p { *lambda } else { 1.0 })
                 .collect();
             let affected =
                 scales.iter().filter(|s| **s != 1.0).count() as f32 / n.max(1) as f32;
-            (scales, affected)
+            (scales, affected, HashSet::new())
         }
 
-        NoiseTargeting::Censoring { .. } => (vec![1.0; n], 0.0),
+        NoiseTargeting::Censoring { .. } => (vec![1.0; n], 0.0, HashSet::new()),
     }
+}
+
+/// Tags for the per-split seeds. Fixed constants, so a split's noise is a
+/// reproducible function of the run seed and nothing else.
+const VALIDATION_SEED_TAG: u64 = 1;
+const TEST_SEED_TAG: u64 = 2;
+
+/// A split's seed, derived from the run seed.
+///
+/// The validation draw has to be INDEPENDENT of the training draw — the same run
+/// seed would hand the first validation molecule the first training molecule's
+/// number, which is the same class of mistake as indexing one plan by two splits'
+/// row positions. It also has to be REPRODUCIBLE from the run seed alone, so that a
+/// resubmitted or gap-filling job injects the same noise as the original.
+///
+/// SplitMix64's finalising mix: every input bit affects every output bit, so
+/// neighbouring run seeds (which is what the replicate loop hands out) do not give
+/// neighbouring validation seeds.
+fn derive_split_seed(base: u64, tag: u64) -> u64 {
+    let mut z = base
+        .wrapping_add(tag.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+        .wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// Unit dose G: the root-mean-square of the per-molecule scale map, times the
@@ -487,13 +662,20 @@ fn unit_dose(shape: &NoiseShape, scales: &[f32]) -> f32 {
     (ms.sqrt() as f32) * shape.unit_sd()
 }
 
-/// Build the noise for one run: the per-molecule values, and the provenance that
+/// Build the noise for one split: the per-molecule values, and the provenance that
 /// proves what they are.
+///
+/// `ctx` says which split this is. The training split defines the condition and is
+/// its own reference; every other split measures its dose and its cut-points against
+/// the clean TRAINING labels and inherits the training split's region-level
+/// decisions, so "the same noise level" means the same number of label units on all
+/// of them.
 fn build_noise_plan(
     labels: &[f32],
     canonical: &[String],
     spec: &NoiseSpec,
     groups: Option<&HashMap<String, u32>>,
+    ctx: &PlanContext,
 ) -> io::Result<NoisePlan> {
     assert_eq!(
         labels.len(),
@@ -504,12 +686,37 @@ fn build_noise_plan(
     if n == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "no training labels were read — cannot build a noise plan",
+            format!(
+                "no {} labels were read — cannot build a noise plan",
+                ctx.split_name
+            ),
+        ));
+    }
+    if ctx.reference_labels.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the clean training labels are empty — there is nothing to anchor the dose to",
         ));
     }
 
     let clean_mean = population_mean(labels);
     let clean_sd = population_sd(labels);
+
+    // THE ANCHOR. The dose is a number of label units, and that number is fixed by
+    // the clean TRAINING spread on every split. Using this split's own spread is the
+    // bug this parameter exists to prevent: validation is a tenth the size and, after
+    // a scaffold split, need not share the training column's spread, so the same
+    // `--noise-level` would deliver a different amount of noise to each split and the
+    // two would no longer be comparable.
+    let reference_sd = population_sd(ctx.reference_labels);
+
+    // The dose delivered at a reference level of 1.0. `noise_pattern_raw` is measured
+    // here and `noise_scale_raw` is `level * noise_pattern_raw` exactly, so the shape
+    // column carries no dependence on the level whatsoever.
+    let reference_dose = match spec.units {
+        DoseUnits::Spread => reference_sd,
+        DoseUnits::Label => 1.0,
+    };
 
     let mut params = serde_json::Map::new();
     params.insert("shape".to_string(), serde_json::json!(spec.shape.name()));
@@ -525,6 +732,8 @@ fn build_noise_plan(
             DoseUnits::Label => "label_units",
         }),
     );
+    params.insert("split".to_string(), serde_json::json!(ctx.split_name));
+    params.insert("noise_applied".to_string(), serde_json::json!(ctx.apply));
 
     // The condition's name, exactly as it appears in `noiseInject.CONDITIONS` and in
     // `roster()` in `rust/reference/noise_arms.rs`. One name per condition — a job
@@ -532,34 +741,15 @@ fn build_noise_plan(
     // already had one quantity carrying two names on facing pages.
     let noise_type = condition_name(spec);
 
-    // ---- The zero level. Exactly zero, not something small. -----------------
-    // Failure mode 2: the old pipeline reconstructed the injected noise by fitting
-    // a line, so at zero noise the "noise" was floating-point rounding whose size
-    // grows with the label. The negative control showed a stronger signal than the
-    // real levels. Recorded ground truth cannot do that.
-    if spec.level <= 0.0 {
-        return Ok(NoisePlan {
-            epsilon: vec![0.0; n],
-            canonical: canonical.to_vec(),
-            noise_type,
-            shape_name: spec.shape.name(),
-            targeting_name: spec.targeting.name(),
-            unit_dose_g: 1.0,
-            solved_scale: 0.0,
-            target_dose_label_units: 0.0,
-            realised_dose_label_units: 0.0,
-            realised_dose_fraction_of_spread: 0.0,
-            mean_epsilon: 0.0,
-            affected_molecule_fraction: 0.0,
-            effective_n: n as f32,
-            clean_label_mean: clean_mean,
-            clean_label_sd: clean_sd,
-            seed: spec.seed,
-            n_train: n,
-            params: serde_json::Value::Object(params),
-        });
-    }
-
+    // The random stream is opened at EVERY level, including zero.
+    //
+    // The scale map is its first consumer, so opening it unconditionally is what
+    // makes `noise_pattern_raw` bit-identical from level zero upwards: the same seed
+    // draws the same scale map whatever the level, and the pattern is a function of
+    // the scale map alone. Returning early at level zero — the old shape of this
+    // function — would leave the negative control with no shape column at all, and
+    // the zero-level subtraction is the only thing that removes the label-magnitude
+    // confound.
     let mut rng = StdRng::seed_from_u64(spec.seed);
 
     // ---- Censoring. Its own axis: no dose to solve for. ---------------------
@@ -571,35 +761,61 @@ fn build_noise_plan(
                 format!("censored fraction must be in [0, 1), got {}", fraction),
             ));
         }
-        let mut sorted = labels.to_vec();
+        // The assay limit is a property of the ASSAY, so it is read off the training
+        // distribution and applied unchanged to every split. Reading it off the
+        // validation labels' own quantile — which is what happens if this uses
+        // `labels` — censors a fixed fraction of each split at a different value, and
+        // that is a bug the experimental pipeline already had and fixed.
+        let mut sorted = ctx.reference_labels.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let cut = match side {
             CensorSide::Upper => quantile(&sorted, 1.0 - fraction),
             CensorSide::Lower => quantile(&sorted, fraction),
         };
-        let epsilon: Vec<f32> = labels
-            .iter()
-            .map(|y| match side {
+        // The level-free shape. Censoring is not on a dose axis, so "the same shape at
+        // level 1.0" means the limit pushed all the way to the end of the training
+        // range: how far a molecule sits past the far end of the training
+        // distribution, which is exactly what decides whether and how hard censoring
+        // hits it. It uses a fixed quantile, so it does not move with the level.
+        let reference_cut = match side {
+            CensorSide::Upper => quantile(&sorted, 0.0),
+            CensorSide::Lower => quantile(&sorted, 1.0),
+        };
+        let clip = |y: f32, limit: f32| -> f32 {
+            match side {
                 CensorSide::Upper => {
-                    if *y > cut {
-                        cut - y
+                    if y > limit {
+                        limit - y
                     } else {
                         0.0
                     }
                 }
                 CensorSide::Lower => {
-                    if *y < cut {
-                        cut - y
+                    if y < limit {
+                        limit - y
                     } else {
                         0.0
                     }
                 }
-            })
-            .collect();
+            }
+        };
+        let noise_pattern: Vec<f32> = labels.iter().map(|y| clip(*y, reference_cut)).collect();
+        let epsilon: Vec<f32> = if ctx.apply && fraction > 0.0 {
+            labels.iter().map(|y| clip(*y, cut)).collect()
+        } else {
+            vec![0.0; n]
+        };
+        // For censoring the amount applied is the shift itself — there is no scale
+        // parameter behind it.
+        let noise_scale: Vec<f32> = epsilon.iter().map(|e| e.abs()).collect();
         let affected = epsilon.iter().filter(|e| **e != 0.0).count() as f32 / n as f32;
         let realised = rms(&epsilon);
         let mean_eps = population_mean(&epsilon);
         params.insert("censor_limit".to_string(), serde_json::json!(cut));
+        params.insert(
+            "censor_reference_limit".to_string(),
+            serde_json::json!(reference_cut),
+        );
         params.insert(
             "requested_censored_fraction".to_string(),
             serde_json::json!(fraction),
@@ -607,6 +823,10 @@ fn build_noise_plan(
         return Ok(NoisePlan {
             epsilon,
             canonical: canonical.to_vec(),
+            noise_scale,
+            noise_pattern,
+            targeting_state: TargetingState::default(),
+            dose_reference_sd: reference_sd,
             noise_type,
             shape_name: spec.shape.name(),
             targeting_name: spec.targeting.name(),
@@ -614,7 +834,7 @@ fn build_noise_plan(
             solved_scale: f32::NAN,
             target_dose_label_units: f32::NAN,
             realised_dose_label_units: realised,
-            realised_dose_fraction_of_spread: realised / clean_sd,
+            realised_dose_fraction_of_spread: realised / reference_sd,
             mean_epsilon: mean_eps,
             affected_molecule_fraction: affected,
             effective_n: n as f32,
@@ -627,10 +847,7 @@ fn build_noise_plan(
     }
 
     // ---- The dose-matched types. -------------------------------------------
-    let target = match spec.units {
-        DoseUnits::Spread => spec.level * clean_sd,
-        DoseUnits::Label => spec.level,
-    };
+    let target = spec.level * reference_dose;
 
     let group_ids: Option<Vec<u32>> = if spec.targeting.needs_groups() {
         let map = groups.ok_or_else(|| {
@@ -647,9 +864,10 @@ fn build_noise_plan(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "{:.2}% of training molecules are missing from the scaffold group file — \
+                    "{:.2}% of {} molecules are missing from the scaffold group file — \
                      it does not match this split. Refusing to run.",
-                    miss_rate * 100.0
+                    miss_rate * 100.0,
+                    ctx.split_name
                 ),
             ));
         }
@@ -675,15 +893,53 @@ fn build_noise_plan(
         None
     };
 
-    let (scales, mut affected) = scale_map(
+    let (scales, mut affected, affected_groups) = scale_map(
         &spec.targeting,
         n,
         group_ids.as_deref(),
+        ctx.shared,
+        ctx.apply,
         &mut rng,
     );
     let g = unit_dose(&spec.shape, &scales);
     let solved = target / g;
 
+    // The per-molecule amount, before the level is applied.
+    //
+    //   sd(eps_i) = solved * s_i * unit_sd = (target / (rms(s) * unit_sd)) * s_i * unit_sd
+    //             = target * s_i / rms(s)
+    //             = level * reference_dose * s_i / rms(s)
+    //
+    // so the shape divides out of the level exactly, whatever the draw's shape is,
+    // and `noise_scale_raw == level * noise_pattern_raw` holds to the bit.
+    //
+    // The shifted grouped condition has no scale map — every molecule receives the
+    // same amount, and what the condition changes is how the noise is CORRELATED, not
+    // where it is concentrated — so its shape is flat at `reference_dose`, which is
+    // what it is meant to deliver. Note that the delivered amount equals that only
+    // for a shape whose unit standard deviation is 1, which is every shifted grouped
+    // condition in the roster (they are all Gaussian). Paired with a heavy-tailed
+    // shape the existing solver delivers `target / unit_sd` instead — the delivered
+    // dose gate above catches it and refuses the run, so it cannot pass quietly, but
+    // the combination does not work today. Flagged, not fixed here: the solver
+    // belongs to the dose-matching work, not to this change.
+    let scale_rms = {
+        let ms: f64 = scales.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
+            / scales.len().max(1) as f64;
+        ms.sqrt() as f32
+    };
+    let noise_pattern: Vec<f32> = scales
+        .iter()
+        .map(|s| reference_dose * s / scale_rms)
+        .collect();
+    let noise_scale: Vec<f32> = if ctx.apply {
+        noise_pattern.iter().map(|p| spec.level * p).collect()
+    } else {
+        vec![0.0; n]
+    };
+
+    let mut group_offsets: HashMap<u32, f32> = HashMap::new();
+    let mut inherited_offsets = 0usize;
     let epsilon: Vec<f32> = match spec.targeting {
         // Two components: a group-level offset carrying `rho` of the variance and a
         // within-molecule term carrying the rest, so the two sum to the target.
@@ -697,20 +953,37 @@ fn build_noise_plan(
             // Both components are unit draws FROM THE SHAPE (NOISE_DESIGN.md §2a),
             // so a heavy-tailed shifted condition has heavy tails in the group
             // offsets as well as in the within-molecule term.
-            let mut offsets: HashMap<u32, f32> = HashMap::new();
+            //
+            // The offset is a property of the GROUP — a laboratory reading high reads
+            // high for everything it measured — so a split that inherits the training
+            // split's state reuses its offsets rather than drawing new ones. A group
+            // that appears only outside training has no offset to inherit and draws
+            // its own; the count is recorded.
             for gid in ids.iter() {
-                if !offsets.contains_key(gid) {
-                    let b = spec.shape.draw_unit_variance(&mut rng);
-                    offsets.insert(*gid, b);
+                if group_offsets.contains_key(gid) {
+                    continue;
                 }
+                if let Some(state) = ctx.shared {
+                    if let Some(b) = state.group_offsets.get(gid) {
+                        group_offsets.insert(*gid, *b);
+                        inherited_offsets += 1;
+                        continue;
+                    }
+                }
+                let b = spec.shape.draw_unit_variance(&mut rng);
+                group_offsets.insert(*gid, b);
             }
             params.insert(
                 "group_variance_share".to_string(),
                 serde_json::json!(rho),
             );
+            params.insert(
+                "group_offsets_inherited_from_training".to_string(),
+                serde_json::json!(inherited_offsets),
+            );
             ids.iter()
                 .map(|gid| {
-                    let b = offsets[gid];
+                    let b = group_offsets[gid];
                     let w = spec.shape.draw_unit_variance(&mut rng);
                     solved * (rho.sqrt() * b + (1.0 - rho).sqrt() * w)
                 })
@@ -720,6 +993,20 @@ fn build_noise_plan(
             .iter()
             .map(|s| spec.shape.draw(&mut rng) * solved * s)
             .collect(),
+    };
+
+    // Exactly zero, not something small, and not a signed zero from multiplying a
+    // draw by a zero scale.
+    //
+    // Failure mode 2: the old pipeline reconstructed the injected noise by fitting a
+    // line, so at zero noise the "noise" was floating-point rounding whose size grew
+    // with the label, and the negative control showed a stronger signal than the real
+    // levels. Recorded ground truth cannot do that — as long as the record really is
+    // zero.
+    let epsilon: Vec<f32> = if ctx.apply && spec.level > 0.0 {
+        epsilon
+    } else {
+        vec![0.0; n]
     };
 
     if let NoiseTargeting::GroupedShift { .. } = spec.targeting {
@@ -795,6 +1082,13 @@ fn build_noise_plan(
     Ok(NoisePlan {
         epsilon,
         canonical: canonical.to_vec(),
+        noise_scale,
+        noise_pattern,
+        targeting_state: TargetingState {
+            affected_groups,
+            group_offsets,
+        },
+        dose_reference_sd: reference_sd,
         noise_type,
         shape_name: spec.shape.name(),
         targeting_name: spec.targeting.name(),
@@ -802,7 +1096,7 @@ fn build_noise_plan(
         solved_scale: solved,
         target_dose_label_units: target,
         realised_dose_label_units: realised,
-        realised_dose_fraction_of_spread: realised / clean_sd,
+        realised_dose_fraction_of_spread: realised / reference_sd,
         mean_epsilon: mean_eps,
         affected_molecule_fraction: affected,
         effective_n,
@@ -859,26 +1153,146 @@ fn dose_tolerance(shape: &NoiseShape, epsilon: &[f32], effective_n: f32) -> f32 
 
 /// The gates that must hold for the noise this run injected. These fail the run.
 /// RERUN_PLAN.md §8 gates 4 and 5; NOISE_DESIGN.md §6.3.
-fn assert_noise_plan_gates(plan: &NoisePlan, spec: &NoiseSpec, labels: &[f32]) {
+///
+/// `ctx.split_name` names the split in every message, and `ctx.apply` says whether
+/// this split's labels were meant to receive noise at all. The dose gates apply only
+/// to a split that receives noise; the zero and shape gates apply to all of them.
+fn assert_noise_plan_gates(
+    plan: &NoisePlan,
+    spec: &NoiseSpec,
+    labels: &[f32],
+    ctx: &PlanContext,
+) {
+    let split = ctx.split_name;
     assert_eq!(
         plan.epsilon.len(),
         labels.len(),
-        "gate: one recorded noise value per training molecule"
+        "gate ({split}): one recorded noise value per molecule"
+    );
+    assert_eq!(
+        plan.noise_scale.len(),
+        labels.len(),
+        "gate ({split}): one recorded noise scale per molecule"
+    );
+    assert_eq!(
+        plan.noise_pattern.len(),
+        labels.len(),
+        "gate ({split}): one recorded noise shape per molecule"
+    );
+    assert!(
+        plan.noise_pattern.iter().all(|p| p.is_finite()),
+        "gate ({split}): every recorded noise shape must be finite"
     );
 
-    // Gate 5 — zero noise records EXACTLY zero, not something small.
-    if spec.level <= 0.0 {
+    // The shape column is what the zero-level subtraction is built on, so it has to
+    // carry the condition's structure at EVERY level — including zero, where there is
+    // no noise to describe. A targeted condition whose shape is flat has lost that
+    // structure and the negative control silently becomes uninformative.
+    let shape_varies = plan
+        .noise_pattern
+        .iter()
+        .any(|p| (*p - plan.noise_pattern[0]).abs() > 1e-12);
+    match spec.targeting {
+        NoiseTargeting::Censoring { .. } => {
+            // Censoring is keyed to the LABEL, so its shape is defined on any split,
+            // held-out included: the cut-points come from the training distribution
+            // and a held-out label either clears them or does not.
+            assert!(
+                shape_varies,
+                "gate ({split}): {} is keyed to the label, so its level-free shape must \
+                 vary between molecules at every level — it is flat",
+                plan.noise_type
+            );
+        }
+        NoiseTargeting::GroupedWide { .. } => {
+            // Keyed to the SCAFFOLD GROUP, and the splitter holds whole groups out.
+            // So a held-out molecule is in a group the selection never saw, and its
+            // level-free shape is flat — truthfully, because the condition never
+            // reached that region. Asserting otherwise would demand a structure that
+            // cannot exist, and drawing one would record an injection that did not
+            // happen.
+            //
+            // Consequence, and it belongs in the Methods rather than in a comment
+            // alone: for the grouped conditions under a scaffold split, "does the
+            // model become less certain where the data is unreliable" is answerable
+            // on the out-of-fold TRAINING rows and undefined on held-out molecules.
+            if ctx.apply {
+                assert!(
+                    shape_varies,
+                    "gate ({split}): {} is keyed to the scaffold group and this split \
+                     RECEIVES noise, so its level-free shape must vary between \
+                     molecules — it is flat",
+                    plan.noise_type
+                );
+            }
+        }
+        NoiseTargeting::Outlier { .. } => {
+            // Only the splits that actually receive contamination have a per-molecule
+            // outlier draw; a clean split carries the uncontaminated multiplier,
+            // which is flat on purpose.
+            if ctx.apply {
+                assert!(
+                    shape_varies,
+                    "gate ({split}): {} contaminates a random fraction, so its level-free \
+                     shape must vary between molecules — it is flat",
+                    plan.noise_type
+                );
+            }
+        }
+        NoiseTargeting::Uniform | NoiseTargeting::GroupedShift { .. } => {
+            // These two hit every molecule equally hard, so a shape that varies means
+            // a scale map crept in where there should be none.
+            assert!(
+                !shape_varies,
+                "gate ({split}): {} delivers the same amount to every molecule, so its \
+                 level-free shape must be flat — it varies",
+                plan.noise_type
+            );
+        }
+    }
+
+    // Gate 5 — zero noise records EXACTLY zero, not something small. On EVERY split,
+    // and for the applied amount as well as the draw: a `noise_scale_raw` that is
+    // merely small at level zero would make the negative control look like a weak
+    // dose rather than none.
+    if spec.level <= 0.0 || !ctx.apply {
+        let why = if spec.level <= 0.0 {
+            "at level 0"
+        } else {
+            "on a split that receives no noise"
+        };
         assert!(
             plan.epsilon.iter().all(|e| *e == 0.0),
-            "gate: at level 0 every recorded noise value must be exactly zero"
+            "gate ({split}): {why} every recorded noise value must be exactly zero"
+        );
+        assert!(
+            plan.noise_scale.iter().all(|s| *s == 0.0),
+            "gate ({split}): {why} every recorded noise scale must be exactly zero"
         );
         return;
     }
 
     assert!(
         plan.epsilon.iter().all(|e| e.is_finite()),
-        "gate: every recorded noise value must be finite"
+        "gate ({split}): every recorded noise value must be finite"
     );
+
+    // `noise_scale_raw` is the level times `noise_pattern_raw`, exactly. Downstream
+    // treats the two as interchangeable on any ranking statistic, and that is only
+    // true if this identity holds.
+    if spec.targeting.is_dose_matched() {
+        for (i, (s, p)) in plan.noise_scale.iter().zip(plan.noise_pattern.iter()).enumerate() {
+            let expected = spec.level * p;
+            assert!(
+                (s - expected).abs() <= expected.abs() * 1e-6,
+                "gate ({split}): molecule {} records a scale of {} but the level times its \
+                 shape is {}",
+                i,
+                s,
+                expected
+            );
+        }
+    }
 
     // Gate 1, first half (NOISE_DESIGN.md §2a rule 3) — the CONSTRUCTION is right:
     // unit dose times solved scale is the target, exactly. This is the part that is
@@ -891,7 +1305,8 @@ fn assert_noise_plan_gates(plan: &NoisePlan, spec: &NoiseSpec, labels: &[f32]) {
         let slack = plan.target_dose_label_units.abs() * 1e-5;
         assert!(
             (constructed - plan.target_dose_label_units).abs() <= slack,
-            "gate: {} constructs a dose of {:.9} against a target of {:.9} — the solver is wrong",
+            "gate ({split}): {} constructs a dose of {:.9} against a target of {:.9} — the \
+             solver is wrong",
             plan.noise_type,
             constructed,
             plan.target_dose_label_units
@@ -906,8 +1321,8 @@ fn assert_noise_plan_gates(plan: &NoisePlan, spec: &NoiseSpec, labels: &[f32]) {
         let err = (plan.realised_dose_label_units / plan.target_dose_label_units - 1.0).abs();
         assert!(
             err <= tol,
-            "gate: {} delivered {:.6} against a target of {:.6} ({:+.2}%), outside the {:.2}% \
-             band that {:.0} effective observations allow",
+            "gate ({split}): {} delivered {:.6} against a target of {:.6} ({:+.2}%), outside \
+             the {:.2}% band that {:.0} effective observations allow",
             plan.noise_type,
             plan.realised_dose_label_units,
             plan.target_dose_label_units,
@@ -919,11 +1334,58 @@ fn assert_noise_plan_gates(plan: &NoisePlan, spec: &NoiseSpec, labels: &[f32]) {
 
     // Failure mode 6 — a cut-point in the wrong units caught 99.99925% of molecules
     // and nobody noticed, because the affected fraction was never recorded.
+    //
+    // This is a statement about the CONDITION, which is defined on the training
+    // split. A held-out split of a few hundred molecules can legitimately contain
+    // none past an assay limit set on the training column, and that is a fact about
+    // the sample rather than a degenerate condition.
+    if ctx.shared.is_none() {
+        assert!(
+            plan.affected_molecule_fraction > 0.0,
+            "gate ({split}): {} affected no molecules at level {} — the condition is degenerate",
+            plan.noise_type,
+            spec.level
+        );
+    }
+}
+
+/// B3's cross-split gate: the validation split must receive the SAME AMOUNT of noise
+/// as the training split, in absolute label units.
+///
+/// This is the check that fails if the validation plan is ever anchored on the
+/// validation labels' own spread. Validation is a tenth the size and, after a
+/// scaffold split, need not share the training column's spread at all — so the
+/// amounts would silently differ while both splits still called it "the same level".
+///
+/// The band is the two splits' own dose tolerances combined in quadrature, because
+/// each realised amount is a sample root-mean-square with its own sampling spread and
+/// the smaller split's dominates. It is not a fixed percentage: at a few hundred
+/// validation molecules a flat band would fail correct code.
+fn assert_validation_matches_training(
+    train: &NoisePlan,
+    validation: &NoisePlan,
+    spec: &NoiseSpec,
+) {
+    if spec.level <= 0.0 || !spec.targeting.is_dose_matched() {
+        return;
+    }
+    let t_train = dose_tolerance(&spec.shape, &train.epsilon, train.effective_n);
+    let t_val = dose_tolerance(&spec.shape, &validation.epsilon, validation.effective_n);
+    let band = (t_train * t_train + t_val * t_val).sqrt();
+    let ratio = validation.realised_dose_label_units / train.realised_dose_label_units;
     assert!(
-        plan.affected_molecule_fraction > 0.0,
-        "gate: {} affected no molecules at level {} — the condition is degenerate",
-        plan.noise_type,
-        spec.level
+        (ratio - 1.0).abs() <= band,
+        "gate: validation received {:.6} label units of {} noise against training's {:.6} \
+         ({:+.2}%), outside the {:.2}% band the two splits' sizes allow. The two splits must \
+         receive the same AMOUNT — check the validation dose is anchored on the clean \
+         TRAINING spread ({:.6}) and not on validation's own ({:.6}).",
+        validation.realised_dose_label_units,
+        train.noise_type,
+        train.realised_dose_label_units,
+        (ratio - 1.0) * 100.0,
+        band * 100.0,
+        train.clean_label_sd,
+        validation.clean_label_sd
     );
 }
 
@@ -1036,7 +1498,7 @@ fn self_test_json(
                 units: DoseUnits::Spread,
                 seed: 1000 + i * 7919,
             };
-            let plan = match build_noise_plan(labels, canonical, &spec, groups) {
+            let plan = match build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("{}", e);
@@ -1147,7 +1609,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 units: DoseUnits::Spread,
                 seed: 42,
             };
-            match build_noise_plan(labels, canonical, &spec, groups) {
+            match build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)) {
                 Ok(plan) => {
                     let err = (plan.realised_dose_label_units / target - 1.0) * 100.0;
                     let tol = dose_tolerance(shape, &plan.epsilon, plan.effective_n) * 100.0;
@@ -1223,7 +1685,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 units: DoseUnits::Spread,
                 seed: *seed,
             };
-            let plan = build_noise_plan(labels, canonical, &spec, groups).unwrap();
+            let plan = build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)).unwrap();
             // the construction identity holds on every single draw
             let constructed = plan.unit_dose_g * plan.solved_scale;
             if (constructed - target).abs() > target.abs() * 1e-5 {
@@ -1287,7 +1749,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
             units: DoseUnits::Spread,
             seed: 42,
         };
-        let plan = build_noise_plan(labels, canonical, &spec, groups).unwrap();
+        let plan = build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)).unwrap();
         if !plan.epsilon.iter().all(|e| *e == 0.0) {
             zero_ok = false;
         }
@@ -1330,6 +1792,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                     seed: 7 + seed * 104_729,
                 },
                 groups,
+                &PlanContext::training(labels),
             )
             .unwrap()
         };
@@ -1369,6 +1832,152 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
         failures += 1;
     }
 
+    // Gate 5b — the level-free shape is bit-identical at EVERY level, zero included.
+    //
+    // This column is the only negative control QM9 has. The zero-level model saw the
+    // same labels and no corruption, so its correlation with the shape is exactly the
+    // label-magnitude confound and can be subtracted off — but only if the shape it is
+    // correlated against is the SAME column at every level. A shape that moves with
+    // the level subtracts a different thing at each one and the control is worthless.
+    print!("gate: the level-free noise shape is identical at every level, zero included ... ");
+    let mut shape_ok = true;
+    let mut shape_varies_somewhere = false;
+    for (shape, targeting) in &types {
+        let mut baseline: Option<Vec<u32>> = None;
+        for level in [0.0f32, 0.25, 0.5, 1.0] {
+            let spec = NoiseSpec {
+                shape: *shape,
+                targeting: *targeting,
+                level,
+                units: DoseUnits::Spread,
+                seed: 42,
+            };
+            let plan =
+                build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels))
+                    .unwrap();
+            let bits: Vec<u32> = plan.noise_pattern.iter().map(|p| p.to_bits()).collect();
+            if plan.noise_pattern.iter().any(|p| *p != plan.noise_pattern[0]) {
+                shape_varies_somewhere = true;
+            }
+            // and at level zero nothing is applied, to the bit
+            if level == 0.0 {
+                if !plan.epsilon.iter().all(|e| *e == 0.0)
+                    || !plan.noise_scale.iter().all(|v| *v == 0.0)
+                {
+                    shape_ok = false;
+                }
+            }
+            match &baseline {
+                None => baseline = Some(bits),
+                Some(b) => {
+                    if *b != bits {
+                        shape_ok = false;
+                    }
+                }
+            }
+        }
+    }
+    if shape_ok && shape_varies_somewhere {
+        println!("ok");
+    } else {
+        println!(
+            "FAIL (identical across levels: {}, varies between molecules somewhere: {})",
+            shape_ok, shape_varies_somewhere
+        );
+        failures += 1;
+    }
+
+    // Gate 11 — the validation split receives the SAME AMOUNT as training, in absolute
+    // label units, even when its own spread is nothing like training's.
+    //
+    // Validation is a tenth the size and split by scaffold, so its spread is not the
+    // training spread. Dosing it against its own spread — the obvious way to write it —
+    // would deliver a different number of label units to each split while both still
+    // called it "level 0.5". The column below is rigged: the validation labels' spread
+    // is three times training's, so an unanchored dose would be out by a factor of three
+    // and could not be mistaken for sampling noise.
+    println!("\ngate: validation is dosed against the CLEAN TRAINING spread, not its own");
+    let cut = (labels.len() * 4) / 5;
+    let train_part: Vec<f32> = labels[..cut].to_vec();
+    let train_names: Vec<String> = canonical[..cut].to_vec();
+    let tail_mean = population_mean(&labels[cut..]);
+    let val_part: Vec<f32> = labels[cut..]
+        .iter()
+        .map(|y| tail_mean + 3.0 * (y - tail_mean))
+        .collect();
+    let val_names: Vec<String> = canonical[cut..].to_vec();
+    let train_sd_here = population_sd(&train_part);
+    let val_sd_here = population_sd(&val_part);
+    println!(
+        "  training spread {:.6}, validation spread {:.6} ({:.2}x)",
+        train_sd_here,
+        val_sd_here,
+        val_sd_here / train_sd_here
+    );
+    for (shape, targeting) in &types {
+        if !targeting.is_dose_matched() {
+            continue;
+        }
+        let spec = NoiseSpec {
+            shape: *shape,
+            targeting: *targeting,
+            level: 0.5,
+            units: DoseUnits::Spread,
+            seed: 42,
+        };
+        let t_ctx = PlanContext::training(&train_part);
+        let t_plan =
+            match build_noise_plan(&train_part, &train_names, &spec, groups, &t_ctx) {
+                Ok(p) => p,
+                Err(e) => {
+                    println!("  {:<34} FAIL: {}", targeting.name(), e);
+                    failures += 1;
+                    continue;
+                }
+            };
+        let v_spec = NoiseSpec {
+            seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
+            ..spec.clone()
+        };
+        let v_ctx = PlanContext {
+            reference_labels: &train_part,
+            shared: Some(&t_plan.targeting_state),
+            apply: true,
+            split_name: "val",
+        };
+        let v_plan = match build_noise_plan(&val_part, &val_names, &v_spec, groups, &v_ctx) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("  {:<34} FAIL: {}", targeting.name(), e);
+                failures += 1;
+                continue;
+            }
+        };
+        let band = {
+            let a = dose_tolerance(shape, &t_plan.epsilon, t_plan.effective_n);
+            let b = dose_tolerance(shape, &v_plan.epsilon, v_plan.effective_n);
+            (a * a + b * b).sqrt()
+        };
+        let err = v_plan.realised_dose_label_units / t_plan.realised_dose_label_units - 1.0;
+        let ok = err.abs() <= band;
+        if !ok {
+            failures += 1;
+        }
+        // what the unanchored version would have delivered, for contrast
+        let unanchored = 0.5 * val_sd_here;
+        println!(
+            "  {:<34} train={:.6} val={:.6} ({:+.2}%, band {:.2}%)  [val's own spread would give {:.6}]  {}",
+            t_plan.noise_type,
+            t_plan.realised_dose_label_units,
+            v_plan.realised_dose_label_units,
+            err * 100.0,
+            band * 100.0,
+            unanchored,
+            if ok { "ok" } else { "FAIL" }
+        );
+    }
+    println!();
+
     // Censoring is not dose-matched; report what it delivers so the level grid can
     // be read off, and check it clips the fraction it was asked to clip.
     println!("\ncensoring — not dose-matched, reported on its own axis:");
@@ -1386,6 +1995,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 seed: 42,
             },
             groups,
+            &PlanContext::training(labels),
         )
         .unwrap();
         let ok = (plan.affected_molecule_fraction - fraction).abs() <= 0.01;
@@ -1498,21 +2108,29 @@ fn read_smiles_data(
     })
 }
 
-/// Read the clean training labels, with the canonical SMILES each one belongs to.
+/// Read one split's clean labels, with the canonical SMILES each one belongs to.
 ///
 /// The SMILES column is not decoration. The noise is built in this order and
 /// applied in a second pass over the same file, so the write path can assert that
 /// row `i` on the way out is the same molecule row `i` was on the way in. The
 /// original held-out bug was exactly this going unchecked.
-fn read_train_labels(config: &Config) -> io::Result<(Vec<String>, Vec<f32>)> {
-    let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
+///
+/// Every split is read this way now, not just training: validation carries its own
+/// independently drawn noise, and the held-out splits carry the level-free shape
+/// their region would receive, so all three need a plan of their own.
+fn read_split_labels(
+    config: &Config,
+    split_name: &str,
+    count: usize,
+) -> io::Result<(Vec<String>, Vec<f32>)> {
+    let train_file = File::open(format!("{}_{}.mmap", split_name, config.file_no))?;
     let mut reader = BufReader::new(train_file);
     reader.seek(SeekFrom::Start(0))?;
 
-    let mut canonical = Vec::with_capacity(config.train_count);
-    let mut labels = Vec::with_capacity(config.train_count);
+    let mut canonical = Vec::with_capacity(count);
+    let mut labels = Vec::with_capacity(count);
 
-    for index in 0..config.train_count {
+    for index in 0..count {
         match read_smiles_data(
             &mut reader,
             config.molecular_representations.clone(),
@@ -1531,10 +2149,10 @@ fn read_train_labels(config: &Config) -> io::Result<(Vec<String>, Vec<f32>)> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "training record {} could not be read but the configuration says there \
+                        "{} record {} could not be read but the configuration says there \
                          are {}. The record stream is truncated or misaligned; refusing to build \
-                         a noise plan over a partial training set.",
-                        index, config.train_count
+                         a noise plan over a partial split.",
+                        split_name, index, count
                     ),
                 ));
             }
@@ -1756,37 +2374,39 @@ fn write_data(
 
             // Add noise to the label.
             //
-            // `apply_noise` is true ONLY for the training split. The plan is built
-            // in training-record order, and this loop restarts its counter at 0 for
-            // every split — so applying it to val or test would hand each held-out
-            // molecule the noise drawn for the training molecule at the same
-            // position. That is the original bug (RERUN_PLAN.md §2.1): it corrupted
-            // the held-out labels, contrary to the Methods, and attached the
-            // corruption to the wrong molecules.
+            // Every split now arrives with ITS OWN plan, built over its own records
+            // in its own order. That is what the original bug was the absence of: one
+            // plan, built in training order, indexed by a counter that restarts at 0
+            // for each split, so every held-out molecule got the noise drawn for the
+            // training molecule at the same position (RERUN_PLAN.md §2.1).
             //
             // The identity check below is what stops that class of mistake rather
-            // than this one instance of it. Row `index` on the way out must be the
-            // same molecule as row `index` on the way in, or the run dies here.
+            // than this one instance of it, and it now runs on all three splits
+            // whether or not the split receives noise. Row `index` on the way out
+            // must be the same molecule as row `index` on the way in, or the run
+            // dies here.
+            //
+            // `apply_noise` is false for the test split, and for validation under
+            // --clean-validation. Those rows still carry `noise_pattern_raw` — the
+            // shape their region would receive — but `epsilon_raw` and
+            // `noise_scale_raw` are exactly zero.
             let y_clean_raw = smiles_data.target_value;
-            let epsilon_raw = if apply_noise {
-                assert!(
-                    index < plan.epsilon.len(),
-                    "guard: training record {} has no entry in the noise plan (plan holds {})",
-                    index,
-                    plan.epsilon.len()
-                );
-                assert_eq!(
-                    plan.canonical[index], smiles_data.canonical_smiles,
-                    "guard: training record {} is molecule {} on the way out but was {} \
-                     when the noise was drawn — the record stream has drifted",
-                    index, smiles_data.canonical_smiles, plan.canonical[index]
-                );
-                plan.epsilon[index]
-            } else {
-                // Held-out labels are never touched. Recorded as exactly zero, so the
-                // provenance file itself is the evidence for that.
-                0.0
-            };
+            assert!(
+                index < plan.epsilon.len(),
+                "guard: {} record {} has no entry in the noise plan (plan holds {})",
+                split_name,
+                index,
+                plan.epsilon.len()
+            );
+            assert_eq!(
+                plan.canonical[index], smiles_data.canonical_smiles,
+                "guard: {} record {} is molecule {} on the way out but was {} \
+                 when the noise was drawn — the record stream has drifted",
+                split_name, index, smiles_data.canonical_smiles, plan.canonical[index]
+            );
+            let epsilon_raw = if apply_noise { plan.epsilon[index] } else { 0.0 };
+            let noise_scale_raw = if apply_noise { plan.noise_scale[index] } else { 0.0 };
+            let noise_pattern_raw = plan.noise_pattern[index];
 
             let y_noisy_raw = y_clean_raw + epsilon_raw;
 
@@ -1801,12 +2421,14 @@ fn write_data(
 
             writeln!(
                 provenance,
-                "{},{},{},{:.9e},{:.9e},{:.9e},{:.9e}",
+                "{},{},{},{:.9e},{:.9e},{:.9e},{:.9e},{:.9e},{:.9e}",
                 split_name,
                 index,
                 smiles_data.canonical_smiles,
                 y_clean_raw,
                 epsilon_raw,
+                noise_scale_raw,
+                noise_pattern_raw,
                 y_noisy_raw,
                 property_value
             )?;
@@ -2011,7 +2633,10 @@ fn preprocess_data(
     std_dev: f32,
     vocab_size: usize,
     vocab: &HashMap<String, usize>,
-    plan: &NoisePlan,
+    train_plan: &NoisePlan,
+    val_plan: &NoisePlan,
+    test_plan: &NoisePlan,
+    noise_validation: bool,
     max_sequence_length: usize,
     provenance_path: &str,
     failures_path: &str,
@@ -2036,7 +2661,8 @@ fn preprocess_data(
     );
     writeln!(
         provenance,
-        "split,record_index,canonical_smiles,y_clean_raw,epsilon_raw,y_noisy_raw,y_written"
+        "split,record_index,canonical_smiles,y_clean_raw,epsilon_raw,noise_scale_raw,\
+noise_pattern_raw,y_noisy_raw,y_written"
     )?;
 
     let train_file_path = format!("train_{}.mmap", config.file_no);
@@ -2066,7 +2692,7 @@ fn preprocess_data(
         config,
         mean,
         std_dev,
-        plan,
+        train_plan,
         &tokenizer,
         vocab,
         vocab_size,
@@ -2096,14 +2722,18 @@ fn preprocess_data(
         config,
         mean,
         std_dev,
-        plan,
+        val_plan,
         &tokenizer,
         vocab,
         vocab_size,
         max_sequence_length,
         config.val_count,
         config.logging,
-        false,   // apply_noise
+        // Decision 3, settled 2026-08-26: validation labels carry their own noise,
+        // drawn independently, anchored on the clean TRAINING spread. Training noisy,
+        // validation noisy from a separate draw, test clean. --clean-validation
+        // restores the old behaviour.
+        noise_validation,
         "val",
         &mut provenance,
         &mut failures,
@@ -2126,13 +2756,15 @@ fn preprocess_data(
         config,
         mean,
         std_dev,
-        plan,
+        test_plan,
         &tokenizer,
         vocab,
         vocab_size,
         max_sequence_length,
         config.test_count,
         config.logging,
+        // The test split is NEVER noised. This is the original bug's fix and it is
+        // not on a flag.
         false,   // apply_noise
         "test",
         &mut provenance,
@@ -2223,7 +2855,13 @@ fn read_self_test_labels(path: &str) -> io::Result<(Vec<String>, Vec<f32>)> {
     Ok((canonical, labels))
 }
 
-fn write_noise_manifest(path: &str, plan: &NoisePlan, spec: &NoiseSpec) -> io::Result<()> {
+fn write_noise_manifest(
+    path: &str,
+    plan: &NoisePlan,
+    spec: &NoiseSpec,
+    validation: &NoisePlan,
+    noise_validation: bool,
+) -> io::Result<()> {
     let manifest = serde_json::json!({
         "noise_type": plan.noise_type,
         "noise_shape": plan.shape_name,
@@ -2243,6 +2881,20 @@ fn write_noise_manifest(path: &str, plan: &NoisePlan, spec: &NoiseSpec) -> io::R
         "clean_label_sd": plan.clean_label_sd,
         "seed": plan.seed,
         "n_train": plan.n_train,
+        // The spread the dose was measured against. On the training plan this is the
+        // training spread; every other split is anchored on the SAME number, which is
+        // the whole point of recording it.
+        "dose_reference_sd": plan.dose_reference_sd,
+        // Decision 3 (2026-08-26): validation carries its own noise, drawn from an
+        // independent seed and dosed against the clean TRAINING spread. Recorded here
+        // so a results row can be traced to what validation actually received.
+        "validation_noised": noise_validation,
+        "validation_seed": validation.seed,
+        "validation_n": validation.n_train,
+        "validation_label_sd": validation.clean_label_sd,
+        "validation_target_dose_in_label_units": validation.target_dose_label_units,
+        "validation_delivered_dose_in_label_units": validation.realised_dose_label_units,
+        "validation_affected_molecule_fraction": validation.affected_molecule_fraction,
         "parameters": plan.params,
     });
     let mut f = BufWriter::new(
@@ -2332,6 +2984,13 @@ fn main() -> io::Result<()> {
              .long("featurisation-failures")
              .action(ArgAction::Set)
              .help("Where to list molecules whose fingerprint could not be computed"))
+        .arg(Arg::new("clean_validation")
+             .long("clean-validation")
+             .action(ArgAction::SetTrue)
+             .help("Leave the validation labels clean, the pre-2026-08-26 behaviour. \
+                    OFF by default: validation carries its own noise, drawn from an \
+                    independent seed and dosed against the CLEAN TRAINING spread so both \
+                    splits receive the same amount. The test split is never noised either way"))
         .arg(Arg::new("allow_featurisation_failures")
              .long("allow-featurisation-failures")
              .action(ArgAction::SetTrue)
@@ -2540,7 +3199,9 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|| format!("featurisation_failures_{}.csv", config.file_no));
     let allow_featurisation_failures = matches.get_flag("allow_featurisation_failures");
 
-    let (canonical, clean_labels) = read_train_labels(&config)?;
+    let noise_validation = !matches.get_flag("clean_validation");
+
+    let (canonical, clean_labels) = read_split_labels(&config, "train", config.train_count)?;
     assert_eq!(
         clean_labels.len(),
         config.train_count,
@@ -2548,6 +3209,8 @@ fn main() -> io::Result<()> {
         clean_labels.len(),
         config.train_count
     );
+    let (val_canonical, val_labels) = read_split_labels(&config, "val", config.val_count)?;
+    let (test_canonical, test_labels) = read_split_labels(&config, "test", config.test_count)?;
 
     let groups = if spec.targeting.needs_groups() {
         Some(load_scaffold_groups(&scaffold_path)?)
@@ -2555,8 +3218,64 @@ fn main() -> io::Result<()> {
         None
     };
 
-    let plan = build_noise_plan(&clean_labels, &canonical, &spec, groups.as_ref())?;
-    assert_noise_plan_gates(&plan, &spec, &clean_labels);
+    // The training plan first: it DEFINES the condition. The dose, the assay limit
+    // and the affected scaffold groups are all read off the clean training labels,
+    // and every other split then measures itself against them.
+    let train_ctx = PlanContext::training(&clean_labels);
+    let plan = build_noise_plan(&clean_labels, &canonical, &spec, groups.as_ref(), &train_ctx)?;
+    assert_noise_plan_gates(&plan, &spec, &clean_labels, &train_ctx);
+
+    // Validation. An independent draw — a separate seed, so validation's noise is not
+    // a copy or a continuation of training's — but the SAME condition: the same dose
+    // in absolute label units, the same assay limit, the same affected scaffold
+    // groups. Decision 3, settled 2026-08-26.
+    let val_spec = NoiseSpec {
+        seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
+        ..spec.clone()
+    };
+    let val_ctx = PlanContext {
+        reference_labels: &clean_labels,
+        shared: Some(&plan.targeting_state),
+        apply: noise_validation,
+        split_name: "val",
+    };
+    let val_plan = build_noise_plan(
+        &val_labels,
+        &val_canonical,
+        &val_spec,
+        groups.as_ref(),
+        &val_ctx,
+    )?;
+    assert_noise_plan_gates(&val_plan, &val_spec, &val_labels, &val_ctx);
+    if noise_validation {
+        // The two splits must receive the same AMOUNT, not the same level applied to
+        // two different spreads. Nothing else checks it at run time: the unit tests
+        // check the property on synthetic labels, and a real run has neither their
+        // labels nor their tolerances.
+        assert_validation_matches_training(&plan, &val_plan, &spec);
+    }
+
+    // Test. Never noised — that is the original bug's fix and it is not on a flag.
+    // The plan exists so held-out rows still carry `noise_pattern_raw`, the level-free
+    // shape their region would receive; every applied amount on it is exactly zero.
+    let test_spec = NoiseSpec {
+        seed: derive_split_seed(spec.seed, TEST_SEED_TAG),
+        ..spec.clone()
+    };
+    let test_ctx = PlanContext {
+        reference_labels: &clean_labels,
+        shared: Some(&plan.targeting_state),
+        apply: false,
+        split_name: "test",
+    };
+    let test_plan = build_noise_plan(
+        &test_labels,
+        &test_canonical,
+        &test_spec,
+        groups.as_ref(),
+        &test_ctx,
+    )?;
+    assert_noise_plan_gates(&test_plan, &test_spec, &test_labels, &test_ctx);
 
     println!(
         "noise: {} at level {} ({}) -> unit dose {:.4}, scale {:.6}, delivered {:.6} ({:.4} of the label spread), {:.1}% of molecules affected",
@@ -2572,8 +3291,23 @@ fn main() -> io::Result<()> {
         plan.realised_dose_fraction_of_spread,
         plan.affected_molecule_fraction * 100.0
     );
+    if noise_validation {
+        println!(
+            "      validation: seed {} (derived from {}), delivered {:.6} against training's \
+{:.6} — both dosed against the clean TRAINING spread {:.6}, not validation's own {:.6}",
+            val_plan.seed,
+            spec.seed,
+            val_plan.realised_dose_label_units,
+            plan.realised_dose_label_units,
+            plan.clean_label_sd,
+            val_plan.clean_label_sd
+        );
+    } else {
+        println!("      validation: CLEAN (--clean-validation was given)");
+    }
+    println!("      test: clean, always");
 
-    write_noise_manifest(&manifest_path, &plan, &spec)?;
+    write_noise_manifest(&manifest_path, &plan, &spec, &val_plan, noise_validation)?;
 
     // Standardisation constants come from the CLEAN training labels only.
     let (mean, std_dev, vocab_size, vocab, max_sequence_length) =
@@ -2586,6 +3320,9 @@ fn main() -> io::Result<()> {
         vocab_size,
         &vocab,
         &plan,
+        &val_plan,
+        &test_plan,
+        noise_validation,
         max_sequence_length,
         &provenance_path,
         &failures_path,

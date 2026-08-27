@@ -245,6 +245,9 @@ UNCERTAINTY_COLUMNS = [
     # analysis module can read both producers.
     "split", "canonical_smiles", "noise_scale", "noise_pattern",
     "noise_pattern_pred", "oof_folds_ok",
+    # Added 2026-08-27: the condition's registry name, so a row can be conditioned
+    # on its noise type rather than the type being guessed from the file name.
+    "noise_type",
 ]
 
 VALID_SPLITS = ("test", "train_oof")
@@ -277,7 +280,8 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
                            epistemic_uncertainty=None, aleatoric_uncertainty=None,
                            split='test', injected_noise=None, canonical_smiles=None,
                            noise_scale=None, noise_pattern=None,
-                           noise_pattern_pred=None, oof_folds_ok=None):
+                           noise_pattern_pred=None, oof_folds_ok=None,
+                           noise_type=None):
     """
     Save per-molecule uncertainty values with optional epistemic/aleatoric decomposition.
 
@@ -376,6 +380,10 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
         row['noise_pattern'] = noise_pattern_rows[i]
         row['noise_pattern_pred'] = noise_pattern_pred_rows[i]
         row['oof_folds_ok'] = oof_folds_ok_rows[i]
+        # The condition this row was produced under. Without it, two noise types
+        # land in one column with nothing to separate them, and every statistic
+        # computed over the file pools across a dimension it must condition on.
+        row['noise_type'] = noise_type
 
         rows.append(row)
 

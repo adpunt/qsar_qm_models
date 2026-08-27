@@ -1159,34 +1159,116 @@ ranking contains the noise you are correlating against.
 **This machinery is sound and should be kept.** What changes is the set of noise types it runs and
 the levels it runs them at — plus one live bug, below.
 
-### 3.1a One check in it never fires
+### 3.1a ✅ FIXED 2026-08-27 (chat F) — the check on training rows that never fired
 
-The placebo check on the training side is permanently blank. It recomputes the noise pattern from
-the model's *predicted* label instead of the true one, so that if uncertainty correlates with that
-just as strongly, you know the model is tracking its own prediction rather than the noise.
+The check recomputes the noise shape from the model's *predicted* label rather than the true one.
+If uncertainty correlates with that just as strongly, the model is tracking its own prediction and
+not the noise. Every training row the pipeline has ever written left that column empty.
 
-The guard is `if sigma in extras['oof_mean']:` at `alternative_data_noise_robustness.py:941`. The
-line that puts the current noise level into `extras['oof_mean']` is `:954`, thirteen lines further
-down. So the guard is evaluated before the thing it tests for exists, and it is False on every
-pass. Every training row writes a blank into that column. The same dead block appears again in the
-neural runner at `:1031-1035`.
+The guard `if sigma in extras['oof_mean']:` sat thirteen lines above the line that writes the
+current noise level into `extras['oof_mean']`, inside the same pass of the same loop. The
+identical dead block sat in the neural runner, thirty-two lines above its write. Both blocks now
+sit below the block that fills those values in.
 
-**Fix: move the block below the out-of-fold block, in both runners.** Two lines each.
+**The check that catches it if it comes back:** `tests/smoke/smoke_kirby_uncertainty.py`. Removing
+the fix and re-running gives five failures, among them *"noise_pattern_pred is populated and
+varying on training rows — 0 distinct values, 288 blank"*, and a non-zero exit. Executed
+2026-08-27.
 
-Worth knowing why nothing caught it: the regression test for these fixes checks several of them by
-searching the pipeline source for a matching string (`smoke_nine_fixes.py:79`, `src = open(PIPE).read()`).
-A string match passes whether or not the matched line ever runs.
+Why nothing caught it before: the regression test read the pipeline as text and searched for a
+matching string (`smoke_nine_fixes.py:79`, `src = open(PIPE).read()`). A string match passes
+whether or not the matched line ever runs. Of that file's 25 checks, 11 were string matches, two
+were tautologies — the one for the random-number generator reduced to `torch.equal(mid, mid)` and
+never touched the pipeline — two confirmed a defect rather than a fix, and one of the nine had no
+check at all while the banner printed `ALL NINE-FIX CHECKS PASSED`. It has been replaced.
 
-### 3.1b Two silent no-ops to assert against at launch
+**The probes that DID execute the code exist and were archived, not shipped.** `d1_oof_rng.py`,
+`d1_state.py`, `t3.py`, `t3b.py`, `t4.py`, `t4b.py`, `t5.py`, `d78.py`, `d78b.py`, `d7b.py` and
+`d9_val.py` are in `research_archive/e1d07839/`, timestamped between the review and the commit.
+Each hardcodes a session scratchpad path, so none was runnable anywhere else. What they assert has
+been ported into the replacement.
 
-Both are in the same writer, and both fail quietly rather than loudly.
+### 3.1b ✅ FIXED 2026-08-27 (chat F) — the silent no-ops, and three more like them
 
-- Per-molecule uncertainty is written only if the zero-noise level is present in the run
-  (`:1422`, `if save_this and uncertainties.get(0.0) is not None`). A run whose level grid omits
-  zero writes **no uncertainty rows at all**, without complaint.
-- Only the Gaussian condition is written unless `--unc-strategies all` is passed; the default is
-  `legacy` (`:1671`). The generated job scripts do pass it, and they also pass `--oof-folds 5` and
-  `--oof-outer-folds 1` — so the three-fold saving on the cross-fitting is already baked in.
+- Per-molecule uncertainty was written only if the zero noise level was in the run
+  (`if save_this and uncertainties.get(0.0) is not None`). The out-of-fold block was nested inside
+  that guard, so a level grid without zero wrote **no uncertainty at all, test rows included**,
+  after paying for every cross-fitting fit — exit status 0, no warning, and a stale file from an
+  earlier run left in place looking current. One expression was doing two unrelated jobs. Split
+  apart: whether the model emits a per-molecule uncertainty is now tested across all levels, and a
+  missing zero level raises with the reason (the zero level is the negative control the whole
+  subtraction rests on).
+- `--unc-strategies` defaulted to `legacy`, so the only condition written was plain Gaussian —
+  whose noise scale is constant, which is the one condition where "does uncertainty find where the
+  noise is" has no answer. Renamed `--unc-conditions` and defaulted to `all`. Passing a single
+  non-Gaussian condition without it used to write nothing at all, silently.
+- `--oof-folds 1` was silently ignored (`if oof_folds and oof_folds > 1`). Now refused, in both
+  pipelines.
+- `UNCERTAINTY_MODELS` was matched by exact equality, so `GP-Tanimoto` got no training-side
+  scoring and nothing said so. Matched by prefix, and a model that emits an uncertainty but is not
+  matched now raises.
+- The noise generator was built once outside the level loop, so each level consumed a draw in grid
+  order: `--sigmas 0.0 0.6` and `--sigmas 0.0 0.3 0.6` corrupted differently at 0.6, and any
+  gap-filling resubmission drew noise unrelated to the original. The seed is now derived from the
+  level itself, through `zlib.crc32` rather than `hash()` — Python randomises string hashing per
+  process, so `hash()` would have made the noise differ on every run. ⚠️ **This changes the
+  realised noise relative to any run made before it. Files from the two are not mergeable.**
+
+Row counts are now asserted after every write, so a condition that produces no rows stops the run.
+
+### 3.1c ✅ 2026-08-27 — QM9 can now answer the uncertainty question, and what it cost
+
+§2.6 said QM9 could not answer it at all: uncertainty was saved for held-out molecules only,
+corruption entered training only, and the noise was reconstructed rather than recorded. The author
+settled the scope on 2026-08-26 — *"QM9 is the core results of the paper because it is the only
+confirmed clean dataset. Make the change in QM9 that is non-negotiable."* All three are now closed.
+
+- **The noise is recorded, not reconstructed.** The injector already wrote a per-molecule
+  provenance file; it now also writes the amount applied to each molecule and the level-free shape
+  of the condition. Python reads it, keys it by canonical SMILES, and asserts the molecule on the
+  way out is the one the noise was drawn for.
+- **Training molecules are scored by models that never fitted them.** One shared routine,
+  `GroupKFold` over Murcko scaffold groups, wired into the quantile forest, NGBoost, the Gaussian
+  process and both neural families. The torch generator is snapshotted around the extra fits, so
+  the main result does not move.
+- **Validation labels carry their own noise**, drawn from a separate seed and dosed against the
+  clean TRAINING spread rather than validation's own. Measured on a real run: validation received
+  0.760882 label units against training's 0.766289, both anchored on a training spread of 1.258461
+  where validation's own is 1.331802. A gate compares the two and stops the run if they diverge.
+- **Held-out molecules stay clean**, and their recorded noise is exactly `0.0`, not a small number.
+
+**Every result row now carries its condition's name.** Without it two noise types land in one column
+with nothing to separate them, and every statistic computed over the file pools across a dimension
+it has to condition on. The analysis module's list of known conditions was the pre-redesign one, so
+a real run's file matched nothing; it now reads the registry from the injector itself.
+
+### 3.1d 🔴 FOR THE METHODS — a scaffold split makes one question unanswerable on held-out molecules
+
+Found by running the pipeline, not by reading it. The grouped conditions are keyed to the scaffold
+group, and the splitter holds whole scaffold groups out. So a held-out molecule is in a group the
+training selection never marked, and its level-free shape is **flat**.
+
+Flat is the truthful answer there — the condition never reached that region — so the shape must not
+be redrawn for held-out molecules, or the file would record an injection that did not happen. Two
+consequences, and both belong in the paper rather than in a comment:
+
+1. **For the grouped conditions, "does the model become less certain where the data is unreliable"
+   is answerable on the out-of-fold TRAINING rows and undefined on held-out molecules.** It stays
+   answerable on both splits for censoring, which is keyed to the label and so is defined anywhere.
+2. **Validation is different**, because validation receives noise. Handing it a selection that
+   reaches none of its molecules would give it plain Gaussian noise under the name of a grouped
+   condition. It draws its own selection at the same molecule fraction.
+
+Why every test passed while the first real run died: the injector's test fixture put held-out
+molecules in the **same** scaffold groups as training, which is a random split. Every experiment in
+this project uses a scaffold split. A fixture with disjoint groups is now in
+`rust/tests/noise_gates.rs`, and the test fails if either half of the rule above is removed.
+
+**A second property to state rather than discover later.** The check that recomputes the shape from
+the model's own predicted label is a real control for a *label-keyed* condition and is degenerate
+for a *group-keyed* one: a predicted label does not change a molecule's scaffold, so the recomputed
+shape is identical to the true one. Measured on both datasets — the two correlations agree to every
+digit. Report it for censoring; do not report it as a control for the grouped conditions.
 
 ### 3.2 What the noise redesign does to the uncertainty questions
 
@@ -1276,16 +1358,17 @@ That is a mechanism-consistent result, not a rescue.
 2. **The zero-noise control must be clean.** One model's apparent signal rode on a zero-noise
    correlation of about 0.22 — a label-magnitude confound, not detection. The KIRBy rebuild handles
    this properly by subtracting the zero-noise correlation (§3.1); the QM9 path never did.
-3. 🔴 **On QM9 the fix is now correct but starved.** `save_uncertainty_values`
-   (`scripts/utils.py:212-221`) does not record the injected noise — it *reconstructs* it by
-   regressing the noisy label on the clean one and keeping the residuals. After the held-out fix the
-   test labels are an exact affine function of the clean labels, so those residuals are identically
-   zero and there is nothing left to correlate against. **The fix is fine. Its input died.** Recording
-   the draw at source (§5.2) is what revives it.
+3. ✅ **FED 2026-08-27 (chat F). On QM9 the fix was correct but starved.**
+   `save_uncertainty_values` did not record the injected noise — it *reconstructed* it by
+   regressing the noisy label on the clean one and keeping the residuals. After the held-out fix
+   the test labels are an exact affine function of the clean labels, so those residuals were
+   identically zero and there was nothing left to correlate against. The regression is deleted. The
+   injector's recorded draw is read from the provenance file and written verbatim, and a training
+   row that arrives without its recorded noise now raises rather than being filled in.
 
-**So the honest status is:** the author's fix is correct, implemented, and load-bearing. What is
-missing is the *data* to feed it on QM9, and a 1:1 review of the KIRBy machinery that feeds it on
-the experimental datasets (§13 chat F).
+**Status 2026-08-27:** the fix is correct, implemented, load-bearing, and now fed on both
+pipelines. What it is fed on QM9 is the recorded draw, not an estimate of it, verified on a real
+run (§3.6).
 
 ---
 
@@ -2186,7 +2269,7 @@ requirement is not met, that question cannot be answered and the run should not 
 | **Q1** | Is noise robustness decided by the model, the representation, or their pairing? | Two-way variance decomposition, model × representation, reported as the share of variance each term explains, with the residual shown | One value per (model, representation, replicate) cell, **separately for each noise type** | ≥2 replicates per cell for the residual to be real; **≥6 for any paired follow-up test** (§13.1); one roster and one exclusion rule applied everywhere |
 | **Q2** | Does the *kind* of noise matter, or only the amount? | (a) Spread in accuracy across noise types at matched delivered amount; (b) paired signed-rank test, each type against Gaussian, per model, **not pooled** | Paired on the replicate, within one representation and one noise level | Delivered amount verified flat across types (§8 gate 1). Six replicates minimum, or no result can reach significance |
 | **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset (§6.1); the QM9 reporting level still 🔴 TODO |
-| **Q4** | Can a model's uncertainty tell you which labels are bad? | Spearman correlation between predicted uncertainty and the size of the injected noise, **within each noise level**, **minus the same correlation at zero noise**, scored **out-of-fold**. Reported with a permutation null | Per (dataset, model, representation, noise type, level) — never pooled | The noise **recorded**, not reconstructed (§5.2); out-of-fold scoring on scaffold groups; a zero-noise run of the same type to subtract |
+| **Q4** | Can a model's uncertainty tell you which labels are bad? | **Two numbers, settled 2026-08-26, reported side by side under names that cannot be confused.** (a) The plain Spearman correlation between predicted uncertainty and the size of the injected noise, **within each noise level**, scored **out-of-fold** — near zero by design, because the scoring model never saw that molecule's draw and under an even condition every molecule gets the same amount. (b) The answer: take the out-of-fold error `\|y_clean + injected − y_pred\|`, which does track the noise, and ask whether dividing it by the predicted uncertainty ranks corrupted labels better than the error alone. Both with a permutation null | Per (dataset, model, representation, noise type, level) — never pooled | The noise **recorded**, not reconstructed (§5.2); out-of-fold scoring on scaffold groups; a zero-noise run of the same type to subtract. ✅ **All three now exist on both pipelines** (§3.1c). Built in `scripts/uncertainty_stats.py` |
 | **Q5** | Does noisy training data make a model less sure about new molecules? | Mean predicted uncertainty against noise level — a **population-level** statement, and it must be labelled as one | Per (model, representation, noise type), across levels | Uncertainty magnitudes on a fixed scale — needs the standardisation fix (§2.4), which currently makes them shrink as noise rises |
 | **Q6** | With noisy training data, does uncertainty still rank which predictions to trust? | Spearman correlation between predicted uncertainty and absolute error **against the clean label** | Per (model, representation, noise type, level) | Clean test labels retained alongside noisy ones. Free — every run already produces both |
 
@@ -2200,6 +2283,33 @@ And Q1's requirement is the reason the replicate count is not a free parameter: 
 of the decomposition and the paired test in Q2 are both replicate-limited**, and a two-sided
 signed-rank test on *n* replicates cannot return a p-value below 2/2ⁿ whatever the effect size —
 0.0625 at five replicates, 0.03125 at six. Five replicates makes Q2 unanswerable by arithmetic.
+
+### 7.0a ✅ 2026-08-27 — the analysis exists now, in one module
+
+Until this chat nothing computed anything from an uncertainty run. `merge_results.py`
+concatenates and stops, and no other file in any of the three repositories read the output. Every
+statistic in §7.0 is now in `scripts/uncertainty_stats.py`, with one loader that reads both
+producers' schemas, and `generate_paper_figures_v2.py` calls it rather than recomputing anything.
+
+**The permutation null is built the way `slurm_scripts_uncertainty_rerun/RUNBOOK.md` specifies**,
+and its test reproduces the runbook's measured numbers independently: permuting the injected noise
+while leaving the error as computed gives a band of [-0.040, +0.034] against an observed +0.616, so
+it fires on simulated data with no leakage at all; recomputing the error from the permuted value
+gives [+0.601, +0.634] with the observed value inside it and p = 0.86. Eighteen tests, all
+executing, all passing.
+
+**Two guards are assertions rather than notes.** Before any correlation, the module checks the
+group is exactly one (dataset, model, representation, condition, level, split) cell — pooling
+across a dimension that should have been conditioned on is what produced the paper's per-molecule
+claim. And the pooled-across-levels correlation in the figure script no longer shares a name with
+the within-level ones: it is written as a population trend and deliberately does not begin with the
+same prefix, so no column glob can sweep it in among them.
+
+**The experimental-dataset loader was discarding most of the run.** It de-duplicated on
+`dataset, model, rep, sigma, sample_idx`, and the rebuilt runner writes two splits × six conditions
+× five folds per molecule. Measured on a file with two splits, three conditions and two folds:
+**880 of 960 rows discarded, 91.7%**. On the real grid it would be 98.3%. The key now carries
+split, condition and fold, and the same file loads losslessly.
 
 ### 7.1 Variance decomposition, per noise type
 
@@ -3718,9 +3828,16 @@ censoring. Regenerating from it reproduces the breakage.
 
 #### Chat F — Uncertainty machinery, reviewed with the author
 
-🔴 **TODO. This is a conversation, not a task**, at the author's explicit request: *"I am not
-confident that uncertainty machinery is built and reviewed — I've had repeated issues with this and
-we need to go over it 1:1 before the plan is finalized."*
+✅ **DONE 2026-08-27.** The four decisions were settled by the author on 2026-08-26 and the work is
+in the tree. What was fixed and what it is checked by is in §3.1a, §3.1b and §3.6. The decisions:
+report both question-4 numbers under names that cannot be confused; run the uncertainty question on
+QM9 as well as the three experimental sets (*"QM9 is the core results of the paper because it is
+the only confirmed clean dataset. Make the change in QM9 that is non-negotiable"*); validation
+labels carry their own noise, drawn independently; and the figure script may be modified.
+
+The original request this chat answered: *"I am not confident that uncertainty machinery is built
+and reviewed — I've had repeated issues with this and we need to go over it 1:1 before the plan is
+finalized."*
 
 **What to go over, in order:**
 

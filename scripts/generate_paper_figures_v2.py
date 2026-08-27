@@ -13,7 +13,7 @@ PART 2: THE WHY
   Figure: NN Family Comparison (NN-α, NN-β, RF families) — 1×3 panel + robustness CSV
   Figure: Uncertainty Tracks Noise (single-panel: mean uncertainty vs σ)
 
-Calibration (ECE, coverage), unc-error/unc-noise correlations, and
+Calibration (coverage at 1σ/2σ), unc-error/unc-noise correlations, and
 aleatoric/epistemic decomposition are reported in table4 CSVs.
 
 Run: python generate_paper_figures.py [--qm9-dir ../results] [--validation-dir /path/to/kirby/results]
@@ -31,7 +31,7 @@ Outputs:
     table1_supp_simple_effects_all_reps.csv
     table2_auc_by_strategy.csv
     table3_probabilistic_comparison.csv
-    table4_uncertainty_metrics.csv (ECE, coverage, correlations, aleatoric/epistemic)
+    table4_uncertainty_metrics.csv (coverage, correlations, aleatoric/epistemic)
     table4_supp_uncertainty_by_strategy_rep.csv (same metrics × all strategies/reps)
     paper_figures_report.txt
 """
@@ -143,6 +143,7 @@ ANOVA_REPS_EXCLUDE = {
 }
 
 import argparse
+import sys
 import time
 import pandas as pd
 import numpy as np
@@ -155,6 +156,15 @@ import seaborn as sns
 from collections import defaultdict
 import warnings
 warnings.filterwarnings('ignore')
+
+# The per-molecule uncertainty statistics live in one module next to this file
+# (scripts/uncertainty_stats.py). Nothing in this file recomputes any of them.
+# The path insert is so the import works from any working directory — SLURM runs
+# this script from the repository root, a laptop usually runs it from scripts/.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uncertainty_stats as unc_stats
+from uncertainty_stats import UncertaintySchemaError
 
 # =============================================================================
 # STYLE SETTINGS (Journal of Cheminformatics)
@@ -763,19 +773,21 @@ def audit_uncertainty_completeness(unc_df, output_dir):
     gap_rows = []
     ok_count = 0
 
-    group_cols = [c for c in ['model', 'rep', 'strategy'] if c in unc_df.columns]
+    # `split` is part of the audit key, not filtered away: a combo that produced
+    # test rows but no out-of-fold training rows is exactly the gap this audit is
+    # for, and pooling the two splits would hide it.
+    group_cols = [c for c in ['model', 'rep', 'strategy', 'split'] if c in unc_df.columns]
     if not group_cols:
         print("\n  UNCERTAINTY AUDIT: Cannot audit — missing group columns")
         return
 
     for keys, grp in unc_df.groupby(group_cols):
-        if len(group_cols) == 3:
-            model, rep, strategy = keys
-        elif len(group_cols) == 2:
-            model, rep = keys
-            strategy = 'unknown'
-        else:
-            continue
+        keys = keys if isinstance(keys, tuple) else (keys,)
+        key = dict(zip(group_cols, keys))
+        model = key.get('model', 'unknown')
+        rep = key.get('rep', 'unknown')
+        strategy = key.get('strategy', 'unknown')
+        split = key.get('split', 'unknown')
 
         found_sigmas = set(grp['sigma'].unique()) if 'sigma' in grp.columns else set()
         missing_sigmas = EXPECTED_SIGMAS - found_sigmas
@@ -797,7 +809,7 @@ def audit_uncertainty_completeness(unc_df, output_dir):
 
         if problems:
             gap_rows.append({
-                'model': model, 'rep': rep, 'strategy': strategy,
+                'model': model, 'rep': rep, 'strategy': strategy, 'split': split,
                 'n_sigmas': len(found_sigmas), 'n_rows': n_samples,
                 'problems': '; '.join(problems),
             })
@@ -815,7 +827,8 @@ def audit_uncertainty_completeness(unc_df, output_dir):
         gap_df.to_csv(gap_path, index=False)
         print(f"    Details saved to: {gap_path}")
         for _, row in gap_df.iterrows():
-            print(f"      {row['model']:30} / {row.get('rep','?'):10} / {row.get('strategy','?'):10} — {row['problems']}")
+            print(f"      {row['model']:30} / {row.get('rep','?'):10} / "
+                  f"{row.get('strategy','?'):10} / {row.get('split','?'):9} — {row['problems']}")
 
 
 def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
@@ -935,8 +948,13 @@ def load_uncertainty_data(results_dir):
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
 
-        # Deduplicate appended runs
-        dedup_cols = [c for c in ['model', 'rep', 'strategy', 'sigma', 'iteration', 'sample_idx']
+        # Deduplicate appended runs.
+        # `split` and `file_no` are part of the key: the rewritten pipeline writes a
+        # 'test' row and a 'train_oof' row per molecule, and `sample_idx` is a row
+        # position that restarts at 0 in each split and in each QM9 chunk, so a key
+        # without them collapses distinct molecules onto one another.
+        dedup_cols = [c for c in ['model', 'rep', 'strategy', 'split', 'sigma',
+                                  'file_no', 'iteration', 'sample_idx']
                       if c in combined.columns]
         if len(dedup_cols) >= 4:
             pre_dedup = len(combined)
@@ -977,48 +995,71 @@ def load_uncertainty_data(results_dir):
     return None
 
 
-def fix_injected_noise(df):
+# The columns the rewritten QM9 pipeline writes and the old one did not. Every
+# one of them is required by the per-molecule uncertainty analysis:
+#   split               — a file without it holds test molecules only, so there
+#                         are no out-of-fold training rows to analyse
+#   canonical_smiles    — the molecule identifier; `sample_idx` is a row position
+#                         and cannot link a molecule across models or levels
+#   noise_pattern       — the level-free shape, without which the zero-level
+#                         subtraction that removes the label-magnitude confound
+#                         cannot be formed
+#   injected_noise      — the value the injector RECORDED
+REQUIRED_UNCERTAINTY_COLUMNS = [
+    'split', 'canonical_smiles', 'noise_pattern', 'injected_noise',
+]
+
+
+def require_uncertainty_schema(df, source):
+    """Refuse a per-molecule uncertainty frame that predates the pipeline rewrite.
+
+    This replaces `fix_injected_noise`, which reconstructed `injected_noise` by
+    fitting a line to `y_true_noisy` against `y_true_original` per
+    (model, rep, sigma, iteration) — with the noise type NOT among the grouping
+    columns, so one regression was fitted across noise types that transform the
+    label differently, and the residual it called "noise" was in part a
+    deterministic function of the label. The pipeline now records the real value,
+    so nothing here reconstructs anything: a file that lacks the column is an
+    error naming the column, not something to be repaired.
     """
-    Recompute injected_noise to correct the scale mismatch bug.
+    if df is None or len(df) == 0:
+        return
+    missing = [c for c in REQUIRED_UNCERTAINTY_COLUMNS if c not in df.columns]
+    if not missing:
+        return
+    files = []
+    if 'source_file' in df.columns:
+        files = sorted(df['source_file'].dropna().unique())[:5]
+    raise UncertaintySchemaError(
+        f"{source}: these per-molecule uncertainty files predate the pipeline "
+        f"rewrite — they are missing {missing}. "
+        f"Nothing in this script reconstructs the injected noise by fitting a "
+        f"line to it any more (`fix_injected_noise` is deleted): a reconstructed "
+        f"value is a function of the label, not the noise. Re-run the pipeline so "
+        f"the injector's recorded values are written. Example files: {files}")
 
-    The saved injected_noise = y_true_noisy - y_true_original, but these are in
-    different scales (normalized vs raw). The actual noise is:
-        noise = y_true_noisy - normalize(y_true_original)
 
-    We recover the normalization transform per group via linear regression:
-        y_true_noisy = a * y_true_original + b + noise
-    The residuals are the correct noise values.
+def filter_to_test_rows(df, what):
+    """Keep only held-out test molecules.
+
+    Both rewritten pipelines write two kinds of row per molecule: `split ==
+    'test'`, a held-out molecule with a clean label, and `split == 'train_oof'`,
+    a TRAINING molecule scored by a model fitted without it, whose label was
+    corrupted. Every statistic in this file — coverage, the uncertainty–error
+    correlation, the mean-uncertainty figure — is about held-out molecules, and
+    every one of them was written when the frame could only contain those. They
+    now have to say so, rather than relying on what happens to be in the frame.
+    The out-of-fold rows are analysed by `scripts/uncertainty_stats.py`.
     """
-    if 'y_true_noisy' not in df.columns or 'y_true_original' not in df.columns:
+    if df is None or len(df) == 0 or 'split' not in df.columns:
         return df
-
-    required_cols = {'model', 'rep', 'sigma', 'iteration'}
-    group_cols = [c for c in required_cols if c in df.columns]
-    if not group_cols:
-        return df
-
-    corrected_noise = df['injected_noise'].copy() if 'injected_noise' in df.columns else pd.Series(np.nan, index=df.index)
-    n_fixed = 0
-
-    for group_key, group_idx in df.groupby(group_cols).groups.items():
-        group = df.loc[group_idx]
-        y_noisy = group['y_true_noisy'].values
-        y_orig = group['y_true_original'].values
-
-        mask = np.isfinite(y_noisy) & np.isfinite(y_orig)
-        if mask.sum() < 10:
-            continue
-
-        # Linear regression to recover normalization parameters
-        slope, intercept, _, _, _ = stats.linregress(y_orig[mask], y_noisy[mask])
-        # Residuals = actual noise in normalized space
-        residuals = y_noisy - (slope * y_orig + intercept)
-        corrected_noise.loc[group_idx] = residuals
-        n_fixed += 1
-
-    df['injected_noise'] = corrected_noise
-    print(f"  Fixed injected_noise via linear regression ({n_fixed} groups)")
-    return df
+    before = len(df)
+    out = df[df['split'] == 'test']
+    if len(out) < before:
+        print(f"  {what}: {len(out)}/{before} rows kept (split == 'test'; "
+              f"{before - len(out)} out-of-fold training rows are for "
+              f"uncertainty_stats.py, not for this statistic)")
+    return out
 
 
 # σ levels for the within-σ uncertainty–noise correlation (per-sample tracking).
@@ -1026,6 +1067,44 @@ def fix_injected_noise(df):
 # σ=0.0 is the clean control (expect ρ≈0/undefined — no noise injected); 0.3 (moderate)
 # and 0.6 (high) are the real per-sample tests.
 WITHIN_SIGMA_LEVELS = [0.0, 0.3, 0.6]
+
+# The correlation between predicted uncertainty and |injected noise| computed
+# with every noise level stacked together. It is NOT a per-molecule quantity:
+# both uncertainty and |injected noise| rise with the noise level, so stacking
+# the levels measures only that both rise — the population trend across levels.
+# It used to be written as 'Unc-Noise ρ (pooled)', one column away from the
+# within-level values 'Unc-Noise ρ σ=0.0/0.3/0.6' in the same row, with the
+# warning living in a source comment that never reached the CSV. The name now
+# says what it measures, and it deliberately does NOT begin with 'Unc-Noise '
+# so that no prefix glob can sweep it in among the within-level columns.
+POPULATION_TREND_COL = 'Population ρ across σ (unc vs |noise|) — NOT per-molecule'
+
+# The within-level columns, named explicitly rather than globbed by prefix.
+WITHIN_SIGMA_COLS = ([f'Unc-Noise ρ σ={s}' for s in WITHIN_SIGMA_LEVELS]
+                     + [f'Unc-Noise n σ={s}' for s in WITHIN_SIGMA_LEVELS])
+
+
+def note_if_noise_columns_are_empty(frame, where):
+    """Say out loud when every uncertainty–noise number in a table is NaN.
+
+    Both the within-level columns and the stacked-across-levels one are computed
+    on held-out molecules, and a held-out molecule's label is no longer noised:
+    `injected_noise` is exactly 0.0 on every test row, so the correlation against
+    it is undefined and the columns are NaN by construction, not by accident.
+    The question they were meant to answer — does the predicted uncertainty find
+    the corrupted labels — is answered on the out-of-fold TRAINING rows by
+    `uncertainty_stats.q4_error_ratio`, written to unc_stats_*_q4_error_ratio.csv.
+    """
+    cols = [c for c in [POPULATION_TREND_COL] + WITHIN_SIGMA_COLS
+            if c in frame.columns and c.startswith(('Unc-Noise ρ', 'Population'))]
+    if not cols:
+        return
+    if frame[cols].notna().to_numpy().any():
+        return
+    print(f"  NOTE ({where}): every uncertainty–noise correlation is NaN. Test "
+          f"molecules carry injected_noise == 0.0 by design, so there is nothing "
+          f"to correlate against on this split. The answer lives in "
+          f"unc_stats_*_q4_error_ratio.csv (out-of-fold training rows).")
 
 
 def within_sigma_unc_noise_rho(model_data, unc_values, base_mask,
@@ -1170,6 +1249,207 @@ def load_validation_data(validation_dir):
     return None
 
 
+def load_validation_uncertainty(validation_dir):
+    """Load per-sample validation uncertainty files from KIRBy.
+
+    KIRBy's `alternative_data_noise_robustness.py` saves, for every
+    probabilistic model that produces a predictive std (QRF, NGBoost, GP),
+    a per-sample file `MODEL_REP_uncertainty_values.csv` alongside the
+    per-dataset `all_results.csv`. The rewritten runner writes
+        split, noise_type, sigma, fold, sample_idx, mol_idx, y_true, y_pred,
+        uncertainty, noise_scale, noise_pattern, noise_pattern_pred,
+        injected_noise, oof_folds_ok, dataset, model, rep
+    and files written before it carry only
+        sigma, sample_idx, y_true, y_pred, uncertainty.
+    All value columns are in RAW label units (predictions and uncertainties are
+    inverse-transformed back from normalized space; see KIRBy
+    train_neural_regression / run_tree_experiment), so coverage is
+    self-consistent.
+
+    The noise type is written as `noise_type` by the runner and as
+    `task_strategy` by `merge_results.py`; it is copied here into `strategy`,
+    the name the rest of this file uses. `split` is 'test' or 'train_oof' —
+    a train_oof row is a TRAINING molecule scored by a model fitted without it,
+    whose label was corrupted, and it must not be mixed into a test statistic.
+
+    De-duplication is keyed on split, strategy and fold as well as
+    dataset/model/rep/sigma/sample_idx. Without them a run of two splits, six
+    noise types and five folds collapses up to sixty distinct rows per molecule
+    onto whichever one happened to be read last.
+
+    Files are found by recursive glob (the rerun layout nests them two dirs
+    deep: `<rep>_<dataset>/<dataset>/MODEL_REP_uncertainty_values.csv`). The
+    dataset is taken from the file's parent directory name unless the file names
+    it; model and rep likewise. Returns a long DataFrame with raw KIRBy names in
+    `model`/`rep`/`dataset` (normalize downstream), or None if nothing found.
+    """
+    if validation_dir is None:
+        return None
+    validation_dir = Path(validation_dir)
+    if not validation_dir.exists():
+        return None
+
+    exclude_dataset_dirs = {'herg_fluid'}  # classification, no regression uncertainty
+    frames = []
+    for f in sorted(validation_dir.rglob('*_uncertainty_values.csv')):
+        dataset_raw = f.parent.name
+        if dataset_raw in exclude_dataset_dirs:
+            continue
+        stem = f.stem.replace('_uncertainty_values', '')
+        parts = stem.split('_')
+        if len(parts) < 2:
+            print(f"  ⚠ Skipping unparseable uncertainty filename: {f.name}")
+            continue
+        model_raw, rep_raw = parts[0], '_'.join(parts[1:])
+        try:
+            df = pd.read_csv(f)
+        except Exception as e:
+            print(f"  ⚠ Could not read {f}: {e}")
+            continue
+        if not {'y_true', 'y_pred', 'uncertainty', 'sigma'}.issubset(df.columns):
+            continue
+        # The runner writes model/rep/dataset into the file; only fall back to
+        # the file name and the parent directory when it did not.
+        if 'model' not in df.columns:
+            df['model'] = model_raw
+        if 'rep' not in df.columns:
+            df['rep'] = rep_raw
+        if 'dataset' not in df.columns:
+            df['dataset'] = dataset_raw
+        frames.append(df)
+
+    if not frames:
+        print("⚠ No validation uncertainty files found")
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+
+    # The noise type: the runner writes `noise_type`, merge_results.py adds
+    # `task_strategy` from the task directory name. This file calls it `strategy`.
+    if 'strategy' not in combined.columns:
+        for src in ('noise_type', 'condition', 'task_strategy'):
+            if src in combined.columns:
+                combined['strategy'] = combined[src]
+                break
+
+    # Deduplicate overlapping directories. split, strategy and fold are part of
+    # the key: sample_idx is a row position within one (split, fold), so a key
+    # without them throws away every split, noise type and fold but one.
+    dedup_cols = ['dataset', 'model', 'rep', 'strategy', 'split', 'fold',
+                  'sigma', 'sample_idx']
+    dedup_cols = [c for c in dedup_cols if c in combined.columns]
+    before = len(combined)
+    combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
+    if len(combined) < before:
+        print(f"  Deduplicated validation uncertainty: {before} → {len(combined)} rows "
+              f"(key: {dedup_cols})")
+    else:
+        print(f"  Validation uncertainty: no duplicates on key {dedup_cols} "
+              f"({len(combined)} rows)")
+    combined = _normalize_validation_names(combined)
+    n_combos = combined.groupby(['dataset', 'model', 'rep']).ngroups
+    print(f"Loaded validation uncertainty: {len(combined)} rows, "
+          f"{n_combos} dataset×model×rep combos "
+          f"({', '.join(sorted(combined['dataset'].unique()))})")
+    if 'split' in combined.columns:
+        print(f"  Splits: {dict(combined['split'].value_counts())}")
+    if 'strategy' in combined.columns:
+        print(f"  Noise types: {sorted(combined['strategy'].dropna().unique())}")
+    return combined
+
+
+def create_validation_uncertainty_table(val_unc_df, output_dir):
+    """Compute validation uncertainty-quality metrics on HELD-OUT molecules.
+
+    Mirrors the QM9 uncertainty metrics (Table 4) for the external datasets,
+    for every dataset × model × rep × noise type that has a predictive std:
+      - Unc-Error ρ : Spearman(predicted uncertainty, |y_pred − y_true|)
+                      (does the model's uncertainty track its own error)
+      - Coverage 1σ/2σ : fraction of |error| within k·uncertainty
+    Pooled across σ (matching the QM9 table); an additional σ=0 column reports
+    the clean-data Unc-Error ρ. Noise types are kept SEPARATE — one row per
+    noise type, never averaged over them.
+
+    Restricted to `split == 'test'`: an out-of-fold training row carries a
+    corrupted label, so its coverage and its uncertainty–error correlation are a
+    different quantity. Those rows are analysed by `uncertainty_stats.py`
+    (`q4_error_ratio`, `confound_controlled_effect`), which is where the
+    noise-detection question is answered.
+
+    Writes `table_validation_uncertainty.csv`.
+    """
+    if val_unc_df is None or len(val_unc_df) == 0:
+        print("⚠ No validation uncertainty data — skipping validation uncertainty table")
+        return None
+
+    val_unc_df = filter_to_test_rows(val_unc_df, 'table_validation_uncertainty')
+    if len(val_unc_df) == 0:
+        print("⚠ Validation uncertainty: no test rows — skipping table")
+        return None
+
+    rows = []
+    group_cols = ['dataset', 'model', 'rep']
+    if 'strategy' in val_unc_df.columns:
+        group_cols.append('strategy')
+    for keys, grp in val_unc_df.groupby(group_cols):
+        dataset, model, rep = keys[0], keys[1], keys[2]
+        strategy = keys[3] if len(keys) > 3 else 'unspecified'
+        y_true = grp['y_true'].values
+        y_pred = grp['y_pred'].values
+        unc = grp['uncertainty'].values
+        errors = np.abs(y_pred - y_true)
+
+        mask = np.isfinite(unc) & np.isfinite(errors) & (unc > 0)
+        if mask.sum() < 100:
+            continue
+
+        # Unc-Error correlation (pooled across σ), scale-invariant.
+        unc_err_rho, _ = stats.spearmanr(unc[mask], errors[mask])
+
+        # Clean-data (σ=0) Unc-Error correlation.
+        rho_sigma0 = np.nan
+        if 'sigma' in grp.columns:
+            g0 = grp[grp['sigma'] == 0.0]
+            e0 = np.abs(g0['y_pred'].values - g0['y_true'].values)
+            u0 = g0['uncertainty'].values
+            m0 = np.isfinite(u0) & np.isfinite(e0) & (u0 > 0)
+            if m0.sum() >= 50:
+                rho_sigma0, _ = stats.spearmanr(u0[m0], e0[m0])
+
+        # Coverage — same-units errors vs k·uncertainty.
+        cov_1sigma = calculate_coverage(y_true[mask], y_pred[mask], unc[mask], k=1)
+        cov_2sigma = calculate_coverage(y_true[mask], y_pred[mask], unc[mask], k=2)
+
+        pred_m = unc[mask]
+        actual_m = errors[mask]
+
+        rows.append({
+            'Dataset': dataset,
+            'Model': get_model_label(model),
+            'Representation': REP_LABELS.get(rep, rep) if 'REP_LABELS' in globals() else rep,
+            'Noise type': STRATEGY_LABELS.get(strategy, strategy),
+            'Split': 'test',
+            'Unc-Error ρ': unc_err_rho,
+            'Unc-Error ρ (σ=0)': rho_sigma0,
+            'Coverage 1σ': cov_1sigma,
+            'Coverage 2σ': cov_2sigma,
+            'Mean Uncertainty': pred_m.mean(),
+            'Mean |Error|': actual_m.mean(),
+            'N': int(mask.sum()),
+        })
+
+    if not rows:
+        print("⚠ Validation uncertainty: no combos with sufficient samples")
+        return None
+
+    out = pd.DataFrame(rows).sort_values(['Dataset', 'Unc-Error ρ'], ascending=[True, False])
+    out.to_csv(output_dir / 'table_validation_uncertainty.csv', index=False)
+    n_types = out['Noise type'].nunique() if 'Noise type' in out.columns else 1
+    print(f"✓ Saved table_validation_uncertainty.csv ({len(out)} rows, "
+          f"{n_types} noise type(s) kept separate, test molecules only)")
+    return out
+
+
 def calculate_validation_auc(validation_df):
     """Convert validation data into robustness-metric format (auc_norm).
 
@@ -1303,9 +1583,10 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
     - fig_validation_overview.png: robustness heatmap per dataset (like Figure 1B)
     - fig_validation_anova.png: η² decomposition on validation datasets
     - fig_validation_combined.png: Panel A grouped bars + Panel B QM9-vs-external scatter
-    - table_validation_auc.csv: Full auc_norm table across datasets
+    - table_validation_auc_full.csv: auc_norm per dataset × model × rep × strategy
     - table_validation_anova.csv: Validation ANOVA statistics
     - table_validation_probabilistic.csv: RF vs QRF (and BNN pairs) per dataset
+      × noise strategy, representation held at PRIMARY_REP
     """
     if val_auc_df is None or len(val_auc_df) == 0:
         print("⚠ No validation robustness data available — skipping validation figures")
@@ -1329,18 +1610,11 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
     datasets = val_auc_df['dataset'].unique() if 'dataset' in val_auc_df.columns else ['validation']
     print(f"  Validation datasets: {sorted(datasets)}, {len(val_auc_df)} configs total")
 
-    # --- Table: Validation auc_norm (cross-dataset comparison) ---
+    # --- Table: Validation auc_norm, fully disaggregated ---
+    # The old collapsed pivot (strategies averaged, then a MEAN across the three
+    # datasets) is deliberately not emitted: it was reconstructible from the
+    # per-strategy table below and hid the strategy dimension.
     if 'dataset' in val_auc_df.columns:
-        pivot = val_auc_df.pivot_table(
-            values='auc_norm', index=['model', 'rep'], columns='dataset', aggfunc='mean'
-        )
-        pivot['MEAN'] = pivot.mean(axis=1)
-        pivot['STD'] = pivot.drop(columns=['MEAN']).std(axis=1)
-        pivot = pivot.sort_values('MEAN', ascending=False)
-        pivot.to_csv(output_dir / 'table_validation_auc.csv')
-        print("✓ Saved table_validation_auc.csv")
-
-        # Diagnostic: save full per-model/rep/strategy/dataset breakdown for inspection
         diag_cols = ['dataset', 'model', 'rep', 'strategy', 'auc_norm']
         if 'baseline_r2' in val_auc_df.columns:
             diag_cols.append('baseline_r2')
@@ -1356,8 +1630,8 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
                 bl = f", baseline_r2={row['baseline_r2']:.3f}" if 'baseline_r2' in row and pd.notna(row['baseline_r2']) else ""
                 print(f"    {row['model']}/{row['rep']}/{row['strategy']} on {row['dataset']}: auc_norm={row['auc_norm']:.3f}{bl}")
     else:
-        val_auc_df.to_csv(output_dir / 'table_validation_auc.csv', index=False)
-        print("✓ Saved table_validation_auc.csv")
+        val_auc_df.to_csv(output_dir / 'table_validation_auc_full.csv', index=False)
+        print("✓ Saved table_validation_auc_full.csv")
 
     # --- Figure: Validation auc_norm heatmap per dataset ---
     # Show a single representation (PRIMARY_REP = continuous_pdv) so the figure
@@ -1515,6 +1789,12 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
             print("✓ Saved table_validation_anova.csv")
 
     # --- Probabilistic comparison on validation datasets ---
+    # One row per dataset × noise strategy, with the representation held at
+    # PRIMARY_REP. Nothing is averaged: a (dataset, strategy, rep) cell holds a
+    # single auc_norm per model. Collapsing the six strategies into one number
+    # per dataset reversed the sign of the comparison on Caco-2, so the strategy
+    # axis stays. The other representations remain in
+    # table_validation_auc_full.csv so the choice of rep is auditable.
     if 'dataset' in val_auc_df.columns:
         prob_pairs = [
             ('rf', 'qrf', 'RF vs QRF'),
@@ -1526,25 +1806,36 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
                 if variant in val_auc_df['model'].values:
                     prob_pairs.append((base, variant, f'{base.upper()} vs {variant}'))
 
+        prob_rep = PRIMARY_REP if 'rep' in val_auc_df.columns else None
+        prob_src = val_auc_df[val_auc_df['rep'] == prob_rep] if prob_rep else val_auc_df
+        strategies_present = ([s for s in STRATEGY_ORDER if s in set(prob_src['strategy'])]
+                              if 'strategy' in prob_src.columns else [None])
+
         rows = []
         for base, variant, label in prob_pairs:
-            for dataset in sorted(datasets):
-                ds_auc = val_auc_df[val_auc_df['dataset'] == dataset]
-                base_auc = ds_auc[ds_auc['model'] == base]['auc_norm'].mean()
-                var_auc = ds_auc[ds_auc['model'] == variant]['auc_norm'].mean()
-                if np.isfinite(base_auc) and np.isfinite(var_auc):
-                    rows.append({
-                        'Dataset': dataset,
-                        'Comparison': label,
-                        'Base AUC_norm': base_auc,
-                        'Variant AUC_norm': var_auc,
-                        'Δ AUC_norm': var_auc - base_auc,
-                        'Variant Better': var_auc > base_auc,
-                    })
+            for dataset in _order_validation_datasets(sorted(datasets)):
+                ds_auc = prob_src[prob_src['dataset'] == dataset]
+                for strategy in strategies_present:
+                    cell = ds_auc if strategy is None else ds_auc[ds_auc['strategy'] == strategy]
+                    base_auc = cell[cell['model'] == base]['auc_norm'].mean()
+                    var_auc = cell[cell['model'] == variant]['auc_norm'].mean()
+                    if np.isfinite(base_auc) and np.isfinite(var_auc):
+                        rows.append({
+                            'Dataset': dataset,
+                            'Comparison': label,
+                            'Strategy': STRATEGY_LABELS.get(strategy, strategy),
+                            'Representation': get_rep_label(prob_rep) if prob_rep else 'all',
+                            'Base AUC_norm': base_auc,
+                            'Variant AUC_norm': var_auc,
+                            'Δ AUC_norm': var_auc - base_auc,
+                            'Variant Better': var_auc > base_auc,
+                        })
 
         if rows:
-            pd.DataFrame(rows).to_csv(output_dir / 'table_validation_probabilistic.csv', index=False)
-            print("✓ Saved table_validation_probabilistic.csv")
+            prob_df = pd.DataFrame(rows)
+            prob_df.to_csv(output_dir / 'table_validation_probabilistic.csv', index=False)
+            print(f"✓ Saved table_validation_probabilistic.csv ({len(prob_df)} rows, "
+                  f"rep={prob_rep}, {len(strategies_present)} strategies)")
 
     # --- Combined validation figure (Panel A: grouped bar, Panel B: transferability scatter) ---
     # Requires both the grouped bar data and the transferability scatter data
@@ -2902,10 +3193,17 @@ def create_nn_family_comparison(df, auc_df, output_dir):
 def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, title_suffix=""):
     """
     Uncertainty figure — single panel: mean uncertainty vs noise level.
-    Calibration metrics (ECE, coverage) and aleatoric/epistemic decomposition
-    are reported in table4 CSVs instead of as figure panels.
+    Coverage and aleatoric/epistemic decomposition are reported in table4 CSVs
+    instead of as figure panels.
     """
     if unc_df is None or len(unc_df) == 0:
+        return False
+
+    # Mean uncertainty on HELD-OUT molecules. An out-of-fold training row is a
+    # different population (corrupted label, model fitted without the molecule)
+    # and would shift the line without saying so.
+    unc_df = filter_to_test_rows(unc_df, 'fig_uncertainty_combined')
+    if len(unc_df) == 0:
         return False
 
     filtered = unc_df.copy()
@@ -3084,14 +3382,14 @@ def create_uncertainty_figure(unc_df, output_dir):
     else:
         print("⚠ Could not create combined uncertainty figure")
 
-    # Supplementary uncertainty figures removed — calibration, ECE, coverage,
+    # Supplementary uncertainty figures removed — coverage,
     # aleatoric/epistemic, and unc-error/unc-noise correlations are all in
     # table4_uncertainty_metrics.csv and table4_supp_uncertainty_by_strategy_rep.csv
 
 
 # NOTE: Old _create_uncertainty_noise_figure, create_figure7, and 3-panel
 # uncertainty figures (calibration scatter, aleatoric/epistemic) removed.
-# ECE, coverage, correlations, and aleatoric/epistemic decomposition
+# Coverage, correlations, and aleatoric/epistemic decomposition
 # are now in table4_uncertainty_metrics.csv and table4_supp CSVs.
 # Only the uncertainty-vs-noise-level line plot remains as a figure.
 
@@ -3101,7 +3399,15 @@ def create_uncertainty_figure(unc_df, output_dir):
 # =============================================================================
 
 def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
-    """Create all summary tables."""
+    """Create all summary tables.
+
+    Every uncertainty statistic below (coverage, the uncertainty–error
+    correlation, mean uncertainty, the aleatoric/epistemic split) is a statement
+    about held-out molecules, so the frame is restricted to `split == 'test'`
+    once here rather than each block trusting what it was handed. The
+    out-of-fold training rows go to `uncertainty_stats.py`.
+    """
+    unc_df = filter_to_test_rows(unc_df, 'table4 uncertainty metrics')
 
     # Table 2: auc_norm by model × strategy (PDV only - don't mix representations)
     # Filter to ANOVA-included models for main table
@@ -3202,8 +3508,10 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
         pd.DataFrame(wilcoxon_results).to_csv(output_dir / 'table3_wilcoxon_tests.csv', index=False)
         print("✓ Saved table3_wilcoxon_tests.csv")
 
-    # Table 4: Uncertainty metrics (legacy strategy only)
-    # Generate per-rep tables AND averaged table for comparison
+    # Table 4: Uncertainty metrics (legacy strategy only), one table per rep.
+    # The rep-pooled 'all' table is deliberately not emitted — averaging a
+    # model's metrics over representations produces values no configuration
+    # actually has, and the per-rep tables carry the same information.
     if unc_df is not None and len(unc_df) > 0:
         unc_legacy = unc_df[unc_df['strategy'] == 'legacy'] if 'strategy' in unc_df.columns else unc_df
 
@@ -3215,20 +3523,17 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                 break
 
         if unc_col and len(unc_legacy) > 0:
-            # Determine reps to iterate: each individual rep + 'all' (averaged)
+            # One table per representation. 'all' (the rep-pooled mean) is only
+            # used when the data carries no rep column at all, in which case
+            # nothing is being pooled across reps.
             if 'rep' in unc_legacy.columns:
-                available_reps = sorted(unc_legacy['rep'].unique())
+                reps_to_compute = sorted(unc_legacy['rep'].unique())
             else:
-                available_reps = []
-            reps_to_compute = available_reps + ['all']
+                reps_to_compute = ['all']
 
             for rep_name in reps_to_compute:
                 if rep_name == 'all':
-                    # Exclude non-ANOVA reps (binary pdv, sns, morgan) from the average
-                    if 'rep' in unc_legacy.columns:
-                        rep_data = unc_legacy[~unc_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
-                    else:
-                        rep_data = unc_legacy
+                    rep_data = unc_legacy
                 else:
                     rep_data = unc_legacy[unc_legacy['rep'] == rep_name]
 
@@ -3265,8 +3570,10 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                     # Uncertainty-error correlation
                     unc_err_corr, _ = stats.spearmanr(unc_values[mask], errors[mask])
 
-                    # Uncertainty-noise correlation, POOLED across σ (population-level /
-                    # Kolmar trend — kept only for comparison, do NOT report as per-sample).
+                    # Uncertainty-noise correlation with every σ stacked together: the
+                    # POPULATION TREND ACROSS LEVELS, not a per-molecule quantity. It is
+                    # written under POPULATION_TREND_COL, whose name carries the warning
+                    # into the CSV.
                     unc_noise_corr = np.nan
                     if 'injected_noise' in model_data.columns:
                         noise_mag = np.abs(model_data['injected_noise'].values)
@@ -3312,23 +3619,6 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                     else:
                         cov_1sigma = cov_2sigma = np.nan
 
-                    # ECE: binned calibration error
-                    pred_pos_mask = mask & (unc_values > 0)
-                    pred_m = unc_values[pred_pos_mask]
-                    actual_m = errors[pred_pos_mask]
-                    ece = np.nan
-                    if len(pred_m) >= 100:
-                        ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-                        ece_bins = np.unique(ece_bins)
-                        ece = 0
-                        for i in range(len(ece_bins) - 1):
-                            bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
-                            if bin_mask.sum() > 0:
-                                bin_pred = pred_m[bin_mask].mean()
-                                bin_actual = actual_m[bin_mask].mean()
-                                bin_weight = bin_mask.sum() / len(pred_m)
-                                ece += bin_weight * np.abs(bin_pred - bin_actual)
-
                     # Aleatoric / epistemic decomposition
                     mean_alea = mean_epis = np.nan
                     if 'aleatoric_uncertainty' in model_data.columns:
@@ -3345,8 +3635,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                     row = {
                         'Model': model,
                         'Unc-Error ρ': unc_err_corr,
-                        'Unc-Noise ρ (pooled)': unc_noise_corr,
-                        'ECE': ece,
+                        POPULATION_TREND_COL: unc_noise_corr,
                         'Coverage 1σ': cov_1sigma,
                         'Coverage 2σ': cov_2sigma,
                         'Mean Uncertainty': unc_values[mask].mean(),
@@ -3367,6 +3656,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                     suffix = f'_{rep_name}' if rep_name != 'all' else ''
                     unc_metrics_df.to_csv(output_dir / f'table4_uncertainty_metrics{suffix}.csv', index=False)
                     print(f"✓ Saved table4_uncertainty_metrics{suffix}.csv")
+                    note_if_noise_columns_are_empty(
+                        unc_metrics_df, f'table4_uncertainty_metrics{suffix}')
 
     # Table 4b: Uncertainty metrics across ALL strategies and reps
     # Answers: do uncertainty patterns hold across noise types and representations?
@@ -3415,7 +3706,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
 
                         unc_err_corr, _ = stats.spearmanr(unc_values[valid], errors[valid])
 
-                        # POOLED across σ (population-level / Kolmar trend — comparison only).
+                        # Every σ stacked together: the POPULATION TREND ACROSS LEVELS.
+                        # Same quantity as in the table above, same warning in its name.
                         unc_noise_corr = np.nan
                         if 'injected_noise' in model_data.columns:
                             noise_mag = np.abs(model_data['injected_noise'].values)
@@ -3425,22 +3717,6 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
 
                         # Within-σ per-sample correlation (honest metric) — each σ separate.
                         per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, valid)
-
-                        # ECE: binned calibration error
-                        pred_m = unc_values[valid]
-                        actual_m = errors[valid]
-                        ece = np.nan
-                        if len(pred_m) >= 100:
-                            ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-                            ece_bins = np.unique(ece_bins)
-                            ece = 0
-                            for i in range(len(ece_bins) - 1):
-                                bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
-                                if bin_mask.sum() > 0:
-                                    bin_pred = pred_m[bin_mask].mean()
-                                    bin_actual = actual_m[bin_mask].mean()
-                                    bin_weight = bin_mask.sum() / len(pred_m)
-                                    ece += bin_weight * np.abs(bin_pred - bin_actual)
 
                         # Coverage
                         y_true_col = y_pred_col = None
@@ -3476,8 +3752,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                             'Rep': rep,
                             'Model': get_model_label(model),
                             'Unc-Error ρ': unc_err_corr,
-                            'Unc-Noise ρ (pooled)': unc_noise_corr,
-                            'ECE': ece,
+                            POPULATION_TREND_COL: unc_noise_corr,
                             'Coverage 1σ': cov_1sigma,
                             'Coverage 2σ': cov_2sigma,
                             'Mean Uncertainty': unc_values[valid].mean(),
@@ -3494,6 +3769,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                 unc_full_df = pd.DataFrame(all_unc_rows)
                 unc_full_df.to_csv(output_dir / 'table4_supp_uncertainty_by_strategy_rep.csv', index=False)
                 print(f"✓ Saved table4_supp_uncertainty_by_strategy_rep.csv ({len(unc_full_df)} rows)")
+                note_if_noise_columns_are_empty(
+                    unc_full_df, 'table4_supp_uncertainty_by_strategy_rep')
 
                 # Summary: which model has best unc-error correlation across strategies?
                 mean_by_model = unc_full_df.groupby('Model')['Unc-Error ρ'].mean().sort_values(ascending=False)
@@ -3522,9 +3799,17 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
             gauss_unc = supp_unc[supp_unc['Strategy'] == 'Gaussian']
             rank_col = 'Unc-Noise ρ σ=0.3'
             if len(gauss_unc) > 0 and rank_col in gauss_unc.columns:
-                per_sigma_cols = [c for c in gauss_unc.columns if c.startswith('Unc-Noise ')]
+                # Named explicitly, not globbed by the prefix 'Unc-Noise '. The glob
+                # used to sweep in the stacked-across-σ population column as well,
+                # putting it beside the within-level values under a near-identical
+                # name. It is still carried — it is a real number — but as its own
+                # clearly-named column at the end, after the within-level ones.
+                per_sigma_cols = [c for c in WITHIN_SIGMA_COLS if c in gauss_unc.columns]
+                trend_cols = ([POPULATION_TREND_COL]
+                              if POPULATION_TREND_COL in gauss_unc.columns else [])
                 table4c_cols = (['Model', 'Rep'] + per_sigma_cols
-                                + ['Unc-Error ρ', 'ECE', 'Coverage 1σ', 'Coverage 2σ'])
+                                + ['Unc-Error ρ', 'Coverage 1σ', 'Coverage 2σ']
+                                + trend_cols)
                 top_noise = gauss_unc.nlargest(15, rank_col)[table4c_cols].copy()
                 # Apply rep labels
                 top_noise['Rep'] = top_noise['Rep'].map(lambda r: get_rep_label(r))
@@ -3842,6 +4127,209 @@ def generate_report(auc_df, excluded_df, output_dir):
 
 
 # =============================================================================
+# PER-MOLECULE UNCERTAINTY STATISTICS (scripts/uncertainty_stats.py)
+# =============================================================================
+#
+# Every statistic below is computed by `scripts/uncertainty_stats.py`. This file
+# calls it and writes what it returns; it reimplements nothing. The module runs
+# on BOTH producers — QM9 and the three experimental datasets — through its own
+# loader, which normalises the two schemas without renaming anything on disk.
+
+def _finite_summary(frame, col):
+    """`n finite, min, median, max` for one column, as a printable string."""
+    if frame is None or len(frame) == 0 or col not in frame.columns:
+        return 'column absent'
+    v = pd.to_numeric(frame[col], errors='coerce').to_numpy(dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return 'no finite values'
+    return (f"n={v.size}, min={v.min():+.4f}, median={np.median(v):+.4f}, "
+            f"max={v.max():+.4f}")
+
+
+def describe_uncertainty_inputs(df, output_dir, prefix):
+    """What actually arrived, per (dataset, condition, split, noise level).
+
+    Also the F5 check: `noise_pattern` is the level-free shape that makes the
+    zero-level subtraction possible, and it must reach the analysis. Its
+    non-null count is printed and written, and its absence is called out rather
+    than left to show up as a NaN column three CSVs later.
+    """
+    keys = [c for c in ['dataset', 'condition', 'split', 'sigma'] if c in df.columns]
+    value_cols = ['injected_noise', 'noise_pattern', 'noise_pattern_pred',
+                  'noise_scale', 'uncertainty', 'oof_folds_ok']
+    rows = []
+    for key, g in df.groupby(keys, dropna=False, sort=True):
+        key = key if isinstance(key, tuple) else (key,)
+        rec = dict(zip(keys, key))
+        rec['n_rows'] = int(len(g))
+        rec['n_molecules'] = int(g['mol_id'].nunique()) if 'mol_id' in g.columns else -1
+        rec['n_folds'] = int(g['fold'].nunique()) if 'fold' in g.columns else -1
+        for c in value_cols:
+            rec[f'n_present_{c}'] = int(g[c].notna().sum()) if c in g.columns else 0
+        rows.append(rec)
+    out = pd.DataFrame(rows)
+    path = output_dir / f'{prefix}_inputs.csv'
+    out.to_csv(path, index=False)
+    print(f"    ✓ {path.name} ({len(out)} rows)")
+
+    n_pattern = int(df['noise_pattern'].notna().sum()) if 'noise_pattern' in df.columns else 0
+    n_pattern_pred = (int(df['noise_pattern_pred'].notna().sum())
+                      if 'noise_pattern_pred' in df.columns else 0)
+    print(f"    noise_pattern reaching the analysis: {n_pattern}/{len(df)} rows; "
+          f"noise_pattern_pred (the sham ceiling): {n_pattern_pred}/{len(df)} rows")
+    if n_pattern == 0:
+        print("    ⚠ noise_pattern is empty — the zero-level subtraction cannot be "
+              "formed, so confound_controlled_effect has nothing to remove the "
+              "label-magnitude confound with.")
+    return out
+
+
+def run_uncertainty_statistics(source, output_dir, label, permutations=200,
+                               strict=True, uncertainty_column='uncalibrated',
+                               dataset_name=None):
+    """Run every statistic in `uncertainty_stats.py` over one producer's files.
+
+    `source` is a directory (searched recursively) or a list of files.
+    `label` names the outputs: `unc_stats_<label>_<statistic>.csv`.
+
+    What comes out, and what each one is:
+      *_q4_plain_correlation  the PLAIN uncertainty-vs-|injected noise|
+                              correlation. A near-zero value is the expected
+                              result, not a failure — read the module docstring
+                              before quoting it. Its own 'statistic' column says
+                              so on every row.
+      *_q4_error_ratio        the answer to question 4: whether dividing the
+                              out-of-fold error by the predicted uncertainty
+                              ranks corrupted labels better than the error alone.
+      *_confound_controlled   uncertainty against the level-free noise shape,
+                              minus the same correlation at level zero, with the
+                              sham ceiling from the model's own prediction.
+      *_permutation_null      the null with the error RECOMPUTED from the
+                              permuted noise. The naive null is not run here.
+      *_q5_mean_uncertainty   a POPULATION statement, labelled as one.
+      *_q6_error_ranking      uncertainty against the error from the CLEAN label,
+                              within each noise level.
+      *_check_pattern_invariance / *_check_noise_scale_redundancy
+                              diagnostics on the inputs, not results.
+
+    `permutations=0` skips the permutation null, which is the only slow one
+    (roughly 0.2 s per group per 100 permutations).
+    """
+    print(f"\n  --- uncertainty_stats: {label} ---", flush=True)
+    if source is None:
+        print(f"    ⚠ no source directory given for {label} — skipping")
+        return None
+    prefix = f'unc_stats_{label}'
+    try:
+        df = unc_stats.load_uncertainty(
+            source, strict=strict, uncertainty_column=uncertainty_column,
+            dataset_name=dataset_name)
+    except unc_stats.UncertaintySchemaError as exc:
+        print(f"    ⚠ {label}: no usable per-molecule uncertainty files.\n"
+              f"      {exc}")
+        (output_dir / f'{prefix}_NOT_COMPUTED.txt').write_text(
+            f"{label}: uncertainty_stats.load_uncertainty refused these files.\n\n{exc}\n")
+        print(f"    ✓ {prefix}_NOT_COMPUTED.txt (records why)")
+        return None
+
+    n_oof = int((df['split'] == 'train_oof').sum())
+    print(f"    loaded {len(df)} rows from {df['source_file'].nunique()} files; "
+          f"splits {dict(df['split'].value_counts())}; "
+          f"conditions {sorted(df['condition'].dropna().unique())}; "
+          f"levels {sorted(pd.unique(df['sigma'].dropna()))}")
+    describe_uncertainty_inputs(df, output_dir, prefix)
+
+    results = {}
+
+    def _run(name, fn, *args, **kwargs):
+        try:
+            out = fn(*args, **kwargs)
+        except (unc_stats.UncertaintySchemaError, unc_stats.ConditioningError) as exc:
+            print(f"    ⚠ {name}: not computed — {exc}")
+            return None
+        path = output_dir / f'{prefix}_{name}.csv'
+        out.to_csv(path, index=False)
+        print(f"    ✓ {path.name} ({len(out)} rows)")
+        results[name] = out
+        return out
+
+    if n_oof == 0:
+        print("    ⚠ no split == 'train_oof' rows: the question-4 statistics and the "
+              "permutation null are about training molecules scored by a model "
+              "fitted without them, so they are not computed. Re-run the pipeline "
+              "with out-of-fold scoring switched on.")
+    else:
+        plain = _run('q4_plain_correlation', unc_stats.q4_plain_correlation, df)
+        if plain is not None:
+            print(f"      rho_raw (NOT the answer — near zero is expected): "
+                  f"{_finite_summary(plain, 'rho_raw')}")
+        ratio = _run('q4_error_ratio', unc_stats.q4_error_ratio, df)
+        if ratio is not None:
+            print(f"      rho_delta (THE ANSWER): {_finite_summary(ratio, 'rho_delta')}")
+            print(f"      auc_delta (THE ANSWER): {_finite_summary(ratio, 'auc_delta')}")
+
+    effect = _run('confound_controlled_effect',
+                  unc_stats.confound_controlled_effect, df)
+    if effect is not None:
+        print(f"      effect (zero-level subtracted): {_finite_summary(effect, 'effect')}")
+        print(f"      effect_pred (sham ceiling): {_finite_summary(effect, 'effect_pred')}")
+        if 'is_detection' in effect.columns:
+            print(f"      cells where effect > sham ceiling: "
+                  f"{int(effect['is_detection'].sum())}/{len(effect)}")
+
+    q5 = _run('q5_mean_uncertainty', unc_stats.q5_mean_uncertainty, df)
+    if q5 is not None:
+        print(f"      slope of mean uncertainty vs noise level (population, "
+              f"not per-molecule): {_finite_summary(q5, 'slope_mean_unc_vs_sigma')}")
+    q6 = _run('q6_error_ranking', unc_stats.q6_error_ranking, df)
+    if q6 is not None:
+        print(f"      rho vs |error| from the CLEAN label, within level: "
+              f"{_finite_summary(q6, 'rho_unc_vs_clean_error')}")
+
+    if n_oof > 0 and permutations > 0:
+        print(f"    permutation null ({permutations} permutations, error "
+              f"recomputed from the permuted noise) …", flush=True)
+        _t = time.time()
+        null = _run('permutation_null', unc_stats.permutation_null, df,
+                    statistic='error_noise_spearman', n_permutations=permutations)
+        if null is not None and len(null) > 0:
+            inside = int(null['observed_inside_null'].sum())
+            print(f"      {inside}/{len(null)} groups have the observed value inside "
+                  f"the null band; observed: {_finite_summary(null, 'observed')} "
+                  f"({time.time() - _t:.1f}s)")
+
+    # Diagnostics on the inputs — the premises the statistics above rest on.
+    # check_pattern_invariance returns one row per molecule, so it is summarised
+    # per cell and only the offending rows are written in full.
+    try:
+        inv = unc_stats.check_pattern_invariance(df)
+    except (unc_stats.UncertaintySchemaError, unc_stats.ConditioningError) as exc:
+        print(f"    ⚠ check_pattern_invariance: not computed — {exc}")
+    else:
+        keys = [c for c in ['dataset', 'model', 'rep', 'condition', 'split', 'fold']
+                if c in inv.columns]
+        summary = inv.groupby(keys, dropna=False).agg(
+            n_molecules=('invariant', 'size'),
+            n_not_invariant=('invariant', lambda s: int((~s).sum())),
+            max_spread_across_levels=('pattern_spread_across_levels', 'max'),
+            max_levels_seen=('n_levels', 'max')).reset_index()
+        summary.to_csv(output_dir / f'{prefix}_check_pattern_invariance.csv', index=False)
+        results['check_pattern_invariance'] = summary
+        n_bad = int((~inv['invariant']).sum())
+        print(f"    ✓ {prefix}_check_pattern_invariance.csv ({len(summary)} rows); "
+              f"{n_bad}/{len(inv)} molecules whose noise_pattern is NOT identical "
+              f"across noise levels")
+        if n_bad:
+            bad_path = output_dir / f'{prefix}_pattern_NOT_invariant.csv'
+            inv[~inv['invariant']].head(1000).to_csv(bad_path, index=False)
+            print(f"    ⚠ {bad_path.name}: the zero-level subtraction assumes the "
+                  f"shape is the same at every level. It is not here.")
+    _run('check_noise_scale_redundancy', unc_stats.check_noise_scale_redundancy, df)
+    return results
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -3853,6 +4341,10 @@ def main():
                         help='Directory containing validation results from KIRBy')
     parser.add_argument('--output-dir', type=str, default='../results/paper_figures',
                         help='Output directory for figures')
+    parser.add_argument('--unc-stats-permutations', type=int, default=200,
+                        help='Permutations for the uncertainty_stats permutation '
+                             'null (0 skips it; it is the only slow statistic, '
+                             'roughly 0.2 s per group per 100 permutations)')
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -3873,8 +4365,9 @@ def main():
     unc_df = load_uncertainty_data(args.qm9_dir)
     print(f"  ✓ load_uncertainty_data: {time.time()-_t:.1f}s "
           f"({len(unc_df) if unc_df is not None else 0} rows)", flush=True)
-    if unc_df is not None:
-        unc_df = fix_injected_noise(unc_df)
+    # Refuse files that predate the pipeline rewrite, naming the columns they
+    # lack. Nothing reconstructs the injected noise by fitting a line to it.
+    require_uncertainty_schema(unc_df, f'QM9 uncertainty files under {args.qm9_dir}')
 
     _t = time.time()
     validation_df = load_validation_data(args.validation_dir)
@@ -4012,6 +4505,17 @@ def main():
 
     print("\n--- VALIDATION (GENERALISATION) ---")
     create_validation_figures(validation_df, val_auc_df, auc_df, output_dir)
+    val_unc_df = load_validation_uncertainty(args.validation_dir)
+    create_validation_uncertainty_table(val_unc_df, output_dir)
+
+    # Per-molecule uncertainty statistics, computed by scripts/uncertainty_stats.py
+    # on BOTH producers. Nothing here recomputes any of them.
+    print("\n--- PER-MOLECULE UNCERTAINTY STATISTICS (uncertainty_stats.py) ---")
+    run_uncertainty_statistics(args.qm9_dir, output_dir, 'qm9',
+                               permutations=args.unc_stats_permutations,
+                               dataset_name='QM9')
+    run_uncertainty_statistics(args.validation_dir, output_dir, 'experimental',
+                               permutations=args.unc_stats_permutations)
 
     print("\n--- SUPPLEMENTARY: ICC & REDUNDANCY ---")
     compute_icc_and_redundancy(auc_df, output_dir)

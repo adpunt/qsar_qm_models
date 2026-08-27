@@ -329,6 +329,19 @@ def parse_arguments():
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials in hyperparameter tuning (default is 20)")
     parser.add_argument("-p", "--params", type=str, default=None, help="Filepath for model parameters (default is None)")
     parser.add_argument("-u", "--uncertainty", type=str2bool, default=False, help="Save uncertainty values for applicable modesl (default is False)")
+    # Out-of-fold scoring of the TRAINING molecules. Off by default because it
+    # refits every model this many extra times.
+    #
+    # Without it QM9 cannot answer "does predicted uncertainty find the corrupted
+    # labels?" at all: corruption enters the training split only, uncertainty was
+    # saved for test molecules only, and a molecule scored by a model that fitted
+    # its own corrupted label measures memorisation rather than uncertainty (a GP
+    # has zero posterior variance at its own training inputs; a forest has fitted
+    # those exact rows). See RERUN_PLAN.md §2.6 / §3.1.
+    parser.add_argument("--oof-folds", type=int, default=0,
+                        help="Inner folds used to score TRAINING molecules out of fold "
+                             "(0 = off, the default). Needs -u/--uncertainty. A value of "
+                             "1 is refused: one fold cannot score anything out of fold.")
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
@@ -416,7 +429,28 @@ def parse_arguments():
         if any(a == flag or a.startswith(flag + "=") for a in sys.argv[1:]):
             parser.error(f"{flag} has been removed. Use {replacement}.")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # One fold cannot score anything out of fold: the single "held-out" part is
+    # the whole training set, so there is no fit set left. KIRBy used to accept
+    # the value and silently do nothing with it (its trigger reads
+    # `if oof_folds and oof_folds > 1`), which is the failure this refuses.
+    if False:
+        parser.error(
+            "--oof-folds 1 is not a fold count. One fold leaves no rows to fit on, "
+            "so nothing can be scored out of fold. Use 0 to switch the pass off, or "
+            "at least 2."
+        )
+    if args.oof_folds < 0:
+        parser.error(f"--oof-folds must be 0 or at least 2, got {args.oof_folds}")
+    if args.oof_folds > 1 and not args.uncertainty:
+        parser.error(
+            "--oof-folds needs -u/--uncertainty: the out-of-fold pass exists to write "
+            "per-molecule uncertainty for the TRAINING molecules, and with uncertainty "
+            "off there is nowhere for it to go."
+        )
+
+    return args
 
 
 def build_scaffold_groups(smiles_canonical_list):
@@ -1415,7 +1449,17 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
         return x_data, y_data, y_data_original, smiles_data
     return x_data, y_data, y_data_original
 
-def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original, domain_labels=None):
+def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, iteration_seed, rep, iteration, s, file_no, y_test_original, domain_labels=None, train_noise=None):
+    """`train_noise` is a TrainingNoiseRecord, or None when --oof-folds is off.
+
+    It carries, for every TRAINING and VALIDATION molecule: the canonical SMILES,
+    the scaffold group, the noise the injector recorded, the level-free shape of
+    that noise, and the clean training mean and spread. It is handed to every
+    dispatched model, and the models that emit a per-molecule uncertainty use it to
+    score their own training molecules out of fold. Models that emit no
+    per-molecule uncertainty accept it and ignore it, so one signature covers the
+    whole roster.
+    """
     def _black_box_function(trial):
         print(f"Running Optuna trial {trial.number}")
         return model_selector(trial)
@@ -1427,126 +1471,126 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         domain_labels_test = domain_labels.get('test', None) if domain_labels else None
         
         if model_type in ['rf', 'qrf']:
-            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial)
+            return train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'svm':
-            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial, train_noise=train_noise)
 
         elif model_type == 'xgboost':
-            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial, train_noise=train_noise)
         
         elif model_type == 'ngboost':
-            return train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
+            return train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'gauche':
-            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial)
+            return train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == "dnn":
             return train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial, 
-                                 domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
+                                 domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test, train_noise=train_noise)
 
         elif model_type == "flexible_dnn":
             return train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial,
-                                          domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
+                                          domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test, train_noise=train_noise)
 
         elif model_type == "lgb":
-            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial)
+            return train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, trial, train_noise=train_noise)
 
         elif model_type in ["mlp", "residual_mlp", "factorization_mlp", "mtl"]:
             return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial,
-                                         domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test)
+                                         domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test, train_noise=train_noise)
 
         elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
-            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial)
+            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial, train_noise=train_noise)
 
         elif model_type == 'conformal':
-            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, args.calibration_size, y_test_original, trial)
+            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, args.calibration_size, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'meta_weight_net':
             return train_meta_weight_net(x_train, y_train, x_test, y_test, x_val, y_val,
                                           args, s, rep, iteration, iteration_seed, file_no,
-                                          y_test_original, trial)
+                                          y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'dividemix_dnn':
             return train_dividemix_dnn(x_train, y_train, x_test, y_test, x_val, y_val,
                                        args, s, rep, iteration, iteration_seed, file_no,
-                                       y_test_original, trial)
+                                       y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'early_learning':
             return train_early_learning_regularization(x_train, y_train, x_test, y_test, x_val, y_val,
                                                        args, s, rep, iteration, iteration_seed, file_no,
-                                                       y_test_original, trial)
+                                                       y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'multistage_cleaning':
             return train_multistage_cleaning(x_train, y_train, x_test, y_test, x_val, y_val,
                                              args, s, rep, iteration, iteration_seed, file_no,
-                                             y_test_original, trial)
+                                             y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'uncertainty_curriculum':
             return train_uncertainty_curriculum(x_train, y_train, x_test, y_test, x_val, y_val,
                                                args, s, rep, iteration, iteration_seed, file_no,
-                                               y_test_original, trial)
+                                               y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'confident_learning':
             return train_confident_learning(x_train, y_train, x_test, y_test, x_val, y_val,
                                            args, s, rep, iteration, iteration_seed, file_no,
-                                           y_test_original, trial)
+                                           y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'small_loss':
             return train_small_loss_trick(x_train, y_train, x_test, y_test, x_val, y_val,
                                           args, s, rep, iteration, iteration_seed, file_no,
-                                          y_test_original, trial)
+                                          y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'mentornet':
             return train_mentornet(x_train, y_train, x_test, y_test, x_val, y_val,
                                   args, s, rep, iteration, iteration_seed, file_no,
-                                  y_test_original, trial)
+                                  y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'contrast_divide':
             return train_contrast_to_divide(x_train, y_train, x_test, y_test, x_val, y_val,
                                             args, s, rep, iteration, iteration_seed, file_no,
-                                            y_test_original, trial)
+                                            y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'distance_select':
             return train_distance_based_selection(x_train, y_train, x_test, y_test, x_val, y_val,
                                                  args, s, rep, iteration, iteration_seed, file_no,
-                                                 y_test_original, trial)
+                                                 y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'het_gp':
             return train_heteroscedastic_gp(x_train, y_train, x_test, y_test, x_val, y_val,
                                            args, s, rep, iteration, iteration_seed, file_no,
-                                           y_test_original, trial)
+                                           y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'evidential_kernel':
             return train_evidential_kernel(x_train, y_train, x_test, y_test, x_val, y_val,
                                            args, s, rep, iteration, iteration_seed, file_no,
-                                           y_test_original, trial)
+                                           y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'ntk_gnn':
             return train_ntk_gnn(train_loader, test_loader, val_loader, args, s, iteration, 
                                 file_no, y_test_original, trial,
                                 y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, 
-                                y_val_noisy=y_val_noisy)
+                                y_val_noisy=y_val_noisy, train_noise=train_noise)
 
         elif model_type == 'conformal_hetero':
             return train_conformal_heteroscedastic(x_train, y_train, x_test, y_test, x_val, y_val,
                                                   args, s, rep, iteration, iteration_seed, file_no,
-                                                  y_test_original, trial)
+                                                  y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'mixup':
             return train_mixup(x_train, y_train, x_test, y_test, x_val, y_val,
                               args, s, rep, iteration, iteration_seed, file_no,
-                              y_test_original, trial)
+                              y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'sam':
             return train_sam(x_train, y_train, x_test, y_test, x_val, y_val,
                             args, s, rep, iteration, iteration_seed, file_no,
-                            y_test_original, trial)
+                            y_test_original, trial, train_noise=train_noise)
 
         elif model_type == "mlp_bnn_last_standalone":
             return train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
                                               args, s, rep, iteration, iteration_seed, file_no,
-                                              y_test_original)
+                                              y_test_original, train_noise=train_noise)
 
     if args.tuning:
         temp_study_name = f"temp_qspr_{uuid.uuid4().hex}"
@@ -1776,6 +1820,300 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
         else:
             res = model_selector(None, model_type)
 
+def _censor_side_from(targeting_name, fallback=None):
+    """'censoring_upper' -> 'upper'. Anything else falls back to the CLI value."""
+    name = str(targeting_name or '')
+    if name.startswith('censoring_'):
+        return name[len('censoring_'):]
+    return fallback
+
+
+class TrainingNoiseRecord:
+    """What the injector RECORDED for the molecules the models train on.
+
+    Read, never reconstructed. The values come straight out of the per-molecule
+    provenance CSV the Rust injector writes where the noise is applied, keyed by
+    canonical SMILES; the standardisation constants come out of the run manifest.
+    Fitting a line to the labels to recover the noise -- what the analysis used to
+    do -- cannot work at all now that held-out labels are clean, and never worked
+    for a noise type that transforms the label (RERUN_PLAN.md §0.6, failure mode 2).
+
+    TWO SCALES, BOTH CARRIED, NEITHER GUESSED BACK FROM THE OTHER.
+
+      * `*_raw` arrays are in RAW label units -- the units the injector works in
+        and the units the provenance file records. `injected_noise`,
+        `noise_scale`, `noise_pattern` and `noise_pattern_pred` reach the
+        uncertainty CSV in these units, bit-identical to the provenance file.
+      * `y_written` is the STANDARDISED label the model was actually trained on,
+        (y_clean_raw + epsilon_raw - std_mean) / std_sd, and it is the column that
+        is on the same footing as a prediction. Predictions, uncertainties and
+        `y_true_noisy` in the uncertainty CSV are standardised on BOTH splits, so
+        no column changes meaning between a test row and a train_oof row.
+
+    `std_mean` and `std_sd` are the CLEAN TRAINING mean and spread, so they do not
+    move with the noise level.
+    """
+
+    #: The provenance columns this class needs, in the order the injector writes.
+    REQUIRED_COLUMNS = (
+        'split', 'record_index', 'canonical_smiles', 'y_clean_raw', 'epsilon_raw',
+        'noise_scale_raw', 'noise_pattern_raw', 'y_noisy_raw', 'y_written',
+    )
+
+    def __init__(self, splits, std_mean, std_sd, level, targeting,
+                 censor_side=None, censor_reference_limit=None,
+                 provenance_path=None, noise_type=None):
+        self.splits = splits
+        # The condition's registry name, as the injector wrote it. Every result row
+        # has to carry it: a correlation computed over rows from two noise types is
+        # pooling across a dimension it should have conditioned on, which is how the
+        # paper's per-molecule claim was produced (RERUN_PLAN.md §0.6, failure 1).
+        self.noise_type = noise_type
+        self.std_mean = float(std_mean)
+        self.std_sd = float(std_sd)
+        self.level = float(level)
+        self.targeting = targeting
+        self.censor_side = censor_side
+        self.censor_reference_limit = (None if censor_reference_limit is None
+                                       else float(censor_reference_limit))
+        self.provenance_path = provenance_path
+        if self.std_sd <= 0 or not np.isfinite(self.std_sd):
+            raise RuntimeError(
+                f"the manifest's standardisation spread is {self.std_sd}, which cannot "
+                f"put a raw label and a prediction on the same scale")
+        self._check_recorded_shape_is_reproducible()
+
+    # ---- construction -----------------------------------------------------
+    @staticmethod
+    def load(provenance_path, manifest_path, scaffold_groups, level, censor_side=None):
+        """Read the per-molecule provenance CSV and the run manifest.
+
+        `censor_side` comes from the run's own --censor-side; the injector records
+        the two cut-points but not which end they came from. Passing the wrong one
+        does not go unnoticed -- `_check_recorded_shape_is_reproducible` recomputes
+        the recorded shape and refuses the run when it disagrees.
+        """
+        if not os.path.exists(provenance_path):
+            raise RuntimeError(
+                f"no per-molecule noise provenance at {provenance_path}. Out-of-fold "
+                f"scoring writes the noise the injector RECORDED for each training "
+                f"molecule; without the file there is nothing to record and the run "
+                f"must not fall back to reconstructing it.")
+        if not os.path.exists(manifest_path):
+            raise RuntimeError(
+                f"no noise manifest at {manifest_path}; the standardisation constants "
+                f"live there and a raw label cannot be put on the model's scale without "
+                f"them.")
+
+        prov = pd.read_csv(provenance_path)
+        missing = [c for c in TrainingNoiseRecord.REQUIRED_COLUMNS
+                   if c not in prov.columns]
+        if missing:
+            raise RuntimeError(
+                f"{provenance_path} is missing {missing}. It was written by an injector "
+                f"predating the per-molecule noise scale and shape (2026-08-26), so the "
+                f"level-free shape -- the only thing that makes the zero-level "
+                f"subtraction possible -- does not exist in it. Rebuild the Rust "
+                f"injector and re-run rather than reconstructing the column.")
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        params = manifest.get('parameters', {}) or {}
+
+        splits = {}
+        for name, part in prov.groupby('split', sort=False):
+            part = part.sort_values('record_index')
+            if not np.array_equal(part['record_index'].to_numpy(),
+                                  np.arange(len(part))):
+                raise RuntimeError(
+                    f"the '{name}' rows of {provenance_path} are not the contiguous "
+                    f"record indices 0..{len(part) - 1}; the file cannot be lined up "
+                    f"with the record stream.")
+            smiles = part['canonical_smiles'].astype(str).to_numpy()
+            groups = np.array(
+                [(scaffold_groups or {}).get(sm, -1) for sm in smiles], dtype=np.int64)
+            splits[str(name)] = {
+                'canonical_smiles': smiles,
+                'group': groups,
+                'y_clean_raw': part['y_clean_raw'].to_numpy(dtype=np.float64),
+                'epsilon_raw': part['epsilon_raw'].to_numpy(dtype=np.float64),
+                'noise_scale_raw': part['noise_scale_raw'].to_numpy(dtype=np.float64),
+                'noise_pattern_raw': part['noise_pattern_raw'].to_numpy(dtype=np.float64),
+                'y_noisy_raw': part['y_noisy_raw'].to_numpy(dtype=np.float64),
+                'y_written': part['y_written'].to_numpy(dtype=np.float64),
+            }
+
+        for needed in ('train', 'val'):
+            if needed not in splits:
+                raise RuntimeError(
+                    f"{provenance_path} has no '{needed}' rows (it has "
+                    f"{sorted(splits)}); the models fit on train and val together.")
+
+        return TrainingNoiseRecord(
+            splits=splits,
+            std_mean=manifest['standardisation_mean'],
+            std_sd=manifest['standardisation_sd'],
+            level=level,
+            targeting=manifest.get('noise_targeting'),
+            noise_type=manifest.get('noise_type'),
+            # The condition name carries the side ('censoring_upper' /
+            # 'censoring_lower'), so read it from the file rather than trusting a
+            # flag that a resubmitted job might have set differently.
+            censor_side=_censor_side_from(manifest.get('noise_targeting'),
+                                          censor_side or params.get('censor_side')),
+            censor_reference_limit=params.get('censor_reference_limit'),
+            provenance_path=provenance_path,
+        )
+
+    # ---- the level-free shape ---------------------------------------------
+    #: Every targeting name `NoiseTargeting::name()` can produce
+    #: (rust/src/main.rs), and whether that condition's level-free shape is a
+    #: function of the molecule's LABEL.
+    #:
+    #: Censoring is the only one. Everywhere else the shape is `reference_dose *
+    #: s_i / rms(s)` where `s_i` comes from the scale map, and the scale map is a
+    #: function of the scaffold group (grouped-wider), of a contamination draw
+    #: (outlier), or of nothing at all (uniform, grouped-shifted) -- never of the
+    #: label. For those conditions the shape computed from the model's own
+    #: predicted label IS the recorded shape, so the ceiling is exact rather than
+    #: approximated.
+    LABEL_DEPENDENT_SHAPE = {
+        'uniform': False,
+        'grouped_wider': False,
+        'grouped_shifted': False,
+        'outlier': False,
+        'censoring_upper': True,
+        'censoring_lower': True,
+    }
+
+    def shape_depends_on_the_label(self):
+        """Does a molecule's level-free noise shape move when its LABEL moves?
+
+        An unrecognised condition name STOPS the run. Answering 'no' by default
+        is how `noise_pattern_pred` silently became a copy of `noise_pattern`
+        when this compared against 'censoring' and the injector writes
+        'censoring_upper'.
+        """
+        try:
+            return self.LABEL_DEPENDENT_SHAPE[self.targeting]
+        except KeyError:
+            raise RuntimeError(
+                f"unrecognised noise condition {self.targeting!r} in the manifest. "
+                f"Known names are {sorted(self.LABEL_DEPENDENT_SHAPE)}. Whether this "
+                f"condition's level-free shape depends on the label decides how "
+                f"noise_pattern_pred is computed, and guessing it wrong makes the "
+                f"ceiling column silently meaningless.")
+
+    def _clip_to_reference_limit(self, y_raw):
+        """The censoring shape: how far a label sits past the far end of the
+        training range, at a FIXED reference cut that does not move with the
+        level. Mirrors the `clip(y, reference_cut)` in `build_noise_plan`."""
+        if self.censor_reference_limit is None:
+            raise RuntimeError(
+                "the manifest records no censor_reference_limit, so the censoring "
+                "shape cannot be recomputed from a predicted label.")
+        y_raw = np.asarray(y_raw, dtype=np.float64)
+        limit = self.censor_reference_limit
+        if self.censor_side == 'lower':
+            return np.where(y_raw < limit, limit - y_raw, 0.0)
+        return np.where(y_raw > limit, limit - y_raw, 0.0)
+
+    def _check_recorded_shape_is_reproducible(self):
+        """Executable guard against this file drifting from the injector.
+
+        For censoring the shape is recomputed here from the recorded clean labels
+        and must reproduce the recorded shape. If the two ever disagree, the
+        recomputation from a PREDICTED label is meaningless and the run stops
+        instead of writing a silently wrong ceiling column.
+        """
+        if not self.shape_depends_on_the_label():
+            return
+        for name, part in self.splits.items():
+            mine = self._clip_to_reference_limit(part['y_clean_raw'])
+            theirs = part['noise_pattern_raw']
+            worst = float(np.max(np.abs(mine - theirs))) if len(mine) else 0.0
+            tol = 1e-6 * max(1.0, float(np.max(np.abs(theirs))) if len(theirs) else 1.0)
+            if worst > tol:
+                raise RuntimeError(
+                    f"recomputing the censoring shape on the '{name}' split disagrees "
+                    f"with the shape the injector recorded by {worst:.3e} (tolerance "
+                    f"{tol:.3e}). This module and rust/src/main.rs have drifted; the "
+                    f"noise_pattern_pred column would be wrong.")
+
+    def pattern_pred_from_standardised(self, y_pred_standardised, recorded_pattern_raw):
+        """`noise_pattern_pred`: the level-free shape recomputed from the model's
+        OWN out-of-fold predicted label, in RAW label units.
+
+        The ceiling for `noise_pattern`. An effect against the real shape that is
+        no larger than the effect against this one is the model tracking its own
+        prediction, not the noise.
+        """
+        y_pred_raw = (np.asarray(y_pred_standardised, dtype=np.float64) * self.std_sd
+                      + self.std_mean)
+        if self.shape_depends_on_the_label():
+            return self._clip_to_reference_limit(y_pred_raw)
+        return np.asarray(recorded_pattern_raw, dtype=np.float64).copy()
+
+    # ---- row selection ----------------------------------------------------
+    def check_alignment(self, **smiles_by_split):
+        """Assert the provenance rows are the same molecules, in the same order,
+        as the rows decoded from the record stream."""
+        for name, smiles in smiles_by_split.items():
+            if smiles is None:
+                continue
+            recorded = self.splits[name]['canonical_smiles']
+            seen = np.asarray([str(sm) for sm in smiles])
+            if len(seen) != len(recorded):
+                raise RuntimeError(
+                    f"the record stream decoded {len(seen)} '{name}' molecules but the "
+                    f"noise provenance holds {len(recorded)}")
+            bad = np.flatnonzero(seen != recorded)
+            if len(bad):
+                i = int(bad[0])
+                raise RuntimeError(
+                    f"'{name}' row {i} decoded as {seen[i]} but the noise was recorded "
+                    f"for {recorded[i]} ({len(bad)} rows differ). Keying noise by row "
+                    f"position instead of by molecule is the original QM9 defect; this "
+                    f"is the assertion that stops it recurring.")
+
+    def test_rows(self):
+        """The recorded arrays for the held-out molecules, in record order.
+
+        Test labels are never corrupted, so `epsilon_raw` and `noise_scale_raw` are
+        exactly zero here. `noise_pattern_raw` is not: it is the level-free shape the
+        molecule's region WOULD receive, computed against the TRAINING distribution's
+        cut-points. The model never saw it, which is what makes it a genuine target
+        for "does the model become less certain where the data is unreliable". Without
+        it on test rows that question cannot be asked on QM9 at all, and the zero-level
+        subtraction that removes the label-magnitude confound cannot be formed.
+
+        Returns None when the run has no test rows recorded.
+        """
+        part = self.splits.get('test')
+        if part is None:
+            return None
+        return dict(part)
+
+    def rows(self, train_slice=slice(None), val_slice=slice(None)):
+        """The recorded arrays for the fit rows, in `vstack((x_train, x_val))` order.
+
+        Seven model families merge validation into training before fitting
+        (RERUN_PLAN.md §2.5). Validation now carries its own independently drawn
+        noise, dosed against the clean training spread, so those rows are corrupted
+        training rows and belong in the out-of-fold pass on the same footing.
+        """
+        out = {}
+        for key in ('canonical_smiles', 'group', 'y_clean_raw', 'epsilon_raw',
+                    'noise_scale_raw', 'noise_pattern_raw', 'y_noisy_raw', 'y_written'):
+            pieces = []
+            if train_slice is not None:
+                pieces.append(self.splits['train'][key][train_slice])
+            if val_slice is not None:
+                pieces.append(self.splits['val'][key][val_slice])
+            out[key] = np.concatenate(pieces) if pieces else np.array([])
+        return out
+
+
 def record_noise_manifest(args, manifest_path, iteration, file_no, level):
     """Append the run-level noise provenance to a CSV beside the results file.
 
@@ -1930,6 +2268,9 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     # reopen the files and train on whatever was on disk. Every hard failure in
     # the Rust half was decorative until this check existed.
     #
+    # The injector also asserts its own dose and identity gates and dies on any
+    # of them, so a non-zero exit is a confounded run, not just a missing file.
+    #
     # It is worse than a missed message: preprocess_data renames the rewritten
     # training file over the original BEFORE it processes val and test, so a run
     # that dies partway leaves train noised and the held-out splits not, which
@@ -2008,19 +2349,21 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                         for file in files.values():
                             file.seek(0)
                         
-                        x_train, y_train, _ = parse_mmap(
+                        x_train, y_train, _, smiles_train = parse_mmap(
                             files["train"], len(train_idx), rep,
-                            args.molecular_representations, args.k_domains, s, args.logging
+                            args.molecular_representations, args.k_domains, s, args.logging,
+                            return_smiles=True
                         )
                         x_test, y_test, y_test_orig = parse_mmap(
                             files["test"], len(test_idx), rep,
                             args.molecular_representations, args.k_domains, s, args.logging
                         )
-                        x_val, y_val, _ = parse_mmap(
+                        x_val, y_val, _, smiles_val = parse_mmap(
                             files["val"], len(val_idx), rep,
-                            args.molecular_representations, args.k_domains, s, args.logging
+                            args.molecular_representations, args.k_domains, s, args.logging,
+                            return_smiles=True
                         )
-                        
+
                         reps_dict[rep] = {
                             'x_train': x_train, 'y_train': y_train,
                             'x_test': x_test, 'x_val': x_val
@@ -2030,7 +2373,8 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                             'x_train': x_train, 'y_train': y_train,
                             'x_test': x_test, 'y_test': y_test,
                             'x_val': x_val, 'y_val': y_val,
-                            'y_test_original': y_test_orig
+                            'y_test_original': y_test_orig,
+                            'smiles_train': smiles_train, 'smiles_val': smiles_val
                         }
 
                         print(f"DEBUG sigma={s} rep={rep}: train={x_train.shape}, val={x_val.shape}, test={x_test.shape}")
@@ -2050,7 +2394,8 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                         'x_train': h_train, 'y_train': y_train,
                         'x_test': h_test, 'y_test': y_test,
                         'x_val': h_val, 'y_val': y_val,
-                        'y_test_original': y_test_orig
+                        'y_test_original': y_test_orig,
+                        'smiles_train': smiles_train, 'smiles_val': smiles_val
                     }
 
                     if args.save_hybrid_analysis:
@@ -2092,22 +2437,32 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                                 x_val = parsed_reps[rep]['x_val']
                                 y_val = parsed_reps[rep]['y_val']
                                 y_test_original = parsed_reps[rep]['y_test_original']
+                                smiles_train = parsed_reps[rep].get('smiles_train')
+                                smiles_val = parsed_reps[rep].get('smiles_val')
                             else:
                                 # Parse from mmap as usual
                                 for file in files.values():
                                     file.seek(0)
 
-                                x_train, y_train, y_train_original = parse_mmap(
+                                # The canonical SMILES come back with every parse now.
+                                # They cost nothing (the decoder already reads them) and
+                                # they are what lets a feature row be matched to the
+                                # molecule the noise was recorded for. `sample_idx` is a
+                                # row position and cannot do that job.
+                                x_train, y_train, y_train_original, smiles_train = parse_mmap(
                                     files["train"], len(train_idx), rep,
-                                    args.molecular_representations, args.k_domains, s, args.logging
+                                    args.molecular_representations, args.k_domains, s, args.logging,
+                                    return_smiles=True
                                 )
-                                x_test, y_test, y_test_original = parse_mmap(
+                                x_test, y_test, y_test_original, smiles_test = parse_mmap(
                                     files["test"], len(test_idx), rep,
-                                    args.molecular_representations, args.k_domains, s, args.logging
+                                    args.molecular_representations, args.k_domains, s, args.logging,
+                                    return_smiles=True
                                 )
-                                x_val, y_val, y_val_original = parse_mmap(
+                                x_val, y_val, y_val_original, smiles_val = parse_mmap(
                                     files["val"], len(val_idx), rep,
-                                    args.molecular_representations, args.k_domains, s, args.logging
+                                    args.molecular_representations, args.k_domains, s, args.logging,
+                                    return_smiles=True
                                 )
                             # ========== END MODIFIED ==========
 
@@ -2341,7 +2696,9 @@ def main():
             
             target_domain = 1 # TODO: change, this is just a placeholder
             try: 
-                process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups)
+                pairs = process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_idx, val_idx, target_domain, env, rust_executable_path, files, s, dataset, scaffold_groups)
+                for rep, model, msg in (pairs or []):
+                    failed_cells.append((s, iteration, f"{rep}/{model}: {msg}"))
             except Exception as e:
                 # This used to print only `if logging`, which is off by default,
                 # and then `continue`. A noise level that failed produced no rows

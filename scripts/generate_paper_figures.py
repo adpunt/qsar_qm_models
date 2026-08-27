@@ -13,7 +13,7 @@ PART 2: THE WHY
   Figure: NN Family Comparison (NN-α, NN-β, RF families) — 1×3 panel + NDS CSV
   Figure: Uncertainty Tracks Noise (single-panel: mean uncertainty vs σ)
 
-Calibration (ECE, coverage), unc-error/unc-noise correlations, and
+Calibration (coverage at 1σ/2σ), unc-error/unc-noise correlations, and
 aleatoric/epistemic decomposition are reported in table4 CSVs.
 
 Run: python generate_paper_figures.py [--qm9-dir ../results] [--validation-dir /path/to/kirby/results]
@@ -32,7 +32,7 @@ Outputs:
     table1_supp_simple_effects_all_reps.csv
     table2_nds_by_strategy.csv
     table3_probabilistic_comparison.csv
-    table4_uncertainty_metrics.csv (ECE, coverage, correlations, aleatoric/epistemic)
+    table4_uncertainty_metrics.csv (coverage, correlations, aleatoric/epistemic)
     table4_supp_uncertainty_by_strategy_rep.csv (same metrics × all strategies/reps)
     paper_figures_report.txt
 """
@@ -3366,8 +3366,8 @@ def create_nn_family_comparison(df, nds_df, output_dir):
 def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, title_suffix=""):
     """
     Uncertainty figure — single panel: mean uncertainty vs noise level.
-    Calibration metrics (ECE, coverage) and aleatoric/epistemic decomposition
-    are reported in table4 CSVs instead of as figure panels.
+    Coverage and aleatoric/epistemic decomposition are reported in table4 CSVs
+    instead of as figure panels.
     """
     if unc_df is None or len(unc_df) == 0:
         return False
@@ -3548,14 +3548,14 @@ def create_uncertainty_figure(unc_df, output_dir):
     else:
         print("⚠ Could not create combined uncertainty figure")
 
-    # Supplementary uncertainty figures removed — calibration, ECE, coverage,
+    # Supplementary uncertainty figures removed — coverage,
     # aleatoric/epistemic, and unc-error/unc-noise correlations are all in
     # table4_uncertainty_metrics.csv and table4_supp_uncertainty_by_strategy_rep.csv
 
 
 # NOTE: Old _create_uncertainty_noise_figure, create_figure7, and 3-panel
 # uncertainty figures (calibration scatter, aleatoric/epistemic) removed.
-# ECE, coverage, correlations, and aleatoric/epistemic decomposition
+# Coverage, correlations, and aleatoric/epistemic decomposition
 # are now in table4_uncertainty_metrics.csv and table4_supp CSVs.
 # Only the uncertainty-vs-noise-level line plot remains as a figure.
 
@@ -3830,23 +3830,6 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                     else:
                         cov_1sigma = cov_2sigma = np.nan
 
-                    # ECE: binned calibration error
-                    pred_pos_mask = mask & (unc_values > 0)
-                    pred_m = unc_values[pred_pos_mask]
-                    actual_m = errors[pred_pos_mask]
-                    ece = np.nan
-                    if len(pred_m) >= 100:
-                        ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-                        ece_bins = np.unique(ece_bins)
-                        ece = 0
-                        for i in range(len(ece_bins) - 1):
-                            bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
-                            if bin_mask.sum() > 0:
-                                bin_pred = pred_m[bin_mask].mean()
-                                bin_actual = actual_m[bin_mask].mean()
-                                bin_weight = bin_mask.sum() / len(pred_m)
-                                ece += bin_weight * np.abs(bin_pred - bin_actual)
-
                     # Aleatoric / epistemic decomposition
                     mean_alea = mean_epis = np.nan
                     if 'aleatoric_uncertainty' in model_data.columns:
@@ -3864,7 +3847,6 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                         'Model': model,
                         'Unc-Error ρ': unc_err_corr,
                         'Unc-Noise ρ (pooled)': unc_noise_corr,
-                        'ECE': ece,
                         'Coverage 1σ': cov_1sigma,
                         'Coverage 2σ': cov_2sigma,
                         'Mean Uncertainty': unc_values[mask].mean(),
@@ -3944,22 +3926,6 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                         # Within-σ per-sample correlation (honest metric) — each σ separate.
                         per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, valid)
 
-                        # ECE: binned calibration error
-                        pred_m = unc_values[valid]
-                        actual_m = errors[valid]
-                        ece = np.nan
-                        if len(pred_m) >= 100:
-                            ece_bins = np.percentile(pred_m, np.linspace(0, 100, 11))
-                            ece_bins = np.unique(ece_bins)
-                            ece = 0
-                            for i in range(len(ece_bins) - 1):
-                                bin_mask = (pred_m >= ece_bins[i]) & (pred_m < ece_bins[i + 1])
-                                if bin_mask.sum() > 0:
-                                    bin_pred = pred_m[bin_mask].mean()
-                                    bin_actual = actual_m[bin_mask].mean()
-                                    bin_weight = bin_mask.sum() / len(pred_m)
-                                    ece += bin_weight * np.abs(bin_pred - bin_actual)
-
                         # Coverage
                         y_true_col = y_pred_col = None
                         if 'y_true_noisy' in model_data.columns and 'y_pred_mean' in model_data.columns:
@@ -3995,7 +3961,6 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
                             'Model': get_model_label(model),
                             'Unc-Error ρ': unc_err_corr,
                             'Unc-Noise ρ (pooled)': unc_noise_corr,
-                            'ECE': ece,
                             'Coverage 1σ': cov_1sigma,
                             'Coverage 2σ': cov_2sigma,
                             'Mean Uncertainty': unc_values[valid].mean(),
@@ -4042,7 +4007,7 @@ def create_tables(nds_df, unc_df, qm9_df, output_dir, val_nds_df=None):
             if len(gauss_unc) > 0 and rank_col in gauss_unc.columns:
                 per_sigma_cols = [c for c in gauss_unc.columns if c.startswith('Unc-Noise ')]
                 table4c_cols = (['Model', 'Rep'] + per_sigma_cols
-                                + ['Unc-Error ρ', 'ECE', 'Coverage 1σ', 'Coverage 2σ'])
+                                + ['Unc-Error ρ', 'Coverage 1σ', 'Coverage 2σ'])
                 top_noise = gauss_unc.nlargest(15, rank_col)[table4c_cols].copy()
                 # Apply rep labels
                 top_noise['Rep'] = top_noise['Rep'].map(lambda r: get_rep_label(r))

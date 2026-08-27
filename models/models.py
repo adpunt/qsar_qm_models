@@ -1560,12 +1560,59 @@ def score_training_molecules_out_of_fold(
         noise_pattern=rows['noise_pattern_raw'],
         noise_pattern_pred=pattern_pred,
         oof_folds_ok=n_ok,
+        noise_type=getattr(train_noise, 'noise_type', None),
     )
     scored = int(np.isfinite(oof_mean).sum())
     print(f"      [oof {model_name}] wrote {n} train_oof rows "
           f"({scored} scored, {n - scored} left NaN by a failed fold), "
           f"{n_ok}/{n_folds} inner folds ok", flush=True)
     return n_ok
+
+
+def _held_out_noise_columns(train_noise, n_rows, y_pred=None):
+    """The recorded columns for held-out molecules, as keyword arguments.
+
+    `noise_scale` and `injected_noise` are exactly zero on a held-out molecule --
+    test labels are never corrupted. `noise_pattern` is NOT zero: it is the
+    level-free shape that molecule's region would receive, computed against the
+    TRAINING distribution's cut-points. Passing it is what lets the analysis ask
+    whether a model becomes less certain where the data is unreliable, and lets the
+    zero-level subtraction remove the label-magnitude confound.
+
+    Returns {} when the run recorded no test rows, so every call site degrades to
+    the previous behaviour rather than raising.
+    """
+    if train_noise is None:
+        return {}
+    rows = getattr(train_noise, 'test_rows', lambda: None)()
+    if not rows:
+        return {}
+    if len(rows['canonical_smiles']) != n_rows:
+        print(f"      [noise] {len(rows['canonical_smiles'])} recorded held-out "
+              f"molecules against {n_rows} scored rows -- not writing the shape "
+              f"columns rather than lining up the wrong molecules.", flush=True)
+        return {}
+    out = {
+        'canonical_smiles': rows['canonical_smiles'],
+        'noise_scale': rows['noise_scale_raw'],
+        'noise_pattern': rows['noise_pattern_raw'],
+        'noise_type': getattr(train_noise, 'noise_type', None),
+    }
+    # The sham ceiling on held-out molecules: the same shape recomputed from what
+    # the model PREDICTED. If uncertainty tracks that as closely as it tracks the
+    # real shape, the model is following its own prediction and has learned nothing
+    # about where the data is unreliable. The experimental pipeline writes this
+    # column for held-out rows and QM9 did not, so the two could not be compared.
+    if y_pred is not None:
+        try:
+            out['noise_pattern_pred'] = train_noise.pattern_pred_from_standardised(
+                np.asarray(y_pred, dtype=float).ravel(), rows['noise_pattern_raw'])
+        except Exception as exc:
+            print(f"      [noise] could not recompute the shape from the held-out "
+                  f"predictions ({type(exc).__name__}: {exc}) -- leaving the column "
+                  f"blank rather than writing something else under its name.",
+                  flush=True)
+    return out
 
 
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None, train_noise=None):
@@ -1644,6 +1691,7 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                 epistemic_uncertainty=epistemic,
                 aleatoric_uncertainty=aleatoric,
                 split='test',
+                **_held_out_noise_columns(train_noise, len(y_pred_mean), y_pred_mean),
             )
 
             # The TRAINING molecules, scored by forests that never saw their
@@ -1814,6 +1862,7 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             epistemic_uncertainty=epistemic,
             aleatoric_uncertainty=aleatoric,
             split='test',
+            **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
 
         # The TRAINING molecules. `x_val_train` is the training split plus the
@@ -2162,6 +2211,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             epistemic_uncertainty=epistemic,
             aleatoric_uncertainty=aleatoric,
             split='test',
+            **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
 
         # The TRAINING molecules. A GP has ZERO posterior variance at its own
@@ -2657,6 +2707,7 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             epistemic_uncertainty=epistemic,
             aleatoric_uncertainty=aleatoric,
             split='test',
+            **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
 
         # The TRAINING molecules. This family fits on the training split alone --
@@ -3351,6 +3402,7 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             epistemic_uncertainty=epistemic,
             aleatoric_uncertainty=aleatoric,
             split='test',
+            **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
 
         # The TRAINING molecules. This family fits on the training split alone;

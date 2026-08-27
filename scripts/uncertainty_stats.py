@@ -1,0 +1,981 @@
+"""Statistics for the per-molecule uncertainty runs (QM9 and the three
+experimental datasets), as one self-contained module.
+
+Nothing else in any of the three repositories computes a number from these runs:
+`merge_results.py` concatenates task files and stops. This module is what the
+figure script calls.
+
+--------------------------------------------------------------------------
+What is in here
+--------------------------------------------------------------------------
+
+``load_uncertainty``            reads both producers' schemas into one frame
+``q4_plain_correlation``        the honest near-zero (NOT the answer)
+``q4_error_ratio``              the answer to question 4
+``confound_controlled_effect``  question B, with the zero-level subtraction
+                                and the sham ceiling
+``permutation_null``            the null the runbook specifies, and the naive
+                                one it warns about, behind one flag
+``q5_mean_uncertainty``         a POPULATION statement, labelled as one
+``q6_error_ranking``            uncertainty against error from the CLEAN label
+
+Two diagnostics that report on the inputs rather than on the science:
+``check_pattern_invariance`` and ``check_noise_scale_redundancy``.
+
+--------------------------------------------------------------------------
+Two things a reader must know before using any number from here
+--------------------------------------------------------------------------
+
+1. ``noise_scale`` equals the noise level times ``noise_pattern`` exactly, for
+   every condition. On any ranking statistic the two are therefore
+   interchangeable and ``noise_scale`` adds nothing: within a fixed noise level
+   they order the molecules identically (measured Spearman 1.000). This module
+   deliberately computes the pattern statistics only. ``noise_scale`` is carried
+   through the loader for provenance and is used by no reported statistic.
+   ``check_noise_scale_redundancy`` exists to verify that identity on real data;
+   it is a diagnostic, not a result.
+
+2. Every correlation here is computed inside one
+   (dataset, model, rep, condition, noise level, split) cell, and
+   ``assert_single_cell`` is called before each one. Pooling across a dimension
+   that should have been conditioned on is what produced the paper's per-molecule
+   claim in the first place, so the assertion is not decoration.
+
+--------------------------------------------------------------------------
+Canonical column names
+--------------------------------------------------------------------------
+
+Neither producer is renamed on disk; both are normalised on read. The canonical
+frame uses:
+
+    dataset, model, rep, condition, sigma, fold, split, mol_id, sample_idx,
+    y_true_clean, y_pred, uncertainty, injected_noise, noise_scale,
+    noise_pattern, noise_pattern_pred, oof_folds_ok, source_file
+
+``condition`` is the noise type. It is read from whichever of ``condition``,
+``strategy``, ``noise_type`` or ``task_strategy`` the producer wrote, and from
+the file name for QM9 files that carry none of them.
+
+``y_true_clean`` is the UNCORRUPTED label on both producers: QM9 writes it as
+``y_true_original``; on KIRBy ``y_true`` is already the clean label and the
+corrupted one is ``y_true + injected_noise``.
+
+``fold`` is the unit within which one model was fitted. On KIRBy that is the
+outer scaffold fold. QM9 has no outer fold, so ``fold`` is built from
+``file_no`` and ``iteration``; it is a string on both producers because it is
+only ever a grouping key.
+"""
+
+from __future__ import annotations
+
+import warnings
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy.stats import rankdata
+
+__all__ = [
+    'UncertaintySchemaError',
+    'ConditioningError',
+    'CELL_COLS',
+    'PERM_GROUP_COLS',
+    'load_uncertainty',
+    'assert_single_cell',
+    'q4_plain_correlation',
+    'q4_error_ratio',
+    'confound_controlled_effect',
+    'permutation_null',
+    'q5_mean_uncertainty',
+    'q6_error_ranking',
+    'check_pattern_invariance',
+    'check_noise_scale_redundancy',
+    'STATISTICS',
+]
+
+
+class UncertaintySchemaError(ValueError):
+    """A file could not be mapped onto either producer's schema."""
+
+
+class ConditioningError(AssertionError):
+    """A statistic was handed a frame spanning more than one cell."""
+
+
+# The cell every correlation must be computed inside.
+CELL_COLS = ['dataset', 'model', 'rep', 'condition', 'sigma', 'split']
+
+# The permutation null's group: the cell, plus the fold, because one fold is one
+# fitted model and the noise was drawn once per fold.
+PERM_GROUP_COLS = ['dataset', 'model', 'rep', 'condition', 'split', 'fold', 'sigma']
+
+# The columns that identify a cell without the noise level, used for the
+# zero-level subtraction.
+_BASE_COLS = ['dataset', 'model', 'rep', 'condition', 'split']
+
+CANONICAL_COLS = [
+    'dataset', 'model', 'rep', 'condition', 'sigma', 'fold', 'split',
+    'mol_id', 'sample_idx', 'y_true_clean', 'y_pred', 'uncertainty',
+    'injected_noise', 'noise_scale', 'noise_pattern', 'noise_pattern_pred',
+    'oof_folds_ok', 'source_file',
+]
+
+# The conditions the injector can produce. Read from the injector itself where it
+# can be imported, so this list cannot drift from the one that draws the noise --
+# it already had: this file was written against the six pre-redesign names and the
+# redesign renamed all of them, so a real run's file name matched nothing.
+#
+# The retired names stay recognised so a file written before the redesign still
+# parses; they are not produced any more.
+_RETIRED_CONDITIONS = {
+    'legacy', 'quantile', 'threshold', 'hetero', 'valprop',
+    'heteroscedastic', 'value_proportional', 'outlier',
+}
+try:  # pragma: no cover - depends on the injector being installed
+    from noiseInject import CONDITIONS as _INJECTOR_CONDITIONS
+    _CURRENT_CONDITIONS = set(_INJECTOR_CONDITIONS)
+except Exception:
+    _CURRENT_CONDITIONS = {
+        'gaussian', 'laplace', 'censoring', 'grouped_wider', 'grouped_shifted',
+        'student_t_nu3', 'student_t_nu5', 'student_t_nu10',
+        'outlier_p01', 'outlier_p05', 'outlier_p10',
+    }
+_VALID_CONDITIONS = _CURRENT_CONDITIONS | _RETIRED_CONDITIONS
+_CONDITION_NORMALISE = {
+    'heteroscedastic': 'hetero',
+    'value_proportional': 'valprop',
+}
+
+_DEFAULT_MIN_N = 20
+
+
+# ---------------------------------------------------------------------------
+# small numeric helpers
+# ---------------------------------------------------------------------------
+
+def _spearman(a, b):
+    """Spearman correlation that returns NaN instead of warning on a constant.
+
+    scipy emits a ConstantInputWarning and returns NaN; a constant input is a
+    routine and meaningful outcome here (at noise level zero the injected noise
+    is identically zero), so it is handled rather than warned about.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    m = np.isfinite(a) & np.isfinite(b)
+    if m.sum() < 3:
+        return np.nan
+    a, b = a[m], b[m]
+    if np.unique(a).size < 2 or np.unique(b).size < 2:
+        return np.nan
+    ra, rb = rankdata(a), rankdata(b)
+    ra = ra - ra.mean()
+    rb = rb - rb.mean()
+    denom = np.sqrt((ra * ra).sum() * (rb * rb).sum())
+    if denom == 0:
+        return np.nan
+    return float((ra * rb).sum() / denom)
+
+
+def _auc(score, positive):
+    """Rank-based AUC (Mann-Whitney U / n_pos n_neg). Ties handled by ranks."""
+    score = np.asarray(score, dtype=np.float64)
+    positive = np.asarray(positive, dtype=bool)
+    m = np.isfinite(score)
+    score, positive = score[m], positive[m]
+    n_pos = int(positive.sum())
+    n_neg = int(positive.size - n_pos)
+    if n_pos == 0 or n_neg == 0:
+        return np.nan
+    r = rankdata(score)
+    return float((r[positive].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
+
+
+def _slope(x, y):
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    m = np.isfinite(x) & np.isfinite(y)
+    if m.sum() < 2 or np.unique(x[m]).size < 2:
+        return np.nan
+    return float(np.polyfit(x[m], y[m], 1)[0])
+
+
+def _require_columns(df, cols, what):
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise UncertaintySchemaError(
+            f"{what} needs column(s) {missing}, which the frame does not have. "
+            f"Present: {sorted(df.columns)}")
+    for c in cols:
+        if df[c].isna().all():
+            raise UncertaintySchemaError(
+                f"{what} needs column '{c}', which is present but entirely "
+                f"missing (all NaN). A file predating the pipeline rewrite does "
+                f"not carry it; nothing here reconstructs it.")
+
+
+# ---------------------------------------------------------------------------
+# E6 — the conditioning guard
+# ---------------------------------------------------------------------------
+
+def assert_single_cell(df, cols=None):
+    """Raise unless `df` is exactly one (dataset, model, rep, condition, noise
+    level, split) cell.
+
+    Called before every correlation in this module. Pooling across one of these
+    dimensions produces a number that looks like a per-molecule result and is
+    not one; this is the only thing that stops that recurring.
+    """
+    cols = list(CELL_COLS if cols is None else cols)
+    present = [c for c in cols if c in df.columns]
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise ConditioningError(
+            f"cannot verify the conditioning: column(s) {missing} are absent, "
+            f"so the frame may be pooled across them without it being visible.")
+    offenders = {}
+    for c in present:
+        vals = df[c].dropna().unique()
+        if len(vals) > 1:
+            offenders[c] = sorted(map(str, vals))[:8]
+    if offenders:
+        raise ConditioningError(
+            "a correlation was handed a frame pooled across "
+            + ", ".join(f"{c} ({len(v)}+ values: {v})" for c, v in offenders.items())
+            + ". Condition on it first.")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# E1 — the loader
+# ---------------------------------------------------------------------------
+
+def _condition_from_name(stem):
+    stem = stem.replace('_uncertainty_values', '')
+    for prefix in ('uncertainty_', 'anova_'):
+        if stem.startswith(prefix):
+            rest = stem[len(prefix):]
+            for s in sorted(_VALID_CONDITIONS, key=len, reverse=True):
+                if rest.startswith(s + '_'):
+                    return _CONDITION_NORMALISE.get(s, s)
+    return None
+
+
+def _pick(df, names):
+    for n in names:
+        if n in df.columns:
+            return df[n]
+    return None
+
+
+def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
+    """QM9's writer -> canonical names. No QM9 column is renamed on disk."""
+    required_new = ['split', 'canonical_smiles', 'noise_pattern']
+    missing_new = [c for c in required_new if c not in df.columns]
+    if missing_new and strict:
+        raise UncertaintySchemaError(
+            f"{path}: this QM9 uncertainty file predates the pipeline rewrite — "
+            f"it is missing {missing_new}. Without 'noise_pattern' the "
+            f"zero-level subtraction cannot be formed and without 'split' there "
+            f"are no out-of-fold training rows. Nothing here reconstructs the "
+            f"injected noise by fitting a line to it. Re-run the pipeline, or "
+            f"pass strict=False to load it for test-split statistics only.")
+
+    out = pd.DataFrame(index=df.index)
+    out['dataset'] = df['dataset'] if 'dataset' in df.columns else dataset_name
+    out['model'] = df['model']
+    rep = _pick(df, ['rep', 'representation'])
+    out['rep'] = rep
+    cond = _pick(df, ['condition', 'strategy', 'noise_type', 'task_strategy'])
+    if cond is None:
+        cond = _condition_from_name(Path(path).stem)
+        if cond is None:
+            if strict:
+                raise UncertaintySchemaError(
+                    f"{path}: no condition column and the file name does not "
+                    f"name a known condition, so rows cannot be conditioned on "
+                    f"the noise type. Known: {sorted(_VALID_CONDITIONS)}")
+            cond = 'unspecified'
+    out['condition'] = cond
+    out['condition'] = out['condition'].map(
+        lambda c: _CONDITION_NORMALISE.get(c, c) if isinstance(c, str) else c)
+
+    out['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
+    fno = df['file_no'].astype(str) if 'file_no' in df.columns else None
+    itr = df['iteration'].astype(str) if 'iteration' in df.columns else None
+    if fno is not None and itr is not None:
+        out['fold'] = fno + ':' + itr
+    elif itr is not None:
+        out['fold'] = itr
+    elif fno is not None:
+        out['fold'] = fno
+    else:
+        out['fold'] = '0'
+
+    out['split'] = df['split'] if 'split' in df.columns else 'test'
+    out['mol_id'] = (df['canonical_smiles'] if 'canonical_smiles' in df.columns
+                     else np.nan)
+    out['sample_idx'] = df['sample_idx'] if 'sample_idx' in df.columns else np.nan
+    out['y_true_clean'] = pd.to_numeric(df['y_true_original'], errors='coerce')
+    out['y_pred'] = pd.to_numeric(df['y_pred_mean'], errors='coerce')
+
+    if uncertainty_column == 'calibrated':
+        unc = _pick(df, ['y_pred_std_calibrated', 'y_pred_std_uncalibrated'])
+    elif uncertainty_column == 'uncalibrated':
+        unc = _pick(df, ['y_pred_std_uncalibrated', 'y_pred_std_calibrated'])
+    else:
+        unc = _pick(df, [uncertainty_column])
+        if unc is None:
+            raise UncertaintySchemaError(
+                f"{path}: no column '{uncertainty_column}'.")
+    out['uncertainty'] = pd.to_numeric(unc, errors='coerce')
+
+    for c in ('injected_noise', 'noise_scale', 'noise_pattern',
+              'noise_pattern_pred'):
+        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+    out['oof_folds_ok'] = (pd.to_numeric(df['oof_folds_ok'], errors='coerce')
+                           if 'oof_folds_ok' in df.columns else np.nan)
+    out['source_file'] = str(path)
+    return out
+
+
+def _normalise_kirby(df, path, strict, dataset_name):
+    """KIRBy's writer -> canonical names. KIRBy's schema is the reference."""
+    out = pd.DataFrame(index=df.index)
+    ds = _pick(df, ['dataset', 'task_dataset'])
+    out['dataset'] = ds if ds is not None else (dataset_name or Path(path).parent.name)
+    model = _pick(df, ['model', 'task_model'])
+    rep = _pick(df, ['rep', 'representation', 'task_rep'])
+    if model is None or rep is None:
+        # The five-column legacy files carry neither; the file name does.
+        stem = Path(path).stem.replace('_uncertainty_values', '')
+        bits = stem.split('_')
+        if len(bits) >= 2:
+            model = model if model is not None else bits[0]
+            rep = rep if rep is not None else bits[1]
+    out['model'] = model
+    out['rep'] = rep
+
+    cond = _pick(df, ['condition', 'noise_type', 'strategy', 'task_strategy'])
+    missing = []
+    if cond is None:
+        missing.append('condition (written as noise_type/strategy)')
+    for c in ('split', 'injected_noise', 'noise_pattern'):
+        if c not in df.columns:
+            missing.append(c)
+    if missing and strict:
+        raise UncertaintySchemaError(
+            f"{path}: this experimental uncertainty file predates the runner "
+            f"rewrite — it is missing {missing}. Without 'split' it holds test "
+            f"molecules only; without 'injected_noise' the corrupted molecules "
+            f"cannot be identified; without 'noise_pattern' the zero-level "
+            f"subtraction cannot be formed; and without the condition, rows "
+            f"from different noise types cannot be told apart. Nothing here "
+            f"reconstructs any of them. Re-run, or pass strict=False to load "
+            f"it for whatever it can still support.")
+    # A file that names no condition gets 'unspecified' rather than NaN, so the
+    # conditioning guard and every group key can still SEE the column. An
+    # all-NaN column would let a pooled frame slip past `assert_single_cell`.
+    out['condition'] = cond if cond is not None else 'unspecified'
+    out['condition'] = out['condition'].map(
+        lambda c: _CONDITION_NORMALISE.get(c, c) if isinstance(c, str) else c)
+
+    out['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
+    out['fold'] = df['fold'].astype(str) if 'fold' in df.columns else '0'
+    out['split'] = df['split'] if 'split' in df.columns else 'test'
+    out['mol_id'] = df['mol_idx'] if 'mol_idx' in df.columns else np.nan
+    out['sample_idx'] = df['sample_idx'] if 'sample_idx' in df.columns else np.nan
+    out['y_true_clean'] = pd.to_numeric(df['y_true'], errors='coerce')
+    out['y_pred'] = pd.to_numeric(df['y_pred'], errors='coerce')
+    out['uncertainty'] = pd.to_numeric(df['uncertainty'], errors='coerce')
+    for c in ('injected_noise', 'noise_scale', 'noise_pattern',
+              'noise_pattern_pred'):
+        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+    out['oof_folds_ok'] = (pd.to_numeric(df['oof_folds_ok'], errors='coerce')
+                           if 'oof_folds_ok' in df.columns else np.nan)
+    out['source_file'] = str(path)
+    return out
+
+
+def _detect_schema(df):
+    if 'y_pred_mean' in df.columns or 'y_true_original' in df.columns:
+        return 'qm9'
+    if 'y_pred' in df.columns and 'uncertainty' in df.columns:
+        return 'kirby'
+    return None
+
+
+def load_uncertainty(paths, strict=True, uncertainty_column='uncalibrated',
+                     dataset_name=None, pattern='*_uncertainty_values.csv',
+                     on_error='raise'):
+    """Read per-molecule uncertainty files from either producer into one frame.
+
+    Parameters
+    ----------
+    paths : str | Path | iterable
+        Files, directories (searched with `pattern`, recursively), or a mix.
+    strict : bool
+        True (default) refuses a file that predates the pipeline rewrite,
+        naming the columns it lacks, rather than loading something that cannot
+        answer the question. False loads it for whatever it can support.
+    uncertainty_column : {'uncalibrated', 'calibrated'} or a column name
+        QM9 writes both. Temperature scaling multiplies the uncalibrated value
+        by one constant per file, so the two give identical RANKS and every
+        rank statistic in this module is unaffected by the choice. It matters
+        only for `q5_mean_uncertainty`, which is on the raw scale.
+    dataset_name : str, optional
+        Used for QM9 files, which carry no dataset column. Defaults to 'QM9'.
+    on_error : {'raise', 'skip'}
+        What to do with a file that cannot be mapped.
+
+    Returns
+    -------
+    pandas.DataFrame with the canonical columns listed in the module docstring.
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    files = []
+    for p in paths:
+        p = Path(p)
+        if p.is_dir():
+            files.extend(sorted(p.rglob(pattern)))
+        else:
+            files.append(p)
+    if not files:
+        raise UncertaintySchemaError(f"no uncertainty files found under {paths!r}")
+
+    frames, problems = [], []
+    for f in files:
+        try:
+            raw = pd.read_csv(f)
+            if len(raw) == 0:
+                continue
+            schema = _detect_schema(raw)
+            if schema == 'qm9':
+                frames.append(_normalise_qm9(
+                    raw, f, strict, uncertainty_column,
+                    dataset_name if dataset_name is not None else 'QM9'))
+            elif schema == 'kirby':
+                frames.append(_normalise_kirby(raw, f, strict, dataset_name))
+            else:
+                raise UncertaintySchemaError(
+                    f"{f}: matches neither schema. A QM9 file has 'y_pred_mean' "
+                    f"and 'y_true_original'; a KIRBy file has 'y_pred' and "
+                    f"'uncertainty'. Found: {sorted(raw.columns)}")
+        except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+            if on_error == 'raise':
+                raise
+            problems.append((str(f), str(exc)))
+    if problems:
+        warnings.warn(
+            "skipped %d uncertainty file(s):\n  " % len(problems)
+            + "\n  ".join(f"{p}: {e}" for p, e in problems), stacklevel=2)
+    if not frames:
+        raise UncertaintySchemaError(
+            f"every candidate file failed to load: {problems}")
+
+    out = pd.concat(frames, ignore_index=True)
+    out = out.reindex(columns=CANONICAL_COLS)
+    out['fold'] = out['fold'].astype(str)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# shared machinery for the per-cell statistics
+# ---------------------------------------------------------------------------
+
+def _cell_cols(extra_group_cols=None):
+    return CELL_COLS + [c for c in (extra_group_cols or [])
+                        if c not in CELL_COLS]
+
+
+def _cell_iter(df, split=None, min_n=_DEFAULT_MIN_N, extra_group_cols=None):
+    """Yield (key_dict, cell_frame) for each conditioned cell.
+
+    `extra_group_cols` conditions on MORE than the contract's cell. The obvious
+    use is `['fold']`: one fold is one fitted model on its own molecules, so a
+    correlation pooled across folds can be produced by differences between the
+    folds rather than by anything inside one. The default is the cell the
+    specification names; pass `['fold']` to check that a result survives.
+    """
+    cols = _cell_cols(extra_group_cols)
+    d = df
+    if split is not None:
+        d = d[d['split'] == split]
+    if len(d) == 0:
+        return
+    for key, cell in d.groupby(cols, dropna=False, sort=True):
+        rec = dict(zip(cols, key))
+        assert_single_cell(cell)
+        rec['n'] = int(len(cell))
+        rec['n_sufficient'] = bool(len(cell) >= min_n)
+        yield rec, cell
+
+
+def _base_cols(extra_group_cols=None):
+    return _BASE_COLS + [c for c in (extra_group_cols or [])
+                         if c not in _BASE_COLS and c != 'sigma']
+
+
+def _subtract_zero_level(out, value_cols, base_cols=None):
+    """Attach the noise-level-zero value of each `value_cols` entry and the
+    difference, matched within (dataset, model, rep, condition, split)."""
+    base_cols = list(_BASE_COLS if base_cols is None else base_cols)
+    if len(out) == 0:
+        for c in value_cols:
+            out[c + '_at_sigma0'] = []
+            out[c + '_baselined'] = []
+        return out
+    zero = out[np.isclose(out['sigma'].astype(float), 0.0)]
+    zero = zero[base_cols + list(value_cols)].rename(
+        columns={c: c + '_at_sigma0' for c in value_cols})
+    zero = zero.drop_duplicates(subset=base_cols)
+    out = out.merge(zero, on=base_cols, how='left')
+    for c in value_cols:
+        out[c + '_baselined'] = out[c] - out[c + '_at_sigma0']
+    return out
+
+
+# ---------------------------------------------------------------------------
+# E2 — the two question-4 statistics
+# ---------------------------------------------------------------------------
+
+def q4_plain_correlation(df, split='train_oof', min_n=_DEFAULT_MIN_N,
+                         extra_group_cols=None):
+    """The PLAIN correlation between predicted uncertainty and the size of the
+    injected noise. **This is not the answer to question 4.**
+
+    A near-zero value here is the EXPECTED result and is not a failure of the
+    models. Under cross-fitting the model that scores a molecule never saw that
+    molecule's noise draw, and under Gaussian noise every molecule receives the
+    same noise scale, so there is nothing in the label for the model to have
+    learned about the individual draw. The design forbids any other answer. It
+    is reported because it is the number a reader will otherwise assume was
+    hidden, and because a LARGE value here would be evidence of leakage.
+
+    The answer to question 4 is `q4_error_ratio`.
+
+    The zero-level subtraction, which the confound control needs, is DEGENERATE
+    here and is reported as NaN: at noise level zero `injected_noise` is
+    identically zero, so its correlation with anything is undefined rather than
+    zero. `rho_raw` is the column to read. `rho_baselined` is emitted only for
+    symmetry with `confound_controlled_effect` and will be NaN in every ordinary
+    run; `baseline_defined` says why.
+
+    Returns one row per (dataset, model, rep, condition, noise level, split).
+    """
+    _require_columns(df, ['injected_noise', 'uncertainty'], 'q4_plain_correlation')
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        size = np.abs(cell['injected_noise'].to_numpy(dtype=np.float64))
+        rec['noise_size_constant'] = bool(np.unique(size[np.isfinite(size)]).size < 2)
+        rec['rho_raw'] = (_spearman(cell['uncertainty'], size)
+                          if rec['n_sufficient'] else np.nan)
+        rows.append(rec)
+    out = pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'noise_size_constant', 'rho_raw']))
+    out = _subtract_zero_level(out, ['rho_raw'],
+                               base_cols=_base_cols(extra_group_cols))
+    out = out.rename(columns={'rho_raw_at_sigma0': 'rho_at_sigma0',
+                              'rho_raw_baselined': 'rho_baselined'})
+    out['baseline_defined'] = out['rho_at_sigma0'].notna()
+    out['statistic'] = 'q4_plain_correlation_NOT_THE_ANSWER'
+    return out
+
+
+def q4_error_ratio(df, split='train_oof', min_n=_DEFAULT_MIN_N, top_frac=0.10,
+                   extra_group_cols=None):
+    """The answer to question 4: does the predicted uncertainty add anything on
+    top of the cross-fitted error?
+
+    The out-of-fold error `|y_true + injected_noise - y_pred|` DOES track the
+    injected noise, because the corrupted label is part of it. The question is
+    whether dividing that error by the predicted uncertainty ranks corrupted
+    labels better than the error alone. Both rankings and their difference are
+    reported; `rho_delta` and `auc_delta` are the numbers that answer it, and a
+    delta of zero means the uncertainty added nothing.
+
+    `rho_*` is the Spearman correlation against the size of the injected noise.
+    `auc_*` is the probability that a molecule in the most-corrupted `top_frac`
+    of the cell scores above one outside it.
+
+    At noise level zero every molecule receives exactly zero noise, so the
+    target is constant and every column is NaN. That is the negative control
+    working, not a gap.
+    """
+    _require_columns(df, ['injected_noise', 'uncertainty', 'y_true_clean', 'y_pred'],
+                     'q4_error_ratio')
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        eps = cell['injected_noise'].to_numpy(dtype=np.float64)
+        y = cell['y_true_clean'].to_numpy(dtype=np.float64)
+        p = cell['y_pred'].to_numpy(dtype=np.float64)
+        u = cell['uncertainty'].to_numpy(dtype=np.float64)
+        err = np.abs(y + eps - p)
+        usable = np.isfinite(u) & (u > 0)
+        rec['n_uncertainty_unusable'] = int((~usable).sum())
+        size = np.abs(eps)
+        ratio = np.where(usable, err / np.where(usable, u, 1.0), np.nan)
+        if not rec['n_sufficient']:
+            rec.update({k: np.nan for k in
+                        ('rho_error', 'rho_ratio', 'rho_delta',
+                         'auc_error', 'auc_ratio', 'auc_delta')})
+            rows.append(rec)
+            continue
+        rec['rho_error'] = _spearman(err, size)
+        rec['rho_ratio'] = _spearman(ratio, size)
+        rec['rho_delta'] = rec['rho_ratio'] - rec['rho_error']
+        finite_size = size[np.isfinite(size)]
+        if finite_size.size and np.unique(finite_size).size > 1:
+            thr = np.quantile(finite_size, 1.0 - top_frac)
+            pos = size >= thr
+            if pos.all():
+                # A condition that leaves most molecules at exactly zero noise
+                # (outlier, threshold) puts the quantile ON the zero mass, so
+                # `>=` selects everything. The corrupted set is then the
+                # molecules above it.
+                pos = size > thr
+            if pos.all() or not pos.any():
+                rec['auc_error'] = rec['auc_ratio'] = rec['auc_delta'] = np.nan
+            else:
+                rec['n_corrupted'] = int(pos.sum())
+                rec['auc_error'] = _auc(err, pos)
+                rec['auc_ratio'] = _auc(np.where(np.isfinite(ratio), ratio, -np.inf), pos)
+                rec['auc_delta'] = rec['auc_ratio'] - rec['auc_error']
+        else:
+            rec['auc_error'] = rec['auc_ratio'] = rec['auc_delta'] = np.nan
+        rows.append(rec)
+    out = pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols)
+        + ['n', 'n_sufficient', 'n_uncertainty_unusable', 'n_corrupted',
+           'rho_error', 'rho_ratio', 'rho_delta',
+           'auc_error', 'auc_ratio', 'auc_delta']))
+    out['top_frac'] = top_frac
+    out['statistic'] = 'q4_error_ratio_THE_ANSWER'
+    return out
+
+
+# ---------------------------------------------------------------------------
+# E3 — the confound control
+# ---------------------------------------------------------------------------
+
+def confound_controlled_effect(df, split=None, min_n=_DEFAULT_MIN_N,
+                               extra_group_cols=None):
+    """Question B: does the model become less certain where the labels are
+    unreliable, once the label-magnitude confound is removed?
+
+    Correlate predicted uncertainty against `noise_pattern` — the SHAPE of the
+    noise at a fixed reference level of 1.0, identical at every noise level
+    including zero — and subtract the same correlation at noise level zero.
+    The zero-level model saw the same labels and no corruption at all, so its
+    correlation is exactly the confound: whatever of the pattern is a function
+    of the label itself. `effect` is what is left.
+
+    The sham ceiling: `noise_pattern_pred` is the same shape recomputed from the
+    model's own PREDICTED label, baselined the same way. An effect that is no
+    larger against the real shape than against the predicted one is the model
+    tracking its own prediction, not the noise. `is_detection` is
+    `effect > effect_pred`, and it is a necessary condition, not a sufficient
+    one.
+
+    `noise_scale` is deliberately not used: it equals the noise level times
+    `noise_pattern` exactly, so within a level the two rank molecules
+    identically and reporting both would be reporting one number twice.
+    """
+    _require_columns(df, ['noise_pattern', 'uncertainty'],
+                     'confound_controlled_effect')
+    have_pred = ('noise_pattern_pred' in df.columns
+                 and df['noise_pattern_pred'].notna().any())
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        if rec['n_sufficient']:
+            rec['rho_pattern'] = _spearman(cell['uncertainty'], cell['noise_pattern'])
+            rec['rho_pattern_pred'] = (
+                _spearman(cell['uncertainty'], cell['noise_pattern_pred'])
+                if have_pred else np.nan)
+        else:
+            rec['rho_pattern'] = np.nan
+            rec['rho_pattern_pred'] = np.nan
+        pat = cell['noise_pattern'].to_numpy(dtype=np.float64)
+        pat = pat[np.isfinite(pat)]
+        rec['pattern_constant'] = bool(np.unique(pat).size < 2)
+        rows.append(rec)
+    out = pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'pattern_constant',
+                     'rho_pattern', 'rho_pattern_pred']))
+    out = _subtract_zero_level(out, ['rho_pattern', 'rho_pattern_pred'],
+                               base_cols=_base_cols(extra_group_cols))
+    out = out.rename(columns={'rho_pattern_baselined': 'effect',
+                              'rho_pattern_pred_baselined': 'effect_pred'})
+    out['is_detection'] = (out['effect'].notna() & out['effect_pred'].notna()
+                           & (out['effect'] > out['effect_pred']))
+    out['sham_ceiling_available'] = have_pred
+    out['statistic'] = 'confound_controlled_effect'
+    return out
+
+
+# ---------------------------------------------------------------------------
+# E4 — the permutation null
+# ---------------------------------------------------------------------------
+
+def _error_from(frame_arrays, use_cached):
+    y, p, eps, cached = frame_arrays
+    if use_cached and cached is not None:
+        return cached
+    return np.abs(y + eps - p)
+
+
+def _stat_error_noise_spearman(arrays, use_cached):
+    y, p, eps, cached = arrays
+    err = _error_from(arrays, use_cached)
+    return _spearman(err, np.abs(eps))
+
+
+def _stat_ratio_noise_spearman(arrays, use_cached, unc=None):
+    y, p, eps, cached = arrays
+    err = _error_from(arrays, use_cached)
+    usable = np.isfinite(unc) & (unc > 0)
+    ratio = np.where(usable, err / np.where(usable, unc, 1.0), np.nan)
+    return _spearman(ratio, np.abs(eps))
+
+
+def _stat_unc_noise_spearman(arrays, use_cached, unc=None):
+    _, _, eps, _ = arrays
+    return _spearman(unc, np.abs(eps))
+
+
+STATISTICS = {
+    # the runbook's headline: the cross-fitted error against the injected noise
+    'error_noise_spearman': _stat_error_noise_spearman,
+    # the same thing after dividing by the predicted uncertainty
+    'ratio_noise_spearman': _stat_ratio_noise_spearman,
+    # the plain correlation, for completeness
+    'uncertainty_noise_spearman': _stat_unc_noise_spearman,
+}
+
+
+def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
+                     recompute_error=True, seed=0, split='train_oof',
+                     min_n=_DEFAULT_MIN_N, group_cols=None):
+    """The permutation null for the question-4 statistics.
+
+    The noise is permuted within one
+    (dataset, model, rep, condition, split, fold, noise level) group AND THE
+    ERROR IS RECOMPUTED FROM THE PERMUTED VALUE. Both halves are load-bearing.
+
+    Why `recompute_error=False` is wrong, and why it is still offered: the
+    cross-fitted error is `(y_true - y_pred) + injected_noise`, so it CONTAINS
+    the value being correlated against. Permuting the noise while leaving the
+    error as computed compares an error carrying the real noise with a shuffled
+    copy of that noise, and therefore declares a leak on a simulation that has
+    none. On clean simulated data the naive null gives a band of about
+    [-0.04, +0.04] against an observed +0.62; the correct null gives about
+    [+0.58, +0.62] with the observed value inside it. The flag exists so that
+    fact is demonstrable rather than asserted, and the test file demonstrates
+    it. Leave it at True for any reported number.
+
+    Parameters
+    ----------
+    statistic : str or callable
+        A key of `STATISTICS`, or `f(arrays, use_cached, unc=...) -> float`
+        where `arrays` is `(y_true_clean, y_pred, injected_noise, cached_error)`.
+    recompute_error : bool
+        True (default) is the correct null. False is the naive one.
+
+    Returns
+    -------
+    One row per permutation group: `observed`, `null_mean`, `null_lo`,
+    `null_hi` (the 2.5th and 97.5th percentiles), `observed_inside_null`,
+    and a two-sided permutation p-value.
+    """
+    _require_columns(df, ['injected_noise', 'y_true_clean', 'y_pred', 'uncertainty'],
+                     'permutation_null')
+    fn = STATISTICS[statistic] if isinstance(statistic, str) else statistic
+    name = statistic if isinstance(statistic, str) else getattr(
+        statistic, '__name__', 'custom')
+    group_cols = list(PERM_GROUP_COLS if group_cols is None else group_cols)
+
+    d = df if split is None else df[df['split'] == split]
+    rows = []
+    for key, g in d.groupby(group_cols, dropna=False, sort=True):
+        rec = dict(zip(group_cols, key))
+        assert_single_cell(g)
+        n = len(g)
+        rec['n'] = int(n)
+        y = g['y_true_clean'].to_numpy(dtype=np.float64)
+        p = g['y_pred'].to_numpy(dtype=np.float64)
+        eps = g['injected_noise'].to_numpy(dtype=np.float64)
+        unc = g['uncertainty'].to_numpy(dtype=np.float64)
+        cached = np.abs(y + eps - p) if not recompute_error else None
+
+        def call(e, use_cached):
+            try:
+                return fn((y, p, e, cached), use_cached, unc=unc)
+            except TypeError:
+                return fn((y, p, e, cached), use_cached)
+
+        if n < min_n:
+            rec.update(observed=np.nan, null_mean=np.nan, null_lo=np.nan,
+                       null_hi=np.nan, p_value=np.nan,
+                       observed_inside_null=False, n_permutations=0)
+            rows.append(rec)
+            continue
+
+        rec['observed'] = call(eps, use_cached=False)
+        rng = np.random.default_rng(
+            abs(hash((name, recompute_error, seed, tuple(map(str, key))))) % (2**32))
+        draws = np.empty(n_permutations, dtype=np.float64)
+        for k in range(n_permutations):
+            draws[k] = call(rng.permutation(eps), use_cached=not recompute_error)
+        finite = draws[np.isfinite(draws)]
+        rec['n_permutations'] = int(finite.size)
+        if finite.size == 0 or not np.isfinite(rec['observed']):
+            rec.update(null_mean=np.nan, null_lo=np.nan, null_hi=np.nan,
+                       p_value=np.nan, observed_inside_null=False)
+        else:
+            rec['null_mean'] = float(finite.mean())
+            rec['null_lo'] = float(np.percentile(finite, 2.5))
+            rec['null_hi'] = float(np.percentile(finite, 97.5))
+            centre = rec['null_mean']
+            extreme = int((np.abs(finite - centre) >= abs(rec['observed'] - centre)).sum())
+            rec['p_value'] = (extreme + 1) / (finite.size + 1)
+            rec['observed_inside_null'] = bool(
+                rec['null_lo'] <= rec['observed'] <= rec['null_hi'])
+        rows.append(rec)
+
+    out = pd.DataFrame(rows)
+    out['statistic'] = name
+    out['null_kind'] = 'correct_recomputed' if recompute_error else 'naive_UNSOUND'
+    return out
+
+
+# ---------------------------------------------------------------------------
+# E5 — question 5 and question 6
+# ---------------------------------------------------------------------------
+
+def q5_mean_uncertainty(df, split=None, min_n=1, extra_group_cols=None):
+    """Question 5: the mean predicted uncertainty against the noise level.
+
+    **This is a statement about the population, not about any molecule.** It
+    says that a model trained on noisier labels reports more uncertainty on
+    average. It says nothing about whether the molecules whose labels were
+    corrupted are the ones that come back uncertain — that is question 4, and
+    `q4_error_ratio` is where it is answered. The `level_of_inference` column
+    carries the label so it cannot be quoted as a per-molecule result.
+
+    Unlike every other statistic here this one is on the raw uncertainty scale,
+    so the `uncertainty_column` chosen at load time does change it.
+
+    Also reports, broadcast onto every row of a
+    (dataset, model, rep, condition, split) series, the slope and the Spearman
+    correlation of the mean uncertainty against the noise level.
+    """
+    _require_columns(df, ['uncertainty'], 'q5_mean_uncertainty')
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        u = cell['uncertainty'].to_numpy(dtype=np.float64)
+        u = u[np.isfinite(u)]
+        rec['mean_uncertainty'] = float(u.mean()) if u.size else np.nan
+        rec['median_uncertainty'] = float(np.median(u)) if u.size else np.nan
+        rec['sd_uncertainty'] = float(u.std(ddof=1)) if u.size > 1 else np.nan
+        rows.append(rec)
+    out = pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'mean_uncertainty',
+                     'median_uncertainty', 'sd_uncertainty']))
+    if len(out):
+        base = _base_cols(extra_group_cols)
+        trend = out.groupby(base, dropna=False).apply(
+            lambda g: pd.Series({
+                'slope_mean_unc_vs_sigma': _slope(g['sigma'], g['mean_uncertainty']),
+                'rho_mean_unc_vs_sigma': _spearman(g['sigma'], g['mean_uncertainty']),
+                'n_levels': int(g['sigma'].nunique()),
+            }), include_groups=False).reset_index()
+        out = out.merge(trend, on=base, how='left')
+    out['level_of_inference'] = 'population_not_per_molecule'
+    out['statistic'] = 'q5_mean_uncertainty'
+    return out
+
+
+def q6_error_ranking(df, split=None, min_n=_DEFAULT_MIN_N,
+                     extra_group_cols=None):
+    """Question 6: does predicted uncertainty rank the size of the error?
+
+    The error is taken against the CLEAN label, `|y_true_clean - y_pred|`, and
+    the correlation is computed WITHIN each noise level. Both departures matter:
+    the error against the noisy label mixes in the corruption that was added to
+    the label, and pooling across noise levels measures the population trend of
+    question 5 wearing question 6's name.
+
+    The clean label is available on both producers: QM9 writes it as
+    `y_true_original`, and on KIRBy `y_true` IS the clean label with the
+    corrupted one being `y_true + injected_noise`. The loader maps both to
+    `y_true_clean`.
+    """
+    _require_columns(df, ['uncertainty', 'y_true_clean', 'y_pred'],
+                     'q6_error_ranking')
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        err = np.abs(cell['y_true_clean'].to_numpy(dtype=np.float64)
+                     - cell['y_pred'].to_numpy(dtype=np.float64))
+        rec['rho_unc_vs_clean_error'] = (_spearman(cell['uncertainty'], err)
+                                         if rec['n_sufficient'] else np.nan)
+        rec['mean_abs_error_clean'] = (float(np.nanmean(err))
+                                       if np.isfinite(err).any() else np.nan)
+        rows.append(rec)
+    out = pd.DataFrame(rows, columns=(
+        _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'rho_unc_vs_clean_error',
+                     'mean_abs_error_clean']))
+    out['statistic'] = 'q6_error_ranking'
+    out['error_reference'] = 'clean_label'
+    return out
+
+
+# ---------------------------------------------------------------------------
+# diagnostics — statements about the inputs, not results
+# ---------------------------------------------------------------------------
+
+def check_pattern_invariance(df, tol=1e-9):
+    """Verify the premise of the zero-level subtraction: `noise_pattern` must be
+    identical at every noise level for a given molecule, including zero.
+
+    A diagnostic, not a result. Returns one row per
+    (dataset, model, rep, condition, split, fold, molecule-set) with the largest
+    spread of the pattern across noise levels and whether it is within `tol`.
+    """
+    _require_columns(df, ['noise_pattern', 'mol_id'], 'check_pattern_invariance')
+    keys = ['dataset', 'model', 'rep', 'condition', 'split', 'fold', 'mol_id']
+    g = df.groupby(keys, dropna=False)['noise_pattern']
+    spread = (g.max() - g.min()).reset_index(name='pattern_spread_across_levels')
+    lvl = df.groupby(keys, dropna=False)['sigma'].nunique().reset_index(
+        name='n_levels')
+    out = spread.merge(lvl, on=keys, how='left')
+    out['invariant'] = out['pattern_spread_across_levels'].fillna(0.0).abs() <= tol
+    return out
+
+
+def check_noise_scale_redundancy(df, min_n=_DEFAULT_MIN_N):
+    """Verify, on real data, the claim this module relies on: within one noise
+    level `noise_scale` equals the level times `noise_pattern`, so the two rank
+    molecules identically and only the pattern is reported.
+
+    A diagnostic, not a result. `rho` should be 1.000 wherever the pattern
+    varies, and `max_abs_deviation` should be at machine precision.
+    """
+    _require_columns(df, ['noise_scale', 'noise_pattern'],
+                     'check_noise_scale_redundancy')
+    rows = []
+    for rec, cell in _cell_iter(df, split=None, min_n=min_n):
+        sc = cell['noise_scale'].to_numpy(dtype=np.float64)
+        pt = cell['noise_pattern'].to_numpy(dtype=np.float64)
+        sig = float(rec['sigma'])
+        rec['rho_scale_vs_pattern'] = _spearman(sc, pt)
+        dev = np.abs(sc - sig * pt)
+        rec['max_abs_deviation'] = (float(np.nanmax(dev))
+                                    if np.isfinite(dev).any() else np.nan)
+        rows.append(rec)
+    return pd.DataFrame(rows)
