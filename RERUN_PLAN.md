@@ -2441,11 +2441,18 @@ python3 scripts/test_noise_conditions.py
 
 `noise_conditions.json` at the repository root says what the study runs — four conditions at full
 grid, two at depth, one optional, four dropped and one never to be built, each with the measurement
-behind it (§13.9). The file is **read by tests on both sides**, not merely documented: this one
-checks that every name in it resolves in the Python injector with the settled parameters, and
-`rust/tests/noise_gates.rs` checks the same against the Rust injector and its command-line defaults.
-Both were verified to fail — put a dropped setting back and the Python gate names it; change a
-settled parameter and the Rust gate names the number and the number it should be.
+behind it (§13.9). The file is **read by tests, not merely documented**, in three places:
+
+| Checked | By | Against |
+|---|---|---|
+| The Python injector | `scripts/test_noise_conditions.py` | every name resolves in `noiseInject.CONDITIONS` with the settled parameters |
+| The Rust injector | `rust/tests/noise_gates.rs` | the self-test covers every condition that runs, the dropped settings stay dropped, and the command-line defaults are the settled settings |
+| The QM9 job generator | `scripts/test_noise_conditions.py` | its full-grid set and its spelled-out `--nu` and `--outlier-p` match |
+
+All three were verified to fail: put a dropped setting back and the Python gate names it; change a
+settled parameter and the Rust gate names both the number and the number it should be; move a
+condition between stages and the generator check says which side is about to run and which is about
+to be believed.
 
 **Why a file and not a note.** `scripts/noise_strategy_params.json` was a settings file that nothing
 read: it was never passed to the binary, so for the life of the project it silently meant nothing

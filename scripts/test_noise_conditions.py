@@ -48,6 +48,73 @@ def check(condition, message, failures):
     return condition
 
 
+def check_generator(spec, failures):
+    """The QM9 job generator's condition table must match the settled set.
+
+    Absent (not yet written, or on the cluster only) is not a failure; disagreeing is.
+    """
+    import importlib.util
+
+    path = os.path.join(REPO, 'slurm_scripts_qm9_rerun', 'generate_scripts.py')
+    if not os.path.exists(path):
+        print("\n  (the QM9 job generator is not in this checkout — skipping that check)")
+        return
+
+    module_spec = importlib.util.spec_from_file_location('qm9_generate_scripts', path)
+    module = importlib.util.module_from_spec(module_spec)
+    try:
+        module_spec.loader.exec_module(module)
+    except Exception as exc:                                   # pragma: no cover
+        failures.append(f"the QM9 job generator does not import ({exc}), so its condition "
+                        f"table cannot be checked against the settled set")
+        return
+    if not hasattr(module, 'CONDITIONS'):
+        print("\n  (the job generator has no CONDITIONS table — skipping that check)")
+        return
+
+    # Its keys are job-script labels, not registry names, so match on the flags.
+    settled_stage_1 = set(names(spec, 'stage_1_full_grid'))
+    settings = spec['settings_that_follow']
+    label_to_name = {
+        'gaussian': 'gaussian',
+        'groupedwide': 'grouped_wider',
+        'groupedshift': 'grouped_shifted',
+        'censoring': 'censoring',
+        'studentt': 'student_t_nu5',
+        'outlier': 'outlier_p10',
+        'laplace': 'laplace',
+    }
+    generator_stage_1 = set()
+    for label, entry in module.CONDITIONS.items():
+        flags, _levels, in_stage_1 = entry[0], entry[1], entry[2]
+        name = label_to_name.get(label)
+        if name is None:
+            failures.append(f"the job generator has a condition '{label}' that the settled set "
+                            f"does not name. Add it to noise_conditions.json with its evidence, "
+                            f"or take it out of the generator")
+            continue
+        if in_stage_1:
+            generator_stage_1.add(name)
+        # the single-setting decisions, where the generator spells them out
+        if name == 'student_t_nu5' and '--nu' in flags:
+            got = float(flags.split('--nu')[1].split()[0])
+            check(abs(got - settings['nu']) < 1e-9,
+                  f"the job generator runs Student-t at nu = {got}; the settled setting is "
+                  f"{settings['nu']}", failures)
+        if name == 'outlier_p10' and '--outlier-p' in flags:
+            got = float(flags.split('--outlier-p')[1].split()[0])
+            check(abs(got - settings['outlier_p']) < 1e-9,
+                  f"the job generator contaminates {got} of labels; the settled setting is "
+                  f"{settings['outlier_p']}", failures)
+
+    check(generator_stage_1 == settled_stage_1,
+          f"the job generator's full grid is {sorted(generator_stage_1)}, the settled set is "
+          f"{sorted(settled_stage_1)}. One of them is about to run and the other is about to be "
+          f"believed", failures)
+    if not failures:
+        print(f"  job generator     : full grid {sorted(generator_stage_1)} — agrees")
+
+
 def main():
     spec = load_settled()
     failures = []
@@ -120,7 +187,13 @@ def main():
               f"noise_conditions.json settles it at {expected}. Two sources of truth for one "
               f"number is how the injectors drifted apart the first time", failures)
 
-    # --- 6. censoring runs on its own axis ----------------------------------
+    # --- 6. the job generator agrees with the settled set -------------------
+    # It restates the conditions as command-line flags rather than reading this file,
+    # which is understandable -- it has to turn them into flags -- but it is also
+    # exactly how a second source of truth starts. So the restatement is checked.
+    check_generator(spec, failures)
+
+    # --- 7. censoring runs on its own axis ----------------------------------
     check('censoring' in stage_1,
           "censoring is not in the full grid. It is not zero-mean and cannot be dose-matched, "
           "so it runs on its own axis -- and it is the largest effect in the whole study "
