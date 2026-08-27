@@ -937,6 +937,52 @@ job thread settings: the fit completes and the thread count is restored.
 **Still worth running on the cluster**, because the crash is environment-specific and the fix
 should be confirmed there rather than assumed: `scripts/server_audit.sh`.
 
+### 2.8e-bis The threading-runtime conflict, measured — and why no import order fixes it
+
+Chat D reproduced §2.8e's silent Gaussian-process death on 2026-08-27 while running the real
+pipeline on real QM9, and it is the same defect as a LightGBM hang found the same day. One root
+cause, two symptoms.
+
+**What happened.** A real run (2 models, 2 representations, 3 noise levels, 1,000 molecules) sat
+for three hours at 0% processor time having written one result row. A stack trace showed LightGBM
+stopped inside a thread barrier that never completes. Three OpenMP threading runtimes were loaded
+in the one process: Intel's (via PyTorch), and LLVM's twice (via scikit-learn and via LightGBM).
+
+**The measured matrix.** Which library is imported first decides which model dies:
+
+| imported first | fitting LightGBM | fitting the Gaussian process |
+|---|---|---|
+| neither | **crash** | works |
+| LightGBM | works | **crash** |
+| PyTorch | **crash** | works |
+
+**So there is no import order that saves both.** Chat D briefly committed an "import LightGBM
+first" fix and reverted it on measuring this: it cures the LightGBM half by causing the
+Gaussian-process half, which is the blocker the server audit already reports.
+
+**The mitigations that do NOT work**, all measured, all still exit 139:
+`KMP_DUPLICATE_LIB_OK=TRUE` (it only silences the warning), and `OMP_NUM_THREADS=1`. This
+confirms the server audit's line that pinning threads does not cure it.
+
+**Why every job is exposed even though each job runs one model.** `models/models.py` imports
+every backend at module scope, unguarded — torch, torch_geometric, lightgbm, xgboost, gpytorch,
+gauche, quantile_forest, torchbnn. So a LightGBM job still loads the Gaussian-process stack, and
+a Gaussian-process job still loads LightGBM. Every process carries every threading runtime
+regardless of what it was asked to run.
+
+**Two ways out, and they are not equivalent:**
+
+1. **Rebuild the environment so only one threading runtime is present** — what the server audit
+   recommends. Correct, and it fixes every model at once. It is also a rebuild of `env_test`,
+   which changes library versions and therefore numbers, so it belongs before launch, not during.
+2. **Import each backend only when its model is requested.** Smaller, no version changes, and it
+   removes the conflict by construction: a LightGBM job would never load the Gaussian-process
+   stack. It touches `models/models.py`, which is not chat D's, and it would need the roster
+   dispatch rewritten to import lazily.
+
+**Neither is chat D's to choose.** Both are recorded here because the audit's section 5 and this
+section are the same defect, and fixing one fixes the other.
+
 ### 2.8f ✅ FIXED 2026-08-26 (chat C) — the Gaussian process could not fit, and it looked like a bad result
 
 **This is the defect that produced the near-zero scores everyone read as "learned embeddings don't
@@ -1078,6 +1124,186 @@ agent told to refute it**. 106 raised, **34 survived**, 72 refuted.
 reimplements two of the noise types differently from the pipeline — threshold as a median split,
 value-proportional as additive where the pipeline is multiplicative. Counting the Python injector,
 "threshold" therefore has three different definitions in three places.
+
+---
+
+### 2.10b ✅ FIXED 2026-08-27 (chat E) — the QM9 graph models were trained on other molecules' labels
+
+Two separate faults in the same function, both executed and both closed. The QM9 graph roster is
+gin, gcn, ginct, gin2d, graph_gp and the conformal graph wrapper.
+
+**The split was void.** `split_qm9` shuffles with `qm9.index_select(randperm(...))`. PyG returns a
+NEW dataset from that call, so the name it assigns to is local and nothing outside the function
+sees it. Every index the function returns is a position in the shuffled order, and every molecule
+it featurises and writes to the mmap is taken from the shuffled order. `main()` kept the indices
+and dropped the object, then passed the ORIGINAL dataset to `run_qm9_graph_model`, where the graphs
+are read as `qm9[train_idx]`.
+
+Measured, on the real dataset, 200 molecules, scaffold split: **0 of 160 training rows had the same
+SMILES on the two sides, and 0 of 160 had the same label.** So each graph was paired with a
+different molecule's label, and `qm9[train_idx]` on the unshuffled dataset is an arbitrary subset
+rather than a held-out-scaffold partition.
+
+**The noisy labels never reached the model.** `run_qm9_graph_model` did
+`qm9[idx].y_noisy = y_train_noisy[i].item()`. Indexing a PyG InMemoryDataset BUILDS a new `Data`
+object every time, so that assignment landed on a temporary and was discarded. Executed on the real
+dataset: after the loop, `hasattr(qm9[0], 'y_noisy')` is False, and a batch raises
+`'GlobalStorage' object has no attribute 'y_noisy'`. The caller's blanket `except Exception` turned
+that into a missing result row. **No QM9 graph-model row can have come from this code.**
+
+Both fixed: `split_qm9` returns the shuffled dataset and `main()` passes it on; the graphs are
+materialised once into a list and the labels attached to those objects. A third fault surfaced only
+when the run got that far — the loader collates the per-graph scalar into a one-element tensor, so
+the target array came out `(n, 1)` against an `(n,)` prediction and `pearsonr` refused it. The
+targets are read with `float()` now.
+
+**The check:** `scripts/test_qm9_split_alignment.py`. Removing either half gives
+*"main() passed a dataset in which 160 of 160 training rows carry another molecule's graph"* and a
+non-zero exit. Executed 2026-08-27. A GIN then ran end to end on real QM9 at two noise levels and
+wrote rows for the first time.
+
+⚠️ On this laptop `torch.randperm(129428)` segfaults after the full import stack unless
+`OMP_NUM_THREADS=1` is set. It is the same shape as §2.8e. Not reproduced on the cluster and not
+guarded in the code.
+
+### 2.10c ✅ FIXED 2026-08-27 (chat E) — the job generator asked for a setting the program refuses
+
+`--bayesian-transformation last` matched no branch in models.py, which tests `last_layer`. Already
+closed on the program side: argparse now has `choices=` and, executed,
+`process_and_train.py --bayesian-transformation last` exits with *"invalid choice"*. The generator
+at `slurm_scripts_qm9_rerun/generate_scripts.py` still emitted `last` for `dnn_bnn_last` and
+`mlp_bnn_last`; both now say `last_layer`.
+
+**The check:** `scripts/test_generated_job_flags.py` runs all 22 of the generator's model flag
+strings through the program's real parser. Restoring `last` gives *"1 of 22 job definitions pass
+flags the program refuses"*.
+
+### 2.11 ✅ FIXED 2026-08-27 (chat E) — a results row now names the condition that produced it
+
+The noise condition survived only in the output FILENAME. Both QM9 loaders in the figure script
+recovered it by matching the stem against `{legacy, outlier, quantile, threshold, hetero, valprop,
+heteroscedastic, value_proportional}` — the six names retired on 2026-08-26. Three failures under
+one cause, all three reproduced by executing the loader on files written to a temporary directory:
+
+- A file written under the settled scheme matched nothing, `strategy` stayed blank, and pandas
+  treats blanks as equal — so two conditions for one (model, rep, level, replicate) came back as
+  **one row**.
+- `outlier` is in the retired list AND is a prefix of the settled `outlier_p10`, so
+  `anova_outlier_p10_*.csv` was labelled `outlier`: a contaminated-fraction run pooled with the
+  retired value-proportional strategy under one name.
+- Every table that wanted the reference condition wrote
+  `frame[frame.strategy == 'legacy'] if 'strategy' in frame else frame`, so a frame without the
+  column silently became every condition pooled together under one condition's name. Ten of those.
+
+What changed. `noise_type` is now a column in `RESULT_COLUMNS`, stamped from the injector's own
+manifest — the name `condition_name` in `rust/src/main.rs` produced, never composed a second time
+in Python. A level whose manifest names no condition stops the run. The figure script reads that
+column, falls back to the filename only for older files, matches settled names before retired ones,
+and labels a file it cannot place `unknown_<stem>` so it groups with nothing. `baseline_rows()`
+raises instead of returning the whole frame. The experimental results loader now copies `noise_type`
+into `strategy` and keeps `fold` in its dedup key — without it, five folds × seven conditions
+collapsed to one row per (dataset, model, rep, level).
+
+The uncertainty column moved too. `models/model_defaults.py` settles `primary_column` as `'raw'` on
+36 measured fits; the figure script picked `y_pred_std_calibrated` first at four sites and never
+imported the spec — and the raw column's real name, `y_pred_std_uncalibrated`, was not among its
+four candidates at all. It now reads the column the spec names.
+
+**The checks:** `scripts/test_figure_conditions.py` and `scripts/test_result_row_condition.py`.
+Reverting the loader reproduces all three failures by name.
+
+### 2.12 A level means three different things, and what the literature does about it
+
+QM9 doses in fractions of the clean training label spread (`--dose-units spread`) and runs to 1.00
+of it. The experimental grids are in RAW LOG UNITS, anchored to published assay error, and reach
+0.84 label SD on LogD, 1.57 on Caco-2 and 1.20 on hERG. Censoring's level is the fraction of labels
+clipped, which is not an amount of noise at all. All three were written into one column called
+`sigma`. `auc_norm` is mean retention over each configuration's own level range, so two `auc_norm`
+values are on the same footing only if the axis under them is the same quantity over the same span.
+
+**What the predecessor does.** Kolmar & Grulke, *The effect of noise on the predictive limit of QSAR
+models*, J Cheminform 13:92 (2021): the dose is set per dataset from that dataset's own endpoint
+range — *"σnoise was determined from the product of the range of endpoint values in the dataset, the
+noise level n, and a multiplier"* — and datasets are compared with BOTH axes divided by the
+noise-free baseline error: *"the y-axis is RMSE/RMSE0. The x-axis is the standard deviation of the
+Gaussian distribution from which the added error was sampled (σ), divided by RMSE0."*
+
+So the shared axis is the delivered dose in raw label units divided by that configuration's own
+zero-noise RMSE. Both pipelines now write what the noise DELIVERED (`delivered_dose` on the QM9 row,
+`realised_dose_label_units` on the experimental one) and what the level MEASURES (`level_units`:
+`label_sd`, `raw_label` or `fraction_censored`). The figure script builds
+`dose_over_baseline_rmse` from those and reports `auc_norm_shared` beside `auc_norm`, and
+`warn_if_axes_differ` names a mismatch instead of pooling silently. Censoring stays on its own axis:
+its level is already dimensionless and it has no dose to rescale.
+
+**Still open for you:** whether the paper reports `auc_norm_shared`, `auc_norm`, or both. Nothing is
+removed either way — both columns are written.
+
+**Also settled 2026-08-27, and each one invalidates results:**
+
+- **ChemBERTa is one encoder now.** QM9 loaded `seyonec/ChemBERTa-zinc-base-v1` (masked language
+  model, ZINC, 768 wide, 6 layers) and the experimental pipeline loaded
+  `DeepChem/ChemBERTa-77M-MTR` (multi-task regression, PubChem, 384 wide, 3 layers). Read from the
+  two cached configs this session. Both sides now use `DeepChem/ChemBERTa-77M-MTR`. The record slot
+  moved 3072 → 1536 bytes in `scripts/process_and_train.py` and `rust/src/main.rs`, and the QM9
+  pooling now excludes padding the way the experimental side already did. **Every QM9 ChemBERTa
+  cell must be re-featurised and re-run.**
+- **No model stacks validation.** Forest, SVM, XGBoost and LightGBM took all of it (90% of the
+  data), NGBoost and the Gauche GP took half (85%), the neural models took none (80%) — so the
+  ANOVA's model factor confounded model family with training-set size, and nothing on the row
+  recorded which regime produced it. Every `vstack((x_train, x_val))` is gone. **Invalidates every
+  QM9 tree, kernel, NGBoost and GP number.**
+- **The Bayesian networks are fitted on the ELBO.** There was no KL, ELBO or `BKLLoss` anywhere in
+  either pipeline: BNN-α and BNN-β trained on plain MSE while the VBLL variants carried a KL term
+  all along. torchbnn samples weights in train AND eval mode, so the posterior width received MSE
+  gradients, which drive it toward zero; `prior_sigma` was only an initialisation. Measured on 300
+  steps of the same data with the same seed: mean posterior width **0.10000 → 0.06028 on plain MSE,
+  → 0.06432 on the ELBO**. The weight is `BAYESIAN_DEFAULTS['bnn_kl_weight'] = 'elbo'`, meaning
+  1/n_train. Spec bumped to **1.3.0**. **Invalidates every BNN-α and BNN-β number on both
+  pipelines.**
+- **The early-stopping validation split is carved by scaffold.** It used to be the first fifth of
+  each fold's training block in dataset order, which is alphabetical by SMILES. On a
+  600-molecule/120-group fixture the old rule put 5 scaffold groups in both training and validation,
+  and left **112 of 600 molecules (19%) out of every training set in all five folds**. The new
+  `scaffold_validation_carve` gives 0 and 0. **Invalidates every experimental neural number.**
+
+**The checks:** `scripts/test_bnn_kl_term.py`, `scripts/test_figure_conditions.py` (level axis),
+`KIRBy tests/smoke/smoke_kirby_splits.py`.
+
+### 2.13 ✅ FIXED 2026-08-27 (chat E) — definitions that were never the ones that ran
+
+`create_gnn_model` was defined **four** times in models.py. Python binds the last, so three
+architectures sat in the file looking authoritative and never ran — including the one whose
+GCN/GAT/GIN classes anyone reading the file to describe the GNN would describe. Executed:
+`create_gnn_model.__code__.co_firstlineno` was 4106, not the 3679 the audit named. `pyg_to_grakel`
+was defined twice and `class GCN` twice.
+
+It was not harmless. `train_conformal_graph_model` builds its base network as `GIN(dim_h=dim_h)` —
+the signature of the `class GCN` that a later definition shadows. Executed: the live GCN and GIN
+take `(num_node_features, hidden_dim, ...)` and `GIN(dim_h=64)` raises `TypeError`. The live classes
+also return `(prediction, embedding)`, and `train_epochs` does `out.detach().cpu().numpy()[:, 0]`.
+**That path has never constructed a model.** It now refuses by name instead of failing into the
+caller's blanket handler as a missing row. It is tier 4 in the job generator and has never produced
+a number; whether to repair it or drop it is yours.
+
+The shadowed copies are deleted. An `ast` comparison of every top-level definition before and after
+shows **no live definition changed**.
+
+Three more in the same pass:
+
+- `train_conformal_model` built every base estimator from an EMPTY parameter dict — conformal_rf on
+  sklearn's `max_features=1.0` instead of the spec's 0.3, conformal_qrf on 100 trees instead of 300,
+  conformal_xgboost on the booster's `learning_rate` 0.3 instead of 0.1. It calls
+  `sklearn_params(...)` now.
+- `train_gnn` had no early stopping, no validation loss inside its loop, and never read
+  `args.epochs`. It now stops on the shared `NEURAL_DEFAULTS` rule and restores the best epoch.
+  Executed on real QM9: *"stopped at epoch 15, restored epoch 5"*.
+- Both graph paths wrote the TEST-set size into `sample_size`. Executed: a `-n 200` run wrote 20.
+  They write `args.sample_size` now, and the same run writes 200.
+
+**The check:** `scripts/test_no_shadowed_definitions.py` walks models.py, model_defaults.py,
+process_and_train.py, utils.py, generate_paper_figures_v2.py and the experimental runner, and fails
+on any repeated top-level definition.
 
 ---
 
