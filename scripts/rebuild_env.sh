@@ -11,9 +11,10 @@
 # To see what it would do first, changing nothing:
 #     REBUILD_DRY_RUN=1 bash scripts/rebuild_env.sh
 #
-# WHY IT IS A JOB AND NOT A PASTE. A login node caps memory per user, which is
-# what made an earlier audit report sixteen phantom failures (RERUN_PLAN.md
-# 2.8d). The build and every check must happen where the work happens.
+# It runs on a login node. It builds with micromamba, whose solver fits inside
+# the per-user memory cap that killed conda's on 2026-08-27; conda does
+# everything else and the result is an ordinary conda environment. If micromamba
+# cannot be fetched it puts itself in a small allocation instead.
 #
 # WHAT IT DOES, in order:
 #   0  refuses to run while any of your jobs are queued or running
@@ -48,15 +49,42 @@ section() { say ""; say "=======================================================
 REPO="${QSAR_QM_MODELS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO" || { echo "cannot cd to $REPO"; exit 1; }
 
-# --- run this where there is memory -----------------------------------------
+# --- a solver small enough for a login node ---------------------------------
 # Measured 2026-08-27: on a login node the conda solve for env.yml is killed
 # part way through "Collecting package metadata", with no message but "Killed".
-# That is the per-user memory cap, not the recipe. Rather than print advice and
-# leave it to a second paste, put itself in an allocation.
-# The ask is deliberately small so it schedules quickly: the solve needs memory,
-# not cores or hours, and a big request sits in the queue for no benefit. The
-# short partition is the one that turns over fastest on this cluster.
-if [ -z "${SLURM_JOB_ID:-}" ] && [ "${REBUILD_NO_SRUN:-0}" != "1" ] \
+# That is the memory cap, and it is conda's own solver that hits it -- conda
+# 4.12 parses the whole conda-forge index into memory. micromamba solves the
+# same file in a few hundred megabytes.
+#
+# So the build goes through micromamba and EVERYTHING ELSE still goes through
+# conda: what it writes is an ordinary conda environment, `conda activate` reads
+# it identically, and no job script changes. This is not the micromamba that has
+# never worked here -- that was `micromamba activate` needing a shell hook. This
+# binary is used for one command, `create`, and is never activated through.
+MM=""
+if [ "${REBUILD_NO_MICROMAMBA:-0}" != "1" ]; then
+    MM_DIR="${REBUILD_MM_DIR:-$(dirname "$REPO")/.micromamba}"
+    if [ ! -x "$MM_DIR/bin/micromamba" ]; then
+        echo "Fetching micromamba (one file, ~5 MB) into $MM_DIR"
+        mkdir -p "$MM_DIR" && ( cd "$MM_DIR" && \
+            curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest \
+            | tar -xj bin/micromamba ) 2>&1 | tail -3
+    fi
+    if [ -x "$MM_DIR/bin/micromamba" ]; then
+        MM="$MM_DIR/bin/micromamba"
+        export SETUP_CREATE_WITH="$MM"
+        export MAMBA_ROOT_PREFIX="$MM_DIR/root"
+        echo "Building with $MM ($("$MM" --version 2>/dev/null))"
+        echo "  -- conda does everything else, and the result is an ordinary"
+        echo "     conda environment."
+    else
+        echo "micromamba could not be fetched; falling back to conda's solver."
+    fi
+fi
+
+# Only if that failed does this need a node at all. The ask is deliberately
+# small so it schedules quickly: the solve needs memory, not cores or hours.
+if [ -z "$MM" ] && [ -z "${SLURM_JOB_ID:-}" ] && [ "${REBUILD_NO_SRUN:-0}" != "1" ] \
    && command -v srun &>/dev/null; then
     echo "Not inside an allocation, and the conda solve needs more memory than a"
     echo "login node allows. Re-running this script inside one:"

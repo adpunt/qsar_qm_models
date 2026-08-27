@@ -95,7 +95,16 @@ setup_create() {  # setup_create <select args...>
     # strict priority is set here because an environment file cannot carry it:
     # conda's valid keys are name, dependencies, prefix, channels, variables,
     # and a `channel_priority:` line in the yml is silently ignored.
-    if [ "$SETUP_TOOL" = "micromamba" ]; then
+    #
+    # SETUP_CREATE_WITH names a binary to BUILD with, while everything after the
+    # build still goes through conda. It exists because conda 4.12's solver
+    # needs gigabytes to parse the conda-forge index and gets killed by the
+    # login-node memory cap, where micromamba solves the same file in a few
+    # hundred megabytes. The environment it produces is an ordinary conda
+    # environment; `conda activate` reads it exactly the same.
+    if [ -n "${SETUP_CREATE_WITH:-}" ]; then
+        CONDA_CHANNEL_PRIORITY=strict "$SETUP_CREATE_WITH" create -y "$@" -f "$YML_FILE"
+    elif [ "$SETUP_TOOL" = "micromamba" ]; then
         CONDA_CHANNEL_PRIORITY=strict micromamba create -y "$@" -f "$YML_FILE"
     else
         CONDA_CHANNEL_PRIORITY=strict "$SETUP_TOOL" env create "$@" -f "$YML_FILE"
