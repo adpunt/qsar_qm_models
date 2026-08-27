@@ -55,25 +55,60 @@ say "job:  ${SLURM_JOB_ID:-<not a slurm job>}"
 
 # --- 0. never during a run --------------------------------------------------
 section "0. is anything running? (a rebuild changes numbers, so it must not be)"
+# What this guard is actually protecting: no job may WRITE RESULT ROWS across
+# the rebuild, because rows from two environments in one file, with nothing
+# recording which, is unreadable afterwards.
+#
+# So it blocks on this study's training jobs and on nothing else. Two lessons
+# from 2026-08-27, when it refused on thirteen jobs and every one was a false
+# alarm: the account runs other projects (nine of them were), and audits,
+# preflights and smoke tests write no rows at all (the other three were).
+JOB_PATTERN="${REBUILD_JOB_PATTERN:-^(qm9|unc_|val_|qsar|anova|vbll|gauche|mol2vec|ngboost|conformal|svm|dnn|mlp|rf_|lgb|xgb|graph)}"
+# Names that produce no result rows, whatever else they match.
+JOB_HARMLESS="${REBUILD_JOB_HARMLESS:-(audit|check|preflight|smoke|test|figures|analysis|merge)}"
 if command -v squeue &>/dev/null; then
-    OTHERS=$(squeue -u "$(whoami)" -h -o "%i %T %j" 2>/dev/null \
-             | grep -v "^${SLURM_JOB_ID:-__none__} " | grep -v "rebuild_env")
-    if [ -n "$OTHERS" ]; then
-        say "  REFUSING: you have jobs in the queue."
-        say "$OTHERS" | sed 's/^/    /'
+    ALL=$(squeue -u "$(whoami)" -h -o "%i %T %j" 2>/dev/null \
+          | grep -v "^${SLURM_JOB_ID:-__none__} " | grep -v "rebuild_env")
+    MINE=$(echo "$ALL"  | awk -v pat="$JOB_PATTERN" -v ok="$JOB_HARMLESS" \
+                              'NF && $3 ~ pat && $3 !~ ok')
+    OTHER=$(echo "$ALL" | awk -v pat="$JOB_PATTERN" -v ok="$JOB_HARMLESS" \
+                              'NF && ($3 !~ pat || $3 ~ ok)')
+    if [ -n "$OTHER" ]; then
+        say "  note: ignoring $(echo "$OTHER" | wc -l | tr -d ' ') job(s) belonging to other work --"
+        say "$OTHER" | sed 's/^/          /'
+        say "        Either they belong to other work, or they write no result rows"
+        say "        (audits, preflights, smoke tests). Neither can be corrupted by this."
+        say ""
+    fi
+    if [ -n "$MINE" ]; then
+        say "  REFUSING: this study has jobs in the queue."
+        say "$MINE" | sed 's/^/    /'
         say ""
         say "  A rebuild changes library versions and therefore numbers. Anything"
         say "  running now would produce rows under one environment and rows under"
         say "  another, in the same results file, with nothing recording which."
-        say "  Let them finish or cancel them, then resubmit."
-        say "  To override deliberately: FORCE_REBUILD=1 sbatch scripts/rebuild_env.sh"
+        say "  Let them finish or cancel them, then rerun."
+        say "  To override deliberately:  FORCE_REBUILD=1 bash scripts/rebuild_env.sh"
+        say "  If the pattern is wrong:   REBUILD_JOB_PATTERN='<regex>' bash scripts/rebuild_env.sh"
         if [ "${FORCE_REBUILD:-0}" != "1" ]; then exit 2; fi
         say "  FORCE_REBUILD=1 given -- continuing anyway."
     else
-        say "  OK   nothing else of yours is queued or running"
+        say "  OK   none of this study's jobs are queued or running"
     fi
 else
     say "  ---  no squeue here; cannot check. Make sure nothing is running."
+fi
+
+# A login-node build is no longer fatal: the old problem was CUDA libraries that
+# would not map under the per-user memory cap, and torch is a CPU build now.
+# Warn, do not block -- being stopped twice by a preflight is worse than a slow
+# build.
+if [ -z "${SLURM_JOB_ID:-}" ]; then
+    say ""
+    say "  WARNING: not inside a Slurm allocation, so this is the login node. It"
+    say "  will work, but it is slow and shares memory with everyone. Better:"
+    say "    srun --account=stat-cadd --cpus-per-task=8 --mem=32G --time=03:00:00 --pty bash"
+    say "  then rerun this script."
 fi
 
 # --- conda ------------------------------------------------------------------
