@@ -427,6 +427,75 @@ def should_standardise(X, rep_name=None):
 # Uncertainty reporting
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# THE REPORTING LEVEL — the ONE noise level a table quotes accuracy at.
+#
+# This is the only place it may live. It is here, in the spec both pipelines
+# import, because between 2026-08-20 and 2026-08-28 it was stated in more than
+# thirty places across two documents, two scripts and paper.tex, on two different
+# scales, with four different values live at once. The author's words on
+# 2026-08-27: "there's clearly multiple sources of information on it and you need
+# to find all of them and rectify it. I'm really sick of this coming up."
+#
+# SCALE. A reporting level is a fraction of that fold's CLEAN TRAINING LABEL
+# SPREAD, and nothing else. It is a point on the ladder in NOISE_DESIGN.md 6.4.
+# It is NOT in log units. The old results files are in log units and a number
+# read off one of them is a different amount of noise -- that mistake has already
+# been made once, in this very decision.
+#
+# NOT REPORTING LEVELS, and each has been mistaken for one:
+#   0.15 / 0.35 / 0.48 / 0.54 / 0.68  published assay error, in log units. These
+#                                     are evidence for where the LADDER's points
+#                                     sit (NOISE_DESIGN.md 4, 4c).
+#   0.6                               an accuracy cutoff in the figure script for
+#                                     discarding fits that failed. Not a level.
+#   0.0 0.2 0.3 0.5 0.75 1.0 1.5      the ladder. Every one of these RUNS. The
+#                                     reporting level is which ONE gets quoted.
+#
+# NOT SETTLED. The author gave numbers on 2026-08-27 and withdrew them the same
+# evening -- "I don't think I did settle them" -- because the tables he read them
+# off were printed on two different scales in one message. Nothing may report at a
+# level until this dict holds a number for that dataset. Read it through
+# reporting_level(), which raises rather than guessing.
+REPORTING_LEVELS = {
+    'qm9': None,      # proposed 1.0; the only measurement at 1.0 is a screening
+                      # file the plan forbids citing (RERUN_PLAN.md 13.15)
+    'logd': None,     # proposed 1.0; no run has ever reached it on this dataset
+    'caco2': None,    # proposed 0.2, read off a LOG-UNIT table; the same point on
+                      # this scale is 0.5 (RERUN_PLAN.md 13.11)
+    'herg': None,     # never proposed by anyone
+}
+REPORTING_LEVEL_SCALE = 'fraction_of_clean_training_label_spread'
+
+
+def reporting_level(dataset):
+    """The level a table quotes for this dataset. Raises while it is unset.
+
+    Raising is the point. Every previous default silently became the answer: the
+    figure script's `sigma_value=0.3` is in paper.tex today as "R2 at sigma = 0.3",
+    on a scale that no longer exists, and nobody chose it.
+    """
+    key = str(dataset).strip().lower().replace('-', '').replace('_', '')
+    alias = {'qm9': 'qm9', 'logd': 'logd', 'caco2': 'caco2',
+             'hergki': 'herg', 'herg': 'herg', 'openadmetlogd': 'logd',
+             'openadmetcaco2': 'caco2'}
+    key = alias.get(key, key)
+    if key not in REPORTING_LEVELS:
+        raise KeyError(
+            f"no reporting level is defined for {dataset!r}. Known: "
+            f"{sorted(REPORTING_LEVELS)}")
+    value = REPORTING_LEVELS[key]
+    if value is None:
+        raise ValueError(
+            f"the reporting level for {key} is NOT SET, so no table may quote one.\n"
+            f"It is a fraction of the clean training label spread, a point on the "
+            f"ladder in NOISE_DESIGN.md 6.4.\n"
+            f"Set it in models/model_defaults.py REPORTING_LEVELS -- that is the only "
+            f"place it may live -- and record the author's decision in "
+            f"NOISE_DESIGN.md 6.4 at the same time.")
+    return value
+
+
 UNCERTAINTY_DEFAULTS = {
     # Which column the analysis treats as "the model's uncertainty".
     #

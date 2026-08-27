@@ -1932,20 +1932,37 @@ constant, the other varies. The old grids below held realism constant; this one 
 constant. §4c converts every published anchor onto this ladder; §4d gives the noise the experimental
 labels already carry before anything is injected.
 
-#### The reporting levels — which single level each table quotes
+#### 🔴 The reporting level — NOT SET, and this is the only place it may be stated
 
-Settled 2026-08-27 by the author. These are points on the ladder above, not a separate scale.
+**The reporting level is the ONE level a table quotes accuracy at.** It is a point on the ladder
+above, expressed as a fraction of the clean training label spread, and nothing else.
 
-| Dataset | Reporting level |
-|---|---|
-| QM9 | **1.0** |
-| logD | **1.0** |
-| Caco-2 | **0.2** |
-| hERG | not yet set |
+| Dataset | Reporting level | Note |
+|---|---|---|
+| QM9 | **not set** | proposed 1.0. The only measurement at 1.0 is a screening file `RERUN_PLAN.md` §13.15 forbids citing |
+| logD | **not set** | proposed 1.0. No run has ever reached that level on this dataset |
+| Caco-2 | **not set** | proposed 0.2 — but read off a table printed in RAW LOG UNITS. The same point on this scale is **0.5** |
+| hERG | **not set** | never proposed by anyone |
 
-`0.25` is **not on the ladder** and cannot be reported. Every level runs on every dataset regardless,
-so a per-dataset reporting level costs no compute. `RERUN_PLAN.md` §13.11 records why the three
-differ and the one consequence on Caco-2.
+**Why none of them is set.** The author gave three numbers on 2026-08-27 and withdrew them the same
+evening — *"I don't think I did settle them"* — because the tables the numbers were read off were
+printed on **two different scales in one message**: QM9 as a fraction of the label spread, logD and
+Caco-2 in raw log units. All three were then recorded as fractions. That is the error, and it is the
+reason the numbers above are not carried forward as settled.
+
+**Where it lives now, and the only place it may live:** `models/model_defaults.py`,
+`REPORTING_LEVELS`, read through `reporting_level(dataset)` — the spec both pipelines already
+import. **It raises while a level is unset rather than returning a default**, because every previous
+default silently became the answer: `paper.tex` says *"R² at σ = 0.3"* today, and that 0.3 is the
+default argument of a figure-script function, on a scale that no longer exists, chosen by nobody.
+
+**Guard:** `scripts/test_one_reporting_level.py` fails if a second source appears, if an unset level
+stops raising, or if a level is set that is not on the ladder.
+
+**To settle one:** put the number in `REPORTING_LEVELS` and record the decision in this section, in
+the same commit. Nowhere else.
+
+**`0.25` is not on the ladder** and cannot be reported whatever is decided.
 
 <details><summary>Superseded 2026-08-27 — the per-dataset log-unit grids that stood here</summary>
 
