@@ -2057,9 +2057,9 @@ decision, not a repair:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
    fractions of the label spread, no rescaling (§2.12).
-2. **`--calibration-size`** for the conformal models: honour it, or refuse it by
-   name. Nothing uses it today and the whole validation split is the calibration
-   set, which is the better estimator now that no model trains on it.
+2. ~~`--calibration-size` for the conformal models~~ — **settled**: commented
+   out at `process_and_train.py:414`. The whole validation split is the
+   calibration set, which is the better estimator now that no model trains on it.
 3. ~~The heteroscedastic and evidential heads~~ — **settled**: the head's own
    predicted variance is reported, kept only on an uncertainty run (§2.17).
 4. ~~`grouped_shifted` off-registry, and the naming of off-registry conditions~~
