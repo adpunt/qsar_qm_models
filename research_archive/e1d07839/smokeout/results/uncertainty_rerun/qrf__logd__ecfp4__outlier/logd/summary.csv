@@ -1,2 +1,0 @@
-dataset,model,rep,strategy,baseline_r2,baseline_r2_std,baseline_rmse,auc_norm,weibull_tau,weibull_beta,retention_0.5,retention_1.0
-OpenADMET-LogD,QRF,ECFP4,hetero,0.6320051518231287,0.07170497651316501,0.7203558858333285,,,,0.9695768545163658,0.9592871471464889

@@ -1,2 +1,0 @@
-sigma,iteration,model,rep,sample_size,mae,mse,rmse,r2,pearson_corr,params_source,loss_function
-0.0,0,gauche_rbf,mhggnn,10000,0.8900629645834747,1.148254259365253,1.0715662645703499,-0.013307868503663611,0.10912365988320992,default,mse
