@@ -43,7 +43,7 @@ from rdkit.Chem import Descriptors
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from rdkit.ML.Descriptors import MoleculeDescriptors
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.svm import SVR
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
@@ -72,7 +72,19 @@ N_REPLICATES = 12
 LEVELS = [0.5, 1.5]        # fraction of the training label spread
 REPORTING_LEVEL = 0.5      # RERUN_PLAN.md section 13.1 open item 5 -- the standing suggestion
 POOL_SEED = 11
-MODELS = ['LGBM', 'RF', 'Ridge']
+# The roster the cluster runs, minus the ones that cannot be fitted here. Ridge is GONE:
+# it is not one of the thirteen models in slurm_scripts_qm9_rerun/generate_scripts.py and
+# no conclusion may rest on it. The quantile forest cannot be built in this environment
+# (RERUN_PLAN.md 3.4.4d, reconfirmed 2026-08-27: scikit-learn 1.3.2 rejects
+# monotonic_cst). The Gaussian process is left out on purpose -- it segfaults in a
+# process that has already loaded the boosting libraries (RERUN_PLAN.md 2.8e). The four
+# Bayesian neural variants are variants of DNN and MLP and add nothing to a screen.
+ALL_SCREEN_MODELS = ['LGBM', 'XGBoost', 'RF', 'SVM', 'NGBoost', 'DNN', 'MLP']
+MODELS = list(ALL_SCREEN_MODELS)
+# Features standardised before fitting. Trees are invariant to it; the kernel and the
+# neural models are not. models/model_defaults.should_standardise() makes the same call
+# in the real pipeline.
+SCALED_MODELS = {'SVM', 'DNN', 'MLP'}
 N_THREADS = int(os.environ.get('SETTING_SELECTION_THREADS', '2'))
 
 # Taken from models/model_defaults.py, the file both training pipelines read, so this
@@ -83,6 +95,94 @@ RF_DEFAULTS = dict(n_estimators=100, max_depth=None, min_samples_leaf=1,
 LGBM_DEFAULTS = dict(n_estimators=100, learning_rate=0.1, num_leaves=31, max_depth=-1,
                      subsample=1.0, colsample_bytree=1.0, min_child_samples=20,
                      reg_alpha=0.0, reg_lambda=0.0)
+XGB_DEFAULTS = dict(n_estimators=100, learning_rate=0.1, max_depth=6, subsample=1.0,
+                    colsample_bytree=1.0, reg_alpha=0.0, reg_lambda=1.0)
+SVM_DEFAULTS = dict(C=1.0, gamma='scale', kernel='rbf')
+NGB_DEFAULTS = dict(n_estimators=500, learning_rate=0.01, natural_gradient=True)
+# models/model_defaults.NEURAL_DEFAULTS, copied for the same reason the tree settings are.
+NEURAL = dict(
+    dnn=dict(hidden_sizes=[128, 64], dropout_rate=0.2),
+    mlp=dict(hidden_sizes=[128, 128], dropout_rate=0.2),
+    training=dict(lr=0.001, weight_decay=0.0, batch_size=32, epochs=100, patience=10,
+                  restore_best_weights=True, standardise_targets=True),
+)
+
+
+class TorchNet:
+    """The study's two neural models, built from NEURAL_DEFAULTS.
+
+    Not imported from models/models.py because that module pulls in the whole training
+    stack. What matters for a screen is that the architecture, the optimiser, the batch
+    size, the early-stopping rule and the target standardisation are the ones the cluster
+    will run -- including restore_best_weights, which RERUN_PLAN.md 3.4.4c settled on
+    2026-08-26 for both pipelines.
+
+    A tenth of the training split is held out to early-stop against. It carries the
+    injected noise like the rest of the training data: nobody gets clean labels when
+    deciding when to stop (RERUN_PLAN.md 4, decision 2).
+    """
+
+    def __init__(self, kind, seed):
+        self.kind, self.seed = kind, seed
+
+    def fit(self, X, y):
+        import torch
+        import torch.nn as nn
+        torch.manual_seed(self.seed)
+        torch.set_num_threads(N_THREADS)
+        cfg, tr = NEURAL[self.kind], NEURAL['training']
+        self.y_mu, self.y_sd = (float(y.mean()), float(y.std())) \
+            if tr['standardise_targets'] else (0.0, 1.0)
+        yv = (np.asarray(y, dtype=np.float32) - self.y_mu) / (self.y_sd or 1.0)
+        Xv = np.asarray(X, dtype=np.float32)
+
+        rng = np.random.default_rng(self.seed)
+        val = rng.permutation(len(Xv))[: max(1, len(Xv) // 10)]
+        mask = np.ones(len(Xv), bool)
+        mask[val] = False
+        Xt, yt = torch.from_numpy(Xv[mask]), torch.from_numpy(yv[mask])
+        Xva, yva = torch.from_numpy(Xv[~mask]), torch.from_numpy(yv[~mask])
+
+        layers, prev = [], Xv.shape[1]
+        for h in cfg['hidden_sizes']:
+            layers += [nn.Linear(prev, h), nn.ReLU(), nn.Dropout(cfg['dropout_rate'])]
+            prev = h
+        layers.append(nn.Linear(prev, 1))
+        self.net = nn.Sequential(*layers)
+
+        opt = torch.optim.Adam(self.net.parameters(), lr=tr['lr'],
+                               weight_decay=tr['weight_decay'])
+        lossf = nn.MSELoss()
+        best, best_state, bad = float('inf'), None, 0
+        bs = tr['batch_size']
+        for _ in range(tr['epochs']):
+            self.net.train()
+            perm = torch.randperm(len(Xt))
+            for i in range(0, len(Xt), bs):
+                b = perm[i:i + bs]
+                opt.zero_grad()
+                lossf(self.net(Xt[b]).squeeze(-1), yt[b]).backward()
+                opt.step()
+            self.net.eval()
+            with torch.no_grad():
+                v = float(lossf(self.net(Xva).squeeze(-1), yva))
+            if v < best:
+                best, bad = v, 0
+                best_state = {k: t.clone() for k, t in self.net.state_dict().items()}
+            else:
+                bad += 1
+                if bad >= tr['patience']:
+                    break
+        if tr['restore_best_weights'] and best_state is not None:
+            self.net.load_state_dict(best_state)
+        return self
+
+    def predict(self, X):
+        import torch
+        self.net.eval()
+        with torch.no_grad():
+            p = self.net(torch.from_numpy(np.asarray(X, dtype=np.float32))).squeeze(-1)
+        return p.numpy() * (self.y_sd or 1.0) + self.y_mu
 # The exact-dose sensitivity pass runs only where the confound it controls for exists:
 # the conditions whose per-run delivered dose is wobbliest (NOISE_DESIGN.md 5.1b).
 EXACT_DOSE_CONDITIONS = ['Gaussian', 'Student-t nu=5', 'Student-t nu=3', 'Laplace',
@@ -391,11 +491,28 @@ def build_models(seed):
     """
     rf = dict(RF_DEFAULTS)
     lgbm = dict(LGBM_DEFAULTS)
-    return {
-        'LGBM': lgb.LGBMRegressor(random_state=seed, verbose=-1, n_jobs=N_THREADS, **lgbm),
-        'RF': RandomForestRegressor(random_state=seed, n_jobs=N_THREADS, **rf),
-        'Ridge': Ridge(alpha=1.0),
+    built = {
+        'LGBM': lambda: lgb.LGBMRegressor(random_state=seed, verbose=-1,
+                                          n_jobs=N_THREADS, **lgbm),
+        'RF': lambda: RandomForestRegressor(random_state=seed, n_jobs=N_THREADS, **rf),
+        'XGBoost': lambda: _xgb().XGBRegressor(random_state=seed, n_jobs=N_THREADS,
+                                               **XGB_DEFAULTS),
+        'SVM': lambda: SVR(**SVM_DEFAULTS),
+        'NGBoost': lambda: _ngb()(random_state=seed, verbose=False, **NGB_DEFAULTS),
+        'DNN': lambda: TorchNet('dnn', seed),
+        'MLP': lambda: TorchNet('mlp', seed),
     }
+    return {m: built[m]() for m in MODELS}
+
+
+def _xgb():
+    import xgboost
+    return xgboost
+
+
+def _ngb():
+    from ngboost import NGBRegressor
+    return NGBRegressor
 
 
 # --------------------------------------------------------------- shape diagnostics
@@ -570,7 +687,7 @@ def run(X, y, scaffs, rescale_to_exact_dose, conditions=None,
 
         base = {}
         for mn, mdl in build_models(rep).items():
-            Xa, Xb = (Xtr_s, Xte_s) if mn == 'Ridge' else (Xtr, Xte)
+            Xa, Xb = (Xtr_s, Xte_s) if mn in SCALED_MODELS else (Xtr, Xte)
             mdl.fit(Xa, ytr)
             base[mn] = r2_score(yte, mdl.predict(Xb))
         print(f"[rep {rep}] train {n} test {len(yte)} label SD {sd:.4f}  clean R2 "
@@ -603,7 +720,7 @@ def run(X, y, scaffs, rescale_to_exact_dose, conditions=None,
                     shape_rows.append(d)
 
                 for mn, mdl in build_models(rep).items():
-                    Xa, Xb = (Xtr_s, Xte_s) if mn == 'Ridge' else (Xtr, Xte)
+                    Xa, Xb = (Xtr_s, Xte_s) if mn in SCALED_MODELS else (Xtr, Xte)
                     mdl.fit(Xa, ynoisy)
                     rows.append(dict(
                         dataset='QM9', representation='PDV', target='homo_lumo_gap',
@@ -905,11 +1022,39 @@ def main():
     ap.add_argument('--analyse-only', action='store_true',
                     help='re-analyse the saved CSVs without re-running')
     ap.add_argument('--replicates', type=int, default=None)
+    ap.add_argument('--models', nargs='+', default=None, choices=ALL_SCREEN_MODELS,
+                    help='Subset of the screen roster. Default is all of them.')
+    ap.add_argument('--levels', nargs='+', type=float, default=None,
+                    help='Noise levels to sweep, as a fraction of the training label '
+                         'spread. Default is 0.5 and 1.5.')
+    ap.add_argument('--conditions', nargs='+', default=None,
+                    help='Subset of the noise conditions, by name.')
+    ap.add_argument('--out', default=None,
+                    help='Write to this CSV instead of the default, so a focused run '
+                         'does not overwrite the full screen.')
     args = ap.parse_args()
 
-    global N_REPLICATES, LEVELS
+    global N_REPLICATES, LEVELS, MODELS, OUT_ROWS, OUT_SHAPE
     if args.replicates is not None:
         N_REPLICATES = args.replicates
+    if args.models:
+        MODELS = list(args.models)
+    if args.levels:
+        LEVELS = list(args.levels)
+    conditions = None
+    if args.conditions:
+        unknown = [c for c in args.conditions if c not in CONDITION_NAMES]
+        assert not unknown, f"unknown conditions {unknown}; known are {CONDITION_NAMES}"
+        conditions = [c for c in CONDITIONS if c[0] in args.conditions]
+    if args.out:
+        OUT_ROWS = args.out
+        OUT_SHAPE = args.out.replace('.csv', '_shape.csv')
+    # A subset run screens a different grid from the full one, so it must not overwrite
+    # the full screen's file and must not be checked against the full grid's row count.
+    subset = bool(args.models or args.levels or args.conditions)
+    assert not (subset and not args.out), \
+        '--models/--levels/--conditions change the grid, so pass --out and keep the ' \
+        'full screen\'s results intact.'
 
     if args.analyse_only:
         df = pd.read_csv(OUT_ROWS)
@@ -961,15 +1106,21 @@ def main():
     for path in (OUT_ROWS, OUT_SHAPE):
         if os.path.exists(path):
             os.remove(path)
-    df, shape = run(X, y, scaffs, rescale_to_exact_dose=False,
+    df, shape = run(X, y, scaffs, rescale_to_exact_dose=False, conditions=conditions,
                     rows_path=OUT_ROWS, shape_path=OUT_SHAPE)
 
     # Guard 9: assert the row count, a condition that produced no rows must fail loudly.
-    expected = len(CONDITIONS) * len(LEVELS) * len(MODELS) * N_REPLICATES
+    ran = [c[0] for c in (conditions or CONDITIONS)]
+    expected = len(ran) * len(LEVELS) * len(MODELS) * N_REPLICATES
     assert len(df) == expected, f"expected {expected} rows, wrote {len(df)}"
-    for name in CONDITION_NAMES:
+    for name in ran:
         assert (df.condition == name).sum() == len(LEVELS) * len(MODELS) * N_REPLICATES, \
             f"condition {name} is short of rows"
+
+    if subset:
+        print(f"\nwrote {OUT_ROWS} ({len(df)} rows). Subset run: the full screen's "
+              f"contrast analysis is not applicable, so it is skipped.")
+        return
 
     # Secondary pass at the top level only: rescale each draw to exactly the target RMS,
     # so the accuracy comparison is separated from the nu=3 dose wobble (section 5.1b).

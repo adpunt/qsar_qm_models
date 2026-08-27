@@ -143,7 +143,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done, sourced, and the settings **settled 2026-08-27** (§13.9), in `noise_conditions.json` with a gate on each side | §13 chats A, B, G |
-| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | ⏸️ deferred 2026-08-27, default recorded: inherit (§13.10) | the chat that writes the uncertainty job scripts asks it, if the author wants it asked at all |
+| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | ✅ settled by the author 2026-08-27 — inherit the four, add `outlier_p10` (§13.1 item 6) | done, and it is already the generator's default |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -1680,6 +1680,17 @@ control (`KIRBy tests/smoke/smoke_kirby_splits.py`,
   the runner pins it to (stream, condition) with no level. Now **Spearman 1.000
   and 18/18 at every level.**
 
+**Found by running it, not by reading it.** `quantile_forest` raises
+`Invalid parameter 'monotonic_cst'` on this sklearn, so a `--models QRF BNN-Full`
+run produced no QRF rows at all — **and exited 0 with a results file.** The
+all-failed guard fires only when EVERY model fails; one model failing everywhere
+is the likelier case and the more damaging one, because the model is then absent
+for that dataset only and every cross-model aggregate is computed on a biased
+subset. A requested model or representation that produces no rows now stops the
+job. Confirmed on the same command: exit 1, *"['QRF'] were requested and produced
+NO rows for ChEMBL-hERG-Ki"*. ⚠️ QRF could not be run on this laptop at all —
+verify it on the cluster before submitting QRF jobs.
+
 Also closed here: a `--conditions` job rewrote `all_results.csv` and `summary.csv`
 with its own rows alone and destroyed every other condition in the file — the
 merge guard knew about `--models` and `--reps` and not about the flag the runbook
@@ -1734,6 +1745,18 @@ Of the 5 marked refuted: three refutations stand, one is half-real (the
 validation-stacking half was real and is fixed), and **one is misfiled** — entry 4,
 the Graph GP constant, is refuted in name while its own evidence confirms it. It
 is real, and it is fixed.
+
+**Every check was broken on purpose to see it go red.** A harness edits the real
+file, runs the check, and puts the file back. Twelve fixes; ten went red first
+time and **two stayed green**, which is the point of running it:
+
+- The QM9 split check asserted each split is more than 10% acyclic. Under
+  DeepChem's largest-first ordering WITH singletons, validation comes out 100%
+  acyclic and test 82% — which passes a floor. It now asserts each split sits
+  within 25 points of the population's 42.5%.
+- The sibling-file check was caught by the column rule, not the name rule, so it
+  did not guard the name rule at all. Its fixture's manifest now carries the
+  results columns.
 
 **The checks.** Fourteen suites, all executing, none matching source text:
 
@@ -3877,7 +3900,22 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    reference instead and stops the whole copy if any disagrees, which turns every resubmitted clean
    task into a free four-way agreement test on production data. Proven both ways — three rows copied
    into empty files, then a corrupted row detected and the copy refused, exit 1.
-4. ⏸️ **NOT A DECISION YET, 2026-08-27.** It is chosen from the screen's output, and the generator already refuses to build the deep run without explicit choices, so nothing can run ahead of it. **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
+4. ✅ **RULED 2026-08-27 by the author — it is chosen from the screen's results, and that is
+   deliberate.** *"That depends on the results from the first runs. That needs to be clearly
+   documented."* A suggestion that it be pre-registered instead was put and is **withdrawn**.
+   **What this means in practice.** The sequence is: run the screen, look at it, choose, then
+   generate the deep run. The generator already refuses `--stage 2` without `--models` and `--reps`
+   rather than inventing a default (`slurm_scripts_qm9_rerun/generate_scripts.py:467-469`), so
+   nothing can run ahead of the choice.
+   **What the paper has to say, because the choice is made on the outcome.** A referee will ask why
+   those models and not others. The answer must be in the Methods, in these terms: the screen ran
+   every model and every representation at one replicate; the deep run added the remaining noise
+   conditions on a subset; here is the rule by which the subset was chosen. **Fix that rule before
+   the screen is read, not after** — otherwise the selection and the justification are written from
+   the same look at the data. Proposed rule, for the author to accept or replace *before* the screen
+   lands: take the widest spread of behaviour the screen shows — the most and least noise-tolerant
+   model, plus one from each remaining family — and the representations that span fingerprint,
+   descriptor and learned embedding. **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
    it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
    rather than inventing a default, so nothing can run ahead of the decision.
@@ -3901,7 +3939,20 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    1.0 is the easier one to defend to a referee, being one unit of label spread. One caveat carried
    from chat D: Ridge replicate 2 is a broken run, R² between −868 and −0.03 in every condition, and
    it is excluded and named rather than averaged in.
-6. ⏸️ **DEFERRED 2026-08-27 to the chat that writes the uncertainty job scripts — default recorded: inherit, and say so in the Methods.** **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
+6. ✅ **SETTLED 2026-08-27 by the author — inherit the main grid's four, and add `outlier_p10`.**
+   *"Yes add it."* Do not reopen it.
+   **Why only that one.** The uncertainty runs ask whether a model's uncertainty rises on the
+   molecules whose labels were corrupted. That has an answer only where the corruption hits some
+   molecules harder than others. Four of the seven conditions spread it evenly over every molecule
+   — gaussian, laplace, student_t, grouped_shifted — so the question is undefined there, not
+   negative. Three do not: `grouped_wider`, `censoring` and `outlier_p10`. The first two are already
+   in the inherited four; `outlier_p10` was the only one missing, and it is the most concentrated
+   case, so it is where a difference is likeliest to show.
+   **Cost: +20% on the uncertainty runs** (one condition on top of four).
+   **Already in the code**: `slurm_scripts_uncertainty_rerun/generate_scripts.py:143`
+   (`ADDED_FOR_QUESTION_B = ['outlier_p10']`) and `:425` make it the default. `--main-grid-only`
+   inherits the four without it; `--include-deep-conditions` adds all three depth-only conditions,
+   two of which are flat by design and buy nothing here. **Yours to decide,
    and chat H is where it gets asked** — it queues the uncertainty runs, so it is the last point at
    which the question can be put before compute is spent. Chat F closed on 2026-08-27 and everything
    it found is in the tree, so nothing is waiting on it. The set was settled on chat G's
@@ -3979,7 +4030,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 | 1 | **1.5.** It is measured, 1.0 is not; both roster models still fit there (R² 0.62 and 0.68); and it is where both the grouped-shifted result and the boosting-versus-forest reversal are visible. Report the clean column beside it | chat J, at figure-script rebuild |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ built 2026-08-27, §2.8j. `--main-grid-only` and `--include-deep-conditions` are the two other choices |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
-| 4 | Nothing to default. The screen runs, the author looks, the author chooses | after the screen |
+| 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |
 
 #### Item 1 — the level changes which model wins, so it is not a presentational choice
 
@@ -4034,57 +4085,52 @@ a measurement — but no part of it involves ridge.
 grouped-shifted result is visible, both models are still fitting, and the reversal is the finding
 rather than an artefact of a broken regime.
 
-#### Item 2 — two of the three conditions on offer cannot answer the question at all
+#### Item 2 — ✅ settled: inherit the four, add one more
 
-`slurm_scripts_uncertainty_rerun/generate_scripts.py:133` lists `FLAT_BY_DESIGN`: the conditions
-that give every molecule the same amount of noise. Under those, "does the uncertainty find which
-molecules were corrupted" is undefined, not zero.
+The uncertainty runs ask one thing: **when a molecule's label has been corrupted, does the model say
+it is more unsure about that molecule?**
 
-| Condition | In | Can it answer "which molecules"? |
+That only has an answer where the corruption hits some molecules harder than others. Where every
+molecule gets the same amount, there is no "which molecules" to find — the question is undefined,
+not answered in the negative.
+
+| Noise condition | Hits some molecules harder? | In the uncertainty runs? |
 |---|---|---|
-| gaussian | main grid | no — flat |
-| grouped_shifted | main grid | no — flat |
-| grouped_wider | main grid | **yes** |
-| censoring | main grid | **yes** |
-| laplace | depth only | no — flat |
-| student_t_nu5 | depth only | no — flat |
-| outlier_p10 | depth only | **yes** |
+| gaussian | no — even across molecules | yes (it answers the other question) |
+| grouped_shifted | no — even across molecules | yes |
+| laplace, student_t_nu5 | no — even across molecules | no |
+| **grouped_wider** | **yes** | yes |
+| **censoring** | **yes** | yes |
+| **outlier_p10** | **yes** | **yes — the author added it, 2026-08-27** |
 
-So "test the conditions rather than inherit them" reduces to **one condition, not three**. Inheriting
-gives two conditions that can answer the question; adding `outlier_p10` gives three, and it is the
-only concentrated-noise condition left — which is exactly the case the question was raised about.
+The four inherited from the main grid already contained two of the three that can answer the
+question. `outlier_p10` was the third, and it is the most concentrated case — a few molecules thrown
+a long way off — so it is where a difference is likeliest to show. **Cost: +20%.** Adding the other
+two depth-only conditions would have cost 60% more and bought nothing for this question, because
+both are even across molecules.
 
-**Cost.** One array task per (dataset, representation, condition), one script per model: 3 × 4 × 7.
-Inherit = 336 tasks. Adding `outlier_p10` = **+84 tasks, +25%**. Adding all three depth-only
-conditions = +252 tasks, +75%, of which two thirds buys nothing.
+Where it lives: `slurm_scripts_uncertainty_rerun/generate_scripts.py:143` and `:425`, as the
+default. `--main-grid-only` turns it off.
 
-**Recommendation: inherit the four, and add `outlier_p10`.**
+#### Item 3 — ✅ settled: one replicate plus the permutation null
 
-#### Item 3 — one replicate is the only thing the runner can do
+The author's call, 2026-08-27. §13.1 item 2 carries what the Methods must therefore say: the
+uncertainty results have **no run-to-run error bar**, and the permutation null is a test against
+chance rather than a substitute for a repeat.
 
-`slurm_scripts_uncertainty_rerun/generate_scripts.py:77-80`: the runner has no replicate axis; the
-five scaffold folds are the only repeat. More replicates would be a build, not a flag. The
-permutation null is built and tested — `scripts/uncertainty_stats.py:760`, `permutation_null`,
-which permutes the noise within a cell and fold and returns the observed value against a 2.5–97.5
-band.
+#### Item 4 — ✅ ruled: chosen from the screen, and the rule fixed before the screen is read
 
-**Recommendation: accept one replicate plus the null.** It is what exists, and the null is the
-reference distribution.
+The author's call, 2026-08-27: which models and representations go deep **depends on the screen's
+results**, and the document must say so plainly. A proposal to pre-register the set instead was put
+and is withdrawn.
 
-#### Item 4 — pre-register the choice rather than select on the screen's results
+Sequence: run the screen → look at it → choose → generate the deep run. The generator refuses to
+build the deep run without explicit choices, so nothing can run ahead of the decision.
 
-Choosing the deep run's models and representations from the screen's output is selection on the
-outcome: the conditions that look interesting get the precision, and a referee can ask why. The
-budget in §13.1 is 4 models × 3 representations. A pre-registered set that spans the space, and is
-defensible before any result exists:
-
-| | Chosen | Why |
-|---|---|---|
-| Models | `lgb`, `rf`, `svm`, `dnn` | boosting, bagging, kernel, neural — the four families, and the three measured above already behave differently from each other |
-| Representations | `ecfp4`, `continuous_pdv`, `mhggnn` | one fingerprint, the PDV, one learned embedding |
-
-The generator still refuses `--stage 2` without explicit choices, so this changes nothing until it
-is passed. If the screen shows something this set misses, widen it and say so in the Methods.
+**The one thing that should not wait for the screen is the rule.** Choosing the subset from the
+results and then justifying the choice from the same results is one look at the data doing two jobs,
+and it is the question a referee asks. Fixing the rule beforehand costs nothing and answers it.
+§13.1 item 4 carries a proposed rule for the author to accept or replace.
 
 ---
 
