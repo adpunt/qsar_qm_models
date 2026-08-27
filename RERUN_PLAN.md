@@ -15,8 +15,8 @@ instruction.
 **What stands beside it.** `NOISE_DESIGN.md` — the sourced specification of the new noise scheme.
 Its core rule, that the noise level becomes the amount actually delivered, you approved on
 2026-08-21. The condition set was **settled 2026-08-27** (§13.9) and now lives in
-`noise_conditions.json` with a gate on each side; the one item still open there is narrow — whether
-Laplace is queued at depth at all, now worth 720 runs rather than 4,680 (§4 Decision 4, §13.5).
+`noise_conditions.json` with a gate on each side. **Nothing in it is open.** Laplace was the last
+question and the author kept it, in the deep run only, at 720 runs (§4 Decision 4, §13.5).
 
 **Which document owns what.** This file owns what gets *run* and in what order — the staged design,
 the replicate counts, the representation set, the job scripts, the analysis, the decisions still
@@ -94,7 +94,7 @@ What can we say about uncertainty in these contexts?"*
 | **Ten replicates in stage 1** | 2026-08-26 | *"Let's do the 10 reps for stage 1 then."* Takes the whole staged design to 37% of the old one instead of 26% (§13.1) |
 | **Both forms of grouped noise are run** | 2026-08-26 | *"For the skewed noise lets go with option C."* Groups get wider errors *and*, as a separate condition, groups get shifted errors. See §13.3 |
 | **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
-| **The noise conditions, and how many settings of each** | 2026-08-27 | Settled on chat G's measurement (§13.9): Gaussian, both grouped conditions and censoring at full grid; **one** Student-t setting (ν = 5) and **one** Outlier setting (p = 10%) at depth only; Laplace optional; ν = 10, ν = 3, p = 1% and p = 5% dropped; the skewed draw never built. Lives in `noise_conditions.json`, enforced by tests on both sides |
+| **The noise conditions, and how many settings of each** | 2026-08-27 | Settled on chat G's measurement (§13.9): Gaussian, both grouped conditions and censoring at full grid; **one** Student-t setting (ν = 5) and **one** Outlier setting (p = 10%) at depth only; Laplace **kept** at depth, settled by the author the same day; ν = 10, ν = 3, p = 1% and p = 5% dropped; the skewed draw never built. Lives in `noise_conditions.json`, enforced by tests on both sides |
 | **The between-laboratory variance finding goes in the Background** | 2026-08-24 | Nearly two-thirds of real measurement variance is between laboratories — you asked for this to be written up |
 
 **Three still-open items from the register that are not in §4 and are yours to close:**
@@ -439,12 +439,24 @@ unchanged — the two `continue` statements in the ECFP4 block fired after the r
 was on disk, so the record came out 256 bytes short and every molecule after it was read at the
 wrong offset.
 
-1. **Truncated records.** Fixed by deciding the fingerprint *before* any byte of the record is
-   written. `prepare_ecfp4` returns the 256-byte block and, on failure, the reason; the failure
-   path writes 256 zero bytes so the record stays full length, records the molecule in
-   `featurisation_failures_{file_no}.csv`, and the run then **refuses to finish** unless
-   `--allow-featurisation-failures` is passed. Alignment is preserved and the condition is loud —
-   a zero fingerprint can never reach a model as though it were real features.
+⚠️ **Items 1 and 2 describe code that has since been deleted.** ECFP4 moved to Python on
+2026-08-26 (§2.13b), taking `prepare_ecfp4` and its null check with it. Read them as history:
+they say what went wrong and why, not what is in the tree. Where the protection lives **now** is
+stated under each. The property both were protecting — every record the same length, or the read
+offset of every molecule after it shifts and the file is silently misparsed — is unchanged and
+still what gate 8 tests.
+
+1. **Truncated records.** *Historical fix:* decide the fingerprint before any byte of the record
+   is written, via a `prepare_ecfp4` helper that returned 256 zero bytes on failure so the record
+   stayed full length.
+
+   **Now:** nothing computes a fingerprint in Rust. `ecfp4_fingerprint`
+   (`scripts/process_and_train.py`) computes Morgan radius 2 and **raises** on an unparseable
+   SMILES, on a wrong bit count, and on an all-zero row; the block is carried through to
+   `rust/src/main.rs` as a fixed `[u8; 256]` (`SmilesData::ecfp4_buf`), which cannot be short.
+   `write_data` checks the remaining case — an all-zero block, meaning the Python refusal was
+   bypassed — records it in `featurisation_failures_{file_no}.csv`, and the run **refuses to
+   finish** unless `--allow-featurisation-failures` is passed.
 
 2. **🔴 An unparseable SMILES did not take the error branch — it killed the process.**
    Found while writing the test for (1), and not previously recorded anywhere. RDKit's
@@ -453,14 +465,19 @@ wrong offset.
    it as `Ok`. Only a thrown C++ exception becomes `Err`. So the old `Err(_) => continue` branch
    was unreachable for the ordinary bad-SMILES case: `rdk_fingerprint_mol` dereferenced null and
    the process died with **SIGSEGV, no message and no partial output**. Confirmed by feeding
-   `this-is-not-a-smiles` to the built binary — exit 139. Fixed with a null check in
-   `prepare_ecfp4`. Not live on QM9, where every SMILES comes from the dataset; live on the ADME
-   sets. Worth knowing for the resubmit-failed-indices workflow in the runbook: a task that hit
-   this would die with signal 11 and be resubmitted straight back into the same crash.
+   `this-is-not-a-smiles` to the built binary — exit 139. Not live on QM9, where every SMILES
+   comes from the dataset; live on the ADME sets.
 
-3. **Index drift → truncation.** `read_all_target_values` no longer exists; chat A replaced it
-   with `read_train_labels` (`rust/src/main.rs`), which changed the failure from a shifted index
-   to a silent `break` — a short label vector, so the noise plan would cover fewer molecules than
+   **Now:** this route does not exist. The only RDKit parse is `Chem.MolFromSmiles` in
+   `ecfp4_fingerprint`, which returns `None` rather than a null pointer and is checked on the
+   line after. Kept here because the resubmit-failed-indices workflow in the runbook needs it: a
+   task that died of signal 11 with no message would be resubmitted straight back into the same
+   crash, so signal 11 is worth recognising.
+
+3. **Index drift → truncation.** `read_all_target_values` no longer exists. Chat A replaced it,
+   and it is now `read_split_labels` (`rust/src/main.rs:2195`) — one reader for all three splits
+   rather than a training-only one. The interim version changed the failure from a shifted index
+   to a silent `break`: a short label vector, so the noise plan would cover fewer molecules than
    the file holds. Now a hard error naming the record index and the expected count.
 
 4. **The Python reader guessed.** `parse_mmap`'s bare `except: continue` is gone. These records
@@ -555,7 +572,9 @@ That is the corruption this section is about, and it survived the fix.
 
 `file_no` is only ever a filename token — every use across `process_and_train.py` and
 `models/models.py` is a filename, never a seed — so it is now `uuid.uuid4().int &
-0xFFFFFFFFFFFFFFFF`. 64 bits because the Rust side types it `usize` and a full grid draws about
+0x7FFFFFFFFFFFFFFF`. **63 bits**, not 64: the Rust side types it `usize` and the Python side puts
+it in a filename, and clearing the top bit keeps it positive on every path that might read it as
+signed. A full grid draws about
 4,000 of them; 32 bits would leave roughly a 1-in-500 birthday collision across the run. Measured
 after: **0 collisions in 500,000 draws.** A single-task run before and after produces
 bit-identical accuracy (MAE 0.5017960652047769 at level 0), confirming nothing but the filename
@@ -1605,9 +1624,9 @@ across that fold.
 **What it costs, and it belongs in the caption.** A level is no longer a stated
 multiple of assay error. At the top of the grid LogD carries **11.9x** its
 within-lab error of 0.15, Caco-2 **1.9x** its 0.35, hERG **2.5x** its 0.54. That
-asymmetry cannot be removed: one unit of real error is 0.13 of the label spread
-on LogD and 0.79 on Caco-2, so whichever axis is held constant, the other varies
-sixfold. §6.4 of `NOISE_DESIGN.md` held realism constant; this holds comparability
+asymmetry cannot be removed: the published assay error is 0.13 of the label
+spread on LogD and 0.79 on Caco-2, so whichever axis is held constant, the other
+varies sixfold. §6.4 of `NOISE_DESIGN.md` held realism constant; this holds comparability
 constant. Both grids and the reason for each are written above
 `NOISE_LEVELS_BY_DATASET`.
 
@@ -2792,7 +2811,7 @@ decision rested on:
 The condition set is settled (§13.9) and enforced by `noise_conditions.json` plus a gate on each
 side. The positive-control question is answered by censoring (§3.2). **What is left is one narrow
 yes/no: is Laplace queued at depth at all?** It is out of the full grid — measured indistinguishable
-from Gaussian on every model at both levels (largest 0.0058 R²) — so the question is no longer worth
+from Gaussian on both roster models at both levels (largest 0.0136 R², 0.24 of the wobble) — so the question is no longer worth
 4,680 runs but **720**. My view is unchanged: include it. It is the only distribution actually
 *fitted* to real bioactivity error, so it buys a citation for a claim the paper wants to make, and
 at that price the citation is cheap. Saying no costs nothing but the citation.
@@ -3123,7 +3142,7 @@ tests on both sides read** (§8). What runs, and why, is §13.9; what it is is h
 | **Full grid** | Gaussian · Grouped — wider · Grouped — shifted | three zero-mean types, all delivering the same amount of noise |
 | **Full grid, own axis** | Censoring | not zero-mean, cannot be dose-matched, and the largest effect in the study |
 | **Depth only** | Student-t at ν = 5 · Outlier at p = 10% | one setting each, not three: the three settings of each came within 0.006 R² of Gaussian and of one another over twelve replicates |
-| **Depth only, optional** | Laplace | indistinguishable from Gaussian; its value is citational. Dropping it saves 720 runs |
+| **Depth only** | Laplace | indistinguishable from Gaussian; its value is citational. **Kept by the author 2026-08-27** at 720 runs — not optional, and no longer a question |
 | **Dropped** | Student-t at ν = 10 and ν = 3 · Outlier at p = 1% and 5% | measured redundant, §13.9 |
 | **Never built** | a skewed draw | tested in the local screen and rejected; the asymmetry story is carried by censoring and by grouped-shifted, which are mechanisms with sources rather than a chosen distribution |
 
@@ -3142,8 +3161,8 @@ about them for a fortnight. §6.4 of the design owns every level grid; this sect
 grids are *for*. Seven levels on QM9 and six on each experimental dataset is what the cost
 arithmetic in §13.1 assumes.
 
-Each experimental grid brackets one unit of real assay error for that endpoint and runs to about
-twice it. Report the fraction-of-spread alongside, because one unit of real error is 0.13 of the
+Each dataset's list of noise levels includes the assay error published for that endpoint and runs to
+about twice it. Report the fraction-of-spread alongside, because that published error is 0.13 of the
 label spread on LogD but 0.76 on Caco-2 — a factor of six.
 
 **This supersedes the old eleven-point ladder.** Your choice of 0.6 as the reporting level
@@ -3354,7 +3373,7 @@ than notes that reassure. Two commands run them:
 # the noise conditions, on the real label column — this is the preflight gate
 ./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
 
-# the pipeline, over real mmap files — 14 gates
+# the pipeline, over real mmap files — 33 gates (28 noise gates + 5 writer guards)
 cd rust && cargo test --release
 ```
 
@@ -3400,6 +3419,51 @@ condition the study runs but nothing runs end to end is a condition that ships u
 property of one path; that one runs all seven settled conditions in turn through the real binary.
 It exists because "the unit tests pass" and "the grid will run" are different claims, and this
 project has already queued jobs that ran five folds over nothing (§2.8d).
+
+---
+
+### 8a. 🔴 The preflight exited 1, and now does not — 2026-08-27
+
+**The command every operator is pointed at failed on a 4,000-molecule column.** Deterministic, and
+reproduced independently. Exactly one gate was responsible: gate 11, *"validation is dosed against
+the clean training spread, not its own"*, on Student-t ν = 3 — validation delivered **+36.54%**
+against a band of 21.21%, and the run stopped there.
+
+**The cause is not the anchoring rule. It is the statistic used to test it.** Gate 11 built one
+draw on training and one on validation, at `seed: 42`, and compared them. Student-t ν = 3 is the
+heaviest-tailed shape on the grid, and the same self-test measures its per-run delivered dose
+spread at **14.5%** on training — the validation part is a fifth of an already small column, so its
+own spread is larger still. The ratio of two single heavy-tailed draws is not a statistic about the
+anchoring rule; it is mostly the draws.
+
+**This is the third gate to need the same fix and the first that stops a run.** The flat-dose gate
+went from 20 seeds to 200 and the ν→∞ gate from one draw to 50, both on 2026-08-27, for exactly
+this reason — a launch gate that fails at random is worse than no gate, because the next person
+turns it off. Gate 11 was missed. Rule 3 of `NOISE_DESIGN.md` §2a says it in one line: gate on the
+population, never on one realisation.
+
+**The fix.** `VALIDATION_SEEDS = 100` in `rust/src/main.rs`. Both sides are built at each of 100
+seeds, the mean ratio is compared against three standard errors of its own mean, floored at 0.5% —
+the same rule the flat-dose gate above uses. The per-run spread is now printed beside the ratio, so
+the reader can see which conditions are noisy (guard 4).
+
+**It also made the gate much stronger, which is the point.** The old bands ran 8.6%–28.7%; the new
+ones run 0.93%–5.36%. It now detects an error five to twenty times smaller than before while no
+longer failing by chance.
+
+**Verified four ways.**
+
+| Check | Result |
+|---|---|
+| The 4,000-molecule column that failed | ✅ `EXIT=0`, all gates pass. ν = 3 now reads **+0.39%** against a band of 5.36% |
+| The full 133,885-label column | ✅ `EXIT=0`, all gates pass. Validation spread is 3.37× training's and every condition lands within 0.12% |
+| **The fix removed** — validation dosed against its own spread | ✅ **All ten conditions FAIL**, at **+181% to +184%** against bands of 2.62%–15.08%. The gate still catches what it exists to catch, by two orders of magnitude |
+| 1,000 / 2,000 / 4,000 / 8,000 / 20,000 molecules | ✅ `EXIT=0` at every size. The verdict no longer depends on how much data the gate is handed |
+
+**The last row is the part worth keeping.** The gate passed on the full column and failed on a
+subsample — so it was *right for the wrong reason*, and its verdict tracked sample size rather than
+the property under test. Any gate whose answer depends on how much data it is given will eventually
+be given the wrong amount.
 
 **Why a file and not a note.** `scripts/noise_strategy_params.json` was a settings file that nothing
 read: it was never passed to the binary, so for the life of the project it silently meant nothing
@@ -3453,12 +3517,26 @@ threshold-degeneracy figure — starts appearing in both documents again. It rep
 7. ✅ **Student-t reduces to Gaussian in the limit.** At 200 degrees of freedom the two must be
    indistinguishable — checked on both the delivered dose and the tail fraction, inside
    `--self-test`.
-8. ✅ **A short record no longer desyncs the file.** Implemented both sides (chat D):
-   `rust/tests/writer_guards.rs` feeds the binary a molecule RDKit cannot parse and asserts the
-   file is still the exact sum of its records' expected lengths;
-   `scripts/test_record_alignment.py` hand-builds a short record and asserts the reader raises
-   rather than returning silently wrong features. `cargo test --test writer_guards` and
-   `python scripts/test_record_alignment.py`.
+8. ✅ **A short record no longer desyncs the file.** Implemented both sides (chat D).
+
+   Writer — `rust/tests/writer_guards.rs`, five tests. It does **not** feed the binary an
+   unparseable molecule: it cannot any more, because nothing in Rust parses SMILES since ECFP4
+   moved to Python (§2.7 item 2). It plants an **all-zero fingerprint block** instead, which is
+   what a molecule that could not be featurised now looks like by the time the binary sees it,
+   and asserts that the record is still the length the reader expects, that the file is the exact
+   sum of its records' expected lengths, that the molecule is reported as a failure, that a full
+   fingerprint is *not* reported as one, and that the configuration path has no default.
+
+   Reader — `scripts/test_record_alignment.py`, five checks: a short record raises rather than
+   returning silently wrong features; a well-formed file is consumed exactly; a representation
+   with no reader is refused by name; and every representation the reader accepts decodes to a
+   fixed width — the assumption `parse_mmap`'s uniform-width check rests on. That last check is
+   the honest replacement for a test of the width guard itself: it is unreachable today, because
+   every accepted representation reads a fixed number of bytes and the two whose rows could
+   differ in width are refused before the loop starts. The test fails the day someone adds a
+   variable-width representation, which is when the guard needs revisiting.
+
+   `cargo test --release --test writer_guards` and `python scripts/test_record_alignment.py`.
 9. **Every new column is populated** in a smallest-possible end-to-end run.
 9c. ✅ **A failure in the injector stops the run.** `python scripts/test_failure_propagation.py`.
     Until 2026-08-26 the pipeline never inspected the injector's return code, so every gate in
@@ -4406,14 +4484,14 @@ split in both the pipeline and the harness.
 | # | Kind | What | Fix |
 |---|---|---|---|
 | ~~D1~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — Avalon returned an all-zero fingerprint for an unparseable molecule and for any exception. Nothing caught it downstream | Raises now, plus the all-zero case RDKit produces from `''`. Guard: `scripts/test_avalon_failure.py` |
-| **D2** | code | **Three live job scripts are submittable with no activation guard** — `slurm_scripts_validation_rerun/val_svm_pdv_herg.sh:13-14`, `val_svm_sns_herg.sh:13-14`, `smoke_test.sh:16-17` still carry the dead micromamba lines. Their regenerated siblings check `CONDA_PREFIX` and assert `env_test`; these three do not. All 92 files there are tracked in git, so they look sanctioned | Regenerate the three, or paste in the same guard block and delete the `MAMBA_EXE` lines |
-| **D3** | code | **The environment probe is wired into one generator of three.** `slurm_scripts_uncertainty_rerun/` and `slurm_scripts_validation_rerun/` emit the activation guard but never call `check_environment.py`, so those runs launch with no model-buildability check | Emit the same `python check_environment.py --models {model} || exit 2` line from both |
-| **D4** | code | **Orphaned doc comment.** The `///` block at `rust/src/main.rs:2212-2220` described `prepare_ecfp4`, which is deleted. It now sits above `fn write_data`, which does something else, and contradicts a `//` comment 14 lines below | Delete or retarget it |
-| **D5** | code | **A guard with no test.** `parse_mmap`'s uniform-width check (`scripts/process_and_train.py:1666-1676`) is live code with nothing exercising it — the short-record case in the alignment test is caught by an earlier branch | Add a case packing records of two different widths |
-| **D6** | doc | **§2.7 items 1-3 name deleted code in the present tense** — `prepare_ecfp4` and its null check (that route went when ECFP4 moved to Python), and `read_train_labels`, now `read_split_labels`. §2.13b already records the deletion, so the document contradicts itself | Past tense, and point at §2.13b and the Python guards |
-| **D7** | doc | **§8 gate 8's description is wrong.** It says the test feeds the binary an unparseable molecule. It plants an all-zero block — the test says so itself | Rewrite the description |
-| **D8** | doc | **Four wrong facts.** §2.8a says the task id masks 64 bits; the code masks 63. §2.8h cites `setup.sh:83` for the PATH prepend; it is `:124`, and the stale citation is copied into the QM9 generator. §2.8d says the runbook diffs two cluster interpreters; the runbook now says the second must not be used. §13.2 warns that checked-in `.sh` files under `slurm_scripts_qm9_rerun/` are stale — that directory has no `.sh` files | Correct the four |
-| **D9** | doc | **§13.2 says only two files in the validation directory are tracked and the other 85 never were.** All 92 are tracked. That sentence is what makes D2 look harmless | Correct it, and disclose `smoke_test.sh` alongside the two reverts |
+| ~~D2~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — all three regenerated, and the smoke test is now emitted by the generator instead of kept by hand. Regenerating also uncovered a live defect the hand edits were masking: the generator passed `--datasets herg`, which the runner rejects at argument parsing, so all 28 other hERG scripts would have died there. The CLI name (`herg_ki`) and the path name (`herg`) are now a two-column table in the generator | ✅ Done — §13.2 chat D |
+| ~~D3~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — both now call it. They could not use `--models`: KIRBy says `LightGBM` and `BNN-Full` where QM9 says `lgb` and `dnn_bnn_full`, so a QM9 label list would have failed them for the guard's own reason. `check_environment.py` gained `VALIDATION_MODELS` and `--validation-models`, sourced from the runner's own optional-import blocks, and `--audit-roster` now checks all three generators' labels | ✅ Done |
+| ~~D4~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — retargeted to `write_data`: it now states the all-or-nothing record property, says the fingerprint is computed in Python and carried through as a fixed `[u8; 256]`, and says what `write_data` itself checks. A mangled failure message on the same path (a broken line continuation leaving 34 spaces mid-sentence) was fixed with it | ✅ Done |
+| ~~D5~~ | ~~code~~ | ✅ **RESOLVED 2026-08-27, and the suggested fix was not possible.** The check is **unreachable**: every representation `parse_mmap` accepts reads a FIXED number of bytes, so its rows are all the same width by construction, and a truncated block is swallowed by the fixed-size read and surfaces as the next field failing — the per-entry guard, tested already. The two representations whose rows could genuinely differ (one-hot and randomized SMILES) are refused by name before the loop. Kept as a backstop; the alignment test now asserts the assumption it rests on, per representation, so it fails loudly the day a variable-width representation is added | ✅ Done — §8 gate 8 |
+| ~~D6~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — §2.7 now opens with a warning that items 1 and 2 are history, each says where the protection lives now (`ecfp4_fingerprint` in Python, the fixed `[u8; 256]` carried through, `write_data`'s all-zero check), and item 3 names `read_split_labels` | ✅ Done |
+| ~~D7~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — rewritten: five writer tests and five reader checks, what each actually plants, and why the unparseable-molecule route no longer exists | ✅ Done |
+| ~~D8~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — all four. The mask is 63 bits and the document now says why the top bit is cleared; `setup.sh:124` corrected in the document and in all three generators and the preflight (it was in four files, not one); the two-interpreter sentence replaced with one interpreter; the stale-scripts warning replaced with what is actually there | ✅ Done |
+| ~~D9~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — corrected, `smoke_test.sh` disclosed, and the consequence traced through to the defect it was hiding (D2) | ✅ Done |
 | **D10** | cluster | The substantive half of gate 10 skips on this laptop, so §8's claim that all three halves passed cannot be re-confirmed off the cluster | Run `python scripts/test_config_isolation.py --end-to-end` under `env_test` and record the output |
 | **D11** | cluster | `check_environment.py` exits 1 on the laptop interpreter — requirement conflicts, a quantile-forest fit failure, four OpenMP runtimes reachable. **The gate is behaving correctly**; this is the threading conflict and the environment rebuild, explicitly not chat D's | Run under `env_test`; nothing in chat D's scope changes |
 | **D12** | cluster | §2.8d's KIRBy citations are in another repository and were not checked; that commit hash does not resolve here | Verify in KIRBy, or mark those lines cross-repo and unverified |
@@ -4422,14 +4500,14 @@ split in both the pipeline and the harness.
 
 | # | Kind | What | Fix |
 |---|---|---|---|
-| **G1** | code | 🔴 **The documented launch preflight EXITS 1 on 4,000 real QM9 molecules.** Gate 11 — *"validation is dosed against the clean training spread, not its own"* — fails on Student-t ν=3: train 0.665, validation 0.909, +36.5% against a 21.2% band. Deterministic, reproduced by two verifiers independently, with and without the scaffold file. **It passes on the full 133,885 column.** The cause is the exact pattern chat G fixed twice and missed here: a **single draw**, `seed: 42` at `rust/src/main.rs:1943`, on the heaviest-tailed shape — whose own per-run dose spread the same self-test measures at 14.5%. Gate 11 is chat F's code, but it is the gate an operator is pointed at | Average gate 11 over seeds the way the other two now do, then re-run the preflight at both sizes and paste both outputs into this document |
+| ~~G1~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — gate 11 now averages the delivered dose over **100 seeds** on each side instead of comparing one draw against one draw, the same rule the flat-dose and ν→∞ gates already use. Verified below. Original report: 🔴 **The documented launch preflight EXITS 1 on 4,000 real QM9 molecules.** Gate 11 — *"validation is dosed against the clean training spread, not its own"* — fails on Student-t ν=3: train 0.665, validation 0.909, +36.5% against a 21.2% band. Deterministic, reproduced by two verifiers independently, with and without the scaffold file. **It passes on the full 133,885 column.** The cause is the exact pattern chat G fixed twice and missed here: a **single draw**, `seed: 42` at `rust/src/main.rs:1943`, on the heaviest-tailed shape — whose own per-run dose spread the same self-test measures at 14.5%. Gate 11 is chat F's code, but it is the gate an operator is pointed at | ✅ Done — §8a |
 | ~~G2~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — the evidence file could not be re-analysed by its own script | The analysis reads its roster from the file, drops non-roster models by name, and says so |
-| **G3** | code | **Guard 8 quietly makes Ridge an eleven-replicate result** — replicate 2's clean R² of −16.99 is dropped by the accuracy floor, removing 28 rows. The row labelled "what twelve replicates could have detected" has an upper end computed on eleven | Relabel, or recompute on the twelve-replicate models only |
-| **G4** | code | **A docstring states the opposite of what the code does.** `scripts/setting_selection_test.py:430-431` says the split keeps raw scaffolds and only the noise grouping is corrected. Both call sites hand the corrected ids to the splitter, and the real pipeline corrects the split too — so both halves of the sentence are false, and they contradict the fix chat G claims | Delete or invert it |
-| ~~G5~~ | ~~doc~~ | ✅ **PARTLY FIXED 2026-08-27** — §13.9's headline numbers were Ridge rows; the correction table is now at the head of §13.9 and `noise_conditions.json`'s Laplace entry no longer quotes a Ridge number | **Still open:** `NOISE_DESIGN.md` §5.8 carries the same numbers and whole uncaveated Ridge columns; two more `0.0058` quotes sit at `RERUN_PLAN.md:2760` and `NOISE_DESIGN.md:1828` |
-| **G6** | doc | **Recommendation 4's "(largest 0.0058)" is wrong twice.** Across both levels the largest Laplace-minus-Gaussian difference is 0.0362, and 0.0058 is a Ridge row at one level only. **The recommendation survives** — 0.0362 is half the replicate wobble, p = 0.222 — but the number cited for it does not | Quote the level-1.5 figure and its ratio, on models in the study |
-| **G7** | doc | 🔴 **Laplace reads as still open in six places** although the author settled it on 2026-08-27 and the conditions file records it as kept with no optional marker. Two of them are the **first lines a reader lands on** in each state document, so the next session is told a settled decision is still waiting on the author. One of them asserts the conditions file marks it optional, which is false. No code disagrees | Update both headers, the two condition tables and `NOISE_DESIGN.md` §7, and stamp the date — it still says last updated 2026-08-26 |
-| **G8** | doc | **Gate counts are wrong in four places** — this document says 14, 15, and 15 + 4. The real numbers are **28 noise gates and 5 writer guards, 33 in total** | Correct all four |
+| ~~G3~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — the verdict table now carries the replicate count and the model beside the detectability figure, and prints them, so the label cannot drift from the arithmetic. With Ridge dropped by the roster filter every figure is on twelve replicates, which the printout states. Original report: **Guard 8 quietly makes Ridge an eleven-replicate result** — replicate 2's clean R² of −16.99 is dropped by the accuracy floor, removing 28 rows. The row labelled "what twelve replicates could have detected" has an upper end computed on eleven | ✅ Done |
+| ~~G4~~ | ~~code~~ | ✅ **FIXED 2026-08-27** — the docstring now says the corrected ids are used for both the noise grouping and the split, and records the R² = −0.40 collapse that found the omission. Original report: **A docstring states the opposite of what the code does.** `scripts/setting_selection_test.py:430-431` says the split keeps raw scaffolds and only the noise grouping is corrected. Both call sites hand the corrected ids to the splitter, and the real pipeline corrects the split too — so both halves of the sentence are false, and they contradict the fix chat G claims | ✅ Done |
+| ~~G5~~ | ~~doc~~ | ✅ **FULLY FIXED 2026-08-27** — `NOISE_DESIGN.md` §5.8 was rewritten on the roster models throughout and carries the correction notice; every remaining `0.0058` quote is gone from both documents and from `noise_conditions.json`. Earlier that day: **PARTLY FIXED** — §13.9's headline numbers were Ridge rows; the correction table is now at the head of §13.9 and `noise_conditions.json`'s Laplace entry no longer quotes a Ridge number | ✅ Closed |
+| ~~G6~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — recommendation 4 now quotes **0.0136 R²**, LightGBM at level 1.5, 0.24 of the wobble, paired *t* p = 0.350, with the reporting-level figure of 0.0024 beside it. The audit's own replacement, 0.0362, was also a Ridge row; the correction table's 0.0087 was an exact-dose row and the primary analysis is the algebraic dose. **The recommendation survives on all three numbers** |
+| ~~G7~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — both document headers, both condition tables, `NOISE_DESIGN.md` §7 and this document's decision register now say Laplace is kept at depth. Original report: 🔴 **Laplace reads as still open in six places** although the author settled it on 2026-08-27 and the conditions file records it as kept with no optional marker. Two of them are the **first lines a reader lands on** in each state document, so the next session is told a settled decision is still waiting on the author. One of them asserts the conditions file marks it optional, which is false. No code disagrees | ✅ Done |
+| ~~G8~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — all four corrected to **28 noise gates + 5 writer guards = 33**, counted from `#[test]` in `rust/tests/`, and both figures reproduced by `cargo test --release` |
 
 **One thing the audit is emphatic about, and it is the reason G5 and G6 matter:** the condition set
 itself is **not** overturned by removing Ridge. Without it the heavy-tailed and contamination ladders
@@ -4569,16 +4647,27 @@ flags and will now fail loudly** — they are rebuilt in chat H (§5.3).
 none of it needs the Python training stack.
 
 ```
-cd rust && cargo test --release --test noise_gates          # 15 gates over real mmap files
+cd rust && cargo test --release --test noise_gates          # 28 gates over real mmap files
 ./rust/target/release/rust_processor --self-test <labels.csv> --scaffold-file <groups.json>
 python scripts/crosscheck_pipeline_reference.py --labels <labels.csv> --groups <groups.json>
 python scripts/test_injector_wiring.py                      # the Python driver's helpers
 ```
 
-Last run 2026-08-26 against the tree at this commit: **15 gates pass; the self-test passes on all
-133,885 QM9 labels and on 4,000 with real Murcko groups; the cross-check passes on all 17
-conditions at k = 0.25, 0.5 and 1.0; the wiring test passes 20 checks.** Every one was falsified by
-removing the fix it guards.
+Last run **2026-08-27** against the tree at this commit:
+
+| Command | Result |
+|---|---|
+| `cargo test --release` | ✅ **33 pass** — 28 noise gates + 5 writer guards |
+| `rust_processor --self-test` on all 132,480 QM9 labels | ✅ `EXIT=0`, all gates pass |
+| the same on 1,000 / 2,000 / 4,000 / 8,000 / 20,000 molecules with real Murcko groups | ✅ `EXIT=0` at every size (§8a) |
+| `scripts/crosscheck_injectors.py` | ✅ **342 checks**, both injectors agree |
+| `scripts/crosscheck_pipeline_reference.py` | ✅ all **17** conditions at k = 0.25, 0.5 and 1.0 |
+| `scripts/test_injector_wiring.py` | ✅ passes |
+| `scripts/test_noise_conditions.py` | ✅ **7 conditions** resolve on both sides with the settled parameters, and the job generator agrees |
+| `scripts/check_bib_and_docs.py` | ✅ OK — one pending item, the author's own `\bibliography` line |
+
+Every one was falsified by removing the fix it guards; §8a records the falsification for the gate
+that was fixed on 2026-08-27.
 
 **The Python driver is covered without the training stack.** `process_and_train.py` cannot be
 imported on a machine without `torch_geometric`, so the three helpers chat A added to it were only
@@ -4968,9 +5057,13 @@ in §2.7, §2.8a and §2.8d; the gates are §8 items 8, 9b and 10.
    explicitly allowed. `read_train_labels` errors instead of truncating. `parse_mmap` raises with
    the entry and byte offset instead of guessing, and asserts the file was consumed exactly.
    Gates: `rust/tests/writer_guards.rs`, `scripts/test_record_alignment.py`.
-3. **The environment (§2.8d).** `scripts/check_environment.py`, wired into the job template and
-   into runbook §1b for both cluster interpreters. The local `torch_geometric` import is fixed, so
-   the QM9 pipeline runs on the laptop and every other chat can verify locally.
+3. **The environment (§2.8d).** `scripts/check_environment.py`, wired into the job template of
+   **all three** job families (QM9 via `--models`, validation and uncertainty via
+   `--validation-models`, which is the same probe over KIRBy's model names) and into runbook §1b.
+   The runbook no longer diffs two cluster interpreters: `py311-kirby` is missing eight packages
+   and the runbook now says not to use it, so there is one interpreter, `env_test`. The local
+   `torch_geometric` import is fixed, so the QM9 pipeline runs on the laptop and every other chat
+   can verify locally.
 
 **Two things found that were not in the brief, and both were worse than what was**
 
@@ -5001,22 +5094,35 @@ three live generators and the uncertainty preflight are all fixed:
 more) still carry them and are deliberately left alone: they are superseded runs, and nothing in
 them should be submitted again.
 
-🔴 **The `.sh` files checked in under `slurm_scripts_qm9_rerun/` are stale in two ways and must
-not be submitted as they stand.** They predate this fix, so they have no activation guard, *and*
-they carry the pre-redesign CLI (`--sigma`, `--noise-strategy`) which `process_and_train.py` no
-longer accepts — it takes `--noise-level`, `--noise-shape` and `--noise-targeting` now. The
-generator's own body still emits the old flags too. Regenerating them, and updating the generator
-to the new CLI, is chat H's, and it is gated on §13.1. What chat D guarantees is only that
-whatever chat H regenerates will carry the activation guard.
+✅ **Corrected 2026-08-27 — this warning is out of date and the directory it names has no `.sh`
+files.** The 22 stale scripts under `slurm_scripts_qm9_rerun/` were deleted on the close-out pass
+(recoverable at `d791ece`) and the generator has since been rewritten: it emits `--noise-level`,
+`--noise-shape` and `--noise-targeting`, reads its level grid and its conditions from
+`noise_conditions.json`, and carries the activation guard and the model-buildability probe. It
+regenerates 14 working scripts. The original warning stands only as history: the scripts that
+were there did predate the fix and did carry the retired CLI.
 
-**One side effect, disclosed.** `slurm_scripts_validation_rerun/generate_scripts.py` ignores
-`--help` and writes its 87 scripts immediately, into its own directory. Probing it therefore
-regenerated them. Only two of those files are tracked in git and both had hand-added `git pull`
-lines that regeneration would have dropped, so **both were reverted** and are unchanged from
-HEAD. The other 85 have never been in version control; they were rewritten and now carry the
-activation guard, and all 92 files in the directory pass `bash -n`. Nothing was lost, but the two
-tracked scripts are now inconsistent with the other 85 — chat H should regenerate the directory
-deliberately rather than inherit that.
+**One side effect, disclosed — and its consequence, found and fixed on 2026-08-27.**
+`slurm_scripts_validation_rerun/generate_scripts.py` ignores `--help` and writes its scripts
+immediately, into its own directory. Probing it therefore regenerated them.
+
+The original note here said only two of those files were tracked in git and the other 85 never
+had been. **That was wrong: all of them are tracked** (commit `ea54082`, "Commit the working
+tree"). Believing otherwise is what made the next sentence look harmless. Three scripts were left
+un-regenerated to preserve hand edits — `val_svm_pdv_herg.sh`, `val_svm_sns_herg.sh` and
+`smoke_test.sh` — and all three kept the dead `MAMBA_EXE` lines with no activation guard, while
+looking as sanctioned as their 85 siblings.
+
+Fixed 2026-08-27. The hand edit those two scripts were protecting turned out to be **load-bearing
+and the right side of a real defect**: they passed `--datasets herg_ki`, and the generator emitted
+`--datasets herg`, which `alternative_data_noise_robustness.py` rejects at argument parsing
+(`choices=['logd', 'caco2', 'herg_ki', 'all']`). Every one of the 28 other hERG scripts would have
+died at argparse. The generator now carries a two-column table: `herg_ki` on the command line,
+`herg` in every path, because the runner writes its output to `Path(results_root) / 'herg'` and
+`merge_results.py` matches on that suffix. The smoke test is generated from the same template
+rather than kept by hand — a hand-written file does not get regenerated, which is how it kept the
+dead hook. All 88 generated scripts now pass `bash -n`, carry the activation guard, carry the
+model-buildability probe, and none contains a live `MAMBA_EXE` line.
 
 **The guard checks the right thing, not a hardcoded path.** The first version keyed on
 `/apps/system/*`, which is brittle — it would have passed a task that activated the *wrong*
@@ -5407,7 +5513,7 @@ correct. Both were under-powered rather than wrong, and both are now fixed and c
 | Student-t nests Gaussian at ν → ∞ | Compared **one** Gaussian draw against **one** t draw. Two independent draws wobble by ~1.8% against a 2% threshold, so it fails about a quarter of the time; it reported +2.21% | Averaged over 50 seeds: mean dose gap +0.38%, tail fractions 0.29% vs 0.28% |
 
 **A launch gate that fails at random is worse than no gate, because the next person turns it off.**
-Both fixes are in `rust/src/main.rs`; `cargo test --release` passes 15 + 4 tests.
+Both fixes are in `rust/src/main.rs`; `cargo test --release` passes 28 + 5 tests.
 
 ##### 🔴 Rule 2 of `NOISE_DESIGN.md` §2a applies to the SPLIT, not only to the noise
 
@@ -5469,14 +5575,23 @@ on 2026-08-27; this section did not, so the two disagreed. Recomputed from
 | Quantity as stated below | With Ridge (as written) | Roster models only |
 |---|---|---|
 | Largest \|mean ΔR²\| against Gaussian at the reporting level, excluding grouped-shifted | 0.0058 — a **Laplace / Ridge** row | **0.0047** — Outlier p=0.01 / random forest |
-| Same across both levels | 0.0475 — Student-t ν=3 / **Ridge** | **0.0408** — skewed draw / random forest |
-| Laplace, largest \|mean ΔR²\| | 0.0362 — **Ridge** | **0.0087** |
+| Same across both levels | 0.0475 — Student-t ν=3 / **Ridge** | **0.0445** — skewed draw / random forest |
+| Laplace, largest \|mean ΔR²\| | 0.0362 — **Ridge** | **0.0136** — LightGBM at level 1.5 |
+| Grouped-shifted against grouped-wider at level 1.5 | 0.096 – 0.314, up to 7.4× the wobble | **0.0963 – 0.1419**, 2.52× and 2.71× the wobble |
+
+⚠️ **Two of the right-hand figures were themselves wrong until 2026-08-27 and are corrected above.**
+The skewed-draw row read 0.0408 and Laplace's read 0.0087; both were **exact-dose** rows, and the
+primary analysis is the algebraic dose because that is what the pipeline will use
+(`scripts/setting_selection_test.py` takes `dose_mode == 'algebraic'` as primary). Recomputed from
+`results/setting_selection_test_contrasts.csv`, which is written on the primary analysis alone.
 
 **Every verdict in this section stands and several are strengthened**, because removing Ridge makes
 the differences *smaller*: the case that shape and contamination do not earn separate settings gets
 better, and Laplace becomes more indistinguishable from Gaussian, not less. **But `noise_conditions.json`
 cites this section as its evidence, so the numbers it points at had to be right.** The `why` strings
-in that file quoting "largest 0.0058" and Laplace's "0.0058" are quoting Ridge rows.
+in that file quoting "largest 0.0058" and Laplace's "0.0058" were quoting Ridge rows. ✅ **All of
+them were rewritten on 2026-08-27** from `results/setting_selection_test_contrasts.csv`, which is
+written on the roster models and the primary dose alone.
 
 ✅ **The analysis script now drops non-roster models by name rather than silently including them**
 (`scripts/setting_selection_test.py`, `models_in()`). `--analyse-only` prints
@@ -5489,14 +5604,16 @@ roster changes, which it did between the file being written and the roster being
 
 #### At the reporting level, everything except one condition is indistinguishable from Gaussian
 
-Across all ten non-Gaussian conditions except grouped-shifted, and all three models:
+Across all ten non-Gaussian conditions except grouped-shifted, on the two roster models, at twelve
+replicates each (**corrected 2026-08-27** — the figures here were computed with Ridge, which is not
+in the study; every one of them got smaller):
 
 | | |
 |---|---|
-| Largest \|mean ΔR²\| against Gaussian | **0.0058** |
-| Largest ratio to the replicate-to-replicate wobble | **0.29** |
-| Smallest paired *p* | 0.089 |
-| What twelve replicates could have detected | 0.0064 – 0.0208 |
+| Largest \|mean ΔR²\| against Gaussian | **0.0047** — Outlier p=0.01 / random forest |
+| Largest ratio to the replicate-to-replicate wobble | **0.29** — the same row |
+| Smallest paired *p* | 0.178 |
+| What twelve replicates could have detected | 0.0064 – 0.0130 |
 
 Every one of them is under a third of the run-to-run wobble. **This is not "we could not see it" —
 the test's own resolution is stated beside every number, and the effects sit at or below it.**
@@ -5569,10 +5686,10 @@ These were put as recommendations and were approved as they stand. They are now 
 
 | # | Recommendation | Why |
 |---|---|---|
-| 1 | **One Student-t setting, not three: ν = 5.** | The three are within 0.006 R² of each other and of Gaussian. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
+| 1 | **One Student-t setting, not three: ν = 5.** | The three are within 0.0036 R² of each other and of Gaussian, against a test that could have seen 0.0064 – 0.0107. ν = 10 is nearly Gaussian by construction; ν = 3's per-run delivered dose has a 17% spread at level 1.5, which makes it the worst-behaved thing on the grid to report. ν = 5 is mid-ladder and well-behaved |
 | 2 | **One Outlier setting, not three: p = 10%.** | Same evidence. p = 10% is the top of Hampel's published range and the strongest contamination, so if anything is ever going to show, it shows there |
 | 3 | **Both grouped conditions at full grid in stage 1** | The only zero-mean condition that separates, and its comparator is what makes it interpretable. The pair is a claim; neither half is |
-| 4 | **Laplace: not in stage 1.** Stage 2 if it is wanted for the citation | Indistinguishable from Gaussian on every model at both levels (largest 0.0058). Its stated value in `NOISE_DESIGN.md` §2 is citational, not empirical |
+| 4 | **Laplace: not in the main grid — the deep run only.** ✅ The author settled it there on 2026-08-27 | Indistinguishable from Gaussian on both roster models at both levels. The largest difference anywhere is **0.0136 R²** — LightGBM at level 1.5, against a replicate-to-replicate wobble of 0.0574, so **0.24 of the wobble**, paired *t* p = 0.350. At the reporting level it is 0.0024. The earlier "largest 0.0058" was a Ridge row. Its stated value in `NOISE_DESIGN.md` §2 is citational, not empirical, and the citation costs 720 runs |
 | 5 | **Do not build the skewed draw** | See above. It also does not exist in either injector yet, so this is a saving rather than a deletion |
 
 **This closes chat A's open TODO** — *"how many Student-t and Outlier settings"* — at one each.
@@ -5767,7 +5884,7 @@ were a document contradicting *itself*:
 | §1 of the design proposed level ladders that its own §6.4 superseded, and this plan restated the grids a third time | §6.4 owns every grid. §1 keeps the axis rule; §6.1 of this plan points |
 | §0.3 of this plan said the heavy-tailed types satisfy the skewed-noise request; §13.3 said plainly that they do not | §0.3 corrected — the request is met by censoring and grouped-shifted, both one-directional |
 | The design's opening said six state documents had been deleted; all six are on disk | Corrected, and it now points at §11. `REVISION_GUIDE.md` is the one that is genuinely gone |
-| §7 of the design had three open items; two were answerable | Positive-control question closed (censoring *is* the label-keyed condition, §3.2); grids closed (the range-finding run set them). **Laplace is the only open item left, and 2026-08-27 narrowed it** — it is out of the full grid on measurement, so the question is whether it runs at depth for the citation, at 720 runs (§13.9) |
+| §7 of the design had three open items; two were answerable | Positive-control question closed (censoring *is* the label-keyed condition, §3.2); grids closed (the range-finding run set them). **Laplace was the last open item and the author closed it on 2026-08-27** — out of the full grid on measurement, kept in the deep run for the citation at 720 runs (§13.9). §7 now has nothing open |
 | The design's status said nothing was implemented | Chat A built the Rust half; the header and §6.5 now say what is built and what is not |
 | The design's delete list reached into the figure script | Moved out — §5.4 of this plan owns those, chat J executes them |
 | §6.5 of the design was a second, different ordering of the whole re-run | Retitled to the noise-scheme build order; §10 of this plan owns the run order |
@@ -5814,7 +5931,7 @@ range-finding run, because it does twelve times more damage than any difference 
 ✅ **Superseded 2026-08-27 by measurement (§13.9).** The set is no longer described by this count at
 all — it is described by what runs where, in `noise_conditions.json`: four conditions at full grid
 (Gaussian, both grouped conditions, censoring), two at depth (one Student-t setting, one Outlier
-setting), Laplace optional at depth, four settings dropped and the skewed draw never built. The
+setting), Laplace kept at depth, four settings dropped and the skewed draw never built. The
 count drifted in the first place because nothing executable owned it; something does now.
 
 **2. Skewed distributions — this is a genuine gap and §0.3 currently overstates it.** The author

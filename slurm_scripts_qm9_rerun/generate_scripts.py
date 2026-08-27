@@ -312,7 +312,7 @@ case "$PY_PATH" in
         esac
         exit 2 ;;
 esac
-# The test above cannot fail once setup.sh has run: setup.sh:83 prepends
+# The test above cannot fail once setup.sh has run: setup.sh:124 prepends
 # $CONDA_PREFIX/bin to PATH, so python resolves inside the prefix whichever
 # environment was activated. It still catches an unset CONDA_PREFIX, which is
 # the case that actually bit us -- but on its own it would pass a task that

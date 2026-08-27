@@ -256,7 +256,7 @@ case "$PY_PATH" in
         esac
         exit 2 ;;
 esac
-# The test above cannot fail once setup.sh has run: setup.sh:83 prepends
+# The test above cannot fail once setup.sh has run: setup.sh:124 prepends
 # $CONDA_PREFIX/bin to PATH, so python resolves inside the prefix whichever
 # environment was activated. It still catches an unset CONDA_PREFIX, which is
 # the case that actually bit us -- but on its own it would pass a task that
@@ -313,6 +313,21 @@ trap 'rm -rf "$TMPDIR"' EXIT
 # Guarded: under `set -u` an unset CONDA_PREFIX aborts the shell here, before
 # python is ever reached.
 export LD_LIBRARY_PATH="${{CONDA_PREFIX:-}}/lib:${{LD_LIBRARY_PATH:-}}"
+
+# Can this interpreter actually build the model this array runs?
+#
+# The activation guard above proves an environment is active and that it is
+# named env_test; the check above that proves noiseInject is the redesigned
+# one. Neither proves the MODEL's backend is installed. Jobs 12822693 and
+# 12822694 ran to completion and wrote nothing because gpytorch was missing,
+# and the runner is built to SKIP a model whose backend will not import (the
+# HAS_* flags at alternative_data_noise_robustness.py:253-333) rather than to
+# stop -- so a missing package is silent by design, and this array would burn
+# {n_tasks} tasks finding nothing to do. Seconds once, before the task loop.
+python "{qsar_dir}/scripts/check_environment.py" --validation-models "{model}" || {{
+    echo "ERROR: this interpreter cannot build {model}. See above."
+    exit 2
+}}
 
 cd tests
 

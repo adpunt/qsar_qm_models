@@ -18,6 +18,7 @@ Usage
     python check_environment.py                     # the whole QM9 roster
     python check_environment.py --models lgb rf     # only what this job runs
     python check_environment.py --validation        # the KIRBy roster too
+    python check_environment.py --validation-models SVM LightGBM   # a KIRBy job's guard
     python check_environment.py --deep --validation # THE PREFLIGHT GATE
 
 The last one is what has to pass before a launch. On top of constructing every
@@ -74,6 +75,76 @@ QM9_MODELS = {
     "conformal_dnn": ("torchcp", None),
     "dnn_bnn_variational": ("torchbnn", None),
     "mlp_bnn_variational": ("torchbnn", None),
+}
+
+# The validation and uncertainty rosters, as KIRBy's --models flag spells them.
+#
+# These are a SEPARATE namespace from QM9_MODELS: KIRBy says 'LightGBM' where
+# process_and_train.py says 'lgb', and 'BNN-Full' where it says 'dnn_bnn_full'.
+# Passing a KIRBy label to --models would fail with "unknown model name", which
+# is the guard blocking a job for the guard's own reason -- so those two job
+# families get --validation-models instead.
+#
+# Sources, checked rather than guessed: the optional-import blocks at
+# alternative_data_noise_robustness.py:253-333 (one try/except per backend,
+# each setting a HAS_* flag that silently drops the model when False) and
+# UNCERTAINTY_MODELS at :182. VBLL has no external package -- VBLLLayer is
+# written out in that file on top of torch -- so it maps to torch.
+#
+# The value is (modules, attr): EVERY module must import, and attr -- when it is
+# not None -- is looked up on the first of them and constructed. GP needs three
+# packages, and gauche or botorch missing is exactly the case that turned into a
+# silent skip before.
+VALIDATION_MODELS = {
+    # the validation roster (slurm_scripts_validation_rerun MODELS_ALL)
+    "RF": (("sklearn.ensemble",), "RandomForestRegressor"),
+    "QRF": (("quantile_forest",), "RandomForestQuantileRegressor"),
+    "SVM": (("sklearn.svm",), "SVR"),
+    "XGBoost": (("xgboost",), "XGBRegressor"),
+    "LightGBM": (("lightgbm",), "LGBMRegressor"),
+    "NGBoost": (("ngboost",), "NGBRegressor"),
+    "GP": (("gpytorch", "gauche", "botorch"), None),
+    "DNN": (("torch",), None),
+    # the uncertainty roster's additions (UNCERTAINTY_MODELS)
+    "BNN-Full": (("torchbnn", "torchhk"), None),
+    "MLP-BNN-Full": (("torchbnn", "torchhk"), None),
+    "VBLL-Full": (("torch",), None),
+    "MLP-VBLL-Full": (("torch",), None),
+}
+
+# The validation and uncertainty rosters, as KIRBy's --models flag spells them.
+#
+# These are a SEPARATE namespace from QM9_MODELS: KIRBy says 'LightGBM' where
+# process_and_train.py says 'lgb', and 'BNN-Full' where it says 'dnn_bnn_full'.
+# Passing a KIRBy label to --models would fail with "unknown model name", which
+# is the guard blocking a job for the guard's own reason -- so those two job
+# families get --validation-models instead.
+#
+# Sources, checked rather than guessed: the optional-import blocks at
+# alternative_data_noise_robustness.py:253-333 (one try/except per backend,
+# each setting a HAS_* flag that silently drops the model when False) and
+# UNCERTAINTY_MODELS at :182. VBLL has no external package -- VBLLLayer is
+# written out in that file on top of torch -- so it maps to torch.
+#
+# The value is (modules, attr): EVERY module must import, and attr -- when it is
+# not None -- is looked up on the first of them and constructed. GP needs three
+# packages, and gauche or botorch missing is exactly the case that turned into a
+# silent skip before.
+VALIDATION_MODELS = {
+    # the validation roster (slurm_scripts_validation_rerun MODELS_ALL)
+    "RF": (("sklearn.ensemble",), "RandomForestRegressor"),
+    "QRF": (("quantile_forest",), "RandomForestQuantileRegressor"),
+    "SVM": (("sklearn.svm",), "SVR"),
+    "XGBoost": (("xgboost",), "XGBRegressor"),
+    "LightGBM": (("lightgbm",), "LGBMRegressor"),
+    "NGBoost": (("ngboost",), "NGBRegressor"),
+    "GP": (("gpytorch", "gauche", "botorch"), None),
+    "DNN": (("torch",), None),
+    # the uncertainty roster's additions (UNCERTAINTY_MODELS)
+    "BNN-Full": (("torchbnn", "torchhk"), None),
+    "MLP-BNN-Full": (("torchbnn", "torchhk"), None),
+    "VBLL-Full": (("torch",), None),
+    "MLP-VBLL-Full": (("torch",), None),
 }
 
 # Packages worth reporting a version for whatever was asked.
@@ -246,10 +317,19 @@ def check_declared_requirements(failures, models):
     # ngboost cares very much.
     # Module root -> the distribution that ships it, where they differ.
     dist_of = {"sklearn": "scikit-learn"}
+    # Both namespaces: KIRBy calls the quantile forest 'QRF' and QM9 calls it
+    # 'qrf', and the quantile-forest requirement conflict this check exists for
+    # breaks both runs identically.
     relevant = set()
     for m in models:
         if m in QM9_MODELS:
-            root = QM9_MODELS[m][0].split(".")[0]
+            mods = (QM9_MODELS[m][0],)
+        elif m in VALIDATION_MODELS:
+            mods = VALIDATION_MODELS[m][0]
+        else:
+            continue
+        for mod in mods:
+            root = mod.split(".")[0]
             relevant.add(dist_of.get(root, root))
     relevant |= {"torch", "numpy", "scipy", "scikit-learn"}
     names = [n for n in VERSION_REPORT
@@ -788,6 +868,66 @@ def check_qm9(models, failures, resource_failures):
     print()
 
 
+def check_validation_models(models, failures, resource_failures):
+    """The per-task guard for the validation and uncertainty jobs.
+
+    The counterpart of check_qm9 for KIRBy's model names. Cheap by design: it
+    imports each model's backend and constructs the estimator, and does NOT
+    exec alternative_data_noise_robustness.py -- that is check_validation's job
+    and it belongs in the preflight, not in 420 array tasks.
+    """
+    print("validation/uncertainty roster -- each model's backend is imported and, where "
+          "there is one, the estimator constructed.")
+
+    unknown = [m for m in models if m not in VALIDATION_MODELS]
+    if unknown:
+        print(f"  FAIL  unknown model name(s): {sorted(unknown)}")
+        print(f"        known: {sorted(VALIDATION_MODELS)}")
+        failures.append("unknown validation model names")
+        models = [m for m in models if m in VALIDATION_MODELS]
+
+    for model in sorted(set(models)):
+        modules, attr = VALIDATION_MODELS[model]
+
+        def _build(modules=modules, attr=attr):
+            mods = [importlib.import_module(m) for m in modules]
+            if attr is not None:
+                getattr(mods[0], attr)()  # constructed, not merely imported
+
+        probe(f"{model:<16s} ({', '.join(modules)})", _build, failures, resource_failures)
+    print()
+
+
+def check_validation_models(models, failures, resource_failures):
+    """The per-task guard for the validation and uncertainty jobs.
+
+    The counterpart of check_qm9 for KIRBy's model names. Cheap by design: it
+    imports each model's backend and constructs the estimator, and does NOT
+    exec alternative_data_noise_robustness.py -- that is check_validation's job
+    and it belongs in the preflight, not in 336 array tasks.
+    """
+    print("validation/uncertainty roster -- each model's backend is imported and, where "
+          "there is one, the estimator constructed.")
+
+    unknown = [m for m in models if m not in VALIDATION_MODELS]
+    if unknown:
+        print(f"  FAIL  unknown model name(s): {sorted(unknown)}")
+        print(f"        known: {sorted(VALIDATION_MODELS)}")
+        failures.append("unknown validation model names")
+        models = [m for m in models if m in VALIDATION_MODELS]
+
+    for model in sorted(set(models)):
+        modules, attr = VALIDATION_MODELS[model]
+
+        def _build(modules=modules, attr=attr):
+            mods = [importlib.import_module(m) for m in modules]
+            if attr is not None:
+                getattr(mods[0], attr)()  # constructed, not merely imported
+
+        probe(f"{model:<16s} ({', '.join(modules)})", _build, failures, resource_failures)
+    print()
+
+
 def check_validation(failures, resource_failures=None):
     """The KIRBy roster, when that checkout is next to this one."""
     here = os.path.dirname(os.path.abspath(__file__))
@@ -879,13 +1019,41 @@ def audit_roster():
 
     unknown = [l for l in labels if l not in QM9_MODELS]
     if unknown:
-        print(f"FAIL: the job generator can emit {len(unknown)} model label(s) this probe "
-              f"does not know: {sorted(unknown)}")
+        print(f"FAIL: the QM9 job generator can emit {len(unknown)} model label(s) this "
+              f"probe does not know: {sorted(unknown)}")
         print("      Add them to QM9_MODELS, or the guard will block those jobs for its "
               "own reason.")
         return 1
 
-    print(f"OK: all {len(labels)} job-generator model labels are known to this probe")
+    print(f"OK: all {len(labels)} QM9 job-generator model labels are known to this probe")
+
+    # The other two job families pass KIRBy's model names to --validation-models,
+    # so the same drift is possible there and has to fail the same way.
+    other = [
+        (os.path.join(here, "..", "slurm_scripts_uncertainty_rerun", "generate_scripts.py"),
+         r"^MODELS = \{(.*?)\n\}", r"^\s*'([A-Za-z0-9_-]+)'\s*:"),
+        (os.path.join(here, "..", "slurm_scripts_validation_rerun", "generate_scripts.py"),
+         r"^MODELS_ALL = \[(.*?)\]", r"'([A-Za-z0-9_-]+)'"),
+    ]
+    v_total = 0
+    for path, block_re, label_re in other:
+        if not os.path.isfile(path):
+            print(f"SKIP: {os.path.normpath(path)} is not present")
+            continue
+        m = re.search(block_re, open(path).read(), re.S | re.M)
+        if not m:
+            print(f"FAIL: cannot parse the model list out of {os.path.normpath(path)}")
+            return 1
+        v_labels = re.findall(label_re, m.group(1), re.M)
+        v_unknown = [l for l in v_labels if l not in VALIDATION_MODELS]
+        if v_unknown:
+            print(f"FAIL: {os.path.normpath(path)} can emit {len(v_unknown)} model "
+                  f"label(s) this probe does not know: {sorted(v_unknown)}")
+            print("      Add them to VALIDATION_MODELS.")
+            return 1
+        v_total += len(v_labels)
+
+    print(f"OK: all {v_total} validation/uncertainty model labels are known to this probe")
     return 0
 
 
@@ -894,6 +1062,14 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="*", default=None,
                     help="Only check these models. Default: the whole QM9 roster.")
+    ap.add_argument("--validation-models", nargs="+", default=None, metavar="NAME",
+                    help="Check these KIRBy model names instead of the QM9 roster (e.g. "
+                         "SVM, LightGBM, BNN-Full). This is what the validation and "
+                         "uncertainty job templates call.")
+    ap.add_argument("--validation-models", nargs="+", default=None, metavar="NAME",
+                    help="Check these KIRBy model names instead of the QM9 roster (e.g. "
+                         "SVM, LightGBM, BNN-Full). This is what the validation and "
+                         "uncertainty job templates call.")
     ap.add_argument("--validation", action="store_true",
                     help="Also check the KIRBy validation roster.")
     ap.add_argument("--deep", action="store_true",
@@ -917,9 +1093,20 @@ def main():
     if not check_pyg_companions(resource_failures):
         failures.append("torch_geometric companions")
 
-    requested = args.models if args.models else sorted(QM9_MODELS)
-    check_declared_requirements(failures, requested)
-    check_qm9(requested, failures, resource_failures)
+    if args.validation_models:
+        # The validation and uncertainty jobs never touch process_and_train.py,
+        # so checking the QM9 roster here would fail them for packages they do
+        # not use.
+        if args.models:
+            print("ERROR: pass --models or --validation-models, not both -- they are "
+                  "different namespaces for the same models.")
+            return 2
+        check_declared_requirements(failures, args.validation_models)
+        check_validation_models(args.validation_models, failures, resource_failures)
+    else:
+        requested = args.models if args.models else sorted(QM9_MODELS)
+        check_declared_requirements(failures, requested)
+        check_qm9(requested, failures, resource_failures)
     check_threading_runtimes(failures)
 
     if args.deep:
