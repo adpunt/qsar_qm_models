@@ -143,7 +143,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 1 | Diagnosis: held-out labels corrupted on QM9 | ✅ found, fixed in code (`9d7db67`), **now guarded by a test that fails if the fix is removed** (chat A), still never re-run | §13 chat H |
 | 2 | Diagnosis: six noise types were one type at six strengths | ✅ found, evidenced, **and fixed in Rust 2026-08-26** — the conditions' mean delivered dose now spreads 1.27% on QM9 | §13 chat A ✅ |
 | 3 | Noise redesign — specification, literature, local tests | ✅ done, sourced, and the settings **settled 2026-08-27** (§13.9), in `noise_conditions.json` with a gate on each side | §13 chats A, B, G |
-| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | 🔴 open — the set was settled on **accuracy**, and corruption detection is a different question (§13.1 item 6) | **yours to decide, and chat H is where it gets asked** — it queues the uncertainty runs. Chat F closed 2026-08-27; nothing waits on it |
+| 3a | **Do the uncertainty runs inherit that settled set, or test it?** | ⏸️ deferred 2026-08-27, default recorded: inherit (§13.10) | the chat that writes the uncertainty job scripts asks it, if the author wants it asked at all |
 | 4 | Assay-error anchors and the blocklist of bad numbers | ✅ done, peer-reviewed, two passes reconciled | — |
 | 5 | Gaussian-process kernel question | ✅ **decision stands, its evidence was wrong** — the 0.89 kernel gap was a failed fit, not the features (§2.8f). One kernel everywhere is now better supported, not worse | done |
 | 6 | Within-noise-level uncertainty correlation | ✅ **author's fix, and it is implemented** — `within_sigma_unc_noise_rho`, `generate_paper_figures_v2.py:1031-1057`. See §3.5 | §13 chat F |
@@ -1116,6 +1116,165 @@ agent told to refute it**. 106 raised, **34 survived**, 72 refuted.
 - `load_and_split_polaris` returns unfiltered split indices while skipping molecules it could not
   write, so `config.train_count` can exceed the records in the file — which chat D's new hard
   error in `read_train_labels` now turns from silent truncation into an abort.
+### 2.8i 🔴 THE ENVIRONMENT REBUILD — one threading runtime, and the roster completed (2026-08-27)
+
+**This is the fix for §2.8e and §2.8e-bis at once, and for the two launch blockers the
+server audit reports.** Section 2.8e-bis showed there is no import order that saves both
+LightGBM and the Gaussian process. This removes the conflict instead of choosing a victim.
+
+#### The claim, measured on one machine on 2026-08-27
+
+Both interpreters on this laptop, same probes, same session — the LightGBM fit from the
+audit's launch-blocker list, and the Gaussian-process fit from `server_audit.sh` section 5:
+
+| interpreter | distinct OpenMP runtime **files** | LightGBM fits | GP fits after lightgbm+xgboost |
+|---|---|---|---|
+| the system Anaconda | **4** | **SEGFAULT** (−11, no traceback) | **SEGFAULT** (−11, no traceback) |
+| `env_test`, built from conda-forge | **1** | ✅ | ✅ |
+
+The four in the system Anaconda are exactly the ones the audit named: Intel's inside
+`torch/lib/libiomp5.dylib`, LLVM's inside `sklearn/.dylibs/libomp.dylib`, a third that
+LightGBM and XGBoost link, and a fourth under `functorch`. **Both blockers appear together
+and disappear together, and the only thing that changed is the number of runtimes.**
+
+#### Where the extra runtimes actually come from — not conda
+
+A real `linux-64` solve of `env.yml`'s conda list gives `_openmp_mutex 4.5 7_kmp_llvm` and
+one `llvm-openmp`, and conda-forge's `llvm-openmp` ships `libgomp.so.1` and `libiomp5.so`
+as **symlinks to `libomp.so`** — three names, one file. conda cannot produce the defect.
+
+Every extra runtime arrives on a **PyPI wheel installed over the top of a conda package**:
+torch, scikit-learn, lightgbm and xgboost wheels each bundle a private copy. That is not a
+theory about this environment, it is its history — the live `env_test` ran a pip wheel of
+`torch 2.3.1+cu121` while `env.yml` said conda `pytorch 2.5.1`, and `setup.sh` was patched
+*down* to 2.3.1 on 2026-03-03 to match the machine rather than the file being fixed.
+
+**A second, quieter door was open the whole time.** `env.yml` carried a
+`channel_priority: strict` line, and conda has never read it: the valid keys of an
+environment file are `name`, `dependencies`, `prefix`, `channels`, `variables`, and
+everything else is silently ignored. So the `defaults` channel — whose `mkl` pulls a
+genuinely separate `intel-openmp` — was never excluded.
+
+#### What changed
+
+| file | change |
+|---|---|
+| `env.yml` | `nodefaults` channel; CPU torch; every compiled package pinned and sourced from conda-forge; `quantile-forest` moved out of pip; the bogus `channel_priority` line gone; the pip block cut to the five things no channel carries |
+| `pip-constraints.txt` | **new.** Pins every conda-installed package by version. `setup.sh` exports `PIP_CONSTRAINT`, so a pip package that wants a different torch/scikit-learn/lightgbm/xgboost now **fails the build loudly** instead of silently swapping in a wheel with its own runtime |
+| `setup.sh` | rebuilds on `SETUP_REBUILD=1`; installs the extras only when the recipe hash changes; installs `torchsort` with `--no-build-isolation`; installs `noiseInject` and `kirby` editable; **no longer installs the PyG companion wheels** |
+| `scripts/check_environment.py` | the threading check counts **distinct resolved files**, not library names; new checks for `env.yml` truthfulness, `noiseInject`/`kirby`, `/proc/self/maps`, and both blocker probes |
+| `scripts/process_and_train.py` | the dead `from gensim.models import word2vec` deleted — the last trace of mol2vec in an import path |
+
+**Why the file-count matters more than it sounds.** A name-based check gets this wrong in
+both directions: it fails a healthy conda environment (three names, one file) and it passes
+the actual defect (two wheels, two copies, one name). The old check was name-based. The new
+one resolved four distinct files in the system Anaconda and one in `env_test`, which is what
+made the table above possible.
+
+#### The torch pin, settled 2026-08-27
+
+`env.yml` has claimed `pytorch=2.5.1` since March 2025 and the cluster has run a pip wheel of
+`2.3.1+cu121`, so **the file has not been a record of what any result was produced under.**
+Settled **upward, to 2.5.1, CPU build**:
+
+- QM9 is being regenerated and the validation sets have to be re-run under the redesigned
+  noise conditions regardless, so **no surviving result is invalidated by the move**.
+- **CPU** because no SLURM script in either repo has ever requested a GPU — zero `--gres`
+  across all of `slurm_scripts_*` and KIRBy. The CUDA build was four gigabytes that only ever
+  ran CPU kernels, and its `libtorch_cuda.so` is what made the preflight report
+  "inconclusive" on a login node instead of a verdict (§2.8d).
+- `gpytorch` moves 1.14 → **1.11** in the file. 1.14 was never installed: `botorch 0.10.0`
+  pins `gpytorch==1.11` and pip enforced it every time.
+
+Solves measured the same day: linux-64, 290 packages, 552 MB, one runtime. osx-64, 278
+packages, 268 MB, one runtime.
+
+#### Packages the roster was missing, now in the recipe
+
+- **`quantile-forest`** — the audit found it absent from the interpreter it checked, so every
+  quantile-forest task died on contact. It is on conda-forge for linux-64/py310 and is now a
+  conda package, built against the same scikit-learn it runs with.
+- **`kirby`** — *not importable in `env_test` at all* (checked 2026-08-27). The validation
+  pipeline does `from kirby.representations.molecular import ...` with no `sys.path` help and
+  KIRBy uses a `src/` layout, so **the whole KIRBy half cannot start without an editable
+  install.** `setup.sh` now does it.
+- **`noiseInject`** — editable from the checkout, so the injector cannot drift from the code
+  the cross-check gates test. (Its `.egg-info` currently reports 0.4.0 while the code is
+  1.0.0; a fresh editable install clears that.)
+- **`torchcp` + `torchsort`** — `torchsort` has no linux wheel and must compile against the
+  *installed* torch. With pip's default build isolation it compiles against a fresh torch pip
+  downloads into a throwaway environment, which is precisely the
+  `undefined symbol: _ZNK3c105Error4whatEv` of §2.8d. `--no-build-isolation` is the fix.
+- **`requests`** — imported at module scope by the validation pipeline, never declared.
+
+Dropped as imported nowhere in either repo: `tensorflow`, `jax`, `gensim`, `mol2vec`,
+`torchaudio`, and the four PyG companion wheels.
+
+#### It must never happen during a run
+
+`setup.sh` is **sourced by every job script**, and it used to run four `pip install` commands
+every time — on a 390-task array that is 390 concurrent writers into one shared
+`site-packages`, quietly undoing whatever the last rebuild pinned. The extras now run only
+when a hash of `env.yml` + `pip-constraints.txt` changes, recorded in a stamp file inside the
+environment. A running task cannot mutate the environment any more.
+
+#### Copy-paste: the rebuild on ARC
+
+```bash
+# 0. Keep a record of what the OLD environment was, before it is destroyed.
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git pull
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate env_test
+conda list --explicit > research_archive/env_test_before_rebuild_2026-08-27.txt
+python -c "import torch, sklearn, gpytorch; print(torch.__version__, sklearn.__version__, gpytorch.__version__)" \
+    >> research_archive/env_test_before_rebuild_2026-08-27.txt
+conda deactivate
+
+# 1. Rebuild INSIDE AN ALLOCATION. A login node caps memory per user, which is what
+#    made the last audit report sixteen phantom failures.
+srun --account=stat-cadd --partition=short --cpus-per-task=8 --mem=32G \
+     --time=02:00:00 --pty bash
+
+cd /data/stat-cadd/scat9264/qsar_qm_models
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda config --env --set channel_priority strict
+export ENV_TEST_PREFIX=/data/stat-cadd/scat9264/conda_envs/env_test
+SETUP_REBUILD=1 . ./setup.sh
+
+# 2. THE GATE. Nothing launches until this exits 0, in this same allocation.
+python scripts/check_environment.py --deep --validation ; echo "exit: $?"
+```
+
+`--deep --validation` is the whole answer: it constructs every model in both rosters, imports
+`models/models.py` for real, checks `env.yml` against what is installed, checks `noiseInject`
+and `kirby`, counts the distinct OpenMP runtimes both statically and in
+`/proc/self/maps` after importing every backend, and then **runs both blockers in the same
+environment** — the LightGBM fit and the Gaussian-process-after-boosting fit, each under both
+of the thread settings the two pipelines use (QM9 sets none, the validation module pins both
+to 4). Curing one at the other's expense is the trap; this fails if either fails.
+
+The two named probes standalone, if you want them separately:
+
+```bash
+python -c "import torch, lightgbm as lgb, numpy as np
+from sklearn.datasets import make_regression
+X, y = make_regression(n_samples=400, n_features=512, random_state=0)
+lgb.LGBMRegressor(n_estimators=15, verbose=-1).fit(X, y); print('LightGBM OK')"
+
+bash scripts/server_audit.sh          # section 5 is the Gaussian-process probe
+```
+
+#### Consequences to carry forward
+
+- **Every number changes.** Torch moves 2.3.1 → 2.5.1 and the BLAS/threading layer changes
+  underneath every model. This is why it happens before launch and never during.
+- `GP_DEFAULTS['single_thread_fit']` stays **True** until the gate above has passed on the
+  cluster. It costs 11% on the Gaussian process alone and it is the net under exactly this
+  failure; it comes down after the cluster says one runtime, not before.
+- §2.8e-bis's second option — importing each backend lazily in `models/models.py` — is not
+  needed for the threading defect once this lands. It remains worth doing on its own merits
+  (a LightGBM job has no business loading gpytorch), and it is still nobody's yet.
 
 ### 2.9 The Methods figure does not show the experiment
 
@@ -3283,8 +3442,9 @@ start with open TODOs; it may not produce a launchable script with one still ope
 ### 13.1 🟢 MOSTLY SETTLED — the run design: replicates, and what runs at full grid
 
 **Settled:** the staged shape (2026-08-26), ten replicates in stage 1 (2026-08-26), and
-which noise types run at full grid (2026-08-27, §13.9). **Still open below: items 2, 4, 5
-and 6** — and of those, only 5 can be answered right now.
+which noise types run at full grid (2026-08-27, §13.9). **Items 2, 4, 5 and 6 were all
+deferred on 2026-08-27 with a default recorded for each — see §13.10.** Nothing on this
+list blocks anything.
 
 **This is the largest open decision and it gates the job scripts.** Both parts are the author's.
 
@@ -3358,7 +3518,7 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    note: *"I believe I was doing 10 and holding off replicates for uncertainty."* **This item read
    🔴 open for a day after it was settled three lines above, and that contradiction cost a session:
    chat D twice told the author the replicate count was the thing blocking launch.** It is not.
-2. 🔴 **Is one replicate for the uncertainty runs still right?** The uncertainty statistics are
+2. ⏸️ **DEFERRED 2026-08-27 to the chat that writes the uncertainty job scripts — default recorded: one replicate plus a permutation null.** **Is one replicate for the uncertainty runs still right?** The uncertainty statistics are
    correlations over thousands of molecules, so their precision comes from the molecule count, not
    the replicate count — one replicate is defensible **provided** a permutation null is reported so
    the reader has a reference distribution. Without repeats there is no run-to-run error bar at all.
@@ -3382,11 +3542,11 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    bit-identical by construction, which makes them four independent tasks that must agree exactly:
    a real check on the path that switches noise off. Sharing one anchor across conditions is a
    figure-script change (chat J), and the 11% is available the day it lands.
-4. 🔴 **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
+4. ⏸️ **NOT A DECISION YET, 2026-08-27.** It is chosen from the screen's output, and the generator already refuses to build the deep run without explicit choices, so nothing can run ahead of it. **Which models and representations go deep in stage 2?** **Yours, and it cannot be asked yet** —
    it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
    rather than inventing a default, so nothing can run ahead of the decision.
-5. 🔴 **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
+5. ⏸️ **DEFERRED 2026-08-27 until the main grid has run — at which point it stops being a guess.** Only 0.5 and 1.5 have ever been measured (`results/setting_selection_test.csv`, levels column holds exactly those two). The main grid sweeps all seven levels, so after it runs the level can be picked from data rather than argued. Nothing between now and then needs it: no code contains a reporting level, and the figure script has not been rebuilt for the new grid anyway (chat J). **If a level must be named before then, use 1.5** — it is the only one measured where the study's largest zero-mean result is visible. **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
    it, but every table that reports accuracy at one level needs it.
 
    ⚠️ **The standing suggestion of 0.5 is withdrawn, 2026-08-27.** Chat D re-read the same twelve
@@ -3396,7 +3556,7 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    | | LightGBM | Random forest | Ridge |
    |---|---|---|---|
    | level 0.5 | 1 | 1 | 2 |
-   | level 1.5 | 8 | 9 | 11 |
+   | level 1.5 | 8 | 8 | 11 |
 
    **Reporting at 0.5 would hide the study's largest zero-mean result.** What the two levels DO agree
    on is that the heavy-tailed and outlier conditions are indistinguishable from Gaussian, which is
@@ -3406,7 +3566,7 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    1.0 is the easier one to defend to a referee, being one unit of label spread. One caveat carried
    from chat D: Ridge replicate 2 is a broken run, R² between −868 and −0.03 in every condition, and
    it is excluded and named rather than averaged in.
-6. 🔴 **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
+6. ⏸️ **DEFERRED 2026-08-27 to the chat that writes the uncertainty job scripts — default recorded: inherit, and say so in the Methods.** **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
    and chat H is where it gets asked** — it queues the uncertainty runs, so it is the last point at
    which the question can be put before compute is spent. Chat F closed on 2026-08-27 and everything
    it found is in the tree, so nothing is waiting on it. The set was settled on chat G's
@@ -3425,6 +3585,83 @@ models and representations go deep in stage 2, which cannot be chosen until stag
 **One caution to hold on to.** A staged design is only honest if the reduced set in stage 1 is
 justified by what stage 0 and stage 2 show, and the paper says so. "We ran everything under Gaussian
 and a subset under the rest" is defensible; presenting it as a full factorial is not.
+
+### 13.10 ⏸️ CLOSED 2026-08-27 — chats D, E and G, and the four items they handed back
+
+**Why this section exists.** Three chats ended by handing the author a list of open decisions.
+The lists were nearly the same list. Read one after another they looked like nine or ten
+outstanding questions; they are four, and none of them blocks anything. The author asked for them
+to be deferred. They are, each with a default recorded so that no one has to come back and ask.
+
+**The vocabulary, once, because it is where the confusion came from.** This document says
+"stage 0/1/2/3". In conversation those are **the screen** (one replicate, everything, choose what
+to look at closely), **the main grid** (ten replicates, four noise conditions, every model and
+representation), **the deep run** (all noise conditions, a chosen few models and representations),
+and **the uncertainty runs** (the three experimental datasets, the models that emit a per-molecule
+uncertainty).
+
+#### The four items, and where each one actually came from
+
+| # | The question | Raised in | Restated in | Blocks |
+|---|---|---|---|---|
+| 1 | The QM9 reporting level | G (suggested 0.5) | D (withdrew 0.5, measured 1.5), E | nothing |
+| 2 | Do the uncertainty runs inherit the settled noise conditions, or test them? | G | D | nothing |
+| 3 | Is one replicate right for the uncertainty runs? | earlier, §13.1 item 2 | D | nothing |
+| 4 | Which models and representations go deep | earlier, §13.1 item 4 | D, E, G | nothing, and it is not askable yet |
+
+**Item 1 was one question that changed answer, not two questions.** Chat G proposed 0.5 while
+measuring only accuracy differences between noise conditions, where 0.5 and 1.5 agree. Chat D
+re-read the same twelve replicates by counting them and found the two levels disagree about
+grouped-shifted. That is a correction to G, not a second open item. **The 0.48 that came up
+alongside it is unrelated** — it is the published repeat error for logD, the evidence for where the
+logD sweep's points sit, and it is not a reporting level anywhere in the code.
+
+#### What the code says about whether any of this blocks
+
+Checked 2026-08-27, by reading the files rather than the notes:
+
+- **No reporting level exists in any script.** `scripts/generate_paper_figures_v2.py` still carries
+  the old eleven-point 0–1.0 grid (`EXPECTED_SIGMAS`, `:885`, `:980`) and has no reporting-level
+  constant at all. It has to be rebuilt for the new seven-point grid regardless (chat J), and that
+  rebuild is where a reporting level would be set.
+- **The QM9 job generator does not have the concept.** `slurm_scripts_qm9_rerun/generate_scripts.py`
+  reads `noise_conditions.json` and sweeps `DOSE_LEVELS = 0.0 0.2 0.3 0.5 0.75 1.0 1.5` (`:101`).
+  Every level runs. Choosing one to report changes nothing about what is queued.
+- **The uncertainty job generator is stale and must be rewritten anyway.**
+  `slurm_scripts_uncertainty_rerun/generate_scripts.py:53` still lists the six deleted strategies
+  (`legacy, outlier, quantile, hetero, threshold, valprop`). Items 2 and 3 are questions for
+  whoever rewrites it, and cannot be spent on before that.
+- **The deep run cannot be built without item 4 and refuses to try** —
+  `generate_scripts.py:467-469` errors on `--stage 2` without `--models` and `--reps`.
+
+#### The recorded defaults
+
+| # | Default, in force unless the author says otherwise | Owner |
+|---|---|---|
+| 1 | **Decide it from the main grid, not now.** All seven levels run; pick the level from the data when the results exist. If a level must be named before then, **1.5** — the only measured level where the largest zero-mean result is visible | chat J, at figure-script rebuild |
+| 2 | **Inherit** the four settled conditions, and say in the Methods that corruption detection was not tested across noise shapes | the uncertainty job-script chat |
+| 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | the uncertainty job-script chat |
+| 4 | Nothing to default. The screen runs, the author looks, the author chooses | after the screen |
+
+#### The measurement behind item 1, recomputed from the file rather than quoted
+
+`results/setting_selection_test.csv`, 1,008 rows, twelve replicates, QM9, PDV, three models. Count
+of replicates in which grouped-shifted is worse than Gaussian by more than 0.05 R², Ridge replicate
+2 excluded and named (its clean R² is −0.35, a scaffold split ridge could not fit):
+
+| | LightGBM | Random forest | Ridge |
+|---|---|---|---|
+| level 0.5 | 1 / 12 | 1 / 12 | 2 / 11 |
+| level 1.5 | 8 / 12 | 8 / 12 | 11 / 11 |
+
+**The file contains only levels 0.5 and 1.5.** 1.0 has never been measured, so recommending it was
+recommending an unmeasured point. That is the reason item 1 is deferred to the main grid rather
+than answered now.
+
+*(Chat D's version of this table read 9 for the random forest at 1.5. Recomputing from the CSV
+gives 8. One replicate, no change to the conclusion.)*
+
+---
 
 ### 13.2 The chats
 
@@ -3940,6 +4177,8 @@ which no longer exists, and it assumes the storage defect is the cause, which it
 
 #### Chat D ✅ DONE 2026-08-26 — Infrastructure: the configuration race, the writer guards, the environment
 
+⏸️ **The decisions this chat handed back are deferred with defaults — §13.10.** Nothing from it is waiting on the author.
+
 All three defects are fixed and each is held by a check that fails if the fix is removed. Details
 in §2.7, §2.8a and §2.8d; the gates are §8 items 8, 9b and 10.
 
@@ -4013,6 +4252,8 @@ cases (no activation, system Anaconda, a different environment, correct activati
 ---
 
 #### Chat E — Cross-pipeline parity ✅ DONE 2026-08-26
+
+⏸️ **The decisions this chat handed back are deferred with defaults — §13.10.**
 
 **Delivered.** Parity is now structural rather than checked: `models/model_defaults.py` is the one
 copy of every shared default and **both pipelines import it** (§3.4.5). One edit moves both studies
@@ -4338,6 +4579,8 @@ type are worth cluster time — and whether a skewed condition is needed (§13.3
 **Why:** `NOISE_DESIGN.md` §2 lists Student-t at three tail weights and Outlier at three
 contamination fractions. Run every setting and there are nine conditions, not six — the largest
 single multiplier on the grid, larger than the replicate count.
+
+⏸️ **The decisions this chat handed back are deferred with defaults — §13.10.** Its 0.5 reporting-level suggestion was withdrawn by chat D and the level is now decided from the main grid.
 
 **✅ CLOSED 2026-08-27.** The harness is `scripts/setting_selection_test.py`, the run is
 `results/setting_selection_test.csv`, and the answer with the settled set is §13.9. Everything below
