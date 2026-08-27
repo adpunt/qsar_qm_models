@@ -238,38 +238,9 @@ class ModelTrainer(object):
         loss, y_pred, y_targ = self._eval_epoch(val_loader)
         return loss, y_pred, y_targ
 
-class GCN(torch.nn.Module):
-    """Graph Convolutional Network class with 3 convolutional layers and a linear layer"""
-
-    def __init__(self, dim_h, dropout_rate=0.5):
-        """init method for GCN
-
-        Args:
-            dim_h (int): the dimension of hidden layers
-        """
-        super().__init__()
-        self.conv1 = GCNConv(11, dim_h)
-        self.conv2 = GCNConv(dim_h, dim_h)
-        self.conv3 = GCNConv(dim_h, dim_h)
-        self.lin = torch.nn.Linear(dim_h, 1)
-        self.dropout = torch.nn.Dropout(p=dropout_rate)
-
-    def forward(self, data):
-        e = data.edge_index
-        x = data.x
-
-        x = self.conv1(x, e)
-        x = x.relu()
-        x = self.conv2(x, e)
-        x = x.relu()
-        x = self.conv3(x, e)
-        x = global_mean_pool(x, data.batch)
-
-        x = self.dropout(x)
-        # x = Fun.dropout(x, p=0.5, training=self.training)
-        x = self.lin(x)
-
-        return x
+# Removed 2026-08-27: a duplicate top-level definition that a later one in
+# this file shadowed, so it never ran -- class GCN (shadowed by the definition at 286).
+# scripts/test_no_shadowed_definitions.py fails if another one appears.
 
 """
 Graph Neural Network Architectures for Molecular Property Prediction
@@ -416,30 +387,9 @@ class GIN(nn.Module):
         return out, graph_embedding
 
 
-def create_gnn_model(model_type, num_node_features=6, hidden_dim=128, 
-                     num_layers=3, dropout=0.0, num_heads=4):
-    """
-    Factory function to create GNN models.
-    
-    Args:
-        model_type: 'gcn', 'gat', or 'gin'
-        num_node_features: Number of input node features (default: 6)
-        hidden_dim: Hidden dimension (default: 128)
-        num_layers: Number of GNN layers (default: 3)
-        dropout: Dropout rate (default: 0.0, set >0 for Bayesian)
-        num_heads: Number of attention heads for GAT (default: 4)
-        
-    Returns:
-        GNN model
-    """
-    if model_type == 'gcn':
-        return GCN(num_node_features, hidden_dim, num_layers, dropout)
-    elif model_type == 'gat':
-        return GAT(num_node_features, hidden_dim, num_layers, dropout, num_heads)
-    elif model_type == 'gin':
-        return GIN(num_node_features, hidden_dim, num_layers, dropout)
-    else:
-        raise ValueError(f"Unknown model_type: {model_type}. Use 'gcn', 'gat', or 'gin'")
+# Removed 2026-08-27: a duplicate top-level definition that a later one in
+# this file shadowed, so it never ran -- create_gnn_model (shadowed by the copy at 4106).
+# scripts/test_no_shadowed_definitions.py fails if another one appears.
 
 class GATv2(torch.nn.Module):
     def __init__(self, in_channels, out_channels, hidden_channels=64, heads=1, dropout=0.5):
@@ -1755,7 +1705,8 @@ def train_svm_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, 'svm', rep, args.sample_size, metrics,
+                 params_source)
 
     return metrics[3]
 
@@ -1939,7 +1890,8 @@ def train_xgboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, 'xgboost', rep, args.sample_size, metrics,
+                 params_source)
 
     return metrics[3]
 
@@ -1981,7 +1933,8 @@ def train_lgb_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, 'lgb', rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, 'lgb', rep, args.sample_size, metrics,
+                 params_source)
 
     return metrics[3]
 
@@ -3496,7 +3449,8 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
-    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics)
+    save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics,
+                 params_source)
 
     return metrics[3]
 
@@ -3620,49 +3574,9 @@ def collate_molecular_graphs(batch):
 # GNN MODELS
 # =============================================================================
 
-def create_gnn_model(model_type, num_node_features=4, hidden_dim=128, num_layers=3, dropout=0.1):
-    """Create GNN model (GCN/GAT/GIN)."""
-    from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
-    
-    class GNNRegressor(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.convs = nn.ModuleList()
-            
-            if model_type == 'gcn':
-                self.convs.append(GCNConv(num_node_features, hidden_dim))
-                for _ in range(num_layers - 1):
-                    self.convs.append(GCNConv(hidden_dim, hidden_dim))
-            
-            elif model_type == 'gat':
-                heads = 4
-                self.convs.append(GATConv(num_node_features, hidden_dim // heads, heads=heads))
-                for _ in range(num_layers - 1):
-                    self.convs.append(GATConv(hidden_dim, hidden_dim // heads, heads=heads))
-            
-            elif model_type == 'gin':
-                nn1 = nn.Sequential(nn.Linear(num_node_features, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
-                self.convs.append(GINConv(nn1))
-                for _ in range(num_layers - 1):
-                    nn_layer = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
-                    self.convs.append(GINConv(nn_layer))
-            
-            self.dropout = dropout
-            self.regression_head = nn.Linear(hidden_dim, 1)
-        
-        def forward(self, data):
-            x, edge_index, batch = data.x, data.edge_index, data.batch
-            
-            for i, conv in enumerate(self.convs):
-                x = conv(x, edge_index)
-                if i < len(self.convs) - 1:
-                    x = F.relu(x)
-                    x = F.dropout(x, p=self.dropout, training=self.training)
-            
-            x = global_mean_pool(x, batch)
-            return self.regression_head(x).squeeze()
-    
-    return GNNRegressor()
+# Removed 2026-08-27: a duplicate top-level definition that a later one in
+# this file shadowed, so it never ran -- create_gnn_model (shadowed by the copy at 4106).
+# scripts/test_no_shadowed_definitions.py fails if another one appears.
 
 
 # =============================================================================
@@ -3676,47 +3590,9 @@ import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, GATConv, GINConv, global_mean_pool
 
 
-def create_gnn_model(model_type, num_node_features, hidden_dim=128, num_layers=3, dropout=0.1):
-    """Create GNN model."""
-    class GNNRegressor(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.convs = nn.ModuleList()
-            
-            if model_type == 'gcn':
-                self.convs.append(GCNConv(num_node_features, hidden_dim))
-                for _ in range(num_layers - 1):
-                    self.convs.append(GCNConv(hidden_dim, hidden_dim))
-            
-            elif model_type == 'gat':
-                heads = 4
-                self.convs.append(GATConv(num_node_features, hidden_dim // heads, heads=heads))
-                for _ in range(num_layers - 1):
-                    self.convs.append(GATConv(hidden_dim, hidden_dim // heads, heads=heads))
-            
-            elif model_type == 'gin':
-                nn1 = nn.Sequential(nn.Linear(num_node_features, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
-                self.convs.append(GINConv(nn1))
-                for _ in range(num_layers - 1):
-                    nn_layer = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim))
-                    self.convs.append(GINConv(nn_layer))
-            
-            self.dropout = dropout
-            self.regression_head = nn.Linear(hidden_dim, 1)
-        
-        def forward(self, data):
-            x, edge_index, batch = data.x, data.edge_index, data.batch
-            
-            for i, conv in enumerate(self.convs):
-                x = conv(x, edge_index)
-                if i < len(self.convs) - 1:
-                    x = F.relu(x)
-                    x = F.dropout(x, p=self.dropout, training=self.training)
-            
-            x = global_mean_pool(x, batch)
-            return self.regression_head(x).squeeze()
-    
-    return GNNRegressor()
+# Removed 2026-08-27: a duplicate top-level definition that a later one in
+# this file shadowed, so it never ran -- create_gnn_model (identical copy at 4106 shadows it).
+# scripts/test_no_shadowed_definitions.py fails if another one appears.
 
 
 def train_gnn(model_type, train_loader, test_loader, val_loader, args, s, 
@@ -3754,7 +3630,11 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
             batch = batch.to(device)
             
             # CRITICAL: Use .y_noisy from Data objects (properly shuffled with graphs)
-            targets = torch.tensor([data.y_noisy for data in batch.to_data_list()], 
+            # float(): the loader collates the per-graph scalar into a
+            # one-element tensor, so reading it raw makes the target array
+            # (n, 1) against an (n,) prediction -- which pearsonr refuses
+            # ('x and y must have the same length along axis').
+            targets = torch.tensor([float(data.y_noisy) for data in batch.to_data_list()], 
                                   dtype=torch.float32, device=device)
             
             optimizer.zero_grad()
@@ -3819,7 +3699,7 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         # Get val targets
         val_targets = []
         for batch in val_loader:
-            val_targets.extend([data.y_noisy for data in batch.to_data_list()])
+            val_targets.extend([float(data.y_noisy) for data in batch.to_data_list()])
         val_targets = np.array(val_targets)
         
         n_cal = len(val_predictions) // 2
@@ -3835,7 +3715,7 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     # Get test targets (noisy, normalized)
     test_targets = []
     for batch in test_loader:
-        test_targets.extend([data.y_noisy for data in batch.to_data_list()])
+        test_targets.extend([float(data.y_noisy) for data in batch.to_data_list()])
     test_targets = np.array(test_targets)
     
     # CRITICAL: Evaluate on normalized targets (same scale as training)
@@ -3879,40 +3759,9 @@ from grakel import Graph
 from grakel.kernels import WeisfeilerLehman, VertexHistogram
 
 
-def pyg_to_grakel(data):
-    """
-    Convert PyG Data object to grakel Graph.
-    
-    CRITICAL: Use STRING atomic symbols, not atomic numbers!
-    """
-    # Map atomic numbers to symbols
-    atomic_num_to_symbol = {
-        1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'
-    }
-    
-    # Get atomic numbers from data.x (first column)
-    atomic_numbers = data.x[:, 0].long().tolist()
-    
-    # Convert to string symbols
-    node_labels = {}
-    for i, atomic_num in enumerate(atomic_numbers):
-        node_labels[i] = atomic_num_to_symbol.get(atomic_num, str(atomic_num))
-    
-    # Get edges
-    edge_index = data.edge_index.t().tolist()
-    edge_list = [(u, v) for u, v in edge_index]
-    
-    # Remove duplicate edges (undirected graph)
-    edge_set = set()
-    for u, v in edge_list:
-        if u < v:
-            edge_set.add((u, v))
-        else:
-            edge_set.add((v, u))
-    edge_list = list(edge_set)
-    
-    # Create Graph
-    return Graph(edge_list, node_labels=node_labels)
+# Removed 2026-08-27: a duplicate top-level definition that a later one in
+# this file shadowed, so it never ran -- pyg_to_grakel (identical copy at 4070 shadows it).
+# scripts/test_no_shadowed_definitions.py fails if another one appears.
 
 
 def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
@@ -3942,7 +3791,7 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
         g = pyg_to_grakel(data)
         if g is not None:
             train_grakel.append(g)
-            train_labels.append(data.y_noisy)
+            train_labels.append(float(data.y_noisy))
     
     train_labels = torch.tensor(train_labels, dtype=torch.float32)
     
@@ -3998,7 +3847,7 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
         g = pyg_to_grakel(data)
         if g is not None:
             test_grakel.append(g)
-            test_labels.append(data.y_noisy)
+            test_labels.append(float(data.y_noisy))
     
     test_labels = np.array(test_labels)
     
@@ -4022,7 +3871,7 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
         g = pyg_to_grakel(data)
         if g is not None:
             val_grakel.append(g)
-            val_labels.append(data.y_noisy)
+            val_labels.append(float(data.y_noisy))
     
     val_labels = np.array(val_labels)
     
@@ -4199,9 +4048,22 @@ def train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, 
                 params['likelihood_noise'] = trial.suggest_float('likelihood_noise', 1e-4, 0.1, log=True)
             params_source = 'tuning_trial'
         else:
-            # Default parameters
+            # The default branch used to leave `params` EMPTY, so every base
+            # estimator below was built from the library's own defaults --
+            # conformal_rf on max_features=1.0 instead of the spec's 0.3,
+            # conformal_qrf on 100 trees instead of 300, conformal_xgboost on the
+            # booster's learning_rate 0.3 instead of 0.1. The conformal models
+            # were therefore not wrappers around the same base models they were
+            # compared against, and the "rho > 0.99 with rf" case for excluding
+            # them rested on a different forest (RERUN_PLAN.md 2.13).
+            _spec_key = {'rf': 'rf', 'qrf': 'qrf', 'xgboost': 'xgboost'}.get(
+                base_model_type)
+            if _spec_key is not None:
+                params = sklearn_params(_spec_key)
+                params_source = 'default'
+            else:
+                params_source = 'default'
             predictor_type = 'split'
-            params_source = 'default'
     
     # Extract conformal parameters
     alpha_list = args.alpha if hasattr(args, 'alpha') else [0.1]
@@ -4511,11 +4373,25 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
     val_loader_updated = GeometricDataLoader(val_data_list, batch_size=64, shuffle=False)
     test_loader_updated = GeometricDataLoader(test_data_list, batch_size=64, shuffle=False)
     
-    # Create base model (use only dim_h since that's what your GNN classes accept)
-    if base_model_type == 'gin':
-        base_model = GIN(dim_h=dim_h)
-    else:  # gcn
-        base_model = GCN(dim_h=dim_h)
+    # The comment that used to sit here said "use only dim_h since that's what
+    # your GNN classes accept". It was true of a `class GCN` that a SECOND
+    # definition later in this file shadowed; the live GCN and GIN take
+    # (num_node_features, hidden_dim, ...) and `GIN(dim_h=...)` raises
+    # TypeError. So this path has never once constructed a model -- the failure
+    # was swallowed by the caller's `except Exception` and came out as a missing
+    # result row (RERUN_PLAN.md 2.13). The live classes also return
+    # (prediction, embedding), which train_epochs cannot consume: it does
+    # `out.detach().cpu().numpy()[:, 0]`.
+    #
+    # Refused by name rather than left to fail as a missing row. The conformal
+    # graph wrapper needs deciding on, not patching blind: it is tier 4 in the
+    # job generator and has never produced a number.
+    raise NotImplementedError(
+        f"the conformal graph wrapper (base model {base_model_type!r}) has "
+        f"never been able to run. It builds its base network as "
+        f"GIN(dim_h=...)/GCN(dim_h=...), a signature no live class in this file "
+        f"has, and the live classes return (prediction, embedding) where "
+        f"train_epochs expects a (batch, 1) tensor. See RERUN_PLAN.md 2.13.")
     
     base_model.to(device)
     

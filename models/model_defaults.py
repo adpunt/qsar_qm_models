@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.1.0'
+SPEC_VERSION = '1.2.0'
 
 
 # ---------------------------------------------------------------------------
@@ -312,26 +312,65 @@ BAYESIAN_DEFAULTS = {
 # project do not identify features.
 #
 # So the decision is made from the matrix itself:
-#     binary (every value 0 or 1)  ->  never standardised
-#     anything else                ->  standardised, train-only
+#     binary (every value 0 or 1)        ->  never standardised
+#     sparse counts (small non-negative
+#       integers, mostly zero)           ->  never standardised
+#     anything else                      ->  standardised, train-only
 #
 # This is self-correcting. When the binarised descriptor vector is replaced by
 # the continuous one, and when the substructure counts stop being flattened to
 # presence bits, the rule follows the data without anyone remembering to edit a
 # list.
 STANDARDISE_BINARY_FEATURES = False
+STANDARDISE_SPARSE_COUNTS = False
+
+# A matrix denser than this is not the sparse-fingerprint case the exemption is
+# about, whatever its values look like. Measured: the substructure counts run at
+# 1.3% density on QM9 and 4.7% on hERG, while the descriptor vector -- the only
+# other candidate, since half its columns hold non-negative integers -- runs at
+# 39% and is not all-integer anyway. The threshold sits an order of magnitude
+# above the fingerprints and well below the descriptors, so nothing is close to
+# it in either direction.
+SPARSE_COUNT_MAX_DENSITY = 0.25
+
+
+def _sample(X):
+    import numpy as np
+    X = np.asarray(X)
+    return X[:min(len(X), 512)]
 
 
 def is_binary_matrix(X):
     """True if every value is 0 or 1. Sampled -- a full scan of a large
     fingerprint matrix is wasteful and the first rows settle it."""
     import numpy as np
-    X = np.asarray(X)
-    sample = X[:min(len(X), 512)]
+    sample = _sample(X)
     finite = sample[np.isfinite(sample)]
     if finite.size == 0:
         return False
     return bool(np.isin(finite, (0, 1)).all())
+
+
+def is_sparse_count_matrix(X):
+    """True for a substructure-count fingerprint: small non-negative integers,
+    almost all of them zero, and at least one above 1.
+
+    The last clause matters -- without it this would also claim every binary
+    fingerprint, and the two exemptions could then disagree. A matrix of 0s and
+    1s is the binary case and is handled there.
+    """
+    import numpy as np
+    sample = _sample(X)
+    finite = sample[np.isfinite(sample)]
+    if finite.size == 0 or finite.size != sample.size:
+        return False
+    if not bool((finite >= 0).all()):
+        return False
+    if not bool(np.all(np.equal(np.mod(finite, 1), 0))):
+        return False
+    if float((sample != 0).mean()) > SPARSE_COUNT_MAX_DENSITY:
+        return False
+    return bool((finite > 1).any())
 
 
 def should_standardise(X, rep_name=None):
@@ -345,12 +384,27 @@ def should_standardise(X, rep_name=None):
     magnitudes and lets them dominate every distance, which wrecks anything
     kernel-based. Trees are unaffected either way.
 
-    NOT YET MEASURED: substructure COUNTS. They are stored as presence bits
-    today, so this returns False for them; once that is fixed they become
-    non-binary and this will start standardising them. Measure it then --
-    sparse counts may have the same problem as sparse bits.
+    SUBSTRUCTURE COUNTS: also left raw, MEASURED 2026-08-27 by
+    scripts/parity_test_count_scaling.py -- Sort & Slice counts, scaffold split,
+    five seeds, the same radial-kernel support vector machine, against a decision
+    rule fixed before the run. Standardised counts minus raw counts:
+        QM9   -0.070, -0.061, -0.107, -0.039, -0.089   mean -0.073, spread 0.026
+        hERG  +0.009, -0.022, -0.061, +0.015, +0.084   mean +0.005, spread 0.053
+    QM9 loses on all five seeds by nearly three times the seed-to-seed spread;
+    hERG is a coin flip. So the harm is the same harm as the binary case -- rare
+    features blown up until they dominate the distances -- and it does not go
+    away when the presence bit becomes a count.
+
+    This is why the exemption is written as a rule about sparse features rather
+    than about binary ones: the storage fix that restores real counts would
+    otherwise have silently started standardising the fingerprint, and cost QM9
+    0.07 R2 on every kernel model, with nothing recording that it had happened.
     """
-    return not (is_binary_matrix(X) and not STANDARDISE_BINARY_FEATURES)
+    if is_binary_matrix(X) and not STANDARDISE_BINARY_FEATURES:
+        return False
+    if is_sparse_count_matrix(X) and not STANDARDISE_SPARSE_COUNTS:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +520,14 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------------------
 # CHANGE LOG
 # ---------------------------------------------------------------------------
+# 1.2.0  2026-08-27  The scaling exemption widened from binary features to
+#                    SPARSE COUNTS, decided by
+#                    scripts/parity_test_count_scaling.py against a rule fixed
+#                    before the run. No model parameter changes; what changes is
+#                    what the substructure fingerprint looks like to a kernel
+#                    once its counts are no longer flattened to presence bits.
+#                    Without this, that storage fix would have cost QM9 0.073 R2
+#                    on the radial-kernel support vector machine.
 # 1.1.0  2026-08-26  Forest max_features 'sqrt' -> 0.3, on BOTH pipelines,
 #                    decided by scripts/parity_test_forest.py against a rule
 #                    fixed before the run. INVALIDATES every existing forest and

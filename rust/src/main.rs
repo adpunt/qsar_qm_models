@@ -66,7 +66,13 @@ struct SmilesData {
     canonical_smiles: String,
     randomized_smiles: Option<String>,
     target_value: f32,
-    sns_buf: [u8; 128],
+    // Sort & Slice: 1024 substructure COUNTS as u16, not one presence bit per
+    // substructure. The Python writer flattened the counts to bits and cast to
+    // u8 before packing, so a count that was a multiple of 256 wrapped to zero
+    // and the substructure recorded as absent (RERUN_PLAN.md 3.4.1). This side
+    // only carries the bytes through, but the WIDTH has to match the writer's or
+    // every field after it decodes at the wrong offset.
+    sns_buf: [u8; 2048],
     pdv_buf: [u8; 25],
     continuous_pdv_buf: [u8; 800],
     // The learned embeddings are 32-bit floats, four bytes a dimension:
@@ -2060,7 +2066,7 @@ fn read_smiles_data(
     }
 
     // Read sns_fp if applicable
-    let mut sns_buf = [0u8; 128];
+    let mut sns_buf = [0u8; 2048];
     if molecular_representations.contains(&"sns".to_string()) {
         reader.read_exact(&mut sns_buf).ok()?;
     }

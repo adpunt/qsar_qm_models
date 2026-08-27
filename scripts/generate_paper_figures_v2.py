@@ -73,16 +73,18 @@ Outputs:
 # =============================================================================
 
 # Primary choices (change these based on results)
-PRIMARY_STRATEGY = 'legacy'      # REVIEW: Main example strategy
-CONTRAST_STRATEGY = 'hetero'     # REVIEW: Strategy to contrast with legacy
+PRIMARY_STRATEGY = 'gaussian'    # The reference condition under the settled scheme
+CONTRAST_STRATEGY = 'grouped_shifted'  # The one condition that separates
 PRIMARY_REP = 'continuous_pdv'   # Continuous physicochemical descriptors
 SUPPLEMENTARY_REP = 'ecfp4'      # ECFP4 is more robust and representative of QSAR practice
 
-# Canonical ordering for all noise strategies. Use this everywhere instead of
-# re-typing the literal list — keeps text/table/figure orderings in sync.
-# Supervisor preference (Hetero last, matches the explanatory paragraph order):
-#   Gaussian → Outlier → Quantile → Threshold → Value-Prop. → Heteroscedastic
-STRATEGY_ORDER = ['legacy', 'outlier', 'quantile', 'threshold', 'valprop', 'hetero']
+# Canonical ordering for all noise conditions. The first six are the settled
+# roster (noise_conditions.json, 2026-08-27); the rest are the names retired on
+# 2026-08-26, kept so that files written before then still order and label.
+STRATEGY_ORDER = ['gaussian', 'grouped_wider', 'grouped_shifted', 'censoring',
+                  'student_t_nu5', 'outlier_p10', 'laplace',
+                  'legacy', 'outlier', 'quantile', 'threshold', 'valprop',
+                  'hetero']
 
 # All strategies for completeness checks (legacy alias — order-insensitive)
 ALL_STRATEGIES = STRATEGY_ORDER
@@ -143,6 +145,8 @@ ANOVA_REPS_EXCLUDE = {
 }
 
 import argparse
+import json
+import re
 import sys
 import time
 import pandas as pd
@@ -195,20 +199,37 @@ plt.rcParams.update({
 # Color palettes — maximally distinct, all different from clean blue
 CLEAN_COLOR = '#0072B2'        # Steel blue — used ONLY for clean (no-noise) data
 STRATEGY_COLORS = {
-    'legacy': '#E31A1C',       # Bright red
-    'valprop': '#FF7F00',      # Pure orange
-    'quantile': '#33A02C',     # Forest green
-    'threshold': '#6A3D9A',    # Royal purple
-    'outlier': '#B15928',      # Sienna/brown
-    'hetero': '#E91E63',       # Hot pink
+    # The settled roster.
+    'gaussian': '#E31A1C',           # Bright red
+    'grouped_wider': '#33A02C',      # Forest green
+    'grouped_shifted': '#6A3D9A',    # Royal purple
+    'censoring': '#B15928',          # Sienna/brown
+    'student_t_nu5': '#FF7F00',      # Pure orange
+    'outlier_p10': '#E91E63',        # Hot pink
+    'laplace': '#17BECF',            # Cyan
+    # Retired 2026-08-26; kept for files written before then.
+    'legacy': '#E31A1C',
+    'valprop': '#FF7F00',
+    'quantile': '#33A02C',
+    'threshold': '#6A3D9A',
+    'outlier': '#B15928',
+    'hetero': '#E91E63',
 }
 
 STRATEGY_LABELS = {
-    'legacy': 'Gaussian',
+    'gaussian': 'Gaussian',
+    'grouped_wider': 'Grouped, wider',
+    'grouped_shifted': 'Grouped, shifted',
+    'censoring': 'Censoring',
+    'student_t_nu5': 'Student-t (nu=5)',
+    'outlier_p10': 'Outlier (10%)',
+    'laplace': 'Laplace',
+    # Retired 2026-08-26.
+    'legacy': 'Gaussian (retired name)',
     'valprop': 'Value-Prop.',
     'quantile': 'Quantile',
     'threshold': 'Threshold',
-    'outlier': 'Outlier',
+    'outlier': 'Outlier (retired: value-proportional)',
     'hetero': 'Heteroscedastic',
 }
 
@@ -559,17 +580,188 @@ def _white_text_for_missing(ax, pivot, annot_text):
 # DATA LOADING
 # =============================================================================
 
+# =============================================================================
+# WHICH NOISE CONDITION A ROW BELONGS TO
+# =============================================================================
+#
+# The condition used to survive only in the output FILENAME, and both QM9 loaders
+# recovered it by matching the stem against a fixed list of six names that were
+# retired on 2026-08-26. Three things went wrong at once (RERUN_PLAN.md 2.11):
+# a new-scheme file matched nothing and its rows were left blank, pandas treats
+# blanks as equal so every condition for one (model, rep, level, replicate)
+# collapsed onto whichever file was read last; and `outlier` matched BOTH schemes,
+# so a new contaminated-fraction run pooled with the retired value-proportional
+# strategy under one name.
+#
+# The condition is now taken from the `noise_type` COLUMN, which both pipelines
+# write (scripts/utils.py RESULT_COLUMNS and UNCERTAINTY_COLUMNS on the QM9 side,
+# the runner on the experimental side). The filename is a fallback for files
+# written before that column existed, and a stem that matches nothing gets a name
+# of its own rather than a blank.
+
+# The settled roster, read from the file both injectors' tests read.
+def _settled_condition_names():
+    path = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
+    names = []
+    try:
+        spec = json.loads(path.read_text())
+    except Exception:
+        return names
+    for key in ('stage_1_full_grid', 'stage_2_depth_only'):
+        for entry in spec.get(key, []):
+            if entry.get('name'):
+                names.append(entry['name'])
+    return names
+
+
+SETTLED_CONDITIONS = _settled_condition_names()
+
+# Retired on 2026-08-26. Kept ONLY so that files written before then still parse;
+# `outlier` here means the value-proportional strategy, which is a different thing
+# from the settled `outlier_p10`. Settled names are matched first so the two can
+# never be pooled.
+RETIRED_CONDITIONS = ['legacy', 'outlier', 'quantile', 'threshold', 'hetero',
+                      'valprop', 'heteroscedastic', 'value_proportional']
+CONDITION_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+
+# The no-noise reference. 'gaussian' under the settled scheme, 'legacy' under the
+# retired one; a table that wants the reference condition must accept both, and
+# must not fall through to pooling every condition when it finds neither.
+BASELINE_CONDITIONS = ('gaussian', 'legacy')
+
+
+def baseline_rows(frame, where):
+    """The rows in the reference condition, refusing to pool when it is absent.
+
+    Every one of these filters used to read
+    `frame[frame['strategy'] == 'legacy'] if 'strategy' in frame else frame`,
+    so a frame with no condition column silently became EVERY condition pooled
+    together under a table titled with one of them (RERUN_PLAN.md 2.11).
+    """
+    if 'strategy' not in frame.columns:
+        raise RuntimeError(
+            f"{where}: the frame carries no noise condition, so the reference "
+            f"condition cannot be selected. Falling through would pool every "
+            f"condition under the reference condition's name.")
+    out = frame[frame['strategy'].isin(BASELINE_CONDITIONS)]
+    if len(out) == 0:
+        present = sorted(frame['strategy'].dropna().unique())
+        print(f"  WARNING: {where}: no rows in the reference condition "
+              f"{BASELINE_CONDITIONS}. Present: {present}")
+    return out
+
+# `condition_name` in rust/src/main.rs composes two names it does not enumerate:
+# a contaminated fraction (outlier_p05, outlier_p10) and a censoring percentage
+# (censoring_50, censoring_lower_50), optionally suffixed with a non-Gaussian
+# shape.
+_COMPOSED_CONDITION = re.compile(
+    r'^(outlier_p\d{2}(?:_[a-z_0-9]+?)?|censoring(?:_lower)?_\d+)_')
+
+
+def condition_from_stem(rest):
+    """The condition a filename stem begins with, or None.
+
+    `rest` is the stem with its `anova_` / `uncertainty_` prefix already removed.
+    Settled names are tried before retired ones, longest first, so `outlier_p10_`
+    can never be read as the retired `outlier`.
+    """
+    for name in sorted(SETTLED_CONDITIONS, key=len, reverse=True):
+        if rest.startswith(name + '_'):
+            return name
+    m = _COMPOSED_CONDITION.match(rest)
+    if m:
+        return m.group(1)
+    for name in sorted(RETIRED_CONDITIONS, key=len, reverse=True):
+        if rest.startswith(name + '_'):
+            return CONDITION_NORMALIZE.get(name, name)
+    return None
+
+
+def attach_condition(df, stem, prefixes=('anova_', 'uncertainty_')):
+    """Put the row's condition in `strategy`, from the column or the filename.
+
+    Never leaves the column blank: a file whose condition cannot be established
+    is labelled `unknown_<stem>`, which groups with nothing else. A blank would
+    be treated as equal to every other blank by `drop_duplicates`, which is how
+    six conditions became one row.
+    """
+    if 'noise_type' in df.columns and df['noise_type'].notna().any():
+        df['strategy'] = df['noise_type'].astype(str)
+        return df, None
+    if 'strategy' in df.columns and df['strategy'].notna().any():
+        return df, None
+    rest = stem
+    for prefix in prefixes:
+        if rest.startswith(prefix):
+            rest = rest[len(prefix):]
+            break
+    name = condition_from_stem(rest)
+    if name is None:
+        name = f'unknown_{stem}'
+        df['strategy'] = name
+        return df, stem
+    df['strategy'] = name
+    return df, None
+
+
+def report_unnamed_conditions(unnamed, where):
+    if not unnamed:
+        return
+    print(f"  WARNING: {len(unnamed)} file(s) in {where} carry no noise condition, "
+          f"in a column or in their name. Their rows are labelled "
+          f"unknown_<file> so they cannot be pooled with a named condition:")
+    for stem in unnamed[:10]:
+        print(f"      {stem}")
+    if len(unnamed) > 10:
+        print(f"      ... and {len(unnamed) - 10} more")
+
+
+# Which column IS "the model's uncertainty"
+# ----------------------------------------
+# models/model_defaults.py settles this: 'raw', on 36 measured fits. The
+# temperature is refitted at every noise level, so calibrated coverage is nominal
+# at each level by construction and the span ACROSS levels collapses -- which is
+# the only thing the paper asks of it. This file used to pick
+# `y_pred_std_calibrated` first at four sites and never imported model_defaults,
+# and the raw column's real name (`y_pred_std_uncalibrated`) was not even among
+# the candidates, so the QM9 tables were read off the calibrated column and the
+# experimental tables off the raw one under the same heading (RERUN_PLAN.md 2.11).
+def _primary_uncertainty_preference():
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'models'))
+        from model_defaults import UNCERTAINTY_DEFAULTS
+        return UNCERTAINTY_DEFAULTS.get('primary_column', 'raw')
+    except Exception:
+        return 'raw'
+
+
+UNCERTAINTY_PRIMARY = _primary_uncertainty_preference()
+
+# `y_pred_std_uncalibrated` is what the QM9 writer calls the raw column
+# (scripts/utils.py UNCERTAINTY_COLUMNS); `uncertainty` is what the experimental
+# runner calls it.
+_RAW_UNCERTAINTY_COLUMNS = ['y_pred_std_uncalibrated', 'y_pred_std',
+                            'uncertainty', 'std']
+_CALIBRATED_UNCERTAINTY_COLUMNS = ['y_pred_std_calibrated']
+
+
+def uncertainty_column(df):
+    """The column to read the model's uncertainty from, or None."""
+    order = (_RAW_UNCERTAINTY_COLUMNS + _CALIBRATED_UNCERTAINTY_COLUMNS
+             if UNCERTAINTY_PRIMARY == 'raw'
+             else _CALIBRATED_UNCERTAINTY_COLUMNS + _RAW_UNCERTAINTY_COLUMNS)
+    for col in order:
+        if col in df.columns:
+            return col
+    return None
+
+
 def load_anova_data(results_dir):
     """Load all anova_*.csv files, deduplicating appended runs."""
     results_dir = Path(results_dir)
     all_data = []
 
-    # Valid strategy names for filename parsing (same as uncertainty loader)
-    VALID_STRATEGIES = {
-        'legacy', 'outlier', 'quantile', 'threshold', 'hetero', 'valprop',
-        'heteroscedastic', 'value_proportional',
-    }
-    STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+    unnamed = []
 
     anova_files = sorted(results_dir.glob("anova_*.csv"), key=lambda p: p.stat().st_mtime)
     total_mb = sum(p.stat().st_size for p in anova_files) / 1e6
@@ -581,17 +773,12 @@ def load_anova_data(results_dir):
             print(f"    ...read {i}/{len(anova_files)} files", flush=True)
         try:
             df = pd.read_csv(f)
-            # Parse filename: anova_{strategy}_{rep}_{model}.csv
-            # Use longest-prefix matching to handle multi-word strategies
-            # (e.g., value_proportional, heteroscedastic)
-            rest = f.stem[len('anova_'):]
-            strategy = None
-            for s in sorted(VALID_STRATEGIES, key=len, reverse=True):
-                if rest.startswith(s + '_'):
-                    strategy = STRATEGY_NORMALIZE.get(s, s)
-                    break
-            if strategy:
-                df['strategy'] = strategy
+            # The condition comes from the `noise_type` column the pipeline
+            # writes. The filename is only a fallback, for files written before
+            # that column existed.
+            df, missing = attach_condition(df, f.stem)
+            if missing:
+                unnamed.append(missing)
 
             # Fix: process_and_train.py with --bayesian-transformation saves
             # model as base name (dnn/mlp) without the BNN suffix. Infer from filename.
@@ -610,6 +797,8 @@ def load_anova_data(results_dir):
             all_data.append(df)
         except Exception as e:
             print(f"Warning: Could not load {f.name}: {e}")
+
+    report_unnamed_conditions(unnamed, 'the QM9 results directory')
 
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
@@ -649,11 +838,20 @@ def load_anova_data(results_dir):
         # Keep only the LAST occurrence of each (model, rep, strategy, sigma, iteration).
         pre_dedup = len(combined)
         dedup_cols = ['model', 'rep', 'strategy', 'sigma', 'iteration']
-        if all(c in combined.columns for c in dedup_cols):
-            combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
-            n_dupes = pre_dedup - len(combined)
-            if n_dupes > 0:
-                print(f"  Deduplicated: removed {n_dupes} duplicate rows (kept last run)")
+        missing_key = [c for c in dedup_cols if c not in combined.columns]
+        if missing_key:
+            # Dropping a key column from the key does not make the duplicates go
+            # away; it merges rows that differ along the dropped dimension.
+            raise RuntimeError(
+                f"the QM9 results carry no {missing_key} column, so rows that "
+                f"differ only in {missing_key} would be deduplicated onto one "
+                f"another. Re-run the affected tasks, or delete the files that "
+                f"predate the column.")
+        combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
+        n_dupes = pre_dedup - len(combined)
+        if n_dupes > 0:
+            print(f"  Deduplicated: removed {n_dupes} duplicate rows (kept last run)")
+        print(f"  Conditions present: {sorted(combined['strategy'].dropna().unique())}")
 
         print(f"Loaded QM9 ANOVA data: {len(combined)} rows from {len(all_data)} files")
         return combined
@@ -764,11 +962,7 @@ def audit_uncertainty_completeness(unc_df, output_dir):
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
 
     # Find uncertainty column
-    unc_col = None
-    for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty', 'std']:
-        if col in unc_df.columns:
-            unc_col = col
-            break
+    unc_col = uncertainty_column(unc_df)
 
     gap_rows = []
     ok_count = 0
@@ -891,12 +1085,7 @@ def load_uncertainty_data(results_dir):
     results_dir = Path(results_dir)
     all_data = []
 
-    # Valid strategy names for filename parsing
-    VALID_STRATEGIES = {
-        'legacy', 'outlier', 'quantile', 'threshold', 'hetero', 'valprop',
-        'heteroscedastic', 'value_proportional',
-    }
-    STRATEGY_NORMALIZE = {'heteroscedastic': 'hetero', 'value_proportional': 'valprop'}
+    unnamed = []
 
     patterns = ["uncertainty_*_uncertainty_values.csv", "*_uncertainty_values.csv"]
 
@@ -910,23 +1099,12 @@ def load_uncertainty_data(results_dir):
                 if 'representation' in df.columns and 'rep' not in df.columns:
                     df.rename(columns={'representation': 'rep'}, inplace=True)
 
-                # Extract strategy from filename if not in data
-                # Patterns:
-                #   uncertainty_{strategy}_{rep}_{model}_uncertainty_values.csv
-                #   anova_{strategy}_{rep}_{model}_uncertainty_values.csv
-                if 'strategy' not in df.columns:
-                    stem_clean = f.stem.replace('_uncertainty_values', '')
-                    prefix = None
-                    if stem_clean.startswith('uncertainty_'):
-                        prefix = 'uncertainty_'
-                    elif stem_clean.startswith('anova_'):
-                        prefix = 'anova_'
-                    if prefix:
-                        rest = stem_clean[len(prefix):]
-                        for s in sorted(VALID_STRATEGIES, key=len, reverse=True):
-                            if rest.startswith(s + '_'):
-                                df['strategy'] = STRATEGY_NORMALIZE.get(s, s)
-                                break
+                # The condition comes from the `noise_type` column the writer
+                # emits; the filename is only a fallback for older files.
+                stem_clean = f.stem.replace('_uncertainty_values', '')
+                df, missing = attach_condition(df, stem_clean)
+                if missing:
+                    unnamed.append(missing)
 
                 # Fix: process_and_train.py with --bayesian-transformation saves
                 # model as base name (dnn/mlp) without the BNN suffix. Infer from filename.
@@ -945,6 +1123,8 @@ def load_uncertainty_data(results_dir):
             except Exception as e:
                 print(f"Warning: Could not load {f.name}: {e}")
 
+    report_unnamed_conditions(unnamed, 'the QM9 uncertainty files')
+
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
 
@@ -953,9 +1133,15 @@ def load_uncertainty_data(results_dir):
         # 'test' row and a 'train_oof' row per molecule, and `sample_idx` is a row
         # position that restarts at 0 in each split and in each QM9 chunk, so a key
         # without them collapses distinct molecules onto one another.
+        # `strategy` is never absent now -- attach_condition names every file --
+        # so a condition can no longer be dropped out of the key.
         dedup_cols = [c for c in ['model', 'rep', 'strategy', 'split', 'sigma',
                                   'file_no', 'iteration', 'sample_idx']
                       if c in combined.columns]
+        if 'strategy' not in dedup_cols:
+            raise RuntimeError(
+                "the QM9 uncertainty rows carry no condition, so rows from "
+                "different noise types would be deduplicated onto one another.")
         if len(dedup_cols) >= 4:
             pre_dedup = len(combined)
             combined = combined.drop_duplicates(subset=dedup_cols, keep='last')
@@ -1224,13 +1410,34 @@ def load_validation_data(validation_dir):
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
         combined = _normalize_validation_names(combined)
+
+        # The runner calls the condition `noise_type`; this file calls it
+        # `strategy`. Without the copy the column was simply absent, and the
+        # dedup below silently dropped it out of its own key -- collapsing five
+        # folds x seven conditions onto one row per (dataset, model, rep, level).
+        if 'strategy' not in combined.columns:
+            for src in ('noise_type', 'condition', 'task_strategy'):
+                if src in combined.columns:
+                    combined['strategy'] = combined[src]
+                    break
+
         # Deduplicate: if logd + openadmet_logd map to same display name, keep longer data
         if 'dataset' in combined.columns:
             before = len(combined)
-            dedup_cols = [c for c in ['dataset', 'model', 'rep', 'strategy', 'sigma'] if c in combined.columns]
+            # `fold` belongs in the key: a row is one (fold, condition, level),
+            # and a key without either merges rows that are not duplicates.
+            dedup_cols = [c for c in ['dataset', 'model', 'rep', 'strategy',
+                                      'fold', 'sigma']
+                          if c in combined.columns]
+            for required in ('strategy', 'fold'):
+                if required not in dedup_cols:
+                    print(f"  WARNING: the validation results carry no "
+                          f"'{required}' column, so rows differing only in "
+                          f"{required} will be merged by the dedup below.")
             combined = combined.drop_duplicates(subset=dedup_cols, keep='first')
             if len(combined) < before:
-                print(f"  Deduplicated: {before} → {len(combined)} rows (overlapping directories)")
+                print(f"  Deduplicated: {before} → {len(combined)} rows "
+                      f"(key: {dedup_cols})")
         datasets = combined['dataset'].unique()
         print(f"Loaded validation data: {len(combined)} rows from {len(datasets)} datasets ({', '.join(sorted(datasets))})")
         return combined
@@ -1450,6 +1657,109 @@ def create_validation_uncertainty_table(val_unc_df, output_dir):
     return out
 
 
+# Putting two pipelines' levels on one axis
+# ---------------------------------------
+# The predecessor this study follows sets the dose per dataset as a fraction of
+# that dataset's endpoint range -- "sigma_noise was determined from the product
+# of the range of endpoint values in the dataset, the noise level n, and a
+# multiplier" -- and then compares datasets by normalising BOTH axes by the
+# noise-free baseline error: "the y-axis is RMSE/RMSE0. The x-axis is the
+# standard deviation of the Gaussian distribution from which the added error was
+# sampled (sigma), divided by RMSE0."  (Kolmar & Grulke, "The effect of noise on
+# the predictive limit of QSAR models", J Cheminform 13:92, 2021.)
+#
+# So the shared axis is the DELIVERED dose in raw label units divided by that
+# configuration's own zero-noise RMSE. Both pipelines record the delivered
+# amount: `delivered_dose` on the QM9 row, `realised_dose_label_units` on the
+# experimental one. Censoring has no dose at all -- its level is already a
+# dimensionless fraction of labels clipped -- so it stays on its own axis and is
+# never rescaled onto this one.
+DOSE_COLUMNS = ('delivered_dose', 'realised_dose_label_units')
+
+
+def delivered_dose_series(frame):
+    """The delivered dose in raw label units, from whichever column carries it."""
+    for col in DOSE_COLUMNS:
+        if col in frame.columns:
+            v = pd.to_numeric(frame[col], errors='coerce')
+            if v.notna().any():
+                return v
+    return None
+
+
+def add_shared_dose_axis(df, group_cols):
+    """Add `dose_over_baseline_rmse` = delivered dose / this config's RMSE at zero.
+
+    Returns the frame unchanged, with the column absent, when the delivered dose
+    or the zero-level RMSE is missing -- an axis built on a guessed dose is worse
+    than no axis.
+    """
+    dose = delivered_dose_series(df)
+    if dose is None or 'rmse' not in df.columns or 'sigma' not in df.columns:
+        return df
+    out = df.copy()
+    out['_dose'] = dose
+    keys = [c for c in group_cols if c in out.columns]
+    base = (out[np.isclose(pd.to_numeric(out['sigma'], errors='coerce'), 0.0)]
+            .groupby(keys)['rmse'].mean().rename('_rmse0'))
+    out = out.merge(base, left_on=keys, right_index=True, how='left')
+    with np.errstate(divide='ignore', invalid='ignore'):
+        out['dose_over_baseline_rmse'] = out['_dose'] / out['_rmse0']
+    return out.drop(columns=['_dose', '_rmse0'])
+
+
+def _one_level_unit(frame):
+    """What the levels in this group measure, or 'unrecorded'."""
+    if 'level_units' in frame.columns:
+        vals = sorted(set(str(v) for v in frame['level_units'].dropna().unique()))
+        if len(vals) == 1:
+            return vals[0]
+        if len(vals) > 1:
+            return '+'.join(vals)
+    return 'unrecorded'
+
+
+def level_axis_note(frame, label):
+    """One line naming the axis a frame's auc_norm was integrated over."""
+    if frame is None or len(frame) == 0:
+        return f"{label}: no rows"
+    units = sorted(set(str(v) for v in frame.get(
+        'level_units', pd.Series(['unrecorded'] * len(frame))).fillna('unrecorded')))
+    if 'level_max' in frame.columns:
+        tops = pd.to_numeric(frame['level_max'], errors='coerce').dropna()
+        span = (f"levels 0 to {tops.min():g}" if tops.nunique() == 1
+                else f"levels 0 to {tops.min():g}-{tops.max():g}")
+    else:
+        span = 'level range unrecorded'
+    return f"{label}: {'/'.join(units)}, {span}"
+
+
+def warn_if_axes_differ(frames, where):
+    """Say so when one axis is about to carry two different quantities.
+
+    `auc_norm` is mean retention over each configuration's OWN level range. QM9
+    doses in fractions of its clean label spread and runs to 1.00 of it; the
+    experimental grids are in raw log units and run to 0.84, 1.57 and 1.20 label
+    SD on LogD, Caco-2 and hERG; and the censoring axis is a fraction of labels
+    clipped, which is not an amount of noise at all. A model can rank differently
+    for that reason alone (RERUN_PLAN.md 2.12).
+    """
+    notes = [level_axis_note(f, label) for label, f in frames]
+    units = set()
+    for label, f in frames:
+        if f is None or len(f) == 0 or 'level_units' not in f.columns:
+            units.add('unrecorded')
+        else:
+            units.update(str(v) for v in f['level_units'].fillna('unrecorded'))
+    if len(units) > 1:
+        print(f"  WARNING: {where} puts more than one kind of level axis on one "
+              f"scale. auc_norm is mean retention over each configuration's own "
+              f"range, so these numbers are not on the same footing:")
+        for note in notes:
+            print(f"      {note}")
+    return units
+
+
 def calculate_validation_auc(validation_df):
     """Convert validation data into robustness-metric format (auc_norm).
 
@@ -1501,6 +1811,7 @@ def calculate_validation_auc(validation_df):
             group_cols = ['dataset'] + group_cols
 
         auc_results = []
+        validation_df = add_shared_dose_axis(validation_df, group_cols)
         for keys, group in validation_df.groupby(group_cols):
             if not isinstance(keys, tuple):
                 keys = (keys,)
@@ -1515,9 +1826,25 @@ def calculate_validation_auc(validation_df):
             baseline = float(base_arr[0])
             if baseline < VALIDATION_BASELINE_THRESHOLD:
                 continue
+            shared = np.nan
+            shared_top = np.nan
+            if 'dose_over_baseline_rmse' in group.columns:
+                gx = group.groupby('sigma')['dose_over_baseline_rmse'].mean()
+                gx = gx.reindex(avg['sigma']).to_numpy(dtype=float)
+                if np.isfinite(gx).all():
+                    shared = _retention_auc_norm(gx, r2, baseline)
+                    shared_top = float(np.nanmax(gx))
             row = dict(zip(group_cols, keys))
             row.update({'auc_norm': _retention_auc_norm(sig, r2, baseline),
-                        'baseline_r2': baseline})
+                        'auc_norm_shared': shared,
+                        'dose_over_baseline_rmse_max': shared_top,
+                        'baseline_r2': baseline,
+                        # auc_norm is mean retention over THIS configuration's
+                        # own level range. Two auc_norm values are comparable
+                        # only if the axis under them is the same quantity over
+                        # the same span (RERUN_PLAN.md 2.12).
+                        'level_units': _one_level_unit(group),
+                        'level_max': float(sig.max())})
             auc_results.append(row)
 
         if auc_results:
@@ -1729,7 +2056,7 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
             ds_auc = ds_auc[~ds_auc['rep'].isin(ANOVA_REPS_EXCLUDE)]
             # Use legacy strategy only — consistent with QM9 per-strategy ANOVA
             if 'strategy' in ds_auc.columns:
-                ds_auc = ds_auc[ds_auc['strategy'] == 'legacy']
+                ds_auc = baseline_rows(ds_auc, 'validation AUC by dataset')
             ds_auc = ds_auc.dropna(subset=['auc_norm'])
             if len(ds_auc) < 10:
                 continue
@@ -1841,6 +2168,10 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
     # Requires both the grouped bar data and the transferability scatter data
     if (qm9_auc_df is not None and val_auc_df is not None
             and 'dataset' in val_auc_df.columns):
+        warn_if_axes_differ(
+            [('QM9', qm9_auc_df), ('validation', val_auc_df)],
+            'the combined validation figure (grouped bar + transferability '
+            'scatter)')
         # Re-compute model_ds for Panel A
         models_in_val_c = sorted(val_auc_df['model'].unique())
         if len(models_in_val_c) >= 2:
@@ -1950,6 +2281,7 @@ def calculate_robustness(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
     results = []
     excluded = []
 
+    df = add_shared_dose_axis(df, ['model', 'rep', 'strategy'])
     for (model, rep, strategy), group in df.groupby(['model', 'rep', 'strategy']):
         # Average across iterations first
         avg_group = group.groupby('sigma')['r2'].mean().reset_index()
@@ -1974,13 +2306,30 @@ def calculate_robustness(df, baseline_threshold=ROBUSTNESS_BASELINE_THRESHOLD):
 
         auc_norm = _retention_auc_norm(sig, r2, baseline)
 
+        # The same retention curve on the axis the predecessor uses to compare
+        # datasets: delivered dose divided by this configuration's zero-noise
+        # RMSE (Kolmar & Grulke 2021). Absent when the delivered dose is not on
+        # the row.
+        shared = np.nan
+        shared_top = np.nan
+        if 'dose_over_baseline_rmse' in group.columns:
+            gx = group.groupby('sigma')['dose_over_baseline_rmse'].mean()
+            gx = gx.reindex(avg_group['sigma']).to_numpy(dtype=float)
+            if np.isfinite(gx).all():
+                shared = _retention_auc_norm(gx, r2, baseline)
+                shared_top = float(np.nanmax(gx))
+
         results.append({
+            'auc_norm_shared': shared,
+            'dose_over_baseline_rmse_max': shared_top,
             'model': model,
             'rep': rep,
             'strategy': strategy,
             'auc_norm': auc_norm,
             'baseline_r2': baseline,
             'n_sigma': len(sig),
+            'level_units': _one_level_unit(group),
+            'level_max': float(sig.max()),
         })
 
     robust_df = pd.DataFrame(results)
@@ -2020,7 +2369,7 @@ def calculate_coverage(y_true, y_pred, uncertainty, k=1):
     return np.mean(within_interval)
 
 
-def wilcoxon_paired_test(auc_df, model_base, model_variant, rep=None, strategy='legacy'):
+def wilcoxon_paired_test(auc_df, model_base, model_variant, rep=None, strategy=PRIMARY_STRATEGY):
     """
     Wilcoxon signed-rank test for paired model comparison.
 
@@ -2790,7 +3139,7 @@ def create_figure1(df, auc_df, output_dir):
     ax_a = fig.add_subplot(gs[0])
 
     key_models = ['rf', 'qrf', 'dnn', 'mlp', 'ngboost', 'xgboost', 'gauche_rbf']
-    pdv_data = df[(df['rep'] == PRIMARY_REP) & (df['strategy'] == 'legacy')]
+    pdv_data = baseline_rows(df[df['rep'] == PRIMARY_REP], 'figure 2 (PDV)')
 
     # Plot key models only (no grey background lines)
 
@@ -2861,7 +3210,7 @@ def create_figure1(df, auc_df, output_dir):
     fig_e, axes_e = plt.subplots(2, 1, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 1.25))
     ax_ea = axes_e[0]
 
-    ecfp4_data = df[(df['rep'] == 'ecfp4') & (df['strategy'] == 'legacy')]
+    ecfp4_data = baseline_rows(df[df['rep'] == 'ecfp4'], 'figure 2 (ECFP4)')
 
     # Plot key models only (no grey background lines)
 
@@ -3048,7 +3397,7 @@ def create_figure3(auc_df, validation_df, val_auc_df, raw_df, output_dir):
     fig, ax = plt.subplots(figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.85))
 
     auc_pdv = auc_df[auc_df['rep'] == PRIMARY_REP] if 'rep' in auc_df.columns else auc_df
-    auc_pdv_legacy = auc_pdv[auc_pdv['strategy'] == 'legacy'] if 'strategy' in auc_pdv.columns else auc_pdv
+    auc_pdv_legacy = baseline_rows(auc_pdv, 'neural-family comparison')
 
     all_base, all_auc = [], []
     for model in sort_models_by_family(auc_pdv_legacy['model'].unique().tolist()):
@@ -3215,11 +3564,7 @@ def _create_combined_uncertainty_figure(unc_df, output_path, strategy, rep, titl
     if len(filtered) == 0 or 'sigma' not in filtered.columns:
         return False
 
-    unc_col = None
-    for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty', 'std']:
-        if col in filtered.columns:
-            unc_col = col
-            break
+    unc_col = uncertainty_column(filtered)
     if unc_col is None:
         return False
 
@@ -3427,7 +3772,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
             print("✓ Saved table2_auc_by_strategy_pdv.csv (ranked by mean)")
 
             # Variant B: ranked by Gaussian auc_norm
-            gauss_col = STRATEGY_LABELS.get('legacy', 'Gaussian')
+            gauss_col = STRATEGY_LABELS.get(PRIMARY_STRATEGY, 'Gaussian')
             if gauss_col in pivot_labeled.columns:
                 variant_b = pivot_labeled.sort_values(gauss_col, ascending=False)
                 variant_b.to_csv(output_dir / 'table2_auc_by_gaussian_pdv.csv')
@@ -3459,7 +3804,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
     }
 
     # Filter to PDV + legacy for fair comparison
-    auc_fair = auc_df[(auc_df['rep'] == PRIMARY_REP) & (auc_df['strategy'] == 'legacy')] if 'rep' in auc_df.columns else auc_df
+    auc_fair = (baseline_rows(auc_df[auc_df['rep'] == PRIMARY_REP], 'table 3')
+                if 'rep' in auc_df.columns else baseline_rows(auc_df, 'table 3'))
 
     rows = []
     wilcoxon_results = []
@@ -3483,7 +3829,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
             var_data = auc_fair[auc_fair['model'] == variant]
             if len(var_data) > 0:
                 # Run Wilcoxon test comparing to base
-                wilcox = wilcoxon_paired_test(auc_df, base_model, variant, rep=PRIMARY_REP, strategy='legacy')
+                wilcox = wilcoxon_paired_test(auc_df, base_model, variant, rep=PRIMARY_REP, strategy=PRIMARY_STRATEGY)
                 wilcoxon_results.append({
                     'Family': family,
                     'Comparison': f'{base_model} vs {variant}',
@@ -3513,14 +3859,10 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
     # model's metrics over representations produces values no configuration
     # actually has, and the per-rep tables carry the same information.
     if unc_df is not None and len(unc_df) > 0:
-        unc_legacy = unc_df[unc_df['strategy'] == 'legacy'] if 'strategy' in unc_df.columns else unc_df
+        unc_legacy = baseline_rows(unc_df, 'table 4 (uncertainty metrics)')
 
         # Find uncertainty column
-        unc_col = None
-        for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty']:
-            if col in unc_legacy.columns:
-                unc_col = col
-                break
+        unc_col = uncertainty_column(unc_legacy)
 
         if unc_col and len(unc_legacy) > 0:
             # One table per representation. 'all' (the rep-pooled mean) is only
@@ -3662,11 +4004,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
     # Table 4b: Uncertainty metrics across ALL strategies and reps
     # Answers: do uncertainty patterns hold across noise types and representations?
     if unc_df is not None and len(unc_df) > 0:
-        unc_col = None
-        for col in ['y_pred_std_calibrated', 'y_pred_std', 'uncertainty']:
-            if col in unc_df.columns:
-                unc_col = col
-                break
+        unc_col = uncertainty_column(unc_df)
 
         if unc_col:
             all_unc_rows = []
@@ -3826,7 +4164,7 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
     # Uses PDV + legacy only
     if qm9_df is not None and len(qm9_df) > 0:
         # Filter to PDV + legacy
-        pdv_legacy = qm9_df[(qm9_df['strategy'] == 'legacy') & (qm9_df['rep'] == PRIMARY_REP)] if 'strategy' in qm9_df.columns else qm9_df
+        pdv_legacy = baseline_rows(qm9_df[qm9_df['rep'] == PRIMARY_REP], 'interaction figure')
 
         sigma_levels = [0.0, 0.3, 0.5, 0.7, 1.0]
         rank_data = {}
@@ -3939,7 +4277,7 @@ def create_interaction_figure(auc_df, raw_df, output_dir):
         print("⚠ Could not create interaction figure - no auc_norm data")
         return
 
-    auc_legacy = auc_df[auc_df['strategy'] == 'legacy'] if 'strategy' in auc_df.columns else auc_df
+    auc_legacy = baseline_rows(auc_df, 'interaction figure')
     # Filter to ANOVA-included reps only; keep ALL models (including QRF) for interaction view
     auc_legacy = auc_legacy[~auc_legacy['rep'].isin(ANOVA_REPS_EXCLUDE)]
     # Exclude PDV-only models from cross-rep interaction figure
@@ -4100,25 +4438,32 @@ def generate_report(auc_df, excluded_df, output_dir):
         lines.append("=" * 80)
 
         # Filter to PDV + legacy for consistent reporting
-        auc_pdv_legacy = auc_df[(auc_df['rep'] == PRIMARY_REP) & (auc_df['strategy'] == 'legacy')]
+        # No fallback to the whole frame: 'most robust model' computed over every
+        # condition pooled together is a different number from the one this
+        # section's heading claims, and the two used to be indistinguishable in
+        # the output.
+        auc_pdv_legacy = baseline_rows(auc_df[auc_df['rep'] == PRIMARY_REP],
+                                       'report (robustness summary)')
         if len(auc_pdv_legacy) == 0:
-            auc_pdv_legacy = auc_df  # Fallback
+            lines.append(f"\n(no rows in the reference condition for "
+                         f"{PRIMARY_REP} — the robustness summary is omitted "
+                         f"rather than computed over every condition pooled)")
+        else:
+            # Most robust model
+            mean_auc = auc_pdv_legacy.groupby('model')['auc_norm'].mean().sort_values(ascending=False)
+            lines.append(f"\nMost robust model: {mean_auc.index[0]} (auc_norm = {mean_auc.iloc[0]:.4f})")
+            lines.append(f"Least robust model: {mean_auc.index[-1]} (auc_norm = {mean_auc.iloc[-1]:.4f})")
 
-        # Most robust model
-        mean_auc = auc_pdv_legacy.groupby('model')['auc_norm'].mean().sort_values(ascending=False)
-        lines.append(f"\nMost robust model: {mean_auc.index[0]} (auc_norm = {mean_auc.iloc[0]:.4f})")
-        lines.append(f"Least robust model: {mean_auc.index[-1]} (auc_norm = {mean_auc.iloc[-1]:.4f})")
+            # BNN vs NN-α comparison
+            dnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn']
+            bnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn_bnn_full']
 
-        # BNN vs NN-α comparison
-        dnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn']
-        bnn_data = auc_pdv_legacy[auc_pdv_legacy['model'] == 'dnn_bnn_full']
-
-        if len(dnn_data) > 0 and len(bnn_data) > 0:
-            dnn_auc = dnn_data['auc_norm'].values[0]
-            bnn_auc = bnn_data['auc_norm'].values[0]
-            lines.append(f"\nNN-α auc_norm: {dnn_auc:.4f}")
-            lines.append(f"BNN-α auc_norm: {bnn_auc:.4f}")
-            lines.append(f"Improvement: {(bnn_auc - dnn_auc):.4f}")
+            if len(dnn_data) > 0 and len(bnn_data) > 0:
+                dnn_auc = dnn_data['auc_norm'].values[0]
+                bnn_auc = bnn_data['auc_norm'].values[0]
+                lines.append(f"\nNN-α auc_norm: {dnn_auc:.4f}")
+                lines.append(f"BNN-α auc_norm: {bnn_auc:.4f}")
+                lines.append(f"Improvement: {(bnn_auc - dnn_auc):.4f}")
 
     report_path = output_dir / 'paper_figures_report.txt'
     with open(report_path, 'w') as f:

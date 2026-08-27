@@ -379,6 +379,34 @@ else
 fi
 
 # -----------------------------------------------------------------------------
+section "8. THE QM9 JOB GENERATOR   (chat M)"
+# -----------------------------------------------------------------------------
+# The scripts are not in version control -- they are rebuilt from the generator
+# every time -- so the generator is the only thing worth auditing, and the only
+# question worth asking about it is whether the commands it emits are ones THIS
+# interpreter's pipeline accepts. It emitted --sigma and --noise-strategy for
+# weeks after both were refused by name, because nobody had run its output.
+GENTEST="$QSAR_ROOT/slurm_scripts_qm9_rerun/test_generate_scripts.py"
+if [ -f "$GENTEST" ]; then
+  say "  running $GENTEST (this imports the whole pipeline; about a minute)"
+  say ""
+  GENOUT="$(cd "$QSAR_ROOT" && printf '%s' "import runpy,sys; sys.argv=['t']; runpy.run_path('$GENTEST', run_name='__main__')" | run_job_env 2>&1)"
+  GEN_RC=$?
+  printf '%s\n' "$GENOUT" | grep -E "^(stage|guards|the real|  checked|PASS|FAIL|  - )" | head -40 | tee -a "$REPORT"
+  if printf '%s' "$GENOUT" | grep -q '^PASS'; then
+    say ""
+    say "  PASS: every command line the generator emits is accepted by this pipeline."
+  else
+    say ""
+    say "  FAIL (exit $GEN_RC): the generator emits commands this pipeline refuses."
+    say "  >>> Every job it writes would die at argument parsing. Do not submit."
+  fi
+else
+  say "  MISSING: $GENTEST"
+  say "  >>> This checkout is behind. git pull before generating any job script."
+fi
+
+# -----------------------------------------------------------------------------
 section "WHAT THIS MEANS"
 say ""
 say "  Read the exit codes above. In order of what stops a launch:"
@@ -389,6 +417,8 @@ say "   * Section 4 FAIL  -> every quantile-forest task dies on contact."
 say "   * Section 3 MISSING -> jobs for those models produce nothing."
 say "   * Section 6 non-zero -> the two pipelines are NOT training the same models, so"
 say "                        results from them cannot be compared."
+say "   * Section 8 FAIL  -> every QM9 job dies at argument parsing before it trains"
+say "                        anything. The generator, not the scripts, is what to fix."
 say "   * Section 1 shows a checkout WITHOUT the shared settings file -> it is behind;"
 say "                        git pull it before anything is submitted from it."
 say ""

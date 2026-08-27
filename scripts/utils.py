@@ -23,11 +23,80 @@ from rdkit import Chem
 RESULT_COLUMNS = ["sigma", "iteration", "model", "rep", "sample_size", "mae",
                   "mse", "rmse", "r2", "pearson_corr", "params_source",
                   "loss_function", "spec_version", "spec_hash", "gp_fit_method",
-                  "gp_collapsed"]
+                  "gp_collapsed",
+                  # Added 2026-08-27. The condition a row belongs to used to
+                  # survive only in the output FILENAME, so the figure script
+                  # recovered it by matching the stem against a list of six
+                  # retired names -- under which a new-scheme file either matched
+                  # nothing (and every condition for a (model, rep, level,
+                  # replicate) collapsed to one row on a blank key) or matched
+                  # `outlier`, which used to mean something else entirely
+                  # (RERUN_PLAN.md 2.11).
+                  "noise_type",
+                  # Added 2026-08-27. What the number in `sigma` MEASURES. The
+                  # column holds three different physical quantities across the
+                  # two pipelines -- a fraction of the clean training label
+                  # spread on QM9, raw log units on the experimental side
+                  # (anchored to published assay error), and a fraction of
+                  # labels clipped on the censoring axis, which is not a noise
+                  # amount at all. auc_norm is mean retention over each
+                  # configuration's own level range, so two auc_norm values on
+                  # one axis compare retention over different spans unless the
+                  # units agree (RERUN_PLAN.md 2.12).
+                  "level_units",
+                  # Added 2026-08-27. What the noise actually DELIVERED at this
+                  # level, in raw label units, as the injector measured it. This
+                  # is what puts two pipelines' levels on one axis: the
+                  # predecessor this study follows (Kolmar & Grulke, J Cheminform
+                  # 13:92, 2021) doses per dataset as a fraction of that
+                  # dataset's endpoint range and then compares datasets with the
+                  # noise divided by the noise-free baseline error, sigma/RMSE0,
+                  # against RMSE/RMSE0. Without the delivered amount on the row,
+                  # that axis cannot be built after the fact.
+                  "delivered_dose"]
+
+# The three things a level can measure.
+LEVEL_UNITS = ('label_sd', 'raw_label', 'fraction_censored')
+
+
+# What every row written from here belongs to. process_and_train sets both once
+# per (noise level, replicate) from the manifest the injector wrote; the
+# condition name is never guessed from a filename and never composed here from
+# the CLI flags, because a second implementation of the naming is a second thing
+# to drift.
+_CURRENT_NOISE_TYPE = None
+_CURRENT_LEVEL_UNITS = None
+_CURRENT_DELIVERED_DOSE = None
+
+
+def set_current_noise_type(name, level_units=None, delivered_dose=None):
+    """Record which condition, in what units, and how much, from now on."""
+    global _CURRENT_NOISE_TYPE, _CURRENT_LEVEL_UNITS, _CURRENT_DELIVERED_DOSE
+    _CURRENT_NOISE_TYPE = None if name in (None, '') else str(name)
+    _CURRENT_DELIVERED_DOSE = delivered_dose
+    if level_units is not None and level_units not in LEVEL_UNITS:
+        raise ValueError(
+            f"level_units={level_units!r} is not one of {LEVEL_UNITS}; a row "
+            f"whose level units are unnamed cannot be put on an axis with "
+            f"another pipeline's.")
+    _CURRENT_LEVEL_UNITS = level_units
+
+
+def current_noise_type():
+    return _CURRENT_NOISE_TYPE
+
+
+def current_level_units():
+    return _CURRENT_LEVEL_UNITS
+
+
+def current_delivered_dose():
+    return _CURRENT_DELIVERED_DOSE
 
 
 def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='default',
-                 loss_function='mse', gp_fit_method='', gp_collapsed=''):
+                 loss_function='mse', gp_fit_method='', gp_collapsed='',
+                 noise_type=None, level_units=None, delivered_dose=None):
     """
     Save results to a CSV file with loss function tracking.
 
@@ -69,7 +138,14 @@ def save_results(filepath, s, iteration, model, rep, n, metrics, params_source='
         writer.writerow([s, iteration, model, rep, n, metrics[0], metrics[1],
                          metrics[2], metrics[3], metrics[4], params_source,
                          loss_function, spec_version, spec, gp_fit_method,
-                         gp_collapsed])
+                         gp_collapsed,
+                         noise_type if noise_type is not None
+                         else (_CURRENT_NOISE_TYPE or ''),
+                         level_units if level_units is not None
+                         else (_CURRENT_LEVEL_UNITS or ''),
+                         delivered_dose if delivered_dose is not None
+                         else ('' if _CURRENT_DELIVERED_DOSE is None
+                               else _CURRENT_DELIVERED_DOSE)])
 
 def calculate_regression_metrics(y_test, prediction, logging=False):
     mae = mean_absolute_error(y_test, prediction)

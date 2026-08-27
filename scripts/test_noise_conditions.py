@@ -72,22 +72,24 @@ def check_generator(spec, failures):
         print("\n  (the job generator has no CONDITIONS table — skipping that check)")
         return
 
-    # Its keys are job-script labels, not registry names, so match on the flags.
     settled_stage_1 = set(names(spec, 'stage_1_full_grid'))
     settings = spec['settings_that_follow']
-    label_to_name = {
-        'gaussian': 'gaussian',
+
+    # The generator keys its table on the registry name itself, so there is no
+    # translation to keep in step here. The abbreviated job-script labels it used
+    # for one day are kept only so an older checkout is reported honestly rather
+    # than as an unknown condition.
+    RETIRED_LABELS = {
         'groupedwide': 'grouped_wider',
         'groupedshift': 'grouped_shifted',
-        'censoring': 'censoring',
         'studentt': 'student_t_nu5',
         'outlier': 'outlier_p10',
-        'laplace': 'laplace',
     }
+    known = set(names(spec, 'stage_1_full_grid')) | set(names(spec, 'stage_2_depth_only'))
     generator_stage_1 = set()
     for label, entry in module.CONDITIONS.items():
         flags, _levels, in_stage_1 = entry[0], entry[1], entry[2]
-        name = label_to_name.get(label)
+        name = label if label in known else RETIRED_LABELS.get(label)
         if name is None:
             failures.append(f"the job generator has a condition '{label}' that the settled set "
                             f"does not name. Add it to noise_conditions.json with its evidence, "

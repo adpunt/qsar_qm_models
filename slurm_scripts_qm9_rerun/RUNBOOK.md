@@ -1,14 +1,22 @@
 # QM9 re-run — runbook
 
-> ⚠️ **PARTLY SUPERSEDED (2026-08-24). Do not submit these scripts as they stand.**
-> The noise scheme is being replaced (`NOISE_DESIGN.md`), so the six noise types and the
-> eleven-level ladder below are both out of date, and the completeness check at the end globs
-> for names that will no longer exist. Several code changes must also land before any of this
-> runs — see `RERUN_PLAN.md` §5.1.
+> ✅ **BROUGHT UP TO DATE 2026-08-27 (chat M).** The generator now emits the new noise CLI,
+> the settled six representations and the staged design; the array sizes, script names, smoke
+> test and completeness check below all follow from it. Nothing here has been run on the
+> cluster yet — §1b is still a launch blocker, and the wall times in §5 are the generator's
+> arithmetic, not measurement.
 >
-> What is still good and should be carried across when the scripts are regenerated: the reasoning
-> about which models and representations are in and out, the tier ordering, the one-task-first
-> discipline, and the archive step.
+> There are no `.sh` files in this directory to submit. They are not in version control, they
+> are rebuilt from `generate_scripts.py`, and §4 below regenerates them. The generator is the
+> artefact; the scripts are its output.
+>
+> The generator has a test, and it is what stops the last failure repeating — the old generator
+> emitted `--sigma` and `--noise-strategy` for weeks after the pipeline started refusing both by
+> name, because nobody had executed its output:
+>
+> ```bash
+> python slurm_scripts_qm9_rerun/test_generate_scripts.py
+> ```
 
 The noise map is keyed by **training** index, and `write_data` restarted its
 counter for each split — so validation and test molecules were handed the noise
@@ -29,20 +37,29 @@ invalid numbers.
 **σ = 0 results were never affected** (`process_and_train.py` sets
 `'noise': s > 0`, so at zero the noise path is off for all splits). They are
 re-run anyway — splicing two runs is more error-prone than re-running one grid,
-and σ = 0 is one eleventh of the cost.
+and level 0 is one seventh of the cost.
 
 ## The grid
 
 | | |
 |---|---|
 | Models | 11 ANOVA models, plus QRF and both Gaussian processes |
-| Representations | ECFP4, continuous PDV, SMILES, MHG-GNN, Mol2vec, SNS |
-| Strategies | 6 |
-| Noise levels | 11 (0.0 to 1.0) |
-| Replicates | 10 |
+| Representations | ECFP4, PDV (`continuous_pdv`), MHG-GNN, Avalon, ChemBERTa, Sort & Slice |
+| Noise conditions | 4 at full grid: gaussian, grouped-wider, grouped-shifted, censoring |
+| Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
+| Replicates | 10, as stage 0 (1) plus stage 1 (9) |
 
-**14 array scripts, 480 tasks**, each 110 training runs — **52,800 training
-runs** in total.
+**Stage 0: 15 array scripts, 320 tasks**, each 7 training runs — 2,240 training runs.
+**Stage 1: the same 320 tasks**, each 63 training runs — 20,160. **22,400 in total.**
+
+Three of the four conditions repeat the level-0 cell, which is bit-identical every
+time because level 0 switches the noise path off. That is 11% of the grid, and it is
+kept because the figure script anchors retention on the level-0 row *within* each
+(model, representation, condition) group, so dropping it would leave three quarters
+of the conditions with nothing to normalise against. It also gives four independent
+tasks that must agree exactly, which is a real check on the level-0 path. Sharing one
+anchor across conditions is a figure-script change, and `RERUN_PLAN.md` §13.1 prices
+the grid as though it had already happened.
 
 ### What is in, and what is deliberately out
 
@@ -74,23 +91,16 @@ scripts and 240 tasks:
 python generate_scripts.py --include-excluded     # 22 scripts, 720 tasks
 ```
 
-**Out permanently:** binary `pdv` (superseded by continuous PDV, and dropped
-after direct comparison), `morgan` (ρ = 0.995 with ECFP4), and
-`randomized_smiles` (incomplete coverage). All three are in
-`ANOVA_REPS_EXCLUDE`.
+**Out permanently:** binary `pdv` (superseded by PDV as continuous descriptors,
+after direct comparison), `morgan` (ρ = 0.995 with ECFP4), one-hot `smiles` and
+`randomized_smiles` (dropped 2026-08-26, and refused by name in `parse_mmap` so a
+job cannot run them by accident), and `mol2vec`, which is deleted from the code
+outright.
 
-One task per (strategy, representation), one script per model. Model and
+One task per (noise condition, representation), one script per model. Model and
 representation are the two factors of the variance decomposition, so neither can
 be cut without gutting the paper's first research question. Replicates can be cut
 (see below); representations cannot.
-
-Two arms sit outside the ANOVA roster and are included deliberately:
-- **QRF** — dropped from the ANOVA as redundant with RF for accuracy (ρ = 0.996),
-  but it is the strongest error-ranker in the uncertainty results.
-- **The RBF Gaussian process on every representation** — it has never been run on
-  the paper's primary representation at all, so it is a visible hole in two
-  figures. Running one consistent kernel across all five representations is also
-  what would let the GP finally enter the cross-representation ANOVA.
 
 ## 1. Rebuild the binary — nothing works without this
 
@@ -180,12 +190,9 @@ uncertainty work has used. Check it too if you submit anything against it:
 `--wrap` submissions with no output path: they inherited whatever interpreter
 was active and left no log saying which.
 
-> 🔴 **The `.sh` files in this directory are stale — do not submit them as they stand.**
-> They predate the activation guard, and they carry the old CLI (`--sigma`,
-> `--noise-strategy`) that `process_and_train.py` no longer accepts. Regenerate
-> with `python generate_scripts.py` once the generator has been updated to the
-> new noise CLI (chat H, gated on `RERUN_PLAN.md` §13.1). The guard is in the
-> generator, so it lands in whatever is regenerated.
+> ✅ **The generator carries the activation guard and the new noise CLI**, so both land in
+> whatever is regenerated. Regenerate rather than editing a `.sh` by hand — a hand-edit is lost
+> the next time anyone runs the generator, and it is not covered by the generator's test.
 
 ## 2. Archive the current results before anything overwrites them
 
@@ -208,15 +215,24 @@ echo "account=$ACCT partition=$PART"
 sinfo -o "%.12P %.12l" | grep -E "medium|long"         # confirm >= 48 h wall
 ```
 
-## 4. One task first — do not submit 390 blind
+## 4. Generate the scripts, then run ONE task — do not submit the grid blind
 
-Pick the cheapest model and the cheapest representation, and let it finish:
+Stage 0 is the screen: every model on every representation, the four stage-1 noise
+conditions, one replicate. It is reused as replicate 0 of stage 1 rather than thrown
+away, which is why stage 1 starts at replicate 1 and both write to the same files.
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
-sbatch --account=$ACCT --partition=$PART --array=0 qm9_rf.sh
+python generate_scripts.py --stage 0
+ls qm9_s0_*.sh
+```
+
+Then the cheapest model on the cheapest representation, and let it finish:
+
+```bash
+sbatch --account=$ACCT --partition=$PART --array=0 qm9_s0_rf.sh
 squeue -u $USER
-tail -f qm9_rf_*_0.out
+tail -f qm90_rf_*_0.out
 ```
 
 Then check the output is sane before committing the queue:
@@ -224,14 +240,19 @@ Then check the output is sane before committing the queue:
 ```bash
 python - <<'PY'
 import pandas as pd
-d = pd.read_csv('../results/anova_legacy_ecfp4_rf.csv')
+d = pd.read_csv('../results/anova_gaussian_ecfp4_rf.csv')
 print(d.shape, sorted(d.sigma.unique()))
 print(d.groupby('sigma').r2.mean().round(3))
 PY
 ```
 
-R² should fall monotonically with σ and start near the published clean value.
-**Record how long that task took** — it sets the wall times for everything else:
+The `sigma` column now carries the noise LEVEL — a fraction of the clean training
+label spread, not the old σ. R² should fall monotonically with it, and at level 0
+it should match the paper's clean number, because level 0 switches the noise path
+off for every split.
+
+**Record how long that task took** — it sets the wall times for everything else,
+and the ones the generator prints are arithmetic, not measurement:
 
 ```bash
 sacct -j <jobid> --format=JobID,JobName%22,State,Elapsed,MaxRSS
@@ -239,22 +260,35 @@ sacct -j <jobid> --format=JobID,JobName%22,State,Elapsed,MaxRSS
 
 ## 5. Submit
 
+Four conditions x six representations is 24 tasks per model; the Tanimoto Gaussian
+process runs on the two binary fingerprints only, so it is 8.
+
 ```bash
 # Tier 1 — the ANOVA roster, tree and deterministic models
-for s in qm9_rf qm9_xgboost qm9_lgb qm9_svm qm9_ngboost qm9_dnn qm9_mlp; do
-    sbatch --account=$ACCT --partition=$PART --array=0-35%5 $s.sh
+for s in rf xgboost lgb svm ngboost dnn mlp; do
+    sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s0_$s.sh
 done
 
 # Tier 2 — the Bayesian networks
-for s in qm9_dnn_bnn_full qm9_mlp_bnn_full \
-         qm9_dnn_bnn_full_variational qm9_mlp_bnn_full_variational; do
-    sbatch --account=$ACCT --partition=$PART --array=0-35%4 $s.sh
+for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational; do
+    sbatch --account=$ACCT --partition=$PART --array=0-23%4 qm9_s0_$s.sh
 done
 
 # Tier 3 — outside the ANOVA: uncertainty and both Gaussian processes
-sbatch --account=$ACCT --partition=$PART --array=0-35%5 qm9_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-35%4 qm9_gauche_rbf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-11%4 qm9_gauche.sh   # 12 tasks: fingerprints only
+sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s0_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-23%4 qm9_s0_gauche_rbf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-7%4  qm9_s0_gauche.sh   # fingerprints only
+```
+
+Stage 1 is the same grid at replicates 1–9, appending to the same files, so it is
+submitted the same way once stage 0 has landed and been checked:
+
+```bash
+python generate_scripts.py --stage 1
+for s in rf xgboost lgb svm ngboost dnn mlp; do
+    sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s1_$s.sh
+done
+# ...and the other two tiers as above, with qm9_s1_ in place of qm9_s0_
 ```
 
 ## 6. Monitor and resubmit
@@ -266,27 +300,46 @@ grep -l "exit=[^0]" qm9_*.out            # failed tasks
 sbatch --account=$ACCT --partition=$PART --array=7,19 qm9_dnn.sh   # only those
 ```
 
-Completeness check once things land — this is the same audit the figure script
-runs, so use it rather than counting files by hand:
+Completeness check once things land. It reads the roster out of the generator
+rather than restating it, because a hand-typed list here is how the old check came
+to glob for six noise names that no longer exist:
 
 ```bash
-cd /data/stat-cadd/scat9264/qsar_qm_models/scripts
-python -c "
-import glob, re, collections
-want_reps = ['ecfp4','continuous_pdv','smiles','mhggnn','mol2vec','sns']
-want_strat = ['legacy','valprop','quantile','threshold','hetero','outlier']
-models = ['rf','xgboost','lgb','svm','ngboost','dnn','mlp','dnn_bnn_full','mlp_bnn_full',
-          'dnn_bnn_full_variational','mlp_bnn_full_variational','qrf','gauche_rbf']
-fp_only = {'gauche': ['ecfp4','sns']}   # Tanimoto GP: binary fingerprints only
+cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
+python - <<'PYCHECK'
+import glob, os, re, sys
+sys.path.insert(0, '.')
+import generate_scripts as gen
+
+STAGE = 0                                    # or 1
+conds = gen.STAGE_DEFAULTS[STAGE]['conditions']
+want = {(c, r, m) for m, (_, _, _, _, reps) in gen.MODELS.items()
+        for r in reps for c in conds}
+
 have = set()
 for f in glob.glob('../results/anova_*.csv'):
-    m = re.match(r'.*anova_(\w+?)_(ecfp4|continuous_pdv|smiles|mhggnn|mol2vec)_(.+)\.csv', f)
-    if m: have.add(m.groups())
-miss = [(s,r,mo) for s in want_strat for r in want_reps for mo in models if (s,r,mo) not in have]
-miss += [(s,r,'gauche') for s in want_strat for r in fp_only['gauche'] if (s,r,'gauche') not in have]
-print(f'{len(have)} present, {len(miss)} missing of {len(want_strat)*(len(want_reps)*len(models)+len(fp_only["gauche"]))}')
-for x in miss[:20]: print('  missing', x)
-"
+    if '_uncertainty_values' in f:
+        continue
+    rest = os.path.basename(f)[len('anova_'):-len('.csv')]
+    for c in conds:
+        if rest.startswith(c + '_'):
+            tail = rest[len(c) + 1:]
+            for r in sorted(gen.ALL_REPS, key=len, reverse=True):
+                if tail.startswith(r + '_'):
+                    have.add((c, r, tail[len(r) + 1:]))
+                    break
+            break
+
+missing = sorted(want - have)
+extra = sorted(have - want)
+print(f'{len(want) - len(missing)}/{len(want)} present, {len(missing)} missing')
+for x in missing[:20]:
+    print('  missing', x)
+if extra:
+    print(f'{len(extra)} file(s) nothing asked for:')
+    for x in extra[:10]:
+        print('  unexpected', x)
+PYCHECK
 ```
 
 ## 7. Regenerate the figures

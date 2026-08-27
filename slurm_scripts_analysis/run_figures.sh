@@ -7,6 +7,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=02:00:00
 #SBATCH --partition=long
+#SBATCH --account=stat-cadd
 #SBATCH --mem=128G
 #SBATCH --output=/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/figs-%j.out
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk

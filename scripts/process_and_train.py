@@ -1,3 +1,20 @@
+# LightGBM FIRST, before anything that pulls in PyTorch.
+#
+# PyTorch ships Intel's OpenMP runtime (libiomp5) and LightGBM ships LLVM's
+# (libomp). If torch is imported first, LightGBM's first fit dies -- as a
+# segmentation fault in a small script, and as a permanent hang inside an
+# OpenMP join barrier in this pipeline. Found on 2026-08-27 by running the real
+# pipeline: it sat for three hours at 0% CPU, having produced one result row,
+# and would have burned a whole SLURM allocation and written nothing.
+#
+# Reproducer and the mitigations that DON'T work:
+#   import torch, lightgbm      -> exit 139
+#   KMP_DUPLICATE_LIB_OK=TRUE   -> exit 139   (only silences the warning)
+#   OMP_NUM_THREADS=1           -> exit 139
+#   import lightgbm, torch      -> works      <- this
+#   lightgbm n_jobs=1           -> works      (but costs all its threads)
+import lightgbm as _lgb_first  # noqa: F401  MUST stay above the torch imports
+
 import argparse
 import os
 import os.path as osp
@@ -131,6 +148,14 @@ from model_defaults import should_standardise, is_binary_matrix
 # FEATURES -- `pdv` means the binarised vector here and the continuous one on
 # the experimental side, so no name-keyed list can be right for both.
 CONTINUOUS_REPS = ('continuous_pdv', 'chemberta', 'mhggnn')
+
+# The Sort & Slice record: 1024 substructures, stored as COUNTS rather than
+# presence bits. The dimension must match the vec_dimension the featuriser is
+# built with; both the writer and the reader read it from here so they cannot
+# drift apart, which is how the record layout has gone wrong before.
+SNS_DIM = 1024
+SNS_COUNT_DTYPE = np.uint16
+SNS_RECORD_BYTES = SNS_DIM * np.dtype(SNS_COUNT_DTYPE).itemsize
 graph_models = ['gin', 'gcn', 'ginct', 'graph_gp', 'gin2d']
 neural_nets = ["dnn", "mlp", "rnn", "gru", 'factorization_mlp', 'residual_mlp']
 
@@ -533,12 +558,41 @@ def write_to_mmap(
         else:
             entry += struct.pack("I", 0)  # Zero length = missing
 
-    # SNS fingerprint (packed bits, fixed length)
+    # Sort & Slice substructure COUNTS, fixed length.
+    #
+    # These used to be packed to one presence bit per substructure, which threw
+    # away everything the featuriser had been asked for: it is called with
+    # sub_counts=True, so it counts how many times each substructure occurs, and
+    # packbits then flattened every nonzero to 1. The experimental pipeline kept
+    # the counts, so the same name meant two different representations
+    # (RERUN_PLAN.md 3.4.1). The counts are worth having on their own terms --
+    # scripts/parity_test_count_scaling.py measures +0.011 R2 on QM9 for a
+    # radial-kernel support vector machine and +0.019 for the forest.
+    #
+    # The old path also cast to uint8 BEFORE packing, so a count that was an
+    # exact multiple of 256 wrapped to zero and the substructure recorded as
+    # absent. Storing uint16 and refusing anything that will not fit closes that
+    # instead of moving it to a larger number.
     if "sns" in molecular_representations:
         if sns_fp is not None:
-            sns_fp_array = np.array(sns_fp, dtype=np.uint8)
-            sns_fp_packed = np.packbits(sns_fp_array, bitorder='little')
-            entry += sns_fp_packed.tobytes()
+            counts = np.asarray(sns_fp)
+            if counts.shape != (SNS_DIM,):
+                # A molecule with no enumerable substructures makes the
+                # featuriser sum an empty list, which returns the scalar 0.0.
+                # The old code packed that into ONE byte instead of 128 and
+                # every field after it in the record decoded from the wrong
+                # offset for the rest of the file.
+                counts = np.zeros(SNS_DIM, dtype=np.float64)
+            if not np.isfinite(counts).all() or counts.min() < 0:
+                raise ValueError(
+                    f"substructure counts must be finite and non-negative, got "
+                    f"min {counts.min()} for {smiles_canonical}")
+            if counts.max() > np.iinfo(np.uint16).max:
+                raise ValueError(
+                    f"substructure count {counts.max()} exceeds what the record "
+                    f"holds ({np.iinfo(np.uint16).max}) for {smiles_canonical}. "
+                    f"Widen SNS_COUNT_DTYPE rather than letting it wrap.")
+            entry += counts.astype(SNS_COUNT_DTYPE).tobytes()
         else:
             return  # skip incomplete entry
 
@@ -680,7 +734,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(
             mols_train=mols_train, max_radius=2, pharm_atom_invs=False,
             bond_invs=True, chirality=False, sub_counts=True,
-            vec_dimension=1024, print_train_set_info=args.logging
+            vec_dimension=SNS_DIM, print_train_set_info=args.logging
         )
     
     # Load mhggnn
@@ -831,7 +885,7 @@ def split_qm9(qm9, args, files):
                                                                bond_invs = True, 
                                                                chirality = False, 
                                                                sub_counts = True, 
-                                                               vec_dimension = 1024, 
+                                                               vec_dimension = SNS_DIM, 
                                                                print_train_set_info = args.logging)
 
     # Load mhg-gnn
@@ -1277,9 +1331,9 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
 
             # --- sns_fp ---
             if "sns" in molecular_representations:
-                sns_bytes = mmap_file.read(128)
+                sns_bytes = mmap_file.read(SNS_RECORD_BYTES)
                 if rep == "sns":
-                    sns_fp = np.unpackbits(np.frombuffer(sns_bytes, dtype=np.uint8), bitorder="little")
+                    sns_fp = np.frombuffer(sns_bytes, dtype=SNS_COUNT_DTYPE).astype(np.float32)
                     feature_vector.append(sns_fp)
                     if logging:
                         print(f"[{entry}] sns_fp: {sns_fp}")
@@ -1722,22 +1776,32 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
     y_val_noisy = torch.tensor(y_val_noisy, dtype=torch.float32)
     y_test_original_tensor = torch.tensor(y_test_original, dtype=torch.float32)
 
-    # Attach noisy labels to Data objects so they travel with graphs through shuffling
-    for i, idx in enumerate(train_idx):
-        qm9[idx].y_noisy = y_train_noisy[i].item()
-    for i, idx in enumerate(test_idx):
-        qm9[idx].y_noisy = y_test_noisy[i].item()
-    for i, idx in enumerate(val_idx):
-        qm9[idx].y_noisy = y_val_noisy[i].item()
-    
-    # Create datasets and loaders BEFORE model_selector
-    train_set = qm9[train_idx]
-    test_set = qm9[test_idx]
-    val_set = qm9[val_idx]
-    
-    train_loader = GeometricDataLoader(train_set, batch_size=64, shuffle=True)
-    test_loader = GeometricDataLoader(test_set, batch_size=64, shuffle=False)
-    val_loader = GeometricDataLoader(val_set, batch_size=64, shuffle=False)
+    # Attach the noisy labels to Data objects the loaders will actually see.
+    #
+    # This used to be `qm9[idx].y_noisy = ...`. Indexing a PyG InMemoryDataset
+    # BUILDS a new Data object every time, so the assignment landed on a
+    # temporary and was discarded, and `qm9[train_idx]` afterwards produced
+    # objects with no `y_noisy` at all. Every graph model then died on the first
+    # training batch with `'GlobalStorage' object has no attribute 'y_noisy'`,
+    # which the caller's blanket `except Exception` turned into a missing result
+    # row (RERUN_PLAN.md 2.13). Materialise the graphs ONCE and keep them.
+    train_graphs = [qm9[i] for i in train_idx]
+    test_graphs = [qm9[i] for i in test_idx]
+    val_graphs = [qm9[i] for i in val_idx]
+    for graphs, labels, name in ((train_graphs, y_train_noisy, 'train'),
+                                 (test_graphs, y_test_noisy, 'test'),
+                                 (val_graphs, y_val_noisy, 'val')):
+        if len(graphs) != len(labels):
+            raise RuntimeError(
+                f"{len(graphs)} {name} graphs against {len(labels)} {name} "
+                f"labels read back from the mmap -- pairing them would put "
+                f"every label on a different molecule.")
+        for g, y in zip(graphs, labels):
+            g.y_noisy = float(y)
+
+    train_loader = GeometricDataLoader(train_graphs, batch_size=64, shuffle=True)
+    test_loader = GeometricDataLoader(test_graphs, batch_size=64, shuffle=False)
+    val_loader = GeometricDataLoader(val_graphs, batch_size=64, shuffle=False)
     
     def _black_box_function(trial, model_type):
         print(f"Running Optuna trial {trial.number} for {model_type}")
@@ -1745,11 +1809,8 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
 
     def model_selector(trial, model_type):
         if model_type == "graph_gp":
-            # For Graph GP, use PyG Data objects directly
-            train_graphs = [qm9[i] for i in train_idx]
-            test_graphs = [qm9[i] for i in test_idx]
-            val_graphs = [qm9[i] for i in val_idx]
-            
+            # The SAME objects the loaders hold -- rebuilding them from the
+            # dataset here would hand the GP graphs with no y_noisy on them.
             return train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy, 
                                  val_graphs, y_val_noisy, args, s, iteration, file_no, 
                                  y_test_original_tensor, trial=trial)
@@ -2170,6 +2231,42 @@ def record_noise_manifest(args, manifest_path, iteration, file_no, level):
     return row
 
 
+def level_units_for(args):
+    """What the number in the `sigma` column MEASURES for this run.
+
+    QM9 doses in fractions of the clean training label spread (`--dose-units
+    spread`, the default) or in raw label units (`--dose-units label`); the
+    experimental pipeline doses in raw log units anchored to published assay
+    error. Censoring has no dose axis at all -- its level is the fraction of
+    labels clipped. All three used to be written into one column called `sigma`
+    with nothing to tell them apart, and `auc_norm` is mean retention over each
+    configuration's OWN level range, so two of them on one axis compare
+    retention over different spans (RERUN_PLAN.md 2.12).
+    """
+    if getattr(args, 'noise_targeting', None) == 'censoring':
+        return 'fraction_censored'
+    return 'label_sd' if getattr(args, 'dose_units', 'spread') == 'spread' else 'raw_label'
+
+
+def condition_from_manifest_row(manifest_row, manifest_path, level, iteration):
+    """The condition name the injector recorded, or stop.
+
+    A row written with no condition on it cannot be conditioned on later, and
+    gets pooled with every other condition -- which is how the paper's
+    per-molecule claim was produced (RERUN_PLAN.md 2.11). The name is never
+    composed here from the CLI flags: a second implementation of the naming is a
+    second thing to drift out of step with the injector's.
+    """
+    condition = (manifest_row or {}).get('noise_type')
+    if not condition:
+        raise RuntimeError(
+            f"the injector's manifest at {manifest_path} carries no noise_type, so "
+            f"the rows for noise level {level}, replicate {iteration} would be "
+            f"written with no condition on them. A row that cannot be conditioned "
+            f"on its noise type gets pooled with every other condition.")
+    return str(condition)
+
+
 # Messages raised by the reader guards. A misparse destroys the byte offset, so
 # it cannot be confined to one (representation, model) cell -- it must take the
 # task down rather than be printed and stepped over.
@@ -2300,7 +2397,15 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
             f"--- stderr ---\n{(stderr or '').strip()[-4000:]}"
         )
 
-    record_noise_manifest(args, manifest_path, iteration, file_no, s)
+    manifest_row = record_noise_manifest(args, manifest_path, iteration, file_no, s)
+
+    # Stamp the condition onto every results row this level writes. The name is
+    # the injector's own (`condition_name` in rust/src/main.rs, carried through
+    # the manifest); nothing downstream has to recover it from a filename.
+    set_current_noise_type(
+        condition_from_manifest_row(manifest_row, manifest_path, s, iteration),
+        level_units=level_units_for(args),
+        delivered_dose=(manifest_row or {}).get('delivered_dose_in_label_units'))
 
     # The noise the injector RECORDED, read back before a single model is fitted.
     # Only when the out-of-fold pass is on: it is the only consumer, and reading

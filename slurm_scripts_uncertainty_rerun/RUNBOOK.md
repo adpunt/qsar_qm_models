@@ -1,5 +1,15 @@
 # Uncertainty re-run — runbook
 
+> ⚠️ **SCOPE SUPERSEDED (2026-08-24), method intact. Do not submit as it stands.**
+> The code, the controls and the analysis plan below are sound and are being kept. What changes
+> is *what it runs*: the six noise types are replaced (`NOISE_DESIGN.md`) and the eleven-level
+> ladder becomes six per-dataset levels in log units. Under the new set, question B's structure
+> is cleaner — grouped-by-scaffold is the positive case, random-selection outlier is a true null,
+> censoring is the label-keyed case, and the unstructured shapes are question A's conditions
+> only. See `RERUN_PLAN.md` §3.2 and §6.
+>
+> Regenerate the scripts with `generate_scripts.py` once the noise types are settled.
+
 **What this produces:** the data needed to answer both uncertainty questions.
 
 - **(A) Do the corrupted molecules come back as the uncertain ones?**

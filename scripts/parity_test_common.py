@@ -301,3 +301,128 @@ def env_fingerprint():
             versions[name] = 'MISSING'
     versions['threads'] = os.environ.get('OMP_NUM_THREADS', 'unset')
     return versions
+
+
+# ---------------------------------------------------------------------------
+# hERG Ki -- the experimental dataset the count-scaling test needs
+# ---------------------------------------------------------------------------
+
+def load_herg(cache=True):
+    """Return (smiles, y, scaffolds) for ChEMBL hERG Ki, pKi as the label.
+
+    Fetched and filtered exactly as KIRBy does it
+    (alternative_data_noise_robustness.py fetch_chembl_herg_ki): binding assays
+    only, median pChEMBL per compound, compounds whose replicate spread exceeds
+    one log unit dropped. Cached under results/parity_tests/_cache so the ChEMBL
+    API is hit once.
+
+    hERG is here because the substructure-count question has to be answered on a
+    real experimental set as well as on QM9: QM9 molecules are small and
+    saturated, so a substructure repeats far less often there than in a
+    drug-like series, and how often a substructure repeats is the whole subject.
+    """
+    import pandas as pd
+    CACHE.mkdir(parents=True, exist_ok=True)
+    raw = CACHE / 'chembl_herg_ki.csv'
+    prepared = CACHE / 'herg_prepared.npz'
+    if cache and prepared.exists():
+        d = np.load(prepared, allow_pickle=True)
+        return list(d['smiles']), d['y'], d['scaffolds']
+
+    if raw.exists():
+        df = pd.read_csv(raw)
+    else:
+        import time
+        import requests
+        records, offset = [], 0
+        while True:
+            resp = requests.get(
+                'https://www.ebi.ac.uk/chembl/api/data/activity.json',
+                params={'target_chembl_id': 'CHEMBL240', 'standard_type': 'Ki',
+                        'pchembl_value__isnull': 'false', 'standard_relation': '=',
+                        'data_validity_comment__isnull': 'true',
+                        'limit': 1000, 'offset': offset, 'format': 'json'},
+                timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            acts = data.get('activities', [])
+            if not acts:
+                break
+            records += [{'canonical_smiles': a.get('canonical_smiles'),
+                         'pchembl_value': a.get('pchembl_value'),
+                         'assay_type': a.get('assay_type')} for a in acts]
+            if data.get('page_meta', {}).get('next') is None:
+                break
+            offset += 1000
+            time.sleep(0.5)
+        if not records:
+            raise RuntimeError('no hERG Ki records retrieved from ChEMBL')
+        df = pd.DataFrame(records)
+        df = df[df['assay_type'] == 'B'].copy()
+        df['pchembl_value'] = pd.to_numeric(df['pchembl_value'], errors='coerce')
+        df = df.dropna(subset=['pchembl_value', 'canonical_smiles'])
+        grouped = df.groupby('canonical_smiles')['pchembl_value']
+        merged = (grouped.median().reset_index()
+                  .merge(grouped.std().reset_index().rename(
+                      columns={'pchembl_value': 'std'}), on='canonical_smiles'))
+        merged = merged[(merged['std'].isna()) | (merged['std'] <= 1.0)]
+        df = merged[['canonical_smiles', 'pchembl_value']].copy()
+        df.columns = ['SMILES', 'pKi']
+        df.to_csv(raw, index=False)
+
+    smiles, y = [], []
+    for s, label in zip(df['SMILES'], df['pKi']):
+        mol = Chem.MolFromSmiles(s)
+        if mol is None:
+            continue
+        smiles.append(Chem.MolToSmiles(mol))
+        y.append(float(label))
+    y = np.asarray(y, dtype=float)
+    scaffolds = np.array([
+        MurckoScaffold.MurckoScaffoldSmiles(mol=Chem.MolFromSmiles(s),
+                                            includeChirality=False)
+        for s in smiles])
+    if cache:
+        np.savez_compressed(prepared, smiles=np.array(smiles, dtype=object),
+                            y=y, scaffolds=scaffolds)
+    return smiles, y, scaffolds
+
+
+# ---------------------------------------------------------------------------
+# Sort & Slice
+# ---------------------------------------------------------------------------
+
+def sort_and_slice(smiles, train_idx, vec_dimension=1024):
+    """Sort & Slice substructure counts, the pooling operator fitted on TRAINING
+    molecules only -- which is what makes it a fitted representation rather than
+    a hash.
+
+    The featuriser is imported from scripts/process_and_train.py rather than
+    reimplemented. Reimplementing it is what this whole class of question keeps
+    going wrong on: the representation is identified by its name and then turns
+    out to be a different function (RERUN_PLAN.md section 3.4.1). The import is
+    slow -- it pulls the whole pipeline -- and that is the price of measuring the
+    real thing.
+
+    Returns the raw COUNT matrix. The production storage path packs this to
+    presence bits (process_and_train.py:539-541), so `(X > 0)` is what the
+    models see today and `X` is what they will see once that is fixed.
+    """
+    import sys
+    sys.path.insert(0, str(REPO / 'scripts'))
+    from process_and_train import create_sort_and_slice_ecfp_featuriser
+
+    mols = [Chem.MolFromSmiles(s) for s in smiles]
+    mols_train = [mols[i] for i in train_idx if mols[i] is not None]
+    featuriser = create_sort_and_slice_ecfp_featuriser(
+        mols_train=mols_train, max_radius=2, pharm_atom_invs=False,
+        bond_invs=True, chirality=False, sub_counts=True,
+        vec_dimension=vec_dimension, print_train_set_info=False)
+    rows = []
+    for mol in mols:
+        vec = featuriser(mol) if mol is not None else np.zeros(vec_dimension)
+        vec = np.asarray(vec, dtype=np.float32)
+        if vec.shape != (vec_dimension,):       # a molecule with no substructures
+            vec = np.zeros(vec_dimension, dtype=np.float32)
+        rows.append(vec)
+    return np.vstack(rows)

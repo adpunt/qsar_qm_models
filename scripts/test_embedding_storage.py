@@ -221,6 +221,66 @@ check("retired storage: section 1's assertion FAILS on it, as it must",
       not np.allclose(np.nanmedian(ratio), FACTOR, rtol=1e-5),
       f"recovered factor {np.nanmedian(ratio):.4f}, not {FACTOR:g}")
 
+# ── 6. Substructure counts survive storage ────────────────────────────────
+#
+# The featuriser is called with sub_counts=True, so it counts how many times each
+# substructure occurs. The record used to flatten that to one presence bit per
+# substructure -- np.array(..., dtype=np.uint8) then packbits -- so everything
+# the counting had produced was thrown away, and the experimental pipeline, which
+# kept its counts, was training on a different representation under the same name
+# (RERUN_PLAN.md 3.4.1). Worse, the cast to uint8 happened BEFORE the pack, so a
+# count that was an exact multiple of 256 wrapped to zero and the substructure
+# recorded as ABSENT.
+#
+# Whether the counts should then be standardised is a separate question, measured
+# in scripts/parity_test_count_scaling.py and guarded by its --self-test.
+print("\n6. Sort & Slice stores COUNTS, not presence bits")
+
+SNS_WIDTH = P.SNS_DIM * np.dtype(P.SNS_COUNT_DTYPE).itemsize
+check(f"the field occupies {SNS_WIDTH} bytes in the record, not 128",
+      SNS_WIDTH == 2048, f"SNS_RECORD_BYTES = {P.SNS_RECORD_BYTES}")
+check("Rust reads the same width",
+      rust_widths.get('sns') == str(SNS_WIDTH),
+      f"Rust says {rust_widths.get('sns')}")
+
+rng = np.random.default_rng(20260827)
+counts = np.zeros(P.SNS_DIM, dtype=np.float64)
+present = rng.choice(P.SNS_DIM, 40, replace=False)
+counts[present] = rng.integers(1, 9, size=40)
+# The two values that broke the old path: a count of exactly 256, which wrapped
+# to zero, and one of 257, which came back as 1.
+counts[present[0]] = 256
+counts[present[1]] = 257
+
+split = FakeSplit()
+P.write_to_mmap(SMILES, SMILES, None, None, None, None, None, None,
+                1.0, 'train', {'train': split}, ['sns'], 1, counts, 0)
+raw = split.buf.getvalue()
+check(f"one record is {HEADER + SNS_WIDTH} bytes",
+      len(raw) == HEADER + SNS_WIDTH, f"got {len(raw)}")
+
+back = np.frombuffer(raw[HEADER:], dtype=P.SNS_COUNT_DTYPE).astype(np.float64)
+check("every count comes back exactly", np.array_equal(back, counts),
+      f"{int((back != counts).sum())} of {P.SNS_DIM} differ")
+check("a count of 256 does not wrap to absent",
+      back[present[0]] == 256, f"read back {back[present[0]]}")
+check("counts are not flattened to presence bits",
+      back.max() > 1 and len(np.unique(back[back > 0])) > 1,
+      f"distinct nonzero values: {len(np.unique(back[back > 0]))}")
+
+# ── 7. Section 6 has teeth ─────────────────────────────────────────────────
+print("\n7. section 6 would catch the retired storage")
+retired = np.packbits(np.array(counts, dtype=np.uint8), bitorder='little')
+retired_back = np.unpackbits(retired, bitorder='little').astype(np.float64)
+check("retired storage: every count becomes 0 or 1 (the defect)",
+      set(np.unique(retired_back)) <= {0.0, 1.0},
+      f"distinct values {sorted(set(np.unique(retired_back)))[:5]}")
+check("retired storage: the count of 256 records as ABSENT (the second defect)",
+      retired_back[present[0]] == 0,
+      f"read back {retired_back[present[0]]}")
+check("retired storage: section 6's assertion FAILS on it, as it must",
+      not np.array_equal(retired_back, counts))
+
 print()
 if failures:
     print(f"{len(failures)} CHECK(S) FAILED: " + ", ".join(failures))
