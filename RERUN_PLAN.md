@@ -4115,7 +4115,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | **Per dataset, matched on TOTAL noise — the author's call, 2026-08-27.** The experimental labels already carry measurement error and QM9 does not, so one nominal level is not one amount of noise (`NOISE_DESIGN.md` §4d). QM9 reports at **1.0**. The three experimental levels wait on one measurement, because the Caco-2 baseline currently in the documents is provably too high | chat J, and one check on the cluster first |
+| 1 | ✅ **SETTLED by the author 2026-08-27, per dataset: QM9 1.0, logD 1.0, Caco-2 0.2.** All three on the settled scale (fraction of the clean training label spread, §2.12); `0.25` is not on the ladder. See §13.11 for the one consequence on Caco-2 | chat J |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ **CONFIRMED by the author 2026-08-27** and built, §2.8j. Not optional: there is no flag to run fewer than the five |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |
@@ -4259,6 +4259,54 @@ build the deep run without explicit choices, so nothing can run ahead of the dec
 results and then justifying the choice from the same results is one look at the data doing two jobs,
 and it is the question a referee asks. Fixing the rule beforehand costs nothing and answers it.
 §13.1 item 4 carries a proposed rule for the author to accept or replace.
+
+---
+
+### 13.11 ✅ SETTLED 2026-08-27 — the reporting levels, per dataset
+
+**QM9 1.0, logD 1.0, Caco-2 0.2.** The author's call. All three read on the settled scale — a
+fraction of that fold's clean training label spread (§2.12). `0.25` was also considered and is **not
+on the ladder** (`NOISE_DESIGN.md` §6.4), so it cannot be reported.
+
+**Why they are not the same number.** The experimental labels already carry measurement error and
+QM9's do not, so one nominal level is not one amount of noise (`NOISE_DESIGN.md` §4d). The caption
+must state each dataset's level and say why they differ.
+
+#### One consequence on Caco-2, recorded rather than argued
+
+The Caco-2 pick was made while reading a table printed in **raw log units** — the units the old
+results files use, not the settled scale. That was an error on the reporting side and the tables
+were regenerated. On the settled scale, the old Caco-2 run maps like this:
+
+| Ladder level | Old run's point | R², four models on ECFP4 |
+|---|---|---|
+| 0.2 | 0.1 log units | 0.458 – 0.539 |
+| 0.5 | 0.2 log units | 0.395 – 0.462 |
+| 1.0 | 0.4 log units | 0.256 – 0.375 |
+| 1.5 | 0.7 log units | −0.142 – 0.303 |
+
+Clean is 0.469 – 0.565. **At level 0.2 the models sit inside their clean range**, so a Caco-2 table
+reported there shows no noise effect at all. The point whose R² values were on screen when 0.2 was
+chosen is called **0.5** on the settled scale. Both are legitimate choices — 0.2 says "even a little
+noise costs nothing here", 0.5 says "here is where it starts to bite" — but they are different
+claims and the level was picked against the second table's numbers.
+
+⚠️ The ladder's 0.2 and 0.3 columns collapse onto the same old point (0.1 log units) because the old
+grid was coarser. That is a limit of the old data, not a result, and it disappears at the re-run.
+
+#### logD has no data at its chosen level yet
+
+The old logD run reached only 0.84 of the label spread, so levels 1.0 and 1.5 were never run there.
+This is not a gap in the design — the re-run sweeps the full ladder on all four datasets. It means
+only that the logD choice cannot be checked against existing numbers before the re-run.
+
+#### hERG was never cut
+
+It is in both live generators — `slurm_scripts_uncertainty_rerun/generate_scripts.py:120` and
+`slurm_scripts_validation_rerun/generate_scripts.py:15`. There are simply no old noise-sweep results
+on disk for it, so it has no table here. Its reporting level is still to be set, and unlike the other
+three it has a **measured** label spread to set it against: 0.9143 over all 1,415 molecules
+(`NOISE_DESIGN.md` §4c).
 
 ---
 
