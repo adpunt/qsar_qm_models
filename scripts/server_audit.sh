@@ -160,11 +160,56 @@ section "2. THE INTERPRETERS   (runbook 1b)"
 USE_SETUP=1
 [ "${1:-}" = "--no-setup" ] && USE_SETUP=0
 
+# Is there an environment to activate at all?
+#
+# On 2026-08-27 the environment rebuild deleted env_test and its solve was then
+# killed, so setup.sh found nothing to activate and began BUILDING one -- a conda
+# solve plus several pip installs. Inside a 15-minute job that is not an audit,
+# it is a rebuild that gets terminated at the wall clock, and the report stops at
+# this section's heading with no explanation. The comment above said setup.sh can
+# do this; nothing checked, which is the same shape as every other defect in this
+# project's history.
+#
+# So: look first, and never let this step run unbounded.
+# setup.sh calls the environment env_test and resolves conda by `command -v`.
+# Inside a compute job conda may not be on PATH yet, so the known install roots
+# are checked too rather than relying on one lookup.
+ENV_PREFIX=""
+for base in "$(conda info --base 2>/dev/null)" \
+            "${CONDA_EXE%/bin/conda}" \
+            "$HOME/miniconda3" "$HOME/anaconda3" \
+            /data/stat-cadd/scat9264/miniconda3 \
+            /data/stat-cadd/scat9264/anaconda3 \
+            /apps/system/easybuild/software/Anaconda3; do
+  [ -n "$base" ] && [ -d "$base/envs/env_test" ] && ENV_PREFIX="$base/envs/env_test" && break
+done
+# And accept an env_test that is already active, whatever root it came from.
+[ -z "$ENV_PREFIX" ] && [ "$(basename "${CONDA_PREFIX:-}")" = "env_test" ] && ENV_PREFIX="$CONDA_PREFIX"
+if [ "$USE_SETUP" = "1" ] && [ -z "$ENV_PREFIX" ]; then
+  say ""
+  say "  🔴 THE ENVIRONMENT env_test DOES NOT EXIST."
+  say "     setup.sh would BUILD it rather than activate it -- a conda solve and"
+  say "     several pip installs -- so this audit would spend its whole wall clock"
+  say "     rebuilding and be killed at the time limit with no report."
+  say ""
+  say "     Nothing below can be answered until the rebuild lands. Every check"
+  say "     from here needs an interpreter that has the modelling packages."
+  say ""
+  say "     Skipping the setup step and reporting what does not need it."
+  say "     Override with FORCE_SETUP=1 if you WANT this run to build it."
+  USE_SETUP=0
+fi
+[ "${FORCE_SETUP:-0}" = "1" ] && USE_SETUP=1
+
 # The shell preamble that puts a child into the job environment. Resolution order
 # mirrors setup.sh's own (micromamba, then mamba, then conda by `command -v`) --
 # NOT a hard-coded micromamba path, which is what this script wrongly used and
 # which does not exist on this cluster at all.
 if [ "$USE_SETUP" = "1" ]; then
+  # No timeout wrapper here, deliberately: `timeout` runs a subprocess, and an
+  # environment sourced inside a subprocess does not reach this child shell. The
+  # guard is the existence check above -- with env_test present, setup.sh
+  # activates rather than builds, which is the case that ran long.
   ENV_PREAMBLE="cd '$QSAR_ROOT' && . setup.sh >/dev/null 2>&1 || true"
 else
   ENV_PREAMBLE='
