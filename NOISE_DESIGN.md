@@ -1267,12 +1267,23 @@ of fifteen real industrial assays** (§3.5). Real datasets therefore sit squarel
 where this goes from mild to catastrophic — while the differences between the zero-mean
 noise shapes never exceed 0.02 R².
 
-⚠️ **Caveats, stated plainly.** QM9 has no real assay limit — a density-functional
-calculation always returns a number — so censoring here is an imposed mechanism, not a
-simulated measurement. It is realistic for the three experimental endpoints, not for QM9.
-And censoring 40% of labels removes the top of the label range outright, so part of the
-damage is loss of range rather than corruption *per se*. That is, however, exactly what
-censoring does to a real dataset.
+⚠️ **CORRECTED 2026-08-27.** This paragraph used to say that censoring on QM9 is "an imposed
+mechanism, not a simulated measurement", and treat that as a weakness. **The author's point, and it
+is right: every noise condition on QM9 is imposed.** QM9 labels come from a calculation, so nothing
+is measured and nothing is corrupted until this study corrupts it. Singling censoring out was
+meaningless.
+
+**QM9 is in fact the best place in the study to measure what censoring costs**, for the same reason
+it is the best place to measure anything else here: the true, uncensored value of every clipped label
+is known, so the damage can be measured exactly. On a real assay dataset, any censoring that survived
+curation is already in the labels with no record of what the true value was, so the cost cannot be
+measured — only its consequences observed.
+
+**The one caveat that survives**, because it is about the mechanism rather than about QM9: censoring
+40% of labels removes the top of the label range outright, so part of the damage is loss of range
+rather than corruption of individual values. That is exactly what censoring does to a real dataset,
+so it is a property of the mechanism and not an artefact — but a reader will ask, and the Methods
+should say it.
 
 **Recommendation for the design (yours to accept or reject):** censoring stops being an
 optional sixth noise type and becomes the main event. The five zero-mean noise types are worth running as
@@ -1365,9 +1376,11 @@ recovers information that was never recorded.
 It is directly actionable, it is the opposite of what a practitioner would assume, and no
 noise-robustness benchmark has established it.
 
-⚠️ Same caveats as §5.3b: QM9 has no real assay limit, so censoring here is imposed rather
-than observed, and clipping the top of the range removes label range as well as corrupting
-values. Both need confirming on the experimental datasets, where censoring is real.
+⚠️ One caveat, per §5.3b as corrected on 2026-08-27: clipping the top of the range removes label
+range as well as corrupting individual values. That is a property of censoring itself, not of QM9 —
+**and the earlier claim that censoring is somehow less valid on QM9 because it is "imposed" is
+withdrawn.** Every condition here is imposed; QM9 is where the true value of each clipped label is
+known, which makes it the only place the cost of censoring can be measured directly.
 
 ### 5.6 ✅ The two new conditions, verified on real labels — chat G, 2026-08-26
 

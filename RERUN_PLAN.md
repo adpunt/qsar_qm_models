@@ -4561,6 +4561,46 @@ as their evidence.
 
 ---
 
+### 13.13 Censoring — what it costs, and the caveat that was withdrawn
+
+#### It is not a second study. It is one condition of four, at the same price as the others.
+
+| | Runs across the screen and the main grid |
+|---|---|
+| Any one ordinary noise condition, 7 levels | 5,460 |
+| **Censoring, 7 levels** | **5,460** |
+| The main grid, all four conditions | 21,840 |
+
+**Censoring is 25% of the main grid** — exactly its share as one of four conditions. It reads like
+extra work because its levels measure a different quantity and so have to be described separately,
+but it costs no more than Gaussian does.
+
+**If it is cut anyway**, the levels are the only lever: 4 levels saves 2,340 runs, 3 levels saves
+3,120. The levels were set by the range-finding run, which found no knee — damage accelerates
+smoothly, becomes serious around 20% and severe past 30% — so a reduced grid should keep the
+resolution where the acceleration is and drop from the flat bottom: **0, 20, 30, 50%** rather than
+thinning evenly. `NOISE_DESIGN.md` §6.4 owns the levels; change them there.
+
+#### ⚠️ The "censoring on QM9 is imposed" caveat is withdrawn, 2026-08-27
+
+`NOISE_DESIGN.md` §5.3b and §5.5 both carried it, and it was wrong. The author's words: *"All the
+noise in qm9 is imposed, how is this any different? It's actually the best case of censoring."*
+
+**Every condition on QM9 is imposed.** QM9 labels come from a calculation — nothing is measured, so
+nothing is corrupted until this study corrupts it. Singling censoring out said nothing.
+
+**And QM9 is the best place to measure what censoring costs**, for the same reason it is the best
+place to measure anything else here: the true value of every clipped label is known, so the damage
+can be measured exactly. On a real assay dataset any censoring that survived curation is already in
+the labels with no record of the true value, so its cost can be observed but not measured.
+
+**One caveat does survive, and it is about the mechanism rather than about QM9:** clipping the top
+removes label range as well as corrupting individual values. That is what censoring does to a real
+dataset too, so it is a property of the mechanism and not an artefact — but a reader will ask, and
+the Methods should say it.
+
+---
+
 ### 13.2 The chats
 
 Letters, not numbers, so inserting one does not renumber the rest. **A, C, D, E and G are
