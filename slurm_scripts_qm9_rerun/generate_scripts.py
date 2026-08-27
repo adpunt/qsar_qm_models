@@ -507,7 +507,17 @@ def main():
     ap.add_argument('--out-dir', default=str(Path(__file__).parent))
     args = ap.parse_args()
 
-    defaults = STAGE_DEFAULTS[args.stage]
+    defaults = dict(STAGE_DEFAULTS[args.stage])
+    # A pair-subset condition is NOT in the screen (it is excluded from stage 0 by
+    # _ALL_PAIRS), so there is no replicate 0 for it to inherit. The main grid's defaults
+    # are replicates=9 starting at 1 precisely because the screen supplies replicate 0 --
+    # applying them here silently produced 9 replicates numbered 1..9, against the 10 the
+    # author settled, and with indices that do not line up with the other conditions.
+    # Found by the close-out audit 2026-08-27.
+    if args.stage in (0, 1) and args.conditions and \
+            all(c in PAIR_SUBSET_CONDITIONS for c in args.conditions):
+        defaults['replicates'] = 10
+        defaults['start'] = 0
     conditions = args.conditions or defaults['conditions']
     n_reps_run = args.replicates if args.replicates is not None else defaults['replicates']
     first_iter = args.start_iteration if args.start_iteration is not None else defaults['start']
@@ -541,6 +551,16 @@ def main():
     # instead of 350. Same shape as the stage-2 refusal above: name the choice, do not
     # invent one.
     restricted = [c for c in conditions if c in PAIR_SUBSET_CONDITIONS]
+    # Scripts are named by model and run-design index only, so generating a different
+    # condition set into the same directory OVERWRITES the main-grid script for those
+    # models -- exit 0, no warning, and the files are untracked so git cannot restore them.
+    # Found by the close-out audit 2026-08-27. A non-default condition set gets its own tag.
+    if restricted and args.out_dir == str(Path(__file__).parent):
+        ap.error(
+            f"{', '.join(restricted)} would be written into the generator's own directory "
+            f"and overwrite the main-grid scripts for the same models, which are named by "
+            f"model alone. Pass --out-dir <somewhere else>.")
+
     if restricted and not (args.models and args.reps):
         first = PAIR_SUBSET_CONDITIONS[restricted[0]]
         ap.error(

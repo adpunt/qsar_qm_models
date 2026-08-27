@@ -69,8 +69,15 @@ N_REPLICATES = 12
 # test that omits the top of the grid cannot find an effect even if one exists, while
 # 1.0 sits between two points that already bracket the answer. Dropping it buys a third
 # of the runtime on a machine this test has to share.
-LEVELS = [0.5, 1.5]        # fraction of the training label spread
-REPORTING_LEVEL = 0.5      # RERUN_PLAN.md section 13.1 open item 5 -- the standing suggestion
+# Levels swept, as a fraction of the clean training label spread.
+# 1.0 was added 2026-08-27: it is the settled QM9 reporting level (RERUN_PLAN.md 13.11) and
+# this screen had never measured it -- it ran 0.5 and 1.5 only, so every "at the reporting
+# level" figure this script has ever printed was computed at 0.5.
+LEVELS = [0.5, 1.0, 1.5]
+# The level the paper's QM9 tables report at. SETTLED 2026-08-27 by the author at 1.0.
+# It was 0.5 here until the close-out audit found it -- the standing suggestion, which
+# RERUN_PLAN.md had already recorded as withdrawn on the same day.
+REPORTING_LEVEL = 1.0
 POOL_SEED = 11
 # The roster the cluster runs, minus the ones that cannot be fitted here. Ridge is GONE:
 # it is not one of the thirteen models in slurm_scripts_qm9_rerun/generate_scripts.py and
@@ -1071,6 +1078,19 @@ def compute_costs(verdicts):
     print("  and that reuse only works if it runs the same conditions. The description is wrong.")
 
 
+def models_present(df):
+    """Roster models present in a results frame, in roster order, non-roster dropped.
+
+    Bound once and used by BOTH main() paths. It used to be bound only inside the
+    --analyse-only branch, which returns before the full-run path reaches it, so a full
+    run died with UnboundLocalError after writing the contrasts file and before printing
+    the costs. Found by the close-out audit 2026-08-27; pyflakes cannot see it because the
+    name is function-local.
+    """
+    present = set(df.model)
+    return [m for m in ALL_SCREEN_MODELS if m in present]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--self-check', action='store_true',
@@ -1124,7 +1144,6 @@ def main():
         # model on the same replicate.
         ex = df[(df.dose_mode == 'exact') & (df.r2_clean >= CLEAN_R2_FLOOR)]
         ex = ex[ex.model.isin(ALL_SCREEN_MODELS)]
-        MODELS_HERE = [m for m in ALL_SCREEN_MODELS if m in set(ex.model)]
         if len(ex):
             top = ex.level.max()
             print("\n--- sensitivity: the same contrasts with the dose rescaled to exactly "
@@ -1133,6 +1152,7 @@ def main():
                   "difference of.")
             print("  " + f"{'condition':<20}{'model':<7}{'mean dR2':>11}{'this':>11}"
                   f"{'Gaussian':>11}{'|d|/wobble':>12}{'t p':>8}")
+            MODELS_HERE = models_present(ex)
             broken = []
             for name in CONDITION_NAMES:
                 if name == 'Gaussian':
@@ -1200,6 +1220,8 @@ def main():
 
     print("\n--- sensitivity: the same contrasts with the dose rescaled to exactly the target ---")
     ex = df[df.dose_mode == 'exact']
+    ex = ex[ex.model.isin(ALL_SCREEN_MODELS)]
+    MODELS_HERE = models_present(ex)
     if len(ex):
         for name in CONDITION_NAMES:
             if name == 'Gaussian':

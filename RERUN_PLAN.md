@@ -4720,7 +4720,7 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    it is chosen from what stage 0 shows, so the sequence is: chat H runs stage 0, brings you the
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
    rather than inventing a default, so nothing can run ahead of the decision.
-5. ⏸️ **DEFERRED 2026-08-27 until the main grid has run — at which point it stops being a guess.** Only 0.5 and 1.5 have ever been measured (`results/setting_selection_test.csv`, levels column holds exactly those two). The main grid sweeps all seven levels, so after it runs the level can be picked from data rather than argued. Nothing between now and then needs it: no code contains a reporting level, and the figure script has not been rebuilt for the new grid anyway (chat J). **If a level must be named before then, use 1.5** — it is the only one measured where the study's largest zero-mean result is visible. **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
+5. ✅ **SETTLED 2026-08-27 by the author: QM9 1.0** (§13.11). *(The paragraph below is the state before that, kept because its factual claim was WRONG and the correction matters: it says "no code contains a reporting level". `scripts/setting_selection_test.py:73` held `REPORTING_LEVEL = 0.5` the whole time, and it drives that script's verdicts. Found by the close-out audit 2026-08-27 and now set to 1.0.)* Only 0.5 and 1.5 have ever been measured (`results/setting_selection_test.csv`, levels column holds exactly those two). The main grid sweeps all seven levels, so after it runs the level can be picked from data rather than argued. Nothing between now and then needs it: no code contains a reporting level, and the figure script has not been rebuilt for the new grid anyway (chat J). **If a level must be named before then, use 1.5** — it is the only one measured where the study's largest zero-mean result is visible. **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
    it, but every table that reports accuracy at one level needs it.
 
    ⚠️ **The standing suggestion of 0.5 is withdrawn, 2026-08-27.** Chat D re-read the same twelve
@@ -4826,7 +4826,15 @@ logD sweep's points sit, and it is not a reporting level anywhere in the code.
 
 Checked 2026-08-27, by reading the files rather than the notes:
 
-- **No reporting level exists in any script.** `scripts/generate_paper_figures_v2.py` still carries
+- 🔴 **WRONG, corrected 2026-08-27 — a reporting level DID exist in a script.**
+  `scripts/setting_selection_test.py:73` held `REPORTING_LEVEL = 0.5`, and it drives that script's
+  verdict filter, its printed labels and its shape table. **So every "at the reporting level" figure
+  in §13.9 and in `noise_conditions.json` was computed at 0.5, not at the settled 1.0** — and that
+  script had never measured 1.0 at all, because its level list was `[0.5, 1.5]`. Both are now fixed
+  in the file (`REPORTING_LEVEL = 1.0`, levels `[0.5, 1.0, 1.5]`), but **the CSV on disk predates
+  the fix**, so those rationales still rest on 0.5 until the screen is re-run. The claim below was
+  made twice as a fact "checked by reading the files" and was not.
+  The rest of the original claim stands: `scripts/generate_paper_figures_v2.py` still carries
   the old eleven-point 0–1.0 grid (`EXPECTED_SIGMAS`, `:885`, `:980`) and has no reporting-level
   constant at all. It has to be rebuilt for the new seven-point grid regardless (chat J), and that
   rebuild is where a reporting level would be set.
@@ -5146,6 +5154,18 @@ gates over four consecutive runs; both raised seed counts (20 → 200, one draw 
 condition set read and enforced by five independent readers; and the singleton-scaffold rule on the
 split in both the pipeline and the harness.
 
+#### 🔴 Found by the second audit, 2026-08-27 — five more, three of them mine
+
+| # | Kind | What | Fix |
+|---|---|---|---|
+| ~~A1~~ | ~~code~~ | ✅ **FIXED** — `scripts/setting_selection_test.py` could not finish a full run. `MODELS_HERE` was bound only inside the `--analyse-only` branch, which returns before the full-run path reaches it, so a run died with `UnboundLocalError` after writing the contrasts file. pyflakes cannot see it | Bound once in `models_present()`, used by both paths |
+| ~~A2~~ | ~~code~~ | ✅ **FIXED IN THE FILE, NOT IN THE DATA** — that script hardcoded `REPORTING_LEVEL = 0.5`, the value this document records as withdrawn, and its level list `[0.5, 1.5]` never measured 1.0 at all. **So every "at the reporting level" figure in §13.9 and in `noise_conditions.json` was computed at 0.5.** Now `1.0` and `[0.5, 1.0, 1.5]` | 🔴 **The CSV on disk still predates this. Re-run the screen and restate those rationales at the level actually measured** |
+| ~~A3~~ | ~~code~~ | ✅ **FIXED** — censoring silently ran **270** runs, not the decided 300: it inherited the main grid's `replicates=9, start=1`, which only makes sense because the screen supplies replicate 0 — and censoring is not in the screen | Defaults to `10, start=0` for a pair-subset condition |
+| ~~A4~~ | ~~code~~ | ✅ **FIXED** — generating censoring into the generator's own directory **overwrote the main-grid scripts** for the same models. Exit 0, no warning, files untracked so git could not restore them | Refused; pass `--out-dir` |
+| **A5** | code | 🔴 **Sort & Slice silently produces an all-zero feature block** where every other featuriser now raises. `scripts/process_and_train.py`: the enumerator returns `{}` for an unparseable molecule (`:1290`), the sum over an empty list is scalar 0.0 (`:1324`), and `write_to_mmap` turns the resulting shape mismatch into `np.zeros(SNS_DIM)` and writes it as a legitimate block (`:651-659`). **The full-width all-zero case passes the shape check entirely.** The unparseable path is reachable — `:1026-1027` reparses and passes `None` straight in. This is the same defect as Avalon's, in the one featuriser that was not checked | Raise, as ChemBERTa, MHG-GNN and now Avalon do, and add a case to `scripts/test_avalon_failure.py` |
+| **A6** | code | 🔴 **`scripts/check_fixes_fail_when_removed.py` exits 1** — four of its twenty-one mutation anchors no longer match their target files, so four fix-guards are never exercised. One is a single trailing space in the anchor. `README.md:198` claims this script proves every check fails when its fix is removed; that claim is currently false | Re-derive the four anchors and run it to green |
+| **A7** | doc | 🔴 **`slurm_scripts_qm9_rerun/RUNBOOK.md` describes the pre-decision run** — four conditions, 320 tasks, 22,400 runs, `--array=0-23`. The generator emits three conditions, 240 tasks, `--array=0-17`. Following it mis-submits every array: six of twenty-four tasks per model exit 2 on the generator's own out-of-range guard. **And `grep -i censor` returns one hit, so there is no instruction for running censoring at all.** This is the file an operator reads before spending cluster time | Regenerate its grid table and every `sbatch` line from the generator's output, and add the censoring command with its `--out-dir` |
+
 #### For chat D
 
 | # | Kind | What | Fix |
@@ -5400,7 +5420,15 @@ QM9 has 13 models × 6 representations = **78 pairs**.
 | **QM9 total** | | | | **22,140** |
 
 The screen is replicate 0 of the main grid and is reused, so the main grid adds nine more rather
-than ten.
+than ten. **Censoring is not in the screen, so it has no replicate 0 to inherit and runs all ten
+itself** — the generator now defaults it to `replicates=10, start=0` rather than inheriting the main
+grid's `9, start=1`, which silently produced 270 runs against the decided 300 (found by the close-out
+audit 2026-08-27).
+
+⚠️ **Censoring must be generated into its own `--out-dir`.** Scripts are named by model and
+run-design index only, so writing a different condition set into the generator's own directory would
+overwrite the main-grid scripts for those models, exit 0, and leave no way back — the files are
+untracked. The generator now refuses this.
 
 **Why Gaussian, grouped-wider and grouped-shifted are the three that run on all 78 pairs, and the
 other three do not.** Every one of the six needs its own accuracy-versus-level curve to enter the
