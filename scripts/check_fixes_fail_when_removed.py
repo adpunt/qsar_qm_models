@@ -142,8 +142,8 @@ CASES = [
  # above stayed wrong through every run in the project.
  ("the Python injector checks what it delivered",
   f"{NOISE}/noiseInject/core.py",
-  "        if abs(realised / dose - 1.0) > tol:\n            raise RuntimeError(",
-  "        if False:\n            raise RuntimeError(",
+  "        if abs(realised / dose - 1.0) > tol:\n            raise DoseError(",
+  "        if False:\n            raise DoseError(",
   [sys.executable, f"{NOISE}/tests/test_noiseinject.py", "-k",
    "delivered_dose_is_checked"]),
 
@@ -155,6 +155,15 @@ CASES = [
   "                let b = spec.shape.draw(&mut rng);\n                group_offsets.insert(*gid, b);",
   "                let b = spec.shape.draw(&mut rng) / spec.shape.unit_sd();\n                group_offsets.insert(*gid, b);",
   [sys.executable, f"{QSAR}/scripts/test_noise_arms.py"]),
+
+ # Swallow the injector's dose failure the way an ordinary model failure is
+ # swallowed: the cell vanishes as one printed line and the job finishes green
+ # having reported a noise level it never received.
+ ("a failed injection stops the run instead of vanishing",
+  f"{KIRBY}/tests/alternative_data_noise_robustness.py",
+  "                except (RunIntegrityError, DoseError):",
+  "                except (RunIntegrityError,):",
+  [sys.executable, f"{KIRBY}/tests/smoke/smoke_kirby_dose_error.py"]),
 
  # Name a condition the way the two implementations used to name it separately.
  # The old fallback also collapsed 1%, 5% and 10% contamination onto one string,
@@ -185,6 +194,21 @@ CASES = [
   "                        choices=[\"uniform\", \"grouped_wide\", \"grouped_shift\", "
   "\"outlier\", \"censoring\"],",
   [sys.executable, f"{QSAR}/scripts/test_generated_job_flags.py"]),
+
+ # Slice the predicted variance off again, which is what every prediction site
+ # used to do. The network still trains on the heteroscedastic loss; only the
+ # second output stops reaching the decomposition, and the aleatoric column comes
+ # out blank.
+ ("the head's predicted variance reaches the file",
+  f"{QSAR}/models/models.py",
+  "                output, variance = split_predictive_head(output, loss_name)\n"
+  "                preds.append(output)\n"
+  "                if variance is not None:\n"
+  "                    head_vars.append(variance)",
+  "                if loss_name == 'heteroscedastic':\n"
+  "                    output = output[:, 0:1]\n"
+  "                preds.append(output)",
+  [sys.executable, f"{QSAR}/scripts/test_predictive_head.py"]),
 ]
 
 
@@ -195,6 +219,47 @@ def run(cmd):
     return p.returncode, (p.stdout + p.stderr)
 
 
+# A killed run leaves a broken file behind, and it is invisible.
+#
+# `finally` puts the file back when the check fails, raises or is interrupted. It
+# does NOT run when the process is killed outright, which is what happens when a
+# run is stopped from outside. Twice on 2026-08-27 that left `utils.py` carrying a
+# save_results that raises NotImplementedError, and `models.py` with the predicted
+# variance sliced off again -- neither committed, both live, and nothing said so.
+#
+# So the original is copied out before the file is touched, and the copy is
+# deleted only once the file is back. A copy still sitting here at start-up is a
+# previous run that was killed: put the file back and refuse to start, because a
+# run that begins from a broken file would restore it to the broken version and
+# bake the damage in.
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          ".harness_unrestored")
+
+
+def _backup_path(path):
+    return os.path.join(BACKUP_DIR, path.replace(os.sep, "__"))
+
+
+def recover_from_a_killed_run():
+    if not os.path.isdir(BACKUP_DIR):
+        return
+    left = sorted(os.listdir(BACKUP_DIR))
+    if not left:
+        return
+    for name in left:
+        original = os.path.join(BACKUP_DIR, name)
+        target = "/" + name.replace("__", os.sep).lstrip(os.sep)
+        shutil.copyfile(original, target)
+        print(f"  put back: {target}")
+        os.remove(original)
+    sys.exit(
+        f"\n{len(left)} file(s) were left broken by a run that was killed, and "
+        f"have been put back. Check `git diff` on them, then run this again.")
+
+
+os.makedirs(BACKUP_DIR, exist_ok=True)
+recover_from_a_killed_run()
+
 ok = True
 print(f"{'fix':52} {'check exits':>12}")
 print("-" * 70)
@@ -204,11 +269,15 @@ for name, path, present, broken, cmd in CASES:
         print(f"{name:52} {'SETUP FAIL':>12}  (anchor appears {src.count(present)}x)")
         ok = False
         continue
+    backup = _backup_path(path)
+    with open(backup, "w") as f:
+        f.write(src)
     open(path, "w").write(src.replace(present, broken))
     try:
         code, out = run(cmd)
     finally:
         open(path, "w").write(src)
+        os.remove(backup)
     verdict = "RED (good)" if code != 0 else "GREEN (BAD)"
     if code == 0:
         ok = False

@@ -2004,8 +2004,8 @@ each; `confirmed_35.json` and `refuted_5.json` each carry a
 
 | | count |
 |---|---|
-| real, fixed | 77 |
-| real, still open — yours to decide | 12 |
+| real, fixed | 78 |
+| real, still open — yours to decide | 11 |
 | duplicate of another entry | 14 |
 | partly fixed | 4 |
 | refuted | 2 |
@@ -2052,7 +2052,7 @@ first time and **two stayed green**, which is the point of running it:
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
-**Still yours.** Twelve entries are real and unfixed because fixing them is a
+**Still yours.** Eleven entries are real and unfixed because fixing them is a
 decision, not a repair:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
@@ -2060,10 +2060,8 @@ decision, not a repair:
 2. **`--calibration-size`** for the conformal models: honour it, or refuse it by
    name. Nothing uses it today and the whole validation split is the calibration
    set, which is the better estimator now that no model trains on it.
-3. **The heteroscedastic and evidential heads.** Their predicted variance is
-   sliced off at every prediction site, so they report the same quantity as a
-   plain MC-dropout network. Neither loss is in the roster. Making the head's
-   variance the reported aleatoric term changes what those models are.
+3. ~~The heteroscedastic and evidential heads~~ — **settled**: the head's own
+   predicted variance is reported, kept only on an uncertainty run (§2.17).
 4. ~~`grouped_shifted` off-registry, and the naming of off-registry conditions~~
    — **settled**: the QM9 rule on both sides, checked against
    `condition_names.json` (§2.16), and the amount of noise fixed with it.
@@ -3345,6 +3343,93 @@ raw scale, with the scale and offset on every row so anything can be converted w
 Bayesian networks can, once they have the head. The quantile forest can, post hoc. The variational
 model cannot give a per-molecule data term at all, and the boosting model has no model-uncertainty
 axis without bagging over seeds. That table belongs in the paper.
+
+---
+
+### 5.5a The audit of 2026-08-27 (chat I) — the spec points at code no job runs
+
+Every line below was read from the working tree on 2026-08-27 before anything was changed.
+§5.5 stands as the statement of intent. What it points at is largely wrong, in a way that
+matters for cost: most of its delete/build list sits behind two command-line flags that
+**no queued job passes**, and the pipeline that produces the paper's uncertainty section
+has no decomposition code in it at all.
+
+**1. The two components are swapped in ten places, not seven — and all ten are unreachable.**
+Confirmed at `models/models.py:5148`, `:5669`, `:5898`, `:6068`, `:6279`, `:6827`, `:6930`,
+`:7418`, `:7820`, `:8537`. The correct assignment is data-noise `beta/(alpha-1)` and model
+`beta/(v(alpha-1))`; the code has them the other way round at every site. But every one of
+those sites is inside `if loss_name in ('evidential', ...)`, and the queued rosters pass no
+`--loss` flag at all — `grep -n '\-\-loss' slurm_scripts_qm9_rerun/generate_scripts.py
+slurm_scripts_uncertainty_rerun/generate_scripts.py` returns nothing, and the default is
+`mse` (`scripts/process_and_train.py:431`). The functions the sites live in are the mentor
+trainer, the evidential kernel, mixup and conformal-heteroscedastic. **None is in either
+roster.** Fixing the swap is right; it changes no number in the paper.
+
+**2. The two crash paths are already fixed.** §5.5 lists `models.py:3133`, `:3162` and
+`:3375`. Chat E/F repaired them: `models.py:3910` and `:4148-4149` now unpack three values,
+with the reasoning in comments. One half of the third defect survives — see 4 below.
+
+**3. The head-widening and loss-mismatch work is also behind an unqueued flag.** The
+two-output head at `models.py:2589` and the architecture-sweep patch at `:3328-3339` only
+fire for `--loss heteroscedastic` or `--loss evidential`. Same for the duplicate loss
+factory (`scripts/loss_functions.py:170` and `:453`). Real defects; no queued job reaches
+them. Note the sweep patch also fails silently when a model has neither `fc_out` nor
+`output_layer`, which would leave a one-column head fitted by a two-column loss.
+
+**4. One live defect remains from the four.** `models.py:4148-4149` passes `std` and
+`val_std` — standard deviations — to a function whose first argument is a posterior
+*variance*, so it returns the fourth root. `val_std` has already had the likelihood noise
+added to it, so the noise is counted twice as well. This is the graph Gaussian process, QM9
+only. The array-representation Gaussian process at `:2243` is correct: it is handed
+`pred_vars`, the latent variance.
+
+**5. The variational defect is real and it is not alone — every model in either roster
+that has a data-noise term at all has it as ONE NUMBER PER FIT.**
+
+| Model, as queued | Model-uncertainty term today | Data-noise term today |
+|---|---|---|
+| NGBoost | none | per molecule (`dist.scale`) |
+| Quantile forest | none | per molecule, but a heuristic: half the 16–84 quantile gap |
+| Gaussian process (RBF) | per molecule (latent variance) | **one scalar** — the likelihood noise, broadcast |
+| BNN-alpha, BNN-beta | per molecule (spread over 100 passes) | **none at all** |
+| VBLL-alpha, VBLL-beta | per molecule (spread over 100 passes) | **one scalar** on QM9, **none** on the lab datasets |
+
+**Not one model in either roster reports both terms per molecule.** That is the finding.
+The variational models' constant is not a special case — a homoscedastic Gaussian process
+has exactly the same property by definition, and §5.5's claim that "the Gaussian process can,
+exactly" is true of the split and false of the per-molecule part.
+
+**6. 🔴 The lab-dataset runner has no decomposition code whatsoever.** §5.5 is written
+entirely against `models/models.py` and `scripts/utils.py` — the QM9 side. The three lab
+datasets run through `KIRBy/tests/alternative_data_noise_robustness.py`, which writes a
+single `uncertainty` column per row (the row is built at `:2479-2504`); the words aleatoric
+and epistemic appear in it twice, both in comments. For the four Bayesian networks that
+number is the spread over 100 stochastic passes and nothing else, so **the data-noise term
+is missing rather than constant** — and the variational layer's learned observation noise is
+sitting in the class at `:806` and is never read. Executing §5.5 as written would fix the
+QM9 half and leave the lab half writing one column, which is where the paper's uncertainty
+section lives.
+
+**7. The two sites §5.5 calls "a two-keyword change" are in unqueued models.**
+`models.py:6827` and `:6930` are inside the mentor trainer. It is not in the QM9 roster and
+not in the uncertainty roster. There is nothing to save at the file boundary because the
+model is never run.
+
+**8. Nothing in §7.0 uses the split.** Q1 to Q6 are all answerable without it. Its only
+consumer is two columns of the uncertainty table in the figure script
+(`generate_paper_figures_v2.py:4011-4021` and `:4122-4131`), each the mean of a component
+across molecules — and each filtered to strictly positive values, so a model whose component
+is exactly zero contributes nothing and the column reads blank rather than zero. **The
+decomposition currently has no question attached to it.** That is what has to be settled
+before the build, not after.
+
+**What the build actually is, once the unreachable code is set aside:** give the four
+Bayesian networks a per-molecule data-noise term they do not have; give the quantile forest a
+model term from the spread across per-tree leaf means and stop calling the quantile gap a
+data term; decide what the Gaussian process and NGBoost report given each is missing the
+opposite half; and do all of it twice, in both runners, against a shared definition. The
+delete list in §5.5 stays — dead swapped code is still wrong — but it is hygiene, not the
+build.
 
 ---
 

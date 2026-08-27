@@ -193,10 +193,12 @@ def calculate_regression_metrics(y_test, prediction, logging=False):
 # UNCERTAINTY DECOMPOSITION HELPERS
 # ============================================================================
 
-# STUB: aleatoric is hard-coded None below and total is set equal to the model part, so any
-# coverage number computed from that total silently omits observation noise. Rebuilding the
-# split is separate work, specified in RERUN_PLAN.md section 5.5; the correct heteroscedastic
-# version is decompose_uncertainty_sampling_heteroscedastic below (currently has no callers).
+# Aleatoric is None below and total is set equal to the model part, which is right for a
+# network that predicts no observation noise -- a plain BNN has none to report. A network
+# whose head DOES predict one per molecule now goes to
+# decompose_uncertainty_sampling_heteroscedastic instead (models.py, the two -u branches);
+# it used to come here too, because that second output was sliced off before it arrived.
+# Rebuilding the split for the models that predict neither is separate work, RERUN_PLAN.md 5.5.
 def decompose_uncertainty_sampling(predictions_array, num_samples):
     """
     Decompose uncertainty from sampling-based methods (BNN, ensembles).
@@ -244,8 +246,49 @@ def decompose_uncertainty_sampling_heteroscedastic(mean_predictions, var_predict
     
     # Total: sqrt(epistemic^2 + aleatoric^2)
     total = np.sqrt(epistemic**2 + aleatoric**2)
-    
+
     return epistemic, aleatoric, total
+
+
+def split_predictive_head(output, loss_name):
+    """Split a wide network output into the prediction and the per-molecule variance.
+
+    Two losses make the network predict how uncertain it is about each molecule
+    as well as the value, and that second output was sliced off and dropped at
+    every prediction site for the life of the project -- so both models reported
+    the spread over their stochastic passes, which is what an ordinary network
+    reports, and the per-molecule variance they exist to produce never reached a
+    file (RERUN_PLAN.md 2.17).
+
+    The transforms here are the ones in `scripts/loss_functions.py`, because that
+    is what was FITTED. A different transform would report a variance the network
+    never learned:
+
+      heteroscedastic  outputs (mean, log_var), log_var clamped to [-10, 10] in
+                       the loss. Variance is exp(log_var).
+      evidential       outputs (gamma, v, alpha, beta) of a Normal-Inverse-Gamma,
+                       with softplus on the last three and +1 on v and alpha. Its
+                       aleatoric variance is beta / (alpha - 1).
+
+    Returns (prediction, variance). `variance` is None for every other loss, and
+    for those the output is returned unchanged.
+    """
+    if loss_name == 'heteroscedastic':
+        mean = output[:, 0:1]
+        log_var = np.clip(output[:, 1:2], -10.0, 10.0)
+        return mean, np.exp(log_var)
+    if loss_name == 'evidential':
+        gamma = output[:, 0:1]
+        alpha = _softplus(output[:, 2:3]) + 1.0
+        beta = _softplus(output[:, 3:4])
+        return gamma, beta / (alpha - 1.0)
+    return output, None
+
+
+def _softplus(x):
+    """log(1 + exp(x)), computed the way that does not overflow."""
+    x = np.asarray(x, dtype=float)
+    return np.maximum(x, 0.0) + np.log1p(np.exp(-np.abs(x)))
 
 
 def decompose_uncertainty_gp(posterior_variance, likelihood_noise):

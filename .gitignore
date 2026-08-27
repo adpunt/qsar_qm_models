@@ -45,3 +45,4 @@ data/QM9/
 
 # A probe output kept in the archive by accident; over 20 MB and derived.
 research_archive/e1d07839/probe.csv
+.harness_unrestored

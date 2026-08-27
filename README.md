@@ -198,6 +198,7 @@ cd rust && cargo test --release
 | `scripts/test_uncertainty_job_scripts.py` | every uncertainty job's command line, through the runner's own parser |
 | `scripts/test_validation_job_scripts.py` | every validation job's command line, its conditions, its three guards |
 | `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
+| `scripts/test_predictive_head.py` | the network's own predicted variance is read back as fitted, and reaches the file per molecule |
 | `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
 | `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
 | `scripts/check_environment.py` | this interpreter can build every model the job asks for |

@@ -2642,27 +2642,30 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         with torch.no_grad():
             for _ in range(num_samples):
                 output = model(x_val_cal_tensor).cpu().numpy()
-                # For heteroscedastic, only use mean predictions
-                if loss_name == 'heteroscedastic':
-                    output = output[:, 0:1]
+                output, _ = split_predictive_head(output, loss_name)
                 preds_cal.append(output)
-        
+
         preds_cal = np.stack(preds_cal, axis=0)
         y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
         y_cal_pred_std = preds_cal.std(axis=0).flatten()
-        
+
         # Find optimal temperature
         temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
-        
+
         # Get test predictions
         preds = []
+        # The per-molecule variance the heteroscedastic and evidential heads
+        # predict, kept alongside the prediction instead of sliced off. This
+        # whole block runs only under -u/--uncertainty, so a run that is not
+        # asked for uncertainty never holds it.
+        head_vars = []
         with torch.no_grad():
             for _ in range(num_samples):
                 output = model(x_test_tensor).cpu().numpy()
-                # For heteroscedastic, only use mean predictions
-                if loss_name == 'heteroscedastic':
-                    output = output[:, 0:1]
+                output, variance = split_predictive_head(output, loss_name)
                 preds.append(output)
+                if variance is not None:
+                    head_vars.append(variance)
 
         preds = np.stack(preds, axis=0)  # Shape: (num_samples, num_datapoints, 1)
         y_pred_mean = preds.mean(axis=0).flatten()
@@ -2675,6 +2678,12 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         if vbll_layer is not None:
             learned_noise_var = vbll_layer.noise_var.item()
             epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
+        elif head_vars:
+            # The head predicted a variance per molecule, so the observation term
+            # is that variance rather than absent. Without this the two losses
+            # reported the spread over the stochastic passes and nothing else.
+            epistemic, aleatoric, total = decompose_uncertainty_sampling_heteroscedastic(
+                preds.squeeze(), np.stack(head_vars, axis=0).squeeze())
         else:
             epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
 
@@ -2702,11 +2711,13 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         # Non-Bayesian prediction
         with torch.no_grad():
             y_pred_tensor = model(x_test_tensor).cpu().numpy()
-            # For heteroscedastic, extract mean predictions
-            if loss_name == 'heteroscedastic':
-                y_pred = y_pred_tensor[:, 0].flatten()
-            else:
-                y_pred = y_pred_tensor.flatten()
+            # Evidential was missing from this branch, so its four outputs were
+            # flattened into four times as many predictions as there are
+            # molecules, and the metrics were computed against whatever that
+            # lined up with. There is no uncertainty to keep here -- this branch
+            # is the one that was not asked for any.
+            y_pred_tensor, _ = split_predictive_head(y_pred_tensor, loss_name)
+            y_pred = y_pred_tensor.flatten()
         
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
@@ -3131,26 +3142,24 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             with torch.no_grad():
                 for _ in range(num_samples):
                     output = model(x_val_cal_tensor).cpu().numpy()
-                    if loss_name == 'heteroscedastic':
-                        output = output[:, 0:1]
-                    elif loss_name == 'evidential':
-                        output = output[:, 0:1]
+                    output, _ = split_predictive_head(output, loss_name)
                     preds_cal.append(output)
-            
+
             preds_cal = np.stack(preds_cal, axis=0)
             y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
             y_cal_pred_std = preds_cal.std(axis=0).flatten()
-            
+
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
-        
+
         preds = []
         with torch.no_grad():
             for _ in range(num_samples):
                 output = model(x_test_tensor).cpu().numpy()
-                if loss_name == 'heteroscedastic':
-                    output = output[:, 0:1]
-                elif loss_name == 'evidential':
-                    output = output[:, 0:1]
+                # The predicted variance is dropped here and nowhere else, because
+                # this model writes no decomposition at all. `flexible_dnn` is in
+                # EXCLUDED_MODELS and no figure reads it; wiring the variance
+                # through would have nothing to write it to.
+                output, _ = split_predictive_head(output, loss_name)
                 preds.append(output)
         
         preds = np.stack(preds, axis=0)
@@ -3367,6 +3376,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     model.to(device)
 
+    criterion = get_loss_function(loss_name, **loss_kwargs)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
     # Train with domain labels if needed
@@ -3390,33 +3401,34 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             with torch.no_grad():
                 for _ in range(num_samples):
                     output = model(x_val_cal_tensor).cpu().numpy()
-                    if loss_name == 'heteroscedastic':
-                        output = output[:, 0:1]
-                    elif loss_name == 'evidential':
-                        output = output[:, 0:1]
+                    output, _ = split_predictive_head(output, loss_name)
                     preds_cal.append(output)
-            
+
             preds_cal = np.stack(preds_cal, axis=0)
             y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
             y_cal_pred_std = preds_cal.std(axis=0).flatten()
-            
+
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
-        
+
         # Get test predictions
         preds = []
+        # The per-molecule variance the heteroscedastic and evidential heads
+        # predict. This loop runs whether or not uncertainty was asked for, since
+        # the prediction itself comes out of it, so the variance is kept ONLY
+        # under -u/--uncertainty -- nothing else would read it.
+        head_vars = []
         with torch.no_grad():
             for _ in range(num_samples):
                 output = model(x_test_tensor).cpu().numpy()
-                if loss_name == 'heteroscedastic':
-                    output = output[:, 0:1]
-                elif loss_name == 'evidential':
-                    output = output[:, 0:1]
+                output, variance = split_predictive_head(output, loss_name)
                 preds.append(output)
-        
+                if args.uncertainty and variance is not None:
+                    head_vars.append(variance)
+
         preds = np.stack(preds, axis=0)
         y_pred_mean = preds.mean(axis=0).flatten()
         y_pred_std_uncalibrated = preds.std(axis=0).flatten()
-        
+
         if args.uncertainty:
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
 
@@ -3428,6 +3440,11 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             if vbll_layer is not None:
                 learned_noise_var = vbll_layer.noise_var.item()
                 epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
+            elif head_vars:
+                # The head predicted a variance per molecule, so the observation
+                # term is that variance rather than absent.
+                epistemic, aleatoric, total = decompose_uncertainty_sampling_heteroscedastic(
+                    preds.squeeze(), np.stack(head_vars, axis=0).squeeze())
             else:
                 epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
 
