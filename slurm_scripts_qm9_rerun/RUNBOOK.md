@@ -49,7 +49,7 @@ and level 0 is one seventh of the cost.
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10, as stage 0 (1) plus stage 1 (9) |
 
-**Stage 0: 15 array scripts, 320 tasks**, each 7 training runs — 2,240 training runs.
+**Stage 0: 14 array scripts, 320 tasks**, each 7 training runs — 2,240 training runs.
 **Stage 1: the same 320 tasks**, each 63 training runs — 20,160. **22,400 in total.**
 
 Three of the four conditions repeat the level-0 cell, which is bit-identical every
