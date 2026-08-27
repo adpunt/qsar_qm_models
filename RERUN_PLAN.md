@@ -2286,6 +2286,10 @@ a real run's file matched nothing; it now reads the registry from the injector i
 
 ### 3.1d 🔴 FOR THE METHODS — a scaffold split makes one question unanswerable on held-out molecules
 
+**Owner: chat J** (assigned 2026-08-27). It was written up and marked "for the Methods" with no chat
+attached, which is how it would have been missed — chat J is the only chat that touches what gets
+written up.
+
 Found by running the pipeline, not by reading it. The grouped conditions are keyed to the scaffold
 group, and the splitter holds whole scaffold groups out. So a held-out molecule is in a group the
 training selection never marked, and its level-free shape is **flat**.
@@ -6687,6 +6691,12 @@ is. The sourced literature review is in `research_archive/f692d614/`.
 ---
 
 #### Chat J — Figure script consolidation and the five analyses
+
+**Also owns one Methods sentence, assigned 2026-08-27: §3.1d.** A scaffold split holds whole
+scaffold groups out, so on held-out molecules the grouped conditions' level-free shape is flat —
+truthfully, not as a defect — and the predicted-label control is degenerate for them, because a
+prediction does not change a molecule's scaffold. Both facts have to be stated where the grouped
+results are reported, or the figures show a null that reads as a finding. It had no owner until now.
 
 🔴 **Blocked: the author has asked for a 1:1 on the details of the analyses first** — *"All of those
 analyses will have to be built, that belongs in the plan. But we're going to need to go over the
