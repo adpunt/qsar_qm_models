@@ -288,6 +288,25 @@ python generate_scripts.py --stage 0
 ls qm9_s0_*.sh
 ```
 
+**Before the first submission, run the concurrency check — it only works here.**
+
+Two array tasks share a working directory. They used to share one settings file with it, and
+the file names which memory-mapped training files the binary opens **and rewrites**, so two
+tasks could silently overwrite each other's training data. That is fixed and there is a check
+for it, but the substantive half of that check starts two real training tasks side by side, and
+it **skips on macOS** — a library the Gaussian process pulls in writes two fixed-name files
+under `/tmp` during import, so two simultaneous imports race on a laptop for reasons that have
+nothing to do with this. The cluster is the only place the check means anything.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+srun --account=$ACCT --partition=short --mem=32G --pty \
+    python scripts/test_config_isolation.py --end-to-end
+```
+
+Three checks must pass. It is also the first end-to-end confirmation that the pipeline runs on
+this cluster at all. If it fails, do not raise job concurrency and do not submit the grid.
+
 Then the cheapest model on the cheapest representation, and let it finish:
 
 ```bash

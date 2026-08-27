@@ -4994,8 +4994,8 @@ split in both the pipeline and the harness.
 | ~~D7~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — rewritten: five writer tests and five reader checks, what each actually plants, and why the unparseable-molecule route no longer exists | ✅ Done |
 | ~~D8~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — all four. The mask is 63 bits and the document now says why the top bit is cleared; `setup.sh:124` corrected in the document and in all three generators and the preflight (it was in four files, not one); the two-interpreter sentence replaced with one interpreter; the stale-scripts warning replaced with what is actually there | ✅ Done |
 | ~~D9~~ | ~~doc~~ | ✅ **FIXED 2026-08-27** — corrected, `smoke_test.sh` disclosed, and the consequence traced through to the defect it was hiding (D2) | ✅ Done |
-| **D10** | cluster | The substantive half of gate 10 skips on this laptop, so §8's claim that all three halves passed cannot be re-confirmed off the cluster | Run `python scripts/test_config_isolation.py --end-to-end` under `env_test` and record the output |
-| **D11** | cluster | `check_environment.py` exits 1 on the laptop interpreter — requirement conflicts, a quantile-forest fit failure, four OpenMP runtimes reachable. **The gate is behaving correctly**; this is the threading conflict and the environment rebuild, explicitly not chat D's | Run under `env_test`; nothing in chat D's scope changes |
+| **D10** | cluster | The substantive half of gate 10 skips on this laptop, so §8's claim that all three halves passed cannot be re-confirmed off the cluster | ▶️ **Owned by chat H, and now step 4 of the QM9 runbook** — `python scripts/test_config_isolation.py --end-to-end` under `env_test`, before the first submission |
+| **D11** | cluster | ▶️ **Owned by chat L, the environment rebuild.** `check_environment.py` exits 1 on the laptop interpreter — requirement conflicts, a quantile-forest fit failure, four OpenMP runtimes reachable. **The gate is behaving correctly**; this is the threading conflict and the environment rebuild, explicitly not chat D's | Run under `env_test`; nothing in chat D's scope changes |
 | ~~D12~~ | ~~cluster~~ | ✅ **VERIFIED 2026-08-27** — checked against the KIRBy checkout at `~/repos/KIRBy`. Commit `333f005` resolves, its message is exactly as quoted, and the guard it added (refusing to exit 0 when every model-and-condition combination raised) is in the file. The one stale part is the line number: `:1342` no longer points at the progress line, because that file has moved on since August. The claim is sound; the citation is a moment in time | ✅ Done |
 
 #### For chat G
@@ -5338,12 +5338,19 @@ Specifically, in every chat:
 | **E** | Cross-pipeline parity | — | ✅ **DONE 2026-08-26** |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
 | **G** | Local test: which noise settings earn their place | A | ✅ **DONE 2026-08-27** — §13.9; the set is in `noise_conditions.json`, gated on both sides |
-| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ G ✅ + B C E + §13.1 | ❌ blocked — but not on G. Read the conditions from `noise_conditions.json` rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight |
+| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ G ✅ + B C E + L + §13.1 | ❌ blocked — but not on G. Read the conditions from `noise_conditions.json` rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight. **Also owns the one chat D check that cannot run off the cluster**: `python scripts/test_config_isolation.py --end-to-end` under `env_test`, now step 4 of the QM9 runbook (§13.2, D10) |
 | **I** | The uncertainty decomposition build | F | ❌ blocked on F's findings |
 | **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
 | **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
+| **L** | **The environment rebuild** — one threading runtime, the roster completed | — | ▶️ **running** (opened by the author 2026-08-27). The procedure is §2.8i. **Nothing launches until this passes**: the per-task guard refuses every job in all three families while more than one threading runtime is present |
 
-**Eight can start immediately and run unattended: A, B, C, D, E, F, G, K.** They touch
+**Eight can start immediately and run unattended: A, B, C, D, E, F, G, K.** L is running.
+
+**Two things are recorded but were owned by nobody until 2026-08-27**, which is how a documented
+step becomes a step that never happens. The environment rebuild is now chat L. The concurrency
+check that only works on the cluster is now chat H's, and — more to the point — it is now a
+numbered step in the runbook an operator actually follows, not only a row in an audit table.
+ They touch
 different files. The one overlap to watch: A and B both change what the noise means, and C changes
 how features are stored — if two of them land at once, the person merging needs to re-run the checks
 in §8 rather than trusting either in isolation.
