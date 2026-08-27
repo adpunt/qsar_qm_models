@@ -50,7 +50,7 @@
     },
     {
       "name": "laplace",
-      "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every model at both levels tested (largest 0.0058 R2), so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
+      "why": "Kept, settled by the author 2026-08-27. Empirically indistinguishable from Gaussian on every model at both levels tested (largest 0.0087 R2 across roster models; the 0.0058 previously quoted here was a Ridge row, and Ridge is not in the study -- corrected 2026-08-27), so it buys a citation rather than a result -- but it is the only distribution family actually FITTED to real bioactivity error, and at 720 training runs (1.4% of the old design) the citation is cheap. Depth stage only; it is not in the full grid."
     }
   ],
   "not_run": [

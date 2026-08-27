@@ -841,6 +841,23 @@ def verdict_table(cdf):
     return pd.DataFrame(out)
 
 
+def models_in(df):
+    """The models actually present in the file, not the module's current roster.
+
+    `--analyse-only` reads a CSV that may have been written by an earlier roster. Indexing
+    a results frame by the roster constant made the analysis die with KeyError the moment
+    the roster changed (it did, on 2026-08-27, when Ridge was removed and five roster
+    models were added). Read the file instead. A row for a model that is NOT in the study
+    is dropped here and named, so no number in the analysis can rest on one.
+    """
+    present = [m for m in df.model.unique()]
+    outside = [m for m in present if m not in ALL_SCREEN_MODELS]
+    if outside:
+        print(f"  !! dropping {', '.join(sorted(outside))} — not in the study roster "
+              f"(RERUN_PLAN.md 13.10). Every number below excludes them.", flush=True)
+    return [m for m in ALL_SCREEN_MODELS if m in present]
+
+
 def analyse(df, shape):
     print("\n" + "=" * 116)
     print("QM9 / PDV. Noise on training labels only, scored on clean test labels.")
@@ -901,9 +918,13 @@ def analyse(df, shape):
                   f"what is fixed, not this (NOISE_DESIGN.md 5.1b, rule 3 of 2a)")
 
     # -- clean baselines, guard 4 ---------------------------------------------
+    # The roster comes from the FILE, and non-roster models are dropped and named.
+    MODELS_HERE = models_in(df)
+    df = df[df.model.isin(MODELS_HERE)]
+    kept = kept[kept.model.isin(MODELS_HERE)]
     print("\n--- clean baseline R2 per replicate (guard 4: the denominator, always shown) ---")
     b = df.groupby('model').r2_clean.agg(['mean', 'std', 'min', 'max'])
-    for m in MODELS:
+    for m in MODELS_HERE:
         print(f"  {m:<6} {b.loc[m, 'mean']:+.4f} +- {b.loc[m, 'std']:.4f}   "
               f"range {b.loc[m, 'min']:+.4f} to {b.loc[m, 'max']:+.4f}")
 
@@ -911,10 +932,10 @@ def analyse(df, shape):
     print("\n--- R2 per condition, mean +- SD over replicates (never averaged across conditions) ---")
     for level in sorted(kept.level.unique()):
         print(f"\n  level {level} x label spread")
-        print("  " + f"{'condition':<20}" + "".join(f"{m:>24}" for m in MODELS))
+        print("  " + f"{'condition':<20}" + "".join(f"{m:>24}" for m in MODELS_HERE))
         for name in CONDITION_NAMES:
             cells = []
-            for m in MODELS:
+            for m in MODELS_HERE:
                 s = kept[(kept.level == level) & (kept.condition == name) & (kept.model == m)].r2
                 cells.append(f"{s.mean():.4f}+-{s.std(ddof=1):.4f}" if len(s) else "—")
             print("  " + f"{name:<20}" + "".join(f"{c:>24}" for c in cells))
@@ -1067,6 +1088,8 @@ def main():
         # while applying it there was making the two blocks disagree about the same
         # model on the same replicate.
         ex = df[(df.dose_mode == 'exact') & (df.r2_clean >= CLEAN_R2_FLOOR)]
+        ex = ex[ex.model.isin(ALL_SCREEN_MODELS)]
+        MODELS_HERE = [m for m in ALL_SCREEN_MODELS if m in set(ex.model)]
         if len(ex):
             top = ex.level.max()
             print("\n--- sensitivity: the same contrasts with the dose rescaled to exactly "
@@ -1079,7 +1102,7 @@ def main():
             for name in CONDITION_NAMES:
                 if name == 'Gaussian':
                     continue
-                for m in MODELS:
+                for m in MODELS_HERE:
                     r = paired_table(ex, name, 'Gaussian', top, m)
                     if not r:
                         continue
@@ -1146,7 +1169,7 @@ def main():
         for name in CONDITION_NAMES:
             if name == 'Gaussian':
                 continue
-            for m in MODELS:
+            for m in MODELS_HERE:
                 r = paired_table(ex, name, 'Gaussian', max(saved), m)
                 if r:
                     print(f"  level {max(saved)} {name:<20}{m:<7}"

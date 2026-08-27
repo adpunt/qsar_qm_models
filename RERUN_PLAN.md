@@ -5375,6 +5375,28 @@ models on the pipeline's own defaults. 792 rows. Every condition delivers the sa
 realised 0.490–0.505 at level 0.5 and 1.475–1.522 at level 1.5, every one within three standard
 errors of target.
 
+⚠️ **CORRECTED 2026-08-27 — every headline number below was computed WITH Ridge, and Ridge is not
+in the study.** Found by the chat D/G close-out audit. §4 of this document got the Ridge correction
+on 2026-08-27; this section did not, so the two disagreed. Recomputed from
+`results/setting_selection_test.csv` with the declared accuracy floor applied:
+
+| Quantity as stated below | With Ridge (as written) | Roster models only |
+|---|---|---|
+| Largest \|mean ΔR²\| against Gaussian at the reporting level, excluding grouped-shifted | 0.0058 — a **Laplace / Ridge** row | **0.0047** — Outlier p=0.01 / random forest |
+| Same across both levels | 0.0475 — Student-t ν=3 / **Ridge** | **0.0408** — skewed draw / random forest |
+| Laplace, largest \|mean ΔR²\| | 0.0362 — **Ridge** | **0.0087** |
+
+**Every verdict in this section stands and several are strengthened**, because removing Ridge makes
+the differences *smaller*: the case that shape and contamination do not earn separate settings gets
+better, and Laplace becomes more indistinguishable from Gaussian, not less. **But `noise_conditions.json`
+cites this section as its evidence, so the numbers it points at had to be right.** The `why` strings
+in that file quoting "largest 0.0058" and Laplace's "0.0058" are quoting Ridge rows.
+
+✅ **The analysis script now drops non-roster models by name rather than silently including them**
+(`scripts/setting_selection_test.py`, `models_in()`). `--analyse-only` prints
+*"dropping Ridge — not in the study roster"* before any number. It also no longer dies when the
+roster changes, which it did between the file being written and the roster being updated.
+
 #### The answer, in one line
 
 **Shape and contamination do not earn separate settings. Direction does.**

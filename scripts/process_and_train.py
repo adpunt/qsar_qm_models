@@ -404,8 +404,18 @@ def parse_arguments():
     )
     parser.add_argument("--hidden-sizes", type=int, nargs='+', default=None,
                        help="Hidden layer sizes for flexible_dnn/dnn/mlp (e.g. --hidden-sizes 256 128 64 32)")
-    parser.add_argument("--calibration-size", type=int, default=20,
-                       help="Percentage of validation set for conformal calibration (default is 20)")
+    # --calibration-size is COMMENTED OUT, 2026-08-27. It was accepted, passed
+    # down to train_conformal_model and never read: conformity scores are
+    # |y_val - y_val_pred| over the WHOLE validation split, so the advertised 20%
+    # carve-out never happened. Nothing in the paper reads conformal rows -- the
+    # figure script drops them at load time and the job generator does not run
+    # them -- so the flag only invited someone to trust a setting that does
+    # nothing (RERUN_PLAN.md 2.13).
+    #
+    # The whole held-out split is the calibration set, and that is the better
+    # estimator now that no model trains on validation.
+    # parser.add_argument("--calibration-size", type=int, default=20,
+    #                    help="Percentage of validation set for conformal calibration (default is 20)")
     parser.add_argument("--domain-method", type=str, default='none',
                         choices=['none', 'random', 'fingerprint_kmeans', 'descriptor', 
                                  'butina', 'splito', 'scaffold', 'molecular_weight'],
@@ -1237,13 +1247,25 @@ def avalon_fingerprint(smiles, n_bits=2048):
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return np.zeros(n_bits // 8, dtype=np.uint8)
+            # An all-zero fingerprint is a molecule with no features carrying a real
+            # label into training, and nothing downstream can tell it from a real one:
+            # write_to_mmap accepts the block unchecked, and the Rust zero-block refusal
+            # is keyed to ecfp4 alone. ChemBERTa and MHG-GNN were fixed on 2026-08-26 and
+            # this path was missed. Found by the chat D/G close-out audit, 2026-08-27.
+            raise RuntimeError(f"Avalon: RDKit could not parse {smiles!r}")
         fp = pyAvalonTools.GetAvalonFP(mol, nBits=n_bits)
         bits = np.array(fp, dtype=np.uint8)
+        if not bits.any():
+            # RDKit parses '' into a valid molecule with no atoms, so `mol is None`
+            # does not catch it and the fingerprint comes back all zeros. Same silent
+            # corruption by a different route. This mirrors the Rust writer's zero-block
+            # refusal, which is keyed to ecfp4 only.
+            raise RuntimeError(
+                f"Avalon: {smiles!r} produced an all-zero fingerprint "
+                f"({mol.GetNumAtoms()} atoms)")
         return np.packbits(bits, bitorder="little")
     except Exception as e:
-        print(f"Avalon error: {e}")
-        return np.zeros(n_bits // 8, dtype=np.uint8)
+        raise RuntimeError(f"Avalon failed on {smiles!r}: {e}") from e
 
 def create_sort_and_slice_ecfp_featuriser(mols_train, 
                                           max_radius = 2, 
@@ -1737,7 +1759,7 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial, train_noise=train_noise)
 
         elif model_type == 'conformal':
-            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, args.calibration_size, y_test_original, trial, train_noise=train_noise)
+            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, None, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'meta_weight_net':
             return train_meta_weight_net(x_train, y_train, x_test, y_test, x_val, y_val,
@@ -1980,7 +2002,7 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
         elif model_type == "conformal":
             return train_conformal_graph_model(
                 train_loader, test_loader, val_loader, args, s, iteration, 
-                file_no, args.cp_base_model, args.calibration_size, y_test_original_tensor, trial,
+                file_no, args.cp_base_model, None, y_test_original_tensor, trial,
                 y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
             )
         
