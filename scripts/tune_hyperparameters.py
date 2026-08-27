@@ -4,7 +4,11 @@
     export OMP_NUM_THREADS=1
     python scripts/tune_hyperparameters.py --time            # cost first
     python scripts/tune_hyperparameters.py --sweep --settings 12
-    python scripts/tune_hyperparameters.py --write-master
+    python scripts/tune_hyperparameters.py --confirm         # winner vs default
+    python scripts/tune_hyperparameters.py --write-master --margin 0.01
+
+    then, before anything is adopted:
+    python scripts/confirm_tuned_on_validation_datasets.py --time
 
 WHAT THIS IS
 ------------
@@ -18,6 +22,28 @@ It replaces the Optuna path, which no job ever used: `--tuning` appears in no
 script slurm_scripts_qm9_rerun/generate_scripts.py writes, and four of its
 suggested values never reached a model at all (models.py:1660 quantile, :4255
 alpha, :4256 predictor_type, :2561 the loss parameters).
+
+A WINNER IS NOT A RESULT UNTIL IT HAS BEATEN THE DEFAULT SOMEWHERE ELSE
+-----------------------------------------------------------------------
+The search picks the best of N candidates ON THE VALIDATION SPLIT. That winning
+score is the maximum of N noisy numbers on the very split that chose it, so it
+is biased upward by construction, and the bias GROWS with N -- a bigger search
+looks better while being no better. This is where the Optuna path failed: it
+wrote the winner to results/master_tuned_hyperparameters.json and nothing ever
+compared it with the default on data neither had seen.
+
+So there are two stages after the sweep, and neither is optional:
+
+  --confirm   refits the winner AND the shared default and scores both on the
+              QM9 TEST split, which the search never touched. --write-master
+              applies --margin to THAT difference, refuses to run if the
+              confirmation file is absent, and records how much of the search's
+              apparent gain did not survive the move.
+  scripts/confirm_tuned_on_validation_datasets.py
+              runs the same head-to-head on LogD, Caco-2 and hERG under their
+              own scaffold cross-validation. A setting tuned on QM9 that costs
+              accuracy on the datasets the paper's validation section rests on
+              is not an improvement, whatever QM9 says.
 
 THE CANDIDATE REACHES THE MODEL THE WAY THE CLUSTER WILL DELIVER IT
 -------------------------------------------------------------------
@@ -407,14 +433,26 @@ def candidate(M, params):
 
 
 def fit_once(pat, M, model_label, rep, data, params, sample_size, scratch_csv,
-             rosters, quiet=True):
-    """Fit one pairing at one setting. Returns (validation R-squared, seconds).
+             rosters, quiet=True, score_on='val'):
+    """Fit one pairing at one setting. Returns (R-squared, seconds).
 
-    The validation split is handed in where the function expects its test split,
-    so what comes back is the validation score. The real test split is not
-    passed to anything.
+    `score_on` says which split the returned R-squared is measured on. The split
+    asked for is handed in where the function expects its test split, so the
+    number that comes back is that split's score.
+
+      'val'   the search. Every candidate is scored here.
+      'test'  --confirm, and nothing else. The search never sees this split, so
+              it is the only place a tuned setting can be compared with the
+              default without the comparison being decided by the same numbers
+              that chose the winner.
     """
-    x_train, y_train, x_val, y_val = data
+    x_train, y_train = data['x_train'], data['y_train']
+    # The split being SCORED, and separately the split the neural models early-stop
+    # on. They must not be the same object in --confirm: passing test as the
+    # early-stopping split would choose the stopping epoch on the split the
+    # comparison is decided on, which is the leak this whole stage exists to close.
+    x_score, y_score = data[f'x_{score_on}'], data[f'y_{score_on}']
+    x_stop, y_stop = data['x_val'], data['y_val']
     args = make_args(pat, model_label, rep, sample_size, scratch_csv, rosters)
     model_type = args.models[0]
 
@@ -425,16 +463,17 @@ def fit_once(pat, M, model_label, rep, data, params, sample_size, scratch_csv,
     started = time.perf_counter()
     with candidate(M, params if use_tuned else None), \
             contextlib.redirect_stdout(sink):
-        # x_val goes in as the scoring split; the calibration split argument
-        # gets it too, because with args.uncertainty False nothing calibrates.
+        # The scored split goes in where the function expects its test split;
+        # the validation argument keeps the real validation split, which is what
+        # the neural models early-stop on and what any calibration would use.
         common = dict(x_train=x_train, y_train=y_train,
-                      x_test=x_val, y_test=y_val,
-                      x_val=x_val, y_val=y_val,
+                      x_test=x_score, y_test=y_score,
+                      x_val=x_stop, y_val=y_stop,
                       args=args, s=0.0, rep=rep, iteration=0,
                       iteration_seed=RANDOM_SEED, train_noise=None)
         if model_type in ('rf', 'qrf'):
             r2 = M.train_rf_model(model_type=model_type, file_no=0,
-                                  y_test_original=y_val, **common)
+                                  y_test_original=y_score, **common)
         elif model_type == 'svm':
             r2 = M.train_svm_model(**common)
         elif model_type == 'xgboost':
@@ -442,14 +481,14 @@ def fit_once(pat, M, model_label, rep, data, params, sample_size, scratch_csv,
         elif model_type == 'lgb':
             r2 = M.train_lgb_model(**common)
         elif model_type == 'ngboost':
-            r2 = M.train_ngboost_model(file_no=0, y_test_original=y_val, **common)
+            r2 = M.train_ngboost_model(file_no=0, y_test_original=y_score, **common)
         elif model_type == 'gauche':
-            r2 = M.train_gauche_model(file_no=0, y_test_original=y_val, **common)
+            r2 = M.train_gauche_model(file_no=0, y_test_original=y_score, **common)
         elif model_type == 'dnn':
-            r2 = M.train_dnn_model(file_no=0, y_test_original=y_val, **common)
+            r2 = M.train_dnn_model(file_no=0, y_test_original=y_score, **common)
         elif model_type == 'mlp':
             r2 = M.train_mlp_variant_model(model_type='mlp', file_no=0,
-                                           y_test_original=y_val, **common)
+                                           y_test_original=y_score, **common)
         else:
             raise KeyError(f'no local runner for model type {model_type!r} '
                            f'(label {model_label!r})')
@@ -468,11 +507,18 @@ BLOCKED = {
 
 def prepared_data(pat, rep, smiles, y, train_idx, val_idx, test_idx,
                   sample_size, seed):
+    """All three splits, standardised on the training split alone.
+
+    The test split is carried but NOT handed to the search. It is used by
+    --confirm and by nothing else.
+    """
     x = features_for(pat, rep, smiles, train_idx, sample_size, seed)
     x_train, x_val, x_test = x[train_idx], x[val_idx], x[test_idx]
     x_train, x_val, x_test, scaled = standardise(x_train, x_val, x_test, rep)
-    return ((x_train, y[train_idx].astype(np.float32),
-             x_val, y[val_idx].astype(np.float32)), scaled)
+    return ({'x_train': x_train, 'y_train': y[train_idx].astype(np.float32),
+             'x_val': x_val, 'y_val': y[val_idx].astype(np.float32),
+             'x_test': x_test, 'y_test': y[test_idx].astype(np.float32)},
+            scaled)
 
 
 def run(args_cli):
@@ -637,6 +683,118 @@ def write_best(rows, args_cli):
           f'{sum(1 for g, _, _ in gains if g <= 0)} of {len(gains)}')
 
 
+
+def confirm(args_cli):
+    """Refit the winner and the shared default, and score both on the TEST split.
+
+    WHY THIS STAGE EXISTS
+    ---------------------
+    This is where the Optuna path failed. It picked a best trial by validation
+    score, wrote it to results/master_tuned_hyperparameters.json, and nothing
+    ever compared that setting with the default on data neither had seen. The
+    winner of a search over N candidates is the maximum of N noisy numbers on the
+    split that chose it, so its validation score is biased upward by construction
+    -- and the bias grows with N, which means a bigger search looks better while
+    being no better.
+
+    So the tuned setting and the shared default are refitted here, on the same
+    training split, and both are scored on the TEST split. The search never
+    touched it. The neural models still early-stop on validation, not on test.
+
+    The number this writes -- not the search's -- is what --write-master compares
+    against --margin.
+    """
+    import tuning_rosters as rosters
+
+    src = os.path.join(OUT_DIR, 'best_by_pairing.json')
+    if not os.path.exists(src):
+        print(f'{src} does not exist -- run --sweep first.')
+        return 1
+    with open(src) as fh:
+        payload = json.load(fh)
+
+    pat, M = _import_pipeline()
+    scratch_csv = os.path.join(OUT_DIR, 'scratch_rows.csv')
+    smiles, y, train_idx, val_idx, test_idx = build_split(
+        pat, args_cli.sample_size, args_cli.seed)
+    print(f'  train {len(train_idx)}  validation {len(val_idx)}  '
+          f'test {len(test_idx)}  (the search never saw test)', flush=True)
+
+    out = os.path.join(OUT_DIR, 'confirmation.csv')
+    fields = ['model', 'rep', 'default_test_r2', 'tuned_test_r2', 'test_delta',
+              'default_val_r2', 'tuned_val_r2', 'val_delta', 'search_optimism',
+              'status', 'detail', 'sample_size', 'seed', 'written']
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    fh_out = open(out, 'w', newline='')
+    writer = csv.DictWriter(fh_out, fieldnames=fields)
+    writer.writeheader()
+
+    cache = {}
+    rows = []
+    pairs = sorted(payload['pairings'].items())
+    if args_cli.models:
+        pairs = [(k, v) for k, v in pairs if k.split('|')[0] in args_cli.models]
+    for i, (pair, rec) in enumerate(pairs, 1):
+        model_label, rep = pair.split('|')
+        if rec.get('best_params') is None:
+            continue
+        if rep not in cache:
+            cache[rep] = prepared_data(pat, rep, smiles, y, train_idx, val_idx,
+                                       test_idx, args_cli.sample_size,
+                                       args_cli.seed)[0]
+        data = cache[rep]
+
+        row = dict(model=model_label, rep=rep, status='ok', detail='',
+                   default_val_r2=rec.get('default_r2', ''),
+                   tuned_val_r2=rec.get('best_r2', ''))
+        try:
+            d_test, _ = fit_once(pat, M, model_label, rep, data, None,
+                                 args_cli.sample_size, scratch_csv, rosters,
+                                 score_on='test')
+            t_test, _ = fit_once(pat, M, model_label, rep, data,
+                                 rec['best_params'], args_cli.sample_size,
+                                 scratch_csv, rosters, score_on='test')
+            row['default_test_r2'] = d_test
+            row['tuned_test_r2'] = t_test
+            row['test_delta'] = t_test - d_test
+            if rec.get('best_r2') is not None and rec.get('default_r2') is not None:
+                row['val_delta'] = rec['best_r2'] - rec['default_r2']
+                # How much of the search's apparent gain does not survive the
+                # move to a split the search did not choose on.
+                row['search_optimism'] = row['val_delta'] - row['test_delta']
+        except Exception as exc:
+            row.update(status='error', detail=f'{type(exc).__name__}: {exc}',
+                       default_test_r2='', tuned_test_r2='', test_delta='')
+            if args_cli.traceback:
+                traceback.print_exc()
+
+        print(f'[{i}/{len(pairs)}] {model_label} x {rep}  '
+              f'default {row["default_test_r2"]}  tuned {row["tuned_test_r2"]}  '
+              f'delta {row["test_delta"]}  {row["status"]}', flush=True)
+        row.update(sample_size=args_cli.sample_size, seed=args_cli.seed,
+                   written=stamp)
+        writer.writerow(row)
+        fh_out.flush()
+        rows.append(row)
+
+    fh_out.close()
+    print(f'\nwrote {out}  ({len(rows)} pairings)')
+
+    good = [r for r in rows if r['status'] == 'ok']
+    won = [r for r in good if r['test_delta'] > 0]
+    print(f'  tuned beats the default on test: {len(won)} of {len(good)} pairings')
+    survived = [r for r in good
+                if r.get('val_delta') not in ('', None)
+                and r['val_delta'] > 0 and r['test_delta'] <= 0]
+    if survived:
+        print(f'  won the search and lost on test: {len(survived)} pairing(s) '
+              f'-- these are the ones the old path would have adopted:')
+        for r in survived:
+            print(f'      {r["model"]} x {r["rep"]}  '
+                  f'validation {r["val_delta"]:+.4f}  test {r["test_delta"]:+.4f}')
+    return 0
+
+
 def write_master(args_cli):
     """Turn best_by_pairing.json into the two files the pipeline reads.
 
@@ -653,6 +811,24 @@ def write_master(args_cli):
     with open(src) as fh:
         payload = json.load(fh)
 
+    # The margin is applied to the TEST-split difference, never the search's.
+    # A winner is the maximum of N noisy validation numbers, so its validation
+    # margin is biased upward by construction; --confirm measures the same two
+    # settings on a split the search never chose on. Without that file there is
+    # nothing to adopt ON, so this refuses rather than falling back to the
+    # search's own numbers -- which is exactly what the Optuna path did.
+    conf_path = os.path.join(OUT_DIR, 'confirmation.csv')
+    if not os.path.exists(conf_path):
+        print(f'{conf_path} does not exist -- run --confirm first. A setting is '
+              f'adopted on the test-split comparison, not on the search score '
+              f'that selected it.')
+        return 1
+    confirmed = {}
+    with open(conf_path) as fh:
+        for row in csv.DictReader(fh):
+            if row['status'] == 'ok' and row['test_delta'] not in ('', None):
+                confirmed[(row['model'], row['rep'])] = float(row['test_delta'])
+
     margin = args_cli.margin
     collapsed = rosters.collapsed_models()
     master, decisions, skipped = {}, {}, []
@@ -665,9 +841,13 @@ def write_master(args_cli):
         if rec['best_r2'] is None or rec['default_r2'] is None:
             skipped.append((pair, 'no scored setting'))
             continue
-        if rec['best_r2'] - rec['default_r2'] < margin:
-            skipped.append((pair, f'gain {rec["best_r2"] - rec["default_r2"]:+.4f} '
-                                  f'below the margin {margin}'))
+        delta = confirmed.get((model_label, rep))
+        if delta is None:
+            skipped.append((pair, 'not confirmed on the test split'))
+            continue
+        if delta < margin:
+            skipped.append((pair, f'test-split gain {delta:+.4f} below the '
+                                  f'margin {margin}'))
             continue
         key = rosters.TUNED_KEY[model_label]
         master.setdefault(key, {})[rep] = rec['best_params']
@@ -696,6 +876,10 @@ def main():
                            'record the seconds. Prices the sweep.')
     mode.add_argument('--sweep', action='store_true',
                       help='The random search itself.')
+    mode.add_argument('--confirm', action='store_true',
+                      help='Refit the winner and the shared default and score '
+                           'both on the TEST split, which the search never saw. '
+                           'This is what --write-master decides on.')
     mode.add_argument('--write-master', action='store_true',
                       help='Write results/master_tuned_hyperparameters.json and '
                            'results/hyperparameter_decisions.json from the sweep.')
@@ -710,8 +894,8 @@ def main():
     ap.add_argument('--reps', nargs='*', help='Subset of representations.')
     ap.add_argument('--margin', type=float, default=0.0,
                     help='Adopt a tuned setting only if it beats the shared '
-                         'default by at least this much validation R-squared '
-                         '(--write-master only).')
+                         'default by at least this much R-squared ON THE TEST '
+                         'SPLIT, as measured by --confirm (--write-master only).')
     ap.add_argument('--noise-level', type=float, default=None,
                     help='Recorded in the output. Tuning runs on CLEAN labels '
                          'unless this is set; the injector is not wired in here '
@@ -721,6 +905,8 @@ def main():
 
     if args_cli.write_master:
         return write_master(args_cli)
+    if args_cli.confirm:
+        return confirm(args_cli)
     return run(args_cli)
 
 

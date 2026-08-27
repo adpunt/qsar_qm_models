@@ -1923,6 +1923,41 @@ They therefore go in separate columns, and **must not share an axis or a
 significance test**. QM9's per-replicate equivalent is computed in the figure
 script rather than the pipeline, so it waits for that rewrite.
 
+### 2.17 ✅ FIXED 2026-08-27 — the network's own predicted variance now reaches the file
+
+Audit entry 53. Two losses make the network output how uncertain it is about each
+molecule alongside the prediction. Every prediction site kept the prediction and
+sliced the second output away — ten places across three functions — so both
+models reported the spread over their stochastic passes, which is exactly what an
+ordinary network reports, and their aleatoric column was blank. The one helper
+that does the split properly had no callers anywhere in the three repositories.
+
+**Kept only when uncertainty was asked for**, which is the author's decision of
+2026-08-27. In `train_dnn_model` the whole block runs under `-u` already. In the
+MLP path the prediction loop runs either way, because the prediction comes out of
+it, so the variance is collected only under `-u`; a run that was not asked for
+uncertainty holds nothing extra.
+
+`split_predictive_head` in `scripts/utils.py` is the one place a wide head is
+narrowed. Its transforms are the ones in `scripts/loss_functions.py`, because
+that is what was fitted: `exp(log_var)` for the heteroscedastic head, and
+`beta / (alpha - 1)` under the loss's own softplus for the evidential one.
+
+Found next to it and fixed with it: on the path that is not asked for
+uncertainty, `heteroscedastic` was handled and `evidential` was not, so its four
+outputs were flattened into four times as many predictions as there are
+molecules and the metrics were computed against whatever that lined up with.
+
+`scripts/test_predictive_head.py` checks three things, all executing: the
+variance is read back through the loss classes themselves rather than a copy of
+their algebra; the aleatoric term differs between molecules; and a real 120-molecule
+training run writes it for every test molecule. Restoring the slice fails the
+third with "30 of 30 molecules have no aleatoric term".
+
+`flexible_dnn` still drops its predicted variance, and that is deliberate — it is
+in `EXCLUDED_MODELS`, writes no decomposition, and there is nothing to write it
+to. Neither loss is in either job generator, so no existing result changes.
+
 ### 2.16 ✅ FIXED 2026-08-27 — one noise condition, one name
 
 Audit entry 39, the naming half of what was item 4 below. The amount-of-noise
@@ -2965,10 +3000,13 @@ and the neural models early-stop against an oracle.
   representation, with no level. My recommendation is clean only, with a Methods sentence saying
   the hyperparameters are fixed across the noise axis so that the axis is the only thing moving.
 - **(c) Does a tuned value have to beat the shared default by a margin?** `--write-master
-  --margin X` adopts a setting only when it beats `models/model_defaults.py` by X of validation R².
-  A margin of 0 adopts anything that wins on one split, which on one split is partly luck. My
-  recommendation is 0.01, and that pairings below it keep the shared default — which is the file
-  both pipelines already read, so the fallback is the parity-checked value, not a library one.
+  --margin X` adopts a setting only when it beats `models/model_defaults.py` by X of R² **on the
+  QM9 test split** — the split the search never chose on (§5.7i) — and it refuses to run at all
+  until `--confirm` has measured that. A margin of 0 adopts anything that wins by any amount, which
+  at that size is partly luck. My recommendation is 0.01, and that pairings below it keep the shared
+  default — which is the file both pipelines already read, so the fallback is the parity-checked
+  value, not a library one. Whatever survives that then goes through the three validation datasets
+  and is pruned there.
 
 **Decision 8 — do the other ten models get their own tuned entry?** §5.7a. As the code stands,
 only svm, xgboost, lgb and ngboost can be handed a setting that reaches them alone. Giving the
@@ -3375,6 +3413,7 @@ question for you, below.
 | `models/tuning_rosters.py` | the pairing list, imported from `generate_scripts.py` and never retyped, plus the QM9 ↔ experimental name map |
 | `scripts/test_tuned_params_reach_models.py` | a tuned value in the two JSON files must change the model that gets built |
 | `scripts/test_tuning_rosters.py` | the names in those files must be the roster's names |
+| `scripts/confirm_tuned_on_validation_datasets.py` | the same head-to-head on LogD, Caco-2 and hERG, with `--prune` (§5.7i) |
 | `scripts/test_bnn_criterion_order.py` | NN-β must train on the loss its Bayesian transformation wrapped (§5.7c) |
 
 All three checks are cases in `scripts/check_fixes_fail_when_removed.py`.
@@ -3388,6 +3427,47 @@ So a parameter name the builder ignores cannot score well here and then do nothi
 declared `--use-best-params` with `action='store_true'` (`process_and_train.py:379`), so it takes
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
+
+#### 5.7i 🔴 A WINNER IS NOT A RESULT — THE TWO CONFIRMATION STAGES
+
+**This is where Optuna failed, and it is not a detail.** The search picks the best of N candidates
+**on the validation split**. That winning score is the maximum of N noisy numbers on the very split
+that chose it, so it is biased upward by construction — and **the bias grows with N**, which means
+a bigger search looks better while being no better. The old path wrote that winner straight into
+`results/master_tuned_hyperparameters.json`, and nothing ever compared it with the default on data
+neither had seen. `models/consolidate_tuned_params.py` has a paired t-test that would have done it,
+and it reads two results files that were never produced.
+
+So there are two stages after the sweep, and neither is optional.
+
+**Stage 1 — the QM9 test split.** `--confirm` refits the winner AND the shared default on the same
+training split and scores both on the **test** split, which the search never touched. The neural
+models still early-stop on validation, never on test — passing test as the early-stopping split
+would choose the stopping epoch on the split the comparison is decided on, which is the same leak
+one level down. `--write-master` applies `--margin` to **that** difference, **refuses to run at all
+if the confirmation file is absent**, and records `search_optimism` — how much of the search's
+apparent gain did not survive the move.
+
+**Stage 2 — the three validation datasets.** A setting tuned on QM9 is tuned on 10,000 small
+molecules with a computed label and essentially no measurement error. LogD, Caco-2 and hERG are
+drug-like, an order of magnitude smaller, and carry real assay error. There is no reason a setting
+that helps the first must help the others, and one that HURTS them is not an improvement — those
+three are what the validation section rests on. `scripts/confirm_tuned_on_validation_datasets.py`
+refits each adopted setting and the shared default on **every fold** of the experimental pipeline's
+own 5-fold scaffold CV, on clean labels, reading that pipeline's loaders, representations and
+grouping rather than restating them. `--prune` then drops from the master file every pairing the
+default beats, and says which and why.
+
+**Every fold's number is written out and the summary is a COUNT of folds won** — never a mean or a
+median over folds, which would hide a setting that wins big on one fold and loses on the other four.
+
+**What stage 2 cannot cover yet:** only the families the experimental side builds from
+`sklearn_params(...)` — the forest, the quantile forest, XGBoost, LightGBM, NGBoost and the SVM. Its
+neural models go through `train_neural_regression` and its Gaussian process through
+`GaussianProcessGauche`, neither of which takes a parameter dict. That is the same gap as §5.7d and
+it overlaps exactly with the four writable keys, so nothing adoptable today is uncovered — but if
+decision 8 widens the writable set, those families need a route here before anything of theirs is
+adopted.
 
 #### 5.7a 🔴 THE ROSTER IS 80 PAIRINGS, AND ONLY 24 OF THEM CAN BE DELIVERED TODAY
 
