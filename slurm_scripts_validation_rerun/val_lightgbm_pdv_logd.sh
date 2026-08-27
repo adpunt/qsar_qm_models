@@ -107,7 +107,7 @@ except Exception as exc:
     sys.exit(1)
 print(f"=== noiseInject: {inspect.getfile(noiseInject)} "
       f"version {getattr(noiseInject, '__version__', 'unknown')}")
-missing = [c for c in ['gaussian', 'grouped_wider', 'grouped_shifted', 'censoring'] if c not in CONDITIONS]
+missing = [c for c in ['gaussian', 'grouped_wider', 'grouped_shifted'] if c not in CONDITIONS]
 if missing:
     print(f"ERROR: this noiseInject does not know {missing}. Known: {sorted(CONDITIONS)}.")
     print("       That is the pre-1.0.0 injector -- the six deleted strategies.")
@@ -121,7 +121,7 @@ python alternative_data_noise_robustness.py \
     --datasets logd \
     --models LightGBM \
     --reps PDV \
-    --conditions gaussian grouped_wider grouped_shifted censoring \
+    --conditions gaussian grouped_wider grouped_shifted \
     --results-root results/validation_rerun/pdv_logd
 
 echo "Done: LightGBM x PDV x logd"

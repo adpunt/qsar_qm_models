@@ -107,7 +107,7 @@ except Exception as exc:
     sys.exit(1)
 print(f"=== noiseInject: {inspect.getfile(noiseInject)} "
       f"version {getattr(noiseInject, '__version__', 'unknown')}")
-missing = [c for c in ['gaussian', 'grouped_wider', 'grouped_shifted', 'censoring'] if c not in CONDITIONS]
+missing = [c for c in ['gaussian', 'grouped_wider', 'grouped_shifted'] if c not in CONDITIONS]
 if missing:
     print(f"ERROR: this noiseInject does not know {missing}. Known: {sorted(CONDITIONS)}.")
     print("       That is the pre-1.0.0 injector -- the six deleted strategies.")
