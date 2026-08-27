@@ -1689,20 +1689,27 @@ verified flat across noise types.**
 | **No separate artificial positive control is needed** | ✅ **Closed 2026-08-26.** This was open as "keep one label-keyed noise type as a deliberate positive control?" The question assumed the replacement set had no label-keyed condition. It has one: **censoring is keyed to the label by construction** — which molecules get clipped is a deterministic function of the value — so the condition the control was wanted for already exists, and the zero-noise subtraction does real work there. `RERUN_PLAN.md` §3.2 sets out the full mapping of which types have a learnable pattern and which are true nulls; §4 Decision 4 records the same conclusion. Reopen only if an *additional* deliberately unrealistic condition is wanted on top |
 | **What determines the QM9 and censoring level grids** | ✅ **Closed 2026-08-26.** The range-finding run has completed (§5.5) and the grids are set from it, in §6.4 |
 
+| **Which conditions run, and at which stage** | ✅ **Settled 2026-08-27**, on twelve replicates at matched delivered dose (§5.8). Four at full grid — Gaussian, both grouped conditions, censoring. One Student-t setting (ν = 5) and one Outlier setting (p = 10%) at depth. Four settings dropped, the skewed draw never built. It lives in `noise_conditions.json` at the repository root, which `rust/tests/noise_gates.rs` and `scripts/test_noise_conditions.py` both read — so a grid that stops matching it fails a test rather than quietly running |
+
 ### Still open
 
-**1. Is Laplace worth one extra run?** *(Built and verified either way — chat A, 2026-08-26.
-Nothing is blocked on this: it is a question of whether the condition is queued, not whether it
-exists.)*
-It adds little statistically — it sits near Student-t at ν = 6 — but it is the only
-distribution family actually *fitted* to real bioactivity data (Anderson-Darling rejects
-normality at p < 2×10⁻¹⁶; Laplace fitted with scale 0.7 and 1.3). Buys a citation, not a
-result. QM9 only if included.
+**1. Is Laplace worth one extra run — at depth?** *(Built and verified either way — chat A,
+2026-08-26. Nothing is blocked on this: it is a question of whether the condition is queued, not
+whether it exists.)*
+
+**Narrowed 2026-08-27 (§5.8).** It is **out of the full grid on measurement** — indistinguishable
+from Gaussian on every model at both levels tested, largest difference 0.0058 R² against a test that
+could have seen 0.0086. So the question is no longer whether it joins the breadth stage at 4,680
+training runs; it is whether it runs at depth for **720**. It adds nothing statistically — it sits
+near Student-t at ν = 6 — but it is the only distribution family actually *fitted* to real
+bioactivity data (Anderson-Darling rejects normality at p < 2×10⁻¹⁶; Laplace fitted with scale 0.7
+and 1.3). **Buys a citation, not a result.** QM9 only if included. It is marked `optional` in
+`noise_conditions.json`, so either answer passes the gates.
 
 Items 2 and 3 were here and are now settled above — the positive-control question was answered by
-censoring, and the grids were set by the range-finding run. **Laplace is the only item still open
-in this document.** `RERUN_PLAN.md` §4 Decision 4 and §13.5 carry it on the process side, with the
-context the author asked for.
+censoring, and the grids were set by the range-finding run. **Laplace is the only item still open in
+this document**, and it is now a 720-run yes/no. `RERUN_PLAN.md` §4 Decision 4 and §13.5 carry it on
+the process side, with the context the author asked for.
 
 ## Sources
 

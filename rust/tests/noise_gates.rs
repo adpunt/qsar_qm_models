@@ -1519,3 +1519,160 @@ fn the_cli_defaults_are_the_settled_settings() {
         want_p
     );
 }
+
+/// The flags the job scripts will carry, derived from the condition's name so this
+/// test is driven by `noise_conditions.json` rather than by a list beside it.
+fn flags_for(name: &str) -> Vec<String> {
+    let v: Vec<&str> = match name {
+        "gaussian" => vec!["--noise-shape", "gaussian", "--noise-targeting", "uniform"],
+        "laplace" => vec!["--noise-shape", "laplace", "--noise-targeting", "uniform"],
+        "grouped_wider" => vec!["--noise-shape", "gaussian", "--noise-targeting", "grouped_wide"],
+        "grouped_shifted" => vec!["--noise-shape", "gaussian", "--noise-targeting", "grouped_shift"],
+        "censoring" => vec!["--noise-targeting", "censoring", "--censor-side", "upper"],
+        // The single-setting conditions deliberately pass NO parameter: the settled
+        // value is the default, and `the_cli_defaults_are_the_settled_settings`
+        // guards that. If it were passed here, this test could not catch a default
+        // that had drifted.
+        "student_t_nu5" => vec!["--noise-shape", "student_t", "--noise-targeting", "uniform"],
+        "outlier_p10" => vec!["--noise-shape", "gaussian", "--noise-targeting", "outlier"],
+        other => panic!(
+            "noise_conditions.json names a condition '{}' this test does not know how to \
+             run. Add its flags here — a condition the study runs but nothing exercises \
+             end to end is a condition that ships unverified",
+            other
+        ),
+    };
+    v.into_iter().map(str::to_string).collect()
+}
+
+/// SMOKE TEST — every condition the study runs, run for real, one after another.
+///
+/// The other tests in this file each prove one property of one path. This proves the
+/// settled set as a set: that every condition in `noise_conditions.json` actually
+/// executes end to end through the real binary, writes a manifest that names it,
+/// delivers what it was asked for, and leaves the held-out labels alone.
+///
+/// It exists because "the unit tests pass" and "the grid will run" are different
+/// claims, and this project has already queued jobs that ran five folds over nothing.
+#[test]
+fn smoke_every_settled_condition_runs_end_to_end() {
+    let spec = conditions_file();
+    let mut conditions = names_in(&spec, "stage_1_full_grid");
+    conditions.extend(names_in(&spec, "stage_2_depth_only"));
+    assert!(
+        conditions.len() >= 4,
+        "the settled set has shrunk to {} conditions — that is a design change, not a \
+         test failure, but it needs a deliberate look",
+        conditions.len()
+    );
+
+    let f = fixture_scaffold_split("smoke_settled");
+    let clean: Vec<f32> = {
+        let (_, _, test) = make_splits(1.0);
+        test.iter().map(|(_, y)| *y).collect()
+    };
+
+    for name in &conditions {
+        // Censoring is not dose-matched and its level is a fraction of labels clipped,
+        // so it runs on its own axis (NOISE_DESIGN.md §2).
+        let level = if name == "censoring" { "0.25" } else { "0.5" };
+        let mut args = flags_for(name);
+        args.push("--noise-level".to_string());
+        args.push(level.to_string());
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        let out = f.run(&borrowed);
+        assert!(
+            out.status.success(),
+            "condition '{}' does not run: {}",
+            name,
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        let manifest = f.manifest();
+        let noise_type = manifest["noise_type"].as_str().unwrap_or("").to_string();
+
+        // 1. the manifest names the condition that was asked for
+        let targeting = manifest["noise_targeting"].as_str().unwrap_or("");
+        let shape = manifest["noise_shape"].as_str().unwrap_or("");
+        let recognised = match name.as_str() {
+            "gaussian" => targeting == "uniform" && shape == "gaussian",
+            "laplace" => targeting == "uniform" && shape == "laplace",
+            "student_t_nu5" => targeting == "uniform" && shape == "student_t_nu5",
+            "grouped_wider" => targeting == "grouped_wider",
+            "grouped_shifted" => targeting == "grouped_shifted",
+            "outlier_p10" => targeting == "outlier",
+            "censoring" => targeting.starts_with("censoring"),
+            _ => false,
+        };
+        assert!(
+            recognised,
+            "condition '{}' ran but the manifest calls it shape '{}' / targeting '{}'. A \
+             results file that cannot be traced back to the condition that produced it is \
+             how the dose confound survived for the life of the project",
+            name, shape, targeting
+        );
+
+        // 2. it delivered something, and for the dose-matched types it delivered what
+        //    it was asked for. Censoring cannot be dose-matched, so it is only
+        //    required to have done something.
+        let delivered = manifest["delivered_dose_as_fraction_of_label_spread"]
+            .as_f64()
+            .unwrap_or(-1.0);
+        assert!(
+            delivered > 0.0,
+            "condition '{}' delivered no noise at all ({}). A condition that produces \
+             nothing must fail loudly, not quietly write a clean column",
+            name,
+            delivered
+        );
+        if name != "censoring" {
+            let target = 0.5;
+            // Generous, and deliberately so: this is a 400-molecule fixture, and
+            // grouped-shifted and heavy tails are imprecise per run for structural
+            // reasons (NOISE_DESIGN.md §2a rule 3). The tight cross-type check is
+            // gate 1, over many seeds, in `--self-test`.
+            assert!(
+                (delivered - target).abs() < 0.25 * target,
+                "condition '{}' asked for {} and delivered {}",
+                name,
+                target,
+                delivered
+            );
+        }
+
+        // 3. the held-out labels are untouched. This is the bug that invalidated
+        //    every QM9 number in the paper, so every condition is checked for it
+        //    rather than one representative.
+        let written = read_written(&f.dir.join(format!("test_{}.mmap", f.file_no)));
+        assert_eq!(written.len(), clean.len(), "condition '{}'", name);
+        for (i, (_, y_clean, _)) in written.iter().enumerate() {
+            assert_eq!(
+                *y_clean, clean[i],
+                "condition '{}' changed a held-out label at row {}",
+                name, i
+            );
+        }
+
+        // 4. the injected value reconstructs the noisy label exactly, per molecule
+        let prov = f.provenance();
+        let train: Vec<&ProvRow> = prov.iter().filter(|r| r.split == "train").collect();
+        assert!(!train.is_empty(), "condition '{}' wrote no provenance", name);
+        for r in &train {
+            assert!(
+                (r.y_clean + r.epsilon - r.y_noisy).abs() < 1e-3,
+                "condition '{}' row {}: {} + {} != {}",
+                name,
+                r.index,
+                r.y_clean,
+                r.epsilon,
+                r.y_noisy
+            );
+        }
+
+        println!(
+            "  smoke ok  {:<18} type={:<28} delivered={:.4}",
+            name, noise_type, delivered
+        );
+    }
+}

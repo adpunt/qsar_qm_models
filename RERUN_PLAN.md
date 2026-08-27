@@ -14,7 +14,9 @@ instruction.
 
 **What stands beside it.** `NOISE_DESIGN.md` — the sourced specification of the new noise scheme.
 Its core rule, that the noise level becomes the amount actually delivered, you approved on
-2026-08-21; **one item is open there and it is whether Laplace is queued** (§4 Decision 4, §13.5).
+2026-08-21. The condition set was **settled 2026-08-27** (§13.9) and now lives in
+`noise_conditions.json` with a gate on each side; the one item still open there is narrow — whether
+Laplace is queued at depth at all, now worth 720 runs rather than 4,680 (§4 Decision 4, §13.5).
 
 **Which document owns what.** This file owns what gets *run* and in what order — the staged design,
 the replicate counts, the representation set, the job scripts, the analysis, the decisions still
@@ -1909,12 +1911,14 @@ two have been applied and one is answered by measurement:
 | ~~**Uncertainty calibration**~~ ✅ **SETTLED 2026-08-26 by measurement — RAW as primary**, calibrated kept as a labelled secondary. See §3.4.4f. Set in the shared spec as `UNCERTAINTY_DEFAULTS['primary_column']`; the figure script must now name the column it reads (chat J) | Report calibrated or raw? | A single multiplier fitted after training so predicted uncertainties match observed errors. QM9 does it, the experimental side does not, and the figure script silently prefers the calibrated column where it exists. Because it is one positive multiplier it **cannot change the order** of molecules — so both uncertainty-tracking questions are unaffected either way. It moves coverage and calibration-error numbers only, which are exactly what it is fitted to fix | **Raw as primary**, calibrated as a clearly-labelled secondary if wanted. Reporting coverage after calibrating is close to circular. Either way the analysis must state which column it read — it does not today. Free: aligning down needs no re-run |
 | **Embedding standardisation** | Standardise the learned embeddings per feature, or leave them raw? | Separate from the storage fix in §2.8c, which is not optional. Without it, a kernel with one shared lengthscale across a thousand dimensions is dominated by whichever dimensions are widest | ✅ **SETTLED 2026-08-26 — standardise.** Approved as part of chat C's plan and implemented: `CONTINUOUS_REPS` in `process_and_train.py` now covers PDV and all three learned embeddings, fitted on the training split. It changes every embedding number, which is why it is recorded here rather than left implicit |
 
-**Decision 4 — sign off the noise design.**
-`NOISE_DESIGN.md` §7 still has Laplace open. My view: include it. It is one extra condition on
-QM9 only, and it is the only distribution actually *fitted* to real bioactivity error, so it buys
-a citation for a claim the paper wants to make. The other open item there — whether to keep a
-deliberately unrealistic label-keyed condition as a positive control — I now think is answered by
-censoring (§3.2), so it can be closed.
+**Decision 4 — sign off the noise design.** ✅ **Almost entirely closed 2026-08-27.**
+The condition set is settled (§13.9) and enforced by `noise_conditions.json` plus a gate on each
+side. The positive-control question is answered by censoring (§3.2). **What is left is one narrow
+yes/no: is Laplace queued at depth at all?** It is out of the full grid — measured indistinguishable
+from Gaussian on every model at both levels (largest 0.0058 R²) — so the question is no longer worth
+4,680 runs but **720**. My view is unchanged: include it. It is the only distribution actually
+*fitted* to real bioactivity error, so it buys a citation for a claim the paper wants to make, and
+at that price the citation is cheap. Saying no costs nothing but the citation.
 
 **Decision 5 — do the experimental datasets lead the Results?**
 They are the only data that has never been contaminated, they are where measurement error is
@@ -2250,10 +2254,24 @@ Two things in it need correcting before it is used again:
 One set of jobs produces both the robustness numbers and the uncertainty numbers, because the
 out-of-fold pass is the only added cost and the five scaffold folds are trained regardless.
 
-Scope, updated for the new noise types: 3 datasets × 7 models that emit a per-molecule
-uncertainty × 4 representations × 6 noise conditions × 6 levels × 5 folds. That is fewer levels
-than the built scripts assume (six instead of eleven), which is roughly a 45% saving before any
-other lever.
+Scope, updated for the settled condition set (§13.9): 3 datasets × 7 models that emit a per-molecule
+uncertainty × 4 representations × **4 noise conditions** × 6 levels × 5 folds. Two changes from what
+the built scripts assume, and they compound: six levels instead of eleven, and four conditions
+instead of six.
+
+⚠️ **The four are the full-grid four, and one of them behaves differently here.** Gaussian, both
+grouped conditions and censoring. Grouped-shifted matters more on the experimental datasets than
+anywhere, because it is the condition that mimics a laboratory offset and these are the datasets
+where that is a real mechanism rather than a simulation. The single-setting conditions —
+Student-t at ν = 5 and Outlier at p = 10% — belong to the depth stage, so they enter here only if
+the depth stage is run on the experimental side.
+
+**One thing to check before pricing this, not to assume.** §13.9 measured redundancy **on QM9**, one
+representation and three tree/linear models. The experimental datasets are smaller and noisier, and
+the uncertainty question is about which *molecules* are corrupted rather than how much accuracy is
+lost — §5.3 of `NOISE_DESIGN.md` notes a model can lose the same accuracy while being much better or
+worse at spotting corruption. So the condition set is settled for the **accuracy** grid; whoever
+builds the uncertainty runs should say explicitly whether they are inheriting it or testing it.
 
 ### 6.4 The levers, in the order they cost you least
 
@@ -2448,11 +2466,18 @@ behind it (§13.9). The file is **read by tests, not merely documented**, in thr
 | The Python injector | `scripts/test_noise_conditions.py` | every name resolves in `noiseInject.CONDITIONS` with the settled parameters |
 | The Rust injector | `rust/tests/noise_gates.rs` | the self-test covers every condition that runs, the dropped settings stay dropped, and the command-line defaults are the settled settings |
 | The QM9 job generator | `scripts/test_noise_conditions.py` | its full-grid set and its spelled-out `--nu` and `--outlier-p` match |
+| **Every condition, run for real** | `smoke_every_settled_condition_runs_end_to_end` in `rust/tests/noise_gates.rs` | each one executes end to end, the manifest names it, it delivers what it asked for, held-out labels are untouched, and the recorded noise reconstructs the label per molecule |
 
-All three were verified to fail: put a dropped setting back and the Python gate names it; change a
+All four were verified to fail: put a dropped setting back and the Python gate names it; change a
 settled parameter and the Rust gate names both the number and the number it should be; move a
 condition between stages and the generator check says which side is about to run and which is about
-to be believed.
+to be believed; add a condition nothing exercises and the smoke test refuses it by name, because a
+condition the study runs but nothing runs end to end is a condition that ships unverified.
+
+**The smoke test is the one that answers "will the grid actually run".** The others each prove one
+property of one path; that one runs all seven settled conditions in turn through the real binary.
+It exists because "the unit tests pass" and "the grid will run" are different claims, and this
+project has already queued jobs that ran five folds over nothing (§2.8d).
 
 **Why a file and not a note.** `scripts/noise_strategy_params.json` was a settings file that nothing
 read: it was never passed to the binary, so for the life of the project it silently meant nothing
@@ -2664,7 +2689,7 @@ Nothing here is started. Steps 1 and 2 are the only ones that need you.
 | # | Step | Blocked on |
 |---|---|---|
 | 1 | Settle the five open decisions in §4 (the sixth was withdrawn — already decided 2026-08-14) | you |
-| 2 | **One decision, not a document.** `NOISE_DESIGN.md` §7 is down to a single open item — whether Laplace is queued as a condition. The dose-matching rule was approved 2026-08-21; the positive-control question and the level grids were closed 2026-08-26. Context for the Laplace call is §4 Decision 4 and §13.5 | you |
+| 2 | **One decision, not a document.** `NOISE_DESIGN.md` §7 is down to a single open item — whether Laplace is queued **at depth**, now that it is out of the full grid on measurement (§13.9). 720 runs, and it buys a citation rather than a result. The dose-matching rule was approved 2026-08-21; the positive-control question and the level grids were closed 2026-08-26; the condition set was settled 2026-08-27. Context is §4 Decision 4 and §13.5 | you |
 | 3 | **Do NOT blanket-cancel the Gaussian-process jobs.** I previously said to kill job range 12822669–12822694. That was wrong: you submitted them deliberately on 2026-08-19 to settle a live question — *"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* Their zero-noise rows answer that question whatever happens to the noise scheme, because no noise is drawn there. **Let the zero-noise point land, harvest the kernel comparison, then cancel the rest.** Check state first: `sacct -j 12822669-12822694 --format=JobID,JobName%24,State,Elapsed` | you |
 | 4 | Archive the current results before anything overwrites them — they are the only record of what the paper claims today | — |
 | 5 | Delete and build the noise scheme in Rust (§5.1 items 1–4) | 2 |
@@ -4286,7 +4311,7 @@ were a document contradicting *itself*:
 | §1 of the design proposed level ladders that its own §6.4 superseded, and this plan restated the grids a third time | §6.4 owns every grid. §1 keeps the axis rule; §6.1 of this plan points |
 | §0.3 of this plan said the heavy-tailed types satisfy the skewed-noise request; §13.3 said plainly that they do not | §0.3 corrected — the request is met by censoring and grouped-shifted, both one-directional |
 | The design's opening said six state documents had been deleted; all six are on disk | Corrected, and it now points at §11. `REVISION_GUIDE.md` is the one that is genuinely gone |
-| §7 of the design had three open items; two were answerable | Positive-control question closed (censoring *is* the label-keyed condition, §3.2); grids closed (the range-finding run set them). **Laplace is the only open item left** |
+| §7 of the design had three open items; two were answerable | Positive-control question closed (censoring *is* the label-keyed condition, §3.2); grids closed (the range-finding run set them). **Laplace is the only open item left, and 2026-08-27 narrowed it** — it is out of the full grid on measurement, so the question is whether it runs at depth for the citation, at 720 runs (§13.9) |
 | The design's status said nothing was implemented | Chat A built the Rust half; the header and §6.5 now say what is built and what is not |
 | The design's delete list reached into the figure script | Moved out — §5.4 of this plan owns those, chat J executes them |
 | §6.5 of the design was a second, different ordering of the whole re-run | Retitled to the noise-scheme build order; §10 of this plan owns the run order |
@@ -4328,9 +4353,13 @@ resolved, zero BibTeX warnings**, against 92 undefined-citation warnings in the 
 The design has **four core zero-mean types** — Gaussian, Student-t, Grouped, Outlier — which is the
 four the author remembers. **Censoring** was then promoted from optional to essential by the
 range-finding run, because it does twelve times more damage than any difference between the four.
-**Laplace** was added as a sixth and is still open. So: four core, plus censoring confirmed, plus
-Laplace open. `NOISE_DESIGN.md` §2 lists all six in one table without that structure, which is why
-it reads as six.
+**Laplace** was added as a sixth. So: four core, plus censoring confirmed, plus Laplace.
+
+✅ **Superseded 2026-08-27 by measurement (§13.9).** The set is no longer described by this count at
+all — it is described by what runs where, in `noise_conditions.json`: four conditions at full grid
+(Gaussian, both grouped conditions, censoring), two at depth (one Student-t setting, one Outlier
+setting), Laplace optional at depth, four settings dropped and the skewed draw never built. The
+count drifted in the first place because nothing executable owned it; something does now.
 
 **2. Skewed distributions — this is a genuine gap and §0.3 currently overstates it.** The author
 asked on 2026-08-21 for *"a set of experiments — not for all combinations — for models that are
