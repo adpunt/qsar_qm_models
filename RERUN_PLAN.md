@@ -1588,7 +1588,7 @@ its level is already dimensionless and it has no dose to rescale.
 
 **✅ SETTLED 2026-08-27 by the author: one shared grid, no rescaling.**
 
-The three experimental grids become `0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5`, read as
+The three experimental grids become the QM9 level grid (`NOISE_DESIGN.md` §6.4), read as
 fractions of each fold's CLEAN TRAINING label spread — the grid QM9 already runs,
 so QM9 does not move. Each experiment runner multiplies the level by that spread
 before the dose reaches the injector, so `sigma` on the row stays the shared
