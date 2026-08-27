@@ -3280,7 +3280,11 @@ touches `paper.tex`.
 **Every item marked 🔴 TODO needs the author before the chat it sits in can finish.** A chat may
 start with open TODOs; it may not produce a launchable script with one still open.
 
-### 13.1 🔴 TODO — the run design: replicates, and what runs at full grid
+### 13.1 🟢 MOSTLY SETTLED — the run design: replicates, and what runs at full grid
+
+**Settled:** the staged shape (2026-08-26), ten replicates in stage 1 (2026-08-26), and
+which noise types run at full grid (2026-08-27, §13.9). **Still open below: items 2, 4, 5
+and 6** — and of those, only 5 can be answered right now.
 
 **This is the largest open decision and it gates the job scripts.** Both parts are the author's.
 
@@ -3348,10 +3352,12 @@ models and representations go deep in stage 2, which cannot be chosen until stag
 
 **Open, and each needs an answer:**
 
-1. 🔴 **How many replicates in the end?** The arithmetic says six is the floor if Q2 is to be
-   answerable and MIN_CELL_ITERS is to have headroom. Ten costs 67% more than six and buys
-   precision, not new answers. Author's note: *"I believe I was doing 10 and holding off replicates
-   for uncertainty."*
+1. ✅ **SETTLED 2026-08-26 — ten replicates in stage 1.** Kept here only because the arithmetic
+   is worth not re-deriving: six is the floor if Q2 is to be answerable and the five-replicate gate
+   is to have headroom; ten costs 67% more than six and buys precision, not new answers. Author's
+   note: *"I believe I was doing 10 and holding off replicates for uncertainty."* **This item read
+   🔴 open for a day after it was settled three lines above, and that contradiction cost a session:
+   chat D twice told the author the replicate count was the thing blocking launch.** It is not.
 2. 🔴 **Is one replicate for the uncertainty runs still right?** The uncertainty statistics are
    correlations over thousands of molecules, so their precision comes from the molecule count, not
    the replicate count — one replicate is defensible **provided** a permutation null is reported so
@@ -3381,10 +3387,25 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    screen, you choose. The generator already refuses `--stage 2` without `--models` and `--reps`
    rather than inventing a default, so nothing can run ahead of the decision.
 5. 🔴 **The QM9 reporting level** (§6.1). **Yours, and it can be asked now** — nothing is blocked on
-   it, but every table that reports accuracy at one level needs it, and it is the level §13.9 states
-   its verdict at. Standing suggestion 0.5. Chat G measured 0.5 and 1.5, which bracket every other
-   point on the grid and agree, so any choice from the grid leaves the settings verdict standing
-   (§13.9); the intermediate levels are bracketed rather than measured.
+   it, but every table that reports accuracy at one level needs it.
+
+   ⚠️ **The standing suggestion of 0.5 is withdrawn, 2026-08-27.** Chat D re-read the same twelve
+   replicates by COUNTING them rather than averaging, and 0.5 and 1.5 do not agree. Number of the
+   twelve replicates in which grouped-shifted is worse than Gaussian by more than 0.05 R²:
+
+   | | LightGBM | Random forest | Ridge |
+   |---|---|---|---|
+   | level 0.5 | 1 | 1 | 2 |
+   | level 1.5 | 8 | 9 | 11 |
+
+   **Reporting at 0.5 would hide the study's largest zero-mean result.** What the two levels DO agree
+   on is that the heavy-tailed and outlier conditions are indistinguishable from Gaussian, which is
+   what the condition set rested on, so §13.9's verdict stands unchanged.
+
+   **Recommendation: 1.0 or 1.5**, both real points on the grid. 1.5 is where the effect is clearest;
+   1.0 is the easier one to defend to a referee, being one unit of label spread. One caveat carried
+   from chat D: Ridge replicate 2 is a broken run, R² between −868 and −0.03 in every condition, and
+   it is excluded and named rather than averaged in.
 6. 🔴 **Do the uncertainty runs inherit the settled condition set, or test it?** **Yours to decide,
    and chat H is where it gets asked** — it queues the uncertainty runs, so it is the last point at
    which the question can be put before compute is spent. Chat F closed on 2026-08-27 and everything
