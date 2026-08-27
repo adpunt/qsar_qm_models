@@ -535,6 +535,11 @@ one. What the conversion above buys is narrower and still worth having: a level 
 of error that the noisiest real assay in this study actually carries between laboratories. That is a
 statement about the range being realistic for *some* endpoint, not about QM9.
 
+**hERG's label spread is now measured, not derived: 0.9143** over all 1,415 molecules
+(`results/parity_tests/_cache/chembl_herg_ki.csv`, pKi column), against 0.896 on the training fold
+after a scaffold split. One unit of real error on hERG is therefore **0.59 of the whole-set spread**
+and 0.60 of the training fold's — the two agree, so the hERG row of the table above is safe.
+
 ⚠️ **One number needs settling and it is a one-line check.** §6.4 of this document says one unit of
 real error is **0.76** of the Caco-2 label spread; `RERUN_PLAN.md` §2.12 says **0.79**. The two imply
 Caco-2 label spreads of 0.461 and 0.443. Nothing in either document records the spread directly —

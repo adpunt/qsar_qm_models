@@ -4115,7 +4115,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | **1.5.** It is measured, 1.0 is not; both roster models still fit there (R² 0.62 and 0.68); and it is where both the grouped-shifted result and the boosting-versus-forest reversal are visible. Report the clean column beside it | chat J, at figure-script rebuild |
+| 1 | **1.0**, the author's leaning and now the recommendation. At 1.5 two of four models on Caco-2 fall below zero, and the shared grid means one level must work on every dataset. At 1.0 everything is alive, QM9 already shows the reversal, and twice published hERG error is 1.21 | chat J, at figure-script rebuild |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ **CONFIRMED by the author 2026-08-27** and built, §2.8j. Not optional: there is no flag to run fewer than the five |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |
@@ -4169,9 +4169,49 @@ Individual pairs move a long way — the neural network on ECFP4 goes 3rd → 8t
 the PDV goes 10th → 7th → 2nd. One fit per cell, no replicates, so this is corroboration rather than
 a measurement — but no part of it involves ridge.
 
-**Recommendation: report at 1.5**, with the clean column beside it. It is measured, it is where the
-grouped-shifted result is visible, both models are still fitting, and the reversal is the finding
-rather than an artefact of a broken regime.
+**⚠️ That recommendation was made on QM9 alone and is WITHDRAWN — 2026-08-27. Report at 1.0.**
+
+The one-shared-grid decision (§2.12) means one reporting level now has to work on all four datasets,
+not just QM9. Checked on the experimental data, plain Gaussian, converting each dataset's raw log-unit
+grid onto the shared scale by its label spread:
+
+**Caco-2** (`results/validation_full/openadmet_caco2/`, ECFP4, one fit per cell, label spread ≈0.44
+so its 0.2 / 0.4 / 0.7 log-unit points are shared levels 0.5 / 1.0 / 1.5):
+
+| Model | clean | 0.5 | 1.0 | 1.5 |
+|---|---|---|---|---|
+| DNN | 0.565 | 0.462 | 0.375 | 0.303 |
+| Random forest | 0.481 | 0.442 | 0.363 | 0.111 |
+| XGBoost | 0.494 | 0.453 | 0.326 | **−0.129** |
+| Quantile forest | 0.469 | 0.395 | 0.256 | **−0.142** |
+
+**At level 1.5 two of the four models on Caco-2 are below zero — worse than predicting the mean.**
+A model that scores below zero carries no information, and a table of such numbers cannot be read.
+QM9 survives 1.5 because its clean R² is ~0.90 and its label spread is wide; Caco-2 has the narrowest
+spread in the study and it does not.
+
+**At level 1.0 every model on every dataset is alive**, and QM9 still shows the result: at 1.0 the
+best model per replicate is MLP 4 of 9, DNN 2, forest 2 — boosting does not win, which is the whole
+contrast. The reversal happens between 0.5 and 1.0, not at 1.5, so 1.0 is where it first shows rather
+than where it is largest.
+
+**What 1.0 costs, stated rather than hidden.** Grouped-shifted at level 1.0 is 9 of 9 replicates for
+both neural models and 1 of 9 for the random forest and XGBoost. At 1.5 it is 7–9 of 9 for all six.
+So at 1.0 the grouped-noise result is model-dependent. **That is a finding, not a weakness**: neural
+models are far more damaged by systematic family-level bias than trees are, and it is visible from
+level 1.0 upward. It has to be written that way rather than as a single pooled claim.
+
+**And 1.0 is the citable one.** `NOISE_DESIGN.md` §4c: twice the published assay error — the rule the
+experimental grids were already built on — is 1.21 on hERG and 1.58 on Caco-2. Level 1.0 sits just
+below the hERG figure. Level 1.5 is only reachable via Caco-2's inter-laboratory upper bound, on a
+dataset where 1.5 kills half the models.
+
+**Caveats on the experimental evidence above, none of which change the direction:** one fit per cell
+and no replicates (the experimental side is pinned to seed 42, §4 decision 3b); Caco-2 has only ECFP4
+and four models, 4 of 20 cells; and these runs used the retired noise strategies, of which `legacy`
+is the plain Gaussian one that carries over. logD is not shown because its old grid reached only 0.84
+of its label spread — under the shared grid it will reach 1.5, and this constraint disappears at the
+re-run.
 
 #### Item 2 — ✅ settled: inherit the four, add one more
 
