@@ -1170,6 +1170,23 @@ agent told to refute it**. 106 raised, **34 survived**, 72 refuted.
   error in `read_train_labels` now turns from silent truncation into an abort.
 ### 2.8i 🔴 THE ENVIRONMENT REBUILD — one threading runtime, and the roster completed (2026-08-27)
 
+⚠️ **Since 2026-08-27 this is a hard stop for every job in the study, not a warning.** The
+per-task guard runs the threading count, and it is now in all three job families (§13.2 chat D,
+D3). If the rebuilt environment still exposes more than one threading runtime, **every task
+refuses to start** — QM9, the experimental datasets and the uncertainty runs alike — and nothing
+runs at all.
+
+That is the intended behaviour: the alternative is the measured hang, where a task holds its
+whole allocation, writes no rows and no error, and looks like a queue problem. But it means one
+property of one environment gates the entire re-run, so **confirm it immediately after the
+rebuild rather than finding out on launch day**:
+
+```bash
+python scripts/check_environment.py --deep --validation ; echo "exit: $?"
+```
+
+Exit 0 is the only value that lets anything through.
+
 **This is the fix for §2.8e and §2.8e-bis at once, and for the two launch blockers the
 server audit reports.** Section 2.8e-bis showed there is no import order that saves both
 LightGBM and the Gaussian process. This removes the conflict instead of choosing a victim.
@@ -2027,6 +2044,78 @@ decision, not a repair:
    latent `randomized_smiles` routes — all listed in `verdicts.json`.
 
 `paper.tex` was not touched.
+
+### 2.14a ✅ FIXED 2026-08-27 — the shifted grouped condition delivered the wrong amount under every shape but Gaussian, in BOTH injectors
+
+Audit entry 34, the last of the noise-amount entries, now closed. It was written
+up as latent. It is not latent in the sense the entry assumed: both injectors were
+wrong, in opposite directions, and each was wrong on its own terms.
+
+Every other condition draws at the shape's own spread and multiplies by the scale
+the dose solver returned. The shifted grouped condition bypassed that in each
+implementation, and the two bypassed it differently:
+
+| | what it multiplied by | delivered, Gaussian | Laplace | Student-t nu=5 |
+|---|---|---|---|---|
+| Python, `noiseInject/core.py` | the target, on draws at the shape's own spread | target | 1.51x | 1.19x |
+| Rust, `rust/src/main.rs` | the solved scale, on draws divided down to unit variance | target | 0.71x | 0.77x |
+| both, now | the solved scale, on draws at the shape's own spread | target | target | target |
+
+A Gaussian draw has spread 1, so the three conventions coincide there, and the
+condition roster is Gaussian at every entry on both sides. That is the whole
+reason neither was ever seen. It is also why **no results need re-running**: every
+run in the study is Gaussian, where the old code and the new agree exactly, bit
+for bit — the seed stream is unchanged, because both halves already called the
+same draw and only the constant in front of it moved.
+
+The Rust half is worth stating plainly because the entry recorded the opposite.
+`rust/src/main.rs` says in its own comment that the two components are unit
+variance "hence G = 1 by construction", but the solver computes G generically as
+the shape's spread, so the two disagreed with each other inside one function. On
+a real run the delivered-dose gate would have caught it — it runs on all three
+splits at line 3323 — so the Rust side would have aborted rather than written a
+wrong number. The Python side had no such check and would have written one.
+
+**The Python injector now checks what it delivered**, the same way and against the
+same band: `dose_tolerance`, derived from the draw's own fourth moment and its
+effective size, is the twin of the Rust function and until now only the tests
+called it. Censoring is exempt — it is swept on the fraction clipped and has no
+target amount.
+
+**One thing for you, and it is a number rather than an opinion.** That band is a
+flat 15% for Student-t at nu <= 4, because the sample kurtosis it is otherwise
+derived from is itself meaningless there. Flat means it does not shrink with the
+dataset, and the experimental sets are two orders of magnitude smaller than QM9.
+Measured over 200 draws of `student_t_nu3` at k=0.5:
+
+| n | single draws outside the 15% band | worst |
+|---|---|---|
+| 1,415 (hERG) | 7.0% | 98% |
+| 4,000 | 2.5% | 47% |
+| 20,000 | 1.0% | 20% |
+| 133,885 (QM9) | 0.0% | 11% |
+
+So the check is safe where Rust runs it and will stop about one hERG
+`student_t_nu3` run in fourteen. Those runs did deliver twice what was asked, so
+refusing them is defensible — but whether a heavy-tailed draw on a small set
+should abort the run or be recorded and kept is your call, not a repair. Nothing
+is red today: all 342 checks in `crosscheck_injectors.py` pass on the real QM9
+column, all 28 Rust gates pass, and all 17 conditions agree between the reference
+and the pipeline.
+
+**What now compares the two.** `scripts/test_noise_arms.py` ends in an assertion
+rather than a table: it drives both injectors on the shifted grouped condition
+under Gaussian, Laplace and Student-t at nu=5 and requires that they deliver the
+target and agree with each other. Reaching the Rust one needed a way in, because
+the roster is Gaussian throughout — `--self-test --json` now runs a single named
+shape-and-targeting pair when both flags are given, and the roster path is
+untouched. No noise algebra changed for that.
+`rust/reference/noise_arms.rs` cannot take part at all: its arm enum fuses the
+shape and the targeting, so its shifted grouped arm has no shape to set.
+
+Three new cases in `scripts/check_fixes_fail_when_removed.py`, each confirmed red
+with its fix removed: the Python scale, the Python delivered-amount check, and
+the agreement between the two injectors.
 
 ---
 
@@ -3330,10 +3419,23 @@ about.
   file, `train_gauche_model` reads `params['kernel_name']` with **no fallback to `--kernel`**, so an
   entry without it raises `KeyError` rather than using the CLI kernel. The tuner pins it to the
   model's own kernel and never searches it.
-- **LightGBM segfaults if it fits after gpytorch in the same process** — exit 139, no traceback,
-  even at one thread and even with `KMP_DUPLICATE_LIB_OK` set. Same collision as §2.8e by a
-  different route. The checks fit the forest, SVM and boosting models before anything that goes
-  through torch, and the Gaussian process last of all.
+- **LightGBM segfaults if it is IMPORTED after torch and tensorflow and then fits with its default
+  thread count.** Exit 139, no traceback, nothing in the log. Measured 2026-08-27, three runs on
+  the same machine and environment:
+
+  | when lightgbm is imported | thread count at the fit | result |
+  |---|---|---|
+  | first, before the pipeline stack | its default | works |
+  | after `process_and_train` | `n_jobs=1` | works |
+  | after `process_and_train` | its default | **SEGFAULT** |
+
+  So it is the import order, not the fit order — reordering which model fits first does nothing.
+  Same collision as §2.8e by a different route. `scripts/tune_hyperparameters.py` and both checks
+  import lightgbm in their first lines, before anything else.
+
+  ⚠️ **`models.py` does `import lightgbm as lgb` INSIDE `train_lgb_model`**, so in the pipeline it
+  is always the late one. That is only survivable because the cluster environment was rebuilt to a
+  single threading runtime (§2.8i). Worth knowing before anyone runs a QM9 job on a laptop.
 
 #### 5.7b Local limits, all measured on this laptop 2026-08-27
 
@@ -4524,6 +4626,16 @@ uncertainty).
 | 2 | Do the uncertainty runs inherit the settled noise conditions, or test them? | G | D | nothing |
 | 3 | Is one replicate right for the uncertainty runs? | earlier, §13.1 item 2 | D | nothing |
 | 4 | Which models and representations go deep | earlier, §13.1 item 4 | D, E, G | nothing, and it is not askable yet |
+| 5 | **How many noise conditions the three experimental datasets run** | D, 2026-08-27 | — | the validation jobs, which are otherwise ready |
+
+**Item 5, added 2026-08-27.** Those jobs never stated their conditions, so they inherited the
+runner's own list of seven — one of which, `outlier_p05`, the author had already retired
+(§"The validation jobs were running a retired noise condition"). The generator now states them,
+and defaults to the full grid's four, which is what §6.3 specifies for these datasets. The three
+depth-only conditions are one flag away (`--include-depth-conditions`). **Four is a default, not
+a ruling** — it was never put to the author, because until today nobody knew the number was seven.
+Recommendation: keep four. The depth-only three belong to the depth run, and running them here
+costs 75% more for conditions §13.9 measured as indistinguishable from Gaussian on accuracy.
 
 **Item 1 was one question that changed answer, not two questions.** Chat G proposed 0.5 while
 measuring only accuracy differences between noise conditions, where 0.5 and 1.5 agree. Chat D
