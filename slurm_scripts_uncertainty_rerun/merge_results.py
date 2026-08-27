@@ -22,8 +22,8 @@ accumulated from per-file counts, never from the merged file.
 The expected cells are NOT restated here. The conditions come from the generated
 job scripts (falling back to noise_conditions.json), and the number of noise
 levels each (dataset, condition) should have is read out of the runner itself —
-it anchors them per dataset to published assay error and sweeps censoring on its
-own axis, so "11 levels everywhere" was wrong the moment the ladder changed.
+the grid is the runner's to set and it has already changed twice, so "11 levels
+everywhere" was wrong the moment the ladder did.
 
 Pass --parquet to write a partitioned Parquet dataset instead (much smaller and
 far faster to query); needs pyarrow.
@@ -80,10 +80,9 @@ def expected_level_counts(kirby_dir):
     """How many noise levels each (dataset, condition) should carry.
 
     Parsed out of the runner's source rather than copied, because the grids are
-    the runner's to set: it anchors them per dataset to published assay error
-    and sweeps censoring on a different axis entirely. Returns None if the
-    source cannot be read, and the coverage report then reports the level count
-    without judging it.
+    the runner's to set, and it sweeps censoring on a different axis entirely.
+    Returns None if the source cannot be read, and the coverage report then
+    reports the level count without judging it.
     """
     runner = Path(kirby_dir) / 'tests' / 'alternative_data_noise_robustness.py'
     if not runner.exists():

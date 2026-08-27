@@ -1412,11 +1412,11 @@ censoring, which sweeps the clipped fraction instead.
 **What it runs now.** The four conditions the main grid runs — `gaussian`, `grouped_wider`,
 `grouped_shifted`, `censoring` — plus `outlier_p10`, which is §13.1 item 2's recorded default. All
 five are read from `noise_conditions.json`, not restated. 3 datasets × 4 representations × 5
-conditions = **60 tasks per model script, 420 in total**, against 504 before. `--main-grid-only`
-inherits the four exactly (336 tasks); `--include-deep-conditions` runs all three depth-only
-conditions (588). Levels are not passed at all: the runner anchors them per dataset to published
-assay error, and `--sigmas` would replace that with one shared ladder, which is six different
-experiments across these three datasets.
+conditions = **60 tasks per model script, 420 in total**, against 504 before. `--include-deep-conditions` runs all three depth-only
+conditions instead of the one (588 tasks). Levels are not passed at all: the runner sweeps one shared grid in
+fractions of each dataset's own clean training label spread, the same seven QM9 runs (the author's
+decision of 2026-08-27, `KIRBy` `2df1a5c`), with censoring on its own clipped-fraction axis.
+**88,200 model fits.**
 
 **The five split cleanly across the two questions**, which is the thing to say in the Methods.
 `gaussian` and `grouped_shifted` give every molecule the same amount, so "does uncertainty find
@@ -4038,9 +4038,9 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    case, so it is where a difference is likeliest to show.
    **Cost: +20% on the uncertainty runs** (one condition on top of four).
    **Already in the code**: `slurm_scripts_uncertainty_rerun/generate_scripts.py:143`
-   (`ADDED_FOR_QUESTION_B = ['outlier_p10']`) and `:425` make it the default. `--main-grid-only`
-   inherits the four without it; `--include-deep-conditions` adds all three depth-only conditions,
-   two of which are flat by design and buy nothing here. **Yours to decide,
+   (`ADDED_FOR_QUESTION_B = ['outlier_p10']`) makes it the default, with no flag to turn it off —
+   the author confirmed it on 2026-08-27. `--include-deep-conditions` adds all three depth-only
+   conditions, two of which are flat by design and buy nothing here. **Yours to decide,
    and chat H is where it gets asked** — it queues the uncertainty runs, so it is the last point at
    which the question can be put before compute is spent. Chat F closed on 2026-08-27 and everything
    it found is in the tree, so nothing is waiting on it. The set was settled on chat G's
@@ -4116,7 +4116,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
 | 1 | **1.5.** It is measured, 1.0 is not; both roster models still fit there (R² 0.62 and 0.68); and it is where both the grouped-shifted result and the boosting-versus-forest reversal are visible. Report the clean column beside it | chat J, at figure-script rebuild |
-| 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ built 2026-08-27, §2.8j. `--main-grid-only` and `--include-deep-conditions` are the two other choices |
+| 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ **CONFIRMED by the author 2026-08-27** and built, §2.8j. Not optional: there is no flag to run fewer than the five |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |
 
@@ -4197,8 +4197,8 @@ a long way off — so it is where a difference is likeliest to show. **Cost: +20
 two depth-only conditions would have cost 60% more and bought nothing for this question, because
 both are even across molecules.
 
-Where it lives: `slurm_scripts_uncertainty_rerun/generate_scripts.py:143` and `:425`, as the
-default. `--main-grid-only` turns it off.
+Where it lives: `slurm_scripts_uncertainty_rerun/generate_scripts.py:143`, as the default. The
+author confirmed the five on 2026-08-27 and there is no flag to run fewer.
 
 #### Item 3 — ✅ settled: one replicate plus the permutation null
 

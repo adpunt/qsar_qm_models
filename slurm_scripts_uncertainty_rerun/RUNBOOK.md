@@ -35,10 +35,9 @@ only the patterned ones can answer question B at all.
 `outlier_p10` is depth-only on the main grid and is added here because it is the
 only one of the three depth-only conditions that is not flat by design, and the
 only concentrated-noise condition left in the study — which is the case the
-question was raised about. It costs 25% of the run. `--main-grid-only` drops back
-to the inherited four; `--include-deep-conditions` adds Student-t and Laplace as
-well, both flat, so they buy shape coverage for question A and nothing for
-question B. Whichever is run, the Methods must say which.
+question was raised about. It costs 25% of the run. `--include-deep-conditions` adds Student-t
+and Laplace as well, both flat, so they buy shape coverage for question A and
+nothing for question B.
 
 **Both grouped conditions are keyed to something a scaffold split holds out
 whole.** On held-out molecules the grouped pattern is flat, truthfully, and the
@@ -82,14 +81,16 @@ Their role is in question A and as the leakage check. Preflight section 4b print
 the per-(dataset, condition) count of distinct noise scales, so a condition that
 is flat where it should not be is visible before the queue is spent.
 
-**Scope:** 3 datasets × 7 models × 4 representations × 5 conditions × 6 noise
-levels (7 for censoring, which sweeps the clipped fraction instead) × 5 scaffold
-folds. 7 array scripts, 60 tasks each, **420 tasks**.
+**Scope:** 3 datasets × 7 models × 4 representations × 5 conditions × 7 noise
+levels × 5 scaffold folds. 7 array scripts, 60 tasks each, **420 tasks**,
+**88,200 model fits**.
 
-The levels are **not** passed on the command line. The runner anchors them per
-dataset to published assay error — logD 0.15, Caco-2 0.35, hERG 0.54 log units —
-and one shared ladder would be six different experiments across the three
-datasets. `--sigmas` would override that, so the job scripts do not use it.
+The levels are **not** passed on the command line. The runner sweeps one shared
+grid in fractions of each dataset's own clean training label spread — 0, 0.2,
+0.3, 0.5, 0.75, 1.0, 1.5, the same grid QM9 runs, so the same number means the
+same relative corruption everywhere (author's decision, 2026-08-27). Censoring
+runs the clipped fraction on its own axis. `--sigmas` would override both, so the
+job scripts do not use it.
 
 ---
 
@@ -481,11 +482,14 @@ training rows.
 
 ## Cost and the one thing to decide
 
-Each task is 6 noise levels (7 for censoring) × 5 scaffold folds × (1 + 5) fits
-= **180 model fits**, against 30 without cross-fitting. That is 45% less per task
-than the old eleven-level ladder, against 25% more tasks. The `--time` requests were set against that ladder and
-are left as they are: a task that finishes early costs nothing, one killed at the
-wall costs the whole task, and nothing here has been timed on the cluster.
+Each task is 7 noise levels × 5 scaffold folds × (1 + 5) fits = **210 model
+fits**, against 35 without cross-fitting. 420 tasks, **88,200 fits**.
+
+⚠️ **The `--time` requests are sized for a grid that no longer exists.** 36 h for
+QRF and 47 h for the rest were set when a task was 11 levels, i.e. 330 fits; it is
+210 now, so they are roughly 1.6× what the work needs. Nothing here has ever been
+timed on ARC, so they were a guess to begin with. The cost of leaving them is
+queue position, not compute — a long request waits longer for a slot.
 
 Two levers if the queue is tight, in order of how little they cost you:
 
@@ -494,12 +498,10 @@ Two levers if the queue is tight, in order of how little they cost you:
 | `--oof-outer-folds 1` | ~3x on each task | the spread of question A across folds. **Test-side data for all five folds is unaffected** — those folds are trained regardless |
 | `--oof-folds 3` | ~40% on each task | each molecule is scored by a model trained on 67% of the data rather than 80% |
 
-**`--main-grid-only` is the third lever, and it is the honest one**: it drops
-`outlier_p10` for 20% of the run, leaving two conditions that can answer question
-B instead of three. Dropping anything else is not a lever. `gaussian` and
-`grouped_shifted` are question A's; `grouped_wider` and `censoring` are the only
-other two that can answer question B. `--drop-conditions` exists, and the
-generator says out loud which question a drop removes.
+**Dropping a condition is not a lever.** All five carry a question: `gaussian`
+and `grouped_shifted` are question A's, `grouped_wider`, `censoring` and
+`outlier_p10` are the three that can answer question B. `--drop-conditions`
+exists, and the generator says out loud which question a drop removes.
 
 The five scaffold folds themselves are **not** a lever: they are trained whatever
 you do, because they produce the R² numbers. Saving their uncertainty is free.

@@ -216,14 +216,11 @@ def conditions_come_from_the_settled_file(_runner, gen):
         got = conditions_of(Path(tmp, scripts[0]).read_text())
         assert got == main_grid + added, (
             f'the default run is {got}, not {main_grid + added}')
-        scripts, _ = generate(tmp, '--main-grid-only')
-        got = conditions_of(Path(tmp, scripts[0]).read_text())
-        assert got == main_grid, f'--main-grid-only gave {got}'
         scripts, _ = generate(tmp, '--include-deep-conditions')
         got = conditions_of(Path(tmp, scripts[0]).read_text())
         assert got == main_grid + deep, got
     print(f'    default = the main grid {main_grid} plus {added}; '
-          f'--main-grid-only drops it, --include-deep-conditions runs all of {deep}')
+          f'--include-deep-conditions runs all of {deep}')
 
 
 def the_run_can_still_answer_both_questions(_runner, gen):  # noqa: D401

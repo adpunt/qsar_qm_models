@@ -65,15 +65,15 @@ is flat, truthfully, and the predicted-label control is degenerate for it. That
 is a Methods sentence, not a defect here. Censoring and outlier are keyed to the
 label and to the draw, so neither is affected.
 
---main-grid-only drops back to the inherited four; --include-deep-conditions
-adds Student-t and Laplace as well, both flat by design. Whichever is run, the
-Methods must say which.
+--include-deep-conditions adds Student-t and Laplace as well, both flat by
+design, so they buy shape coverage for question A and nothing for question B.
 
-The levels are NOT passed. The runner anchors them per dataset to published
-assay error (logD 0.15, Caco-2 0.35, hERG 0.54 log units) and sweeps censoring
-on its own axis -- the fraction of labels clipped -- because it has no variance
-parameter and cannot be dose-matched. Passing --sigmas would override both with
-one shared ladder, which is six different experiments on these three datasets.
+The levels are NOT passed. The runner sweeps one shared grid in fractions of
+each dataset's own clean training label spread -- 0, 0.2, 0.3, 0.5, 0.75, 1.0,
+1.5, the same grid QM9 runs, so the same number means the same relative
+corruption everywhere (author's decision, 2026-08-27). Censoring runs on its own
+axis, the fraction of labels clipped, because it has no variance parameter and
+cannot be dose-matched. Passing --sigmas would override both.
 
 DESIGN NOTES
 ------------
@@ -390,10 +390,6 @@ def main():
                          f'experimental datasets rather than inheriting it (RERUN_PLAN.md 13.1 '
                          f'item 6). The two it adds are flat by design, so they buy shape '
                          f'coverage for question A and nothing for question B.')
-    ap.add_argument('--main-grid-only', action='store_true',
-                    help=f'Inherit the main grid\'s four conditions exactly, without '
-                         f'{", ".join(ADDED_FOR_QUESTION_B)}. Saves 20% of the run and leaves '
-                         f'two conditions that can answer question B instead of three.')
     ap.add_argument('--drop-conditions', nargs='+', default=[], choices=KNOWN_CONDITIONS,
                     help='Conditions to leave out. gaussian is the one condition that spreads '
                          'the noise evenly across molecules, which is what makes it question '
@@ -422,9 +418,6 @@ def main():
     elif args.include_deep_conditions:
         conditions = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
         source = f'the main grid plus every depth-only condition ({NOISE_CONDITIONS_FILE.name})'
-    elif args.main_grid_only:
-        conditions = list(MAIN_GRID_CONDITIONS)
-        source = f"the main grid's four, inherited ({NOISE_CONDITIONS_FILE.name})"
     else:
         conditions = MAIN_GRID_CONDITIONS + ADDED_FOR_QUESTION_B
         source = (f"the main grid's four plus {', '.join(ADDED_FOR_QUESTION_B)} "
