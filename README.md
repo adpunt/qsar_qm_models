@@ -116,7 +116,9 @@ current Rust binary.
   the experimental datasets).
 - `--noise-shape`: `gaussian`, `student_t` or `laplace`.
 - `--noise-targeting`: `uniform`, `grouped_wide`, `grouped_shift`, `outlier` or
-  `censoring`.
+  `censoring`. The two grouped ones also take the longer spellings
+  `grouped_wider` and `grouped_shifted`, which is what every results row,
+  manifest and figure calls them.
 - Condition parameters: `--nu`, `--noise-lambda`, `--group-fraction`,
   `--group-variance-share`, `--outlier-p`, `--censor-side`. Their defaults are
   the settled values and are sourced in `NOISE_DESIGN.md`.
@@ -195,6 +197,7 @@ cd rust && cargo test --release
 | `scripts/test_noise_conditions.py` | the settled condition set binds the Python injector too |
 | `scripts/test_uncertainty_job_scripts.py` | every uncertainty job's command line, through the runner's own parser |
 | `scripts/test_validation_job_scripts.py` | every validation job's command line, its conditions, its three guards |
+| `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
 | `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
 | `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
 | `scripts/check_environment.py` | this interpreter can build every model the job asks for |

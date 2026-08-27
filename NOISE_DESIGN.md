@@ -1669,7 +1669,7 @@ scheme would otherwise run silently under the new one, where the level means som
 | `--noise-level` | the dose to deliver; for censoring, the fraction of labels clipped | 0 |
 | `--dose-units` | `spread` (a fraction of the clean training label SD) or `label` (the label's own units) | `spread` |
 | `--noise-shape` | `gaussian`, `student_t`, `laplace` | `gaussian` |
-| `--noise-targeting` | `uniform`, `grouped_wide`, `grouped_shift`, `outlier`, `censoring` | `uniform` |
+| `--noise-targeting` | `uniform`, `grouped_wide` (or `grouped_wider`), `grouped_shift` (or `grouped_shifted`), `outlier`, `censoring` | `uniform` |
 | `--nu` | degrees of freedom; **refused at or below 2** | 5 |
 | `--lambda` | how many times wider the affected molecules' error is | 3 (Avdeef 2019) |
 | `--group-fraction` | affected **molecule** fraction for `grouped_wide` | 0.2 (a stated choice) |
@@ -1679,6 +1679,32 @@ scheme would otherwise run silently under the new one, where the level means som
 | `--scaffold-file` | canonical SMILES → scaffold group id, written by `process_and_train.py` | `scaffold_groups_{file_no}.json` |
 | `--noise-manifest` / `--noise-provenance` | where the provenance goes | `noise_{manifest,provenance}_{file_no}.{json,csv}` |
 | `--self-test <labels>` | run the gates on a labels file and exit non-zero on failure. No pipeline needed | — |
+
+### 6.2b ✅ What a condition is called — 2026-08-27
+
+One rule, and both injectors follow it: the targeting, then the contaminated
+fraction where the targeting has one, then the shape — with the shape left off
+when it is Gaussian, so the settled conditions keep the short names they have
+always had. Uniform targeting is named by its shape alone. Censoring is named by
+the percentage clipped, which is its level.
+
+    gaussian   student_t_nu5   laplace
+    grouped_wider   grouped_wider_laplace   grouped_wider_student_t_nu5
+    grouped_shifted   grouped_shifted_laplace
+    outlier_p01   outlier_p05   outlier_p05_laplace
+    censoring_25   censoring_lower_25
+
+The fraction is in the name because it is nowhere else. `RESULT_COLUMNS` carries
+`noise_type`, `level_units` and `delivered_dose` and has no column for it, so a
+name that drops it loses it from the results. The Python injector used to return
+`outlier/laplace` for 1%, 5% and 10% alike — a string this pipeline never
+writes, and the same string for three different conditions.
+
+The expected name for each condition is written down once, in
+`condition_names.json`, and `scripts/test_condition_names.py` checks both
+injectors against it. The QM9 side goes through this binary's `--self-test
+--json` mode, so it reads what the executable emits rather than a restatement of
+what it should emit.
 
 **Two files come out of every run, and neither existed before.**
 
