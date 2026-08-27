@@ -289,6 +289,13 @@ const TYPES: &[(&str, &[&str])] = &[
     ("uniform laplace", &["--noise-targeting", "uniform", "--noise-shape", "laplace"]),
     ("grouped_wide", &["--noise-targeting", "grouped_wide", "--noise-shape", "gaussian"]),
     ("grouped_shift", &["--noise-targeting", "grouped_shift", "--noise-shape", "gaussian"]),
+    // The shifted grouped type under a shape whose spread is not 1. Every other entry
+    // here is Gaussian, and so is the condition roster, which is why this type could
+    // deliver the target divided by that spread for the life of the project without a
+    // gate seeing it (RERUN_PLAN.md 2.14a). These two carry it through every gate the
+    // table drives, the validation split's inherited group offsets included.
+    ("grouped_shift laplace", &["--noise-targeting", "grouped_shift", "--noise-shape", "laplace"]),
+    ("grouped_shift student_t", &["--noise-targeting", "grouped_shift", "--noise-shape", "student_t", "--nu", "5"]),
     ("outlier", &["--noise-targeting", "outlier", "--noise-shape", "gaussian"]),
     ("censoring", &["--noise-targeting", "censoring", "--noise-shape", "gaussian"]),
 ];

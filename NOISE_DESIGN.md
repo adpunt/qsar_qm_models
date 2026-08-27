@@ -196,10 +196,23 @@ Written 2026-08-26 by chat B, closing the 🔴 TODO left for chats A and B in `R
 
 Every group *g* receives a constant offset; every molecule receives its own error on top.
 
-> `ε_i = √ρ · τ · b_{g(i)}  +  √(1 − ρ) · τ · e_i`,   with `b_g`, `e_i` unit draws from the shape
+> `ε_i = √ρ · s · b_{g(i)}  +  √(1 − ρ) · s · e_i`,   with `b_g`, `e_i` drawn from the shape at
+> **its own spread**, and `s = τ / G` the scale the dose solver returned
 
-The two variances sum to `τ²` by construction, so this condition is dose-matched to the same `τ`
-as the other four **without a solver step**. `ρ` is the share of total variance carried by the
+The two variances sum to `τ²`, so this condition is dose-matched to the same `τ` as the other four.
+It takes **the same solver step as every other condition** — `G` is the root-mean-square of the
+scale map times the shape's unit spread, which for this condition is 1 × that spread.
+
+> ⚠️ **This paragraph used to say `τ` in place of `s`, and called the condition dose-matched
+> "without a solver step", describing `b_g` and `e_i` only as "unit draws from the shape".** That is
+> ambiguous between a draw at unit variance and a draw at the shape's own scale parameter, and the
+> two implementations resolved it in opposite directions: Python multiplied shape-scale draws by
+> `τ` and delivered `τ` × the spread, Rust multiplied unit-variance draws by `s` and delivered
+> `τ` ÷ the spread. A Gaussian draw has spread 1, so both were exactly right wherever anyone
+> looked. Corrected 2026-08-27 in the text and in both implementations; what ran is unaffected,
+> because every condition in the roster is Gaussian (`RERUN_PLAN.md` §2.14a).
+
+`ρ` is the share of total variance carried by the
 group-level term, and it comes from the source rather than from a judgement: **Bentz et al. (2013)
 Table 7** gives laboratory 62%, laboratory × experiment 20%, residual error 10%, cell line 8%.
 
@@ -995,6 +1008,59 @@ All six noise types implemented in Python and run against the real QM9 labels (1
 `data/QM9/raw/gdb9.sdf.csv`). Script: `scripts/test_noise_arms.py`.
 
 Every noise type landed within **±1.5%** of the requested dose at k = 0.2 and k = 0.5.
+
+### 5.1c ✅ The shape is a second axis for grouped-shifted, and both injectors now deliver on it
+
+Added 2026-08-27. Everything in 5.1 and 5.1b was run with the roster, and every roster entry pairs
+its targeting with a **Gaussian** shape. A Gaussian draw has spread 1, so the ambiguity in §2a
+above cost nothing anywhere it was measured, and neither cross-check could see it — the reference
+implementation cannot express the combination at all, because it fuses the shape and the targeting
+into one type, leaving its shifted grouped entry with no shape to set.
+
+Measured on 4,000 labels in 200 groups, target 0.6427 (k = 0.5), 20 seeds each side:
+
+| Shape | spread of one draw | Python, before | Rust, before | Python, now | Rust, now |
+|---|---|---|---|---|---|
+| Gaussian | 1 | +0.37% | −0.93% | +0.37% | −0.93% |
+| Laplace | √2 | **+151%** | **−29%** | −0.44% | −0.27% |
+| Student-t ν=5 | √(5/3) | **+119%** | **−23%** | −0.17% | +0.67% |
+
+Bands derived per condition from the draw, 2.1–3.7%. The two implementations were wrong in
+opposite directions and each disagreed with itself: the Rust comment claimed its unit dose was 1
+by construction while its solver computed the shape's spread.
+
+**What checks it now.** `scripts/test_noise_arms.py` ends in an assertion rather than a table: it
+drives **both** injectors on the shifted grouped condition under Gaussian, Laplace and Student-t
+ν=5 and requires that each delivers the target and that the two agree. Reaching the Rust one needed
+a way past the roster — `--self-test --json` accepts a single named shape-and-targeting pair when
+both flags are given; the roster path is untouched and no noise algebra changed for it.
+`tests/test_noiseinject.py` carries the same axis on the Python side, and the shifted grouped type
+under Laplace and Student-t is now in the Rust gate table, which puts it through seven gates
+including the one covering the validation split's inherited group offsets. Removing the fix turns
+six of those gates red; nothing covered that path before.
+
+### 5.1d ✅ The Python injector checks what it delivered — and what that costs
+
+Added 2026-08-27. `rust/src/main.rs` has asserted the delivered amount against `dose_tolerance` on
+every split since it was written; the Python injector recorded the same number and never read it
+back, which is how the error above survived. It now runs the same check against the same function.
+Censoring is exempt: it is swept on the fraction clipped and has no target amount.
+
+That band is **three standard errors**, so roughly three legitimate draws in a thousand fall
+outside it by chance — on either implementation, at any size. Measured over the study's real
+conditions, its real level grid and the real labels and Murcko scaffold groups, at one training
+fold's size (120 seeds × 6 levels = 720 draws per cell):
+
+| Dataset | n train/fold | gaussian | student_t_nu5 | laplace | grouped_wider | grouped_shifted | outlier_p05 |
+|---|---|---|---|---|---|---|---|
+| OpenADMET-LogD | 3,628 | 0 | 0 | 0 | 0 | 0 | 0 |
+| OpenADMET-Caco2_Efflux | 1,556 | 0 | 6 | 0 | 0 | 12 | 0 |
+| ChEMBL-hERG-Ki | 1,019 | 0 | 6 | 0 | 0 | 6 | 0 |
+
+So it is silent on the largest set and trips on about 1% of draws for the two most awkward
+conditions on the two smaller ones. `student_t_nu3` is not in the experimental condition list;
+at nu ≤ 4 the band is a flat 15% that does not shrink with n, and 200 draws put it outside that
+band 7.0% of the time at 1,415 molecules against 0.0% at QM9's 133,885.
 
 ### 5.1b ✅ A Rust reference implementation exists, builds, and agrees with Python
 
