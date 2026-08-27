@@ -4561,7 +4561,41 @@ as their evidence.
 
 ---
 
-### 13.13 Censoring — what it costs, and the caveat that was withdrawn
+### 13.13 ✅ SETTLED 2026-08-27 — censoring runs on about five pairs, QM9 only
+
+**The author's instruction:** *"A SUPER SMALL set of model/rep pairs to test this with on QM9. Like
+5. Just to see the individual affects no need to run the full suite."*
+
+**Censoring comes off the full grid.** It runs on **about five model-and-representation pairs, on
+QM9, at all seven of its levels, 10 replicates.**
+
+| | Runs |
+|---|---|
+| Censoring as a full-grid condition (78 pairs) | 5,460 |
+| **Censoring on 5 pairs** | **350** |
+| Saved | 5,110 |
+
+**Which five pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection.
+
+**No code change is needed.** The generator already takes the flags:
+`--conditions censoring --models <...> --reps <...>`.
+
+**Two things this changes elsewhere, both small.**
+
+- `noise_conditions.json` lists censoring under the full-grid group. Move it, or add a note there,
+  so the file states what actually runs. It is read by tests on three sides, so the move has to be
+  made in the file rather than only in prose.
+- §13.1 item 3's arithmetic prices the main grid at four conditions × 7 levels. With censoring off
+  the full grid that becomes three conditions × 7 levels plus 350, so the main grid drops from
+  21,840 runs to **16,730**.
+
+**What the paper has to say, because this is a reduced design and reduced designs get asked about:**
+censoring was run on a named subset to measure the size of its effect, not to compare models and
+representations under it. Any claim about *which* model resists censoring best rests on those five
+pairs and must say so. The claim the reduced run can still carry is the one that matters — how much
+damage censoring does compared with ordinary noise at the same delivered amount.
+
+### 13.13a Censoring — what it costs, and the caveat that was withdrawn
 
 #### It is not a second study. It is one condition of four, at the same price as the others.
 
