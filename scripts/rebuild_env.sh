@@ -30,9 +30,10 @@
 #SBATCH --account=stat-cadd
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --partition=short
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=03:00:00
+#SBATCH --time=01:30:00
 #SBATCH --output=%x_%j.out
 
 # No `set -e`: every check must run even if an earlier one fails. One paste,
@@ -59,14 +60,14 @@ if [ -z "${SLURM_JOB_ID:-}" ] && [ "${REBUILD_NO_SRUN:-0}" != "1" ] \
    && command -v srun &>/dev/null; then
     echo "Not inside an allocation, and the conda solve needs more memory than a"
     echo "login node allows. Re-running this script inside one:"
-    echo "  --partition=${REBUILD_PARTITION:-short} --cpus-per-task=4 --mem=32G --time=02:00:00"
+    echo "  --partition=${REBUILD_PARTITION:-short} --cpus-per-task=4 --mem=32G --time=01:30:00"
     echo "If it sits here for a while that is the wait for a node. Leave it."
     echo "To pick your own allocation instead:"
     echo "  REBUILD_NO_SRUN=1 bash scripts/rebuild_env.sh   (inside your own srun)"
     echo ""
     exec srun --account="${REBUILD_ACCOUNT:-stat-cadd}" \
               --partition="${REBUILD_PARTITION:-short}" --nodes=1 --ntasks=1 \
-              --cpus-per-task=4 --mem=32G --time=02:00:00 \
+              --cpus-per-task=4 --mem=32G --time=01:30:00 \
               --job-name=rebuild_env bash "$0" "$@"
 fi
 
@@ -130,7 +131,7 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
     say ""
     say "  WARNING: not inside a Slurm allocation, so this is the login node. It"
     say "  will work, but it is slow and shares memory with everyone. Better:"
-    say "    srun --account=stat-cadd --cpus-per-task=8 --mem=32G --time=03:00:00 --pty bash"
+    say "    srun --account=stat-cadd --partition=short --cpus-per-task=4 --mem=32G --time=01:30:00 --pty bash"
     say "  then rerun this script."
 fi
 
