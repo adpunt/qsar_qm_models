@@ -220,8 +220,10 @@ Two scripts in `scripts/` match `test_*.py` but are **not** part of this suite,
 and the loop above will run them:
 
 - `scripts/test_noise_arms.py` — design exploration from 2026-08-24, written
-  against five *proposed* noise conditions before the set was settled. It is
-  evidence behind `NOISE_DESIGN.md`, not a guard, and it needs the raw QM9 CSV.
+  against five *proposed* noise conditions before the set was settled, and using
+  vocabulary the project has since dropped. It is evidence behind
+  `NOISE_DESIGN.md`, not a guard. It passes, and it needs the raw QM9 CSV
+  (`data/QM9/raw/gdb9.sdf.csv`), so it fails on a checkout without the data.
 - `scripts/test_hybrid.py` — a manual check for the hybrid-representation
   feature, which is not part of the study's roster.
 
