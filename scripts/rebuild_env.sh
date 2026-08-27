@@ -52,15 +52,21 @@ cd "$REPO" || { echo "cannot cd to $REPO"; exit 1; }
 # part way through "Collecting package metadata", with no message but "Killed".
 # That is the per-user memory cap, not the recipe. Rather than print advice and
 # leave it to a second paste, put itself in an allocation.
+# The ask is deliberately small so it schedules quickly: the solve needs memory,
+# not cores or hours, and a big request sits in the queue for no benefit. The
+# short partition is the one that turns over fastest on this cluster.
 if [ -z "${SLURM_JOB_ID:-}" ] && [ "${REBUILD_NO_SRUN:-0}" != "1" ] \
    && command -v srun &>/dev/null; then
     echo "Not inside an allocation, and the conda solve needs more memory than a"
     echo "login node allows. Re-running this script inside one:"
-    echo "  srun --account=${REBUILD_ACCOUNT:-stat-cadd} --cpus-per-task=8 --mem=48G --time=03:00:00"
+    echo "  --partition=${REBUILD_PARTITION:-short} --cpus-per-task=4 --mem=32G --time=02:00:00"
     echo "If it sits here for a while that is the wait for a node. Leave it."
+    echo "To pick your own allocation instead:"
+    echo "  REBUILD_NO_SRUN=1 bash scripts/rebuild_env.sh   (inside your own srun)"
     echo ""
-    exec srun --account="${REBUILD_ACCOUNT:-stat-cadd}" --nodes=1 --ntasks=1 \
-              --cpus-per-task=8 --mem=48G --time=03:00:00 \
+    exec srun --account="${REBUILD_ACCOUNT:-stat-cadd}" \
+              --partition="${REBUILD_PARTITION:-short}" --nodes=1 --ntasks=1 \
+              --cpus-per-task=4 --mem=32G --time=02:00:00 \
               --job-name=rebuild_env bash "$0" "$@"
 fi
 
