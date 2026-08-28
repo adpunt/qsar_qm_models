@@ -1499,6 +1499,48 @@ The three-way behaviour was tested against a stubbed conda before this went back
 a failed build leaves the old environment in place, a successful one keeps it at `.old` and says
 how to delete it, and an activation that lands elsewhere refuses to install anything.
 
+#### The login node cannot answer this question — 2026-08-28
+
+Running `check_environment.py` on an ARC login node produced `---` for `lgb`, `ngboost`, `qrf`
+and `rf`: *"failed to map segment from shared object"* and a bare `MemoryError` out of
+`sklearn`'s import. **That is the per-user address-space cap, not a verdict on any package** —
+the same cap that killed the conda solve and that made an earlier audit report sixteen phantom
+failures (§2.8d). The `---` marker exists to say exactly that, and it did.
+
+Then the checker **crashed**: `MemoryError()` carries no message, so `str(e).splitlines()[0]`
+raised `IndexError` and took the run down with a traceback at the moment it had something useful
+to report. Fixed — `first_line()` falls back to the exception type, a bare `MemoryError` is
+classified as a resource failure by type rather than by matching its (absent) text, and the
+reporting helper can no longer be the thing that fails.
+
+**So the roster can only be checked inside an allocation**, which is where it will run anyway:
+
+```bash
+srun --account=stat-cadd --partition=short --cpus-per-task=4 --mem=32G --time=01:00:00 --pty bash
+cd /data/stat-cadd/scat9264/qsar_qm_models && . ./setup.sh
+python scripts/check_environment.py --deep --validation ; echo "exit: $?"
+bash scripts/server_audit.sh
+```
+
+#### `pip-constraints.txt` was pinning things it had no business pinning — 2026-08-28
+
+Installing `torch-geometric` with the constraint file active **downgraded** `requests`
+2.34.2 → 2.32.3 and `typing-extensions` → 4.12.2, leaving six packages declaring conflicts.
+A constraint is not a floor, it is an exact requirement, and pip enforces it downwards too.
+Ten pins removed — `requests`, `typing-extensions`, `tqdm`, `sympy`, `networkx`, `diskcache`,
+`matplotlib`, `seaborn`, `joblib`, `pandas`. None of them is compiled, so none could carry a
+threading runtime; the file keeps the eighteen pins that are load-bearing.
+
+⚠️ **`botorch 0.16.1` declares `gpytorch>=1.14.2` against the installed 1.14.** It is a metadata
+conflict and not a runtime one: `gauche` and `gauche_rbf` both constructed in the same run.
+Neither pairing is the recipe's (`gpytorch==1.11`, `botorch==0.10.0`), which is another way of
+saying the restored environment is not reproducible from `env.yml`.
+
+⚠️ **`torchsort` is absent**, so the four `conformal*` labels fail to build. They are in
+`EXCLUDED_MODELS` and nothing in the study needs them, but the guard reports them. It must be
+compiled against the installed torch, inside an allocation:
+`python -m pip install --no-cache-dir --no-binary :all: --no-build-isolation "torchsort==0.1.10"`.
+
 #### `results/` is out of git — 2026-08-28
 
 515 generated files were tracked, the cluster has its own copies at the same paths, and every
@@ -4360,6 +4402,149 @@ the two is safe to assert for a bagged model.
 
 ---
 
+### 5.5g ✅ CONNECTED 2026-08-28 — the split reaches both pipelines, and what that cost
+
+Everything in §5.5b to §5.5f was built and **connected to nothing**: nothing imported the shared
+module, no flag or roster entry could reach the noise head, neither new model appeared in a job
+script, and the laboratory runner wrote no component columns at all. All four are now wired. The
+run commands are in §8.
+
+**What is connected, and where.**
+
+| What | QM9 (`models/models.py`) | Laboratory (`KIRBy/tests/alternative_data_noise_robustness.py`) |
+|---|---|---|
+| the shared definition | imported; five local definitions deleted from `scripts/utils.py` | imported, found and refused exactly the way the parameter spec is |
+| both forests | law of total variance over already-fitted trees, no refit | same, through one `_tree_split` router |
+| NGBoost | data half per molecule, model half **absent** | same |
+| Gaussian process | data half is the likelihood noise, one number per fit | same |
+| the noise-predicting GP | roster entry `heteroscedastic_gp`, plus an out-of-fold pass it did not have | `GP-Hetero` |
+| the variational noise head | `--heteroscedastic-vbll`, rows named `_hetero` | `VBLL-Full-Hetero`, `MLP-VBLL-Full-Hetero` |
+| the two component columns | already there; now fed from the shared module | **new** — this file wrote one column and no split |
+| whether each component varies per molecule | **new column on every row** | **new column on every row** |
+
+**The quantile gap stays.** The quantile forest's reported `uncertainty` column is still half the
+16-to-84 gap, so every existing analysis reads what it read before. What changes is that the gap is
+no longer *called* the data-noise term: the split's total and that column are two different
+estimates of the same quantity and are now reported side by side. The code says so at the site.
+
+**🔴 THREE SUPPORT-TABLE CORRECTIONS, AND THEY ARE FINDINGS.** `assert_matches_support` runs before
+every write. Wiring it in immediately stopped three model families, because the table said what the
+plan wanted and the code writes something else. Corrected to what the code writes:
+
+- **NGBoost has no model-uncertainty term at all.** One fit, so there is no ensemble to disagree
+  with itself. `decompose_seed_ensemble` gives it one at the price of a fit per seed and NGBoost is
+  already the slowest tree model in the roster. **Not paid for — an open decision, below.**
+- **The two plain Bayesian networks have no data-noise term at all.** They predict a mean and
+  nothing else. That is Kendall & Gal's epistemic-only model, and it is why §5.5b's third part —
+  the variance output on the four Bayesian network families — matters: two of the four still have
+  none. **The two variational ones now do.**
+- **The forests have both terms per molecule, and only because `min_samples_leaf` is 5** (§5.5c). At
+  a leaf of one the data half is identically zero and the split refuses rather than writing zeros.
+
+**Four defects found and fixed while wiring, none of them in the plan before today.**
+
+1. **The graph Gaussian process was handed a predictive standard deviation where a latent variance
+   belongs** — §5.5a point 4, the one live defect of the four. Two errors in one call: the square
+   root made the model half the FOURTH ROOT of the quantity wanted, and the noise was already inside
+   it, so it was counted twice.
+2. **The two neural trainers had already drifted.** The DNN path reported the two components added
+   as its total; the MLP path reported the spread over the passes alone. So the two variational
+   models published different quantities under one heading — §5.5a's "second route into questions 4,
+   5 and 6", now closed. One routine, `sample_network_split`, and both call it.
+3. **The Gaussian process's out-of-fold rows carried the latent spread while its test rows carried
+   the predictive spread.** One column, two quantities, depending which split a row came from.
+4. **The components were being scaled by the calibration temperature as if they were standard
+   deviations.** They are variances, the operation is different, and it left the test rows on a
+   different scale from the out-of-fold rows where no temperature is applied at all. Components are
+   now written RAW, which is what §3.4.4f settled the paper reports; the calibrated total and the
+   temperature travel in their own columns.
+
+**The out-of-fold rows carry the split for the first time.** It took a keyword no caller passed, so
+every `train_oof` row this project has written had two blank component columns — on the one split
+where the labels really are corrupted, which is the only split that can answer whether the
+uncertainty finds them (§3.1c). The guard is told which inner fit scored each molecule, because a
+component that is one number per fit takes a different value in each fold and that is fold
+variation, not per-molecule variation.
+
+**🔴 What this costs on the grid.** Three new QM9 models × every representation, and three new
+laboratory models. They are the ONLY models in either roster that report both halves per molecule,
+so without them question B has no model that can answer it — but they are new cells and they are not
+free. The noise-predicting Gaussian process was measured at 0.0003 of R² against the ordinary one
+(§5.5e), so it costs about what a Gaussian process costs; the two variational models cost what a
+variational model costs.
+
+#### 🟠 OPEN — one decision, and it is about cost, not about method
+
+**Does NGBoost get a model-uncertainty term?** It has none today and cannot have one from a single
+fit. `decompose_seed_ensemble` is written and tested and gives it one from the disagreement between
+seeds, at the price of ONE FIT PER SEED. NGBoost is quoted at 47 hours per 110 training runs, the
+slowest tree model in the roster, so three seeds is roughly three times that. The alternative is to
+report NGBoost as a data-noise-only model and say so in the table §5.5 already asks for. **Nothing
+is blocked either way** — the code runs today with the model half recorded as absent.
+
+**Two things settled without asking, because the code decided them.**
+
+- **The ordinary forest's split is wired but `rf` is not asked for uncertainty in the job
+  generator** (`-m rf` carries no `-u True`). The quantile forest's aleatoric share is within 0.001
+  of the ordinary forest's at every leaf size (§5.5c), so running both would buy a duplicate. One
+  flag turns it on if that judgement is ever wanted back.
+- **Every model that reaches the writer now declares which SUPPORT entry describes it**, including
+  the ones no roster runs. A model nobody queued writes a labelled column rather than an unlabelled
+  one, and one with no entry is refused by name rather than writing a column nobody can interpret.
+
+---
+
+### 5.5h ✅ MEASURED 2026-08-28 — the three checks, and what they answer
+
+`scripts/decomposition_controls.py` is the measurement; `scripts/test_decomposition_controls.py`
+runs it as gates. Real QM9 — the HOMO-LUMO gap, nine descriptors from `data/QM9/raw/gdb9.sdf.csv`,
+`homo` and `lumo` excluded because the gap is their difference — with every model scored OUT OF FOLD
+on Murcko scaffold groups, acyclic molecules as singletons.
+
+Nine fast gates run in seconds. The three measured gates fit real models and run under `--measured`;
+a run without it says the three were not run rather than reporting passes it did not perform.
+
+**The three designs are dose-matched on the second moment**, so they deliver the same total amount
+of noise and a difference between them is a difference in WHERE the noise sits and nowhere else.
+Without that, a design that simply added more noise would look like a design a model localises
+better — §2.2 all over again.
+
+**1. Even noise, and the model must find nothing.** Every molecule the same amount. The control is
+scored against the patterns from the UNEVEN designs, not against its own flat one: a rank
+correlation against a constant is undefined rather than zero, so scoring it against its own shape
+would put a blank exactly where the control's answer belongs. The question it asks is the right one
+— does a model that scores well under an uneven design still score against that same pattern when
+the noise carries no such structure?
+
+**2. Graded noise, and the model must rank.** Every correlation measured before today used two noise
+amounts, so +0.79 meant the model told two blocks apart, not that it ranked molecules. A continuous
+ladder over the same 1×-to-3× range asks the second question. Both are reported side by side, so a
+collapse is visible rather than absent.
+
+**3. The variational noise head, measured the way the Gaussian process was.** It had no correlation
+number, no zero-noise control and no accuracy comparison against the ordinary variational model
+(§5.5f, "Not yet done"). It has all three now, and the gate fails if its data term comes out
+CONSTANT — which is what an attached but untrained head produces, and which would write a
+per-molecule column meaning nothing.
+
+**Every correlation is reported beside its zero-noise value and never alone.** The honest effect is
+(correlation under the condition) minus (correlation at zero), because uncertainty may already track
+the pattern for reasons that have nothing to do with corruption.
+
+**The output is one row per model, representation, noise condition, reference pattern, level and
+term.** Nothing pooled, nothing averaged across models or conditions.
+
+**The measurement calls the pipeline's own routines** — `sample_network_split` from
+`models/models.py`, and the forest and Gaussian-process splits from the shared module — rather than
+copies of them, so a change to the split changes the measurement. A gate fails if that stops being
+true. **A control that measures a copy of the code proves nothing about the code that runs.**
+
+**The quantile forest is BLOCKED locally, not failing.** It needs scikit-learn 1.6.1 with
+quantile-forest 1.4.1 and this laptop has 1.3.2 (§3.4.4d). It is written into the output as blocked,
+so its absence cannot be mistaken for a null. It runs on the cluster.
+
+---
+
 ### 5.6 The two representation repairs
 
 Both change the record layout, so they land together with the embedding storage fix (§2.8c) and
@@ -4915,6 +5100,32 @@ in the runbook fails with that line number.
 script:** the branch has to be **pushed**. The cluster's only route in is
 `git pull --ff-only origin additional_reps`, so a gate that passes on an unpushed commit has
 proved nothing about what runs.
+
+**Five gates added 2026-08-28 with the uncertainty split (§5.5g, §5.5h).** The first four cost
+seconds and need no cluster, no GPU and no trained model; the fifth fits real models and takes
+minutes, so it is asked for by name:
+
+```
+# the shared definition of the split, its arithmetic and its support table -- 30 gates
+python scripts/test_uncertainty_decomposition.py
+
+# the writer: variances in, one conversion to a standard deviation, and a component
+# declared per molecule that is really a constant refused rather than written
+python scripts/test_uncertainty_writer.py
+
+# the variational noise head, and the switch that reaches it -- 8 gates
+python scripts/test_heteroscedastic_vbll.py
+
+# the three checks' designs and wiring -- 9 gates, no fitting
+python scripts/test_decomposition_controls.py
+
+# the three checks THEMSELVES, on real QM9, out of fold on scaffold groups
+python scripts/test_decomposition_controls.py --measured
+```
+
+One gate in the first command reports as **BLOCKED** on any interpreter that is not scikit-learn
+1.6.1 with quantile-forest 1.4.1, and the quantile forest is recorded as blocked in the fifth for
+the same reason (§3.4.4d). A blocked gate is not a pass and both say so.
 
 **One more gate, and it costs a second — chat G, 2026-08-27.** It guards the settled condition set:
 
@@ -6579,24 +6790,52 @@ were recorded as fractions. Caco-2's "0.2" off a log-unit table is **0.5** on th
 
 ---
 
-### 13.17 🔴 OPEN AFTER THIS SESSION — everything, with an owner
+### 13.17 What is open, what is deferred on purpose, and what is nobody's
 
-**Written because the author asked whether anything was open that nobody had claimed. This is the
-complete list. If it is not here it is not open from this session.**
+**Rewritten 2026-08-28 on the author's instruction.** The old version of this section mixed two
+different things under one heading and kept asking the author about both. **A decision that has been
+deferred with a rule and a trigger is SETTLED, not open.** It belongs in the second table and must
+not be raised again until its trigger fires.
+
+#### A. Must be answered before compute is spent
 
 | # | What | Owner |
 |---|---|---|
-| 1 | **`results/setting_selection_test.csv` was measured with the reporting level at 0.5.** So §13.9's "at the reporting level" figures, and the `why` strings in `noise_conditions.json` that justify the settled condition set, are all at 0.5 rather than the settled 1.0. The script is fixed; the data is not. **Re-run started 2026-08-28**, 12 replicates at 0.5, 1.0 and 1.5 across all 11 conditions and all 7 screen models | **this chat — running now** |
-| 2 | **`paper.tex` quotes "R² at σ = 0.3" in three places** (`:380`, `:387`, `:409`), on the retired raw scale. Nobody chose 0.3; it is the figure script's default argument | **the author** — paper.tex is theirs |
-| 3 | **The figure script hardcodes 0.3** — `run_anova_decomposition(df, sigma_value=0.3)` and two filters at `:2671` and `:2784`. It must read `reporting_level()` instead, and it has never been rebuilt for the seven-point ladder at all | **chat J** |
-| 4 | **hERG's reporting level was not checked against a rank-flip table**, only the assay anchor | **whoever reads the re-run** |
-| 5 | **The Caco-2 baseline noise figure is provably too high.** §6.4 says 0.76 of the label spread, §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **needs one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label SD |
-| 6 | ~~A5 Sort & Slice writes all-zero feature blocks~~ ✅ **FIXED 2026-08-28.** Chats D and G had closed everything else; this one was still live. An unparseable molecule gave an empty substructure dict → an all-zero count vector → the writer zero-filled it to the right width and stored it as a legitimate block. Both paths now raise, and `scripts/test_avalon_failure.py` covers Sort & Slice as well as Avalon | done |
-| 7 | 🔴 **`scripts/check_fixes_fail_when_removed.py` now CRASHES rather than reporting.** It dies at cleanup with `FileNotFoundError` removing its own backup (`:292`), after restoring the files — so its overall pass signal, which `README.md:198` relies on, still does not exist. This is a *different* failure from the four dead anchors that audit item A6 named. **Files are safe:** it restores on the way out, and `git diff` on every tracked file is clean after a killed run | **unassigned — small, and nobody is on it** |
-| 8 | ~~A7 the QM9 runbook~~ and the first audit's items for D and G | **verified fixed 2026-08-28** — the three validation scripts now carry the activation guard, all three generators call the environment probe, the orphaned Rust doc comment is retargeted, and the gate counts read 33 everywhere |
-| 9 | **The rank-versus-level charts** (§5.4a) | **chat J** |
-| 10 | **Which models and representations go deep** — NGBoost is locked on by a check that refuses to build without it | **the author, after the screen** |
-| 11 | **The uncertainty roster — which models and which representations the uncertainty runs use — is OPEN and stays open until the screen reports.** The generator's current 7 models × 4 representations is a typed-in default, not a measurement, and the author has said plainly they are not comfortable with it. The screen tests all seven models against **all six** representations, so Avalon and ChemBERTa can join and any model whose uncertainty says nothing can leave. **Nothing may quote a pair count as settled** — say "the same pairs as every other condition" | **the author, after the roster screen** |
+| A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label spread |
+| A2 | **The experimental pipeline draws its noise per fold, not once per label column** (§3.3a). Recommendation unchanged: keep the per-fold draw and say so in the Methods in one sentence. It needs an answer because it changes what a *molecule* means across folds | **the author** |
+| A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
+
+#### B. Deferred ON PURPOSE — decided, with the rule and what fires it
+
+**Nothing here is a question for the author today.** Each one has a rule fixed in advance, and the
+answer is read off a result that does not exist yet. Raising them earlier is what cost several
+sessions.
+
+| What | The rule | Fires when |
+|---|---|---|
+| **Which models and representations go deep** | Take the widest spread of behaviour the screen shows — the most and least noise-tolerant model, plus one from each remaining family — and the representations that span fingerprint, descriptor and learned embedding. NGBoost is locked on by a check that refuses to build without it | the screen lands (§13.1 item 4) |
+| **Which model-and-representation pairs censoring runs on** | Chosen from the screen on interest and clean performance, at least two of them models that report a per-molecule uncertainty. One selection, used on QM9 and all three validation datasets | the screen lands (§13.13) |
+| **The uncertainty roster — which models and which representations the uncertainty runs use** | The decision rule is written out in full in chat N and was fixed before any number came back. The generator's current lists are a typed-in default, not a measurement; the screen tests every model against **all six** representations, so representations can join and models can leave. **No document may quote a pair count as settled** — say "the same pairs as every other condition" | the roster screen reports |
+| **hERG's reporting level, checked against a rank-flip table** | Its level rests on the assay anchor alone; confirm it against rank movement | the re-run lands (§13.16) |
+
+#### C. Work with an owner, not blocking anything
+
+| # | What | Owner |
+|---|---|---|
+| C1 | **The figure script hardcodes 0.3** — `run_anova_decomposition(df, sigma_value=0.3)` and two filters at `:2671` and `:2784`. It must read `reporting_level()` instead, and it has never been rebuilt for the seven-point ladder at all | chat J |
+| C2 | **The rank-versus-level charts** (§5.4a) | chat J |
+| C3 | **`paper.tex` quotes "R² at σ = 0.3" in three places** (`:380`, `:387`, `:409`), on the retired raw scale. Nobody chose 0.3; it is the figure script's default argument | the author — `paper.tex` is theirs |
+| C4 | 🔴 **`scripts/check_fixes_fail_when_removed.py` CRASHES rather than reporting.** It dies at cleanup with `FileNotFoundError` removing its own backup (`:292`), after restoring the files, so the overall pass signal `README.md:198` relies on does not exist. **Files are safe** — it restores on the way out and `git diff` is clean after a killed run | **unassigned — small, and nobody is on it** |
+
+#### D. Closed since this list was written
+
+| What | |
+|---|---|
+| `results/setting_selection_test.csv` measured at the retired reporting level | re-run started 2026-08-28 across all 11 conditions and all 7 screen models |
+| Sort & Slice writing all-zero feature blocks | ✅ fixed 2026-08-28; both paths raise and `scripts/test_avalon_failure.py` covers it |
+| The QM9 runbook, and the first audit's items | ✅ verified fixed 2026-08-28 |
+| **The forest leaf size** | ✅ settled and applied 2026-08-28 — both forests at 5 (§5.5c). It appeared on the launch-blocker list for a day after it was decided |
+| **Whether the uncertainty runs inherit the settled condition set** | ✅ settled 2026-08-27, and superseded 2026-08-28: **all seven conditions, one list, both pipelines** |
 
 ---
 

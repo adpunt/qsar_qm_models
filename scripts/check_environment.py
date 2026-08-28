@@ -163,8 +163,25 @@ _RESOURCE_MARKERS = (
 )
 
 
-def classify_loader_error(text):
+def first_line(e):
+    """The first line of an exception's message, or its type when it has none.
+
+    `MemoryError()` carries no message at all, so `str(e).splitlines()[0]`
+    raises IndexError -- which on ARC on 2026-08-28 took the whole check down
+    with a traceback at the exact moment it had something useful to report: the
+    login node refusing to map scikit-learn. A reporting helper must never be
+    the thing that fails.
+    """
+    lines = str(e).splitlines()
+    return lines[0] if lines else type(e).__name__
+
+
+def classify_loader_error(text, exc=None):
     """'abi', 'resource', or None if it is neither."""
+    # A bare MemoryError is the address-space cap by definition, and it arrives
+    # with no message to match on.
+    if isinstance(exc, MemoryError) or isinstance(text, MemoryError):
+        return "resource"
     low = str(text).lower()
     if any(m in low for m in _RESOURCE_MARKERS):
         return "resource"
@@ -219,7 +236,7 @@ def check_pyg_companions(resource_failures):
             importlib.import_module(name)
         except Exception as e:
             kind = classify_loader_error(e)
-            entry = (name, f"{type(e).__name__}: {str(e).splitlines()[0]}")
+            entry = (name, f"{type(e).__name__}: {first_line(e)}")
             (resource if kind == "resource" else abi).append(entry)
 
     if resource:
@@ -830,7 +847,7 @@ def check_project_packages(failures):
                     ver = "?"
             print(f"  OK    {mod:<12s} {ver}   {where}")
         except Exception as e:
-            print(f"  FAIL  {mod}: {type(e).__name__}: {str(e).splitlines()[0]}")
+            print(f"  FAIL  {mod}: {type(e).__name__}: {first_line(e)}")
             print(f"        {human} is not importable, so the KIRBy half cannot start.")
             print("        setup.sh installs it editable from the checkout.")
             failures.append(mod)
@@ -840,9 +857,9 @@ def probe(name, fn, failures, resource_failures=None):
     try:
         fn()
         print(f"  OK    {name}")
-    except Exception as e:
-        first = str(e).splitlines()[0]
-        if classify_loader_error(e) == "resource" and resource_failures is not None:
+    except (Exception, MemoryError) as e:
+        first = first_line(e)
+        if classify_loader_error(e, e) == "resource" and resource_failures is not None:
             # Not a verdict on the environment: the machine would not give the
             # library address space. Counted separately so a login-node run does
             # not read as sixteen broken models.

@@ -35,8 +35,6 @@ xgboost==3.0.0
 # --- the rest of the compiled numerics ------------------------------------
 numpy==1.26.4
 scipy==1.15.2
-pandas==2.2.3
-joblib==1.4.2
 torchvision==0.20.1
 
 # --- model backends whose version changes the numbers ---------------------
@@ -51,15 +49,24 @@ torch-geometric==2.6.1
 # --- representation stack -------------------------------------------------
 transformers==4.51.3
 huggingface-hub==0.30.2
-networkx==3.4.2
 
 # --- imported at module scope by one pipeline or the other ----------------
 optuna==4.3.0
-diskcache==5.6.3
-requests==2.32.3
 lightning==2.5.1.post0
-sympy==1.13.3
-tqdm==4.67.1
-typing-extensions==4.12.2
-matplotlib==3.10.1
-seaborn==0.13.2
+
+# ---------------------------------------------------------------------------
+# WHAT BELONGS IN THIS FILE, and what does not (2026-08-28)
+#
+# Only packages where the version is load-bearing: the compiled ones a PyPI
+# wheel would replace with a copy carrying its own OpenMP runtime, and the
+# modelling libraries whose version the numbers depend on.
+#
+# Ten pins were removed because they were neither -- requests,
+# typing-extensions, tqdm, sympy, networkx, diskcache, matplotlib, seaborn,
+# joblib and pandas. A constraint is not a floor, it is an EXACT requirement,
+# so pip enforces it downwards too: installing torch-geometric on ARC with this
+# file active DOWNGRADED requests 2.34.2 -> 2.32.3 and typing-extensions
+# 4.15 -> 4.12.2, and left six packages declaring conflicts against them. The
+# pins protected nothing that could carry a threading runtime and broke things
+# that could not.
+# ---------------------------------------------------------------------------
