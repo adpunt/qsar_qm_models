@@ -657,6 +657,30 @@ def main():
     written = []
     grand = 0
     for model, (flags, tier, hours_per_110, note, model_reps) in chosen.items():
+        # EVERY MODEL THAT EMITS A PER-MOLECULE UNCERTAINTY ALSO SCORES THE
+        # VALIDATION MOLECULES. Added 2026-08-28.
+        #
+        # Without it the QM9 run answers nothing about whether uncertainty finds
+        # the corrupted labels, and that is not a small gap -- it is one of the
+        # questions the study exists to ask. A QM9 TEST label is never corrupted,
+        # by design, so a test row has no corruption for the uncertainty to find.
+        # The scripts passed neither this flag nor --oof-folds, so every
+        # uncertainty row the grid produced was a test row and the question had
+        # no data behind it at all (RERUN_PLAN.md 13, the validation-versus-
+        # refitting section).
+        #
+        # A validation molecule meets the two conditions the question needs: no
+        # model fitted it, and the injector recorded the noise it received. This
+        # costs one forward pass per model -- not a multiple of the fit count,
+        # which is what --oof-folds costs.
+        #
+        # The flag is keyed on `-u True` because that is the same test the
+        # censoring guard above uses to decide which models emit an uncertainty;
+        # two different answers to "does this model emit one?" is how the roster
+        # and the guard would drift apart.
+        if '-u True' in flags and '--score-validation' not in flags:
+            flags = f'{flags} --score-validation'
+
         reps = [r for r in model_reps if not args.reps or r in args.reps]
         if not reps:
             print(f"  skipping {model}: none of --reps {args.reps} is available to it "

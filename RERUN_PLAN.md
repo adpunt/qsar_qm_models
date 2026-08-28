@@ -5493,8 +5493,8 @@ the same reason (§3.4.4d). A blocked gate is not a pass and both say so.
 section).** Seconds, no cluster, no trained model:
 
 ```
-# the validation split through the writer and the scorer, and the wiring into every
-# model family that cross-fits -- 21 gates
+# the validation split through the writer and the scorer, the wiring into every model
+# family that cross-fits, and the QM9 job scripts asking for it -- 23 gates
 python scripts/test_validation_split_scoring.py
 ```
 
@@ -8586,14 +8586,26 @@ set. Nothing reads it — checked 2026-08-28, it appears at its own definition a
 ⚠️ **Chat O may change how the QM9 run is built, not whether.** If validation molecules replace the
 refitting, it costs a sixth of what it otherwise would. Build it after that answer.
 
-🔴 **AND ONE THING THIS CHAT MUST FIX WHATEVER THAT ANSWER IS — verified 2026-08-28.** The QM9 job
-scripts pass **neither** `--oof-folds` nor `--score-validation`. Checked in the generator and in all
-seventeen generated scripts; neither flag appears in either. QM9 test labels are never corrupted, so
-**as the grid stands the QM9 run writes nothing that can answer "does the uncertainty find the
-corrupted labels?" at all** — the question §3.1c says QM9 can now answer. The fix is one flag on the
-uncertainty models in `slurm_scripts_qm9_rerun/generate_scripts.py`, and `--score-validation` is the
-cheap one: a forward pass per model rather than a multiple of the fit count. It is independent of
-the verdict, and it is this chat's.
+✅ **FIXED 2026-08-28 — the QM9 jobs now answer the corrupted-label question at all.** They passed
+**neither** `--oof-folds` nor `--score-validation`; neither flag appeared in the generator or in any
+of the seventeen generated scripts. QM9 test labels are never corrupted, so **the QM9 run wrote
+nothing that could answer "does the uncertainty find the corrupted labels?"** — the question §3.1c
+says QM9 can now answer. The two statements contradicted each other and nothing connected them.
+
+`slurm_scripts_qm9_rerun/generate_scripts.py` now appends `--score-validation` to every model whose
+flags carry `-u True`, keyed on that string because it is the same test the censoring guard uses to
+decide which models emit an uncertainty — two different answers to "does this model emit one?" is
+how a roster and a guard drift apart. Result: **11 of 17 scripts ask for it, and the 6 that do not
+are exactly the models that emit no per-molecule uncertainty** (rf, xgboost, lgb, svm, dnn, mlp).
+
+Gated: `scripts/test_validation_split_scoring.py` generates the real scripts and fails if a model
+emits an uncertainty without scoring validation, or asks for it without emitting one.
+`scripts/test_generated_job_flags.py` still passes and now counts 11 distinct flags, so the new one
+reaches the runner's own parser.
+
+⚠️ **This is the CHEAP floor, not necessarily the whole answer for QM9.** It costs one forward pass
+per model. If the verdict below says the cross-fit is needed, QM9 needs `--oof-folds` on top, which
+is a multiple of the fit count — that part waits.
 
 ---
 

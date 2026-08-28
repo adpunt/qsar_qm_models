@@ -237,6 +237,47 @@ def main():
         check(f"{label} scores validation as well as cross-fitting",
               cross and val, f"cross-fit={cross} validation={val}")
 
+    # ---- the QM9 job scripts actually ask for it ---------------------------
+    # The code above is unreachable on the cluster unless a job script passes the
+    # flag, and until 2026-08-28 none did. A QM9 TEST label is never corrupted,
+    # so with neither this flag nor --oof-folds the whole grid answered nothing
+    # about whether uncertainty finds the corrupted labels. This generates the
+    # real scripts and reads what they would run.
+    print("\nthe QM9 job scripts ask for it")
+    import subprocess
+    gen = os.path.join(REPO, 'slurm_scripts_qm9_rerun', 'generate_scripts.py')
+    if not os.path.exists(gen):
+        check("the QM9 job generator exists", False, gen)
+    else:
+        with tempfile.TemporaryDirectory() as gd:
+            r = subprocess.run([sys.executable, gen, '--out-dir', gd],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                check("the QM9 job generator runs", False, r.stderr[-200:])
+            else:
+                scripts = sorted(f for f in os.listdir(gd) if f.endswith('.sh'))
+                asks, skips = [], []
+                for f in scripts:
+                    body = open(os.path.join(gd, f)).read()
+                    (asks if '--score-validation' in body else skips).append(f)
+                    # A model that emits an uncertainty and does NOT ask is the
+                    # failure; a model that emits none and does ask is also wrong,
+                    # because the flag would be refused or write nothing.
+                    if ('-u True' in body) != ('--score-validation' in body):
+                        check(f"{f}: emits uncertainty and scores validation, or neither",
+                              False,
+                              f"uncertainty={'-u True' in body} "
+                              f"score_validation={'--score-validation' in body}")
+                check("every QM9 script that emits an uncertainty scores validation",
+                      len(asks) > 0 and all(
+                          ('-u True' in open(os.path.join(gd, f)).read())
+                          for f in asks),
+                      f"{len(asks)} of {len(scripts)} scripts")
+                check("the models that emit no uncertainty do not ask for it",
+                      all('-u True' not in open(os.path.join(gd, f)).read()
+                          for f in skips),
+                      f"{len(skips)} scripts")
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILED:")
