@@ -230,6 +230,15 @@ CASES = [
   "    CONFORMAL_MODELS = ('conformal', 'conformal_hetero')",
   "    CONFORMAL_MODELS = ()",
   [sys.executable, f"{QSAR}/scripts/test_conformal_is_out.py"]),
+
+ # Rename QM9's replicate axis to `fold`, which is how the two axes would merge:
+ # one reader then concatenates ten resamples and five overlapping partitions into
+ # a single spread and calls it an error bar.
+ ("a replicate is QM9's and a fold is the other three datasets'",
+  f"{QSAR}/scripts/utils.py",
+  '"noise_type",',
+  '"noise_type", "fold",',
+  [sys.executable, f"{QSAR}/scripts/test_replicate_is_not_a_fold.py"]),
 ]
 
 

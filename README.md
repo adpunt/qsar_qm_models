@@ -12,11 +12,17 @@ bits, computed in Python and carried through the record), **PDV**
 (`sns`, 1,024 substructure counts as uint16), **MHG-GNN**, **Avalon** and
 **ChemBERTa** (`DeepChem/ChemBERTa-77M-MTR`, 384 wide).
 
-Anything else is refused by name. mol2vec is deleted; so is the bit-packed form
-of the descriptor vector, which used to hold the name `pdv` while the float32
-form was called `continuous_pdv` (2026-08-28). `continuous_pdv` is refused rather
-than treated as an alias, because `pdv` used to mean the other thing, so a job
-script or a results file written before that date means something else by it.
+Anything else is DELETED, not disabled. mol2vec went on 2026-08-26. One-hot
+SMILES and randomized SMILES went on 2026-08-28, with the tokenizer, the
+vocabulary, the record fields and the recurrent-model dispatch that was the only
+thing reading them. So did the bit-packed form of the descriptor vector, which
+used to hold the name `pdv` while the float32 form was called `continuous_pdv`.
+
+All four names are still refused by name, so a job script that still asks for one
+stops with a message rather than a KeyError two functions later. `continuous_pdv`
+is refused rather than treated as an alias, because `pdv` used to mean the other
+thing: a job script or a results file written before 2026-08-28 means the binary
+vector by it.
 Graph representations (GIN, GCN, GATv2, MPNN) exist for QM9 and are not in the
 job generator's roster.
 
@@ -204,6 +210,7 @@ cd rust && cargo test --release
 | `scripts/test_predictive_head.py` | the network's own predicted variance is read back as fitted, and reaches the file per molecule |
 | `scripts/test_metric_units.py` | `rmse` and `mae` are in the label's own units, and the row carries the conversion |
 | `scripts/test_conformal_is_out.py` | conformal is refused by name, no dispatcher still branches on it, and the job generator writes no script that asks for it |
+| `scripts/test_replicate_is_not_a_fold.py` | QM9's ten replicates and the other three datasets' five folds stay separate axes under separate names |
 | `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
 | `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
 | `scripts/check_environment.py` | this interpreter can build every model the job asks for |

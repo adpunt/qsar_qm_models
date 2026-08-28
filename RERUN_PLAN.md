@@ -2839,6 +2839,47 @@ That is a better design than the six it replaces, and it answers the open questi
 `NOISE_DESIGN.md` §7.2: **censoring is the deliberately label-keyed condition**, so a separate
 artificial positive control is not needed.
 
+### 3.2b ✅ SETTLED — a replicate is QM9's. The other three datasets have folds. Read this before writing an error bar.
+
+**This was settled on 2026-08-27 and has come back three times since, because it was written down
+only inside other decisions.** It is stated here once, on its own, so it stops.
+
+**A replicate is a QM9 thing and nothing else.** `split_qm9` starts with
+`indices = torch.randperm(len(qm9))`, takes the first 10,000 molecules and scaffold-splits those.
+The loop that calls it reseeds per iteration (`scripts/process_and_train.py:3117-3122`), so ten
+replicates are ten different draws of 10,000 molecules out of QM9's ~130,000, each with its own
+split. That is a resample of the population.
+
+**hERG, LogD and Caco-2 have folds, and a fold is not a replicate.** There is one dataset and one
+`GroupKFold(n_splits=5)` over it (`tests/alternative_data_noise_robustness.py:2181`). Every
+molecule is tested exactly once. Nothing is resampled, the seed is pinned at 42, and the five
+training sets overlap heavily, so the five numbers are not independent.
+
+**Error bars are allowed on both. They are different statistics and must be labelled differently.**
+
+| | QM9 | hERG, LogD, Caco-2 |
+|---|---|---|
+| the axis | `iteration`, ten of them | `fold`, five of them |
+| what varies | which molecules, the split, the seed | which fifth is held out |
+| independent? | yes | no — the training sets overlap |
+| what the spread is | sampling variability of the whole experiment | how much the answer depends on which scaffolds are held out |
+
+So a QM9 error bar is a run-to-run error bar. A fold spread is not, and cannot stand in for one:
+it mixes randomness with scaffold difficulty. **The experimental side has no run-to-run error bar
+at all**, by the author's decision of 2026-08-26 (one fit per cell, seed 42) and 2026-08-27 (one
+replicate for the uncertainty runs). The Methods have to say that in those words.
+
+**Matching them is not on the table.** Fixing QM9's sample across its ten replicates would throw
+away a resample of the population to imitate a limit that only exists because hERG has 1,415
+molecules.
+
+**The words.** `rep` in this project always means representation. A replicate is a replicate, and
+only QM9 has them. A fold is a fold.
+
+**Where it is enforced.** `scripts/test_replicate_is_not_a_fold.py` — the two axes carry different
+column names in the two schemas, which is the mechanism by which they would get merged, and the
+check fails if either name appears in the other pipeline's rows.
+
 ### 3.3 Parity — what each pipeline actually has
 
 Established 2026-08-25 by reading all three repositories, with every row cross-checked against the
