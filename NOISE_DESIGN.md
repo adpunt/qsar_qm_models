@@ -1259,6 +1259,31 @@ is uniform noise wearing a grouped name. So the grouped conditions cannot be com
 a real assignment — and the check now reports **PARTIAL and exits non-zero** rather than
 saying 15 of 17 conditions agree and calling it a pass.
 
+**5. ✅ SETTLED 2026-08-28 — the wider-groups condition draws its own families for validation
+labels.** The condition chooses whole scaffold families and widens them. The choice used to be made
+on the training assignment and then looked up among the validation molecules — but the validation
+split shares no scaffold family with training, and the code that makes that split **raises** if one
+is ever shared. So the lookup matched nothing, every validation molecule took the ordinary width,
+and validation carried plain noise while training carried the grouped pattern. Under one condition
+name, on all three laboratory datasets, reaching the four neural families that decide when to stop
+training by watching those labels.
+
+The validation injection now omits the reference assignment, so the selection is drawn over
+validation's own families at the same molecule fraction, from that stream's independent seed.
+`reference` is still passed — it fixes the censoring cut-point and is a different argument — and
+the other five conditions do not consult the group assignment for their selection.
+
+**The QM9 injector already did this**, under the same rule and for the reason spelled out at
+`rust/src/main.rs` §"A split that inherits the training split's selection does not draw one": a
+flat shape is not a smaller effect, it is an absent one. The two injectors now agree.
+
+**Describing a pattern stays separate from applying one.** `noise_scale()` still returns a flat map
+for held-out molecules, because the pattern their region was exposed to IS flat when whole families
+are held out — §3.1d, unchanged. Only injection changed. `noiseInject` now refuses to inject a
+grouped condition that selected nobody, rather than delivering plain noise under a grouped name;
+three tests fix the guard, the fresh draw and the still-flat held-out pattern. 67 `noiseInject`
+tests and all 342 cross-check checks pass.
+
 **4. ✅ SETTLED 2026-08-28 — for censoring, "affected" is the top *k* by rank, not a comparison
 against the limit.** The count used to be the fraction of labels the clip actually MOVED, i.e.
 `y > limit`. On a coarsely recorded assay a block of labels sits exactly ON the limit; clipping
