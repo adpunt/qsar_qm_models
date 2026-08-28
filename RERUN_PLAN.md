@@ -5751,6 +5751,77 @@ for its reasoning about replicate counts, not for its totals.
 
 ---
 
+### 13.16 ✅ THE REPORTING LEVELS — SET 2026-08-28. Read this before quoting any accuracy number.
+
+## QM9 1.0 · logD 1.0 · hERG 1.0 · Caco-2 0.75
+
+**A reporting level is the ONE noise level a table quotes accuracy at.** It is a point on the ladder
+in `NOISE_DESIGN.md` §6.4, expressed as **a fraction of that fold's clean training label spread**.
+It is not in log units. It is not the ladder. It is not an assay-error figure.
+
+**It lives in exactly one place:** `models/model_defaults.py`, `REPORTING_LEVELS`, read through
+`reporting_level(dataset)`. **Do not write a reporting level anywhere else, including here** — this
+section explains the decision; the file holds the number.
+
+| Dataset | Level | Why that one |
+|---|---|---|
+| QM9 | **1.0** | All 7 models change rank against clean, and R² is 0.783–0.836 — the effect is there and nothing is broken. At 0.5 the models are *closer together* than on clean labels |
+| logD | **1.0** | Consistency with QM9. **No run has ever reached 1.0 on logD**, so this one is unverified until the re-run |
+| hERG | **1.0** | Chosen on the assay-error anchor, not a rank table — see the warning below |
+| **Caco-2** | **0.75** | **Deliberately lower.** Its clean R² is only ~0.5, so it has less to lose. 0.75 gives the *same* 2-of-4 rank flips as 1.0 with every model 0.04–0.11 higher; at 1.0 the quantile forest drops to 0.256, and at 0.2 nothing moves at all |
+
+**The caption owes one sentence about Caco-2:** that assay's models start near R² 0.5, so the level
+that produces the same amount of rank movement leaves them at higher accuracy than the same level
+would elsewhere. It is a property of the endpoint, not a convenience.
+
+⚠️ **hERG's level is the weakest of the four.** hERG *was* tested — 25 model-and-representation pairs
+under plain Gaussian survive in `results/paper_figures_v2/table_validation_auc_full.csv`, clean R²
+0.367 to 0.635 — **but only as `auc_norm` and a clean baseline. The accuracy at each level is not on
+this machine.** So hERG is the one dataset whose level was not checked against a rank-flip table. Its
+1.0 rests on its measured label spread (0.9143 over 1,415 molecules), against which published assay
+error is 0.60 and twice that is 1.21. **Re-check it against a rank-flip table when the re-run lands.**
+
+**One thing the Methods must disclose.** The lab datasets' labels already carry measurement error and
+QM9's do not, so one nominal level is not one amount of noise: at level 1.0 the total is 1.00 on QM9,
+1.01 on logD and 1.17 on hERG (`NOISE_DESIGN.md` §4d). That cannot be removed, only stated.
+
+**Guard:** `scripts/test_one_reporting_level.py` fails if a second source appears, if a dataset's
+level is unset but stops raising, or if a level is set that is not on the ladder.
+
+#### Why this section exists at all
+
+Between 2026-08-20 and 2026-08-28 the reporting level was stated in **more than thirty places**
+across both state documents, two scripts and `paper.tex`, on **two different scales**, with **four
+values live at once**. `paper.tex` says *"R² at σ = 0.3"* today; that 0.3 is a figure-script
+function's default argument, on a scale that no longer exists, chosen by nobody. The author, twice:
+*"has this been answered? I think not"* and *"I don't think I did settle them."*
+
+**The root error:** three numbers were read off tables printed on two different scales in one
+message — QM9 as a fraction of the label spread, logD and Caco-2 in raw log units — and all three
+were recorded as fractions. Caco-2's "0.2" off a log-unit table is **0.5** on this scale.
+
+---
+
+### 13.17 🔴 OPEN AFTER THIS SESSION — everything, with an owner
+
+**Written because the author asked whether anything was open that nobody had claimed. This is the
+complete list. If it is not here it is not open from this session.**
+
+| # | What | Owner |
+|---|---|---|
+| 1 | **`results/setting_selection_test.csv` was measured with the reporting level at 0.5.** So §13.9's "at the reporting level" figures, and the `why` strings in `noise_conditions.json` that justify the settled condition set, are all at 0.5 rather than the settled 1.0. The script is fixed; the data is not. **Re-run started 2026-08-28**, 12 replicates at 0.5, 1.0 and 1.5 across all 11 conditions and all 7 screen models | **this chat — running now** |
+| 2 | **`paper.tex` quotes "R² at σ = 0.3" in three places** (`:380`, `:387`, `:409`), on the retired raw scale. Nobody chose 0.3; it is the figure script's default argument | **the author** — paper.tex is theirs |
+| 3 | **The figure script hardcodes 0.3** — `run_anova_decomposition(df, sigma_value=0.3)` and two filters at `:2671` and `:2784`. It must read `reporting_level()` instead, and it has never been rebuilt for the seven-point ladder at all | **chat J** |
+| 4 | **hERG's reporting level was not checked against a rank-flip table**, only the assay anchor | **whoever reads the re-run** |
+| 5 | **The Caco-2 baseline noise figure is provably too high.** §6.4 says 0.76 of the label spread, §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **needs one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label SD |
+| 6 | **A5 Sort & Slice writes all-zero feature blocks**; **A6 four dead mutation anchors** | **chat D** (§13.12) |
+| 7 | **A7 the QM9 runbook describes the pre-decision run** | **chat H** (§13.12) |
+| 8 | The first audit's twelve items for D and eight for G | **chats D and G** (§13.12) |
+| 9 | **The rank-versus-level charts** (§5.4a) | **chat J** |
+| 10 | **Which models and representations go deep** — NGBoost is locked on by a check that refuses to build without it | **the author, after the screen** |
+
+---
+
 ### 13.2 The chats
 
 Letters, not numbers, so inserting one does not renumber the rest. **A, C, D, E and G are
