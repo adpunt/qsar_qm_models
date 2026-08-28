@@ -6185,6 +6185,18 @@ QM9, at all seven of its levels, 10 replicates.**
 
 **Which five pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection.
 
+##### ✅ RULED 2026-08-28 — censoring is NOT a special case inside the uncertainty runs
+
+The five-pair subset applies to the **robustness** runs: the QM9 grid and the validation robustness
+runs on logD, Caco-2 and hERG. **Inside the uncertainty runs censoring runs on the same pairs as
+every other condition, on every dataset.** The author's words: *"just run 28 for all uncertainty
+including censor for all datasets."*
+
+⚠️ **The 28 is not a decision and must not be quoted as one.** It is 7 models × 4 representations,
+the two lists currently at the top of the uncertainty generator. **Those lists are exactly what the
+roster screen is running to settle** (chat N), and the author has said they are not comfortable with
+them until it reports. Write "the same pairs as every other condition", never a number.
+
 ##### ✅ CONFIRMED BY THE AUTHOR 2026-08-28 — one selection of five, used on every dataset
 
 Asked directly whether cutting censoring to a named subset on logD, Caco-2 and hERG was theirs:
