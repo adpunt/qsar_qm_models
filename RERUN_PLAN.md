@@ -1369,10 +1369,19 @@ does everything else, so what lands at the prefix is an ordinary conda environme
 job script's `conda activate env_test` still resolves. If micromamba cannot be fetched it puts
 itself inside a small allocation instead and uses conda's solver there.
 
-**Rollback**, if it is ever wanted: step 1 writes
-`research_archive/env_test_before_rebuild_<date>.txt`, a `conda list --explicit` of the old
-environment. `conda create --prefix <prefix> --file <that file>` puts it back, then rerun
-`setup.sh` for the extras.
+**Rollback is one command, and it is the safe route** — it runs no solver, so the memory
+failure that killed the build on 2026-08-27 cannot touch it, and with the package cache intact
+it links rather than downloads:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git pull
+REBUILD_RESTORE_ONLY=1 bash scripts/rebuild_env.sh
+```
+
+It rebuilds the environment recorded in `research_archive/env_test_before_rebuild_*.txt` at the
+prefix that record names, **including the torch the server actually ran** — see the 2026-08-28
+entry at the end of this section for what it does and does not put back.
 
 If you would rather drive it by hand — this route uses conda's own solver, so it does need an
 allocation:
@@ -1489,6 +1498,56 @@ environment held two distinct OpenMP runtime files, so it was not an environment
 The three-way behaviour was tested against a stubbed conda before this went back to the cluster:
 a failed build leaves the old environment in place, a successful one keeps it at `.old` and says
 how to delete it, and an activation that lands elsewhere refuses to install anything.
+
+#### 2026-08-28 — the account has no environment, and the route back to a working one
+
+**The state.** `env_test` does not exist. Its prefix is
+`/data/stat-cadd/scat9264/conda_envs/env_test`. The conda half is recorded in
+`research_archive/env_test_before_rebuild_2026-08-27.txt` (190 lines, `conda list --explicit`),
+the package cache is intact, and the pip half is not in that record.
+
+**Two routes, and they are independent.** The restore puts back what was working. The rebuild
+is the fix for the threading defect. Neither is a precondition of the other, and the restore
+does not have to be undone before a rebuild is attempted.
+
+| | what it does | what it costs | what it gives |
+|---|---|---|---|
+| `REBUILD_RESTORE_ONLY=1 bash scripts/rebuild_env.sh` | rebuilds the recorded environment at the recorded prefix | no solve; links from cache | the environment as it was — **two OpenMP runtimes and all** |
+| `bash scripts/rebuild_env.sh` | builds from `env.yml`, then runs the gate and both blockers | one micromamba solve on the login node | one threading runtime, if it passes |
+
+**The restore reinstalls the server's torch, not `env.yml`'s pin.** `conda list --explicit`
+records conda packages only, and the server's torch was a pip wheel — so torch is absent from
+the record and has to be named. The by-hand recipe above appended a line of versions to the
+archive for exactly this reason; the restore reads that line back, reinstalls
+`torch==2.3.1+cu121` from the matching index, and reinstalls the four PyG companion wheels from
+`https://data.pyg.org/whl/torch-2.3.1+cu121.html`. Those wheels pin the environment to one exact
+torch. **On the restore route that is the point, not the defect** — the whole aim is the
+environment that was working. `REBUILD_TORCH=<version>` names a different one if the archive
+records none.
+
+What the restore cannot promise: the pip half other than torch comes back at `env.yml`'s
+versions (`gauche`, `torchbnn`, `torchhk`, `deepchem`, `polaris-lib`, `torchcp`), because no
+record of what those were survives. Everything else is exact.
+
+**Four refusals, each executed against a stubbed conda on 2026-08-28** — the point being that a
+script that deletes an environment must be tested before it is pasted, not after:
+
+| situation | what happens |
+|---|---|
+| archive carries the trailing version line the by-hand recipe appends | the line is stripped before conda sees it; conda rejects a whole explicit list over one line it cannot parse |
+| `env_test` already has an interpreter | the restore **refuses** and exits 2 rather than deleting a live environment |
+| the prefix cannot be determined from any archive | both routes **refuse** and name `REBUILD_ENV_PREFIX`, rather than building by name into the home quota |
+| the build fails with the prefix known | the previous environment is put back automatically, and the interpreter is there afterwards |
+
+**Order of work, and `noiseInject` comes first.** The gate only checks that `noiseInject`
+imports, so it passes at either version — but `scripts/test_noise_conditions.py` and the
+injector cross-check both need 1.0.0, and the checkout on ARC is 0.1.0. Push from the laptop and
+pull at `/data/stat-ecr/scat9264/NoiseInject` before either route, and the install is editable,
+so nothing needs reinstalling after a pull.
+
+**Still open here:** the cross-check step is skipped unless `rust/target/release/rust_processor`
+is built on the cluster (`cd rust && cargo build --release`), and `GP_DEFAULTS['single_thread_fit']`
+stays `True` until the gate passes on ARC.
 
 ### 2.8j ✅ FIXED 2026-08-27 — the uncertainty jobs asked for six conditions that no longer exist
 
