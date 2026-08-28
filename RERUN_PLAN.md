@@ -7177,7 +7177,7 @@ Specifically, in every chat:
 | **E** | Cross-pipeline parity | — | ✅ **DONE 2026-08-26** |
 | **F** | Uncertainty machinery: audit, fix the clear bugs, report the rest | — | ✅ **yes** — it has real work in it, and produces the material for the 1:1 |
 | **G** | Local test: which noise settings earn their place | A | ✅ **DONE 2026-08-27** — §13.9; the set is in `noise_conditions.json`, gated on both sides |
-| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ G ✅ + B C E + L + §13.1 | ❌ blocked — but not on G. Read the conditions from `noise_conditions.json` rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight. **Also owns the one chat D check that cannot run off the cluster**: `python scripts/test_config_isolation.py --end-to-end` under `env_test`, now step 4 of the QM9 runbook (§13.2, D10) |
+| **H** | Job scripts, preflight, gates, launch | A ✅ D ✅ G ✅ **L ✅** + B C E + §13.1 | ❌ blocked — but not on G. Read the conditions from `noise_conditions.json` rather than restating them, and put `scripts/test_noise_conditions.py` in the preflight. **Also owns the one chat D check that cannot run off the cluster**: `python scripts/test_config_isolation.py --end-to-end` under `env_test`, now step 4 of the QM9 runbook (§13.2, D10) |
 | **I** | The uncertainty decomposition build | F | ❌ blocked on F's findings |
 | **J** | One figure script, and the five analyses | 1:1 on details, then the new columns | ❌ blocked |
 | **K** | Sync the two documents, fix the bibliography | — | ✅ **yes** — smallest, entirely self-contained |
@@ -8696,6 +8696,38 @@ the reason is in this document, with the fit count both ways.
 
 #### Chat H — Job scripts, preflight, gates, launch
 
+### 🔵 UPDATING THE CLUSTER CHECKOUT — `bash scripts/pull_safely.sh`, always
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+bash scripts/pull_safely.sh
+```
+
+**Never a bare `git pull` on ARC.** On 2026-08-28 it aborted four times in one session, each time
+as a wall of file names to clear by hand before anything could move — *"untracked working tree
+files would be overwritten by merge"* and *"your local changes would be overwritten"*. That cost
+more of that session than any defect in it did.
+
+The script does what was being pasted, in a form that cannot be got wrong:
+
+1. files **modified** on the cluster that the incoming commits also touch → copied into a dated
+   backup directory beside the repository, then the local edit discarded;
+2. **untracked** files the pull would overwrite → moved into the same place;
+3. `git pull --ff-only`.
+
+Nothing is ever deleted, the count and the location are printed at the end, and `DRY_RUN=1` shows
+what it would touch while changing nothing. Tested against a reproduction of the real failure — a
+local edit to a tracked file the pull changes, plus an untracked copy of a path the pull adds.
+
+Three families of generated file were untracked the same day so the collisions stop arising at
+all (§2.8i): everything under `results/`, the generated `slurm_scripts_*/*.sh`, `rust/Cargo.lock`,
+`data/smiles_db.sqlite` and the `slurm-*.out` logs. **The generators and runbooks stay tracked** —
+they are the source, and the `.sh` files are rebuilt from them every time.
+
+✅ **The environment block is gone.** §2.8i closed on 2026-08-28: the gate exits 0 on an ARC
+compute node, one threading runtime, both blockers passing in the same interpreter, all 33
+`env.yml` pins truthful. Nothing here waits on chat L any longer.
+
 **Blocked** on the run design in §13.1. A, B, C, D, E and G are all done, so that is the only
 remaining block, and it applies to the QM9 half only.
 
@@ -8722,7 +8754,7 @@ committed harness mutation and the eleven untracked guards (§2.20), the QM9 gen
 | | Whose | Why it cannot wait until after the grid |
 |---|---|---|
 | **The experimental pipeline draws noise per fold, not once per label column** (§3.3a) | the author | Recommendation unchanged: keep the per-fold draw, and say so in the Methods in one sentence. It needs a decision because it changes what a *molecule* means, and chat J must not average injected noise across folds either way |
-| **Push the branch** | chat H | The cluster's only route in is `git pull --ff-only`. A gate that passed on an unpushed commit proved nothing about what runs (§2.20) |
+| **Push the branch** | chat H | The cluster's only route in is `git pull --ff-only`. A gate that passed on an unpushed commit proved nothing about what runs (§2.20). On the cluster side that pull is **`bash scripts/pull_safely.sh`**, never a bare `git pull` — see the top of this section |
 
 **Two rows were deleted from this table on 2026-08-28 because they were already answered**, and
 leaving them here cost sessions: the forest leaf size (settled and applied, §5.5c) and whether the
