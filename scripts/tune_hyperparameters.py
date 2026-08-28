@@ -535,7 +535,9 @@ def run(args_cli):
 
     pat, M = _import_pipeline()
     os.makedirs(OUT_DIR, exist_ok=True)
-    scratch_csv = os.path.join(OUT_DIR, 'scratch_rows.csv')
+    # Per-run too: two runs sharing one scratch file is how the column-mismatch
+    # error appears, and it is the same collision as the timing file.
+    scratch_csv = os.path.join(OUT_DIR, f'scratch_rows{args_cli.tag}.csv')
 
     print(f'loading QM9 and taking one scaffold split of '
           f'{args_cli.sample_size} molecules...', flush=True)
@@ -773,7 +775,9 @@ def confirm(args_cli):
         payload = json.load(fh)
 
     pat, M = _import_pipeline()
-    scratch_csv = os.path.join(OUT_DIR, 'scratch_rows.csv')
+    # Per-run too: two runs sharing one scratch file is how the column-mismatch
+    # error appears, and it is the same collision as the timing file.
+    scratch_csv = os.path.join(OUT_DIR, f'scratch_rows{args_cli.tag}.csv')
     smiles, y, train_idx, val_idx, test_idx = build_split(
         pat, args_cli.sample_size, args_cli.seed)
     print(f'  train {len(train_idx)}  validation {len(val_idx)}  '
@@ -971,6 +975,20 @@ def main():
     args_cli = ap.parse_args()
     if args_cli.tag and not args_cli.tag.startswith('_'):
         args_cli.tag = '_' + args_cli.tag
+    # A NARROWED RUN NEVER SHARES THE FULL RUN'S FILES.
+    #
+    # Measured the hard way on 2026-08-28: a one-pairing --time run with no tag
+    # opened results/tuning_local/timing.csv with 'w' while the full 80-pairing
+    # pass was six hours into writing that same path. The truncation destroyed
+    # every row on disk, and the long run -- still holding its own handle at its
+    # old offset -- carried on writing past a block of NULs. Only the log saved
+    # it. So a run restricted to particular models or representations gets its
+    # own filename whether or not anyone remembered to ask for one.
+    if not args_cli.tag and (args_cli.models or args_cli.reps):
+        parts = list(args_cli.models or []) + list(args_cli.reps or [])
+        args_cli.tag = '_subset_' + '-'.join(parts)[:60]
+        print(f"  [tag] restricted to {parts}, so this run writes "
+              f"{args_cli.tag[1:]} files rather than the full run's.", flush=True)
 
     if args_cli.write_master:
         return write_master(args_cli)
