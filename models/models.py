@@ -1152,13 +1152,23 @@ class VBLLLayer(nn.Module):
     over the weight matrix, with a standard normal prior p(W) = N(0, I).
     Uses the reparameterization trick for gradient estimation.
     """
-    def __init__(self, in_features, out_features, prior_mu=None, prior_sigma=None):
+    def __init__(self, in_features, out_features, prior_mu=None, prior_sigma=None,
+                 heteroscedastic=False):
         super(VBLLLayer, self).__init__()
         # From the shared spec, not restated here (RERUN_PLAN.md 2.13).
         _init_log_sigma = BAYESIAN_DEFAULTS['vbll_init_log_sigma']
         _init_log_noise = BAYESIAN_DEFAULTS['vbll_init_log_noise_var']
         self.in_features = in_features
         self.out_features = out_features
+        # When False the observation noise is ONE NUMBER for the whole fit, so
+        # this model's aleatoric term is identical for every molecule and its
+        # correlation with per-molecule injected noise is zero however good the
+        # model is (RERUN_PLAN.md 5.5). When True the noise is predicted FROM
+        # THE INPUT, which is the `HetRegression` class of the reference library
+        # saved at research_archive/f692d614/vbll_regression.py:277-370. The
+        # noise head is variational too, exactly as it is there, so it carries a
+        # KL term rather than being a free deterministic function.
+        self.heteroscedastic = bool(heteroscedastic)
         self.prior_mu = (BAYESIAN_DEFAULTS['vbll_prior_mu']
                          if prior_mu is None else prior_mu)
         self.prior_sigma = (BAYESIAN_DEFAULTS['vbll_prior_sigma']
@@ -1175,6 +1185,22 @@ class VBLLLayer(nn.Module):
         # Learned log observation noise (aleatoric uncertainty)
         self.log_noise_var = nn.Parameter(torch.tensor(_init_log_noise))
 
+        if self.heteroscedastic:
+            # A variational map from the features to a log noise variance, one
+            # value per molecule. Initialised to predict nothing, so the layer
+            # starts at the homoscedastic value above and has to earn any
+            # departure from it.
+            self.noise_mu = nn.Parameter(torch.zeros(1, in_features))
+            self.noise_log_sigma = nn.Parameter(
+                torch.full((1, in_features), _init_log_sigma))
+            self.noise_bias_mu = nn.Parameter(torch.tensor([_init_log_noise]))
+            self.noise_bias_log_sigma = nn.Parameter(
+                torch.tensor([_init_log_sigma]))
+        # What the last forward pass predicted, so the loss can read it without
+        # every call site growing an argument. Recomputed on every forward, and
+        # the loss is always called immediately after one.
+        self._last_noise_var = None
+
         # Initialize weight_mu with Kaiming uniform
         nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
         fan_in = in_features
@@ -1183,7 +1209,26 @@ class VBLLLayer(nn.Module):
 
     @property
     def noise_var(self):
+        """The single observation noise. Meaningful only when this layer is
+        homoscedastic; when it is not, use `noise_var_for(x)`."""
         return torch.exp(self.log_noise_var)
+
+    def noise_var_for(self, x):
+        """Observation noise variance, PER MOLECULE when heteroscedastic.
+
+        Clamped the way the heteroscedastic loss in scripts/loss_functions.py
+        clamps its log variance, so the two agree about what a predicted noise
+        can be and neither can drive the other's gradient to infinity.
+        """
+        if not self.heteroscedastic:
+            n = torch.exp(self.log_noise_var)
+            return n.expand(x.shape[0]) if x.dim() > 1 else n
+        w = self.noise_mu + torch.exp(self.noise_log_sigma) * torch.randn_like(
+            self.noise_mu)
+        b = self.noise_bias_mu + torch.exp(
+            self.noise_bias_log_sigma) * torch.randn_like(self.noise_bias_mu)
+        log_var = F.linear(x, w, b).squeeze(-1)
+        return torch.exp(torch.clamp(log_var, -10.0, 10.0))
 
     def kl_divergence(self):
         """Closed-form KL(q(W)||p(W)) for diagonal Gaussians."""
@@ -1207,7 +1252,27 @@ class VBLLLayer(nn.Module):
             + math.log(prior_var) - 2.0 * self.bias_log_sigma
         )
 
-        return kl_w + kl_b
+        kl = kl_w + kl_b
+
+        if self.heteroscedastic:
+            # The noise head is variational, so it is regularised toward the
+            # same prior. Without this the head is free to fit residual noise
+            # arbitrarily and the aleatoric term stops being a posterior
+            # quantity at all.
+            n_var = torch.exp(2.0 * self.noise_log_sigma)
+            kl = kl + 0.5 * torch.sum(
+                n_var / prior_var
+                + ((self.prior_mu - self.noise_mu) ** 2) / prior_var
+                - 1.0
+                + math.log(prior_var) - 2.0 * self.noise_log_sigma)
+            nb_var = torch.exp(2.0 * self.noise_bias_log_sigma)
+            kl = kl + 0.5 * torch.sum(
+                nb_var / prior_var
+                + ((self.prior_mu - self.noise_bias_mu) ** 2) / prior_var
+                - 1.0
+                + math.log(prior_var) - 2.0 * self.noise_bias_log_sigma)
+
+        return kl
 
     def forward(self, x):
         # Weights are SAMPLED in eval mode too, deliberately: the Monte Carlo
@@ -1223,6 +1288,7 @@ class VBLLLayer(nn.Module):
         weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
         bias_sigma = torch.exp(self.bias_log_sigma)
         bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+        self._last_noise_var = self.noise_var_for(x)
         return F.linear(x, weight, bias)
 
 
@@ -1249,7 +1315,16 @@ class VBLLLoss(nn.Module):
 
     def forward(self, pred, target):
         if self.output_layer is not None:
-            noise_var = self.output_layer.noise_var
+            # When the layer predicts a noise PER MOLECULE, use what it
+            # predicted on the forward pass that produced `pred`. Using the
+            # single `noise_var` here instead would fit the mean with a
+            # heteroscedastic head attached and never train that head, which
+            # gives a per-molecule column that means nothing.
+            cached = getattr(self.output_layer, '_last_noise_var', None)
+            if self.output_layer.heteroscedastic and cached is not None:
+                noise_var = cached.reshape(-1, 1) if pred.dim() > 1 else cached
+            else:
+                noise_var = self.output_layer.noise_var
             # Gaussian NLL with learned observation noise
             nll = 0.5 * torch.log(noise_var) + 0.5 * ((pred - target) ** 2) / noise_var
             nll = nll.mean()
