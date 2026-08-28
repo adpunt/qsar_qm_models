@@ -745,6 +745,87 @@ for k, v in sorted(seen.items()):
     print()
 
 
+# conda package name -> the distribution that carries its python metadata,
+# where the two differ.
+RECIPE_DIST_OF = {
+    "pytorch": "torch",
+    "pytorch_geometric": "torch-geometric",
+    "matplotlib-base": "matplotlib",
+    "huggingface_hub": "huggingface-hub",
+    "typing_extensions": "typing-extensions",
+    "rdkit-dev": "rdkit",
+}
+# Pins with no python metadata to compare against.
+RECIPE_SKIP = {"python", "pip", "boost-cpp", "llvm-openmp", "pybind11",
+               "pybind11-global"}
+
+# Packages that carry compiled code. A PyPI wheel of any of these can bring its
+# own OpenMP runtime, which is the defect this whole environment exists to keep
+# out (RERUN_PLAN.md 2.8i). They must come from conda, so a gap in one is
+# REPORTED and never pip-installed.
+RECIPE_COMPILED = {
+    "pytorch", "torch", "scikit-learn", "lightgbm", "xgboost", "numpy", "scipy",
+    "rdkit", "rdkit-dev", "quantile-forest", "grakel", "torchvision", "pandas",
+    "matplotlib", "matplotlib-base", "pyarrow", "shap",
+}
+
+
+def recipe_release(v):
+    """Compare on the release only.
+
+    conda-forge's torch 2.5.1 calls itself 2.5.1.post108 and a PyPI wheel calls
+    itself 2.5.1+cu121. Both ARE the pinned 2.5.1, and a comparison that says
+    otherwise reports a correct environment as wrong -- and would send a
+    reconcile off to "fix" a package that is already right, which for torch
+    means fetching the wheel this file exists to keep out.
+    """
+    v = str(v).split("+")[0]
+    return v.split(".post")[0]
+
+
+def recipe_pins(yml):
+    """[(conda name, wanted version)] from env.yml, in file order."""
+    import re
+    pins = []
+    for raw in open(yml):
+        line = raw.split("#", 1)[0].strip()
+        if not line.startswith("- "):
+            continue
+        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*==?\s*([0-9][0-9A-Za-z_.\-]*)",
+                     line[2:].strip())
+        if not m:
+            continue
+        if m.group(1) in RECIPE_SKIP:
+            continue
+        pins.append((m.group(1), m.group(2)))
+    return pins
+
+
+def recipe_gaps(yml):
+    """[(name, dist, want, have_or_None)] for every pin that is not satisfied."""
+    import importlib.metadata as md
+    gaps = []
+    for name, want in recipe_pins(yml):
+        dist = RECIPE_DIST_OF.get(name, name)
+        have = None
+        for cand in (dist, dist.replace("_", "-"), dist.replace("-", "_")):
+            try:
+                have = md.version(cand)
+                break
+            except md.PackageNotFoundError:
+                continue
+        if have is None or recipe_release(have) != recipe_release(want):
+            gaps.append((name, dist, want, have))
+    return gaps
+
+
+def print_recipe_gaps(yml):
+    """One line per gap, for setup.sh to act on:  <pip|conda> <dist> <want>"""
+    for name, dist, want, _have in recipe_gaps(yml):
+        kind = "conda" if name in RECIPE_COMPILED or dist in RECIPE_COMPILED else "pip"
+        print(f"{kind} {dist} {want}")
+
+
 def check_env_recipe(failures):
     """Is env.yml a truthful record of what is installed?
 
@@ -762,59 +843,19 @@ def check_env_recipe(failures):
         return
 
     try:
-        import importlib.metadata as md
+        import importlib.metadata  # noqa: F401
     except Exception as e:
         print(f"env.yml: cannot check ({e})")
         print()
         return
 
-    # conda package name -> the distribution that carries its python metadata,
-    # where the two differ.
-    dist_of = {
-        "pytorch": "torch",
-        "pytorch_geometric": "torch-geometric",
-        "matplotlib-base": "matplotlib",
-        "huggingface_hub": "huggingface-hub",
-        "typing_extensions": "typing-extensions",
-        "rdkit-dev": "rdkit",
-    }
-    # Pins with no python metadata to compare against.
-    skip = {"python", "pip", "boost-cpp", "llvm-openmp", "pybind11",
-            "pybind11-global"}
-
-    import re
-    pins = []
-    for raw in open(yml):
-        line = raw.split("#", 1)[0].strip()
-        if not line.startswith("- "):
-            continue
-        spec = line[2:].strip()
-        m = re.match(r"^([A-Za-z0-9_.\-]+)\s*==?\s*([0-9][0-9A-Za-z_.\-]*)", spec)
-        if not m:
-            continue
-        name, want = m.group(1), m.group(2)
-        if name in skip:
-            continue
-        pins.append((name, want))
-
+    pins = recipe_pins(yml)
     print(f"env.yml is a truthful record ({len(pins)} pinned packages)")
     bad = []
-    for name, want in pins:
-        dist = dist_of.get(name, name)
-        have = None
-        for cand in (dist, dist.replace("_", "-"), dist.replace("-", "_")):
-            try:
-                have = md.version(cand)
-                break
-            except md.PackageNotFoundError:
-                continue
+    for name, dist, want, have in recipe_gaps(yml):
         if have is None:
             bad.append(f"{name}: pinned {want}, NOT INSTALLED")
-            continue
-        # A local version tag is exactly the tell that a PyPI wheel replaced a
-        # conda package: the live environment read "2.3.1+cu121".
-        base = have.split("+")[0]
-        if base != want:
+        else:
             extra = " (a PyPI wheel, not the conda package)" if "+" in have else ""
             bad.append(f"{name}: env.yml pins {want}, installed {have}{extra}")
 
@@ -822,8 +863,10 @@ def check_env_recipe(failures):
         for line in bad:
             print(f"  FAIL  {line}")
         print("        env.yml does not describe this interpreter, so it is not a record")
-        print("        of what any result was produced under. Rebuild it, or fix the pin")
-        print("        and pip-constraints.txt together and say what moved in RERUN_PLAN.md.")
+        print("        of what any result was produced under.")
+        print("        `. ./setup.sh` closes these: it installs what the recipe pins and")
+        print("        is missing, and names anything compiled for conda rather than")
+        print("        pip-installing a wheel with its own threading runtime.")
         failures.append("env.yml disagrees with what is installed")
     else:
         print("  OK    every pinned version in env.yml is what is installed")
@@ -1086,10 +1129,23 @@ def main():
                          "environment rebuild -- the LightGBM fit and the Gaussian-process "
                          "fit after the boosting libraries are loaded. A few minutes. Use "
                          "in the preflight, not in a per-task guard.")
+    ap.add_argument("--print-recipe-gaps", action="store_true",
+                    help="One line per env.yml pin that is not satisfied, as "
+                         "'<pip|conda> <dist> <version>'. setup.sh reads this and "
+                         "installs them, so there is one implementation of "
+                         "'what does the recipe say and what is here'.")
     ap.add_argument("--audit-roster", action="store_true",
                     help="Check that every model the job generator can emit is known here, "
                          "and exit. Nothing is imported.")
     args = ap.parse_args()
+
+    if args.print_recipe_gaps:
+        here = os.path.dirname(os.path.abspath(__file__))
+        yml = os.path.join(os.path.dirname(here), "env.yml")
+        if os.path.isfile(yml):
+            print_recipe_gaps(yml)
+        return 0
+
 
     if args.audit_roster:
         return audit_roster()

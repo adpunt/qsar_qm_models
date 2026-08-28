@@ -239,6 +239,92 @@ def apply_noise(y, scales, seed):
 
 
 # ---------------------------------------------------------------------------
+# THE PROJECT'S OWN NOISE CONDITIONS, and its own representations
+# ---------------------------------------------------------------------------
+# The three designs above are written for the three checks: they are the
+# cleanest way to ask "is there anything to find, and can the model rank it?".
+# They are NOT the study's noise conditions, and a split that survives them has
+# not been shown to survive the noise the study actually injects.
+#
+# Everything below uses the real thing on both axes: the conditions come from
+# the installed injector (`noiseInject`), and the features from the laboratory
+# runner's own representation builders. Neither is reimplemented here.
+#
+# WHICH CONDITIONS CAN ANSWER THIS AT ALL. Only some conditions give different
+# molecules different amounts of noise. For the rest every molecule gets the
+# same amount, so "which molecules were corrupted" is UNDEFINED rather than
+# zero, exactly as the even design above is. Those conditions are still worth
+# running, as the study's own version of the negative control.
+KIRBY_ROOT = os.environ.get(
+    'KIRBY_ROOT', os.path.join(os.path.dirname(REPO), 'KIRBy'))
+
+
+def _kirby_runner():
+    """The laboratory runner, imported for its representation builders and its
+    scaffold-group rule. Imported, not copied: a second implementation of a
+    representation is a second thing to drift."""
+    import importlib.util
+    path = os.path.join(KIRBY_ROOT, 'tests',
+                        'alternative_data_noise_robustness.py')
+    if not os.path.isfile(path):
+        raise DecompositionControlsError(
+            f"cannot find the laboratory runner at {path}. Set KIRBY_ROOT.")
+    os.environ.setdefault('QSAR_QM_MODELS_ROOT', REPO)
+    spec = importlib.util.spec_from_file_location('kirby_runner', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class DecompositionControlsError(RuntimeError):
+    pass
+
+
+def build_representations(smiles, names):
+    """Real representations, from the laboratory runner's own builders."""
+    runner = _kirby_runner()
+    return runner.generate_representations(list(smiles), rep_filter=list(names))
+
+
+def injector_patterns(condition, y, groups, spread):
+    """The per-molecule noise scale a real condition delivers, at a fixed
+    reference level, and whether it varies at all.
+
+    Taken at level 1.0 so it is the same column at every level including zero,
+    which is what makes the zero-noise subtraction mean something.
+    """
+    from noiseInject import CONDITIONS as INJ_CONDITIONS
+    from noiseInject import NoiseInjectorRegression
+    if condition not in INJ_CONDITIONS:
+        raise DecompositionControlsError(
+            f"{condition!r} is not a condition the installed injector knows. "
+            f"Known: {sorted(INJ_CONDITIONS)}")
+    inj = NoiseInjectorRegression.from_condition(condition, random_state=0)
+    # Censoring's level is the FRACTION of labels clipped, which is already
+    # dimensionless. Multiplying it by a label spread gives a fraction outside
+    # [0, 1] and the quantile raises. Same exemption the runners make.
+    ref = 1.0 if INJ_CONDITIONS[condition]['strategy'] == 'censoring' else spread
+    scale = inj.noise_scale(y, ref, reference=y, groups=groups,
+                            reference_groups=groups)
+    scale = np.asarray(scale, dtype=float)
+    varies = bool(len(np.unique(np.round(scale, 12))) > 1)
+    return scale, varies
+
+
+def injector_noise(condition, y, level, groups, spread, seed):
+    """Corrupt the labels with a real condition at a real level."""
+    from noiseInject import CONDITIONS as INJ_CONDITIONS
+    from noiseInject import NoiseInjectorRegression
+    if float(level) == 0.0:
+        return np.asarray(y, dtype=float).copy()
+    inj = NoiseInjectorRegression.from_condition(condition, random_state=seed)
+    ref = 1.0 if INJ_CONDITIONS[condition]['strategy'] == 'censoring' else spread
+    return np.asarray(
+        inj.inject_verbose(y, float(level) * ref, groups=groups).y_noisy,
+        dtype=float)
+
+
+# ---------------------------------------------------------------------------
 # The models, each scored out of fold on scaffold groups
 # ---------------------------------------------------------------------------
 
@@ -419,8 +505,32 @@ def fit_vbll(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150,
     return mean, alea, epis
 
 
+def fit_ngboost(x_fit, y_fit, x_score, seed=0):
+    """NGBoost predicts a distribution per molecule from ONE fit, so its noise
+    half varies and it has no model half at all -- there is no second fit to
+    disagree with. Recorded as absent, not as zero."""
+    from ngboost import NGBRegressor
+    from ngboost.distns import Normal
+    from ngboost.scores import MLE
+    from model_defaults import SKLEARN_DEFAULTS
+    from uncertainty_decomposition import decompose_single_distribution
+
+    p = dict(SKLEARN_DEFAULTS['ngboost'])
+    model = NGBRegressor(Dist=Normal, Score=MLE, verbose=False,
+                         random_state=seed,
+                         natural_gradient=p['natural_gradient'],
+                         n_estimators=p['n_estimators'],
+                         learning_rate=p['learning_rate'])
+    model.fit(x_fit, y_fit)
+    dist = model.pred_dist(x_score)
+    alea, epis, _ = decompose_single_distribution(
+        np.asarray(dist.scale, dtype=float) ** 2)
+    return np.asarray(dist.loc, dtype=float), alea, epis
+
+
 MODELS = {
     'rf':                   lambda a, b, c, s: fit_rf(a, b, c, 'rf', s),
+    'ngboost':              lambda a, b, c, s: fit_ngboost(a, b, c, s),
     'qrf':                  lambda a, b, c, s: fit_rf(a, b, c, 'qrf', s),
     'gauche_rbf':           lambda a, b, c, s: fit_gp(a, b, c, False, s),
     'heteroscedastic_gp':   lambda a, b, c, s: fit_gp(a, b, c, True, s),
@@ -584,6 +694,153 @@ def measure(models=None, conditions=CONDITIONS, level=0.6, n_molecules=2000,
     return rows
 
 
+def measure_real_conditions(models, reps, conditions, level=0.6,
+                            n_molecules=900, n_folds=3, seed=0, out_csv=None,
+                            verbose=True):
+    """The same three questions, asked with the STUDY'S OWN noise and features.
+
+    One row per (model, representation, condition, level, term). Nothing pooled.
+
+    Two things this adds over the synthetic designs above.
+
+      The noise is the injector's, so a result here is about a condition the
+      study actually runs rather than about a shape written for a test.
+
+      The features are the study's own representations, so a split that depends
+      on having nine tidy descriptors shows up as a split that stops working on
+      a fingerprint.
+
+    The correlation target is the condition's own per-molecule noise scale, at a
+    fixed reference level. For a condition that gives every molecule the same
+    amount that column is CONSTANT, the question is undefined rather than zero,
+    and the row says so instead of carrying a number.
+    """
+    from scipy.stats import spearmanr
+    from sklearn.metrics import r2_score
+    from uncertainty_decomposition import support
+
+    x_desc, y, groups = load_qm9(n_molecules, seed=seed)
+    smiles = _selected_smiles(n_molecules, seed)
+    spread = float(np.std(y))
+    if verbose:
+        print(f"  {len(y)} real QM9 molecules, label '{LABEL}', spread "
+              f"{spread:.4f}, {len(np.unique(groups))} scaffold groups")
+        print(f"  building representations: {', '.join(reps)}", flush=True)
+    features = build_representations(smiles, reps)
+
+    rows = []
+    for condition in conditions:
+        pattern, varies = injector_patterns(condition, y, groups, spread)
+        if verbose:
+            _note = ('VARIES per molecule' if varies else
+                     'is the SAME for every molecule, so the question is '
+                     'UNDEFINED here rather than zero: this condition is the '
+                     "study's own negative control")
+            print(f"\n  condition {condition}: noise scale {_note}", flush=True)
+        for lvl in (0.0, float(level)):
+            y_noisy = injector_noise(condition, y, lvl, groups, spread, seed)
+            for rep_name in reps:
+                x = np.asarray(features[rep_name], dtype=float)
+                for name in models:
+                    fit = MODELS[name]
+                    try:
+                        mean, alea, epis, fold = _oof(
+                            lambda a, b, c: fit(a, b, c, seed), x, y_noisy,
+                            groups, n_folds)
+                    except Exception as exc:
+                        if verbose:
+                            print(f"    {condition:<14} {lvl:.1f} {rep_name:<7} "
+                                  f"{name:<32} BLOCKED: {type(exc).__name__}: "
+                                  f"{str(exc)[:70]}", flush=True)
+                        for term in ('aleatoric', 'epistemic'):
+                            rows.append(_row(name, rep_name, condition, lvl,
+                                             term, 'blocked', float('nan'), 0,
+                                             float('nan'), 0, n_folds, seed,
+                                             varies,
+                                             f"{type(exc).__name__}: {exc}"))
+                        continue
+
+                    ok = np.isfinite(mean)
+                    r2 = float(r2_score(y[ok], mean[ok]))
+                    alea_kind, epis_kind = support(name)
+                    for term, values, kind in (('aleatoric', alea, alea_kind),
+                                               ('epistemic', epis, epis_kind)):
+                        if values is None:
+                            constant, rho = True, float('nan')
+                        else:
+                            v = np.asarray(values, dtype=float)
+                            good = ok & np.isfinite(v)
+                            constant = all(
+                                float(np.nanmax(v[good & (fold == f)])
+                                      - np.nanmin(v[good & (fold == f)])) <= 1e-12
+                                for f in np.unique(fold[good]))
+                            rho = (float('nan') if (constant or not varies)
+                                   else float(spearmanr(v[good],
+                                                        pattern[good])[0]))
+                        rows.append(_row(name, rep_name, condition, lvl, term,
+                                         kind, rho, int(constant), r2,
+                                         int(ok.sum()), n_folds, seed, varies,
+                                         ''))
+                    if verbose:
+                        def _f(t):
+                            r = [r for r in rows if r['model'] == name
+                                 and r['representation'] == rep_name
+                                 and r['noise_condition'] == condition
+                                 and abs(r['level'] - lvl) < 1e-12
+                                 and r['term'] == t][-1]
+                            if r['is_constant']:
+                                return ' (constant)'
+                            if np.isnan(r['spearman_vs_pattern']):
+                                return ' (undefined)'
+                            return f"{r['spearman_vs_pattern']:+.4f}"
+                        print(f"    {condition:<14} {lvl:.1f} {rep_name:<7} "
+                              f"{name:<32} R2 {r2:+.4f}  aleatoric {_f('aleatoric')}"
+                              f"  epistemic {_f('epistemic')}", flush=True)
+
+    if out_csv:
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(out_csv, index=False)
+        if verbose:
+            print(f"\n  wrote {len(rows)} rows to {out_csv}")
+    return rows
+
+
+def _row(model, rep, condition, level, term, support_kind, rho, constant, r2,
+         n, n_folds, seed, pattern_varies, blocked):
+    return {
+        'model': model,
+        'representation': rep,
+        'noise_condition': condition,
+        'reference_pattern': condition,
+        'level': level,
+        'term': term,
+        'support': support_kind,
+        'spearman_vs_pattern': rho,
+        'is_constant': constant,
+        'pattern_varies': int(bool(pattern_varies)),
+        'r2_oof': r2,
+        'n_molecules': n,
+        'n_folds': n_folds,
+        'seed': seed,
+        'blocked': blocked,
+    }
+
+
+def _selected_smiles(n_molecules, seed):
+    """The SMILES of exactly the molecules `load_qm9` selects, in the same order."""
+    import pandas as pd
+    frame = pd.read_csv(os.path.join(REPO, 'data', 'QM9', 'raw', 'gdb9.sdf.csv'))
+    smiles = qm9_smiles(len(frame))
+    frame = frame.iloc[:len(smiles)].copy()
+    frame['__smiles'] = smiles
+    frame = frame[frame['__smiles'] != '']
+    rng = np.random.default_rng(seed)
+    take = rng.choice(len(frame), size=min(n_molecules, len(frame)),
+                      replace=False)
+    take.sort()
+    return list(frame.iloc[take]['__smiles'])
+
+
 def lookup(rows, model, condition, term, level, reference=None):
     for r in rows:
         if (r['model'] == model and r['noise_condition'] == condition
@@ -604,7 +861,19 @@ if __name__ == '__main__':
     ap.add_argument('--n-folds', type=int, default=3)
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--out', default=None)
+    ap.add_argument('--real-conditions', action='store_true',
+                    help="Use the injector's own noise conditions and the "
+                         "study's own representations instead of the three "
+                         "designs written for the checks.")
+    ap.add_argument('--reps', nargs='*', default=['ECFP4', 'PDV', 'SNS'])
     a = ap.parse_args()
-    measure(models=a.models, conditions=a.conditions, level=a.level,
+    if a.real_conditions:
+        measure_real_conditions(
+            models=a.models or list(MODELS), reps=a.reps,
+            conditions=a.conditions, level=a.level,
             n_molecules=a.n_molecules, n_folds=a.n_folds, seed=a.seed,
             out_csv=a.out)
+    else:
+        measure(models=a.models, conditions=a.conditions, level=a.level,
+                n_molecules=a.n_molecules, n_folds=a.n_folds, seed=a.seed,
+                out_csv=a.out)

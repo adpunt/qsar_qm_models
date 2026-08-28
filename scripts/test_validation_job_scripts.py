@@ -88,6 +88,13 @@ def load_runner(kirby_dir):
     return module
 
 
+def generate_raw(tmp, *extra):
+    """Run the generator and hand back the result, refusals included."""
+    return subprocess.run(
+        [sys.executable, str(GENERATOR), '--out-dir', str(tmp), *extra],
+        capture_output=True, text=True)
+
+
 def generate(tmp, *extra):
     result = subprocess.run(
         [sys.executable, str(GENERATOR), '--out-dir', str(tmp), *extra],
@@ -165,14 +172,55 @@ def no_retired_condition_is_ever_run():
                 assert bad not in text, (
                     f"{name} names {bad}, which noise_conditions.json lists under "
                     f"not_run. Conditions must come from that file.")
-    # and with the depth conditions on, which is the other way to run this
+    # and with the deep run on, which is the other way to run this. It takes named
+    # pairs since 2026-08-28 -- the validation datasets get the same noise as QM9,
+    # on the same shape of run, so the deep conditions are a subset run here too.
     with tempfile.TemporaryDirectory() as tmp:
-        scripts, _ = generate(tmp, '--include-depth-conditions')
+        scripts, _ = generate(tmp, '--include-depth-conditions',
+                              '--models', 'RF', 'NGBoost', '--reps', 'ECFP4', 'PDV')
         for name in scripts:
             text = Path(tmp, name).read_text()
             for bad in retired:
-                assert bad not in text, f"--include-depth-conditions puts {bad} in {name}"
-    return f"neither default nor --include-depth-conditions emits any of {sorted(retired)}"
+                assert bad not in text, f"the deep run puts {bad} in {name}"
+    return f"neither the breadth grid nor the deep run emits any of {sorted(retired)}"
+
+
+def the_deep_run_is_a_subset_run_here_too():
+    """The validation datasets get the same noise as QM9, on the same shape of run.
+
+    The author ruled on 2026-08-28 that the validation datasets see every
+    condition QM9 sees. QM9 runs the three depth-only conditions on about a
+    dozen model-and-representation pairs, not across its whole grid, and its
+    generator refuses `--stage 2` without --models and --reps rather than
+    inventing a selection. This asserts the validation generator does the same:
+    the depth-only conditions across 8 models x 6 representations is three times
+    the breadth grid's cost and was never the design.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        r = generate_raw(tmp, '--include-depth-conditions')
+        assert r.returncode != 0, (
+            "the depth-only conditions were accepted across the whole grid; the deep run "
+            "goes on a named subset of pairs, as it does on QM9")
+        assert 'named subset' in r.stderr, (
+            f"the refusal does not say what the rule is:\n{r.stderr[-400:]}")
+
+        r = generate_raw(tmp, '--include-depth-conditions',
+                         '--models', 'RF', 'NGBoost', '--reps', 'ECFP4', 'PDV')
+        assert r.returncode == 0, (
+            f"the deep run on named pairs was refused:\n{r.stderr[-600:]}")
+        deep = {c['name'] for c in SETTLED['stage_2_depth_only']}
+        emitted = set()
+        for f in Path(tmp).glob('val_*.sh'):
+            argv = shlex.split(command_line_of(f.read_text()))
+            i = argv.index('--conditions')
+            for a in argv[i + 1:]:
+                if a.startswith('--'):
+                    break
+                emitted.add(a)
+        missing = deep - emitted
+        assert not missing, (
+            f"the deep run on named pairs emitted no {', '.join(sorted(missing))}; the "
+            f"validation datasets are meant to see every condition QM9 sees")
 
 
 def the_conditions_are_stated_not_inherited():
@@ -359,6 +407,7 @@ def main():
         check("the smoke test parses too", lambda: the_smoke_test_parses_too(runner)),
         check("no retired condition is ever run", no_retired_condition_is_ever_run),
         check("the conditions are stated, not inherited", the_conditions_are_stated_not_inherited),
+        check("the deep run is a subset run here too", the_deep_run_is_a_subset_run_here_too),
         check("hERG's two names are both right",
               lambda: the_dataset_name_and_the_path_name_are_both_right(runner)),
         check("every script carries all three guards", every_script_carries_all_three_guards),
