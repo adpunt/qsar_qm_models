@@ -248,7 +248,10 @@ SETUP_SKIP_EXTRAS=0
 # 2.5.1.post108 and a pip wheel as 2.5.1+cu121; both ARE the pinned 2.5.1, and
 # a comparison that says otherwise skips the extras on a correctly built
 # environment -- which it did on ARC on 2026-08-28.
-setup_release_of() { local v="${1%%+*}"; echo "${v%%.post*}"; }
+# Strip a trailing `.*` too: the pin is written `torch==2.5.1.*` so that PEP 440
+# accepts conda-forge's post-release, and without this the comparison reads
+# "2.5.1.post108 is not 2.5.1.*" and skips the extras on a matching environment.
+setup_release_of() { local v="${1%%+*}"; v="${v%%.post*}"; echo "${v%.\*}"; }
 _installed_torch="$(python -c "import importlib.metadata as m; print(m.version('torch'))" 2>/dev/null)"
 _pinned_torch="$(grep -E '^torch==' "$CONSTRAINTS" 2>/dev/null | head -1 | cut -d'=' -f3)"
 if [ -n "$_installed_torch" ] && [ -n "$_pinned_torch" ] \

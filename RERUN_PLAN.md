@@ -1611,6 +1611,29 @@ done. Three things it exposed, all now fixed in the script:
    were absent from the environment it records — `quantile-forest` is the package the server
    audit found missing, which is why every quantile-forest task died on contact. They are conda
    packages in `env.yml` and have to be added to a restored environment by hand.
+#### The restored environment has ONE threading runtime — measured on ARC, 2026-08-28
+
+```
+threading runtimes (what a job would load, not what is loaded now)
+  OK    one threading runtime: /data/stat-cadd/scat9264/conda_envs/env_test/lib/libomp.so
+```
+
+**The restore produced the property the rebuild was for.** The second runtime came in on the pip
+torch wheel, that wheel was shadowing the conda package rather than replacing it, and a restore
+from a list of conda packages cannot bring it back. So `env_test` as restored has one runtime,
+`QSAR_ALLOW_MULTIPLE_OPENMP=1` is **not needed**, and the per-task guard passes on its own terms.
+
+Everything else on the same run: `check_environment.py --models lgb` exit 0; the two injectors
+agree, **342 of 342**; the seven settled conditions resolve on both sides; the KIRBy validation
+pipeline imports and builds its parser; RDKit links and the Rust binary builds. This is the first
+time any of it has been true on the cluster.
+
+**Not yet closed on that environment:** `torch_geometric` is absent, which is the whole QM9 graph
+roster (`gin`, `gcn`, `ginct`, `gin2d`, `graph_gp`) — `env.yml` pins `pytorch_geometric=2.6.1`
+and it has to be added to the restored environment by hand, like `quantile-forest` and `ngboost`
+were. `noiseInject` reports 0.3.0 from stale `.egg-info` metadata while the code it loads is
+1.0.0 — the conditions check proves the code, and a fresh editable install clears the number.
+
 7. **The archive on ARC has no version line**, so the torch step was skipped —
    `REBUILD_TORCH=<version>` names it. Whether torch is present at all comes from the conda half
    and has to be checked in the restored environment, not assumed.
