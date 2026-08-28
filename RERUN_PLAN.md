@@ -8949,6 +8949,88 @@ different files, so no duplicate exists for the deduplication to catch, and noth
 `scripts/confirm_tuned_on_validation_datasets.py --prune` rewrites them after they exist, so the
 hazard is "absent then present" AND "present then changed".
 
+#### 🟡 2026-08-28 — THE SCREEN IS GENERATED AND TWO CANARY TASKS ARE QUEUED
+
+**Submitted on ARC, 2026-08-28, `--account=stat-cadd --partition=medium`:**
+
+| job | script | array | what it proves |
+|---|---|---|---|
+| `12925391` | `qm9_s0_rf.sh` | `0` | the job script's own guards — environment, the QM9 cache guard, the tuned-flag block. 2:59 wall, so it backfills first |
+| `12925392` | `qm9_s0_qrf.sh` | `0` | `-u True --oof-folds 5` inside a real job — the cross-fit, which is in 11 of the 17 scripts and had never run to completion anywhere |
+
+Both write real cells of the screen; neither is throwaway. **The remaining 292 tasks are not
+submitted** and go out once these two report.
+
+**What the generator emitted** (its own printed summary, not retyped):
+
+```
+Stage 0: 17 array scripts, 294 tasks total
+  conditions: gaussian grouped_wider grouped_shifted
+  replicates: 1, numbered 0..0
+  each task: up to 7 levels x 1 replicate(s) = 7 training runs
+  the clean level runs under gaussian only; copy_zero_rows.py fills in the rest afterwards
+  grid total: 2,058 training runs
+```
+
+| tier | scripts | tasks each | wall |
+|---|---|---|---|
+| 1 — tree and deterministic | `rf`, `xgboost`, `lgb` | 18 | 2:59 |
+| | `svm`, `dnn`, `mlp` | 18 | 3:59 |
+| | `ngboost` | 18 | 23:59 |
+| 2 — Bayesian networks | `dnn_bnn_full`, `mlp_bnn_full`, `dnn_bnn_full_variational`, `mlp_bnn_full_variational` | 18 | 23:59 |
+| 3 — outside the ANOVA | `qrf` | 18 | 11:59 |
+| | `gauche_rbf`, `heteroscedastic_gp`, `dnn_bnn_full_variational_hetero`, `mlp_bnn_full_variational_hetero` | 18 | 23:59 |
+| | `gauche` (Tanimoto — binary fingerprints only) | 6 | 23:59 |
+
+16 models × 6 representations × 3 conditions = 288, plus `gauche`'s 6 = **294**.
+
+**Cluster state at submission.** `data/QM9/processed` rebuilt once, single threaded, in an
+allocation: 133,885 molecules processed, **129,428** after the RDKit validity filter, `data_v3.pt`
+325 MB. The 1,255 pre-fix `anova_*.csv` files were **moved** to `results/superseded_pre_rerun/`,
+not deleted. Neither tuned hyperparameter file exists, so the screen runs on the shared defaults —
+which is what the reuse as replicate 0 requires.
+
+**Measured in the interactive allocation before submitting**, on 500 molecules:
+
+- `rf` / `ecfp4`, uniform gaussian: R² **0.5759 → 0.5485** from level 0 to 0.5; delivered
+  0.671229, **0.5170 of the label spread** against a nominal 0.5; `test: clean, always`;
+  validation carried its own independent draw dosed against the clean TRAINING spread 1.298387,
+  not its own 1.092380. That is §2.1 and §2.5 working on real data for the first time.
+- `qrf` / `pdv`, grouped-shifted with `--oof-folds 5`: delivered 0.257547, **0.1984 of the spread**
+  against a nominal 0.2; the provenance reader picked up 400 training and 50 validation molecules;
+  the cross-fit built a **scaffold-grouped inner split, 5 folds over 261 scaffold groups**. The
+  allocation then hit its four-hour limit and SLURM killed the step — not a code failure, and job
+  `12925392` is what finishes the question.
+
+**The morning check, and then the rest:**
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
+sacct -X -S today --format=JobID%14,JobName%18,State,Elapsed,MaxRSS | grep qm90_
+tail -30 qm90_rf_*_0.out ; tail -30 qm90_qrf_*_0.out
+```
+
+Both `COMPLETED` with `exit=0` → submit the other 292. `rf` and `qrf` skip index 0, which the
+canaries already did:
+
+```bash
+ACCT=stat-cadd; PART=medium
+for s in xgboost lgb svm ngboost dnn mlp; do
+    sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_$s.sh; done
+for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational \
+         mlp_bnn_full_variational heteroscedastic_gp \
+         dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero; do
+    sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh; done
+sbatch --account=$ACCT --partition=$PART --array=1-17%5 qm9_s0_rf.sh
+sbatch --account=$ACCT --partition=$PART --array=1-17%5 qm9_s0_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-5%4  qm9_s0_gauche.sh
+```
+
+Then `python copy_zero_rows.py --results ../results` once the array lands, because the clean level
+runs under gaussian only and `auc_norm` divides each condition's curve by that condition's own
+clean accuracy.
+
 #### ✅ 2026-08-28 — THE SCREEN IS READY TO SUBMIT. What is left is all on the cluster.
 
 **The author's instruction, 2026-08-28:** get the screen out first — one replicate, full grid.
