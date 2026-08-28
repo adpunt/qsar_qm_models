@@ -305,16 +305,36 @@ given `--use-best-params`**. All twelve call sites are behind
 `if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:` -- checked
 in `models/models.py` on 2026-08-28, twelve guards against twelve calls.
 
-**No script this generator writes passes that flag** (`grep -r use.best.params
-slurm_scripts_qm9_rerun/` returns nothing). Two consequences, and the second is the one that
-costs something:
+⚠️ **CORRECTED 2026-08-28, same day.** An earlier version of this section said no generated
+script passes that flag. That was true when it was written at 05:59 and false nine minutes later:
+commit `15c012c` (06:08) added `--use-best-params` to the template (`generate_scripts.py:473`), so
+**every freshly generated script passes it**. The 28 `.sh` files sitting in this directory are older
+than the generator and do NOT, which means the behaviour depends entirely on whether you regenerate
+before copying. Regenerate — §4 — and do not submit what is on disk.
 
-1. The February files on the cluster cannot fire. Move them aside anyway -- it is free, and it
-   removes the need to reason about the flag at all.
-2. **A tuned setting cannot reach the cluster today.** The sweep can finish, `--write-master`
-   can adopt settings, and the grid will still train on the shared defaults in
-   `models/model_defaults.py` until the generator is changed to emit `--use-best-params`. That
-   is a decision for the author, not a silent edit -- see `RERUN_PLAN.md` chat H.
+**So the tuned path is LIVE, and that creates a race the runbook must state.** The author's plan is
+to submit now and let the sweep finish while the jobs sit in the queue for days. Six conditions must
+hold for a tuned value to reach a model, and every one of them is evaluated **inside each individual
+training run**, not once per job — so a task that starts before the two files exist does not fail.
+It prints one line to the job log, trains on the shared defaults, and appends those rows to the same
+`anova_<condition>_<rep>_<model>.csv` the tuned rows go to.
+
+**The sharpest form of it.** `load_best_hyperparameters` fires once per (noise level, replicate).
+A task already running when the files land produces ONE degradation curve whose early noise levels
+were fitted with the defaults and whose later levels were fitted with the tuned setting. `auc_norm`
+is a statistic *of that curve*. Different array tasks write different files, so this leaves no
+duplicate for the deduplication to reveal, and nothing downstream reads `params_source` — the figure
+script prints its value counts and warns on a mixed `spec_hash`, which cannot see this, because the
+hash covers only the shared spec.
+
+Only `svm`, `xgboost`, `lgb` and `ngboost` can flip this way — `--write-master` refuses every model
+whose tuned key is shared with another — so the blast radius is 24 of 98 pairings. That is small and
+it is not zero, and NGBoost is in it.
+
+**Until a start-gate exists, the two safe orders are:** finish `--write-master` (and
+`confirm_tuned_on_validation_datasets.py --prune`, which rewrites both files a second time) BEFORE
+submitting; or submit with the tuned files absent and accept that the whole grid runs on the shared
+defaults.
 
 Move them aside:
 

@@ -8925,13 +8925,52 @@ of its six items is settled. A, B, C, D, E and G are done, the environment gate 
 
 #### 🔴 2026-08-28 — a tuned setting cannot reach the cluster, and the screen is replicate 0
 
-**The tuned path is unreachable from every script this project generates.** All twelve reads of
-`load_best_hyperparameters` in `models/models.py` sit behind
-`if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:`, and
-`grep -r use.best.params slurm_scripts_qm9_rerun/ slurm_scripts_uncertainty_rerun/` returns
-nothing. So the sweep can finish, `--write-master` can adopt settings, and the grid still trains
-on `models/model_defaults.py`. The runbook's §2b said the two files alone were enough; corrected
-there the same day.
+⚠️ **THIS ENTRY WAS WRONG WITHIN NINE MINUTES OF BEING WRITTEN, and the correction is the
+finding.** At 05:59 no generated script passed `--use-best-params`; commit `15c012c` at 06:08 added
+it to the template (`generate_scripts.py:473`). A concurrent session was editing the generator while
+this was being audited. **Every freshly generated script now passes the flag.** The 28 `.sh` files
+on disk predate it and do not — so which files reach the cluster decides the behaviour, and the
+answer must be "regenerate, always".
+
+**What is still true, and is now a live race rather than a dead path.** All twelve reads of
+`load_best_hyperparameters` sit behind that flag, and all six conditions for a tuned value to arrive
+are evaluated **inside each individual training run**. Nothing is captured at submit time. So a task
+that starts before the two JSON files exist does not fail — it prints one line, trains on the shared
+defaults, and appends those rows to the same results file the tuned rows go to.
+
+**Sharpest form:** `load_best_hyperparameters` fires once per (noise level, replicate)
+(`scripts/process_and_train.py`, the level loop around the replicate loop), so a task in flight when
+`--write-master` lands yields ONE degradation curve with its early levels fitted at the defaults and
+its later levels tuned. `auc_norm` is a statistic of that curve. Different array tasks write
+different files, so no duplicate exists for the deduplication to catch, and nothing downstream reads
+`params_source`. Blast radius is bounded: `--write-master` refuses every shared tuned key, so only
+`svm`, `xgboost`, `lgb` and `ngboost` can flip — 24 of 98 pairings, NGBoost among them. There is a
+**second** writer of both files, not just `--write-master`:
+`scripts/confirm_tuned_on_validation_datasets.py --prune` rewrites them after they exist, so the
+hazard is "absent then present" AND "present then changed".
+
+#### 🔴 2026-08-28 — LAUNCH BLOCKER: eleven of seventeen scripts request wall time for one fit and do six
+
+`--oof-folds 5` was added to the generator on 2026-08-28 (`15c012c`, then `81db325`) and is appended
+to every model carrying `-u True` (`generate_scripts.py:713-714`) — 11 of the 17 roster entries. Its
+own commit message says it "multiplies those models' fit count by (1 + this)". **The wall time was
+not changed with it.** `hours_per_110` (23 / 35 / 47) was set in the first commit of this generator,
+`afd92ec`, and no commit since has touched those numbers; `hours` is computed from them alone
+(`:694`) and is capped at `min(47, ...)`, so it cannot express the true cost even if corrected.
+
+What that means, computed from the generator's own formula:
+
+| | requests | needs at six fits |
+|---|---|---|
+| the screen, `rf`/`xgboost`/`lgb`/`qrf` | 2:59 | ~12 h |
+| the screen, `svm`/`dnn`/`mlp` | 3:59 | ~18 h |
+| the screen, `ngboost`, the four Bayesian networks, both GPs, the three decomposition models | 4:59 | ~24 h |
+| the main grid, same three tiers | 17:59 / 26:59 / 34:59 | ~102 h / ~156 h / ~204 h |
+
+Only the six models without `-u True` are unaffected. The rest would sit in the queue for days and
+then be killed by the wall clock — the most expensive way this run can fail. **Nothing can be
+submitted for those eleven until the hours are re-derived and the 47-hour cap is reconsidered
+against the partition limit.**
 
 **Why that is a decision and not a one-line fix.** The screen IS replicate 0 of the main grid
 (§13.1, and `generate_scripts.py:55`), so the two must be trained the same way. Launching the
