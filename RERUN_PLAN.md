@@ -4659,6 +4659,78 @@ term.** Nothing pooled, nothing averaged across models or conditions.
 copies of them, so a change to the split changes the measurement. A gate fails if that stops being
 true. **A control that measures a copy of the code proves nothing about the code that runs.**
 
+#### ✅ MEASURED 2026-08-28 — the three checks, run. The headline number does not survive.
+
+900 real QM9 molecules, nine descriptors, three scaffold-grouped folds, one seed, level 0.6. Every
+model scored out of fold. Full output:
+`results/decomposition_controls/synthetic_designs_qm9_n900.csv`, 96 rows, one per model,
+representation, condition, reference pattern, level and term.
+
+**Every number here is the reading under noise MINUS the reading on clean labels.** The raw
+correlation is not evidence and is never quoted alone.
+
+**Check 1, even noise, must find nothing. Passes for every model that can be tested.**
+
+| model | vs the two-block pattern | vs the graded pattern |
+|---|---|---|
+| random forest | −0.107 | −0.100 |
+| Gaussian process | data term is one number — undefined | undefined |
+| noise-predicting GP | −0.070 | −0.068 |
+| variational | data term is one number — undefined | undefined |
+| variational + noise head | +0.024 | +0.019 |
+
+The raw readings are what makes this control worth having. The noise-predicting Gaussian process
+scores **+0.19** against the two-block pattern under even noise, and the variational noise head
+scores **+0.33**. Quoted alone, both read as a model finding corrupted labels. There are none to
+find. Almost all of it was already present on clean labels.
+
+**Check 2, does it rank molecules or only tell two blocks apart. Nothing collapses.**
+
+| model | two blocks | graded ladder |
+|---|---|---|
+| random forest | +0.402 | +0.345 |
+| noise-predicting GP | +0.109 | +0.087 |
+| variational + noise head | +0.057 | +0.057 |
+
+**🔴 And the finding, which is the two halves side by side** (two-block design, effects):
+
+| model | data-noise half | model half |
+|---|---|---|
+| random forest | +0.402 | **+0.325** |
+| noise-predicting GP | +0.109 | **−0.003** |
+| variational + noise head | +0.057 | **−0.003** |
+
+**The forest finds the corrupted molecules far better than anything else and does not separate the
+two halves.** Both of its halves carry almost the same signal, which is §5.5d measured again on a
+different design. **The Gaussian process separates exactly**: its model half does not move at all.
+But its signal is a fifth of the forest's. That trade is the result, and it is what decides whether
+a decomposition column belongs in the paper at all.
+
+**Check 3, the variational noise head, measured to the same standard as the Gaussian process.**
+Correlation +0.364 raw and **+0.057** after subtraction; clean-label reading +0.307; R² out of fold
+**+0.236** against **−0.140** for the ordinary variational model. So the head improves accuracy over
+the ordinary variational model and its noise signal is very weak. Both variational models fit badly
+at this size and neither reading is worth much until they run at full scale.
+
+**🔴 THE +0.7307 IN §5.5e IS +0.109 WHEN MEASURED THE WAY THE PIPELINE WORKS.** That figure came
+from a single train/test holdout, scored against the noise the region of a HELD-OUT molecule would
+carry, with no clean-label subtraction. Out of fold on scaffold groups, against the corruption a
+training molecule actually received, with the subtraction, it is +0.109. **Do not quote +0.73.**
+
+**Not yet answered: whether any of this holds under the study's own noise conditions and its own
+representations.** These three designs were written for the checks. The measurement can now run on
+the injector's conditions and the laboratory runner's representation builders
+(`--real-conditions`), and that run is what settles it. First result from it: under `gaussian`
+every molecule receives the same amount of noise, so the question is **undefined** there, not zero —
+the study's own even-noise control, and the code reports it as undefined rather than printing a
+number.
+
+**Three states that must never read the same, and now cannot.** A model that produces no such term
+at all (NGBoost's model half). A term that is one number for the whole fit (an ordinary Gaussian
+process's data half). A condition whose noise has no pattern, so there is nothing to correlate
+against. All three used to collapse into a blank or a zero, and all three would have been read as
+"the model found nothing", which is a claim about the model that the data does not support.
+
 **🔴 One trap the measurement itself fell into, and the gate that now guards it.** A component that
 is ONE NUMBER PER FIT — a homoscedastic likelihood noise, a variational layer's single observation
 noise — takes a **different value in each out-of-fold fold**, because those rows come from several
