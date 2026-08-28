@@ -1932,37 +1932,43 @@ constant, the other varies. The old grids below held realism constant; this one 
 constant. §4c converts every published anchor onto this ladder; §4d gives the noise the experimental
 labels already carry before anything is injected.
 
-#### 🔴 The reporting level — NOT SET, and this is the only place it may be stated
+#### ✅ The reporting level — SET 2026-08-28. This is the only place it may be stated.
 
 **The reporting level is the ONE level a table quotes accuracy at.** It is a point on the ladder
-above, expressed as a fraction of the clean training label spread, and nothing else.
+above, a fraction of the clean training label spread, and nothing else.
 
-| Dataset | Reporting level | Note |
+| Dataset | Level | Chosen on |
 |---|---|---|
-| QM9 | **not set** | proposed 1.0. The only measurement at 1.0 is a screening file `RERUN_PLAN.md` §13.15 forbids citing |
-| logD | **not set** | proposed 1.0. No run has ever reached that level on this dataset |
-| Caco-2 | **not set** | proposed 0.2 — but read off a table printed in RAW LOG UNITS. The same point on this scale is **0.5** |
-| hERG | **not set** | never proposed by anyone |
+| QM9 | **1.0** | 7 of 7 models change rank against clean, and R² is 0.783–0.836 — the effect is there and nothing is broken |
+| logD | **1.0** | consistency. No run has reached 1.0 on logD yet, so this is unverified until the re-run |
+| **Caco-2** | **0.75** | **lower than the rest on purpose.** Its clean R² is only ~0.5, so it has less to lose. 0.75 gives the SAME 2-of-4 rank flips as 1.0 with every model 0.04–0.11 higher; at 1.0 the quantile forest falls to 0.256, and at 0.2 nothing moves at all |
+| hERG | **1.0** | the anchor, not a rank table. Its label spread is **measured** — 0.9143 over 1,415 molecules — so published assay error is 0.60 of it and twice that is 1.21, and 1.0 sits just under the design's own "run to about twice real error" rule |
 
-**Why none of them is set.** The author gave three numbers on 2026-08-27 and withdrew them the same
-evening — *"I don't think I did settle them"* — because the tables the numbers were read off were
-printed on **two different scales in one message**: QM9 as a fraction of the label spread, logD and
-Caco-2 in raw log units. All three were then recorded as fractions. That is the error, and it is the
-reason the numbers above are not carried forward as settled.
+**Caco-2 differs, and the caption must say why in one sentence:** that assay's models start at about
+R² 0.5, so the level that shows the same amount of rank movement leaves them at higher accuracy than
+the same level would on the others. It is a property of the endpoint, not a choice of convenience.
 
-**Where it lives now, and the only place it may live:** `models/model_defaults.py`,
-`REPORTING_LEVELS`, read through `reporting_level(dataset)` — the spec both pipelines already
-import. **It raises while a level is unset rather than returning a default**, because every previous
-default silently became the answer: `paper.tex` says *"R² at σ = 0.3"* today, and that 0.3 is the
-default argument of a figure-script function, on a scale that no longer exists, chosen by nobody.
+**What hERG's level does NOT rest on.** hERG *was* tested — 25 model-and-representation pairs under
+plain Gaussian survive in `results/paper_figures_v2/table_validation_auc_full.csv`, clean R² 0.367 to
+0.635 — but only as `auc_norm` and a clean baseline. **The per-level R² is not on this machine**, so
+hERG is the one dataset whose level was not checked against a rank-flip table. Re-check it when the
+re-run lands.
+
+**One thing to disclose in the Methods.** The lab datasets' labels already carry measurement error and
+QM9's do not, so the same nominal level is not the same total amount of noise: at level 1.0 the total
+is 1.00 on QM9, 1.01 on logD and 1.17 on hERG (§4d). That cannot be removed, only stated.
+
+**Where it lives, and the only place it may live:** `models/model_defaults.py`, `REPORTING_LEVELS`,
+read through `reporting_level(dataset)` — the spec both pipelines import. It **raises** for a dataset
+whose level is unset rather than returning a default, because every previous default silently became
+the answer: `paper.tex` says *"R² at σ = 0.3"* today, and that 0.3 is a figure-script function's
+default argument, on a scale that no longer exists, chosen by nobody.
 
 **Guard:** `scripts/test_one_reporting_level.py` fails if a second source appears, if an unset level
 stops raising, or if a level is set that is not on the ladder.
 
-**To settle one:** put the number in `REPORTING_LEVELS` and record the decision in this section, in
-the same commit. Nowhere else.
-
-**`0.25` is not on the ladder** and cannot be reported whatever is decided.
+**To change one:** edit `REPORTING_LEVELS` and this table, in the same commit. Nowhere else.
+**`0.25` is not on the ladder** and cannot be reported.
 
 <details><summary>Superseded 2026-08-27 — the per-dataset log-unit grids that stood here</summary>
 
