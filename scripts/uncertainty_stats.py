@@ -106,15 +106,33 @@ class ConditioningError(AssertionError):
 
 
 # The cell every correlation must be computed inside.
-CELL_COLS = ['dataset', 'model', 'rep', 'condition', 'sigma', 'split']
+#
+# `fold` IS PART OF THE CELL. One fold is one fitted model, and the noise is
+# drawn once per fold: a molecule that appears in the training half of four
+# folds was corrupted four separate times, by four separate draws. A correlation
+# computed across folds therefore mixes four different corruptions of the same
+# molecule against four different models' opinions of it, and the number it
+# produces is not the correlation of any fit that was actually run.
+#
+# The permutation null already grouped on fold for exactly this reason while the
+# correlations it is a null FOR did not, so the two were computed over different
+# groupings. Corrected 2026-08-28, on the author's instruction: "the uncertainty
+# gets reported on a per-fold basis, and the correlation should be compared on a
+# per-fold basis."
+#
+# On QM9 the loader puts the replicate number in `fold`, which is the same rule:
+# one replicate is one fitted model with its own draw.
+CELL_COLS = ['dataset', 'model', 'rep', 'condition', 'sigma', 'fold', 'split']
 
-# The permutation null's group: the cell, plus the fold, because one fold is one
-# fitted model and the noise was drawn once per fold.
+# The permutation null's group. Identical to the cell now; kept as its own name
+# because the null's grouping is a statement about the null, and if the two ever
+# have to differ again this is where it says so.
 PERM_GROUP_COLS = ['dataset', 'model', 'rep', 'condition', 'split', 'fold', 'sigma']
 
 # The columns that identify a cell without the noise level, used for the
-# zero-level subtraction.
-_BASE_COLS = ['dataset', 'model', 'rep', 'condition', 'split']
+# zero-level subtraction. The zero-noise control is subtracted WITHIN a fold, for
+# the same reason: it is that fold's own model on that fold's own molecules.
+_BASE_COLS = ['dataset', 'model', 'rep', 'condition', 'fold', 'split']
 
 CANONICAL_COLS = [
     'dataset', 'model', 'rep', 'condition', 'sigma', 'fold', 'split',

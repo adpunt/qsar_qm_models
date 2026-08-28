@@ -393,9 +393,20 @@ def test_conditioning_assertion_raises_on_a_pooled_frame():
     assert assert_single_cell(a) is True
 
 
-def test_extra_group_cols_conditions_on_the_fold_as_well():
-    """A fold is a separate fit on its own molecules, so a caller must be able
-    to check that a pooled-over-folds result survives being split by fold."""
+def test_every_correlation_is_computed_within_one_fold():
+    """A fold is one fitted model on its own molecules, corrupted by its own draw.
+
+    A molecule in the training half of four folds was corrupted four separate
+    times. A correlation computed across folds mixes four different corruptions
+    of the same molecule against four different models' opinions of it, so the
+    number it produces is not the correlation of any fit that was run.
+
+    Until 2026-08-28 `fold` was in the permutation null's group but NOT in the
+    cell, so the null and the statistic it was a null FOR were computed over
+    different groupings. The author's instruction: "the uncertainty gets reported
+    on a per-fold basis, and the correlation should be compared on a per-fold
+    basis."
+    """
     rng = np.random.default_rng(53)
     frames = []
     for fold in ('0', '1', '2'):
@@ -403,21 +414,27 @@ def test_extra_group_cols_conditions_on_the_fold_as_well():
             frames.append(_cell(400, sigma, rng, fold=fold))
     df = pd.concat(frames, ignore_index=True)
 
-    pooled = q6_error_ranking(df)
-    by_fold = q6_error_ranking(df, extra_group_cols=['fold'])
-    assert len(pooled) == 2 and len(by_fold) == 6
-    assert 'fold' in by_fold.columns and by_fold['fold'].nunique() == 3
-    assert int(pooled['n'].iloc[0]) == 3 * int(by_fold['n'].iloc[0])
+    out = q6_error_ranking(df)
+    # Three folds x two levels, not two pooled rows.
+    assert len(out) == 6, f'{len(out)} rows; expected one per fold per level'
+    assert 'fold' in out.columns and out['fold'].nunique() == 3
+    assert (out['n'] == 400).all(), (
+        f"a cell holds {sorted(out['n'].unique())} molecules; each should hold "
+        f"one fold's 400, not three folds stacked")
 
-    # the zero-level subtraction must then match WITHIN a fold, not across
+    # Naming the fold explicitly must be a no-op, not a second grouping.
+    again = q6_error_ranking(df, extra_group_cols=['fold'])
+    assert len(again) == len(out)
+
+    # The zero-level subtraction must match WITHIN a fold.
     cc = confound_controlled_effect(
-        _confound_frames(np.random.default_rng(54), detection_gain=1.5),
-        extra_group_cols=['fold'])
+        _confound_frames(np.random.default_rng(54), detection_gain=1.5))
     assert 'fold' in cc.columns
     assert cc[cc['sigma'] == 1.0]['rho_pattern_at_sigma0'].notna().all()
-    _record('extra_group_cols',
-            f"q6 gives {len(pooled)} rows pooled over folds and {len(by_fold)} "
-            f"split by fold; the zero-level baseline still matches within a fold")
+    _record('per fold',
+            f"q6 gives {len(out)} rows -- one per fold per level, each on one "
+            f"fold's 400 molecules -- and the zero-level baseline matches within "
+            f"a fold")
 
 
 def test_statistics_condition_before_correlating():
