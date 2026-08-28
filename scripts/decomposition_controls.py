@@ -733,6 +733,23 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
     features = build_representations(smiles, reps)
 
     rows = []
+
+    def _flush():
+        """Write what exists so far.
+
+        Called after every cell, not at the end. A two-hour run that writes
+        nothing until it completes loses everything to a kill, a wall clock or a
+        laptop lid, and that is exactly what happened on 2026-08-28: 39 of 120
+        cells, about forty minutes of fitting, gone because the write was one
+        line after the loop.
+        """
+        if not out_csv or not rows:
+            return
+        import pandas as pd
+        tmp = str(out_csv) + '.tmp'
+        pd.DataFrame(rows).to_csv(tmp, index=False)
+        os.replace(tmp, out_csv)   # atomic: a kill never leaves half a file
+
     for condition in conditions:
         pattern, varies = injector_patterns(condition, y, groups, spread)
         if verbose:
@@ -762,6 +779,7 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                                              float('nan'), 0, n_folds, seed,
                                              varies,
                                              f"{type(exc).__name__}: {exc}"))
+                        _flush()
                         continue
 
                     ok = np.isfinite(mean)
@@ -789,6 +807,7 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                                          kind, rho, int(constant), r2,
                                          int(ok.sum()), n_folds, seed, varies,
                                          ''))
+                    _flush()
                     if verbose:
                         def _f(t):
                             r = [r for r in rows if r['model'] == name
@@ -813,11 +832,9 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                               f"{name:<32} R2 {r2:+.4f}  aleatoric {_f('aleatoric')}"
                               f"  epistemic {_f('epistemic')}", flush=True)
 
-    if out_csv:
-        import pandas as pd
-        pd.DataFrame(rows).to_csv(out_csv, index=False)
-        if verbose:
-            print(f"\n  wrote {len(rows)} rows to {out_csv}")
+    _flush()
+    if out_csv and verbose:
+        print(f"\n  wrote {len(rows)} rows to {out_csv}")
     return rows
 
 

@@ -157,6 +157,25 @@ def test_zero_level_keeps_the_shape_and_drops_the_amount():
             f"{condition}: labels moved at level 0")
 
 
+def test_results_are_written_as_they_are_produced():
+    """A long run that writes nothing until it finishes loses everything to a
+    kill, a wall clock or a closed lid. On 2026-08-28 that cost 39 of 120 cells,
+    about forty minutes of fitting, because the write was one line after the
+    loop. Written after every cell now, through a temporary file so a kill never
+    leaves half a row."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'decomposition_controls.py')).read()
+    assert 'def _flush():' in src, "results are no longer written incrementally"
+    assert 'os.replace(tmp, out_csv)' in src, (
+        "the write is no longer atomic, so a kill can leave a half-written file "
+        "that reads as a complete one")
+    body = src[src.index('def measure_real_conditions'):]
+    body = body[:body.index('\ndef _row(')]
+    assert body.count('_flush()') >= 3, (
+        "the flush is not called from inside the loop, so a killed run still "
+        "loses everything")
+
+
 def test_absent_constant_and_undefined_are_three_different_things():
     """They must not read the same in the output. A model with no such term
     produced NOTHING. A constant term produced ONE number for the whole fit. An
