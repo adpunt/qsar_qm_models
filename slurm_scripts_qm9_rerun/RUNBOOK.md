@@ -161,6 +161,30 @@ Confirm the fix is in the binary you just built:
 grep -n "apply_noise" rust/src/main.rs | head    # flag + 3 call sites (true/false/false)
 ```
 
+## 1a. Source setup.sh ONCE before the first submission — in an allocation
+
+**Not on a login node** (it caps memory per user) and **not left to the array**.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+. setup.sh
+```
+
+**Why once is enough for all 294 tasks.** The shell environment `setup.sh` sets — `PATH`,
+`CONDA_PREFIX` — is per-shell and per-node, and does not carry; every job script sources the file
+itself, which is correct. What carries is on the shared project filesystem: the environment at
+`/data/stat-cadd/scat9264/conda_envs/env_test`, and the stamp written inside it,
+`$CONDA_PREFIX/.env_test_extras`. Every later task hashes `env.yml` and `pip-constraints.txt`,
+compares against that one file, and prints *"Extras already match the recipe; nothing to install."*
+
+**Why it now fails loudly instead of quietly, 2026-08-28.** `setup_reconcile` has always refused to
+install from inside an array task. The extras block — a from-source `torchsort` compile plus three
+more installs — did not, so on the first launch after `env.yml` changed, all 294 tasks would enter it
+at once. It now refuses the same way, and the job scripts **exit 2** when it does, rather than
+training in an environment that is not the one `env.yml` describes. Proven three ways: an array task
+with a mismatched stamp refuses, an array task with a matching stamp proceeds, and an ordinary shell
+with a mismatched stamp installs.
+
 ## 1b. Audit the interpreter — this is a launch blocker
 
 Two Gaussian-process jobs (`12822693`, `12822694`) ran to completion on

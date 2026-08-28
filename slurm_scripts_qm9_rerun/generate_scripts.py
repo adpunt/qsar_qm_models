@@ -343,6 +343,18 @@ if [ -z "${{CONDA_PREFIX:-}}" ]; then
     echo "ERROR: setup.sh did not activate an environment (CONDA_PREFIX unset)."
     exit 2
 fi
+
+# setup.sh refuses to install the extras from inside an array task, because 294
+# tasks compiling torchsort into one site-packages is the failure it exists to
+# prevent. When it refuses, the environment is NOT the one env.yml describes and
+# this job must stop rather than train in it -- an under-provisioned run that
+# produces rows is worse than one that does not start.
+if [ "${{SETUP_EXTRAS_REFUSED:-0}}" = "1" ]; then
+    echo "ERROR: the environment does not match the recipe and setup.sh refused"
+    echo "       to repair it from an array task. Run '. ./setup.sh' once in an"
+    echo "       interactive allocation, then resubmit this array."
+    exit 2
+fi
 PY_PATH="$(command -v python)"
 case "$PY_PATH" in
     "$CONDA_PREFIX"/*) : ;;

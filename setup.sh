@@ -336,7 +336,32 @@ STAMP_FILE="$CONDA_PREFIX/.env_test_extras"
 WANT_STAMP="$(setup_extras_stamp)"
 HAVE_STAMP="$(cat "$STAMP_FILE" 2>/dev/null)"
 
-if [ "${SETUP_FORCE_EXTRAS:-0}" = "1" ] \
+# NEVER INSTALL THE EXTRAS FROM INSIDE AN ARRAY TASK EITHER.
+#
+# setup_reconcile has refused this since it was written (see its guard above),
+# but the extras block did not, and it is the more expensive of the two: a
+# from-source torchsort compile plus three more installs, into one shared
+# site-packages. On the first launch after env.yml or pip-constraints.txt
+# changes, the stamp does not match and EVERY array task enters this block at
+# once -- which is the failure this file's header says it was rewritten to stop,
+# surviving on one of the two paths.
+#
+# The environment and its stamp both live on the shared project filesystem, so
+# ONE run before the launch is enough for every task. This makes that ordering a
+# property of the code rather than of whoever remembers the runbook.
+if [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && [ "$WANT_STAMP" != "$HAVE_STAMP" ]; then
+    echo "ERROR: the extras do not match the recipe and this is array task" \
+         "${SLURM_ARRAY_TASK_ID}."
+    echo "  Installing them from 294 tasks at once is the failure this file exists"
+    echo "  to prevent, and running without them is an environment nobody audited."
+    echo "  Run '. ./setup.sh' ONCE in an interactive allocation, then resubmit."
+    SETUP_EXTRAS_REFUSED=1
+    export SETUP_EXTRAS_REFUSED
+fi
+
+if [ "${SETUP_EXTRAS_REFUSED:-0}" = "1" ]; then
+    :
+elif [ "${SETUP_FORCE_EXTRAS:-0}" = "1" ] \
    || { [ "$SETUP_SKIP_EXTRAS" = "0" ] && [ "$WANT_STAMP" != "$HAVE_STAMP" ]; }; then
     echo "Installing the packages no channel carries (stamp changed)..."
 
