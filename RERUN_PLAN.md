@@ -8349,7 +8349,20 @@ both without a change; validation rows satisfy its one-scale check and satisfy
    ⚠️ **The rebuild-per-level cost is not specific to this test and is not fixed.** Every QM9 job
    on the grid pays it for every representation it carries. Worth a look when the QM9 jobs are
    built (chat H).
-2. **The lab plumbing** (step 5 below), only if the verdict says validation is enough.
+2. **The lab plumbing** (step 5 below), only if the verdict says validation is enough. **What it
+   actually is, read from the tree 2026-08-28** — the line numbers in the older table below have
+   moved, these have not:
+
+   | | Where | What it needs |
+   |---|---|---|
+   | The validation draw is thrown away | `alternative_data_noise_robustness.py:2080-2087` — `inject_verbose(...).y_noisy` keeps only the labels | keep the whole verbose result and stash the per-molecule draw, scale and shape |
+   | The tree path has no validation at all | `run_tree_experiment`, `:1737` — no `X_val`/`y_val` argument | pass the carve in, noise it from the same independent stream, score it with the fitted model |
+   | Nothing emits a validation row | the writer around `:2974` / `:3033` | a `split='validation'` block beside the `train_oof` one |
+   | **The preflight would refuse every run** | `slurm_scripts_uncertainty_rerun/preflight.sh:414` requires `train_oof` in the splits; `:434` checks `oof_folds_ok` | must accept a run that writes `validation` instead. ⚠️ another session edited this file on 2026-08-28 (`5f6ff40`) — re-read it before touching |
+
+   The carve itself is already right: `scaffold_validation_carve` splits every fold's training block
+   before ANY model is fitted, tree included (`:2665-2668`), so validation is genuinely unfitted on
+   the laboratory side too. That is the premise, and it holds.
 3. **The job-script edit**, which is the deliverable either way.
 
 **The fit count, before and after, from the generator's own output.**
