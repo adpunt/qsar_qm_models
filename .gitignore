@@ -46,3 +46,15 @@ data/QM9/
 # A probe output kept in the archive by accident; over 20 MB and derived.
 research_archive/e1d07839/probe.csv
 .harness_unrestored
+
+# --- generated output: never in git ------------------------------------------
+# Everything under results/ is produced by a run. It was tracked, the cluster
+# has its own copies of the same paths, and every `git pull` there aborted with
+# "untracked working tree files would be overwritten" -- a wall of file names
+# that has to be cleared by hand before anything can be pulled. Untracked
+# 2026-08-28. Nothing is lost: the files stay on disk everywhere they already
+# are, and every version remains in history --
+#     git checkout <commit> -- results/<path>
+# brings any of them back.
+results/
+data/smiles_db.sqlite

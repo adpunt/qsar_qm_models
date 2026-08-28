@@ -1,3 +1,0 @@
-gap,needs
-QM9 baseline_r2 for baseline-vs-robustness correlation,server dump qm9_auc_with_baseline.csv (valprop-guarded) OR raw anova_*.csv
-"Validation per-model calibration (Unc-Error rho, Coverage) for LogD / Caco2_Efflux / hERG-Ki",KIRBy uncertainty run (only RF-vs-QRF robustness comparison exists locally)

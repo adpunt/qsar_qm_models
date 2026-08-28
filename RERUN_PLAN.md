@@ -1499,6 +1499,27 @@ The three-way behaviour was tested against a stubbed conda before this went back
 a failed build leaves the old environment in place, a successful one keeps it at `.old` and says
 how to delete it, and an activation that lands elsewhere refuses to install anything.
 
+#### `results/` is out of git — 2026-08-28
+
+515 generated files were tracked, the cluster has its own copies at the same paths, and every
+`git pull` there aborted with *"untracked working tree files would be overwritten by merge"* and
+a wall of names to clear by hand. Untracking is the fix rather than a deferral: with those paths
+absent from both the old and the new commit, a pull neither adds nor removes them and the
+conflict cannot arise.
+
+**Nothing is lost.** The files stay on disk everywhere they already are, and every version stays
+in history: `git checkout <commit> -- results/<path>` brings any of them back. What leaves is
+only their presence in a fresh clone. `.gitignore` now carries `results/` and
+`data/smiles_db.sqlite`.
+
+This is the project's own rule applied where it had not been: generated output is not source.
+Nothing in `models/` or `scripts/` reads a tracked `results/` file at run time — the references
+in `models/models.py` and `models/model_defaults.py` are comments citing where a number came
+from, and the plotting scripts that do read from `results/` read files a run produces.
+
+⚠️ `research_archive/` stays tracked on purpose — it holds the record of the environment, which
+is the one artefact that has to survive a filesystem.
+
 #### What is portable and what is this cluster — and the one command that tests a fresh node
 
 **Asked by the author 2026-08-28, and worth a straight answer: fixing ARC does not fix anywhere
