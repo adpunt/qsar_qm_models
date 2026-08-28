@@ -7788,19 +7788,24 @@ for validation rows no model fits, which had silently disabled training-molecule
 quantile forest, NGBoost and the Gaussian process) and the censoring name normalisation in
 `scripts/uncertainty_stats.py`.
 
-#### ✅ RULED 2026-08-28 — the QM9 uncertainty run exists, on the server, on the same five noise types
+#### ✅ RULED 2026-08-28 — the QM9 uncertainty run goes on the server, and there is ONE condition list
 
 **What was missing.** The code that scores training molecules with a model that never fitted them was
-built on 2026-08-27 and works — a screen is using it on the laptop right now. What did not exist was
-a set of cluster job scripts for QM9 that turn it on. Everything that reaches the paper runs on the
-server, so that is a job-script gap and it is chat H's.
+built on 2026-08-27. What did not exist was a set of cluster job scripts for QM9 that turn it on.
+Everything that reaches the paper runs on the server, so this is a job-script gap, and it is chat H's.
 
-**The author's ruling:** the QM9 uncertainty run covers the same five noise types as the uncertainty
-runs on logD, Caco-2 and hERG — gaussian, grouped_wider, grouped_shifted, censoring and outlier_p10 —
-so the two sides answer the same questions under the same conditions.
+**The author's ruling: the two sides mirror each other. There is no separate list for the laboratory
+datasets and none for QM9.** Both read the settled conditions from `noise_conditions.json` — all
+seven, which is the default the uncertainty generator already applies after the author's decision of
+2026-08-28. Nothing about the condition set is decided per pipeline, and no generator may hold a list
+of its own.
 
-⚠️ **Chat O may change how it is built, not whether.** If validation molecules turn out to replace the
-refitting, this run costs a sixth of what it otherwise would. Build it after that answer.
+⚠️ **One remnant to clear when the QM9 jobs are built:** `ADDED_FOR_QUESTION_B = ['outlier_p10']`
+(`slurm_scripts_uncertainty_rerun/generate_scripts.py:171`) is the last trace of the old five-condition
+set. Nothing reads it — checked 2026-08-28, it appears at its own definition and nowhere else.
+
+⚠️ **Chat O may change how the QM9 run is built, not whether.** If validation molecules replace the
+refitting, it costs a sixth of what it otherwise would. Build it after that answer.
 
 ---
 
