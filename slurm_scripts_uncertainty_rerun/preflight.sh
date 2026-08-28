@@ -374,9 +374,39 @@ if not f:
     print("FAIL: no uncertainty file written"); sys.exit(1)
 d = pd.read_csv(f[0])
 need = {'split','noise_type','sigma','fold','uncertainty','noise_scale',
-        'noise_pattern','injected_noise','oof_folds_ok'}
+        'noise_pattern','injected_noise','oof_folds_ok',
+        # The split, added 2026-08-28. This pipeline wrote one uncertainty
+        # column and performed no split at all, and the paper's uncertainty
+        # section is built on these three datasets (RERUN_PLAN.md 5.5g).
+        'aleatoric_uncertainty','epistemic_uncertainty',
+        'aleatoric_support','epistemic_support'}
 miss = need - set(d.columns)
 if miss: print("FAIL: missing columns", miss); sys.exit(1)
+# A support label that is not one of the three means nothing to a reader and
+# nothing to the analysis. NGBoost has a per-molecule data term and NO model
+# term -- one fit has no ensemble to disagree with -- so 'none' is expected here
+# and is not a failure.
+_kinds = {'per_molecule', 'constant', 'none'}
+for _col in ('aleatoric_support', 'epistemic_support'):
+    _got = set(d[_col].dropna().unique())
+    if not _got or not _got <= _kinds:
+        print(f"FAIL: {_col} holds {sorted(_got)}; must be a subset of "
+              f"{sorted(_kinds)}"); sys.exit(1)
+print(f"  OK    support labels: aleatoric "
+      f"{sorted(set(d['aleatoric_support'].dropna()))}, epistemic "
+      f"{sorted(set(d['epistemic_support'].dropna()))}")
+# A column claimed per molecule that is in fact one number is the failure the
+# support column exists to make visible. Checked WITHIN a fold, because these
+# rows come from several fits.
+for _col, _sup in (('aleatoric_uncertainty', 'aleatoric_support'),
+                   ('epistemic_uncertainty', 'epistemic_support')):
+    for _kind, _grp in d.groupby(_sup, dropna=True):
+        _v = _grp[_col]
+        if _kind == 'per_molecule' and _v.notna().any() and _v.nunique() <= 1:
+            print(f"FAIL: {_col} is labelled per_molecule and every row holds "
+                  f"the same value"); sys.exit(1)
+        if _kind == 'none' and _v.notna().any():
+            print(f"FAIL: {_col} is labelled 'none' and carries values"); sys.exit(1)
 print(f"  OK    {f[0].split('/')[-1]}: {len(d)} rows")
 print(f"  splits    : {sorted(d['split'].unique())}")
 print(f"  conditions: {sorted(d['noise_type'].unique())}")
