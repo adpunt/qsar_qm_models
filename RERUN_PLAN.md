@@ -8320,11 +8320,14 @@ committed harness mutation and the eleven untracked guards (§2.20), the QM9 gen
 
 | | Whose | Why it cannot wait until after the grid |
 |---|---|---|
-| **`min_samples_leaf = 1` gives both forests exactly zero aleatoric term** (§5.5c) | the author | It is a shared-spec value, so changing it changes *every* forest number in the paper, not only the uncertainty ones. Deciding after the grid means re-running the forests |
-| **Do the uncertainty runs inherit the settled condition set, or test it?** (§13.1 item 6) | the author, asked by chat H | The set was settled on **accuracy** on QM9. A model can lose the same accuracy while being much better or worse at spotting which labels were corrupted, which is exactly what those runs measure |
-| **Which model-and-representation pairs censoring runs on** (§13.13) | the author, from the screen | Comes out of the screen, like the deep run's selection, so it is not blocking the screen — but it blocks the censoring submission, and the runbook §5b now says where it goes |
 | **The experimental pipeline draws noise per fold, not once per label column** (§3.3a) | the author | Recommendation unchanged: keep the per-fold draw, and say so in the Methods in one sentence. It needs a decision because it changes what a *molecule* means, and chat J must not average injected noise across folds either way |
 | **Push the branch** | chat H | The cluster's only route in is `git pull --ff-only`. A gate that passed on an unpushed commit proved nothing about what runs (§2.20) |
+
+**Two rows were deleted from this table on 2026-08-28 because they were already answered**, and
+leaving them here cost sessions: the forest leaf size (settled and applied, §5.5c) and whether the
+uncertainty runs inherit the condition set (settled, and now one list of all seven for both
+pipelines). **The censoring pair selection is not a launch blocker either** — it is deferred with a
+rule and fires when the screen lands (§13.17 B).
 
 **One evidence gap, not a code gap.** §13.15's screen figures — and the rationales
 `noise_conditions.json` cites for them — were computed at level **0.5**, the value this document
