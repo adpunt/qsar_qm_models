@@ -1628,6 +1628,27 @@ agree, **342 of 342**; the seven settled conditions resolve on both sides; the K
 pipeline imports and builds its parser; RDKit links and the Rust binary builds. This is the first
 time any of it has been true on the cluster.
 
+**Adding a package to the restored environment: pip with the constraint file, or conda with
+`--override-channels`.** A plain `micromamba install -c conda-forge <pkg>` still reads the
+account's `.condarc`, so it fetched `pkgs/main` and `pkgs/r` alongside conda-forge and the solve
+was **Killed** on the login node — the same memory cap, arrived at by a different route. Two ways
+past it, and the first is better where the package is pure Python:
+
+```bash
+# no solve at all; PIP_CONSTRAINT (exported by setup.sh) stops pip touching a conda package
+. ./setup.sh && python -m pip install torch-geometric==2.6.1
+
+# or, when it must be a conda package, exclude the channels env.yml excludes
+/data/stat-cadd/scat9264/.micromamba/bin/micromamba install -y \
+    -p /data/stat-cadd/scat9264/conda_envs/env_test \
+    --override-channels -c conda-forge <package>
+```
+
+`--override-channels` is the same rule as `env.yml`'s `nodefaults`, applied to a command line
+instead of a file. `defaults` is where `mkl` and a separate `intel-openmp` come from, so leaving
+it on the list is also how a second threading runtime would get back into an environment that
+currently has one.
+
 **Not yet closed on that environment:** `torch_geometric` is absent, which is the whole QM9 graph
 roster (`gin`, `gcn`, `ginct`, `gin2d`, `graph_gp`) — `env.yml` pins `pytorch_geometric=2.6.1`
 and it has to be added to the restored environment by hand, like `quantile-forest` and `ngboost`
