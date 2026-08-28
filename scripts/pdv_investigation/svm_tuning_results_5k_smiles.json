@@ -1,0 +1,14 @@
+{
+  "smiles": {
+    "best_r2": 0.8255111665369477,
+    "best_params": {
+      "C": 0.6704916599016698,
+      "gamma": "scale",
+      "kernel": "poly",
+      "degree": 3,
+      "coef0": 1.2464869137718948
+    },
+    "n_trials": 200,
+    "n_features": 638
+  }
+}

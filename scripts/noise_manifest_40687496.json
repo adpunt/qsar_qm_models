@@ -1,0 +1,26 @@
+{
+  "affected_molecule_fraction": 1.0,
+  "clean_label_mean": 6.8520379066467285,
+  "clean_label_sd": 1.2064963579177856,
+  "delivered_dose_as_fraction_of_label_spread": 0.48935332894325256,
+  "delivered_dose_in_label_units": 0.5904030203819275,
+  "effective_n": 400.0,
+  "mean_epsilon": 0.031184475868940353,
+  "n_train": 400,
+  "noise_level": 0.5,
+  "noise_shape": "gaussian",
+  "noise_targeting": "uniform",
+  "noise_type": "gaussian",
+  "parameters": {
+    "dose_units": "fraction_of_label_spread",
+    "level": 0.5,
+    "shape": "gaussian",
+    "targeting": "uniform"
+  },
+  "seed": 3740067399,
+  "solved_scale": 0.6032481789588928,
+  "standardisation_mean": 6.8520379066467285,
+  "standardisation_sd": 1.2064963579177856,
+  "target_dose_in_label_units": 0.6032481789588928,
+  "unit_dose": 1.0
+}

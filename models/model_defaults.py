@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.3.0'
+SPEC_VERSION = '1.4.0'
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +64,24 @@ SKLEARN_DEFAULTS = {
     #   1.0          the experimental side's silent default is the WORST option
     #                under noise on descriptors, losing every seed.
     # Cost: about 3.5x 'sqrt', about 3x cheaper than 1.0.
+    # min_samples_leaf 5, not 1, changed 2026-08-28 (RERUN_PLAN.md 5.5c).
+    # A leaf holding one molecule has no spread inside it, so the aleatoric half
+    # of this model's uncertainty is EXACTLY ZERO at leaf 1 and the split cannot
+    # be reported at all. Measured on 4,000 real QM9 molecules at the settings in
+    # this block, 3 replicates, against 2,000 held out:
+    #        leaf   R2 clean   R2 at 1.0 noise   aleatoric share
+    #           1     0.6019            0.5339            0.0000
+    #           2     0.5990            0.5333            0.1783
+    #           5     0.5771            0.5402            0.4586
+    #          10     0.5497            0.5236            0.6214
+    #          20     0.5131            0.5006            0.7319
+    # Five costs 0.025 of clean R2 and GAINS 0.006 at one label spread of
+    # injected noise, which is the level the paper reports at. Bigger leaves
+    # average over more molecules, which is what damping label noise looks like.
     'rf': {
         'n_estimators': 100,
         'max_depth': None,
-        'min_samples_leaf': 1,
+        'min_samples_leaf': 5,
         'min_samples_split': 2,
         'max_features': 0.3,
         'bootstrap': True,
@@ -78,10 +92,19 @@ SKLEARN_DEFAULTS = {
     # 0.3 also gives this model much better-calibrated intervals on clean
     # descriptors -- coverage at 1 sd is 0.688 against a nominal 0.683, where
     # 'sqrt' is far too wide at 0.754 and 1.0 too narrow at 0.648.
+    # min_samples_leaf 5 for the same reason as the ordinary forest above, and
+    # measured separately on this model because it has 300 trees rather than 100
+    # and its reported uncertainty comes from quantiles rather than from leaves.
+    # It behaves the same: aleatoric share 0.0000 at leaf 1 and 0.4578 at leaf 5,
+    # within 0.001 of the ordinary forest at every setting. The accuracy trade is
+    # BETTER here -- five costs 0.024 of clean R2 and gains 0.023 at one label
+    # spread of noise (0.5051 to 0.5284).
+    # NOTE for the coverage line below: it was measured at leaf 1 and has not
+    # been re-measured at leaf 5 (RERUN_PLAN.md 5.5c).
     'qrf': {
         'n_estimators': 300,
         'max_depth': None,
-        'min_samples_leaf': 1,
+        'min_samples_leaf': 5,
         'min_samples_split': 2,
         'max_features': 0.3,
         'bootstrap': True,

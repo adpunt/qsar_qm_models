@@ -1,0 +1,1 @@
+{"sample_size": 5000, "noise": false, "train_count": 4000, "test_count": 500, "val_count": 500, "max_vocab": 30, "file_no": 3599417450518730268, "molecular_representations": ["ecfp4", "continuous_pdv", "mhggnn", "avalon", "chemberta", "sns"], "k_domains": 1, "logging": false, "regression": true, "normalize": true, "uncertainty": true}

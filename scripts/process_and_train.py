@@ -380,9 +380,11 @@ def parse_arguments():
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
-    parser.add_argument('--cp-base-model', type=str, default='rf',
-                    choices=['rf', 'xgboost', 'dnn', 'qrf', 'gauche', 'gin', 'gcn'],
-                    help='Base model for conformal prediction')
+    # --cp-base-model is COMMENTED OUT 2026-08-28, with the conformal models it
+    # selects a base for. Nothing else reads it (RERUN_PLAN.md 2.20).
+    # parser.add_argument('--cp-base-model', type=str, default='rf',
+    #                 choices=['rf', 'xgboost', 'dnn', 'qrf', 'gauche', 'gin', 'gcn'],
+    #                 help='Base model for conformal prediction')
     parser.add_argument('--use-best-params', action='store_true')
     parser.add_argument(
         "--bayesian-transformation",
@@ -448,8 +450,11 @@ def parse_arguments():
 
     parser.add_argument("--use-distance", type=str2bool, default=False,
                        help="Use distance metrics in sample selection (default: False)")
-    parser.add_argument("--alpha", nargs='*', type=float, default=[0.1],
-                       help="Confidence levels for conformal prediction (default is [0.1])")
+    # --alpha is COMMENTED OUT 2026-08-28, with the conformal models. It set the
+    # conformal interval's miss rate and is read nowhere else; both readers in
+    # models.py fall back to [0.1] when it is absent (RERUN_PLAN.md 2.20).
+    # parser.add_argument("--alpha", nargs='*', type=float, default=[0.1],
+    #                    help="Confidence levels for conformal prediction (default is [0.1])")
     parser.add_argument("--create-hybrid", type=str2bool, default=False)
     parser.add_argument("--hybrid-n-per-rep", type=int, default=100)
     parser.add_argument("--hybrid-importance", type=str, default="shap",
@@ -1809,8 +1814,14 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
         elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
             return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial, train_noise=train_noise)
 
-        elif model_type == 'conformal':
-            return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, None, y_test_original, trial, train_noise=train_noise)
+        # COMMENTED OUT 2026-08-28, on the author's instruction: conformal is not
+        # used. It is in EXCLUDED_MODELS in the job generator, the figure script
+        # drops its rows at load time, and no table in the paper reads one.
+        # `--calibration-size` was commented out on 2026-08-27 for the same
+        # reason. The refusal above is what stops `-m conformal` from returning
+        # None here and writing nothing (RERUN_PLAN.md 2.20).
+        # elif model_type == 'conformal':
+        #     return train_conformal_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, file_no, args.cp_base_model, None, y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'meta_weight_net':
             return train_meta_weight_net(x_train, y_train, x_test, y_test, x_val, y_val,
@@ -1878,10 +1889,14 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
                                 y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, 
                                 y_val_noisy=y_val_noisy, train_noise=train_noise)
 
-        elif model_type == 'conformal_hetero':
-            return train_conformal_heteroscedastic(x_train, y_train, x_test, y_test, x_val, y_val,
-                                                  args, s, rep, iteration, iteration_seed, file_no,
-                                                  y_test_original, trial, train_noise=train_noise)
+        # COMMENTED OUT 2026-08-28, with `conformal` above. This one also wrote its
+        # per-molecule learned spread to a file name no reader looks for, so the
+        # only column it produced that nothing else produces never reached a
+        # table (RERUN_PLAN.md 2.20).
+        # elif model_type == 'conformal_hetero':
+        #     return train_conformal_heteroscedastic(x_train, y_train, x_test, y_test, x_val, y_val,
+        #                                           args, s, rep, iteration, iteration_seed, file_no,
+        #                                           y_test_original, trial, train_noise=train_noise)
 
         elif model_type == 'mixup':
             return train_mixup(x_train, y_train, x_test, y_test, x_val, y_val,
@@ -2050,12 +2065,16 @@ def run_qm9_graph_model(args, qm9, train_idx, test_idx, val_idx, s, iteration, f
                                  val_graphs, y_val_noisy, args, s, iteration, file_no, 
                                  y_test_original_tensor, trial=trial)
         
-        elif model_type == "conformal":
-            return train_conformal_graph_model(
-                train_loader, test_loader, val_loader, args, s, iteration, 
-                file_no, args.cp_base_model, None, y_test_original_tensor, trial,
-                y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
-            )
+        # COMMENTED OUT 2026-08-28, with the two tabular branches. The `else`
+        # below trains an ordinary graph network, so without the refusal above
+        # `-m conformal -r graph` would train a GNN and write it under the name
+        # `conformal` (RERUN_PLAN.md 2.20).
+        # elif model_type == "conformal":
+        #     return train_conformal_graph_model(
+        #         train_loader, test_loader, val_loader, args, s, iteration,
+        #         file_no, args.cp_base_model, None, y_test_original_tensor, trial,
+        #         y_train_noisy=y_train_noisy, y_test_noisy=y_test_noisy, y_val_noisy=y_val_noisy
+        #     )
         
         else:
             return train_gnn(

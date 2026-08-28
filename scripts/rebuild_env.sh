@@ -4,9 +4,15 @@
 #
 #     cd /data/stat-cadd/scat9264/qsar_qm_models
 #     git pull
-#     sbatch scripts/rebuild_env.sh
+#     bash scripts/rebuild_env.sh
 #
 # then send back  ~/env_rebuild_report.txt.
+#
+# TO PUT THE OLD ENVIRONMENT BACK INSTEAD, and do nothing else:
+#     REBUILD_RESTORE_ONLY=1 bash scripts/rebuild_env.sh
+# That runs no solver and builds nothing. It rebuilds the environment recorded
+# in research_archive/env_test_before_rebuild_*.txt, including the torch that
+# was actually on the server and the PyG wheels that go with it.
 #
 # To see what it would do first, changing nothing:
 #     REBUILD_DRY_RUN=1 bash scripts/rebuild_env.sh
@@ -52,6 +58,81 @@ section() { say ""; say "=======================================================
 
 REPO="${QSAR_QM_MODELS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO" || { echo "cannot cd to $REPO"; exit 1; }
+
+# --- putting the OLD environment back --------------------------------------
+# Used by REBUILD_RESTORE_ONLY=1 and by the failure path below. It runs NO
+# solver -- an explicit package list is a list of files -- so the memory limit
+# that killed the build cannot affect it, and with the package cache intact it
+# links rather than downloads.
+restore_old_env() {   # restore_old_env <prefix> <archive>
+    local prefix="$1" archive="$2"
+    # The by-hand recipe in RERUN_PLAN.md appends a line of version numbers to
+    # the explicit list, and conda rejects the whole file over one line it
+    # cannot parse. Keep the comments, the @EXPLICIT marker and the package
+    # URLs; drop anything else.
+    local clean="$HOME/env_test_explicit_$(basename "$archive")"
+    grep -E '^(#|@EXPLICIT|https?://|file:/|/)' "$archive" > "$clean"
+    say "  cleaned list: $clean  ($(grep -cE '^(https?://|file:/|/)' "$clean") packages)"
+    if ! grep -q '^@EXPLICIT' "$clean"; then
+        say "  This is not an explicit package list -- it has no @EXPLICIT line."
+        say "  Refusing to hand it to conda. The file is still there, untouched."
+        return 1
+    fi
+    rm -rf "$prefix"
+    conda create --yes --prefix "$prefix" --file "$clean" 2>&1 | tail -15 | tee -a "$REPORT"
+    [ -x "$prefix/bin/python" ] || return 1
+    say "  conda half restored at $prefix"
+
+    # `conda list --explicit` records CONDA packages only, and the server's
+    # torch was a pip wheel -- so torch is not in the list and has to be named.
+    # The by-hand recipe in RERUN_PLAN.md appended a line of versions to the
+    # archive for exactly this; read it back rather than assuming env.yml's pin,
+    # which describes the environment being BUILT, not this one.
+    local recorded_torch
+    recorded_torch="$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+(\+[a-z0-9]+)?' "$archive" | tail -1)"
+    local torch_spec="${REBUILD_TORCH:-$recorded_torch}"
+    if [ -n "$torch_spec" ]; then
+        say "  torch on the server was $torch_spec -- reinstalling that, not env.yml's pin"
+        local idx=()
+        case "$torch_spec" in
+            *+cu*) idx=(--index-url "https://download.pytorch.org/whl/${torch_spec##*+}") ;;
+        esac
+        env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" \
+            -m pip install --no-cache-dir "${idx[@]}" "torch==$torch_spec" \
+            2>&1 | tail -4 | tee -a "$REPORT"
+        # The four PyG companion wheels setup.sh used to install. They are built
+        # against one exact torch, which is why they pinned the environment --
+        # here that is the point, not the problem.
+        env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" \
+            -m pip install --no-cache-dir \
+            -f "https://data.pyg.org/whl/torch-${torch_spec}.html" \
+            torch-scatter torch-sparse torch-cluster torch-spline-conv \
+            2>&1 | tail -4 | tee -a "$REPORT"
+    else
+        say "  no torch version recorded in the archive. If the restored"
+        say "  environment has no torch, name it:"
+        say "    REBUILD_TORCH=2.3.1+cu121 REBUILD_RESTORE_ONLY=1 bash scripts/rebuild_env.sh"
+    fi
+
+    say "  The rest of the pip half is not in that record either -- reinstalling"
+    say "  it from the pinned list. These versions come from env.yml, so they may"
+    say "  not be identical to what was there."
+    # PIP_CONSTRAINT pins the versions of the environment being BUILT, not the
+    # one being restored. It must not apply here.
+    env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" -m pip install \
+        --no-cache-dir gauche==0.1.6 torchbnn==1.2 torchhk==0.86.14 \
+        deepchem==2.8.0 polaris-lib==0.11.10 torchcp==1.1.0 \
+        2>&1 | tail -6 | tee -a "$REPORT"
+    for c in "$HOME/repos/NoiseInject" /data/stat-cadd/scat9264/NoiseInject \
+             /data/stat-ecr/scat9264/NoiseInject "$HOME/repos/KIRBy" \
+             /data/stat-cadd/scat9264/KIRBy /data/stat-ecr/scat9264/KIRBy; do
+        [ -d "$c" ] || continue
+        say "  editable install: $c"
+        env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" \
+            -m pip install --no-deps -e "$c" >/dev/null 2>&1
+    done
+    return 0
+}
 
 # --- a solver small enough for a login node ---------------------------------
 # Measured 2026-08-27: on a login node the conda solve for env.yml is killed
@@ -243,6 +324,47 @@ else
     say "  env_test was not found -- this will be a first build, not a rebuild."
 fi
 
+# --- 1b. restore only, and stop ---------------------------------------------
+# The whole point of this route: put back what was there, run no solver, build
+# nothing, change no versions.
+if [ "${REBUILD_RESTORE_ONLY:-0}" = "1" ]; then
+    section "RESTORE ONLY -- putting the previous environment back, building nothing"
+    RESTORE_ARCHIVE="${REBUILD_ARCHIVE:-$(ls -1t "$REPO"/research_archive/env_test_before_rebuild_*.txt 2>/dev/null | head -1)}"
+    if [ -z "$OLD_PREFIX" ]; then
+        say "  Cannot tell where env_test should go. Name it and rerun:"
+        say "    REBUILD_ENV_PREFIX=/data/stat-cadd/scat9264/conda_envs/env_test \\"
+        say "      REBUILD_RESTORE_ONLY=1 bash scripts/rebuild_env.sh"
+        exit 2
+    fi
+    if [ -z "$RESTORE_ARCHIVE" ]; then
+        say "  No archive found under $REPO/research_archive/."
+        say "  Name one with REBUILD_ARCHIVE=<file>."
+        exit 2
+    fi
+    if [ -x "$OLD_PREFIX/bin/python" ]; then
+        say "  $OLD_PREFIX already has an interpreter. Refusing to delete a live"
+        say "  environment. Move it aside yourself if you really mean to."
+        exit 2
+    fi
+    say "  archive: $RESTORE_ARCHIVE"
+    say "  prefix:  $OLD_PREFIX"
+    if restore_old_env "$OLD_PREFIX" "$RESTORE_ARCHIVE"; then
+        say ""
+        say "  RESTORED. This is the environment you had before -- two OpenMP"
+        say "  runtimes and all. It is not the rebuild; nothing here claims one"
+        say "  threading runtime. Check it with:"
+        say "    conda activate env_test && python scripts/check_environment.py"
+        say ""
+        say "written to: $REPORT"
+        exit 0
+    fi
+    say ""
+    say "  The restore did not produce an interpreter. The archive is untouched:"
+    say "  $RESTORE_ARCHIVE"
+    say "written to: $REPORT"
+    exit 1
+fi
+
 # --- 2. rebuild -------------------------------------------------------------
 if [ "${REBUILD_DRY_RUN:-0}" = "1" ]; then
     section "DRY RUN -- stopping before anything is changed"
@@ -254,6 +376,18 @@ if [ "${REBUILD_DRY_RUN:-0}" = "1" ]; then
 fi
 
 section "2. rebuild, in the same prefix"
+if [ -z "$OLD_PREFIX" ]; then
+    # Building by NAME would drop several gigabytes into whichever envs_dir
+    # comes first, which on this cluster can be the home quota. Refuse.
+    say "  STOPPING: env_test's prefix could not be determined, and building by"
+    say "  name would put several gigabytes in whichever envs_dir comes first --"
+    say "  on this cluster that can be your home quota. Name it and rerun:"
+    say "    REBUILD_ENV_PREFIX=/data/stat-cadd/scat9264/conda_envs/env_test \\"
+    say "      bash scripts/rebuild_env.sh"
+    say ""
+    say "written to: $REPORT"
+    exit 2
+fi
 if [ -n "$OLD_PREFIX" ]; then
     export ENV_TEST_PREFIX="$OLD_PREFIX"
     say "  rebuilding in place: $ENV_TEST_PREFIX"
@@ -293,26 +427,7 @@ if [ "$BUILD_RC" -ne 0 ] || [ -z "${CONDA_PREFIX:-}" ] \
         say "  from: $LAST_ARCHIVE"
         say "  This is an explicit package list: no solve, no dependency"
         say "  resolution, and the packages are in the cache already."
-        rm -rf "$OLD_PREFIX"
-        conda create --yes --prefix "$OLD_PREFIX" --file "$LAST_ARCHIVE" \
-            2>&1 | tail -15 | tee -a "$REPORT"
-        if [ -x "$OLD_PREFIX/bin/python" ]; then
-            say "  conda half restored at $OLD_PREFIX"
-            say "  The pip half is not in that record -- reinstalling it from the"
-            say "  pinned list. These versions come from env.yml, so they may not"
-            say "  be identical to what was there."
-            # PIP_CONSTRAINT pins torch 2.5.1, which is the environment being
-            # built, not the one being restored. It must not apply here.
-            env -u PIP_CONSTRAINT "$OLD_PREFIX/bin/python" -m pip install \
-                --no-cache-dir gauche==0.1.6 torchbnn==1.2 torchhk==0.86.14 \
-                deepchem==2.8.0 polaris-lib==0.11.10 torchcp==1.1.0 \
-                2>&1 | tail -6 | tee -a "$REPORT"
-            for c in "$HOME/repos/NoiseInject" /data/stat-cadd/scat9264/NoiseInject \
-                     /data/stat-ecr/scat9264/NoiseInject "$HOME/repos/KIRBy" \
-                     /data/stat-cadd/scat9264/KIRBy /data/stat-ecr/scat9264/KIRBy; do
-                [ -d "$c" ] && env -u PIP_CONSTRAINT "$OLD_PREFIX/bin/python" \
-                    -m pip install --no-deps -e "$c" >/dev/null 2>&1
-            done
+        if restore_old_env "$OLD_PREFIX" "$LAST_ARCHIVE"; then
             say "  RESTORED. It is the environment you had before -- two OpenMP"
             say "  runtimes and all -- but it works, and nothing is lost."
         else

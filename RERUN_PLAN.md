@@ -1297,7 +1297,7 @@ The other two code bases were run against the same fresh environment on the same
 builds, and clears both blockers, and that all three code bases run against it. **It does not
 prove the cluster's answer**, and the cluster is where the failure was found: `linux-64` has
 been verified only as a *solve*, never as a build, and the `/proc/self/maps` check is
-Linux-only and has not run at all. Until `sbatch scripts/rebuild_env.sh` comes back clear,
+Linux-only and has not run at all. Until `bash scripts/rebuild_env.sh` comes back clear,
 this section is verified on one platform out of two.
 
 #### Packages the roster was missing, now in the recipe
@@ -1346,7 +1346,7 @@ pipeline. It writes one file, `~/env_rebuild_report.txt`, and ends with a verdic
 cd /data/stat-cadd/scat9264/qsar_qm_models
 git pull
 REBUILD_DRY_RUN=1 bash scripts/rebuild_env.sh    # optional: see what it would do
-sbatch scripts/rebuild_env.sh
+bash scripts/rebuild_env.sh
 ```
 
 It **refuses to start while any of your jobs are queued or running** — a rebuild changes
@@ -1356,17 +1356,26 @@ overrides it deliberately.
 
 It rebuilds **in the prefix env_test already occupies**, read from `conda env list`. Creating
 by name would put a multi-gigabyte environment in whichever `envs_dir` comes first, which on
-this cluster can be the home quota.
+this cluster can be the home quota. When `env_test` is not there to ask — which is the state
+as of 2026-08-28 — it recovers the path from the `# prefix:` line of the newest
+`research_archive/env_test_before_rebuild_*.txt`, and `REBUILD_ENV_PREFIX=<path>` names it
+outright if that line is missing.
 
-It is a job, not a login-node paste, because a login node caps memory per user — the same cap
-that made an earlier audit report sixteen phantom failures (§2.8d).
+**It runs on the login node and needs no allocation.** The memory cap is real, but what hit it
+was conda 4.12's own solver parsing the whole conda-forge index; micromamba solves the same
+file in a few hundred megabytes. The script fetches one micromamba binary and uses it for the
+single `create` command — never `micromamba activate`, which has never worked here — and conda
+does everything else, so what lands at the prefix is an ordinary conda environment and every
+job script's `conda activate env_test` still resolves. If micromamba cannot be fetched it puts
+itself inside a small allocation instead and uses conda's solver there.
 
 **Rollback**, if it is ever wanted: step 1 writes
 `research_archive/env_test_before_rebuild_<date>.txt`, a `conda list --explicit` of the old
 environment. `conda create --prefix <prefix> --file <that file>` puts it back, then rerun
 `setup.sh` for the extras.
 
-If you would rather drive it by hand:
+If you would rather drive it by hand — this route uses conda's own solver, so it does need an
+allocation:
 
 ```bash
 # 0. Keep a record of what the OLD environment was, before it is destroyed.
@@ -1456,10 +1465,14 @@ fixed, and every one of them would have fired again on the next attempt:
    showed sixteen absent packages and six failures that were not tests of `env_test` at all.
    Process substitution now keeps the source in the calling shell, and the script stops with one
    line if the build did not produce the environment.
-4. **It warned about the login node and continued.** It now re-executes itself inside an allocation
-   (`srun --account=stat-cadd --cpus-per-task=8 --mem=48G --time=03:00:00`) rather than asking for a
-   second paste, and puts the conda package cache beside the environment instead of letting it
-   default into the home quota.
+4. **It warned about the login node and continued.** The login node was never the real cause:
+   conda 4.12's solver needs gigabytes to parse the conda-forge index and the per-user cap kills
+   it, while micromamba solves the same file in a few hundred megabytes. The build now goes
+   through one fetched micromamba binary for the `create` command alone and conda does everything
+   else, so it runs on the login node with no allocation at all; only if micromamba cannot be
+   fetched does it re-execute itself inside `srun --account=stat-cadd --cpus-per-task=4
+   --mem=32G --time=01:30:00`. It also puts the conda package cache beside the environment
+   instead of letting it default into the home quota.
 
 Two further hardenings came out of the same log. `PYTHONNOUSERSITE=1` is now exported, because
 `~/.local/lib/python3.X/site-packages` is read by every interpreter of that version — this account
@@ -3682,41 +3695,47 @@ per molecule or is one number per fit. `assert_matches_support` fails the run wh
 output disagrees with it — a constant sold as per-molecule, or a per-molecule term that came out
 flat. That is guard 1 and guard 9 of §0.6 applied to the split.
 
-### 5.5c 🔴 MEASURED 2026-08-28 — the forest split is DEGENERATE at the project's own settings
+### 5.5c ✅ APPLIED 2026-08-28 — the forests ended on one molecule, so they had no aleatoric term
 
-**At `min_samples_leaf = 1` the forest's aleatoric term is exactly zero.** A leaf holding one
-training molecule has no within-leaf spread, so the law of total variance puts the entire
-predictive variance into the epistemic term. `models/model_defaults.py:70` and `:84` set
-`min_samples_leaf = 1` for the random forest and the quantile forest respectively, so this is the
-setting the re-run would have used.
+**Both forests are now `min_samples_leaf = 5`** (`models/model_defaults.py`, spec version 1.4.0).
+The author's call. Both pipelines read that file, so QM9 and the three laboratory datasets move
+together and no second edit exists to drift.
 
-Measured on 4,000 real QM9 molecules — the HOMO-LUMO gap, nine descriptors from
-`data/QM9/raw/gdb9.sdf.csv`, 2,000 held out. Ten replicates per level for the ladder; the table
-below is one replicate at two levels.
+**Why.** A leaf holding one training molecule has no within-leaf spread, so the law of total
+variance puts the entire predictive variance into the epistemic term and the aleatoric term is
+identically zero. That is arithmetic, not a property of the data.
 
-| `min_samples_leaf` | R² clean | R² at one label spread of noise | aleatoric share, clean |
-|---|---|---|---|
-| **1 (current)** | 0.6603 | 0.5277 | **0.000** |
-| 2 | 0.6570 | 0.5363 | 0.104 |
-| 5 | 0.6415 | 0.5458 | 0.373 |
-| 10 | 0.6201 | 0.5493 | 0.575 |
-| 20 | 0.5856 | 0.5424 | 0.718 |
-| 50 | 0.5287 | 0.5121 | 0.834 |
+**⚠️ An earlier version of this section quoted 0.6603 clean and a 0.019/0.018 trade. Those came
+from a run that used scikit-learn's default `max_features`, not the shared spec's 0.3, so they
+described a configuration nothing runs.** The table below is measured at the spec's own settings and
+supersedes them. 4,000 real QM9 molecules — the HOMO-LUMO gap, nine descriptors from
+`data/QM9/raw/gdb9.sdf.csv` — 2,000 held out, 3 replicates, noise at one label spread.
 
-**Two things this settles and one it opens.**
+| leaf | R² clean (rf) | R² noised (rf) | share (rf) | R² clean (qrf) | R² noised (qrf) | share (qrf) |
+|---|---|---|---|---|---|---|
+| **1 (was)** | 0.6019 | 0.5339 | **0.0000** | 0.6160 | 0.5051 | **0.0000** |
+| 2 | 0.5990 | 0.5333 | 0.1783 | 0.6152 | 0.5217 | 0.1773 |
+| **5 (now)** | 0.5771 | 0.5402 | 0.4586 | 0.5925 | 0.5284 | 0.4578 |
+| 10 | 0.5497 | 0.5236 | 0.6214 | 0.5651 | 0.5171 | 0.6202 |
+| 20 | 0.5131 | 0.5006 | 0.7319 | 0.5250 | 0.4987 | 0.7299 |
 
-- The "free, no re-fitting" part of the build is only free if the forests keep leaves of size 1 —
-  and at size 1 there is no aleatoric term to report. Getting one costs a re-fit of the two forest
-  models.
-- **The re-fit is not a cost at the noise levels the paper reports.** Larger leaves lose accuracy
-  on clean labels and *gain* it under noise: at leaf 5 the clean R² drops 0.019 while the R² at one
-  label spread of injected noise rises 0.018. Bigger leaves average over more molecules, which is
-  exactly what damping label noise looks like. Leaf 10 is the best setting measured at that noise
-  level (0.5493).
-- 🔴 **Open, and it is the author's:** `min_samples_leaf` is a settled shared-spec value. Changing
-  it changes every forest number in the paper, not only the uncertainty ones. The alternative is to
-  keep leaf 1 and report the two forests as having no aleatoric term at all — which is honest, and
-  which throws away the only per-molecule split available without re-fitting a network.
+**Both forests were measured, not one.** The quantile forest has 300 trees rather than 100 and its
+reported uncertainty comes from quantiles rather than from leaves, so it could have behaved
+differently. It does not: the aleatoric share is within 0.001 of the ordinary forest at every
+setting. The accuracy trade is better for it — five costs 0.024 of clean R² and gains 0.023 at the
+reporting level, against 0.025 and 0.006 for the ordinary forest.
+
+**🔴 Two consequences to carry, neither of them blocking.**
+
+- **Every forest number in the paper changes**, not only the uncertainty ones. Both forests are in
+  the variance decomposition and in the robustness curves.
+- **The quantile forest's calibration evidence was measured at leaf 1 and has not been re-measured.**
+  The comment in the spec quotes coverage at one standard deviation of 0.688 against a nominal
+  0.683, and that was the reason 0.3 was chosen for `max_features`. Measured now from the
+  leaf-based split's total at leaf 5, coverage is 0.780 — too wide. That is a different estimator
+  from the quantile interval the model actually reports, so it does not by itself invalidate the
+  0.688, but the quantile interval's coverage at leaf 5 is **not checked** and belongs in the next
+  forest run.
 
 ### 5.5d 🔴 MEASURED 2026-08-28 — "aleatoric rises, epistemic holds still" is WRONG for a bagged model
 
