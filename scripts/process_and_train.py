@@ -653,12 +653,25 @@ def write_to_mmap(
         if sns_fp is not None:
             counts = np.asarray(sns_fp)
             if counts.shape != (SNS_DIM,):
-                # A molecule with no enumerable substructures makes the
-                # featuriser sum an empty list, which returns the scalar 0.0.
-                # The old code packed that into ONE byte instead of 128 and
-                # every field after it in the record decoded from the wrong
-                # offset for the rest of the file.
-                counts = np.zeros(SNS_DIM, dtype=np.float64)
+                # A molecule with no enumerable substructures makes the featuriser
+                # sum an empty list, which returns the scalar 0.0. The old code
+                # packed that into ONE byte instead of 128 and every field after it
+                # decoded from the wrong offset for the rest of the file.
+                #
+                # Zero-filling fixed the alignment and left the corruption: the
+                # molecule then trained as if every substructure were genuinely
+                # absent. Refuse instead. Alignment is still safe because the run
+                # stops. Fixed 2026-08-28, close-out audit item A5.
+                raise ValueError(
+                    f"Sort & Slice produced {counts.shape} for {smiles_canonical}, "
+                    f"not ({SNS_DIM},). A molecule with no enumerable substructures "
+                    f"gives a scalar; zero-filling it would train as if every "
+                    f"substructure were genuinely absent.")
+            if not counts.any():
+                raise ValueError(
+                    f"Sort & Slice produced an all-zero count vector for "
+                    f"{smiles_canonical}. That is a molecule with no features "
+                    f"carrying a real label into training.")
             if not np.isfinite(counts).all() or counts.min() < 0:
                 raise ValueError(
                     f"substructure counts must be finite and non-negative, got "
@@ -1289,7 +1302,19 @@ def create_sort_and_slice_ecfp_featuriser(mols_train,
                                                                  useBondTypes = bond_invs,
                                                                  includeChirality = chirality)
     
-    sub_id_enumerator = lambda mol: morgan_generator.GetSparseCountFingerprint(mol).GetNonzeroElements() if mol is not None else {}
+    def sub_id_enumerator(mol):
+        # An unparseable molecule used to return {} here, which becomes an
+        # all-zero count vector: a molecule with no features carrying a real label
+        # into training, and nothing downstream can tell it from a real one. Every
+        # other featuriser raises on this path -- ChemBERTa and MHG-GNN since
+        # 2026-08-26, Avalon since 2026-08-27 -- and Sort & Slice was the one that
+        # was missed. Found by the close-out audit and fixed 2026-08-28.
+        if mol is None:
+            raise RuntimeError(
+                "Sort & Slice: RDKit could not parse the molecule, so it has no "
+                "substructures. An all-zero count vector would train as if it were "
+                "real features.")
+        return morgan_generator.GetSparseCountFingerprint(mol).GetNonzeroElements()
     
     # Construct dictionary that maps each integer substructure identifier sub_id in mols_train to its associated prevalence (i.e., to the total number of compounds in mols_train that contain sub_id at least once)
     sub_ids_to_prevs_dict = {}
@@ -1321,10 +1346,29 @@ def create_sort_and_slice_ecfp_featuriser(mols_train,
             sub_id_list = [sub_idd for (sub_id, count) in sub_id_enumerator(mol).items() for sub_idd in [sub_id]*count]
         else:
             sub_id_list = list(sub_id_enumerator(mol).keys())
-        
+
+        # `sub_id_enumerator` raises for an unparseable molecule, but RDKit parses
+        # '' into a VALID Mol with no atoms, so that route returns {} and never
+        # touches the guard above -- the same case Avalon's fix calls out by name.
+        # The sum below over an empty list returns the scalar 0.0, which used to
+        # reach write_to_mmap as a shape mismatch.
+        #
+        # This is NOT the case of a molecule whose substructures all fall outside
+        # the top `vec_dimension`: that returns a full-width vector of zeros and
+        # is the method working as designed.
+        if not sub_id_list:
+            raise RuntimeError(
+                f"Sort & Slice: {Chem.MolToSmiles(mol)!r} has no enumerable "
+                f"substructures, so it has no representation to store")
+
         # create molecule-wide vectorial representation by summing up one-hot encoded substructure identifiers
         ecfp_vector = np.sum(np.array([sub_id_one_hot_encoder(sub_id) for sub_id in sub_id_list]), axis = 0)
-    
+
+        if ecfp_vector.shape != (vec_dimension,):
+            raise RuntimeError(
+                f"Sort & Slice: {Chem.MolToSmiles(mol)!r} produced shape "
+                f"{ecfp_vector.shape}, expected ({vec_dimension},)")
+
         return ecfp_vector
     
     # Print information on training set
