@@ -293,6 +293,7 @@ def fit_gp(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150):
     """The two Gaussian processes, built the way models.py builds them."""
     import gpytorch
     import torch
+    from model_defaults import gp_fit_threads
     from uncertainty_decomposition import decompose_gp, decompose_hetero_gp
 
     torch.manual_seed(seed)
@@ -337,20 +338,26 @@ def fit_gp(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150):
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(lik, gp)
     gp.train()
     lik.train()
-    for _ in range(epochs):
-        opt.zero_grad()
-        loss = -mll(gp(xt), yt)
-        if noise_net is not None:
-            with torch.no_grad():
-                resid = (yt - gp(xt).mean) ** 2
-            pv = noise_net(xt).squeeze(-1) + 1e-4
-            loss = loss + torch.mean(0.5 * torch.log(pv) + resid / (2 * pv))
-        loss.backward()
-        opt.step()
+    # SINGLE-THREADED, through the shared spec's own context manager. Not an
+    # optimisation: torch's thread pool and the linear-algebra backend under
+    # gpytorch fight over the same cores, and the fit does not merely slow down
+    # -- it deadlocks, and it segfaults (RERUN_PLAN.md 2.8e, 2.8e-ter). Both
+    # pipelines wrap their Gaussian-process fits this way and so does this.
+    with gp_fit_threads():
+        for _ in range(epochs):
+            opt.zero_grad()
+            loss = -mll(gp(xt), yt)
+            if noise_net is not None:
+                with torch.no_grad():
+                    resid = (yt - gp(xt).mean) ** 2
+                pv = noise_net(xt).squeeze(-1) + 1e-4
+                loss = loss + torch.mean(0.5 * torch.log(pv) + resid / (2 * pv))
+            loss.backward()
+            opt.step()
 
     gp.eval()
     lik.eval()
-    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    with gp_fit_threads(), torch.no_grad(), gpytorch.settings.fast_pred_var():
         post = gp(xst)
         mean = post.mean.numpy()
         latent = np.clip(post.variance.numpy(), 1e-12, None)
