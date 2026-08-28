@@ -1581,7 +1581,22 @@ done. Three things it exposed, all now fixed in the script:
    package now, `/data/stat-ecr` first because that is what KIRBy's own job scripts use (§2.8b),
    the others named in the report as present-but-not-installed. `REBUILD_KIRBY_DIR` and
    `REBUILD_NOISEINJECT_DIR` override.
-3. **The archive on ARC has no version line**, so the torch step was skipped —
+3. **`import torch` then failed on the restored environment** with
+   ``/lib64/libstdc++.so.6: version `GLIBCXX_3.4.30' not found``, which stops the KIRBy pipeline
+   at its imports. The cluster image's libstdc++ is older than torch's extensions were built
+   against, and the package that fixes it — `libstdcxx-ng>=12` — was inside `setup.sh`'s
+   recipe-stamped extras block. A restored environment has no stamp for that recipe and is not
+   described by it, so the one package that makes torch importable was gated on a condition
+   that has nothing to do with it. It is its own check now: it greps the environment's own
+   libstdc++ and installs only if that is too old, which costs one grep per task after the first.
+4. **`setup.sh` must not run the extras against a restored environment at all.**
+   `PIP_CONSTRAINT` pins the versions `env.yml` asks for, and a restored environment carries the
+   versions it had — the same mismatch that took gpytorch out. It now compares the installed
+   torch against the pin, reads it from package metadata rather than importing torch (this file
+   is sourced by every task, and importing torch where there are two threading runtimes is the
+   hang), and skips the extras with a note when they differ. Activation, the library paths, the
+   RDKit symlinks and libstdc++ all still happen. `SETUP_FORCE_EXTRAS=1` overrides.
+5. **The archive on ARC has no version line**, so the torch step was skipped —
    `REBUILD_TORCH=<version>` names it. Whether torch is present at all comes from the conda half
    and has to be checked in the restored environment, not assumed.
 

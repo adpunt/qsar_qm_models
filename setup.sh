@@ -208,6 +208,25 @@ export PYTHONNOUSERSITE=1
 # ~/.local/lib/python3.9 on 2026-08-27.
 export PIP_USER=0
 
+# --- the libstdc++ torch needs ----------------------------------------------
+# The cluster image ships a libstdc++ older than torch's extensions were built
+# against, and the failure is
+#   ImportError: /lib64/libstdc++.so.6: version `GLIBCXX_3.4.30' not found
+# on `import torch` -- which stops the KIRBy pipeline at its imports.
+#
+# This used to live in the extras block below, so it ran only when the recipe
+# changed. A restored environment has no stamp for that recipe and is not
+# described by it, so the one package that makes torch importable was tied to
+# a condition that has nothing to do with it. It is its own check now: it looks
+# at the environment's own libstdc++ and installs only if that is too old, so
+# it costs one grep per task after the first time.
+if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
+    if ! grep -aq GLIBCXX_3.4.30 "$CONDA_PREFIX/lib/libstdc++.so.6" 2>/dev/null; then
+        echo "Installing libstdcxx-ng: this environment's libstdc++ is older than torch needs..."
+        "$SETUP_TOOL" install -y "${ENV_SELECT[@]}" -c conda-forge 'libstdcxx-ng>=12'
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # The four things no channel can supply.
 #
@@ -216,6 +235,28 @@ export PIP_USER=0
 # triggers exactly one rebuild of the extras and a job task never writes into a
 # shared environment while another task is reading it.
 # ---------------------------------------------------------------------------
+# An environment restored from research_archive/ carries the versions it had,
+# and pip-constraints.txt pins the versions env.yml asks for. Running the extras
+# with one against the other is how a restore gets quietly undone -- on ARC on
+# 2026-08-28 an unconstrained pip step uninstalled a just-restored gpytorch. So
+# check whether this interpreter is the recipe before installing into it. Read
+# from package metadata, never `import torch`: this file is sourced by every
+# task, and importing torch in an environment with two threading runtimes is
+# the hang this whole section is about.
+SETUP_SKIP_EXTRAS=0
+_installed_torch="$(python -c "import importlib.metadata as m; print(m.version('torch'))" 2>/dev/null)"
+_pinned_torch="$(grep -E '^torch==' "$CONSTRAINTS" 2>/dev/null | head -1 | cut -d'=' -f3)"
+if [ -n "$_installed_torch" ] && [ -n "$_pinned_torch" ] \
+   && [ "${_installed_torch%%+*}" != "$_pinned_torch" ]; then
+    echo "NOTE: torch here is $_installed_torch, and the recipe pins $_pinned_torch."
+    echo "  This environment is not the one env.yml describes -- most likely restored"
+    echo "  from research_archive/. Skipping the extras so they cannot change it."
+    echo "  Everything above this line still applied: activation, library paths,"
+    echo "  the RDKit symlinks and libstdc++."
+    echo "  To install them anyway:  SETUP_FORCE_EXTRAS=1 . ./setup.sh"
+    SETUP_SKIP_EXTRAS=1
+fi
+
 setup_extras_stamp() {
     cat "$YML_FILE" "$CONSTRAINTS" 2>/dev/null | \
         { shasum -a 256 2>/dev/null || sha256sum; } | awk '{print $1}'
@@ -224,13 +265,9 @@ STAMP_FILE="$CONDA_PREFIX/.env_test_extras"
 WANT_STAMP="$(setup_extras_stamp)"
 HAVE_STAMP="$(cat "$STAMP_FILE" 2>/dev/null)"
 
-if [ "${SETUP_FORCE_EXTRAS:-0}" = "1" ] || [ "$WANT_STAMP" != "$HAVE_STAMP" ]; then
+if [ "${SETUP_FORCE_EXTRAS:-0}" = "1" ] \
+   || { [ "$SETUP_SKIP_EXTRAS" = "0" ] && [ "$WANT_STAMP" != "$HAVE_STAMP" ]; }; then
     echo "Installing the packages no channel carries (stamp changed)..."
-
-    # RDKit needs a newer libstdc++ than some cluster images ship.
-    if [[ "$OSTYPE" == linux-gnu* ]] || [[ -z "${OSTYPE:-}" ]]; then
-        "$SETUP_TOOL" install -y "${ENV_SELECT[@]}" -c conda-forge 'libstdcxx-ng>=12'
-    fi
 
     # torchsort has no linux wheel and its extension must be compiled against
     # the torch that is INSTALLED. --no-build-isolation is the whole point:
@@ -270,6 +307,8 @@ if [ "${SETUP_FORCE_EXTRAS:-0}" = "1" ] || [ "$WANT_STAMP" != "$HAVE_STAMP" ]; t
     done
 
     echo "$WANT_STAMP" > "$STAMP_FILE"
+elif [ "$SETUP_SKIP_EXTRAS" = "1" ]; then
+    echo "Extras skipped: see the note above."
 else
     echo "Extras already match the recipe; nothing to install."
 fi
