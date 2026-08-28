@@ -124,6 +124,15 @@ MODELS = {
     'QRF':            (1, 8,  '128G', 36, 'quantile spread; strongest error-ranker in existing results'),
     'NGBoost':        (1, 8,  '128G', 47, '500 estimators; slowest of the tree models by far'),
     'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)'),
+    # The only model measured that SEPARATES the two halves of its uncertainty.
+    # An ordinary process learns one noise level for the whole dataset and
+    # reports it for every molecule; this one predicts a level per molecule, so
+    # its data half tracks the true corruption at +0.62 while its model half
+    # sits at -0.18 against the same thing, for the same accuracy. Both forest
+    # halves sit at +0.84 and +0.81 -- one signal reported twice. Added
+    # 2026-08-28 on the author's instruction, to THIS run only: it answers an
+    # uncertainty question and does not need a place on the accuracy grid.
+    'GP-Hetero':      (1, 8,  '128G', 47, 'the same process with a network predicting each molecule\'s noise; the only model that separates the two halves'),
     'BNN-Full':       (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'VBLL-Full':      (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'MLP-BNN-Full':   (2, 8,  '128G', 47, '100 stochastic forward passes'),
