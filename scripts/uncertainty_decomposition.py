@@ -136,6 +136,41 @@ SUPPORT = {
     'XGBoost':                   (NONE, NONE),
     'LightGBM':                  (NONE, NONE),
     'SVM':                       (NONE, NONE),
+    # ---------------------------------------------------------------------
+    # NOT IN EITHER ROSTER. Present so that a model nobody queued still writes
+    # a labelled column instead of stopping the run at the writer, and so that
+    # what it produces is on the record. Every one of these is reached only by
+    # naming it on the command line.
+    # ---------------------------------------------------------------------
+    'dnn_bnn_last':              (NONE, PER_MOLECULE),
+    'mlp_bnn_last':              (NONE, PER_MOLECULE),
+    'dnn_bnn_variational':       (CONSTANT, PER_MOLECULE),
+    'mlp_bnn_variational':       (CONSTANT, PER_MOLECULE),
+    'flexible_dnn':              (NONE, PER_MOLECULE),
+    'graph_gp':                  (CONSTANT, PER_MOLECULE),
+    'gnn':                       (NONE, PER_MOLECULE),
+    # The two evidential models write both terms per molecule from the
+    # Normal-Inverse-Gamma parameters.
+    'evidential_kernel':         (PER_MOLECULE, PER_MOLECULE),
+    'conformal_hetero':          (PER_MOLECULE, PER_MOLECULE),
+    'ntk_gnn':                   (NONE, PER_MOLECULE),
+    # Refused by name at the top of process_and_train.py (RERUN_PLAN.md 2.22),
+    # and it never computed a split.
+    'conformal':                 (NONE, NONE),
+    # The mitigation experiments write a total and no split.
+    'noise_mitigation_gauche':   (NONE, NONE),
+}
+
+# The name a row is WRITTEN under is not always the name the job generator uses.
+# The neural trainers write 'bnn_full' and the file name carries the base
+# network, so the roster's 'dnn_bnn_full' never appears in the model column.
+# Mapping them here keeps one entry per model rather than two that can disagree.
+SUPPORT_ALIASES = {
+    'bnn_full':                     'dnn_bnn_full',
+    'bnn_last':                     'dnn_bnn_last',
+    'bnn_variational':              'dnn_bnn_variational',
+    'bnn_full_variational':         'dnn_bnn_full_variational',
+    'bnn_full_variational_hetero':  'dnn_bnn_full_variational_hetero',
 }
 
 # Two losses give a network a second output that predicts the observation noise
@@ -162,7 +197,7 @@ def support(model_name, loss_name=None):
     better term than the table claims.
     """
     try:
-        alea, epis = SUPPORT[model_name]
+        alea, epis = SUPPORT[SUPPORT_ALIASES.get(model_name, model_name)]
     except KeyError:
         raise DecompositionError(
             f"{model_name!r} has no entry in SUPPORT, so nothing knows whether "
@@ -437,13 +472,22 @@ def variance_to_std(variance):
 
 
 def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None,
-                           loss_name=None):
+                           loss_name=None, blocks=None):
     """Fail the run when what a model produced disagrees with what SUPPORT says.
 
     This is the guard, not a comment. It catches the failure that has cost this
     project most: a term declared per molecule that is in fact one number copied
     onto every row, whose correlation with anything per-molecule is zero however
     good the model is.
+
+    `blocks` names which FIT each value came from, one entry per molecule. It
+    matters for the out-of-fold rows: those come from several fits, so a term
+    that is one number PER FIT -- a homoscedastic likelihood noise, a variational
+    layer's single observation noise -- takes a different value in each fold and
+    is not constant down the column. It is still `constant`, and it still cannot
+    answer a per-molecule question: what varies is the fold, not the molecule.
+    Without this the guard would stop a correct out-of-fold pass; with it, the
+    check becomes constant WITHIN each fit, which is the real claim.
     """
     alea_kind, epis_kind = support(model_name, loss_name)
 
@@ -470,13 +514,28 @@ def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None,
                 f"molecules")
 
         spread = float(np.nanmax(v) - np.nanmin(v)) if v.size else 0.0
-        if kind == CONSTANT and spread > 1e-12:
-            raise DecompositionError(
-                f"{model_name}: SUPPORT calls its {name} term one number per "
-                f"fit, but it varies by {spread:.6g} across molecules. Update "
-                f"SUPPORT -- a term that really does vary is worth more, not "
-                f"less.")
-        if kind == PER_MOLECULE and v.size > 1 and spread <= 1e-12:
+        if kind == CONSTANT:
+            if blocks is None:
+                within = spread
+            else:
+                b = np.asarray(blocks).ravel()
+                if b.size != v.size:
+                    raise DecompositionError(
+                        f"{model_name}: {b.size} block labels for {v.size} "
+                        f"{name} values")
+                within = 0.0
+                for label in np.unique(b):
+                    part = v[b == label]
+                    if part.size and np.isfinite(part).any():
+                        within = max(within, float(np.nanmax(part)
+                                                   - np.nanmin(part)))
+            if within > 1e-12:
+                raise DecompositionError(
+                    f"{model_name}: SUPPORT calls its {name} term one number per "
+                    f"fit, but it varies by {within:.6g} within a single fit. "
+                    f"Update SUPPORT -- a term that really does vary is worth "
+                    f"more, not less.")
+        if kind == PER_MOLECULE and v.size > 1 and spread <= 1e-12 and np.isfinite(v).any():
             raise DecompositionError(
                 f"{model_name}: SUPPORT calls its {name} term per molecule, but "
                 f"every molecule got {float(v[0]):.6g}. A constant cannot "

@@ -331,6 +331,24 @@ def test_guard_catches_a_varying_term_declared_constant():
            'one number per fit')
 
 
+def test_guard_allows_one_number_per_fold_out_of_fold():
+    """The out-of-fold rows come from several fits, so a term that is one number
+    per fit takes a different value in each fold. That is still constant."""
+    values = np.array([0.2, 0.2, 0.2, 0.9, 0.9, 0.9])
+    folds = np.array([0, 0, 0, 1, 1, 1])
+    raises(DecompositionError,
+           lambda: assert_matches_support('GP', values, np.linspace(1, 2, 6)),
+           'within a single fit')
+    assert assert_matches_support('GP', values, np.linspace(1, 2, 6),
+                                  blocks=folds)
+    # It still catches a term that varies INSIDE one fit.
+    raises(DecompositionError,
+           lambda: assert_matches_support('GP', np.linspace(0.1, 0.5, 6),
+                                          np.linspace(1, 2, 6),
+                                          blocks=folds),
+           'within a single fit')
+
+
 def test_guard_catches_a_missing_component():
     raises(DecompositionError,
            lambda: assert_matches_support('QRF', None, np.linspace(0, 1, 5)),

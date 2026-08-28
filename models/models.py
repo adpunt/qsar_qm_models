@@ -79,6 +79,17 @@ from rdkit import Chem
 from utils import * 
 from loss_functions import *
 
+# ONE definition of the aleatoric/epistemic split, shared with the laboratory
+# runner (KIRBy/tests/alternative_data_noise_robustness.py). Nothing in this
+# file computes the arithmetic itself: QM9 used to hold four different
+# definitions of the split and they disagreed with one another and with the
+# other pipeline, which had none (RERUN_PLAN.md 5.5, 5.5b). Everything the
+# module returns is a VARIANCE; save_uncertainty_values converts once, at the
+# point of writing.
+from uncertainty_decomposition import (
+    decompose_forest, decompose_gp, decompose_hetero_gp, decompose_sampling,
+    decompose_single_distribution)
+
 # The shared parameter spec. models/ is on sys.path when process_and_train.py
 # runs from scripts/, but not when this module is imported from the repo root
 # (the parity audit does that), so resolve it from this file's own location.
@@ -1473,15 +1484,31 @@ def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label=''
     uncertainties come from an interpolation regime while the test set is an
     extrapolation regime, and the two are not on the same scale.
 
-    `fit_predict(X_fit, y_fit, X_score) -> (mean, std_or_None)`.
+    `fit_predict(X_fit, y_fit, X_score)` returns either `(mean, std_or_None)` or
+    `(mean, std_or_None, aleatoric_var_or_None, epistemic_var_or_None)`. The
+    four-value form carries the aleatoric/epistemic split out of fold, which is
+    where the question "does the uncertainty find the corrupted labels?" is
+    actually asked -- a test molecule's label is never corrupted, so a split
+    written only for test rows cannot answer it (RERUN_PLAN.md 3.1c). The
+    two-value form is what a model with no split returns.
 
-    Returns (oof_mean, oof_unc, n_folds_ok). The caller MUST check n_folds_ok: a
-    silently truncated out-of-fold pass looks exactly like a complete one in the
-    output file.
+    Returns (oof_mean, oof_unc, oof_aleatoric_var, oof_epistemic_var, oof_fold,
+    n_folds_ok); either component array is None when no fold produced it, and
+    `oof_fold` says which inner fit scored each molecule (-1 for unscored). The
+    caller MUST check n_folds_ok: a silently truncated out-of-fold pass looks
+    exactly like a complete one in the output file.
     """
     n = len(y_noisy)
     oof_mean = np.full(n, np.nan)
     oof_unc = np.full(n, np.nan)
+    oof_alea = np.full(n, np.nan)
+    oof_epis = np.full(n, np.nan)
+    # Which inner fit scored each molecule. A component that is one number per
+    # FIT -- a homoscedastic likelihood noise, a variational layer's single
+    # observation noise -- takes a different value in each fold, so the writer's
+    # guard needs to know where one fit ends and the next begins.
+    oof_fold = np.full(n, -1, dtype=int)
+    got_alea = got_epis = False
 
     tag = f"[oof{(' ' + label) if label else ''}]"
 
@@ -1515,20 +1542,35 @@ def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label=''
         folds = folds[:folds_scored]
 
     n_ok = 0
-    for keep, held in folds:
+    for fold_i, (keep, held) in enumerate(folds):
         try:
-            m, u = fit_predict(X[keep], y_noisy[keep], X[held])
+            out = fit_predict(X[keep], y_noisy[keep], X[held])
         except Exception as e:
             print(f"      {tag} fold failed: {type(e).__name__}: {e}", flush=True)
             continue
+        if len(out) == 4:
+            m, u, a, ep = out
+        else:
+            m, u = out
+            a = ep = None
         oof_mean[held] = np.asarray(m, dtype=float).ravel()
+        oof_fold[held] = fold_i
         if u is not None:
             oof_unc[held] = np.asarray(u, dtype=float).ravel()
+        if a is not None:
+            oof_alea[held] = np.asarray(a, dtype=float).ravel()
+            got_alea = True
+        if ep is not None:
+            oof_epis[held] = np.asarray(ep, dtype=float).ravel()
+            got_epis = True
         n_ok += 1
     if n_ok < len(folds):
         print(f"      {tag} WARNING {n_ok}/{len(folds)} inner folds succeeded",
               flush=True)
-    return oof_mean, oof_unc, n_ok
+    return (oof_mean, oof_unc,
+            oof_alea if got_alea else None,
+            oof_epis if got_epis else None,
+            oof_fold, n_ok)
 
 
 def _fill_non_finite(values):
@@ -1549,7 +1591,7 @@ def score_training_molecules_out_of_fold(
         iteration_seed, file_no, model_name,
         train_slice=slice(None), val_slice=None,
         y_pred_std_calibrated=None, temperature=None,
-        epistemic_from=None, restore_torch_rng=False):
+        support_model=None, loss_name=None, restore_torch_rng=False):
     """Score the molecules a model fitted, out of fold, and write their rows.
 
     `train_slice` / `val_slice` say which provenance rows `x_fit` is made of, in
@@ -1572,6 +1614,10 @@ def score_training_molecules_out_of_fold(
     injector's provenance file. `y_true_original` is the raw clean label and
     `y_true_noisy` is the standardised noisy label -- the same two meanings those
     columns already carry on a test row.
+
+    `support_model` is the SUPPORT-table key for this model, for when the name
+    written on the row is decorated with a loss or a kernel. Defaults to
+    `model_name`.
 
     Returns the number of inner folds that succeeded, or None when nothing was
     written.
@@ -1612,7 +1658,7 @@ def score_training_molecules_out_of_fold(
         _cstate = (torch.cuda.get_rng_state_all()
                    if torch.cuda.is_available() else None)
     try:
-        oof_mean, oof_unc, n_ok = oof_predict(
+        oof_mean, oof_unc, oof_alea, oof_epis, oof_fold, n_ok = oof_predict(
             fit_predict, np.asarray(x_fit), np.asarray(y_fit), n_folds,
             groups=groups, seed=iteration_seed, label=model_name,
             folds_scored=int(getattr(args, 'oof_folds_scored', 0) or 0))
@@ -1652,8 +1698,17 @@ def score_training_molecules_out_of_fold(
         file_no=file_no,
         y_pred_std_calibrated=y_pred_std_calibrated,
         temperature=temperature,
-        epistemic_uncertainty=epistemic_from,
-        aleatoric_uncertainty=None,
+        # The split, as VARIANCES, computed inside each inner fold by a model
+        # that never saw these molecules' labels. This used to be a single
+        # keyword no caller passed, so every train_oof row this pipeline has
+        # written carried two blank component columns -- on the one split where
+        # the labels really are corrupted, which is the only split that can
+        # answer whether the uncertainty finds them (RERUN_PLAN.md 3.1c, 5.5a).
+        aleatoric_var=oof_alea,
+        epistemic_var=oof_epis,
+        support_model=support_model or model_name,
+        loss_name=loss_name,
+        support_blocks=oof_fold,
         split='train_oof',
         injected_noise=rows['epsilon_raw'],
         canonical_smiles=rows['canonical_smiles'],
@@ -1768,22 +1823,47 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
 
     model.fit(x_train, y_train)
 
+    # THE SPLIT, for BOTH forests. The law of total variance over the mixture of
+    # per-tree leaf distributions, walked from trees that are already fitted, so
+    # it costs no refit (`decompose_forest`).
+    #
+    # It replaces a heuristic. The quantile forest used to report HALF THE 16-TO-84
+    # QUANTILE GAP as its aleatoric term, with no model term at all -- a number
+    # that is not a decomposition of anything, and which made the forest look like
+    # a model that sees only observation noise (RERUN_PLAN.md 5.5, 5.5a point 5).
+    # The ordinary forest reported no uncertainty whatsoever.
+    #
+    # THE QUANTILE GAP STAYS as the reported `uncertainty` column for the quantile
+    # forest, so every existing analysis reads exactly what it read before. The
+    # split's total and that column are two DIFFERENT estimates of the same
+    # quantity: the gap is a spread read off the pooled empirical distribution of
+    # the training labels in the leaves a molecule lands in, while the total is
+    # E_t[Var(y|leaf_t)] + Var_t[E(y|leaf_t)] over the same leaves. They agree only
+    # when the per-tree leaf distributions are Gaussian and identical, so they are
+    # reported side by side rather than one derived from the other.
+    #
+    # Both terms are per molecule ONLY because `min_samples_leaf` is 5. At a leaf
+    # of one there is no within-leaf spread, the whole predictive variance lands
+    # in the model term and the aleatoric term is identically zero -- which is
+    # arithmetic, not a finding (RERUN_PLAN.md 5.5c). decompose_forest refuses to
+    # return a column of zeros rather than let that be read as a result.
+    def _forest_split(fitted, x_fit, y_fit, x_score):
+        _mean, _alea, _epis = decompose_forest(fitted, x_fit, y_fit, x_score)
+        return _alea, _epis
+
     if model_type == 'qrf':
         q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T
         y_pred = q50
         y_pred_mean = q50
         std_est = (q84 - q16) / 2  # IQR-based std estimate
-        
+
         if args.uncertainty:
-            # Decompose distributional uncertainty
-            epistemic, aleatoric, total = decompose_uncertainty_distributional(
-                y_pred_mean, std_est, model_type='qrf', is_variance=False
-            )
-            
+            alea_var, epis_var = _forest_split(model, x_train, y_train, x_test)
+
             # QRF doesn't get temperature calibration (quantiles are already calibrated)
             temperature = None
             y_pred_std_calibrated = std_est
-            
+
             save_uncertainty_values(
                 y_pred_mean=y_pred_mean,
                 y_pred_std=std_est,
@@ -1797,8 +1877,8 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                 file_no=file_no,
                 y_pred_std_calibrated=y_pred_std_calibrated,
                 temperature=temperature,
-                epistemic_uncertainty=epistemic,
-                aleatoric_uncertainty=aleatoric,
+                aleatoric_var=alea_var,
+                epistemic_var=epis_var,
                 split='test',
                 **_held_out_noise_columns(train_noise, len(y_pred_mean), y_pred_mean),
             )
@@ -1816,13 +1896,52 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
                 inner.fit(x_fit, y_fit)
                 iq16, iq50, iq84 = inner.predict(
                     x_score, quantiles=[0.16, 0.5, 0.84]).T
-                return iq50, (iq84 - iq16) / 2
+                _a, _e = _forest_split(inner, x_fit, y_fit, x_score)
+                return iq50, (iq84 - iq16) / 2, _a, _e
 
             score_training_molecules_out_of_fold(
                 _fp, x_train, y_train, train_noise, args, s, rep, iteration,
                 iteration_seed, file_no, model_type, val_slice=None)
     else:
         y_pred = model.predict(x_test)
+
+        if args.uncertainty:
+            # The ordinary forest gets the same split. It reported no
+            # per-molecule uncertainty at all before this, so its reported
+            # column is the split's own total -- there is no quantile interval
+            # here to leave alone.
+            alea_var, epis_var = _forest_split(model, x_train, y_train, x_test)
+            std_est = np.sqrt(alea_var + epis_var)
+
+            save_uncertainty_values(
+                y_pred_mean=y_pred,
+                y_pred_std=std_est,
+                y_true_original=y_test_original,
+                y_true_noisy=y_test,
+                filepath=args.filepath,
+                model_name=model_type,
+                rep=rep,
+                sigma_noise=s,
+                iteration=iteration,
+                file_no=file_no,
+                y_pred_std_calibrated=std_est,
+                temperature=None,
+                aleatoric_var=alea_var,
+                epistemic_var=epis_var,
+                split='test',
+                **_held_out_noise_columns(train_noise, len(y_pred), y_pred),
+            )
+
+            def _fp(x_fit, y_fit, x_score):
+                inner = RandomForestRegressor(
+                    random_state=iteration_seed, **params)
+                inner.fit(x_fit, y_fit)
+                _a, _e = _forest_split(inner, x_fit, y_fit, x_score)
+                return inner.predict(x_score), np.sqrt(_a + _e), _a, _e
+
+            score_training_molecules_out_of_fold(
+                _fp, x_train, y_train, train_noise, args, s, rep, iteration,
+                iteration_seed, file_no, model_type, val_slice=None)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics, params_source)
@@ -1951,20 +2070,29 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         temperature = calibrate_uncertainty_simple(y_cal_pred, y_cal_pred_std, y_val_cal)
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
         
-        # Decompose distributional uncertainty
-        epistemic, aleatoric, total = decompose_uncertainty_distributional(
-            y_pred, y_pred_std_uncalibrated, model_type='ngboost', is_variance=False
-        )
-        
-        # Apply calibration to aleatoric
-        if aleatoric is not None:
-            aleatoric = aleatoric * temperature
-        
+        # NGBoost predicts a distribution per molecule from ONE fit, so its
+        # aleatoric term is per molecule and there is no second fit to disagree
+        # with -- the epistemic term is ABSENT, not zero. Zero would read as a
+        # model certain of its own parameters. `decompose_seed_ensemble` gives it
+        # one at the price of a fit per seed, and nothing in either roster pays
+        # that today (RERUN_PLAN.md 5.5g).
+        #
+        # `.scale` is a standard deviation; the module takes VARIANCES.
+        alea_var = np.asarray(y_pred_std_uncalibrated, dtype=float) ** 2
+        alea_var, epis_var, _total_var = decompose_single_distribution(alea_var)
+
+        # The components are written RAW, uncalibrated. The temperature is a
+        # calibration of the TOTAL and it is on the row in its own column
+        # (`temperature`, with the calibrated total beside it); the paper reports
+        # raw uncertainty (RERUN_PLAN.md 3.4.4f). Scaling one component by it also
+        # used to be done on a standard deviation, which is a different operation
+        # from scaling a variance and left the two columns on different scales
+        # from the out-of-fold rows, where no temperature is applied at all.
     else:
         temperature = None
         y_pred_std_calibrated = None
-        epistemic = None
-        aleatoric = None
+        alea_var = None
+        epis_var = None
     
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, 'ngboost', rep, args.sample_size, metrics, params_source)
@@ -1984,8 +2112,8 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
-            epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric,
+            aleatoric_var=alea_var,
+            epistemic_var=epis_var,
             split='test',
             **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
@@ -2009,7 +2137,8 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             )
             inner.fit(x_fit, y_fit)
             dist = inner.pred_dist(x_score)
-            return dist.loc, dist.scale
+            _scale = np.asarray(dist.scale, dtype=float)
+            return dist.loc, _scale, _scale ** 2, None
 
         score_training_molecules_out_of_fold(
             _fp, x_val_train, y_val_train, train_noise, args, s, rep, iteration,
@@ -2324,19 +2453,29 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
             
-            # Decompose GP uncertainty
+            # The split. `pred_vars` is the LATENT variance, which is the
+            # epistemic term; the aleatoric term is the likelihood noise, and a
+            # homoscedastic likelihood has exactly ONE of those, so it is the
+            # same number for every molecule. The row says so, in
+            # `aleatoric_support`, and that is the whole point of the column: a
+            # constant cannot correlate with per-molecule injected noise however
+            # good the model is, so a null read off it is a property of the
+            # likelihood and not a finding (RERUN_PLAN.md 5.5a point 5).
             likelihood_noise = likelihood.noise.item()
-            epistemic, aleatoric, total = decompose_uncertainty_gp(pred_vars, likelihood_noise)
-            
-            # Apply calibration to epistemic
-            epistemic = epistemic * temperature
-            aleatoric = aleatoric * temperature
-            
+            alea_var, epis_var, _total_var = decompose_gp(pred_vars,
+                                                          likelihood_noise)
+
+            # Written RAW. The temperature calibrates the TOTAL and travels on
+            # the row in its own column; the paper reports raw uncertainty
+            # (RERUN_PLAN.md 3.4.4f). It used to be applied to both components as
+            # if they were standard deviations, which is a different operation
+            # from scaling a variance and left the test rows on a different scale
+            # from the out-of-fold rows, where no temperature is applied at all.
         else:
             temperature = None
             y_pred_std_calibrated = None
-            epistemic = None
-            aleatoric = None
+            alea_var = None
+            epis_var = None
 
     model_name = 'gauche_rbf' if params['kernel_name'] == 'RBF' else 'gauche'
     # A fit that gave up and predicted one constant still produces a number, and
@@ -2361,8 +2500,8 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
-            epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric,
+            aleatoric_var=alea_var,
+            epistemic_var=epis_var,
             split='test',
             **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
@@ -2391,8 +2530,18 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             lik.eval()
             with torch.no_grad():
                 preds = inner(xs)
-                return (preds.mean.numpy(),
-                        np.sqrt(np.clip(preds.variance.numpy(), 1e-12, None)))
+                # The reported column is the PREDICTIVE spread, the same
+                # quantity the test rows carry. It used to be the latent spread
+                # here and the predictive spread there, so one column held two
+                # different things depending on which split a row came from --
+                # and the latent one omits the observation noise entirely.
+                observed = lik(preds)
+                _alea, _epis, _tot = decompose_gp(
+                    np.clip(preds.variance.numpy(), 1e-12, None),
+                    float(lik.noise.item()))
+                return (observed.mean.numpy(),
+                        np.sqrt(observed.variance.numpy()),
+                        _alea, _epis)
 
         # A GP fit runs through torch; snapshot the global generator so the main
         # result is what it would have been without the out-of-fold pass.

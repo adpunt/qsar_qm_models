@@ -228,64 +228,40 @@ def calculate_regression_metrics(y_test, prediction, logging=False):
 
 
 # ============================================================================
-# UNCERTAINTY DECOMPOSITION HELPERS
+# UNCERTAINTY DECOMPOSITION -- ONE DEFINITION, IMPORTED
 # ============================================================================
-
-# Aleatoric is None below and total is set equal to the model part, which is right for a
-# network that predicts no observation noise -- a plain BNN has none to report. A network
-# whose head DOES predict one per molecule now goes to
-# decompose_uncertainty_sampling_heteroscedastic instead (models.py, the two -u branches);
-# it used to come here too, because that second output was sliced off before it arrived.
-# Rebuilding the split for the models that predict neither is separate work, RERUN_PLAN.md 5.5.
-def decompose_uncertainty_sampling(predictions_array, num_samples):
-    """
-    Decompose uncertainty from sampling-based methods (BNN, ensembles).
-
-    Args:
-        predictions_array: numpy array of shape (num_samples, num_datapoints)
-        num_samples: number of forward passes
-    
-    Returns:
-        epistemic: uncertainty due to model parameters (variance of means)
-        aleatoric: uncertainty due to data noise (mean of variances)
-        total: total predictive uncertainty
-    """
-    # Epistemic: variance across different model samples
-    epistemic = predictions_array.std(axis=0)
-    
-    # Aleatoric: for simple sampling, we can't separate this without explicit noise modeling
-    # So we return None - only models with heteroscedastic outputs can provide this
-    aleatoric = None
-    
-    # Total uncertainty
-    total = epistemic  # When aleatoric is unknown
-    
-    return epistemic, aleatoric, total
-
-
-def decompose_uncertainty_sampling_heteroscedastic(mean_predictions, var_predictions):
-    """
-    Decompose uncertainty from heteroscedastic sampling methods.
-    
-    Args:
-        mean_predictions: array of shape (num_samples, num_datapoints) - predicted means
-        var_predictions: array of shape (num_samples, num_datapoints) - predicted variances
-    
-    Returns:
-        epistemic: uncertainty due to model parameters
-        aleatoric: uncertainty due to data noise (from learned variance)
-        total: total predictive uncertainty
-    """
-    # Epistemic: variance of the predicted means across samples
-    epistemic = mean_predictions.std(axis=0)
-    
-    # Aleatoric: average of the predicted variances
-    aleatoric = np.sqrt(var_predictions.mean(axis=0))
-    
-    # Total: sqrt(epistemic^2 + aleatoric^2)
-    total = np.sqrt(epistemic**2 + aleatoric**2)
-
-    return epistemic, aleatoric, total
+#
+# There is nothing to compute here. Five local definitions of the split used to
+# sit at this point in the file and they disagreed with one another and with the
+# laboratory runner, which had none at all -- failure mode 10 in RERUN_PLAN.md
+# 0.6. They are deleted (the delete list in RERUN_PLAN.md 5.5) and both
+# pipelines now import scripts/uncertainty_decomposition.py.
+#
+# What each of the five did, and what replaced it:
+#
+#   decompose_uncertainty_sampling             -> decompose_sampling
+#       hard-coded the aleatoric term to None and set the total equal to the
+#       model term, so every coverage number computed from that "total" silently
+#       omitted observation noise.
+#   decompose_uncertainty_sampling_heteroscedastic -> decompose_sampling
+#       right in shape, but returned standard deviations, which the callers then
+#       added in quadrature by hand at each site.
+#   decompose_uncertainty_gp                   -> decompose_gp
+#   decompose_uncertainty_vbll                 -> decompose_sampling
+#       both broadcast one number onto every molecule without recording that
+#       they had, so a column that cannot correlate with anything per-molecule
+#       was indistinguishable from one that can.
+#   decompose_uncertainty_distributional       -> decompose_single_distribution
+#       hard-coded the model term to None. Its premise is false for the quantile
+#       forest -- a forest IS an ensemble and the spread across its trees is a
+#       legitimate model-uncertainty estimate, which is what the forest split now
+#       computes.
+#
+# EVERY value in and out of that module is a VARIANCE. The single conversion to
+# a standard deviation happens in save_uncertainty_values below, at the point of
+# writing, and nowhere else.
+from uncertainty_decomposition import (  # noqa: E402
+    assert_matches_support, support, variance_to_std)
 
 
 def split_predictive_head(output, loss_name):
@@ -329,89 +305,6 @@ def _softplus(x):
     return np.maximum(x, 0.0) + np.log1p(np.exp(-np.abs(x)))
 
 
-def decompose_uncertainty_gp(posterior_variance, likelihood_noise):
-    """
-    Decompose uncertainty from Gaussian Process models.
-    
-    Args:
-        posterior_variance: numpy array of posterior predictive variance
-        likelihood_noise: scalar noise parameter from likelihood
-    
-    Returns:
-        epistemic: uncertainty due to model (posterior variance)
-        aleatoric: uncertainty due to data noise (likelihood noise)
-        total: total predictive uncertainty
-    """
-    # Epistemic: posterior variance (model uncertainty)
-    epistemic = np.sqrt(posterior_variance)
-    
-    # Aleatoric: likelihood noise (observation noise)
-    aleatoric = np.full_like(epistemic, np.sqrt(likelihood_noise))
-    
-    # Total: GP predictive includes both
-    total = np.sqrt(posterior_variance + likelihood_noise)
-    
-    return epistemic, aleatoric, total
-
-
-def decompose_uncertainty_distributional(pred_mean, pred_std_or_var, model_type='ngboost', is_variance=False):
-    """
-    Decompose uncertainty from distributional models (NGBoost, QRF, heteroscedastic NN).
-    These models only capture aleatoric uncertainty directly.
-    
-    Args:
-        pred_mean: predicted means
-        pred_std_or_var: predicted standard deviations or variances
-        model_type: 'ngboost', 'qrf', 'heteroscedastic'
-        is_variance: True if pred_std_or_var contains variances, False if std
-    
-    Returns:
-        epistemic: None (single model can't estimate this)
-        aleatoric: predicted uncertainty (data noise)
-        total: same as aleatoric for single models
-    """
-    # Convert to std if variance was provided
-    if is_variance:
-        aleatoric = np.sqrt(pred_std_or_var)
-    else:
-        aleatoric = pred_std_or_var
-    
-    # Single distributional models can't estimate epistemic uncertainty
-    epistemic = None
-    
-    # Total is just aleatoric for these models
-    total = aleatoric
-    
-    return epistemic, aleatoric, total
-
-
-def decompose_uncertainty_vbll(predictions_array, learned_noise_var):
-    """
-    Decompose uncertainty from VBLL (Variational Bayesian Last Layer).
-
-    Args:
-        predictions_array: numpy array of shape (num_samples, num_datapoints)
-            from MC sampling over the variational posterior.
-        learned_noise_var: scalar learned observation noise variance from
-            VBLLLayer.noise_var (exp(log_noise_var)).
-
-    Returns:
-        epistemic: std across MC weight samples (model uncertainty)
-        aleatoric: sqrt(learned_noise_var) broadcast to all samples (data noise)
-        total: sqrt(epistemic^2 + aleatoric^2)
-    """
-    # Epistemic: variance across different weight samples
-    epistemic = predictions_array.std(axis=0)
-
-    # Aleatoric: learned observation noise (constant per-sample)
-    aleatoric = np.full_like(epistemic, np.sqrt(learned_noise_var))
-
-    # Total predictive uncertainty
-    total = np.sqrt(epistemic**2 + aleatoric**2)
-
-    return epistemic, aleatoric, total
-
-
 # ============================================================================
 # SAVE UNCERTAINTY WITH DECOMPOSITION
 # ============================================================================
@@ -421,6 +314,16 @@ UNCERTAINTY_COLUMNS = [
     "y_pred_mean", "y_pred_std_uncalibrated", "y_true_original", "y_true_noisy",
     "injected_noise", "y_pred_std_calibrated", "temperature",
     "epistemic_uncertainty", "aleatoric_uncertainty",
+    # Added 2026-08-28. Whether each component VARIES PER MOLECULE or is one
+    # number per fit copied onto every row. Nothing recorded this, and it is the
+    # distinction that decides whether a correlation against per-molecule
+    # injected noise means anything: a constant term correlates at exactly zero
+    # however good the model is, so a null read off such a column is a property
+    # of the model and not a finding (RERUN_PLAN.md 5.5, 5.5a point 5). Values
+    # are 'per_molecule', 'constant' or 'none', from the SUPPORT table in
+    # scripts/uncertainty_decomposition.py, and assert_matches_support has
+    # already refused to write the row if the numbers disagree with the label.
+    "aleatoric_support", "epistemic_support",
     # Added 2026-08-26 (Chat F, agent C). split/canonical_smiles/noise_scale/
     # noise_pattern/noise_pattern_pred/oof_folds_ok mirror the KIRBy schema so one
     # analysis module can read both producers.
@@ -466,7 +369,9 @@ def _per_row_values(value, n, name):
 def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noisy,
                            filepath, model_name, rep, sigma_noise, iteration, file_no,
                            y_pred_std_calibrated=None, temperature=None,
-                           epistemic_uncertainty=None, aleatoric_uncertainty=None,
+                           aleatoric_var=None, epistemic_var=None,
+                           support_model=None, loss_name=None,
+                           support_blocks=None,
                            split='test', injected_noise=None, canonical_smiles=None,
                            noise_scale=None, noise_pattern=None,
                            noise_pattern_pred=None, oof_folds_ok=None,
@@ -496,6 +401,23 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
         noise_pattern_pred: the same shape recomputed from the model's own PREDICTED
             label, as a ceiling on what counts as detection.
         oof_folds_ok: how many inner folds produced a value. Test rows get -1.
+        aleatoric_var, epistemic_var: the two components, as VARIANCES, from
+            scripts/uncertainty_decomposition.py. This is the ONE place in the
+            QM9 pipeline where a variance becomes a standard deviation, which is
+            what the two columns have always held; the callers used to convert
+            at fourteen different sites and two of them added standard
+            deviations in quadrature by hand (RERUN_PLAN.md 5.5, the
+            standardisation trap, part 3). None means the model has no such
+            component -- which is not the same as zero, and the column says which.
+        support_model: the name to look up in the SUPPORT table when the name
+            WRITTEN on the row is decorated (het_gp_rbf against the roster's
+            heteroscedastic_gp). Defaults to model_name.
+        loss_name: the loss the model was fitted with. Two of them give a network
+            a per-molecule variance head, which changes what SUPPORT expects.
+        support_blocks: which FIT each row came from. Out-of-fold rows come from
+            several fits, so a component that is one number per fit takes a
+            different value in each fold; without this the guard would read that
+            as a term varying per molecule and stop a correct run.
     """
     if split not in VALID_SPLITS:
         raise ValueError(
@@ -504,6 +426,22 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
     uncertainty_file = filepath.replace('.csv', '_uncertainty_values.csv')
 
     n = len(y_pred_mean)
+
+    # THE GUARD, before anything reaches disk. A component declared per molecule
+    # that is in fact one number copied onto every row -- or the reverse -- is
+    # the failure that has cost this project most, and it is invisible in the
+    # output file. assert_matches_support raises rather than writing a column
+    # nobody can interpret (RERUN_PLAN.md 5.5b).
+    _support_key = support_model or model_name
+    assert_matches_support(_support_key, aleatoric_var, epistemic_var,
+                           n_molecules=n, loss_name=loss_name,
+                           blocks=support_blocks)
+    _alea_kind, _epis_kind = support(_support_key, loss_name)
+    # The single conversion. Variances add; standard deviations do not, so the
+    # arithmetic is all done upstream in variance space and this is the last
+    # step before the numbers are written.
+    aleatoric_uncertainty = variance_to_std(aleatoric_var)
+    epistemic_uncertainty = variance_to_std(epistemic_var)
 
     if injected_noise is None:
         if split == 'train_oof':
@@ -568,6 +506,9 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             row['aleatoric_uncertainty'] = aleatoric_uncertainty[i]
         else:
             row['aleatoric_uncertainty'] = np.nan
+
+        row['aleatoric_support'] = _alea_kind
+        row['epistemic_support'] = _epis_kind
 
         row['split'] = split
         row['canonical_smiles'] = smiles_rows[i]
