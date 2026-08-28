@@ -666,6 +666,49 @@ def scaffold_split_indices(smiles_list, frac_train=0.8, frac_valid=0.1,
     return sorted(train_idx), sorted(val_idx), sorted(test_idx)
 
 
+def noise_seeds_for_level(iteration_seed, level):
+    """The two seeds the injector needs: (shape_seed, selection_seed).
+
+    THE SHAPE SEED varies with the level. It used to be `iteration_seed` alone,
+    recomputed identically at every level of the outer loop, and for uniform
+    targeting the scale map consumes no randomness -- so the epsilon at every
+    level was the SAME standard draw times that level's solved scale, and
+    epsilon(0.6) was exactly 2 x epsilon(0.3). The whole degradation curve within
+    a replicate rode on one realisation: an unusually smooth curve, and a
+    replicate-to-replicate spread of auc_norm smaller than an independent-draw
+    design gives. The experimental pipeline draws each level independently, so
+    the two were not measuring the same thing (RERUN_PLAN.md 2.13).
+
+    It is keyed on the level's own repr, not its position in the grid, so a
+    subset run reproduces the full run's rows.
+
+    THE SELECTION SEED does not vary with the level, and that is the whole reason
+    this function exists rather than one inline expression. It seeds WHO GETS HIT
+    -- the outlier draw and the affected scaffold groups. Both seeds used to be
+    the one level-dependent value, so the affected molecules were redrawn at every
+    point of the same condition's curve. Measured on 160 real QM9 molecules,
+    level 0.3 against level 0.5: outlier_p10 Spearman 0.014 between the two shape
+    columns with 3 affected molecules in common, grouped_wider -0.691 with none
+    of its affected scaffold families in common (RERUN_PLAN.md 2.26a).
+
+    Two things break when it moves. `noise_pattern_raw` is the level-free column
+    the zero-level subtraction rests on, so subtracting the clean row subtracts a
+    correlation against a different set of molecules. And a condition whose
+    affected set is redrawn at every level is not one condition swept, so its
+    auc_norm is not the same quantity as gaussian's.
+
+    It still varies per REPLICATE, which is what makes the affected set a draw
+    rather than a fixture.
+
+    `noiseInject` carries the same pair as `random_state` and `selection_state`
+    (NoiseInject/noiseInject/core.py, `_selection_rng`), where this was fixed
+    first; the Rust injector takes them as --seed and --selection-seed.
+    """
+    shape_seed = (iteration_seed * 1000003
+                  + zlib.crc32(repr(float(level)).encode())) & 0xFFFFFFFF
+    return shape_seed, int(iteration_seed)
+
+
 def build_scaffold_groups(smiles_canonical_list):
     """Map each canonical SMILES to a Murcko scaffold group id.
 
@@ -2428,7 +2471,16 @@ class TrainingNoiseRecord:
     def _clip_to_reference_limit(self, y_raw):
         """The censoring shape: how far a label sits past the far end of the
         training range, at a FIXED reference cut that does not move with the
-        level. Mirrors the `clip(y, reference_cut)` in `build_noise_plan`."""
+        level. Mirrors the `clip(y, reference_cut).abs()` in `build_noise_plan`.
+
+        A MAGNITUDE, not a signed shift. It used to be signed, which for the upper
+        side is negative, and that made this column rank molecules in the opposite
+        order to the Python injector's censoring shape (`noise_scale` in
+        `NoiseInject/noiseInject/core.py`, which returns `max(y - limit, 0)`).
+        The statistic that reads it is a signed rank correlation over both
+        pipelines' rows at once, so the two halves of the study disagreed about
+        which direction counted as detection.
+        """
         if self.censor_reference_limit is None:
             raise RuntimeError(
                 "the manifest records no censor_reference_limit, so the censoring "
@@ -2436,8 +2488,8 @@ class TrainingNoiseRecord:
         y_raw = np.asarray(y_raw, dtype=np.float64)
         limit = self.censor_reference_limit
         if self.censor_side == 'lower':
-            return np.where(y_raw < limit, limit - y_raw, 0.0)
-        return np.where(y_raw > limit, limit - y_raw, 0.0)
+            return np.abs(np.where(y_raw < limit, limit - y_raw, 0.0))
+        return np.abs(np.where(y_raw > limit, limit - y_raw, 0.0))
 
     def _check_recorded_shape_is_reproducible(self):
         """Executable guard against this file drifting from the injector.
@@ -2735,24 +2787,16 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
 
     print(f"Rust executable path: {rust_executable_path}")
 
-    # The seed is a function of the replicate AND the level.
-    #
-    # It used to be `iteration_seed` alone, recomputed identically at every level
-    # of the outer loop, and for uniform targeting the scale map consumes no
-    # randomness -- so the epsilon at every level was the SAME standard draw
-    # times that level's solved scale, and epsilon(0.6) was exactly 2 x
-    # epsilon(0.3). The whole degradation curve within a replicate rode on one
-    # realisation: an unusually smooth curve and a replicate-to-replicate spread
-    # of auc_norm smaller than an independent-draw design gives. The experimental
-    # pipeline draws each level independently, so the two were not measuring the
-    # same thing (RERUN_PLAN.md 2.13). crc32 of the level's own repr, not its
-    # position, so a subset run reproduces the full run's rows.
-    level_seed = (iteration_seed * 1000003 + zlib.crc32(repr(float(s)).encode())) \
-        & 0xFFFFFFFF
+    # Two seeds, and the difference between them is the point: the shape draw
+    # moves with the level, the affected set does not. The rule lives in one
+    # function so it can be executed by a test rather than read
+    # (scripts/test_injector_wiring.py).
+    level_seed, selection_seed = noise_seeds_for_level(iteration_seed, s)
 
     rust_cmd = [
         rust_executable_path,
         '--seed', str(level_seed),
+        '--selection-seed', str(selection_seed),
         '--config', config_path,
         '--model', "rf",
         '--noise-level', str(s),

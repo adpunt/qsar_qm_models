@@ -269,7 +269,30 @@ struct NoiseSpec {
     /// The dose for the dose-matched types; the censored fraction for censoring.
     level: f32,
     units: DoseUnits,
+    /// The stream for the SHAPE draws. The caller varies it per noise level, so
+    /// every level of a replicate's curve is its own realisation rather than one
+    /// draw rescaled (RERUN_PLAN.md §2.13).
     seed: u64,
+    /// The stream for WHO GETS HIT, and it must NOT vary with the level.
+    ///
+    /// `scale_map` is the only consumer. Both used to come off `seed` alone, and
+    /// `seed` varies per level, so the affected molecules were redrawn at every
+    /// point of the same condition's curve: measured on 160 real QM9 molecules,
+    /// level 0.3 against level 0.5, `outlier_p10` had Spearman 0.014 between the
+    /// two shape columns with 3 of ~21 affected molecules in common, and
+    /// `grouped_wider` −0.691 with none of its affected scaffold families in
+    /// common (RERUN_PLAN.md §2.26a).
+    ///
+    /// Two things break when it moves. `noise_pattern_raw` is the level-free
+    /// column the zero-level subtraction rests on, so subtracting the clean row
+    /// subtracts a correlation against a DIFFERENT set of molecules. And a
+    /// condition whose affected set is redrawn at every level is not one
+    /// condition swept — its `auc_norm` is not the same quantity as Gaussian's.
+    ///
+    /// `noiseInject` carries the same separation as `selection_state`
+    /// (`NoiseInject/noiseInject/core.py`, `_selection_rng`), which is where this
+    /// was fixed first; the two now match.
+    selection_seed: u64,
 }
 
 /// The region-level targeting decisions. Drawn ONCE, on the training labels, and
@@ -378,6 +401,10 @@ struct NoisePlan {
     clean_label_mean: f32,
     clean_label_sd: f32,
     seed: u64,
+    /// Recorded beside `seed` so a results file shows, without rerunning anything,
+    /// that the affected set was drawn level-free. It is the same value at every
+    /// level of a replicate; `seed` is not.
+    selection_seed: u64,
     n_train: usize,
     params: serde_json::Value,
 }
@@ -762,15 +789,25 @@ fn build_noise_plan(
     // already had one quantity carrying two names on facing pages.
     let noise_type = condition_name(spec);
 
-    // The random stream is opened at EVERY level, including zero.
+    // TWO streams, and which one draws what is the whole point.
     //
-    // The scale map is its first consumer, so opening it unconditionally is what
-    // makes `noise_pattern_raw` bit-identical from level zero upwards: the same seed
-    // draws the same scale map whatever the level, and the pattern is a function of
-    // the scale map alone. Returning early at level zero — the old shape of this
-    // function — would leave the negative control with no shape column at all, and
-    // the zero-level subtraction is the only thing that removes the label-magnitude
-    // confound.
+    // `sel_rng` draws WHO GETS HIT and nothing else. It is seeded from
+    // `selection_seed`, which does not move with the noise level, so
+    // `noise_pattern_raw` is the same column at every level including zero — the
+    // property the zero-level subtraction rests on. It is opened at every level,
+    // including zero: returning early at level zero would leave the negative control
+    // with no shape column at all.
+    //
+    // `rng` draws the SHAPE — the per-molecule deviates, and the group offsets for
+    // the shifted condition. It is seeded from `seed`, which the caller varies per
+    // level so each level is its own realisation (RERUN_PLAN.md §2.13).
+    //
+    // The two were one generator until 2026-08-28, with the scale map as its first
+    // consumer, so the level-varying seed reached the selection as well
+    // (RERUN_PLAN.md §2.26a). The mixing constant is `noiseInject`'s, from
+    // `_selection_rng`: it keeps the selection stream apart from the shape stream
+    // even when a caller passes the same value for both.
+    let mut sel_rng = StdRng::seed_from_u64(spec.selection_seed ^ 0x5CA1E);
     let mut rng = StdRng::seed_from_u64(spec.seed);
 
     // ---- Censoring. Its own axis: no dose to solve for. ---------------------
@@ -820,7 +857,28 @@ fn build_noise_plan(
                 }
             }
         };
-        let noise_pattern: Vec<f32> = labels.iter().map(|y| clip(*y, reference_cut)).collect();
+        // A MAGNITUDE, like every other condition's shape column and like
+        // `noise_scale` below. `clip` returns the signed shift, which for the upper
+        // side is negative — so recording it unchanged made this column rank
+        // molecules in the OPPOSITE order to the Python injector, whose censoring
+        // shape is `max(y - limit, 0)` (`NoiseInject/noiseInject/core.py`,
+        // `noise_scale`). Measured on identical labels: Spearman exactly -1.0.
+        //
+        // The statistic that reads this column is a SIGNED rank correlation with
+        // the zero-level value subtracted (`scripts/uncertainty_stats.py`,
+        // `confound_controlled_effect`), and it pools both pipelines into one
+        // frame — so a model that finds the censored molecules perfectly scored
+        // +0.88 on the laboratory datasets and -0.88 on QM9 for identical
+        // behaviour, and QM9's "does the uncertainty find the bad labels" answer
+        // came out inverted. Censoring is one of only two conditions that can
+        // answer that question at all.
+        //
+        // `epsilon` stays SIGNED: it is the shift actually applied, and
+        // `y_noisy = y + epsilon` depends on it.
+        let noise_pattern: Vec<f32> = labels
+            .iter()
+            .map(|y| clip(*y, reference_cut).abs())
+            .collect();
         let epsilon: Vec<f32> = if ctx.apply && fraction > 0.0 {
             labels.iter().map(|y| clip(*y, cut)).collect()
         } else {
@@ -914,6 +972,7 @@ fn build_noise_plan(
             clean_label_mean: clean_mean,
             clean_label_sd: clean_sd,
             seed: spec.seed,
+            selection_seed: spec.selection_seed,
             n_train: n,
             params: serde_json::Value::Object(params),
         });
@@ -972,7 +1031,7 @@ fn build_noise_plan(
         group_ids.as_deref(),
         ctx.shared,
         ctx.apply,
-        &mut rng,
+        &mut sel_rng,
     );
     let g = unit_dose(&spec.shape, &scales);
     let solved = target / g;
@@ -1184,6 +1243,7 @@ fn build_noise_plan(
         clean_label_mean: clean_mean,
         clean_label_sd: clean_sd,
         seed: spec.seed,
+        selection_seed: spec.selection_seed,
         n_train: n,
         params: serde_json::Value::Object(params),
     })
@@ -1589,6 +1649,8 @@ fn self_test_json(
                 level,
                 units: DoseUnits::Spread,
                 seed: 1000 + i * 7919,
+                // Level-free by construction: this gate sweeps LEVELS at a fixed i.
+                selection_seed: 1000 + i * 7919,
             };
             let plan = match build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)) {
                 Ok(p) => p,
@@ -1700,6 +1762,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 level,
                 units: DoseUnits::Spread,
                 seed: 42,
+                selection_seed: 42,
             };
             match build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)) {
                 Ok(plan) => {
@@ -1776,6 +1839,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 level,
                 units: DoseUnits::Spread,
                 seed: *seed,
+                selection_seed: *seed,
             };
             let plan = build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)).unwrap();
             // the construction identity holds on every single draw
@@ -1840,6 +1904,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
             level: 0.0,
             units: DoseUnits::Spread,
             seed: 42,
+            selection_seed: 42,
         };
         let plan = build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels)).unwrap();
         if !plan.epsilon.iter().all(|e| *e == 0.0) {
@@ -1882,6 +1947,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                     level: 0.5,
                     units: DoseUnits::Spread,
                     seed: 7 + seed * 104_729,
+                    selection_seed: 7 + seed * 104_729,
                 },
                 groups,
                 &PlanContext::training(labels),
@@ -1943,6 +2009,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 level,
                 units: DoseUnits::Spread,
                 seed: 42,
+                selection_seed: 42,
             };
             let plan =
                 build_noise_plan(labels, canonical, &spec, groups, &PlanContext::training(labels))
@@ -2040,6 +2107,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 level: 0.5,
                 units: DoseUnits::Spread,
                 seed: *seed,
+                selection_seed: *seed,
             };
             let t_ctx = PlanContext::training(&train_part);
             let t_plan =
@@ -2054,6 +2122,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 };
             let v_spec = NoiseSpec {
                 seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
+                selection_seed: derive_split_seed(spec.selection_seed, VALIDATION_SEED_TAG),
                 ..spec.clone()
             };
             let v_ctx = PlanContext {
@@ -2140,6 +2209,7 @@ fn self_test(labels: &[f32], groups: Option<&HashMap<String, u32>>, canonical: &
                 level: fraction,
                 units: DoseUnits::Spread,
                 seed: 42,
+                selection_seed: 42,
             },
             groups,
             &PlanContext::training(labels),
@@ -3049,6 +3119,10 @@ fn write_noise_manifest(
         "clean_label_mean": plan.clean_label_mean,
         "clean_label_sd": plan.clean_label_sd,
         "seed": plan.seed,
+        // The level-free stream. Read a replicate's manifests across the level grid:
+        // this value is the same in all of them and "seed" is not, which is the
+        // property RERUN_PLAN.md §2.26a was about, visible without rerunning anything.
+        "selection_seed": plan.selection_seed,
         "n_train": plan.n_train,
         // The spread the dose was measured against. On the training plan this is the
         // training spread; every other split is anchored on the SAME number, which is
@@ -3059,6 +3133,7 @@ fn write_noise_manifest(
         // so a results row can be traced to what validation actually received.
         "validation_noised": noise_validation,
         "validation_seed": validation.seed,
+        "validation_selection_seed": validation.selection_seed,
         "validation_n": validation.n_train,
         "validation_label_sd": validation.clean_label_sd,
         "validation_target_dose_in_label_units": validation.target_dose_label_units,
@@ -3130,6 +3205,17 @@ fn main() -> io::Result<()> {
              .long("censor-side")
              .action(ArgAction::Set)
              .help("Which end of the label range the assay limit sits at: upper or lower"))
+        .arg(Arg::new("selection_seed")
+             .long("selection-seed")
+             .action(ArgAction::Set)
+             .required_unless_present("self_test")
+             .help("Seed for WHO GETS HIT — the outlier draw and the affected scaffold \
+                    groups. REQUIRED, with deliberately no default: it must NOT vary \
+                    with --noise-level, and the caller's --seed does. Defaulting it to \
+                    --seed is exactly the defect this flag exists to close \
+                    (RERUN_PLAN.md §2.26a), and a default would reintroduce it silently \
+                    on any job script that forgot the flag. Pass the replicate's own \
+                    seed: process_and_train.py passes `iteration_seed`"))
         .arg(Arg::new("config")
              .long("config")
              .action(ArgAction::Set)
@@ -3346,12 +3432,24 @@ fn main() -> io::Result<()> {
         .expect("Seed must be a valid integer");
     let _model = matches.get_one::<String>("model");
 
+    // Level-free by contract. Nothing here can check that — one invocation sees one
+    // level — so the check lives where the rule does: `scripts/test_injector_wiring.py`
+    // asserts that `process_and_train.py`'s seed rule holds this constant across a
+    // level grid, and `rust/tests/noise_gates.rs` sweeps the levels with `--seed`
+    // moving and this one pinned, which is how the pipeline actually calls it.
+    let selection_seed: u64 = matches
+        .get_one::<String>("selection_seed")
+        .expect("--selection-seed is required")
+        .parse()
+        .expect("--selection-seed must be a valid integer");
+
     let spec = NoiseSpec {
         shape,
         targeting,
         level: noise_level,
         units: dose_units,
         seed,
+        selection_seed,
     };
 
     // Reading the configuration file. The path comes from the caller and has no
@@ -3419,6 +3517,13 @@ fn main() -> io::Result<()> {
     // groups. Decision 3, settled 2026-08-26.
     let val_spec = NoiseSpec {
         seed: derive_split_seed(spec.seed, VALIDATION_SEED_TAG),
+        // Derived from the LEVEL-FREE seed by the same rule, so this split's
+        // affected set is independent of training's and still does not move with
+        // the level. Under a scaffold split that matters on every grouped run:
+        // held-out molecules share no scaffold with training, so validation falls
+        // through to drawing its own selection (`scale_map`), and it would move
+        // level to level if this came off `spec.seed`.
+        selection_seed: derive_split_seed(spec.selection_seed, VALIDATION_SEED_TAG),
         ..spec.clone()
     };
     let val_ctx = PlanContext {
@@ -3448,6 +3553,13 @@ fn main() -> io::Result<()> {
     // shape their region would receive; every applied amount on it is exactly zero.
     let test_spec = NoiseSpec {
         seed: derive_split_seed(spec.seed, TEST_SEED_TAG),
+        // Derived from the LEVEL-FREE seed by the same rule, so this split's
+        // affected set is independent of training's and still does not move with
+        // the level. Under a scaffold split that matters on every grouped run:
+        // held-out molecules share no scaffold with training, so validation falls
+        // through to drawing its own selection (`scale_map`), and it would move
+        // level to level if this came off `spec.seed`.
+        selection_seed: derive_split_seed(spec.selection_seed, TEST_SEED_TAG),
         ..spec.clone()
     };
     let test_ctx = PlanContext {

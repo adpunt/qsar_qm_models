@@ -676,6 +676,26 @@ def condition_from_stem(rest):
     return None
 
 
+# The QM9 injector puts the clipped percentage INSIDE the condition's name, so it
+# writes `censoring_25` where the laboratory runner writes plain `censoring` and
+# carries 0.25 in the level column. Left alone, each censoring level arrives here
+# as a condition of its own with a single level in it, and `calculate_robustness`
+# drops any condition with fewer than three levels or no clean baseline — so QM9's
+# censoring curve was silently absent from every robustness figure and table while
+# the laboratory one was present. The level is already in its own column, so the
+# name does not need it. Same rule as `_normalise_condition` in
+# `scripts/uncertainty_stats.py`, which the per-molecule path already applies.
+_CENSORING_LEVEL_SUFFIX = re.compile(r'^(censoring(?:_lower)?)_\d+$')
+
+
+def _strip_censoring_level(name):
+    """`censoring_25` -> `censoring`. Anything else is returned unchanged."""
+    if not isinstance(name, str):
+        return name
+    m = _CENSORING_LEVEL_SUFFIX.match(name)
+    return m.group(1) if m else name
+
+
 def attach_condition(df, stem, prefixes=('anova_', 'uncertainty_')):
     """Put the row's condition in `strategy`, from the column or the filename.
 
@@ -685,7 +705,7 @@ def attach_condition(df, stem, prefixes=('anova_', 'uncertainty_')):
     six conditions became one row.
     """
     if 'noise_type' in df.columns and df['noise_type'].notna().any():
-        df['strategy'] = df['noise_type'].astype(str)
+        df['strategy'] = df['noise_type'].astype(str).map(_strip_censoring_level)
         return df, None
     if 'strategy' in df.columns and df['strategy'].notna().any():
         return df, None
@@ -699,7 +719,7 @@ def attach_condition(df, stem, prefixes=('anova_', 'uncertainty_')):
         name = f'unknown_{stem}'
         df['strategy'] = name
         return df, stem
-    df['strategy'] = name
+    df['strategy'] = _strip_censoring_level(name)
     return df, None
 
 
