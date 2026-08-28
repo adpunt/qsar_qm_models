@@ -45,7 +45,7 @@ and level 0 is one seventh of the cost.
 |---|---|
 | Models | 11 ANOVA models, plus QRF and both Gaussian processes |
 | Representations | ECFP4, PDV (`continuous_pdv`), MHG-GNN, Avalon, ChemBERTa, Sort & Slice |
-| Noise conditions | **3 in the array**: gaussian, grouped-wider, grouped-shifted. Censoring is the fourth settled condition but runs on about five model-and-representation pairs, so it is generated and submitted separately — §5b |
+| Noise conditions | **3 in the array**: gaussian, grouped-wider, grouped-shifted. Censoring is the fourth settled condition but runs on a named subset of model-and-representation pairs, so it is generated and submitted separately — §5b |
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
@@ -428,9 +428,9 @@ done
 ## 5b. Censoring — separate, and it must be, twice over
 
 Censoring is the fourth settled condition, and it is **not in the array above**. It runs on
-about five model-and-representation pairs rather than all 80, because the question there is
+a named subset of model-and-representation pairs rather than all 80, because the question there is
 how big the effect is and not which model resists it best — 300 training runs instead of
-5,460 (`noise_conditions.json`, RERUN_PLAN.md §13.13). Which five comes out of the screen,
+5,460 (`noise_conditions.json`, RERUN_PLAN.md §13.13). Which pairs comes out of the screen, and none are chosen yet;
 the same way the deep run's selection does, so this is submitted **after** §5 has landed.
 
 Two things the generator refuses, both found by the close-out audit after they had already
