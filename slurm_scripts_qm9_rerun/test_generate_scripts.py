@@ -70,6 +70,14 @@ def build_stub(root: Path) -> Path:
     (root / 'scripts').mkdir()
     (root / 'rust' / 'target' / 'release').mkdir(parents=True)
 
+    # The processed QM9 cache. The template refuses to start without it, because
+    # torch_geometric builds data_v3.pt on first access and takes no lock, so an
+    # array submitted cold has 294 tasks writing one file. The stub only needs the
+    # path to exist -- nothing here reads it -- and `guard_refuses_unprocessed_qm9`
+    # below deletes it again to prove the refusal still fires.
+    (root / 'data' / 'QM9' / 'processed').mkdir(parents=True)
+    (root / 'data' / 'QM9' / 'processed' / 'data_v3.pt').write_text('stub')
+
     binary = root / 'rust' / 'target' / 'release' / 'rust_processor'
     binary.write_text('#!/bin/sh\nexit 0\n')
     binary.chmod(0o755)
@@ -289,6 +297,24 @@ def check_guards(failures, checked):
         if proc.returncode == 0:
             failures.append('guard "rust binary not executable" did not fire')
         binary.chmod(0o755)
+
+        # The processed QM9 cache. torch_geometric builds data_v3.pt on first
+        # access and takes NO lock, so an array submitted with the directory
+        # cleared has 294 tasks writing one file: 294x the work at best, and at
+        # worst a task loading a .pt another is still writing. The guard must
+        # refuse BEFORE anything is trained -- a guard that fires after the
+        # command line has been issued has already lost the race it exists to
+        # prevent, so the recorded call log is what this asserts on.
+        cache = stub / 'data' / 'QM9' / 'processed' / 'data_v3.pt'
+        cache.unlink()
+        proc, calls = run_task(script, stub, 0)
+        checked[0] += 1
+        if proc.returncode == 0:
+            failures.append('guard "QM9 not processed" did not fire')
+        elif any('process_and_train.py' in c for c in calls):
+            failures.append('guard "QM9 not processed" fired only AFTER issuing '
+                            'the training command, which is too late')
+        cache.write_text('stub')
 
 
 def check_generator_refusals(failures, checked):

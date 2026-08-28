@@ -123,9 +123,16 @@ CASES = [
  # Drop the flag from the generated command, which is where it was until
  # 2026-08-28: every reader of the tuned files sits behind it, so the grid
  # trains on the shared defaults no matter what the sweep wrote.
+ #
+ # The line moved on 2026-08-28. The template no longer passes the literal: it
+ # decides ONCE at task start whether the two tuned files exist and passes
+ # $TUNED_FLAG, so a task is entirely tuned or entirely default rather than
+ # flipping between noise levels mid-curve. This entry followed it -- pointed at
+ # the old literal it reported the fix as already removed, on every run, which is
+ # how a guard stops being read.
  ("a generated job script can deliver a tuned value",
   f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
-  "    --use-best-params \\\\\n",
+  "    $TUNED_FLAG \\\\\n",
   "",
   [sys.executable, f"{QSAR}/scripts/test_tuned_params_reach_the_cluster.py"]),
 

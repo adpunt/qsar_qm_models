@@ -171,12 +171,19 @@ def check_pair_subset_scope():
     with tempfile.TemporaryDirectory() as tmp:
         # The deep run drops the pair-subset conditions too: it is more pairs than the
         # subset, so leaving censoring in would either refuse or quietly restore its cost.
-        for stage, extra in (('0', []), ('1', []),
+        # The main grid and the deep run need `long`. With the cross-fit costed
+        # into the wall time the ngboost tier is 202 h and 225 h per task against
+        # medium's 48, and the generator REFUSES to write a script it cannot
+        # honour rather than capping the request -- so both are generated here
+        # with that partition's ceiling, the way the RUNBOOK submits them. Only
+        # the screen fits inside medium's default 47.
+        LONG = ['--max-hours', '720']
+        for stage, extra in (('0', []), ('1', LONG),
                              # ngboost is on the author's deep-run shortlist
                              # (RERUN_PLAN.md 13.15) and the generator refuses a
                              # deep run without it, so this fixture carries it.
                              ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm', 'ngboost',
-                                    '--reps', 'pdv', 'ecfp4', 'mhggnn'])):
+                                    '--reps', 'pdv', 'ecfp4', 'mhggnn'] + LONG)):
             r = run('--stage', stage, *extra, '--out-dir', tmp)
             assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
             line = [l for l in r.stdout.splitlines() if 'conditions:' in l]
@@ -184,7 +191,7 @@ def check_pair_subset_scope():
             assert 'censoring' not in line[0], (
                 f"stage {stage} still runs censoring at full breadth by default: {line[0].strip()}")
 
-        r = run('--stage', '1', '--conditions', 'censoring', '--out-dir', tmp)
+        r = run('--stage', '1', '--conditions', 'censoring', '--out-dir', tmp, *LONG)
         assert r.returncode != 0, \
             "asking for censoring without --models and --reps was accepted; it must be refused"
         assert '13.13' in r.stderr, \
@@ -203,7 +210,8 @@ def check_pair_subset_scope():
             f"the refusal does not name the rule it enforces:\n{r.stderr[-400:]}"
 
         r = run('--stage', '1', '--conditions', 'censoring',
-                '--models', 'lgb', 'qrf', 'ngboost', '--reps', 'pdv', '--out-dir', tmp)
+                '--models', 'lgb', 'qrf', 'ngboost', '--reps', 'pdv',
+                '--out-dir', tmp, *LONG)
         assert r.returncode == 0, \
             f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
 
