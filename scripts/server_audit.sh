@@ -506,6 +506,77 @@ else
   say "  >>> This checkout is behind. git pull before generating any job script."
 fi
 
+# --- 9. the noise half ------------------------------------------------------
+section "9. THE NOISE CONDITIONS AND THE TWO INJECTORS"
+say "  Both of these need the environment: the first imports the Python injector,"
+say "  the second runs the Rust binary against it on real QM9 labels."
+say ""
+COND_RC=-1
+NOISE_CROSS_RC=-1
+if [ "$ENV_MISSING" = "1" ] && [ "$USE_SETUP" = "0" ]; then
+  say "  NOT CHECKED: no environment (see section 2)."
+else
+  if [ -f "$QSAR_ROOT/scripts/test_noise_conditions.py" ]; then
+    ( cd "$QSAR_ROOT" && job_exec scripts/test_noise_conditions.py ) 2>&1 \
+        | tail -6 | sed 's/^/    /' | tee -a "$REPORT"
+    COND_RC=${PIPESTATUS[0]}
+    say "  conditions exit: $COND_RC"
+  else
+    say "  MISSING: scripts/test_noise_conditions.py -- this checkout is behind."
+  fi
+  say ""
+  if [ -x "$QSAR_ROOT/rust/target/release/rust_processor" ]; then
+    ( cd "$QSAR_ROOT" && job_exec scripts/crosscheck_injectors.py ) 2>&1 \
+        | tail -5 | sed 's/^/    /' | tee -a "$REPORT"
+    NOISE_CROSS_RC=${PIPESTATUS[0]}
+    say "  cross-check exit: $NOISE_CROSS_RC"
+  else
+    say "  SKIPPED: rust/target/release/rust_processor is not built."
+    say "  Build it INSIDE the environment, so it links against its RDKit:"
+    say "    . ./setup.sh && cd rust && cargo build --release"
+  fi
+fi
+
+# --- 10. does a real task write a real row ----------------------------------
+section "10. END TO END -- a real training task, on this node, writing a real row"
+say "  Everything above says the parts are present. This says the thing works."
+say "  It is a genuine run of the QM9 pipeline -- same program, same arguments"
+say "  shape, same noise machinery as a submitted task -- shrunk to 300 molecules"
+say "  and one repetition so it finishes in a couple of minutes."
+say ""
+say "  It is the check nothing else makes. The failure this whole section exists"
+say "  to stop does not appear at import: it is a HANG partway through fitting,"
+say "  which only a fit can find."
+say ""
+E2E_RC=-1
+E2E_OUT="${TMPDIR:-/tmp}/audit_e2e_$$.csv"
+if [ "$ENV_MISSING" = "1" ] && [ "$USE_SETUP" = "0" ]; then
+  say "  NOT CHECKED: no environment (see section 2)."
+elif [ ! -f "$QSAR_ROOT/scripts/process_and_train.py" ]; then
+  say "  MISSING: scripts/process_and_train.py"
+else
+  say "  running (timeout 20 minutes; lgb on ECFP4, 300 molecules, two levels)..."
+  ( cd "$QSAR_ROOT/scripts" && timeout 1200 \
+      bash -c "$ENV_PREAMBLE
+exec python -u process_and_train.py -d QM9 -t homo_lumo_gap -m lgb -r ecfp4 \
+    --noise-level 0.0 0.4 --dose-units spread --noise-shape gaussian \
+    -n 300 --repetitions 1 --start-iteration 0 -s scaffold \
+    --normalize True -f '$E2E_OUT'" ) 2>&1 | tail -12 | sed 's/^/    /' | tee -a "$REPORT"
+  E2E_RC=${PIPESTATUS[0]}
+  say ""
+  say "  exit: $E2E_RC   (124 = TIMED OUT, which is the hang, not a crash)"
+  if [ -s "$E2E_OUT" ]; then
+    E2E_ROWS=$(( $(wc -l < "$E2E_OUT") - 1 ))
+    say "  rows written: $E2E_ROWS   -> $E2E_OUT"
+    head -2 "$E2E_OUT" | sed 's/^/    /' | tee -a "$REPORT"
+    [ "$E2E_ROWS" -lt 1 ] && E2E_RC=1
+  else
+    say "  NO OUTPUT FILE. The task wrote nothing, which is the failure mode that"
+    say "  looks like a queue problem: allocation spent, no rows, no error."
+    E2E_RC=1
+  fi
+fi
+
 # -----------------------------------------------------------------------------
 section "WHAT THIS MEANS"
 say ""
@@ -530,6 +601,17 @@ say "   * Section 8 FAIL  -> every QM9 job dies at argument parsing before it tr
 say "                        anything. The generator, not the scripts, is what to fix."
 say "   * Section 1 shows a checkout WITHOUT the shared settings file -> it is behind;"
 say "                        git pull it before anything is submitted from it."
+say "   * Section 9 non-zero -> the two injectors disagree, or the conditions do not"
+say "                        resolve. Noise written by one and read by the other is"
+say "                        not the same noise, so no result is comparable."
+say "   * Section 10 exit 124 -> THE HANG. A real fit did not finish on this node."
+say "                        Nothing may be submitted: every task would burn its"
+say "                        whole allocation and write no rows and no error."
+say "   * Section 10 zero rows -> the pipeline runs and produces nothing, which is"
+say "                        how jobs 12822693 and 12822694 looked from the queue."
+say ""
+say "  Section 10 is the one to read first. Sections 1-9 say the parts are there;"
+say "  section 10 is the only one where a fit actually happens on this node."
 say ""
 say "  If sections 3-6 pass under BOTH interpreters, the environment side is clear."
 say ""

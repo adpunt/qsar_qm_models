@@ -1499,6 +1499,54 @@ The three-way behaviour was tested against a stubbed conda before this went back
 a failed build leaves the old environment in place, a successful one keeps it at `.old` and says
 how to delete it, and an activation that lands elsewhere refuses to install anything.
 
+#### What is portable and what is this cluster — and the one command that tests a fresh node
+
+**Asked by the author 2026-08-28, and worth a straight answer: fixing ARC does not fix anywhere
+else, and the environment as it now stands is not reproducible from this repository.**
+
+| | portable | ARC-specific |
+|---|---|---|
+| `env.yml`, `pip-constraints.txt` | ✅ the whole recipe; no paths, no scheduler | — |
+| `rust/build.rs` | ✅ reads `CONDA_PREFIX`, nothing else | — |
+| `setup.sh` | the activation and the stamp | the RDKit `.so` symlinks, `LD_LIBRARY_PATH`, `libstdcxx-ng` — all **this cluster's image**; and the checkout search list is three hard-coded paths |
+| `scripts/check_environment.py` | the checks themselves | two hard-coded KIRBy paths; `/proc/self/maps` is Linux-only |
+| `scripts/rebuild_env.sh` | the logic | prefixes, the micromamba `linux-64` URL, `squeue`/`srun`, `--account=stat-cadd` |
+| the job scripts | — | entirely |
+
+**The honest limitation of the restore route.** What `env_test` now contains is: an explicit list
+of conda packages from 2026-08-27, plus six pip packages at `env.yml`'s versions, plus
+`quantile-forest`, `ngboost` and `torch_geometric` added by hand afterwards. **No single file
+describes it.** `env.yml` describes the *rebuild*, and the rebuild is the only route that ends
+with a recipe that reproduces what ran. That is the trade the restore makes and it should be
+recorded next to any result produced under it. `pip install` was the right call for
+`torch_geometric` specifically — it is a pure-Python package, so it carries no compiled code and
+no threading runtime, which is the only property that made a wheel safe here. **It is not a
+general answer**: a wheel of anything compiled is exactly what put four runtimes in the system
+Anaconda.
+
+**The one command that tests a fresh compute node**, end to end, changing nothing:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git pull
+sbatch --account=stat-cadd --partition=short --time=00:40:00 \
+       --output=$HOME/server_audit_%j.out scripts/server_audit.sh
+```
+
+`scripts/server_audit.sh` gained two sections on 2026-08-28 so that it answers the whole
+question rather than most of it:
+
+- **9** — the settled conditions resolve on both sides, and the two injectors agree on real QM9
+  labels.
+- **10** — **a real training task, on that node, writing a real row.** `lgb` on ECFP4, 300
+  molecules, two levels, one repetition, under a 20-minute timeout. Same program and same noise
+  machinery as a submitted task. This is the check nothing else makes: the failure that forced
+  all of this does not appear at import, it is a hang partway through a fit, and only a fit finds
+  it. Exit 124 is the hang; zero rows with exit 0 is the other shape of the same thing.
+
+Sections 1–9 say the parts are present. Section 10 is the only one where something is actually
+fitted on the node that would run the study.
+
 #### 2026-08-28 — the account has no environment, and the route back to a working one
 
 **The state.** `env_test` does not exist. Its prefix is
