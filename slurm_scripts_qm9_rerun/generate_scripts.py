@@ -601,6 +601,26 @@ def main():
             f"chosen from the screen; see RERUN_PLAN.md 13.13. To run the rest of the grid "
             f"without it, pass --conditions "
             f"{' '.join(c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS)}.")
+    # At least N of the named models must emit a per-molecule uncertainty (author,
+    # 2026-08-28). Half the roster emits none -- rf, xgboost, lgb and svm -- so a
+    # five-pair selection made on robustness alone can leave censoring unable to say
+    # anything about uncertainty, which is one of the two questions it is here for:
+    # which molecules get clipped depends on their value, so the model can see it
+    # coming. The rule lives in noise_conditions.json; this only enforces it.
+    if restricted and args.models:
+        need = max(int(PAIR_SUBSET_CONDITIONS[c].get('min_uncertainty_models', 0) or 0)
+                   for c in restricted)
+        if need:
+            unc = [m for m in args.models
+                   if '-u True' in MODELS.get(m, ("",))[0]]
+            if len(unc) < need:
+                ap.error(
+                    f"{', '.join(restricted)} needs at least {need} of the named models to emit a "
+                    f"per-molecule uncertainty, and --models names {len(unc)} "
+                    f"({', '.join(unc) if unc else 'none'}). Models that emit one: "
+                    f"{', '.join(sorted(m for m, spec in MODELS.items() if '-u True' in spec[0]))}. "
+                    f"See RERUN_PLAN.md 13.13; the rule lives in {NOISE_CONDITIONS_FILE.name}.")
+
     if restricted and args.models and args.reps:
         n = len(args.models) * len(args.reps)
         if n > 2 * PAIR_SUBSET_CONDITIONS[restricted[0]]['n_pairs']:

@@ -190,8 +190,20 @@ def check_pair_subset_scope():
         assert '13.13' in r.stderr, \
             f"the refusal does not point at the decision:\n{r.stderr[-400:]}"
 
+        # At least two of the named pairs must be a model that emits a per-molecule
+        # uncertainty (author, 2026-08-28). Half the roster emits none, and censoring
+        # is one of the few conditions where "does the model know which labels are
+        # unreliable" has an answer at all, so a selection made on robustness alone
+        # can leave that question with no censoring data.
         r = run('--stage', '1', '--conditions', 'censoring',
                 '--models', 'lgb', 'rf', '--reps', 'pdv', '--out-dir', tmp)
+        assert r.returncode != 0, \
+            "censoring was accepted with no uncertainty-emitting model among the pairs"
+        assert 'per-molecule uncertainty' in r.stderr, \
+            f"the refusal does not name the rule it enforces:\n{r.stderr[-400:]}"
+
+        r = run('--stage', '1', '--conditions', 'censoring',
+                '--models', 'lgb', 'qrf', 'ngboost', '--reps', 'pdv', '--out-dir', tmp)
         assert r.returncode == 0, \
             f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
 

@@ -6083,6 +6083,21 @@ QM9, at all seven of its levels, 10 replicates.**
 
 **Which five pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection.
 
+##### ✅ RULED 2026-08-28 — at least two of the five must be a model that reports an uncertainty
+
+The author's call, on being shown that the selection could otherwise leave censoring with nothing to
+say about uncertainty. Half the roster emits no per-molecule uncertainty at all — the random forest,
+XGBoost, LightGBM and the support vector machine. Censoring is one of only a few conditions where
+*does the model know which labels are unreliable* has an answer, because which molecules get clipped
+depends on their value and the model predicts values. A five-pair selection made on robustness alone
+could therefore contribute nothing to the uncertainty side.
+
+**Where it lives:** `min_uncertainty_models: 2` in the censoring scope of `noise_conditions.json`.
+**Where it is enforced:** the QM9 generator refuses a pair-subset condition whose `--models` name
+fewer than that many uncertainty-emitting models, and names the ones that qualify. **Guard:**
+`scripts/test_noise_conditions.py` check 8 now asserts both directions — refused with `lgb rf`,
+accepted with `lgb qrf ngboost`.
+
 **No code change is needed.** The generator already takes the flags:
 `--conditions censoring --models <...> --reps <...>`.
 
@@ -7772,6 +7787,22 @@ connect results to implementation is downright offensive."*
 for validation rows no model fits, which had silently disabled training-molecule scoring for the
 quantile forest, NGBoost and the Gaussian process) and the censoring name normalisation in
 `scripts/uncertainty_stats.py`.
+
+#### ✅ RULED 2026-08-28 — the QM9 uncertainty run exists, on the server, on the same five noise types
+
+**What was missing.** The code that scores training molecules with a model that never fitted them was
+built on 2026-08-27 and works — a screen is using it on the laptop right now. What did not exist was
+a set of cluster job scripts for QM9 that turn it on. Everything that reaches the paper runs on the
+server, so that is a job-script gap and it is chat H's.
+
+**The author's ruling:** the QM9 uncertainty run covers the same five noise types as the uncertainty
+runs on logD, Caco-2 and hERG — gaussian, grouped_wider, grouped_shifted, censoring and outlier_p10 —
+so the two sides answer the same questions under the same conditions.
+
+⚠️ **Chat O may change how it is built, not whether.** If validation molecules turn out to replace the
+refitting, this run costs a sixth of what it otherwise would. Build it after that answer.
+
+---
 
 #### Chat O — Do validation molecules replace the out-of-fold refitting?
 
