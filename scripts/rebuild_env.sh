@@ -117,19 +117,56 @@ restore_old_env() {   # restore_old_env <prefix> <archive>
     say "  The rest of the pip half is not in that record either -- reinstalling"
     say "  it from the pinned list. These versions come from env.yml, so they may"
     say "  not be identical to what was there."
-    # PIP_CONSTRAINT pins the versions of the environment being BUILT, not the
-    # one being restored. It must not apply here.
-    env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" -m pip install \
+
+    # Hold pip to what conda just restored. Without this, gauche pulls the
+    # latest botorch, which pulls a newer gpytorch, and pip UNINSTALLS the
+    # gpytorch the explicit list had just put back -- measured on ARC
+    # 2026-08-28: gpytorch 1.14 -> 1.15.2 and linear_operator 0.6 -> 0.6.1,
+    # silently, inside a step whose whole purpose is to restore. Constraining
+    # to the restored versions makes pip say so and stop instead.
+    local restored_pins="$prefix/.restore_constraints.txt"
+    env PYTHONNOUSERSITE=1 "$prefix/bin/python" -m pip list --format=freeze \
+        > "$restored_pins" 2>/dev/null
+    say "  holding pip to the $(wc -l < "$restored_pins" | tr -d ' ') versions conda just restored"
+    # PIP_CONSTRAINT from setup.sh pins the environment being BUILT, not this
+    # one; the restored pins replace it.
+    if ! env PIP_CONSTRAINT="$restored_pins" PYTHONNOUSERSITE=1 PIP_USER=0 \
+        "$prefix/bin/python" -m pip install \
         --no-cache-dir gauche==0.1.6 torchbnn==1.2 torchhk==0.86.14 \
         deepchem==2.8.0 polaris-lib==0.11.10 torchcp==1.1.0 \
-        2>&1 | tail -6 | tee -a "$REPORT"
-    for c in "$HOME/repos/NoiseInject" /data/stat-cadd/scat9264/NoiseInject \
-             /data/stat-ecr/scat9264/NoiseInject "$HOME/repos/KIRBy" \
-             /data/stat-cadd/scat9264/KIRBy /data/stat-ecr/scat9264/KIRBy; do
-        [ -d "$c" ] || continue
-        say "  editable install: $c"
+        2>&1 | tail -8 | tee -a "$REPORT"; then
+        say ""
+        say "  One of those six wants a different version of something conda"
+        say "  restored. That is the check working: the alternative is it"
+        say "  replacing a package you had and not saying so. Install that one"
+        say "  by hand, deciding which version you want."
+    fi
+    # ONE checkout per package. Installing every one that exists leaves the
+    # last in the list winning by accident: on ARC 2026-08-28 both
+    # /data/stat-cadd/scat9264/KIRBy and /data/stat-ecr/scat9264/KIRBy were
+    # installed, one after the other. /data/stat-ecr is listed first because
+    # that is the path KIRBy's own job scripts use (RERUN_PLAN.md 2.8b: 125 of
+    # its 127 scripts). REBUILD_KIRBY_DIR / REBUILD_NOISEINJECT_DIR override.
+    for pair in \
+        "NoiseInject:${REBUILD_NOISEINJECT_DIR:-}:/data/stat-ecr/scat9264/NoiseInject:/data/stat-cadd/scat9264/NoiseInject:$HOME/repos/NoiseInject" \
+        "KIRBy:${REBUILD_KIRBY_DIR:-}:/data/stat-ecr/scat9264/KIRBy:/data/stat-cadd/scat9264/KIRBy:$HOME/repos/KIRBy"
+    do
+        local name="${pair%%:*}" rest="${pair#*:}" found="" c
+        IFS=':' read -ra cands <<< "$rest"
+        for c in "${cands[@]}"; do
+            [ -n "$c" ] && [ -d "$c" ] && found="$c" && break
+        done
+        if [ -z "$found" ]; then
+            say "  WARNING: no $name checkout found"
+            continue
+        fi
+        say "  editable install: $name -> $found"
+        for c in "${cands[@]}"; do
+            [ -n "$c" ] && [ -d "$c" ] && [ "$c" != "$found" ] && \
+                say "      (not installed, also present: $c)"
+        done
         env -u PIP_CONSTRAINT PYTHONNOUSERSITE=1 PIP_USER=0 "$prefix/bin/python" \
-            -m pip install --no-deps -e "$c" >/dev/null 2>&1
+            -m pip install --no-deps -e "$found" >/dev/null 2>&1
     done
     return 0
 }

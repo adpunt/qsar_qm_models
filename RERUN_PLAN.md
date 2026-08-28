@@ -1566,6 +1566,25 @@ from "only the versioned files are here", which is `setup.sh`'s symlink step not
 those need different fixes. Both messages were executed, and a real `cargo build --release`
 against a working RDKit still finishes.
 
+**The restore ran on ARC on 2026-08-28 and worked** — 180 conda packages linked back at
+`/data/stat-cadd/scat9264/conda_envs/env_test`, the pip half reinstalled, both editable installs
+done. Three things it exposed, all now fixed in the script:
+
+1. **pip undid part of the restore.** `gauche` pulls the latest `botorch`, which pulls a newer
+   `gpytorch`, and pip **uninstalled** the `gpytorch 1.14` the explicit list had just restored,
+   replacing it with 1.15.2 (and `linear_operator` 0.6 → 0.6.1). A restore step that silently
+   changes versions is not a restore. The six pip packages are now installed under a constraint
+   file generated from the environment conda just restored, so pip cannot move anything that came
+   back — it fails and says which package wants what instead.
+2. **Both KIRBy checkouts were installed**, `/data/stat-cadd` then `/data/stat-ecr`, so which one
+   `import kirby` resolves to was decided by list order rather than on purpose. One checkout per
+   package now, `/data/stat-ecr` first because that is what KIRBy's own job scripts use (§2.8b),
+   the others named in the report as present-but-not-installed. `REBUILD_KIRBY_DIR` and
+   `REBUILD_NOISEINJECT_DIR` override.
+3. **The archive on ARC has no version line**, so the torch step was skipped —
+   `REBUILD_TORCH=<version>` names it. Whether torch is present at all comes from the conda half
+   and has to be checked in the restored environment, not assumed.
+
 **The environment is not in git and cannot be.** git holds the recipe — `env.yml`, `setup.sh`,
 `pip-constraints.txt` — not several gigabytes of compiled packages. The one artefact that makes
 the old environment recoverable is `research_archive/env_test_before_rebuild_2026-08-27.txt`, it
