@@ -58,3 +58,19 @@ research_archive/e1d07839/probe.csv
 # brings any of them back.
 results/
 data/smiles_db.sqlite
+
+# Generated job scripts. The GENERATORS (generate_scripts.py and friends) and the
+# runbooks stay in git -- they are the source. The .sh files they emit do not:
+# they are rebuilt from the generator every time, the cluster has its own copies
+# at the same paths, and every `git pull` there aborted on them. Untracked
+# 2026-08-28, same reason as results/.
+slurm_scripts_*/*.sh
+
+# Written by `cargo build` on whichever machine built last, and the cluster's
+# copy differs from the laptop's. Tracking it bought reproducibility nobody was
+# using and cost a merge conflict on every pull.
+rust/Cargo.lock
+
+# Scheduler logs.
+slurm-*.out
+*_%j.out

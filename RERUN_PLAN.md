@@ -4540,6 +4540,15 @@ term.** Nothing pooled, nothing averaged across models or conditions.
 copies of them, so a change to the split changes the measurement. A gate fails if that stops being
 true. **A control that measures a copy of the code proves nothing about the code that runs.**
 
+**🔴 One trap the measurement itself fell into, and the gate that now guards it.** A component that
+is ONE NUMBER PER FIT — a homoscedastic likelihood noise, a variational layer's single observation
+noise — takes a **different value in each out-of-fold fold**, because those rows come from several
+fits. Judged down the whole column it looks like a term that varies per molecule, and the
+correlation against it is then a correlation with **fold membership**. Caught on real QM9: the
+ordinary Gaussian process's data term was reporting −0.013 and +0.26 before the fix, and both would
+have been read as the process localising noise. Constancy is judged **within each fit**, on both
+sides — the writer's guard and the measurement — and a gate fails if either stops doing it.
+
 **The quantile forest is BLOCKED locally, not failing.** It needs scikit-learn 1.6.1 with
 quantile-forest 1.4.1 and this laptop has 1.3.2 (§3.4.4d). It is written into the output as blocked,
 so its absence cannot be mistaken for a null. It runs on the cluster.
