@@ -27,11 +27,12 @@ import os
 import sys
 import tempfile
 import types
+import zlib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(REPO, 'scripts', 'process_and_train.py')
 
-WANTED = {'build_scaffold_groups', 'record_noise_manifest'}
+WANTED = {'build_scaffold_groups', 'record_noise_manifest', 'noise_seeds_for_level'}
 
 
 def load_helpers():
@@ -48,7 +49,7 @@ def load_helpers():
     RDLogger.DisableLog('rdApp.*')
 
     ns = {'MurckoScaffoldSmiles': MurckoScaffoldSmiles,
-          'os': os, 'json': json, 'csv': csv, 'print': print}
+          'os': os, 'json': json, 'csv': csv, 'zlib': zlib, 'print': print}
     exec(compile(ast.Module(body=picked, type_ignores=[]), SOURCE, 'exec'), ns)
     return ns
 
@@ -62,6 +63,7 @@ def main():
     ns = load_helpers()
     build_scaffold_groups = ns['build_scaffold_groups']
     record_noise_manifest = ns['record_noise_manifest']
+    noise_seeds_for_level = ns['noise_seeds_for_level']
     failures = 0
 
     print("build_scaffold_groups")
@@ -149,6 +151,41 @@ def main():
                                     iteration=2, file_no=9, level=0.2)
         failures += check("a missing manifest returns None rather than inventing a row",
                           got is None and len(list(csv.DictReader(open(out)))) == 2)
+
+    print("\nnoise_seeds_for_level")
+    # The rule that decides who gets damaged. It has to hold still across the level
+    # grid: both seeds used to come off one level-dependent value, so the affected
+    # molecules were redrawn at every point of a condition's own degradation curve
+    # (RERUN_PLAN.md 2.26a). Nothing in the injector can see that -- one invocation
+    # sees one level -- so the check belongs here, where the rule lives.
+    grid = [0.0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5]
+    shape_seeds = [noise_seeds_for_level(42, v)[0] for v in grid]
+    selection_seeds = [noise_seeds_for_level(42, v)[1] for v in grid]
+
+    failures += check("the SELECTION seed is the same at every noise level",
+                      len(set(selection_seeds)) == 1,
+                      f"{len(set(selection_seeds))} distinct values across "
+                      f"{len(grid)} levels: {sorted(set(selection_seeds))}")
+    failures += check("the SHAPE seed is different at every noise level",
+                      len(set(shape_seeds)) == len(grid),
+                      f"{len(set(shape_seeds))} distinct values across {len(grid)} levels")
+    # ...and it still has to be a draw, not a fixture: a different replicate picks a
+    # different set of molecules, or the affected set is the same one all study long.
+    per_replicate = {noise_seeds_for_level(rep_seed, 0.5)[1]
+                     for rep_seed in (42, 43, 1234, 99999)}
+    failures += check("the SELECTION seed still varies between replicates",
+                      len(per_replicate) == 4,
+                      f"{len(per_replicate)} distinct values across 4 replicates")
+    # Keyed on the level's VALUE, not its position, so a gap-filling run that sweeps
+    # a subset of the grid reproduces the full run's rows rather than new noise.
+    failures += check("the SHAPE seed is keyed on the level's value, not its position",
+                      noise_seeds_for_level(42, 0.5)[0]
+                      == [noise_seeds_for_level(42, v)[0] for v in [0.5, 1.0]][0]
+                      == [noise_seeds_for_level(42, v)[0] for v in [0.0, 0.2, 0.5]][2])
+    failures += check("both seeds are passed to the injector on the command line",
+                      "'--selection-seed', str(selection_seed)" in open(SOURCE).read(),
+                      "the level-free seed is computed but never handed over"
+                      if "'--selection-seed'" not in open(SOURCE).read() else '')
 
     print("\nthe retired noise flags are refused")
     source = open(SOURCE).read()

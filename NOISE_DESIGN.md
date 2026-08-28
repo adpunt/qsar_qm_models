@@ -1790,6 +1790,16 @@ NoiseInjectorRegression(strategy=..., distribution=..., random_state=..., **para
 ```
 
 - `scale_map(y, groups, **p) -> (scales, affected_fraction)` — draws only for the two selection rules
+
+  **TWO SEEDS, and the split between them is part of the scheme, not an implementation detail.**
+  The shape draw and the selection draw come from separate generators. The shape seed varies with
+  the noise level, so each level of a degradation curve is its own realisation. The selection seed
+  does NOT vary with the level: it decides which molecules and which scaffold families are affected,
+  and a condition whose affected set is redrawn at every level is not one condition swept. It still
+  varies per replicate, so the affected set stays a draw. Both injectors carry the pair —
+  `random_state` and `selection_state` in Python, `--seed` and `--selection-seed` in Rust — and the
+  Rust flag has no default, because defaulting it to the shape seed is exactly the failure it
+  prevents
 - `unit_dose(scales, **p) -> G` — `√(mean(scale²)) × shape_unit_sd`; `solved = τ / G`
 - `inject_verbose(y, dose, groups=, reference=) -> InjectionResult` — carries every provenance field
   in `RERUN_PLAN.md` §5.2, and unpacks as `(y_noisy, noise_scale, epsilon)` for existing callers

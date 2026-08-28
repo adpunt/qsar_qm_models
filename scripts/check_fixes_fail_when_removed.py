@@ -224,15 +224,18 @@ CASES = [
  # used to do. The network still trains on the heteroscedastic loss; only the
  # second output stops reaching the decomposition, and the aleatoric column comes
  # out blank.
+ # Re-anchored 2026-08-28. The old anchor named a prediction loop that has since
+ # been rewritten, so this reported SETUP FAIL and the guard was UNVERIFIED, not
+ # passing. The break is the original defect: slice the second output off and keep
+ # the first, so the fitted per-molecule variance reaches no file.
  ("the head's predicted variance reaches the file",
   f"{QSAR}/models/models.py",
-  "                output, variance = split_predictive_head(output, loss_name)\n"
-  "                preds.append(output)\n"
-  "                if variance is not None:\n"
-  "                    head_vars.append(variance)",
-  "                if loss_name == 'heteroscedastic':\n"
-  "                    output = output[:, 0:1]\n"
-  "                preds.append(output)",
+  "            output, variance = split_predictive_head(output, loss_name)\n"
+  "            means.append(np.asarray(output, dtype=float).reshape(-1))\n"
+  "            if variance is not None:\n"
+  "                head_vars.append(np.asarray(variance, dtype=float).reshape(-1))",
+  "            output, _ = split_predictive_head(output, loss_name)\n"
+  "            means.append(np.asarray(output, dtype=float).reshape(-1))",
   [sys.executable, f"{QSAR}/scripts/test_predictive_head.py"]),
 
  # Leave the error columns in label standard deviations, which is what they were
@@ -255,21 +258,46 @@ CASES = [
   "    CONFORMAL_MODELS = ()",
   [sys.executable, f"{QSAR}/scripts/test_conformal_is_out.py"]),
 
+ # Put the affected molecules back on the level-dependent seed. Who gets damaged
+ # then changes at every point of a condition's own degradation curve, and the
+ # level-free column the clean-run subtraction rests on describes a different set of
+ # molecules at every level (RERUN_PLAN.md 2.26a).
+ ("the affected molecules are chosen level-free, in the training script",
+  f"{QSAR}/scripts/process_and_train.py",
+  "    return shape_seed, int(iteration_seed)",
+  "    return shape_seed, int(shape_seed)",
+  [sys.executable, f"{QSAR}/scripts/test_injector_wiring.py"]),
+
+ # ...and the same fix in the injector: the selection draw goes back on the stream
+ # the caller varies per level.
+ ("the affected molecules are chosen level-free, in the injector",
+  f"{QSAR}/rust/src/main.rs",
+  "    let mut sel_rng = StdRng::seed_from_u64(spec.selection_seed ^ 0x5CA1E);",
+  "    let mut sel_rng = StdRng::seed_from_u64(spec.seed ^ 0x5CA1E);",
+  ["cargo", "test", "--release", "--test", "noise_gates",
+   "the_selection_seed_is_what_decides_who_gets_hit"]),
+
  # Rename QM9's replicate axis to `fold`, which is how the two axes would merge:
  # one reader then concatenates ten resamples and five overlapping partitions into
  # a single spread and calls it an error bar.
+ # Re-anchored 2026-08-28. `"noise_type",` was unique when this was written and now
+ # sits in two column lists, so the harness reported SETUP FAIL and the guard was
+ # UNVERIFIED. It anchors on the results-row list by name instead, which is the list
+ # the check actually reads.
  ("a replicate is QM9's and a fold is the other three datasets'",
   f"{QSAR}/scripts/utils.py",
-  '"noise_type",',
-  '"noise_type", "fold",',
+  'RESULT_COLUMNS = ["sigma", "iteration", "model",',
+  'RESULT_COLUMNS = ["sigma", "iteration", "fold", "model",',
   [sys.executable, f"{QSAR}/scripts/test_replicate_is_not_a_fold.py"]),
 ]
 
 
 def run(cmd):
     env = dict(os.environ, OMP_NUM_THREADS="1")
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env,
-                       cwd=os.path.dirname(cmd[1]))
+    # Every case but one is a script path, and its own directory is the right place
+    # to run it from. cargo is the exception: it has to run inside the crate.
+    cwd = os.path.join(QSAR, "rust") if cmd[0] == "cargo" else os.path.dirname(cmd[1])
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=cwd)
     return p.returncode, (p.stdout + p.stderr)
 
 

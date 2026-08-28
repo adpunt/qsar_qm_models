@@ -2482,6 +2482,269 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.26 FOUND 2026-08-28 — three reasons "does uncertainty find the corrupted labels" cannot be answered on QM9, and none of them was checked
+
+**Two of the three are FIXED and re-measured; the third is open.** Both fixes are in `fb42cd8`.
+**2.26b is still open** and is the author's call, because it costs compute.
+
+⚠️ **The attribution here was wrong once, and how it went wrong is worth knowing.** Two sessions
+were working in this repository at the same time. One wrote the 2.26a fix and left it uncommitted
+while it built the guards for it; the other ran `git commit` on the whole working tree for its own
+censoring change, so `fb42cd8` carries both, and its message mentions only censoring. This entry
+then credited `e29d91c`, which is a different commit and contains none of it. **Nothing was lost
+and nothing is broken — the code in the tree is right.** The lesson is narrow and practical:
+when more than one session is live, commit only named paths, never the whole tree.
+
+**Audit of the screen before submission. Every number below was produced by running the
+production binary and the production seed rule on this machine, not by reading code.**
+
+**What passes.** `cd rust && cargo test --release` — 34 gates, all green.
+`scripts/crosscheck_injectors.py` — 154 checks, all green.
+`scripts/crosscheck_pipeline_reference.py` — the 15 ungrouped conditions agree.
+`NoiseInject` — 64 tests, all green. The apparatus that exists works. The three defects below
+sit in the one column no check on any side compares.
+
+#### 2.26a ✅ FIXED `fb42cd8`, RE-MEASURED 2026-08-28 — the level-free shape was not level-free on QM9
+
+`process_and_train.py:2750` derives one seed from the replicate **and the level**:
+
+    level_seed = (iteration_seed * 1000003 + zlib.crc32(repr(float(s)).encode())) & 0xFFFFFFFF
+
+`build_noise_plan` opens a single generator from it (`rust/src/main.rs:771`) and `scale_map` is
+its first consumer, so **who gets hit is redrawn at every noise level**. Measured, 160 real
+training molecules, production binary, production seed rule, level 0.3 against level 0.5:
+
+| condition | rows identical | Spearman | affected set overlap |
+|---|---|---|---|
+| `outlier_p10` | 0 of 160 | **−0.112** | **0 of 13** |
+| `grouped_wider` | 0 of 160 | **+0.093** | 9 of 33 |
+
+This is the same defect, with the same shape of number, that §2.13 records finding and fixing on
+the **Python** side (−0.101, 3/18 for `outlier_p10`). The Python fix was a separately seeded
+`selection_state` pinned to (stream, condition) with **no level** — `_injector_for` in
+`KIRBy/tests/alternative_data_noise_robustness.py:1750`. It was never carried to Rust. That
+runner's comment says *"The Rust injector has always been level-independent here"*; it is not.
+
+§3.3's parity table read "the level-invariant noise pattern | QM9: no — appears nowhere" while
+this was open. It is updated.
+
+**It is not only the uncertainty question.** `grouped_wider` is in the screen, and its affected
+scaffold families are a different draw at every point of its own degradation curve — so its
+accuracy-versus-level curve is not one condition swept, and `auc_norm` on it is not the same
+quantity as `auc_norm` on Gaussian.
+
+**Why no gate caught it.** `the_noise_shape_is_bit_identical_across_levels_including_zero`
+(`rust/tests/noise_gates.rs:585`) sweeps the levels with the seed **held fixed**. It certifies the
+property the pipeline breaks, and it passes.
+
+**The fix, applied.** The binary takes a second seed, `--selection-seed`, and `scale_map` draws
+from its own generator (`rust/src/main.rs`, `sel_rng`); `noise_seeds_for_level` in
+`process_and_train.py` returns the pair and passes `iteration_seed` as the level-free half. The
+mixing constant is `noiseInject`'s, so a caller passing one value for both still gets two streams.
+
+**Re-measured after the fix, same fixture, same production seed rule, level 0.3 against 0.5:**
+
+| condition | rows identical, before → after | affected set in common, before → after |
+|---|---|---|
+| `outlier_p10` | 0 of 160 → **160 of 160** | 0 of 13 → **13 of 13** |
+| `grouped_wider` | 0 of 160 → **160 of 160** | 9 of 33 → **32 of 32** |
+
+⚠️ **Runs made before `fb42cd8` are not mergeable with runs made after it.** The two generators
+consume in a different order, so every dose-matched condition's realisation changed. Nothing that
+has been submitted is affected — the screen had not run.
+
+**Independently re-measured a second time**, on a fixture built the way the pipeline builds one:
+160 real QM9 molecules read from the raw SDF, scaffold groups from `build_scaffold_groups` itself,
+production binary, production seed rule, level 0.3 against level 0.5. Before the fix, `outlier_p10`
+was 0 of 160 rows identical with Spearman +0.014 and 3 affected molecules in common, and
+`grouped_wider` 0 of 160 with Spearman −0.691 and none of its affected families in common. After
+it, both are **160 of 160 identical**, Spearman 1.000, every affected molecule in common. The
+affected set is still a draw and not a fixture: change only the replicate and `outlier_p10` shares
+1 of 19 affected molecules with the first draw, `grouped_wider` 16 of 35.
+
+**`--selection-seed` is REQUIRED, with no default.** A default of `--seed` is the defect, and it
+would come back silently on any job script that forgot the flag. It joins `--config` as the second
+flag the binary refuses to guess (§2.8a). Consequence to expect on the cluster: a stale binary or a
+hand-written command line stops with *"the following required arguments were not provided"* rather
+than running. `scripts/launch_screen.sh` counts it among the flags a current build must accept, so a
+stale binary is caught before submission rather than at the first task.
+
+Validation and test take `derive_split_seed(selection_seed, tag)`, by the same rule as their shape
+seeds. That matters on every grouped run: under a scaffold split the held-out molecules share no
+scaffold with training, so `scale_map` falls through to drawing validation's own selection, and it
+would have moved level to level.
+
+**WHAT GUARDS IT NOW, on both sides of the call.**
+
+- `rust/tests/noise_gates.rs::the_noise_shape_is_bit_identical_across_levels_including_zero` sweeps
+  the levels **with `--seed` moving**, one value per level, exactly as the pipeline hands them out,
+  and only `--selection-seed` pinned. Held fixed, as it was, it certified a property the pipeline
+  broke. Its four per-level seeds are fixed constants: the fixture's 50-molecule validation split
+  gives a grouped condition only ~44 effective observations, so its delivered dose is allowed a
+  ±32% band and an occasional draw lands outside it, which stops the run for a reason unrelated to
+  the column under test.
+- `the_selection_seed_is_what_decides_who_gets_hit` (new) requires the shape column to move when
+  only the selection seed changes, for the two conditions that select, and to stay put for the two
+  that do not. Without it an injector that ignored the flag entirely would pass the gate above.
+- `scripts/test_injector_wiring.py` lifts `noise_seeds_for_level` out of the source and executes
+  it: the selection seed is one value across the seven-level grid, the shape seed is seven, the
+  selection seed still differs across replicates, the shape seed is keyed on the level's value and
+  not its position, and both seeds actually reach the command line. The binary cannot check any of
+  this — one invocation sees one level — so it belongs where the rule lives.
+- `scripts/check_fixes_fail_when_removed.py` carries both halves as cases, and both go **RED** when
+  their fix is removed. Its runner now knows that a `cargo` case runs inside the crate rather than
+  beside a script.
+
+**TWO MORE GUARDS WERE UNVERIFIED, and are now verified.** Running that harness in full reported
+`SETUP FAIL` on two cases, which means the guard was neither passing nor failing — it never ran.
+Both anchors had gone stale under later edits, and both are re-anchored and confirmed RED:
+
+- *the head's predicted variance reaches the file* — the case named a prediction loop that has
+  since been rewritten. Re-anchored on the live loop, with the original defect as the break: slice
+  the second output off and keep the first, so the fitted per-molecule variance reaches no file.
+- *a replicate is QM9's and a fold is the other three datasets'* — the case anchored on the string
+  `"noise_type",`, which was unique when it was written and now appears in two column lists. It
+  anchors on the results-row list by name instead, which is the list the check actually reads.
+
+Full harness result after both: **28 cases RED, 0 GREEN, 0 SETUP FAIL.** The lesson for this file
+is that a `SETUP FAIL` line is not cosmetic — it is a guard that has quietly stopped guarding, and
+it reads almost the same as a pass in a long list.
+
+**TWO GATES FOUND BROKEN WHILE WIRING THIS IN, both fixed.** Each was passing for a reason
+unrelated to what it claims to test.
+
+- `rust/tests/noise_gates.rs::a_short_record_stream_is_caught` corrupts a training record and
+  asserts the run fails. It invoked the binary **without `--config`**, which is required and has no
+  default, so the run died on argument parsing and never opened the corrupted file. It would have
+  gone on passing with the short-read guard deleted outright. It now passes `--config` and asserts
+  the message names the record stream.
+- `rust/tests/writer_guards.rs::the_configuration_path_has_no_default` had the same shape in
+  reverse: it omits `--config` on purpose, but would from now on have stopped on the missing
+  `--selection-seed` instead. It supplies every other required flag and asserts the refusal names
+  `--config`.
+
+**NOT CHANGED, AND DELIBERATELY — one for the author.** For `grouped_shifted`, which family is
+pushed and in which direction still comes off the level-varying stream. Its shape column is flat —
+every molecule gets the same amount — so the zero-level subtraction is unaffected, and `noiseInject`
+draws its offsets from the level-varying stream too, so moving one side alone would split the two
+implementations. The "not one condition swept" argument does apply to it. **Author's call whether
+the shifted condition's families should also be pinned per replicate.**
+
+**Checks re-run after the change, all green:** `cd rust && cargo test --release` — 35 gates
+(29 noise gates, 6 writer guards); `scripts/crosscheck_injectors.py` — 342 checks;
+`scripts/crosscheck_pipeline_reference.py` on 4,000 real QM9 molecules with 1,703 scaffold groups —
+all 17 conditions agree; `scripts/test_injector_wiring.py`; `scripts/test_config_isolation.py`.
+
+#### 2.26b 🔴 OPEN — no condition but Gaussian ever runs level 0, so there is no zero-level control to subtract
+
+`levels_for()` (`slurm_scripts_qm9_rerun/generate_scripts.py:151`) strips `0.0` from every
+condition except the reference, and `copy_zero_rows.py:66` refuses any file whose name contains
+`_uncertainty_values`. So the accuracy tables get their clean row and the uncertainty file does
+not. `_subtract_zero_level` matches a noisy row to its clean one on `_BASE_COLS`, which includes
+`condition` (`scripts/uncertainty_stats.py:133`).
+
+Generated levels, read off the generator:
+
+    gaussian         0.0 0.2 0.3 0.5 0.75 1.0 1.5
+    grouped_wider        0.2 0.3 0.5 0.75 1.0 1.5
+    grouped_shifted      0.2 0.3 0.5 0.75 1.0 1.5
+    censoring            0.10 0.20 0.25 0.30 0.40 0.50
+    outlier_p10          0.2 0.3 0.5 0.75 1.0 1.5
+
+`grouped_wider`, `censoring` and `outlier_p10` are **the only three conditions where question B is
+defined at all** — the other four deliver the same amount to every molecule, so their pattern is
+flat and the correlation is undefined rather than zero (§7.0, the Q7 note). All three have no
+level-0 partner, so `effect`, `effect_pred` and `is_detection` come out NaN. Q4(b) and Q7 on QM9
+produce an empty table, not a wrong one.
+
+**It is cheap to fix.** At level 0 the labels are untouched and the seed depends only on the
+replicate, so the model fit is bit-identical whichever condition labels it — only the pattern
+column differs. Either run level 0 for those three conditions on the pairs that emit an
+uncertainty, or teach `copy_zero_rows.py` to carry the uncertainty rows with the condition's own
+level-0 pattern. **Fix 2.26a first**, or the copied zero row is a different draw again.
+
+#### 2.26c ✅ FIXED `fb42cd8`, RE-MEASURED 2026-08-28 — the censoring shape column had the opposite sign in the two injectors
+
+| | upper censoring, reference limit = the training minimum |
+|---|---|
+| Rust, `main.rs:823` | `limit − y` → **negative**, more negative = more clipping |
+| noiseInject, `core.py` `noise_scale()` | `max(y − limit, 0)` → **positive**, larger = more clipping |
+
+Measured on `y = [1,2,3,4,5]`: python `[0,1,2,3,4]`, rust `[0,−1,−2,−3,−4]`; they sum to zero.
+
+`confound_controlled_effect` correlates against the **signed** column
+(`scripts/uncertainty_stats.py:826`). So a model that is more uncertain about the molecules the
+assay limit clipped scores `rho_pattern` **positive on logD, Caco-2 and hERG and negative on
+QM9**, and `is_detection = effect > effect_pred` reads backwards on QM9. QM9 leads the Results.
+
+Censoring is the one condition whose pattern is a function of the label, so it is the only one
+whose shape is defined on **held-out** molecules as well as out-of-fold training ones (§3.1d).
+It is the most valuable cell in the uncertainty design and it is the one that is sign-flipped.
+
+**Why no gate caught it.** The chain is python ↔ reference ↔ pipeline, and it compares delivered
+dose, unit dose, median error, top-5% energy share, affected fraction and the censoring limit.
+**`noise_pattern` is produced by two of the three implementations and compared by none.**
+
+**The fix, applied.** The Rust side takes the absolute value, so the column is a distance on both
+sides. Re-measured on the 200-molecule fixture at 25% clipped: the shape column has no negative
+entry, runs 0 to 7.1131, and its rank correlation with the clean label is **+1.000** — bigger
+label, more clipping — which is what the Python side has always written.
+
+🔴 **Still to do: put this column IN the cross-check.** Nothing compares it today, which is why
+this and 2.26a both survived to a launch gate.
+
+#### 2.26d Two launch gates are red, and one of them is red permanently
+
+- `scripts/test_no_harness_mutation_committed.py` **exits 1 on a false positive.** The harness
+  case *"a generated job script can deliver a tuned value"* anchors on the literal line
+  `    --use-best-params \`, which was replaced by `$TUNED_FLAG \` on 2026-08-28
+  (`generate_scripts.py:538`). Its mutation payload is the empty string, so "payload present"
+  is vacuously true and "anchor absent" is now permanently true. The same staleness means
+  `check_fixes_fail_when_removed.py` reports SETUP FAIL for that case, so the tuned-parameter
+  guard is **unverified**, not passing.
+- `scripts/test_noise_conditions.py` **exits 1** because it generates the main grid at the
+  default `--max-hours 47`, and the main grid legitimately needs `--max-hours 720`
+  (ngboost 202h, and six more models at 202h). The condition-set half of the test passes.
+- `scripts/crosscheck_pipeline_reference.py` defaults `--labels` to `data/qm9_gap_ev.csv`,
+  which is not in the tree. Harmless — §8 passes the path explicitly — but it means the bare
+  command in the docstring cannot run.
+
+#### 2.26e The laboratory side — two things to close before those jobs go
+
+- **`NoiseInject` has uncommitted work in the tree** (`noiseInject/core.py`,
+  `tests/test_noiseinject.py`) and it changed twice while this audit was running. The change is
+  `_censored_set`: the censored count becomes the top *k* by rank instead of `epsilon != 0`.
+  It is right — logD is recorded to one decimal, so a tie block sits exactly on the limit and
+  asking for 10% moved 8.57%. But **Rust still counts `epsilon != 0`**, so the two now disagree on
+  `affected_molecule_fraction` for any coarsely recorded assay. QM9's gaps are continuous, which
+  is why the cross-check still passes. Commit it, and make the cross-check run on a coarse column.
+- **`alternative_data_noise_robustness.py:217`** still defaults `NOISE_CONDITIONS` to a list
+  containing `outlier_p05`, which `noise_conditions.json` lists under `not_run`, and omitting
+  `outlier_p10` entirely. The SLURM generator always passes `--conditions` and refuses retired
+  names, so the grid is safe; a manual run or a smoke test is not.
+
+#### 2.26f Housekeeping that will bite on the cluster
+
+`process_and_run`'s `finally` block deletes the three `.mmap` files and `config_<file_no>.json`
+(`process_and_train.py:3106-3133`). It does **not** delete `noise_provenance_<file_no>.csv`,
+`noise_manifest_<file_no>.json` or `scaffold_groups_<file_no>.json`. `file_no` is a fresh
+`uuid4` per (level, replicate), so the screen leaves about 294 × 19 ≈ 5,600 sets behind in
+`scripts/`: at ~112 bytes a provenance row and 10,000 molecules that is roughly **8 GB and 17,000
+files**, and the main grid is nine times that. 65 of them are sitting untracked in this
+checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
+
+#### 2.26g Stale in this document, found while checking it
+
+- **§13.14's run table** is written for 13 models and 78 pairs. The generator now emits **17
+  models, 102 pairs, 294 tasks and 2,058 training runs** in the screen. Rebuild the table from
+  the generator, as its own instruction says.
+- **§3.3's parity table** is stale on three rows that are now done on QM9 — out-of-fold scoring
+  of training molecules, a scaffold-grouped inner split (`GroupKFold`, `models.py:1594`), and
+  keeping the best weights after early stopping (`models.py:2990`/`3002`, `3501`/`3509`,
+  `4438`/`4445`). The `noise_pattern` row is the one that is still true.
+- **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
+  (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
+
 ### 2.25 🔴 FOUND AND FIXED 2026-08-28 — the noise-predicting Gaussian process was learning from the wrong residual
 
 **This is the model the aleatoric/epistemic split rests on**, because it is the only one measured
@@ -3332,7 +3595,7 @@ apparatus.
 | The injected noise recorded per molecule | ✅ recorded (chat A) | ✅ recorded, and now with the full provenance beside it (chat B) | Done on both sides. Every result row carries `unit_dose_g`, `solved_scale`, `target_dose_label_units`, `realised_dose_label_units`, `realised_dose_fraction_of_spread`, `mean_epsilon`, `affected_molecule_fraction`, `effective_n` and the clean standardisation constants — under **the same column names in both pipelines**, checked by the cross-check |
 | Per-molecule noise scale recorded | no — computed then discarded (`main.rs:309-317`) | yes | Same serialisation change |
 | Held-out noise scale computed against the *training* cut-points | no | yes | Follows once QM9 records a scale at all |
-| The level-invariant noise pattern (the confound control) | no — appears nowhere | ✅ yes, and **it is now genuinely level-invariant** | Chat B found it was not. The scale map drew from the same generator as the noise, so the "pattern" moved every time it was recomputed and the zero-noise subtraction compared two different patterns. The selection is now drawn from a separately seeded generator, re-seeded per call, so it is a deterministic function of (seed, groups, parameters) and identical at every level including zero |
+| The level-invariant noise pattern (the confound control) | ✅ yes, and level-invariant since 2026-08-28 (§2.26a) | ✅ yes, and **it is now genuinely level-invariant** | The same defect was found on each side, a year apart in the codebase's history and two days apart in ours. The scale map drew from the same generator as the noise, so the "pattern" moved every time it was recomputed and the zero-noise subtraction compared two different patterns. Both injectors now draw the selection from a separately seeded generator that does not see the level: `selection_state` in Python, `--selection-seed` in Rust |
 | The placebo check on training rows | no | **blank — see §3.1a** | Two-line fix in the experimental runner |
 | Validation labels carry their own noise | no | yes, on by default | The headline asymmetry, and one day old rather than architectural — before the held-out fix QM9 noised *both* held-out splits |
 | Validation kept out of the training set | no — seven model families merge it | yes | §2.5 |
@@ -8556,12 +8819,63 @@ pipeline at all (§2.6).
 
 #### Chat N — The uncertainty screen: which models and which representations
 
-▶️ **RUNNING 2026-08-27.** The screen is on the laptop in `env_test`: seven models, six
-representations, two noise levels, QM9 at 5,000 molecules, one noise type (plain Gaussian), one
-process per model. Outputs go to `/Volumes/seagate/chatN_screen`, the tables to
-`results/uncertainty_screen/`, and the decision rule below was written **before** any number came
-back. A first attempt earlier that day was cancelled by the author because it was built to answer
-the wrong question. Read the next paragraph before anything else.
+✅ **RUN 2026-08-28. All seven models, all six representations, complete, no failures.**
+
+**What ran.** QM9, 3,000 molecules, one replicate, one noise type (plain Gaussian) at two levels —
+none and 1.5 of the clean training label spread — plus a second pass under concentrated noise
+(a tenth of the molecules take nearly all of it) for the quantile forest and the Gaussian process.
+Training molecules are scored by a model that never saw them; **one** of the three inner folds is
+scored, which is the author's sizing (`--oof-folds-scored`, commit `5828e5d`), so each cell carries
+800 scored molecules. Per-model wall clock, laptop, four jobs at once: quantile forest 1.0 h,
+Gaussian process 1.4 h, MLP-BNN 2.6 h, BNN 3.2 h, VBLL 6.6 h, MLP-VBLL 7.2 h, NGBoost 7.4 h.
+Results in `/Volumes/seagate/chatN_screen`, tables in `results/uncertainty_screen/`.
+
+**Three things about how it ran, because each cost real time.**
+
+1. **The first launch died and it was not the code.** Another session in the main working tree
+   changed the record layout and rebuilt the Rust injector mid-run, so the Python half was writing
+   the old layout and the new binary refused to decode it. The screen now runs from a pinned
+   checkout, `/Volumes/seagate/chatN_run`, with its own binary. Two sessions in one working tree is
+   the hazard; the guard in §2.7 is what caught it.
+2. **`continuous_pdv` became `pdv` the same night** and the old name is refused, so any command line
+   written before 2026-08-28 fails at parsing.
+3. **One statistic was measured under the wrong noise, and the author caught it.** Under plain
+   Gaussian every molecule receives the same amount, so "does the uncertainty point at the corrupted
+   molecules" has no pattern to find and the near-zero answer says nothing about the models. Re-run
+   under the concentrated condition: the answer does not move — the cross-fitted error alone
+   separates corrupted from clean at 0.97–0.98, and dividing by the predicted uncertainty is
+   slightly WORSE on all six representations. That is a real negative result and it holds under the
+   condition designed to favour it.
+
+##### What it found
+
+Every number below is on clean data, out of fold, per representation — nothing pooled. "Tracks its
+error" is the rank correlation between the predicted uncertainty and the true error; "in 1σ" is how
+often the truth fell inside the model's own one-standard-deviation range, against 0.68.
+
+| Model | Tracks its error (worst–best of 6) | In 1σ (worst–best) | Verdict |
+|---|---|---|---|
+| **Quantile forest** | **0.249 – 0.352** | **0.702 – 0.828** | first on both measures on ALL six representations, and the cheapest |
+| **NGBoost** | 0.092 – 0.302 | 0.531 – 0.659 | second on four representations, third on one, weak on ChemBERTa (0.092) |
+| **Gaussian process** | 0.024 – 0.279 | 0.502 – 0.740 | representation-dependent: strong on PDV and ChemBERTa, nothing on ECFP4 or Sort & Slice |
+| VBLL | 0.011 – 0.268 | 0.274 – 0.514 | erratic, and overconfident everywhere |
+| MLP-VBLL | −0.093 – 0.155 | 0.548 – 0.804 | no tracking |
+| MLP-BNN | −0.088 – 0.161 | 0.449 – 0.642 | no tracking |
+| BNN | −0.103 – 0.188 | 0.340 – 0.590 | no tracking, worst calibrated |
+
+**The finding that outlives the list decision:** a model's own prediction error already identifies
+corrupted labels almost perfectly, and no model's uncertainty improves on it. What the uncertainty
+is good for is the other question — ranking where the model is wrong — and there only the two tree
+models do it reliably.
+
+##### 🔴 The rule below was written before the numbers and it does not survive them
+
+It judged "does the uncertainty track the error" on the **noised** half. At that level the error
+against the clean label is mostly the injected corruption, so nothing can track it and the rule
+drops all seven models, the quantile forest included. Measured on the **clean** half the same
+statistic separates them cleanly, which is the table above. The correction is the author's to
+approve; it is the same argument that set the rule in the first place — a statistic that is
+degenerate by construction cannot rank models — applied to a clause I failed to apply it to.
 
 ##### The rule that decides the two lists, fixed before the numbers
 

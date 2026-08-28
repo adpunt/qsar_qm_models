@@ -47,11 +47,15 @@ ok "environment env_test"
 say "2. rust binary"
 [ -x rust/target/release/rust_processor ] \
     || die "rust/target/release/rust_processor is missing. Run: cd rust && cargo build --release"
+# --selection-seed is in this list on purpose. It is the flag that separates a
+# build where the affected molecules are chosen level-free from one where they are
+# redrawn at every noise level (RERUN_PLAN.md 2.26a), and a stale binary on the
+# cluster is otherwise indistinguishable from a current one.
 flags=$(./rust/target/release/rust_processor --help 2>&1 \
-        | grep -cE -- "--noise-level|--dose-units|--noise-shape|--noise-targeting")
-[ "$flags" -ge 4 ] \
-    || die "the binary does not accept the current noise flags (found $flags of 4). It is the old build. Run: cd rust && cargo build --release"
-ok "binary accepts all four noise flags"
+        | grep -cE -- "--noise-level|--dose-units|--noise-shape|--noise-targeting|--selection-seed")
+[ "$flags" -ge 5 ] \
+    || die "the binary does not accept the current noise flags (found $flags of 5). It is the old build. Run: cd rust && cargo build --release"
+ok "binary accepts all five noise flags"
 
 # --- 3. clear what a killed run leaves behind ---------------------------------
 say "3. clearing leftovers (safe to repeat)"

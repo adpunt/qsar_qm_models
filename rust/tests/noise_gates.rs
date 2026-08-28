@@ -204,11 +204,20 @@ impl Fixture {
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
+        self.run_seeded(42, 42, args)
+    }
+
+    /// The two seeds spelled out. The pipeline varies `seed` per noise level and
+    /// pins `selection_seed` for the whole replicate, so any gate about the level
+    /// grid has to be able to say which is which (RERUN_PLAN.md §2.26a).
+    fn run_seeded(&self, seed: u64, selection_seed: u64, args: &[&str]) -> std::process::Output {
         self.reset();
         let mut cmd = Command::new(BIN);
         cmd.current_dir(&self.dir)
             .arg("--seed")
-            .arg("42")
+            .arg(seed.to_string())
+            .arg("--selection-seed")
+            .arg(selection_seed.to_string())
             .arg("--config")
             .arg(format!("config_{}.json", self.file_no))
             .arg("--model")
@@ -581,6 +590,19 @@ fn clean_validation_restores_untouched_validation() {
 ///
 /// If it moved with the level, the zero-level correlation being subtracted off would
 /// be a correlation against a different quantity, and the confound would not cancel.
+///
+/// SWEPT THE WAY THE PIPELINE SWEEPS, which is the whole reason this gate is worth
+/// anything. It used to hold `--seed` fixed across the level grid — and the pipeline
+/// does not: `noise_seeds_for_level` in `process_and_train.py` derives a different
+/// shape seed at every level. Both seeds came off that one value, so the affected
+/// molecules were redrawn at every point of a condition's own curve while this gate
+/// certified the opposite and passed (RERUN_PLAN.md §2.26a). Measured on 160 real QM9
+/// molecules at the time: `outlier_p10` had Spearman 0.014 between the shape column at
+/// level 0.3 and at level 0.5, with 3 affected molecules in common; `grouped_wider`
+/// −0.691, with none of its affected scaffold families in common.
+///
+/// So `--seed` moves here, exactly as it does in production, and only
+/// `--selection-seed` is pinned.
 #[test]
 fn the_noise_shape_is_bit_identical_across_levels_including_zero() {
     let f = fixture("shape");
@@ -590,11 +612,19 @@ fn the_noise_shape_is_bit_identical_across_levels_including_zero() {
         } else {
             &["0.0", "0.2", "0.5", "1.0"]
         };
+        // Fixed constants, one per level. Fixed rather than arbitrary because the
+        // fixture's 50-molecule validation split gives a grouped condition only ~44
+        // effective observations, so its delivered dose is allowed a ±32% band and an
+        // occasional draw lands outside it — the binary's own dose gate then stops the
+        // run, for a reason that has nothing to do with the column under test here.
+        const SHAPE_SEEDS: [u64; 4] = [42, 1_042, 2_042, 3_042];
         let mut baseline: Option<HashMap<(String, usize), u32>> = None;
-        for level in levels {
+        for (i, level) in levels.iter().enumerate() {
             let mut a = args.to_vec();
             a.extend_from_slice(&["--noise-level", level]);
-            ok(&f.run(&a));
+            // A different shape seed per level, as the pipeline hands out; one
+            // selection seed for the whole sweep, as the pipeline also does.
+            ok(&f.run_seeded(SHAPE_SEEDS[i], 42, &a));
             let shape: HashMap<(String, usize), u32> = f
                 .provenance()
                 .iter()
@@ -610,6 +640,64 @@ fn the_noise_shape_is_bit_identical_across_levels_including_zero() {
                     name, level
                 ),
             }
+        }
+    }
+}
+
+/// ...and the selection seed is the thing that decides it.
+///
+/// Without this, an injector that ignored `--selection-seed` entirely — or derived
+/// the affected set from the labels alone — would pass the gate above. The two
+/// conditions with a selection rule must give a DIFFERENT shape column when only that
+/// seed changes, and the ones without a selection rule must give the same one,
+/// because for them there is nothing to select.
+#[test]
+fn the_selection_seed_is_what_decides_who_gets_hit() {
+    let f = fixture("selseed");
+    for (name, args, has_selection) in [
+        ("grouped_wide", &["--noise-targeting", "grouped_wide"][..], true),
+        ("outlier", &["--noise-targeting", "outlier"][..], true),
+        ("uniform", &["--noise-targeting", "uniform"][..], false),
+        ("grouped_shift", &["--noise-targeting", "grouped_shift"][..], false),
+    ] {
+        let mut a = args.to_vec();
+        a.extend_from_slice(&["--noise-level", "0.5"]);
+        let train_shape = |out: &std::process::Output| -> Vec<u32> {
+            ok(out);
+            let mut rows: Vec<(usize, u32)> = f
+                .provenance()
+                .iter()
+                .filter(|r| r.split == "train")
+                .map(|r| (r.index, r.noise_pattern.to_bits()))
+                .collect();
+            rows.sort();
+            rows.into_iter().map(|(_, b)| b).collect()
+        };
+        // Same selection seed, different shape seed: the same column, always.
+        let base = train_shape(&f.run_seeded(11, 42, &a));
+        let same_selection = train_shape(&f.run_seeded(22, 42, &a));
+        assert_eq!(
+            base, same_selection,
+            "{}: the shape column moved when only the SHAPE seed changed",
+            name
+        );
+        // Different selection seed: a different column, for the two conditions that
+        // actually select.
+        let other_selection = train_shape(&f.run_seeded(11, 4242, &a));
+        if has_selection {
+            assert_ne!(
+                base, other_selection,
+                "{}: the shape column did not move when the SELECTION seed changed — \
+                 the flag is not reaching the draw",
+                name
+            );
+        } else {
+            assert_eq!(
+                base, other_selection,
+                "{}: hits every molecule equally, so nothing is selected and the shape \
+                 column must not depend on the selection seed",
+                name
+            );
         }
     }
 }
@@ -1111,7 +1199,8 @@ fn grouped_shift_precision_uses_the_effective_group_count() {
         f.reset();
         let out = cmd
             .current_dir(&f.dir)
-            .args(["--seed", seed, "--config", &format!("config_{}.json", f.file_no)])
+            .args(["--seed", seed, "--selection-seed", seed])
+            .args(["--config", &format!("config_{}.json", f.file_no)])
             .args(["--model", "rf", "--noise-targeting", "grouped_shift"])
             .args(["--noise-level", "0.5"])
             .output()
@@ -1248,15 +1337,33 @@ fn a_short_record_stream_is_caught() {
     }
     fs::write(&path, out).unwrap();
 
+    // --config, and the assertion on the MESSAGE, are both load-bearing. Without the
+    // flag the binary exits on argument parsing — it is required and has no default
+    // (RERUN_PLAN.md §2.8a) — so this gate passed without ever opening the corrupted
+    // file, and would have gone on passing if the short-read guard were deleted.
     let out = Command::new(BIN)
         .current_dir(&f.dir)
-        .args(["--seed", "42", "--model", "rf"])
+        .args(["--seed", "42", "--selection-seed", "42", "--model", "rf"])
+        .args(["--config", &format!("config_{}.json", f.file_no)])
         .args(["--noise-targeting", "uniform", "--noise-level", "0.5"])
         .output()
         .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         !out.status.success(),
-        "a training stream that goes short must stop the run, not shift every molecule's noise"
+        "a training stream that goes short must stop the run, not shift every molecule's \
+         noise. It said:\n{}",
+        said
+    );
+    assert!(
+        said.contains("record stream") && !said.contains("required arguments"),
+        "the run stopped, but not for the short stream — this gate has to fail on the \
+         corrupted file, not on its own command line. It said:\n{}",
+        said
     );
 }
 

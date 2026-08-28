@@ -147,6 +147,8 @@ impl Fixture {
         cmd.current_dir(&self.dir)
             .arg("--seed")
             .arg("42")
+            .arg("--selection-seed")
+            .arg("42")
             .arg("--config")
             .arg(format!("config_{}.json", self.file_no))
             .arg("--model")
@@ -299,16 +301,25 @@ fn the_configuration_path_has_no_default() {
     )
     .unwrap();
 
+    // Every other required flag IS supplied, so the refusal can only be about the
+    // configuration path. Leaving one out would make this pass on the wrong flag.
     let out = Command::new(BIN)
         .current_dir(&f.dir)
-        .args(["--seed", "42", "--model", "rf", "--noise-level", "0.3"])
+        .args(["--seed", "42", "--selection-seed", "42", "--model", "rf"])
+        .args(["--noise-level", "0.3"])
         .args(["--noise-shape", "gaussian", "--noise-targeting", "uniform"])
         .output()
         .unwrap();
 
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
         !out.status.success(),
         "the binary must not fall back to a shared config.json"
+    );
+    assert!(
+        said.contains("--config"),
+        "it stopped, but not for the missing configuration path. It said:\n{}",
+        said
     );
 }
 
@@ -395,7 +406,8 @@ fn the_randomized_smiles_field_is_written_the_way_the_reader_reads_it() {
         .unwrap();
         let out = Command::new(BIN)
             .current_dir(&dir)
-            .args(["--seed", "42", "--config", &format!("config_{}.json", file_no)])
+            .args(["--seed", "42", "--selection-seed", "42"])
+            .args(["--config", &format!("config_{}.json", file_no)])
             .args(["--model", "rf", "--noise-level", "0.3"])
             .args(["--noise-shape", "gaussian", "--noise-targeting", "uniform"])
             .output()

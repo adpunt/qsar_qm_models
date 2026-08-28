@@ -137,7 +137,8 @@ def concurrent_tasks_do_not_corrupt_each_other():
 
         def launch(cfg):
             return subprocess.Popen(
-                [BIN, "--seed", "42", "--config", cfg, "--model", "rf",
+                [BIN, "--seed", "42", "--selection-seed", "42",
+                 "--config", cfg, "--model", "rf",
                  "--noise-level", "0.4", "--noise-shape", "gaussian",
                  "--noise-targeting", "uniform"],
                 cwd=tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
