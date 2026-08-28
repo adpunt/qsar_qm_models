@@ -1810,17 +1810,37 @@ archive: `transformers` (ChemBERTa, and what the four `conformal*` labels actual
 `grakel` (graph kernels), `huggingface_hub`, `diskcache`, `lightning`.
 
 ```bash
-. ./setup.sh     # exports PIP_CONSTRAINT, which pins all of these to the same values
-python -m pip install "gpytorch==1.11" "botorch==0.10.0" "transformers==4.51.3" \
-    "huggingface_hub==0.30.2" "grakel==0.1.10" "diskcache==5.6.3" "lightning==2.5.1.post0"
+. ./setup.sh
 ```
 
-⚠️ `grakel` is compiled, so **re-run the check afterwards and read the runtime count first**. If
-it goes above one, that wheel is the cause: remove it and take it from conda-forge instead
-(`micromamba install --override-channels -c conda-forge grakel=0.1.10`).
+**That is the whole command, and it should have been from the start.** Closing each round of
+drift by pasting `pip install` lines into a terminal is precisely what a setup script is for,
+and the author said so. `setup.sh` now reconciles the interpreter against the recipe every time
+it is sourced:
 
-This also closes the `env.yml` truthfulness check, which is the point of it — the environment
-becomes one the recipe describes, which is what makes it reproducible rather than merely working.
+- `check_environment.py --print-recipe-gaps` is the **single** implementation of *what does
+  `env.yml` pin, and what is actually here*. The truthfulness check and the reconcile read the
+  same function, so they cannot disagree.
+- Gaps in pure-python packages are installed.
+- **Gaps in anything compiled are reported, never pip-installed** — a PyPI wheel of `torch`,
+  `scikit-learn`, `lightgbm`, `xgboost` or `grakel` brings its own OpenMP runtime, which is the
+  defect this environment exists to keep out. It prints the `micromamba ... --override-channels
+  -c conda-forge` line to run instead.
+- **It refuses to install anything inside an array task.** 390 tasks writing into one
+  `site-packages` is the failure this file was rewritten to stop; the environment is made right
+  before a launch, never repaired during one.
+- Versions compare on the release alone, so conda-forge's `2.5.1.post108` counts as the pinned
+  `2.5.1` and the reconcile does not go "fixing" a torch that is already correct — which for
+  torch would mean fetching the very wheel the recipe excludes.
+
+`typing_extensions` **lost its pin in `env.yml`** at the same time. 4.12.2 was pinned while
+`pydantic`, `cryptography`, `jupyter-client` and `typing-inspection` — all pulled in by
+`polaris-lib` and `deepchem` — each declare a floor above it, so the pin produced six dependency
+conflicts and bought nothing: it is pure python and cannot carry a threading runtime.
+
+Closing these also closes the `env.yml` truthfulness check, which is the point of it — the
+environment becomes one the recipe describes, which is what makes it reproducible rather than
+merely working.
 
 #### `short` had no idle nodes — read `sinfo` before advising a partition (2026-08-28)
 
@@ -4986,6 +5006,20 @@ QM9's six — and the representation half of the model-versus-representation spl
 spine. The author: *"it should run all 6 this is a mistake."* The generator now emits 8 models × 6
 representations; `scripts/test_validation_job_scripts.py` parses every script it writes.
 
+✅ **The deep run reaches the validation datasets, from 2026-08-28.** The author: *"It should get
+all the same noise as qm9."* Until then those datasets only ever saw three of the seven conditions —
+Gaussian and the two grouped ones — so *does the kind of noise matter, or only the amount* was
+answerable on QM9 and nowhere else, and a difference between computed labels and real assay labels
+would have been invisible.
+
+**It mirrors QM9's shape, not only its condition list.** QM9 runs Student-t, the outlier condition
+and Laplace on about a dozen model-and-representation pairs rather than across its whole grid, and
+its generator refuses to build a deep run without being told which pairs. The validation generator
+now refuses the same way: `--include-depth-conditions` needs `--models` and `--reps`, and the message
+says why. Across 8 models × 6 representations those three conditions would have cost three times the
+breadth grid, which was never the design. **Which pairs is deferred with the screen's other
+selections** (§13.17 B). Guard: `scripts/test_validation_job_scripts.py` asserts both directions.
+
 #### The uncertainty runs
 
 ⚠️ **No shape is quoted here on purpose.** The conditions are **all seven**, read from the settled
@@ -5053,6 +5087,8 @@ undefined there rather than zero. A Q7 table that ranks all seven on the Q4 stat
 ranking four undefined cells against three real ones. Q7 on the Q4 statistic is a comparison of
 **three**; Q7 on Q5 and Q6 is a comparison of seven. The gate on the job generator asserts at least
 three patterned types survive any future change to the set.
+
+**Q2 is answerable on all four datasets, from 2026-08-28.** It used to be QM9's alone: the validation datasets ran three of the seven conditions, so a difference between computed labels and real assay labels could not have been seen. They now run the deep run's conditions too, on a named subset of pairs, exactly as QM9 does (§6.3).
 
 **Two things this table settles.**
 
@@ -6940,6 +6976,7 @@ sessions.
 |---|---|---|
 | **Which models and representations go deep** | Take the widest spread of behaviour the screen shows — the most and least noise-tolerant model, plus one from each remaining family — and the representations that span fingerprint, descriptor and learned embedding. NGBoost is locked on by a check that refuses to build without it | the screen lands (§13.1 item 4) |
 | **Which model-and-representation pairs censoring runs on** | Chosen from the screen on interest and clean performance, at least two of them models that report a per-molecule uncertainty. One selection, used on QM9 and all three validation datasets | the screen lands (§13.13) |
+| **Which pairs the deep run uses — on QM9 and on the validation datasets** | The same selection rule, and the same pairs unless there is a reason to differ. Both generators refuse to build a deep run without being told which pairs, so nothing can run ahead of the choice | the screen lands (§13.1 item 4) |
 | **The uncertainty roster — which models and which representations the uncertainty runs use** | The decision rule is written out in full in chat N and was fixed before any number came back. The generator's current lists are a typed-in default, not a measurement; the screen tests every model against **all six** representations, so representations can join and models can leave. **No document may quote a pair count as settled** — say "the same pairs as every other condition" | the roster screen reports |
 | **hERG's reporting level, checked against a rank-flip table** | Its level rests on the assay anchor alone; confirm it against rank movement | the re-run lands (§13.16) |
 

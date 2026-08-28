@@ -235,11 +235,71 @@ fi
 # triggers exactly one rebuild of the extras and a job task never writes into a
 # shared environment while another task is reading it.
 # ---------------------------------------------------------------------------
-# An environment restored from research_archive/ carries the versions it had,
-# and pip-constraints.txt pins the versions env.yml asks for. Running the extras
-# with one against the other is how a restore gets quietly undone -- on ARC on
-# 2026-08-28 an unconstrained pip step uninstalled a just-restored gpytorch. So
-# check whether this interpreter is the recipe before installing into it. Read
+# ---------------------------------------------------------------------------
+# Make the interpreter match the recipe.
+#
+# This is the step that should have been here all along. A restored environment,
+# or one anything has been installed into by hand, drifts from env.yml -- and
+# every round of that drift was being closed by pasting pip commands into a
+# terminal, which is exactly what a setup script is for.
+#
+# check_environment.py --print-recipe-gaps is the single implementation of
+# "what does env.yml pin, and what is actually here". It prints one line per
+# unsatisfied pin: `pip <dist> <version>` or `conda <dist> <version>`.
+#
+# THE SPLIT MATTERS. Anything carrying compiled code is marked `conda` and is
+# NEVER pip-installed here: a PyPI wheel of torch, scikit-learn, lightgbm,
+# xgboost or grakel brings its own OpenMP runtime, which is the defect this
+# environment exists to keep out. Those are reported with the command to run.
+# ---------------------------------------------------------------------------
+setup_reconcile() {
+    local gaps
+    gaps="$(python "$REPO_ROOT/scripts/check_environment.py" --print-recipe-gaps 2>/dev/null)"
+    [ -z "$gaps" ] && return 0
+
+    local pip_specs=() conda_specs=()
+    while read -r kind dist want; do
+        [ -z "${dist:-}" ] && continue
+        if [ "$kind" = "conda" ]; then conda_specs+=("$dist=$want")
+        else pip_specs+=("$dist==$want"); fi
+    done <<< "$gaps"
+
+    echo "The interpreter does not match env.yml. ${#pip_specs[@]} to install with pip,"
+    echo "${#conda_specs[@]} that must come from conda."
+
+    # Never install from inside an array task. 390 tasks writing into one
+    # site-packages at once is the failure this file was rewritten to stop; the
+    # environment has to be right BEFORE a launch, not repaired during one.
+    if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+        echo "  REFUSING to install: this is array task ${SLURM_ARRAY_TASK_ID}."
+        echo "  Run '. ./setup.sh' once on a login node before submitting."
+        return 1
+    fi
+
+    if [ "${#pip_specs[@]}" -gt 0 ]; then
+        echo "  pip: ${pip_specs[*]}"
+        python -m pip install --no-cache-dir "${pip_specs[@]}" || {
+            echo "  One of those could not be installed. Nothing else was changed."
+            return 1
+        }
+    fi
+    if [ "${#conda_specs[@]}" -gt 0 ]; then
+        echo ""
+        echo "  These carry compiled code, so they are NOT pip-installed -- a wheel of"
+        echo "  any of them brings its own OpenMP runtime. Install from conda-forge,"
+        echo "  with defaults excluded (that channel's mkl carries a second runtime):"
+        echo ""
+        echo "    micromamba install -y -p \"$CONDA_PREFIX\" --override-channels \\"
+        echo "        -c conda-forge ${conda_specs[*]}"
+        echo ""
+        echo "  Then re-run:  python scripts/check_environment.py --deep --validation"
+        return 1
+    fi
+    return 0
+}
+
+# The extras below are a different question: torchsort, torchcp and the two
+# editable installs, none of which any channel carries. Read the installed torch
 # from package metadata, never `import torch`: this file is sourced by every
 # task, and importing torch in an environment with two threading runtimes is
 # the hang this whole section is about.
@@ -264,6 +324,9 @@ if [ -n "$_installed_torch" ] && [ -n "$_pinned_torch" ] \
     echo "  To install them anyway:  SETUP_FORCE_EXTRAS=1 . ./setup.sh"
     SETUP_SKIP_EXTRAS=1
 fi
+
+setup_reconcile
+SETUP_RECONCILE_RC=$?
 
 setup_extras_stamp() {
     cat "$YML_FILE" "$CONSTRAINTS" 2>/dev/null | \
@@ -331,3 +394,7 @@ fi
 # would want torch_cluster.
 
 echo "Environment '$ENV_LABEL' ready ($(python -c 'import sys; print(sys.version.split()[0])' 2>/dev/null))"
+if [ "${SETUP_RECONCILE_RC:-0}" -ne 0 ]; then
+    echo "  ...but it does not match env.yml yet -- see the lines above. Verify with:"
+    echo "     python scripts/check_environment.py --deep --validation"
+fi
