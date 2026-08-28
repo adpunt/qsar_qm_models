@@ -528,8 +528,19 @@ def measure(models=None, conditions=CONDITIONS, level=0.6, n_molecules=2000,
                     else:
                         v = np.asarray(values, dtype=float)
                         good = ok & np.isfinite(v)
-                        constant = bool(np.nanmax(v[good]) - np.nanmin(v[good])
-                                        <= 1e-12)
+                        # CONSTANT WITHIN EACH INNER FIT, not down the whole
+                        # column. These rows come from several fits, so a term
+                        # that is one number per fit -- a homoscedastic
+                        # likelihood noise, a variational layer's single
+                        # observation noise -- takes a DIFFERENT value in each
+                        # fold. Judged down the column it looks like a term that
+                        # varies, and a correlation against it is then a
+                        # correlation with fold membership. That is the same
+                        # rule the writer's guard uses (RERUN_PLAN.md 5.5g).
+                        constant = all(
+                            float(np.nanmax(v[good & (fold == f)])
+                                  - np.nanmin(v[good & (fold == f)])) <= 1e-12
+                            for f in np.unique(fold[good]))
                     for ref_name, ref in references.items():
                         # A rank correlation against a constant column is
                         # UNDEFINED, not zero. Writing 0.0 would read as "the

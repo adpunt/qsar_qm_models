@@ -157,6 +157,19 @@ def test_zero_level_keeps_the_shape_and_drops_the_amount():
             f"{condition}: labels moved at level 0")
 
 
+def test_a_per_fold_constant_is_not_mistaken_for_a_varying_term():
+    """The out-of-fold rows come from several fits, so a term that is one number
+    per fit takes a different value in each fold. Judged down the whole column
+    it looks like a term that varies, and the correlation against it is then a
+    correlation with FOLD MEMBERSHIP -- a number that would be reported as the
+    Gaussian process localising noise when it is doing nothing of the kind."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'decomposition_controls.py')).read()
+    assert 'for f in np.unique(fold[good])' in src, (
+        "constancy is judged down the whole column again, so a term that is one "
+        "number per fit will be reported as varying per molecule")
+
+
 def test_a_constant_term_is_reported_as_undefined_and_not_as_zero():
     """A rank correlation against a constant column is undefined. Writing 0.0
     would read as `the model found nothing`, which is a claim about the model;
