@@ -58,8 +58,13 @@ say "3. clearing leftovers (safe to repeat)"
 rm -f  train_*.mmap test_*.mmap val_*.mmap config_*.json config.json
 rm -f  noise_manifest_*.json noise_provenance_*.csv scaffold_groups_*.json
 rm -f  scripts/train_*.mmap scripts/test_*.mmap scripts/val_*.mmap
-rm -f  scripts/config_*.json scripts/config.json scripts/noise_provenance_*.csv
-rm -f  results/SMOKE_rf_ecfp4.csv
+rm -f  scripts/config_*.json scripts/config.json
+# The jobs `cd scripts` first, so EVERY per-task artefact lands there, not only
+# the provenance CSV. Clearing three of the five was the kind of gap that leaves
+# a stale manifest for a task to pick up.
+rm -f  scripts/noise_provenance_*.csv scripts/noise_manifest_*.json
+rm -f  scripts/scaffold_groups_*.json scripts/featurisation_failures_*.csv
+rm -f  results/SMOKE_*.csv
 ok "intermediates and any interrupted smoke output cleared"
 
 # The raw data is the only irreplaceable thing here. Never touched; only checked.
@@ -98,7 +103,21 @@ say "5. tuned hyperparameters"
 m=results/master_tuned_hyperparameters.json
 h=results/hyperparameter_decisions.json
 if [ -f "$m" ] && [ -f "$h" ]; then
-    ok "both present -- tasks that start from now will use them"
+    # ACCEPTING THEM BLINDLY IS THE TRAP. The copies on this cluster are from
+    # February, keyed by a representation set and a model set from before the
+    # roster was settled, and one of them carries a key that is not an argument of
+    # RandomForestRegressor at all. A grid that silently trains on those is worse
+    # than one that trains on the shared defaults, because nothing on the row says
+    # so. Anything older than today is not this week's sweep.
+    newest=$(( $(date +%s) - $(stat -c %Y "$m" 2>/dev/null || echo 0) ))
+    if [ "$newest" -gt 86400 ]; then
+        for f in "$m" "$h"; do
+            [ -f "$f" ] && mv "$f" "$f.superseded_$(date +%Y%m%d_%H%M%S)"
+        done
+        ok "tuned files were over a day old -- moved aside; the screen uses the shared defaults"
+    else
+        ok "tuned files written within the last day -- tasks from now on will use them"
+    fi
 elif [ ! -f "$m" ] && [ ! -f "$h" ]; then
     ok "neither present -- the screen runs on the shared defaults"
 else
