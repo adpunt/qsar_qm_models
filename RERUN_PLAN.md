@@ -3467,9 +3467,12 @@ Flat is the truthful answer there — the condition never reached that region �
 be redrawn for held-out molecules, or the file would record an injection that did not happen. Two
 consequences, and both belong in the paper rather than in a comment:
 
-1. **For the grouped conditions, "does the model become less certain where the data is unreliable"
-   is answerable on the out-of-fold TRAINING rows and undefined on held-out molecules.** It stays
-   answerable on both splits for censoring, which is keyed to the label and so is defined anywhere.
+1. ~~**For the grouped conditions, "does the model become less certain where the data is
+   unreliable" is answerable on the out-of-fold TRAINING rows and undefined on held-out
+   molecules.**~~ 🔴 **WRONG, corrected 2026-08-28 — see §3.1f. It is undefined on the out-of-fold
+   rows too, for the same reason.** The out-of-fold pass splits on the SAME scaffold groups the
+   noise is keyed to, so the group is hidden there as well. It stays answerable on both splits for
+   censoring, which is keyed to the label and so is defined anywhere.
 2. **Validation is different**, because validation receives noise. Handing it a selection that
    reaches none of its molecules would give it plain Gaussian noise under the name of a grouped
    condition. It draws its own selection at the same molecule fraction.
@@ -3484,6 +3487,64 @@ the model's own predicted label is a real control for a *label-keyed* condition 
 for a *group-keyed* one: a predicted label does not change a molecule's scaffold, so the recomputed
 shape is identical to the true one. Measured on both datasets — the two correlations agree to every
 digit. Report it for censoring; do not report it as a control for the grouped conditions.
+
+### 3.1f 🔴 FOUND 2026-08-28 — the grouped conditions cannot answer question B on ANY split, and censoring is the only condition that can
+
+**This corrects §3.1d point 1, which said the grouped conditions stay answerable on the
+out-of-fold training rows. They do not.** Read out of the code, both pipelines:
+
+- The noise for `grouped_wider` and `grouped_shifted` is keyed to the scaffold group
+  (`--noise-targeting grouped_wide`, with the group assignment in `scaffold_groups_<file_no>.json`).
+- The out-of-fold pass splits on **that same array**. `process_and_train.py` builds
+  `'group'` from `(scaffold_groups or {}).get(sm, -1)`; `score_training_molecules_out_of_fold`
+  takes `groups = rows['group']` (`models/models.py:1717`) and hands it to `GroupKFold`
+  (`:1594`). The laboratory runner does the same through `_oof_predict` with
+  `assign_scaffold_groups`.
+
+So when a molecule is scored out of fold, **its entire scaffold group was held out of the fit that
+scored it**. The model saw no corrupted label from that group. Which groups are noisy is a random
+draw, not a property of their structure, so there is nothing to generalise from the groups it did
+see. The correlation is forced to the confound, and `effect` — the confound subtracted — is forced
+to zero. It is not a weak result; it is the design.
+
+**On the laboratory side the two groupings are IDENTICAL, not merely similar.**
+`assign_scaffold_groups` (fold geometry) and `assign_noise_groups` (noise) differ only in treating
+acyclic molecules as singletons, and the runner's own docstring records that **no molecule in LogD,
+Caco-2 or hERG is acyclic**. On QM9 the correspondence is exact by construction — one file feeds
+both.
+
+**Where each condition stands, then, on question B ("is the model less sure about the badly
+measured molecules"):**
+
+| condition | keyed to | question B |
+|---|---|---|
+| `gaussian`, `laplace`, `student_t_nu5`, `grouped_shifted` | nothing per molecule | **undefined** — the shape is flat, the correlation has no input |
+| `grouped_wider` | the scaffold group | **structurally zero** — the split hides exactly what the noise is keyed to, on both splits |
+| `outlier_p10` | a random draw | **structurally zero** — the honest null the plan already names |
+| `censoring` | the label itself | **answerable, on both splits.** The only one |
+
+That is one live test out of seven, and it was already the one §2.26c found sign-flipped and
+§2.26b found without a zero-level control on QM9.
+
+**What this changes.**
+
+- **It is a Methods sentence, not a defect to fix.** Nothing in the code is wrong. The paper must
+  say that a scaffold split and a scaffold-keyed corruption cannot both be in the same experiment
+  and leave the question answerable, and report `grouped_wider` and `outlier_p10` as measured
+  nulls rather than as failures of the models.
+- **It re-prices §2.26b.** Running the clean level for `grouped_wider` (about +5% on the screen)
+  buys a *measured* zero where there is now a NaN. Running it for **censoring** buys the study's
+  only real answer. If only one is bought, it is censoring.
+- **A measured zero is still worth having**, because it is what separates "the models cannot do it"
+  from "the design cannot show it" — and that distinction is the whole of what the paper can claim
+  here. Two nulls (`grouped_wider`, `outlier_p10`) plus one live test is a defensible design; one
+  live test with two NaNs is not.
+
+**Not yet checked, and it is the obvious next question:** whether an out-of-fold split that is NOT
+grouped on the scaffold would make `grouped_wider` answerable. It would — but it would also put the
+out-of-fold rows in an interpolation regime that no test row is in, so the two splits would stop
+being on the same footing (`models/models.py:1598`, the fallback branch, already says this about
+the random fallback). Raising it as an option, not recommending it.
 
 ### 3.1e ✅ FIXED 2026-08-27 — the out-of-fold pass asked for validation rows no model fits
 
@@ -3528,13 +3589,18 @@ which needs a *learnable pattern* of unreliability — has a much cleaner struct
 | New noise type | Is there a pattern to learn? |
 |---|---|
 | Gaussian, Student-t, Laplace | **No, by construction.** Every molecule gets the same scale. The correlation is undefined, not zero. These are question A's conditions and the leakage check. |
-| Grouped by scaffold | **Yes, and it is predictable from structure.** This is the positive case, and the only one where a model could genuinely spot bad data from the features it has. |
+| Grouped by scaffold | ~~**Yes, and it is predictable from structure.** This is the positive case~~ 🔴 **WRONG, corrected 2026-08-28 — see §3.1f.** The out-of-fold split holds out whole scaffold groups, which is exactly what the noise is keyed to, so the model is never shown a corrupted label from the group it is being asked about. Structurally zero on both splits, not a positive case. |
 | Outlier, random selection | **No — a true null.** Victims are chosen at random, so nothing in the features predicts them. This is the honest negative control that the old design lacked. |
 | Censoring | **Yes, and keyed to the label.** Which molecules get clipped is a deterministic function of the label, so the zero-noise subtraction is doing real work here. |
 
 That is a better design than the six it replaces, and it answers the open question in
 `NOISE_DESIGN.md` §7.2: **censoring is the deliberately label-keyed condition**, so a separate
 artificial positive control is not needed.
+
+⚠️ **Read §3.1f before using this table.** After the correction above, **censoring is the only
+condition on which question B is answerable at all** — the four uniform conditions are undefined,
+and both the grouped and the outlier conditions are structural nulls. That makes the row this table
+calls "the positive case" a null, and censoring the whole of the live evidence.
 
 ### 3.2b ✅ SETTLED — a replicate is QM9's. The other three datasets have folds. Read this before writing an error bar.
 
@@ -3701,6 +3767,45 @@ confirmed matches.** The five worst are representation-identity errors, and one 
 paper's Methods are wrong about its most-used representation.
 
 I verified the five highest-severity findings myself, in the source, before writing them here.
+
+#### 3.4b ✅ FIXED 2026-08-28 — four models had no name in common, and nothing said so
+
+**The same failure `condition_names.json` exists to stop, one level up.** The two pipelines write
+different spellings into the `model` column and every table putting the four datasets side by side
+joins on that string. The correspondence lived inline in two dicts a hundred lines apart in
+`generate_paper_figures_v2.py`, and `scripts/uncertainty_stats.py` — which POOLS the two pipelines
+into one frame — did not normalise model names **at all**.
+
+When four models were added on 2026-08-28, none was added to either dict:
+
+| the laboratory runner writes | QM9 writes | before | after |
+|---|---|---|---|
+| `GP-Tanimoto` | `gauche` | `gp-tanimoto` vs `gauche` | **`gauche`** |
+| `GP-Hetero` | `het_gp_rbf` | `gp-hetero` vs `het_gp_rbf` | **`het_gp_rbf`** |
+| `VBLL-Full-Hetero` | `bnn_full_variational_hetero` | `vbll-full-hetero` vs `bnn_full_variational_hetero` | **`dnn_vbll_hetero`** |
+| `MLP-VBLL-Full-Hetero` | `mlp_bnn_full_variational_hetero` | `mlp-vbll-full-hetero` vs `mlp_bnn_full_variational_hetero` | **`mlp_vbll_hetero`** |
+
+**Nothing raised.** `.fillna(df['model'].str.lower())` keeps an unmapped name, lower-cased — so
+`GP-Hetero` became `gp-hetero`, a name nothing else in the study uses, and the rows survived into
+the frame joined to nothing. Per-dataset tables look right, because each dataset's rows are
+internally consistent; only a cross-dataset table is wrong, and it is wrong by omission.
+
+**The fix.** `model_names.json` at the repository root, on the model of `condition_names.json`:
+22 canonical names, the QM9 spelling of each, the laboratory spelling of each. Read by
+`generate_paper_figures_v2.py` (all three call sites — the accuracy loader, the uncertainty loader
+and `_normalize_validation_names`) and by `scripts/uncertainty_stats.py` (both schema readers).
+A name that is not in it is still kept rather than dropped, so every file on disk still loads —
+but it is now **named in the output** instead of disappearing into a lower-cased spelling.
+
+Three models also had no colour, marker, label or ordering entry in the figure script:
+`het_gp_rbf`, `dnn_vbll_hetero`, `mlp_vbll_hetero`. Added, keeping their family's colour and
+separated by marker.
+
+**The guard.** `python scripts/test_model_names.py` reads the QM9 job generator's `MODELS` dict and
+the laboratory runner's experiment list out of their own source, and requires every name either can
+emit to resolve; it also requires the three figure registries to cover the roster. **17 models
+resolve to the same canonical name on both sides.** It is case 1 of
+`scripts/check_fixes_fail_when_removed.py` and goes RED when one entry is taken out.
 
 #### 3.4.1 Four representations share a name and are not the same features
 

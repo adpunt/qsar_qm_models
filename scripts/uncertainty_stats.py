@@ -70,6 +70,7 @@ only ever a grouping key.
 
 from __future__ import annotations
 
+import json
 import re
 import warnings
 from pathlib import Path
@@ -211,6 +212,58 @@ def _normalise_condition(name):
     return _CONDITION_NORMALISE.get(name, name)
 
 _DEFAULT_MIN_N = 20
+
+# ---------------------------------------------------------------------------
+# The model-name correspondence between the two pipelines.
+#
+# This module POOLS the two into one frame and grouped every statistic by the
+# `model` column verbatim, so 'het_gp_rbf' (what QM9 writes) and 'GP-Hetero'
+# (what the laboratory runner writes) were two different models, and 'RF' and
+# 'rf' were two more. Nothing raised: each dataset's rows are internally
+# consistent, so a per-dataset table looks right and only a table putting the
+# four datasets side by side comes out wrong.
+#
+# model_names.json is the one place the correspondence is written down, the same
+# treatment condition_names.json gives the noise conditions. A name that is not
+# in it is lower-cased and kept -- a legacy file still loads -- and named in
+# `unmapped_model_names` on the frame's attrs so a caller can see it.
+# ---------------------------------------------------------------------------
+
+def _load_model_names():
+    path = Path(__file__).resolve().parent.parent / 'model_names.json'
+    try:
+        spec = json.loads(path.read_text())
+    except Exception:
+        return {}, {}
+    qm9 = dict(spec.get('qm9', {}))
+    val = dict(spec.get('validation', {}))
+    # The per-molecule uncertainty FILENAMES strip hyphens, so a legacy file
+    # arrives as 'BNNFull'. Accept both spellings.
+    for m in (qm9, val):
+        for name, target in list(m.items()):
+            m.setdefault(name.replace('-', ''), target)
+    return qm9, val
+
+
+_QM9_MODEL_NAMES, _VALIDATION_MODEL_NAMES = _load_model_names()
+
+# Names seen on disk that model_names.json does not know. Module-level, so the
+# loader can report the whole set once rather than per file.
+_UNMAPPED_MODELS = set()
+
+
+def _canonical_model(series, mapping):
+    """Map a `model` column to canonical names, recording what did not map."""
+    raw = series.astype(str)
+    _UNMAPPED_MODELS.update(sorted(set(raw[~raw.isin(mapping)])))
+    return raw.map(mapping).fillna(raw.str.lower())
+
+
+def unmapped_model_names():
+    """Model names loaded so far that model_names.json does not name."""
+    return sorted(_UNMAPPED_MODELS)
+
+
 
 # How far the clean label plus the recorded noise may sit from the corrupted
 # label before the frame is refused as mis-scaled. The columns are written as
@@ -354,7 +407,7 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
 
     out = pd.DataFrame(index=df.index)
     out['dataset'] = df['dataset'] if 'dataset' in df.columns else dataset_name
-    out['model'] = df['model']
+    out['model'] = _canonical_model(df['model'], _QM9_MODEL_NAMES)
     rep = _pick(df, ['rep', 'representation'])
     out['rep'] = rep
     cond = _pick(df, ['condition', 'noise_type', 'task_condition',
@@ -483,7 +536,9 @@ def _normalise_kirby(df, path, strict, dataset_name):
         if len(bits) >= 2:
             model = model if model is not None else bits[0]
             rep = rep if rep is not None else bits[1]
-    out['model'] = model
+    out['model'] = (_canonical_model(pd.Series(model, index=df.index),
+                                     _VALIDATION_MODEL_NAMES)
+                    if model is not None else model)
     out['rep'] = rep
 
     cond = _pick(df, ['condition', 'noise_type', 'task_condition',

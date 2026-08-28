@@ -692,7 +692,12 @@ def test_loader_refuses_a_file_predating_the_rewrite_and_names_the_column():
         # missing columns then refuse by name rather than inventing anything
         loose = load_uncertainty(legacy, strict=False)
         assert set(loose['split']) == {'test'}
-        assert loose['model'].iloc[0] == 'QRF' and loose['rep'].iloc[0] == 'ECFP4'
+        # The model name is canonicalised through model_names.json (RERUN_PLAN.md
+        # 3.4b) -- the file name recovers 'QRF', and the loader maps it to the
+        # one spelling the QM9 side also lands on, so a legacy laboratory file
+        # joins to QM9 rows instead of sitting beside them under its own name.
+        # The representation is not mapped here and stays as written.
+        assert loose['model'].iloc[0] == 'qrf' and loose['rep'].iloc[0] == 'ECFP4'
         for fn in (q4_plain_correlation, q4_error_ratio):
             try:
                 fn(loose)

@@ -263,6 +263,12 @@ MODEL_COLORS = {
     'svm': '#999999',              # Gray
     'gauche': '#882255',           # Wine
     'gauche_rbf': '#882255',       # Wine (RBF variant, PDV only)
+    # Added 2026-08-28 with the three decomposition models. Each keeps its
+    # family's colour and is separated by MARKER, so a figure that shows a base
+    # model beside its heteroscedastic variant still reads as one family.
+    'het_gp_rbf': '#882255',       # Wine (GP family)
+    'dnn_vbll_hetero': '#E69F00',  # NN-alpha
+    'mlp_vbll_hetero': '#CC79A7',  # NN-beta
 }
 
 # Within-family colors for figures that compare variants of the same family.
@@ -307,15 +313,18 @@ MODEL_MARKERS = {
     'dnn_bnn_full': 's', 'dnn_bnn_last': '^', 'dnn_vbll': 'D',
     # NN-β family variants
     'mlp_bnn_full': 's', 'mlp_bnn_last': '^', 'mlp_vbll': 'D',
+    # The per-molecule-noise variants: a plus, so they are distinguishable from
+    # the model they are a variant of while keeping the family colour.
+    'het_gp_rbf': 'P', 'dnn_vbll_hetero': 'P', 'mlp_vbll_hetero': 'P',
 }
 
 # Canonical ordering for legends — grouped by family, base model first.
 MODEL_ORDER = [
     'rf', 'qrf',
     'xgboost', 'lgb', 'ngboost',
-    'svm', 'gauche', 'gauche_rbf',
-    'dnn', 'dnn_bnn_full', 'dnn_vbll',
-    'mlp', 'mlp_bnn_full', 'mlp_vbll',
+    'svm', 'gauche', 'gauche_rbf', 'het_gp_rbf',
+    'dnn', 'dnn_bnn_full', 'dnn_vbll', 'dnn_vbll_hetero',
+    'mlp', 'mlp_bnn_full', 'mlp_vbll', 'mlp_vbll_hetero',
 ]
 
 def sort_models_by_family(models):
@@ -396,6 +405,13 @@ MODEL_LABELS = {
     # β Bayesian variants
     'mlp_bnn_full': 'BNN-β',
     'mlp_vbll': 'VBLL-β',
+    # The three models whose data-noise term varies per molecule instead of
+    # being one number per fit. The suffix is load-bearing and stays in the
+    # label: they report a different KIND of quantity from the model they are a
+    # variant of (RERUN_PLAN.md 5.5f).
+    'het_gp_rbf': 'GP (RBF, het.)',
+    'dnn_vbll_hetero': 'VBLL-α (het.)',
+    'mlp_vbll_hetero': 'VBLL-β (het.)',
 }
 
 REP_LABELS = {
@@ -614,6 +630,57 @@ def _settled_condition_names():
 
 
 SETTLED_CONDITIONS = _settled_condition_names()
+
+
+# The settled model-name correspondence, read from model_names.json -- the one
+# place the two pipelines' spellings are written down. It used to live inline in
+# two dicts a hundred lines apart (BNN_NAME_MAP for QM9, val_model_map for the
+# laboratory runner) and neither was updated when GP-Tanimoto, GP-Hetero,
+# VBLL-Full-Hetero and MLP-VBLL-Full-Hetero started being emitted on 2026-08-28.
+# An unmapped name does not raise -- `.fillna(str.lower())` turns 'GP-Hetero'
+# into 'gp-hetero' -- so the rows survived under names that join to nothing.
+def _model_name_maps():
+    path = Path(__file__).resolve().parent.parent / 'model_names.json'
+    try:
+        spec = json.loads(path.read_text())
+    except Exception as exc:
+        print(f"WARNING: could not read {path.name} ({exc}); model names will "
+              f"not be normalized and the two pipelines will not join.")
+        return {}, {}, []
+    qm9 = dict(spec.get('qm9', {}))
+    val = dict(spec.get('validation', {}))
+    # The per-molecule uncertainty FILENAMES strip hyphens, so a file written
+    # before the runner put model/rep/dataset in as columns arrives as
+    # 'BNNFull'. Accept both spellings rather than losing the row to
+    # `.fillna(str.lower())` (RERUN_PLAN.md 2.13).
+    for m in (qm9, val):
+        for name, target in list(m.items()):
+            m.setdefault(name.replace('-', ''), target)
+    return qm9, val, list(spec.get('canonical', []))
+
+
+QM9_MODEL_MAP, VALIDATION_MODEL_MAP, CANONICAL_MODELS = _model_name_maps()
+
+
+def _apply_model_map(df, mapping, where):
+    """Map the `model` column through `mapping`, and SAY what did not map.
+
+    A name that maps to nothing is lower-cased and kept, as it always was, so a
+    legacy file still loads. But it is now named in the output instead of
+    disappearing into a lower-cased spelling nothing else uses -- which is how
+    four models were silently absent from every cross-pipeline table.
+    """
+    if 'model' not in df.columns or len(df) == 0:
+        return df
+    raw = df['model'].astype(str)
+    unmapped = sorted(set(raw[~raw.isin(mapping)]))
+    if unmapped:
+        print(f"  WARNING: {len(unmapped)} model name(s) in {where} are not in "
+              f"model_names.json and will not join to the other pipeline: "
+              f"{', '.join(unmapped)}")
+    df = df.copy()
+    df['model'] = raw.map(mapping).fillna(raw.str.lower())
+    return df
 
 # Retired on 2026-08-26. Kept ONLY so that files written before then still parse;
 # `outlier` here means the value-proportional strategy, which is a different thing
@@ -841,21 +908,12 @@ def load_anova_data(results_dir):
         combined = pd.concat(all_data, ignore_index=True)
 
         # Normalize model names from CSV conventions to clean internal names.
-        # process_and_train.py saves NN-α BNN variants as 'bnn_full' etc.
-        # VBLL variants saved as '*_full_variational' → renamed to '*_vbll'.
-        BNN_NAME_MAP = {
-            'bnn_full': 'dnn_bnn_full',
-            'bnn_last': 'dnn_bnn_last',
-            'bnn_variational': 'dnn_bnn_variational',  # Old pre-VBLL variant → gets caught by GLOBAL_MODELS_EXCLUDE
-            'bnn_full_variational': 'dnn_vbll',
-            'dnn_bnn_full_variational': 'dnn_vbll',
-            'mlp_bnn_full_variational': 'mlp_vbll',
-        }
-        if 'model' in combined.columns:
-            n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
-            combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
-            if n_renamed > 0:
-                print(f"  Normalized {n_renamed} model names (bnn_* → dnn_bnn_*, *_full_variational → *_vbll)")
+        # The map is model_names.json, not a dict here: this one and the
+        # laboratory one below drifted apart from what the pipelines emit, and a
+        # name that maps to nothing is kept rather than dropped, so the drift was
+        # invisible (RERUN_PLAN.md 3.4b).
+        combined = _apply_model_map(combined, QM9_MODEL_MAP,
+                                    'the QM9 results directory')
 
         # Normalize column: representation → rep
         if 'representation' in combined.columns and 'rep' not in combined.columns:
@@ -1196,20 +1254,9 @@ def load_uncertainty_data(results_dir):
             if n_dupes > 0:
                 print(f"  Deduplicated uncertainty: removed {n_dupes} duplicate rows")
 
-        # Normalize BNN model names (same map as ANOVA loader)
-        BNN_NAME_MAP = {
-            'bnn_full': 'dnn_bnn_full',
-            'bnn_last': 'dnn_bnn_last',
-            'bnn_variational': 'dnn_bnn_variational',
-            'bnn_full_variational': 'dnn_vbll',
-            'dnn_bnn_full_variational': 'dnn_vbll',
-            'mlp_bnn_full_variational': 'mlp_vbll',
-        }
-        if 'model' in combined.columns:
-            n_renamed = combined['model'].isin(BNN_NAME_MAP).sum()
-            combined['model'] = combined['model'].map(lambda m: BNN_NAME_MAP.get(m, m))
-            if n_renamed > 0:
-                print(f"  Normalized {n_renamed} uncertainty model names")
+        # The same map as the accuracy loader, and the same file both read.
+        combined = _apply_model_map(combined, QM9_MODEL_MAP,
+                                    'the QM9 uncertainty files')
 
         # Global model exclusion (CP, old variational)
         if 'model' in combined.columns:
@@ -1376,29 +1423,18 @@ def within_sigma_unc_noise_rho(model_data, unc_values, base_mask,
 
 
 def _normalize_validation_names(df):
-    """Normalize KIRBy naming conventions to match QM9 conventions."""
-    val_model_map = {
-        'RF': 'rf', 'XGBoost': 'xgboost', 'DNN': 'dnn', 'MLP': 'mlp',  # KIRBy uses DNN/MLP internally
-        # Validation GP is sklearn GaussianProcessRegressor with an RBF + WhiteKernel
-        # composite, run on PDV only. Semantically that's gauche_rbf (RBF GP on PDV),
-        # NOT gauche (Tanimoto GP on fingerprints). Conflating them in figures would
-        # mix two different models.
-        'GP': 'gauche_rbf', 'QRF': 'qrf', 'NGBoost': 'ngboost', 'SVM': 'svm',
-        'LightGBM': 'lgb', 'LGBM': 'lgb',
-        'BNN-Full': 'dnn_bnn_full', 'BNN-Last': 'dnn_bnn_last',
-        'VBLL-Full': 'dnn_vbll',
-        # NN-β family from KIRBy validation (MLP base, hidden=32, 2 hidden layers)
-        'MLP-BNN-Full': 'mlp_bnn_full',
-        'MLP-VBLL-Full': 'mlp_vbll',
-    }
-    # The per-molecule uncertainty FILENAMES strip hyphens
-    # (`model_name.replace('-', '')`). The runner writes model/rep/dataset into
-    # the file as columns, so the filename is only a fallback -- but for files
-    # written before it did, 'BNN-Full' arrived as 'BNNFull', matched no key, and
-    # `.fillna(str.lower())` turned it into 'bnnfull': a model name nothing else
-    # in the study uses (RERUN_PLAN.md 2.13). Both spellings map to one name now.
-    for _name, _target in list(val_model_map.items()):
-        val_model_map.setdefault(_name.replace('-', ''), _target)
+    """Normalize KIRBy naming conventions to match QM9 conventions.
+
+    The model map is model_names.json, read once at import. It used to be a dict
+    here, and it went stale: the laboratory runner names its Gaussian process by
+    kernel ('GP' for RBF, 'GP-Tanimoto' otherwise) and added GP-Hetero,
+    VBLL-Full-Hetero and MLP-VBLL-Full-Hetero on 2026-08-28, none of which were
+    keys. An unmapped name is lower-cased and kept, so 'GP-Hetero' became
+    'gp-hetero' -- a name QM9 never writes -- and four models were silently
+    absent from every table that puts the four datasets side by side
+    (RERUN_PLAN.md 3.4b).
+    """
+    val_model_map = VALIDATION_MODEL_MAP
     val_rep_map = {
         'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
@@ -1416,8 +1452,7 @@ def _normalize_validation_names(df):
         'caco2': 'OpenADMET-Caco2_Efflux',     # duplicate of openadmet_caco2
     }
     VALIDATION_EXCLUDE_DIRS = {'herg_fluid'}  # classification dataset, not regression
-    if 'model' in df.columns:
-        df['model'] = df['model'].map(val_model_map).fillna(df['model'].str.lower())
+    df = _apply_model_map(df, val_model_map, 'the validation results')
     if 'rep' in df.columns:
         df['rep'] = df['rep'].map(val_rep_map).fillna(df['rep'].str.lower())
     if 'dataset' in df.columns:

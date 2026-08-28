@@ -30,6 +30,12 @@ KIRBY = "/Users/apunt/repos/KIRBy"
 NOISE = "/Users/apunt/repos/NoiseInject"
 
 CASES = [
+ ("the two pipelines join on one set of model names",
+  f"{QSAR}/model_names.json",
+  '"GP-Hetero": "het_gp_rbf",',
+  '"GP-Hetero-REMOVED": "het_gp_rbf",',
+  [sys.executable, f"{QSAR}/scripts/test_model_names.py"]),
+
  ("ECFP4 is Morgan radius 2",
   f"{QSAR}/scripts/process_and_train.py",
   "    bits = np.array(_ECFP4_GENERATOR.GetFingerprint(mol), dtype=np.uint8)",

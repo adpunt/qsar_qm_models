@@ -1,0 +1,78 @@
+{
+  "what_this_is": "One name per model, and the ONLY place the correspondence between the two pipelines is written down. QM9 (process_and_train.py -> models/models.py -> save_results) and the laboratory runner (KIRBy tests/alternative_data_noise_robustness.py) each write their own spelling into the `model` column, and every table that puts the four datasets side by side joins on that string. A second naming rule anywhere means the two cannot be joined -- which is exactly what happened to the four models added on 2026-08-28.",
+
+  "why_it_exists": "scripts/generate_paper_figures_v2.py held the laboratory-to-canonical map inline (val_model_map) and the QM9-to-canonical map inline beside it (BNN_NAME_MAP), and neither was updated when GP-Tanimoto, GP-Hetero, VBLL-Full-Hetero and MLP-VBLL-Full-Hetero started being emitted. An unmapped name does not raise: `.fillna(df['model'].str.lower())` turns 'GP-Hetero' into 'gp-hetero', which is a model name nothing else in the study uses, so the row survives into the frame under a name that joins to nothing. scripts/uncertainty_stats.py did not normalise model names at ALL, so the pooled uncertainty frame carried 'het_gp_rbf' and 'GP-Hetero' as two different models. This is the same failure condition_names.json exists to stop for noise conditions, and it gets the same treatment: one file, read by both consumers, checked by a test.",
+
+  "the_rule": "`canonical` is what every figure, table and statistic uses. `qm9` maps what models/models.py passes to save_results; `validation` maps the display name the laboratory runner builds its experiment list with. Hyphen-stripped spellings are accepted automatically by the reader (the per-molecule uncertainty FILENAMES strip hyphens), so they are not listed here.",
+
+  "settled": "2026-08-28. RERUN_PLAN.md section 3.4b.",
+
+  "canonical": [
+    "rf", "qrf", "xgboost", "lgb", "ngboost", "svm",
+    "gauche", "gauche_rbf", "het_gp_rbf", "het_gp_tanimoto",
+    "dnn", "dnn_bnn_full", "dnn_bnn_last", "dnn_bnn_variational",
+    "dnn_vbll", "dnn_vbll_hetero",
+    "mlp", "mlp_bnn_full", "mlp_bnn_last", "mlp_bnn_variational",
+    "mlp_vbll", "mlp_vbll_hetero"
+  ],
+
+  "qm9": {
+    "rf": "rf",
+    "qrf": "qrf",
+    "xgboost": "xgboost",
+    "lgb": "lgb",
+    "ngboost": "ngboost",
+    "svm": "svm",
+    "gauche": "gauche",
+    "gauche_rbf": "gauche_rbf",
+    "het_gp_rbf": "het_gp_rbf",
+    "het_gp_tanimoto": "het_gp_tanimoto",
+    "dnn": "dnn",
+    "mlp": "mlp",
+    "bnn_full": "dnn_bnn_full",
+    "dnn_bnn_full": "dnn_bnn_full",
+    "bnn_last": "dnn_bnn_last",
+    "dnn_bnn_last": "dnn_bnn_last",
+    "bnn_variational": "dnn_bnn_variational",
+    "dnn_bnn_variational": "dnn_bnn_variational",
+    "bnn_full_variational": "dnn_vbll",
+    "dnn_bnn_full_variational": "dnn_vbll",
+    "bnn_full_variational_hetero": "dnn_vbll_hetero",
+    "dnn_bnn_full_variational_hetero": "dnn_vbll_hetero",
+    "mlp_bnn_full": "mlp_bnn_full",
+    "mlp_bnn_last": "mlp_bnn_last",
+    "mlp_bnn_variational": "mlp_bnn_variational",
+    "mlp_bnn_full_variational": "mlp_vbll",
+    "mlp_bnn_full_variational_hetero": "mlp_vbll_hetero"
+  },
+
+  "validation": {
+    "RF": "rf",
+    "QRF": "qrf",
+    "XGBoost": "xgboost",
+    "LightGBM": "lgb",
+    "LGBM": "lgb",
+    "NGBoost": "ngboost",
+    "SVM": "svm",
+    "GP": "gauche_rbf",
+    "GP-Tanimoto": "gauche",
+    "GP-Hetero": "het_gp_rbf",
+    "GP-Tanimoto-Hetero": "het_gp_tanimoto",
+    "DNN": "dnn",
+    "MLP": "mlp",
+    "BNN-Full": "dnn_bnn_full",
+    "BNN-Last": "dnn_bnn_last",
+    "VBLL-Full": "dnn_vbll",
+    "VBLL-Full-Hetero": "dnn_vbll_hetero",
+    "MLP-BNN-Full": "mlp_bnn_full",
+    "MLP-BNN-Last": "mlp_bnn_last",
+    "MLP-VBLL-Full": "mlp_vbll",
+    "MLP-VBLL-Full-Hetero": "mlp_vbll_hetero"
+  },
+
+  "notes": {
+    "GP": "The laboratory runner names the ordinary process by its kernel: 'GP' when the kernel is RBF, 'GP-Tanimoto' otherwise. QM9 names the same two models gauche_rbf and gauche. They are DIFFERENT models -- an RBF kernel on any representation against a Tanimoto kernel on binary fingerprints only -- and mapping both to one name would pool two kernels into one row.",
+    "hetero": "The -Hetero / _hetero suffix means the observation noise is predicted per molecule instead of being one number per fit. It is load-bearing and must not be folded into the plain name: the two report different KINDS of data-noise term, and a per-molecule column and a broadcast constant would become indistinguishable (RERUN_PLAN.md 5.5f).",
+    "dnn_prefix": "The QM9 DNN trainer writes the Bayesian variants WITHOUT a base prefix ('bnn_full'), while the MLP trainer writes them WITH one ('mlp_bnn_full'). Both spellings are listed rather than fixed in models.py, because changing what the pipeline writes would orphan every results file already on disk."
+  }
+}
