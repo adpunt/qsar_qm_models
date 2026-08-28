@@ -226,6 +226,18 @@ def build(run_dir, out_dir, report_level=REPORT_LEVEL, n_boot=300):
         raise SystemExit(f"no *_uncertainty_values.csv under {run_dir}")
     print(f"reading {len(paths)} uncertainty files from {run_dir}")
     df = us.load_uncertainty(paths)
+
+    # A molecule in an out-of-fold part that was not run is written as NaN, so
+    # the file says which molecules carry a score (process_and_train.py
+    # --oof-folds-scored). Drop those rows here rather than carrying them into
+    # the counts: every statistic already masks non-finite values, but `n` would
+    # otherwise report molecules nobody scored.
+    unscored = (df['split'].eq('train_oof')
+                & (~np.isfinite(df['y_pred']) | ~np.isfinite(df['uncertainty'])))
+    if unscored.any():
+        print(f"  dropping {int(unscored.sum()):,} training rows with no "
+              f"out-of-fold score (a fold that was not run, or one that failed)")
+        df = df[~unscored].copy()
     print(f"  {len(df):,} rows | models {sorted(df['model'].unique())}")
     print(f"  reps {sorted(df['rep'].unique())} | levels {sorted(df['sigma'].unique())}")
     print(f"  conditions {sorted(df['condition'].unique())}")

@@ -1457,7 +1457,8 @@ def apply_bayesian_transformation_full_variational(model):
 # producers cannot drift.
 
 
-def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label=''):
+def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label='',
+                folds_scored=0):
     """Out-of-fold predictions and uncertainties over the molecules a model fits.
 
     Splits the fit rows into `n_folds` parts, fits on the rest and scores the
@@ -1505,6 +1506,13 @@ def oof_predict(fit_predict, X, y_noisy, n_folds, groups=None, seed=42, label=''
         order = np.random.RandomState(seed).permutation(n)
         parts = np.array_split(order, n_folds)
         folds = [(np.setdiff1d(order, held), held) for held in parts]
+
+    if folds_scored and 0 < folds_scored < len(folds):
+        print(f"      {tag} scoring {folds_scored} of {len(folds)} folds: "
+              f"{sum(len(h) for _, h in folds[:folds_scored])} of {n} molecules get "
+              f"an out-of-fold score, the rest stay NaN and are written as NaN",
+              flush=True)
+        folds = folds[:folds_scored]
 
     n_ok = 0
     for keep, held in folds:
@@ -1606,7 +1614,8 @@ def score_training_molecules_out_of_fold(
     try:
         oof_mean, oof_unc, n_ok = oof_predict(
             fit_predict, np.asarray(x_fit), np.asarray(y_fit), n_folds,
-            groups=groups, seed=iteration_seed, label=model_name)
+            groups=groups, seed=iteration_seed, label=model_name,
+            folds_scored=int(getattr(args, 'oof_folds_scored', 0) or 0))
     finally:
         if restore_torch_rng:
             torch.set_rng_state(_tstate)
@@ -1655,9 +1664,11 @@ def score_training_molecules_out_of_fold(
         noise_type=getattr(train_noise, 'noise_type', None),
     )
     scored = int(np.isfinite(oof_mean).sum())
+    n_run = int(getattr(args, 'oof_folds_scored', 0) or 0) or n_folds
     print(f"      [oof {model_name}] wrote {n} train_oof rows "
-          f"({scored} scored, {n - scored} left NaN by a failed fold), "
-          f"{n_ok}/{n_folds} inner folds ok", flush=True)
+          f"({scored} scored, {n - scored} left NaN by a fold that was not run or "
+          f"failed), {n_ok}/{n_run} inner folds ok "
+          f"({n_run} of {n_folds} folds requested)", flush=True)
     return n_ok
 
 

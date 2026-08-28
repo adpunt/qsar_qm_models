@@ -377,6 +377,15 @@ def parse_arguments():
                         help="Inner folds used to score TRAINING molecules out of fold "
                              "(0 = off, the default). Needs -u/--uncertainty. A value of "
                              "1 is refused: one fold cannot score anything out of fold.")
+    parser.add_argument("--oof-folds-scored", type=int, default=0,
+                        help="How many of the --oof-folds parts to actually fit and "
+                             "score (0 = all of them, the default). The split geometry "
+                             "is unchanged, so a scored molecule is scored by a model "
+                             "fitted on the same fraction of the data either way; there "
+                             "are simply fewer scored molecules and the pass costs that "
+                             "many fits instead of --oof-folds. Molecules in a fold that "
+                             "was not run are written as NaN, so the file says which "
+                             "molecules carry an out-of-fold score.")
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
@@ -510,6 +519,16 @@ def parse_arguments():
         )
     if args.oof_folds < 0:
         parser.error(f"--oof-folds must be 0 or at least 2, got {args.oof_folds}")
+    if args.oof_folds_scored < 0:
+        parser.error(f"--oof-folds-scored must be 0 or more, got {args.oof_folds_scored}")
+    if args.oof_folds_scored and not args.oof_folds:
+        parser.error(
+            "--oof-folds-scored without --oof-folds asks for a fraction of a pass "
+            "that is switched off.")
+    if args.oof_folds and args.oof_folds_scored > args.oof_folds:
+        parser.error(
+            f"--oof-folds-scored {args.oof_folds_scored} exceeds --oof-folds "
+            f"{args.oof_folds}: there are only {args.oof_folds} folds to score.")
     if args.oof_folds > 1 and not args.uncertainty:
         parser.error(
             "--oof-folds needs -u/--uncertainty: the out-of-fold pass exists to write "
