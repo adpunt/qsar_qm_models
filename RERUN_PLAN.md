@@ -3176,6 +3176,13 @@ confirmed clean dataset. Make the change in QM9 that is non-negotiable."* All th
   0.760882 label units against training's 0.766289, both anchored on a training spread of 1.258461
   where validation's own is 1.331802. A gate compares the two and stops the run if they diverge.
 - **Held-out molecules stay clean**, and their recorded noise is exactly `0.0`, not a small number.
+- **A SECOND ROUTE to the same answer exists since 2026-08-28**, and which one the runs use is not
+  settled here. The validation molecules meet the same two requirements the cross-fitted training
+  molecules meet — no model fitted them, and the injector recorded each one's draw — so
+  `--score-validation` scores them with the model that already fitted, at one forward pass instead
+  of `--oof-folds` extra fits. The route is built, proven on all eight model paths, and **the choice
+  between the two is decided by the validation-versus-refitting section of §13.** Do not restate its
+  numbers here.
 
 **Every result row now carries its condition's name.** Without it two noise types land in one column
 with nothing to separate them, and every statistic computed over the file pools across a dimension
@@ -5399,6 +5406,20 @@ python scripts/test_decomposition_controls.py --measured
 One gate in the first command reports as **BLOCKED** on any interpreter that is not scikit-learn
 1.6.1 with quantile-forest 1.4.1, and the quantile forest is recorded as blocked in the fifth for
 the same reason (§3.4.4d). A blocked gate is not a pass and both say so.
+
+**One gate added 2026-08-28 with the validation route (§13, the validation-versus-refitting
+section).** Seconds, no cluster, no trained model:
+
+```
+# the validation split through the writer and the scorer, and the wiring into every
+# model family that cross-fits -- 21 gates
+python scripts/test_validation_split_scoring.py
+```
+
+Its wiring gates read the **compiled code object** of each trainer, not the source text, so a call
+that is deleted, renamed or commented out fails them while a call sitting in an untaken branch
+still passes. That distinction matters here: this project has already shipped a smoke test whose
+checks searched the file as text, and it hid a live bug for two days.
 
 **One more gate, and it costs a second — chat G, 2026-08-27.** It guards the settled condition set:
 
@@ -8482,6 +8503,15 @@ set. Nothing reads it — checked 2026-08-28, it appears at its own definition a
 
 ⚠️ **Chat O may change how the QM9 run is built, not whether.** If validation molecules replace the
 refitting, it costs a sixth of what it otherwise would. Build it after that answer.
+
+🔴 **AND ONE THING THIS CHAT MUST FIX WHATEVER THAT ANSWER IS — verified 2026-08-28.** The QM9 job
+scripts pass **neither** `--oof-folds` nor `--score-validation`. Checked in the generator and in all
+seventeen generated scripts; neither flag appears in either. QM9 test labels are never corrupted, so
+**as the grid stands the QM9 run writes nothing that can answer "does the uncertainty find the
+corrupted labels?" at all** — the question §3.1c says QM9 can now answer. The fix is one flag on the
+uncertainty models in `slurm_scripts_qm9_rerun/generate_scripts.py`, and `--score-validation` is the
+cheap one: a forward pass per model rather than a multiple of the fit count. It is independent of
+the verdict, and it is this chat's.
 
 ---
 
