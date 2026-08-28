@@ -3574,6 +3574,64 @@ opposite half; and do all of it twice, in both runners, against a shared definit
 delete list in §5.5 stays — dead swapped code is still wrong — but it is hygiene, not the
 build.
 
+### 5.5b ✅ DECIDED 2026-08-28 — all three parts are built, and the shared definition exists
+
+**The author's call: *"Why not do all 3"*.** So all of it — the forests repaired with no
+re-fitting, the two models that are written but have never been queued, and the variance output on
+the four Bayesian network families. Nothing is deferred and nothing is dropped.
+
+**One definition, imported by both pipelines.** `scripts/uncertainty_decomposition.py`, gated by
+`scripts/test_uncertainty_decomposition.py` (25 checks, no cluster, no GPU, no trained model
+needed). QM9 had four different definitions of the split and the laboratory runner had none; that
+is failure mode 10 in §0.6 and this closes it. Everything in and out of the module is a
+**variance**, converted to a standard deviation once, at the point of writing.
+
+The arithmetic is the one three papers on disk share — Kendall & Gal eq. 9 (`kg.pdf`), Ryu et al.
+eq. 9 (`ryu2.pdf`), Scalia et al. eq. 4 (`scalia.pdf`) — and the module's test reproduces their
+working code (`ryu_train_cep.py:128-133`, `scalia_predict.py:107-118`) on a fixed array, so a change
+to our arithmetic fails a test rather than moving a number in a figure.
+
+The module also carries a **support table**: for every queued model, whether each component varies
+per molecule or is one number per fit. `assert_matches_support` fails the run when a model's actual
+output disagrees with it — a constant sold as per-molecule, or a per-molecule term that came out
+flat. That is guard 1 and guard 9 of §0.6 applied to the split.
+
+### 5.5c 🔴 MEASURED 2026-08-28 — the forest split is DEGENERATE at the project's own settings
+
+**At `min_samples_leaf = 1` the forest's aleatoric term is exactly zero.** A leaf holding one
+training molecule has no within-leaf spread, so the law of total variance puts the entire
+predictive variance into the epistemic term. `models/model_defaults.py:70` and `:84` set
+`min_samples_leaf = 1` for the random forest and the quantile forest respectively, so this is the
+setting the re-run would have used.
+
+Measured on 4,000 real QM9 molecules — the HOMO-LUMO gap, nine descriptors from
+`data/QM9/raw/gdb9.sdf.csv`, 2,000 held out. Ten replicates per level for the ladder; the table
+below is one replicate at two levels.
+
+| `min_samples_leaf` | R² clean | R² at one label spread of noise | aleatoric share, clean |
+|---|---|---|---|
+| **1 (current)** | 0.6603 | 0.5277 | **0.000** |
+| 2 | 0.6570 | 0.5363 | 0.104 |
+| 5 | 0.6415 | 0.5458 | 0.373 |
+| 10 | 0.6201 | 0.5493 | 0.575 |
+| 20 | 0.5856 | 0.5424 | 0.718 |
+| 50 | 0.5287 | 0.5121 | 0.834 |
+
+**Two things this settles and one it opens.**
+
+- The "free, no re-fitting" part of the build is only free if the forests keep leaves of size 1 —
+  and at size 1 there is no aleatoric term to report. Getting one costs a re-fit of the two forest
+  models.
+- **The re-fit is not a cost at the noise levels the paper reports.** Larger leaves lose accuracy
+  on clean labels and *gain* it under noise: at leaf 5 the clean R² drops 0.019 while the R² at one
+  label spread of injected noise rises 0.018. Bigger leaves average over more molecules, which is
+  exactly what damping label noise looks like. Leaf 10 is the best setting measured at that noise
+  level (0.5493).
+- 🔴 **Open, and it is the author's:** `min_samples_leaf` is a settled shared-spec value. Changing
+  it changes every forest number in the paper, not only the uncertainty ones. The alternative is to
+  keep leaf 1 and report the two forests as having no aleatoric term at all — which is honest, and
+  which throws away the only per-molecule split available without re-fitting a network.
+
 ---
 
 ### 5.6 The two representation repairs
@@ -3779,6 +3837,21 @@ the Bayesian transformation and then overwrote it:
 `train_dnn_model` has always built the loss first. NN-β now does the same, and
 `scripts/test_bnn_criterion_order.py` asserts the loss that reaches the trainer, for both bases and
 every transformation.
+
+> **Only half of that landed until 2026-08-28.** The base loss was moved above the transformation,
+> which cured the crash, but the unconditional rebuild after `model.to(device)` was left in place —
+> so `MLP-BNN-Full` and `MLP-VBLL-Full` ran, and trained on plain MSE with no KL term, which is the
+> second half of this entry and the more dangerous one because it produces rows rather than an
+> error. The check was committed failing and stayed red against committed code. The rebuild is now
+> gone and all six cases pass. Two lessons, both cheap: a check that fails is not finished work, and
+> the fix that removes a line is not done until the line is removed.
+>
+> Found alongside it and fixed with it: the full Bayesian transformation's prior spread was a
+> literal `0.1` sitting beside a prior mean read from the spec (`models.py:1082`), while the
+> last-layer transformation two functions down already read both from it. The value is the same
+> 0.1, so nothing that has been run changes — but editing `model_defaults.py` moved the `spec_hash`
+> on every results row without moving the number the model was built with, which is exactly what
+> §2.13 exists to prevent. `scripts/test_spec_is_live.py` covers it and now passes.
 
 #### 5.7d The experimental pipeline has no reader — RAISED, NOT BUILT
 
