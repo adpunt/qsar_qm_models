@@ -13,7 +13,14 @@ import os
 from pathlib import Path
 
 MODELS_ALL = ['RF', 'QRF', 'XGBoost', 'DNN', 'GP', 'NGBoost', 'SVM', 'LightGBM']
-ALL_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained', 'PDV']
+# All SIX of the study's representations, matching the QM9 grid (author, 2026-08-28:
+# "it should run all 6 this is a mistake"). Avalon and ChemBERTa were absent while the
+# rest of the study moved to six, so every representation claim on logD, Caco-2 and hERG
+# would have rested on four of six while QM9 used all six -- and the representation
+# half of the model-versus-representation split is the paper's spine. The runner has
+# accepted all six since the storage fix; its --reps carries choices=ALL_REPS, so a name
+# this file emits that the runner does not know stops the task at argument parsing.
+ALL_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained', 'PDV', 'Avalon', 'ChemBERTa']
 
 KIRBY_DIR = '/data/stat-cadd/scat9264/KIRBy'
 QSAR_DIR = '/data/stat-cadd/scat9264/qsar_qm_models'

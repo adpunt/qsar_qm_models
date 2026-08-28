@@ -1799,10 +1799,11 @@ run, every cell would have read `MISSING` and nothing that did run would have be
 level check beside it expected eleven levels; the ladder is six per dataset, and seven for
 censoring, which sweeps the clipped fraction instead.
 
-**What it runs now.** The four conditions the main grid runs — `gaussian`, `grouped_wider`,
-`grouped_shifted`, `censoring` — plus `outlier_p10`, which is §13.1 item 2's recorded default. All
-five are read from `noise_conditions.json`, not restated. 3 datasets × 4 representations × 5
-conditions = **60 tasks per model script, 420 in total**, against 504 before. `--include-deep-conditions` runs all three depth-only
+**What it runs now.** ⚠️ **Superseded twice since this was written, and the counts are deliberately
+gone.** The conditions are **all seven**, read from `noise_conditions.json` and never restated — the
+author's decision of 2026-08-28, which replaced the four-plus-`outlier_p10` set recorded here. The
+model and representation lists are **not settled**: they are exactly what the roster screen is
+running to decide (§13.17 B), so no task count is quoted here and none should be. `--include-deep-conditions` runs all three depth-only
 conditions instead of the one (588 tasks). Levels are not passed at all: the runner sweeps one shared grid in
 fractions of each dataset's own clean training label spread, the same seven QM9 runs (the author's
 decision of 2026-08-27, `KIRBy` `2df1a5c`), with censoring on its own clipped-fraction axis.
