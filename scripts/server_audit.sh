@@ -185,22 +185,37 @@ for base in "$(conda info --base 2>/dev/null)" \
 done
 # And accept an env_test that is already active, whatever root it came from.
 [ -z "$ENV_PREFIX" ] && [ "$(basename "${CONDA_PREFIX:-}")" = "env_test" ] && ENV_PREFIX="$CONDA_PREFIX"
-if [ "$USE_SETUP" = "1" ] && [ -z "$ENV_PREFIX" ]; then
-  say ""
-  say "  🔴 THE ENVIRONMENT env_test DOES NOT EXIST."
-  say "     setup.sh would BUILD it rather than activate it -- a conda solve and"
-  say "     several pip installs -- so this audit would spend its whole wall clock"
-  say "     rebuilding and be killed at the time limit with no report."
-  say ""
-  say "     Nothing below can be answered until the rebuild lands. Every check"
-  say "     from here needs an interpreter that has the modelling packages."
-  say ""
-  say "     Skipping the setup step and reporting what does not need it."
-  say "     Override with FORCE_SETUP=1 if you WANT this run to build it."
-  USE_SETUP=0
+# setup.sh is how this project's environment becomes usable. It has always been
+# the path, the job scripts source it, and auditing a bare activation instead
+# audits an environment nobody runs in -- the mistake this script made until
+# 2026-08-26 and then made again on 2026-08-28.
+#
+# So it is still sourced. What is added is a warning, because when env_test is
+# absent setup.sh BUILDS it -- a conda solve plus several pip installs -- and a
+# fifteen-minute job is not long enough for that. On 2026-08-27 the audit was
+# killed at its wall clock part-way through a build, and the report stopped at
+# section 2's heading saying nothing about why.
+ENV_MISSING=0
+if [ -z "$ENV_PREFIX" ]; then
   ENV_MISSING=1
+  if [ "$USE_SETUP" = "1" ]; then
+    say ""
+    say "  ⚠️  env_test does not exist yet, so setup.sh is going to BUILD it rather"
+    say "     than activate it: a conda solve and several pip installs. That is the"
+    say "     right thing to happen -- it is how this environment is made -- but it"
+    say "     takes tens of minutes, not the five this audit usually needs."
+    say ""
+    say "     If this run is inside a job, give it at least an hour or it will be"
+    say "     killed part-way through the build with an unfinished report."
+    say "     For a quick look that builds nothing, re-run with --no-setup; it can"
+    say "     only answer sections 1, 2 and 7."
+    say ""
+    say "     The rebuild belongs elsewhere -- to env.yml, pip-constraints.txt"
+    say "     and the deep environment probe, not to this script:"
+    say "         python scripts/check_environment.py --deep --validation"
+    say ""
+  fi
 fi
-ENV_MISSING="${ENV_MISSING:-0}"
 [ "${FORCE_SETUP:-0}" = "1" ] && USE_SETUP=1
 
 # The shell preamble that puts a child into the job environment. Resolution order
@@ -279,16 +294,15 @@ run_py() {
 # -----------------------------------------------------------------------------
 # Without an interpreter that has the modelling packages, sections 3 to 6 all
 # fail for one reason and report it as six. Say it once.
-if [ "$ENV_MISSING" = "1" ]; then
+if [ "$ENV_MISSING" = "1" ] && [ "$USE_SETUP" = "0" ]; then
   section "3-6. MODELS, QUANTILE FOREST, GAUSSIAN PROCESS, PIPELINE PARITY"
   say ""
-  say "  NOT CHECKED. env_test does not exist, so there is no interpreter with"
-  say "  torch, gpytorch, quantile_forest or ngboost in it. Running these anyway"
-  say "  reports eight launch blockers that are all the same missing environment,"
-  say "  which is worse than reporting nothing."
+  say "  NOT CHECKED. env_test does not exist and --no-setup was passed, so nothing"
+  say "  built it. Running these anyway reports eight launch blockers that are all"
+  say "  the same missing environment, which is worse than reporting nothing."
   say ""
-  say "  Rebuild the environment, then run this again. Sections 1, 2 and 7 do not"
-  say "  need it and are still worth reading."
+  say "  Run this WITHOUT --no-setup and setup.sh will build the environment, which"
+  say "  is how it is meant to be made. Allow at least an hour if it is in a job."
   # Only the job environment is dropped. The second interpreter is a separate
   # install and may still be usable, so it is left in rather than assumed dead.
   KEPT=()
@@ -467,7 +481,7 @@ section "8. THE QM9 JOB GENERATOR   (chat M)"
 # interpreter's pipeline accepts. It emitted --sigma and --noise-strategy for
 # weeks after both were refused by name, because nobody had run its output.
 GENTEST="$QSAR_ROOT/slurm_scripts_qm9_rerun/test_generate_scripts.py"
-if [ "$ENV_MISSING" = "1" ]; then
+if [ "$ENV_MISSING" = "1" ] && [ "$USE_SETUP" = "0" ]; then
   say "  NOT CHECKED. This test feeds every command the generator writes through"
   say "  the training program's own settings reader, which means importing the"
   say "  pipeline. With env_test absent the import fails, and a failed import is"
@@ -497,12 +511,13 @@ section "WHAT THIS MEANS"
 say ""
 say "  Read the exit codes above. In order of what stops a launch:"
 say ""
-if [ "$ENV_MISSING" = "1" ]; then
-  say "   * env_test DOES NOT EXIST. That is the only finding this run can make."
+if [ "$ENV_MISSING" = "1" ] && [ "$USE_SETUP" = "0" ]; then
+  say "   * env_test DOES NOT EXIST and --no-setup stopped anything building it."
+  say "                        That is the only finding this run can make."
   say "                        Sections 3 to 6 and 8 all need an interpreter with the"
-  say "                        modelling packages, so none of them ran. Rebuild the"
-  say "                        environment and run this again; nothing else here is"
-  say "                        evidence of anything until you do."
+  say "                        modelling packages, so none of them ran. Re-run without"
+  say "                        --no-setup and setup.sh will build it; nothing else here"
+  say "                        is evidence of anything until it exists."
   say ""
 fi
 say "   * Section 5 FAIL  -> every Gaussian-process task dies silently. Fix before submitting"
