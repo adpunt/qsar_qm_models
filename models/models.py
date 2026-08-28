@@ -1848,6 +1848,131 @@ def _held_out_noise_columns(train_noise, n_rows, y_pred=None):
     return out
 
 
+def score_validation_molecules(
+        predict, x_val, train_noise, args, s, rep, iteration, file_no,
+        model_name, support_model=None, loss_name=None,
+        y_pred_std_calibrated=None, temperature=None,
+        restore_torch_rng=False):
+    """Score the held-out VALIDATION molecules with the model that is already fitted.
+
+    A molecule can answer "does the uncertainty find the corrupted labels?" when
+    two things hold: no model fitted it, and the injector recorded the noise it
+    received. Out-of-fold scoring buys the first at the price of `oof_folds`
+    extra fits per model. A validation molecule has both for free -- since
+    2026-08-27 no model stacks validation into its training set, and validation
+    carries its own independently drawn noise, recorded per molecule in the
+    provenance file exactly as the training rows are (RERUN_PLAN.md 13 chat O).
+
+    This writes those rows. It is a PREDICTION with the outer model, not a refit,
+    so it costs one forward pass.
+
+    `predict(x_score)` returns `(mean, std)` or
+    `(mean, std, aleatoric_var_or_None, epistemic_var_or_None)` -- the same
+    contract `oof_predict` uses, so a caller can hand over the same closure shape.
+
+    TWO LEAKS, AND THE CALLER SHOULD KNOW WHICH IT HAS.
+
+      * The four neural families choose when to stop training by watching these
+        molecules, so their error here is optimistic. That is real and it is
+        exactly what a comparison against the out-of-fold rows is looking for.
+      * Temperature calibration is fitted on validation for several families.
+        It is ONE multiplier over every molecule, so it cannot change any
+        ranking; every rank statistic reads `y_pred_std_uncalibrated` and is
+        untouched. Coverage is not a rank statistic and stays on the test rows.
+
+    UNITS are the writer's, identical to a test row and to a train_oof row:
+    predictions and uncertainties standardised, the noise columns in raw label
+    units.
+
+    Returns the number of rows written, or None when nothing was written.
+    """
+    if train_noise is None:
+        return None
+    if not getattr(args, 'uncertainty', False):
+        return None
+    if not getattr(args, 'score_validation', False):
+        return None
+
+    rows = train_noise.splits.get('val')
+    if not rows:
+        print(f"      [val {model_name}] the provenance has no validation rows -- "
+              f"writing none rather than inventing them.", flush=True)
+        return None
+
+    x = np.asarray(x_val)
+    n = len(rows['epsilon_raw'])
+    if len(x) != n:
+        raise RuntimeError(
+            f"validation scoring for {model_name}: the model is asked to score "
+            f"{len(x)} rows but the recorded noise covers {n} validation "
+            f"molecules. The two must be the same molecules in the same order -- "
+            f"anything else attributes one molecule's noise to another, which is "
+            f"the original QM9 defect.")
+
+    # A stochastic forward pass consumes the GLOBAL torch generator, so without
+    # this snapshot the MAIN model at every later noise level would be
+    # initialised differently and this job's R2 would silently disagree with a
+    # run made without --score-validation. Same reason as the out-of-fold pass.
+    if restore_torch_rng:
+        _tstate = torch.get_rng_state()
+        _cstate = (torch.cuda.get_rng_state_all()
+                   if torch.cuda.is_available() else None)
+    try:
+        out = predict(x)
+    finally:
+        if restore_torch_rng:
+            torch.set_rng_state(_tstate)
+            if _cstate is not None:
+                torch.cuda.set_rng_state_all(_cstate)
+    if len(out) == 4:
+        mean, unc, alea, epis = out
+    else:
+        mean, unc = out
+        alea = epis = None
+    mean = np.asarray(mean, dtype=float).ravel()
+    unc = np.asarray(unc, dtype=float).ravel()
+
+    if not np.isfinite(unc).any():
+        print(f"      [val {model_name}] the fitted model produced no per-molecule "
+              f"uncertainty on validation -- writing no rows.", flush=True)
+        return None
+
+    pattern_pred = train_noise.pattern_pred_from_standardised(
+        _fill_non_finite(mean), rows['noise_pattern_raw'])
+
+    save_uncertainty_values(
+        y_pred_mean=mean,
+        y_pred_std=unc,
+        y_true_original=rows['y_clean_raw'],
+        y_true_noisy=rows['y_written'],
+        filepath=args.filepath,
+        model_name=model_name,
+        rep=rep,
+        sigma_noise=s,
+        iteration=iteration,
+        file_no=file_no,
+        y_pred_std_calibrated=y_pred_std_calibrated,
+        temperature=temperature,
+        aleatoric_var=alea,
+        epistemic_var=epis,
+        support_model=support_model or model_name,
+        loss_name=loss_name,
+        # ONE fit produced every row, so a term that is one number per fit is
+        # constant down the whole column. That is the writer guard's default and
+        # no block labels are needed.
+        support_blocks=None,
+        split='validation',
+        injected_noise=rows['epsilon_raw'],
+        canonical_smiles=rows['canonical_smiles'],
+        noise_scale=rows['noise_scale_raw'],
+        noise_pattern=rows['noise_pattern_raw'],
+        noise_pattern_pred=pattern_pred,
+        noise_type=getattr(train_noise, 'noise_type', None),
+    )
+    print(f"      [val {model_name}] wrote {n} validation rows from the outer fit "
+          f"(no refit)", flush=True)
+    return n
+
 def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep, iteration, iteration_seed, model_type, file_no, y_test_original, trial=None, train_noise=None):
     from quantile_forest import RandomForestQuantileRegressor
     params = {}
@@ -1977,6 +2102,21 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             score_training_molecules_out_of_fold(
                 _fp, x_train, y_train, train_noise, args, s, rep, iteration,
                 iteration_seed, file_no, model_type, val_slice=None)
+
+            # The VALIDATION molecules, scored by the forest that is ALREADY
+            # fitted. No forest saw them and the injector recorded the noise each
+            # one received, so they answer the same question the rows above
+            # answer -- at one prediction instead of --oof-folds extra fits
+            # (RERUN_PLAN.md 13 chat O).
+            def _pv(x_score):
+                vq16, vq50, vq84 = model.predict(
+                    x_score, quantiles=[0.16, 0.5, 0.84]).T
+                _a, _e = _forest_split(model, x_train, y_train, x_score)
+                return vq50, (vq84 - vq16) / 2, _a, _e
+
+            score_validation_molecules(
+                _pv, x_val, train_noise, args, s, rep, iteration, file_no,
+                model_type)
     else:
         y_pred = model.predict(x_test)
 
@@ -2017,6 +2157,16 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
             score_training_molecules_out_of_fold(
                 _fp, x_train, y_train, train_noise, args, s, rep, iteration,
                 iteration_seed, file_no, model_type, val_slice=None)
+
+            # The VALIDATION molecules, from the fitted forest. See the quantile
+            # branch above.
+            def _pv(x_score):
+                _a, _e = _forest_split(model, x_train, y_train, x_score)
+                return (model.predict(x_score), np.sqrt(_a + _e), _a, _e)
+
+            score_validation_molecules(
+                _pv, x_val, train_noise, args, s, rep, iteration, file_no,
+                model_type)
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, model_type, rep, args.sample_size, metrics, params_source)
@@ -2218,6 +2368,21 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         score_training_molecules_out_of_fold(
             _fp, x_val_train, y_val_train, train_noise, args, s, rep, iteration,
             iteration_seed, file_no, 'ngboost', val_slice=None)
+
+        # The VALIDATION molecules, from the fitted model. It is held out of the
+        # fit -- the branch at the top of this function keeps it for calibration
+        # only -- and its noise is recorded, so it answers the same question as
+        # the rows above without the inner fits (RERUN_PLAN.md 13 chat O). The
+        # temperature fitted on these same molecules is deliberately NOT passed:
+        # it is one multiplier, it cannot change a rank, and every statistic here
+        # is a rank statistic read off the uncalibrated column.
+        def _pv(x_score):
+            dist = model.pred_dist(x_score)
+            _scale = np.asarray(dist.scale, dtype=float)
+            return dist.loc, _scale, _scale ** 2, None
+
+        score_validation_molecules(
+            _pv, x_val, train_noise, args, s, rep, iteration, file_no, 'ngboost')
 
     return metrics[3]
 
@@ -2624,6 +2789,25 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
             _fp, x_train_full, y_train_full, train_noise, args, s, rep, iteration,
             iteration_seed, file_no, model_name, val_slice=None,
             restore_torch_rng=True)
+
+        # The VALIDATION molecules, from the fitted process. This is the family
+        # the out-of-fold pass was built for -- a GP has zero posterior variance
+        # at its OWN training inputs -- and validation is not a training input,
+        # so the objection does not apply to it (RERUN_PLAN.md 13 chat O).
+        def _pv(x_score):
+            xs = torch.from_numpy(np.asarray(x_score)).double()
+            with torch.no_grad():
+                preds = model(xs)
+                observed = likelihood(preds)
+                _alea, _epis, _tot = decompose_gp(
+                    np.clip(preds.variance.numpy(), 1e-12, None),
+                    float(likelihood.noise.item()))
+                return (observed.mean.numpy(),
+                        np.sqrt(observed.variance.numpy()), _alea, _epis)
+
+        score_validation_molecules(
+            _pv, x_val, train_noise, args, s, rep, iteration, file_no,
+            model_name, restore_torch_rng=True)
 
     return metrics[3]
 
@@ -3129,6 +3313,25 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             iteration_seed, file_no, full_model_name,
             support_model=model_name, loss_name=loss_name,
             val_slice=None, restore_torch_rng=True)
+
+        # The VALIDATION molecules, from the network that is ALREADY trained.
+        # THE LEAK, NAMED: this family stops training by watching these
+        # molecules, so its error on them is optimistic. That is not a defect
+        # here -- it is the thing a comparison against the out-of-fold rows above
+        # is looking for (RERUN_PLAN.md 13 chat O). Temperature is not passed:
+        # it is one multiplier, fitted on half of these same molecules, and it
+        # cannot change any ranking.
+        def _pv(x_score):
+            model.eval()
+            xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
+            _mean, _a, _e, _t = sample_network_split(
+                model, xs, num_samples, loss_name)
+            return _mean, np.sqrt(np.asarray(_t, dtype=float)), _a, _e
+
+        score_validation_molecules(
+            _pv, x_val, train_noise, args, s, rep, iteration, file_no,
+            full_model_name, support_model=model_name, loss_name=loss_name,
+            restore_torch_rng=True)
 
     return metrics[3]
 
@@ -3859,6 +4062,25 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             iteration_seed, file_no, full_model_name,
             support_model=model_name, loss_name=loss_name,
             val_slice=None, restore_torch_rng=True)
+
+        # The VALIDATION molecules, from the network that is ALREADY trained.
+        # THE LEAK, NAMED: this family stops training by watching these
+        # molecules, so its error on them is optimistic. That is not a defect
+        # here -- it is the thing a comparison against the out-of-fold rows above
+        # is looking for (RERUN_PLAN.md 13 chat O). Temperature is not passed:
+        # it is one multiplier, fitted on half of these same molecules, and it
+        # cannot change any ranking.
+        def _pv(x_score):
+            model.eval()
+            xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
+            _mean, _a, _e, _t = sample_network_split(
+                model, xs, num_samples, loss_name)
+            return _mean, np.sqrt(np.asarray(_t, dtype=float)), _a, _e
+
+        score_validation_molecules(
+            _pv, x_val, train_noise, args, s, rep, iteration, file_no,
+            full_model_name, support_model=model_name, loss_name=loss_name,
+            restore_torch_rng=True)
 
     return metrics[3]
 
@@ -7909,7 +8131,11 @@ def train_heteroscedastic_gp(
     # the out-of-fold pass. Written as a function rather than inline because the
     # out-of-fold pass has to build exactly the same model; two copies of a fit
     # is how the rest of this file drifted (RERUN_PLAN.md 5.5).
-    def _fit_het_gp(x_fit, y_fit, x_score, announce=False):
+    def _fit_het_gp(x_fit, y_fit, x_score, announce=False, also_score=None):
+        """Fit once, score `x_score`, and optionally score `also_score` from the
+        SAME fit -- which is how the validation molecules get a prediction
+        without a second fit (RERUN_PLAN.md 13 chat O). With `also_score` the
+        return gains a fifth element holding that second set's four arrays."""
         xf = torch.tensor(np.asarray(x_fit), dtype=torch.float32).to(device)
         yf = torch.tensor(np.asarray(y_fit), dtype=torch.float32).to(device)
         xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
@@ -7967,10 +8193,31 @@ def train_heteroscedastic_gp(
             noise_var = noise_net(xs).cpu().numpy()
 
         alea, epis, total = decompose_hetero_gp(latent_var, noise_var)
-        return mean, np.sqrt(total), alea, epis
+        if also_score is None:
+            return mean, np.sqrt(total), alea, epis
 
-    pred_mean, total_std, aleatoric_var, epistemic_var = _fit_het_gp(
-        x_train, y_train, x_test, announce=True)
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            xa = torch.tensor(np.asarray(also_score),
+                              dtype=torch.float32).to(device)
+            post_a = gp(xa)
+            mean_a = post_a.mean.cpu().numpy()
+            latent_a = post_a.variance.cpu().numpy()
+            noise_a = noise_net(xa).cpu().numpy()
+        alea_a, epis_a, total_a = decompose_hetero_gp(latent_a, noise_a)
+        return (mean, np.sqrt(total), alea, epis,
+                (mean_a, np.sqrt(total_a), alea_a, epis_a))
+
+    # The validation molecules are scored from the SAME fit as the test
+    # molecules, so asking for them costs a forward pass and no refit.
+    _want_val = (train_noise is not None and getattr(args, 'uncertainty', False)
+                 and getattr(args, 'score_validation', False))
+    _fit_out = _fit_het_gp(x_train, y_train, x_test, announce=True,
+                           also_score=x_val if _want_val else None)
+    if _want_val:
+        pred_mean, total_std, aleatoric_var, epistemic_var, _val_scores = _fit_out
+    else:
+        pred_mean, total_std, aleatoric_var, epistemic_var = _fit_out
+        _val_scores = None
 
     # Calculate metrics
     metrics = calculate_regression_metrics(y_test, pred_mean, logging=True)
@@ -8014,6 +8261,12 @@ def train_heteroscedastic_gp(
             _fp, x_train, y_train, train_noise, args, s, rep, iteration,
             iteration_seed, file_no, model_name, val_slice=None,
             restore_torch_rng=True)
+
+        # The VALIDATION molecules, already scored by the outer fit above.
+        if _val_scores is not None:
+            score_validation_molecules(
+                lambda _x: _val_scores, x_val, train_noise, args, s, rep,
+                iteration, file_no, model_name)
 
     return metrics[3]
 

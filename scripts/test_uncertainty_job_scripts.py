@@ -251,10 +251,27 @@ def the_run_can_still_answer_both_questions(_runner, gen):  # noqa: D401
 
 def the_rosters_match_the_runner(runner, gen):
     """Models, representations and datasets the generator asks for must exist."""
-    assert list(gen.MODELS) == list(runner.UNCERTAINTY_MODELS), (
-        f'the generator writes scripts for {list(gen.MODELS)}, but the runner '
-        f'cross-fits {list(runner.UNCERTAINTY_MODELS)} — a model outside that list is '
-        f'refused, and a model missing from it never gets an out-of-fold pass')
+    # Matched the way the RUNNER matches, by prefix, not by set equality.
+    # `_emits_uncertainty` treats 'GP-Hetero' as a 'GP' and 'VBLL-Full-Hetero'
+    # as a 'VBLL-Full', so a decorated variant does get the out-of-fold pass --
+    # set equality here would have refused three models the runner cross-fits
+    # perfectly well (RERUN_PLAN.md 5.5).
+    not_cross_fitted = [m for m in gen.MODELS
+                        if not runner._emits_uncertainty(m)]
+    assert not not_cross_fitted, (
+        f'the generator writes scripts for {not_cross_fitted}, which the runner '
+        f'does not recognise as emitting a per-molecule uncertainty '
+        f'(UNCERTAINTY_MODELS = {list(runner.UNCERTAINTY_MODELS)}, matched by '
+        f'prefix) — those models would get no out-of-fold pass and no training '
+        f'rows at all')
+    unqueued = [m for m in runner.UNCERTAINTY_MODELS if m not in gen.MODELS]
+    assert not unqueued, (
+        f'the runner cross-fits {unqueued} but no job script asks for them')
+    # Every generated model must also be one the runner can actually build.
+    buildable = set(runner.UNCERTAINTY_MODELS)
+    for m in gen.MODELS:
+        assert (m in buildable
+                or any(m.startswith(u + '-') for u in buildable)), m
     unknown = [r for r in gen.REPS if r not in runner.ALL_REPS]
     assert not unknown, f'representations the runner does not have: {unknown}'
     parser = runner.build_parser()

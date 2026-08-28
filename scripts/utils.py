@@ -342,7 +342,14 @@ UNCERTAINTY_COLUMNS = [
     "noise_type",
 ]
 
-VALID_SPLITS = ("test", "train_oof")
+# 'validation' was added 2026-08-28. A validation molecule satisfies the two
+# things a scored molecule has to satisfy -- no model fitted it, and the
+# injector recorded its noise draw -- so it can answer the same question a
+# train_oof row answers, without the extra fits (RERUN_PLAN.md 13 chat O).
+VALID_SPLITS = ("test", "train_oof", "validation")
+
+#: Splits whose labels were corrupted, so the recorded draw is mandatory.
+CORRUPTED_SPLITS = ("train_oof", "validation")
 
 
 def _per_row_values(value, n, name):
@@ -385,13 +392,17 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
     dead. The regression is gone.
 
     Args:
-        split: 'test' or 'train_oof'. A 'train_oof' row is scored by a model fitted
-            without that molecule, so y_true_original is the CLEAN label and the label
-            the model was trained on is y_true_original + injected_noise.
+        split: 'test', 'train_oof' or 'validation'. A 'train_oof' row is scored by a
+            model fitted without that molecule, so y_true_original is the CLEAN label
+            and the label the model was trained on is y_true_original + injected_noise.
+            A 'validation' row carries corrupted labels the same way, but no model
+            fitted it in the first place -- it is held out of every fit and scored
+            once, by the outer model, with no inner folds.
         injected_noise: the value the injector RECORDED for each molecule, written
             verbatim. When it is omitted, a test row gets exactly 0.0 and a train_oof
-            row raises -- a training row without its recorded noise cannot answer
-            anything about whether uncertainty finds the corrupted labels.
+            or validation row raises -- a row whose label was corrupted, without its
+            recorded noise, cannot answer anything about whether uncertainty finds the
+            corrupted labels.
         canonical_smiles: the molecule identifier. sample_idx is a row position and
             cannot link a molecule across models or noise levels.
         noise_scale: per-molecule amount of noise actually applied.
@@ -400,7 +411,8 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
             correlation is what removes the label-magnitude confound.
         noise_pattern_pred: the same shape recomputed from the model's own PREDICTED
             label, as a ceiling on what counts as detection.
-        oof_folds_ok: how many inner folds produced a value. Test rows get -1.
+        oof_folds_ok: how many inner folds produced a value. Test and validation
+            rows get -1: neither was cross-fitted.
         aleatoric_var, epistemic_var: the two components, as VARIANCES, from
             scripts/uncertainty_decomposition.py. This is the ONE place in the
             QM9 pipeline where a variance becomes a standard deviation, which is
@@ -429,18 +441,22 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
 
 
     if injected_noise is None:
-        if split == 'train_oof':
+        if split in CORRUPTED_SPLITS:
             raise ValueError(
-                "save_uncertainty_values: split='train_oof' requires injected_noise. "
-                "A training row without the noise the injector recorded for it cannot "
-                "answer whether uncertainty tracks the corruption; it must not be "
-                "reconstructed from the labels.")
+                f"save_uncertainty_values: split={split!r} requires injected_noise. "
+                "A row whose label WAS corrupted, but which does not carry the noise "
+                "the injector recorded for it, cannot answer whether uncertainty "
+                "tracks the corruption; it must not be reconstructed from the labels.")
         injected_noise_rows = [0.0] * n
     else:
         injected_noise_rows = _per_row_values(injected_noise, n, 'injected_noise')
 
     if oof_folds_ok is None:
-        oof_folds_ok_rows = [-1] * n if split == 'test' else [np.nan] * n
+        # -1 is 'this row was not cross-fitted'. It is the right value for a
+        # validation row as well as a test row: both are scored once, by the
+        # outer fit, and neither came from an inner fold.
+        oof_folds_ok_rows = ([-1] * n if split in ('test', 'validation')
+                             else [np.nan] * n)
     else:
         oof_folds_ok_rows = _per_row_values(oof_folds_ok, n, 'oof_folds_ok')
 

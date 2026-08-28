@@ -209,7 +209,29 @@ def main():
                 COLUMNS.append(c)
     COLUMNS += [c for c in ('task_model', 'task_dataset', 'task_rep', 'task_condition')
                 if c not in COLUMNS]
+    # The four columns added 2026-08-28: the two halves of the uncertainty and,
+    # for each, whether it varies per molecule or is one number per fit. The
+    # union above already carries them through without shifting anything, and a
+    # task file written before they existed is padded with blanks -- which reads
+    # exactly like a model that cannot produce them. Say which it is, here,
+    # rather than leaving the reader to guess from an empty column
+    # (RERUN_PLAN.md 5.5).
+    _SPLIT_COLUMNS = ('aleatoric_uncertainty', 'epistemic_uncertainty',
+                      'aleatoric_support', 'epistemic_support')
+    _with_split = 0
+    for f in unc_files:
+        try:
+            cols = set(pd.read_csv(f, nrows=0).columns)
+        except Exception:
+            continue
+        if set(_SPLIT_COLUMNS) <= cols:
+            _with_split += 1
     print(f"  column union across task files: {len(COLUMNS)} columns")
+    print(f"  uncertainty split: {_with_split}/{len(unc_files)} task files carry "
+          f"all four component columns"
+          + ("" if _with_split == len(unc_files)
+             else "  <-- the rest predate them and are padded with blanks, "
+                  "which is NOT the same as a model that has no split"))
     _ragged = set()
 
     big = out / 'uncertainty.csv'

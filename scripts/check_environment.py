@@ -123,6 +123,14 @@ VALIDATION_MODELS = {
     "MLP-BNN-Full": (("torchbnn", "torchhk:transform_model", "torchhk:transform_layer"), None),
     "VBLL-Full": (("torch",), None),
     "MLP-VBLL-Full": (("torch",), None),
+    # The three decomposition models, added 2026-08-28. Same packages as the
+    # models they extend -- the noise head is written out on top of torch, and
+    # the heteroscedastic process is the same gauche ExactGP with a small
+    # network beside it (RERUN_PLAN.md 5.5e, 5.5f).
+    "GP-Hetero": (("gpytorch", "gauche",
+                   "botorch.fit:fit_gpytorch_mll|fit_gpytorch_model"), None),
+    "VBLL-Full-Hetero": (("torch",), None),
+    "MLP-VBLL-Full-Hetero": (("torch",), None),
 }
 
 # Packages worth reporting a version for whatever was asked.

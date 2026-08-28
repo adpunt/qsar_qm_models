@@ -403,7 +403,8 @@ def test_the_heteroscedastic_models_claim_both_terms_per_molecule():
     for name in ('heteroscedastic_gp', 'het_gp_rbf',
                  'dnn_bnn_full_variational_hetero',
                  'mlp_bnn_full_variational_hetero',
-                 'Hetero-GP', 'Hetero-VBLL-Full', 'MLP-Hetero-VBLL-Full'):
+                 'GP-Hetero', 'GP-Tanimoto-Hetero',
+                 'VBLL-Full-Hetero', 'MLP-VBLL-Full-Hetero'):
         assert SUPPORT[name] == (PER_MOLECULE, PER_MOLECULE), name
 
 

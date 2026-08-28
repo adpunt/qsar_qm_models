@@ -128,6 +128,22 @@ MODELS = {
     'VBLL-Full':      (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'MLP-BNN-Full':   (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'MLP-VBLL-Full':  (2, 8,  '128G', 47, '100 stochastic forward passes'),
+    # -----------------------------------------------------------------------
+    # THE DECOMPOSITION MODELS, added 2026-08-28.
+    #
+    # Not one model above reports BOTH halves of its uncertainty per molecule:
+    # the quantile forest does now, but the Gaussian process's data half is one
+    # number for the whole fit, the two variational models' likewise, and the
+    # two plain Bayesian networks have no data half at all. A constant
+    # correlates with per-molecule injected noise at exactly zero however good
+    # the model is, so a null read off those columns is a property of the model
+    # (RERUN_PLAN.md 5.5a point 5). These three can answer the question.
+    # -----------------------------------------------------------------------
+    'GP-Hetero':      (1, 8,  '128G', 47, 'the same ExactGP with a network predicting the '
+                                          'observation noise per molecule; measured free on QM9 '
+                                          '(RERUN_PLAN.md 5.5e)'),
+    'VBLL-Full-Hetero':     (2, 8, '128G', 47, 'VBLL with a noise head (RERUN_PLAN.md 5.5f)'),
+    'MLP-VBLL-Full-Hetero': (2, 8, '128G', 47, 'VBLL-beta with a noise head'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
 # A subset of the runner's ALL_REPS. The four the uncertainty work has always

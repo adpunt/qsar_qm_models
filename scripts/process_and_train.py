@@ -386,6 +386,21 @@ def parse_arguments():
                              "many fits instead of --oof-folds. Molecules in a fold that "
                              "was not run are written as NaN, so the file says which "
                              "molecules carry an out-of-fold score.")
+    parser.add_argument("--score-validation", action='store_true',
+                        help="Also score the held-out VALIDATION molecules with the "
+                             "model that is already fitted, and write them as "
+                             "split='validation' rows. A validation molecule meets the "
+                             "two conditions a scored molecule has to meet -- no model "
+                             "fitted it, and the injector recorded the noise it "
+                             "received -- so it can answer the same question as a "
+                             "train_oof row at one forward pass instead of --oof-folds "
+                             "extra fits. It needs the per-molecule provenance, which "
+                             "is loaded when --oof-folds is set; pass both to write "
+                             "both routes from one run (RERUN_PLAN.md 13 chat O). "
+                             "The four neural families early-stop on these molecules, "
+                             "so their error here is optimistic; the temperature is "
+                             "fitted on them too but is one multiplier and cannot "
+                             "change a rank.")
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
@@ -569,6 +584,12 @@ def parse_arguments():
             "--oof-folds needs -u/--uncertainty: the out-of-fold pass exists to write "
             "per-molecule uncertainty for the TRAINING molecules, and with uncertainty "
             "off there is nowhere for it to go."
+        )
+    if args.score_validation and not args.uncertainty:
+        parser.error(
+            "--score-validation needs -u/--uncertainty: it exists to write "
+            "per-molecule uncertainty for the VALIDATION molecules, and with "
+            "uncertainty off there is nowhere for it to go."
         )
 
     return args
@@ -2791,7 +2812,9 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
     # Only when the out-of-fold pass is on: it is the only consumer, and reading
     # the file otherwise would refuse older provenance for no reason.
     noise_record = None
-    if getattr(args, 'oof_folds', 0) > 1:
+    # The per-molecule provenance is what BOTH routes read: the out-of-fold pass
+    # needs the training draws, and --score-validation needs the validation ones.
+    if getattr(args, 'oof_folds', 0) > 1 or getattr(args, 'score_validation', False):
         noise_record = TrainingNoiseRecord.load(
             provenance_path, manifest_path, scaffold_groups, s,
             censor_side=getattr(args, 'censor_side', None))
