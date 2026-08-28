@@ -61,6 +61,15 @@ HEADROOM = 3.0
 # on top.
 QRF_FROM_RF = 3.5
 
+# Which partition a script names. The author confirmed 2026-08-28 that a 60-hour
+# request is fine on `long`, so NGBoost is left as one array rather than split by
+# representation to dodge its wall clock.
+#
+# 48 is an ASSUMPTION about where `medium` stops, not something read from the
+# cluster. It only decides which partition the generated header suggests, and
+# --medium-max-hours corrects it without touching anything else.
+MEDIUM_MAX_HOURS = 48
+
 
 def _rosters():
     spec = importlib.util.spec_from_file_location(
@@ -110,12 +119,12 @@ SCRIPT = '''#!/bin/bash
 #                 VALIDATION split of one scaffold split of {sample_size}
 #                 molecules. No folds. Clean labels.
 #
-# Wall clock is {hours}h, from the MEASURED seconds for this model's slowest
+# Wall clock is {hours}h on `{partition}`, from the MEASURED seconds for this model's slowest
 # representation ({slowest_rep}, {slowest_s:.0f}s per fit) x {n_fits} fits x {headroom}
 # headroom. Nothing here is a guess; see results/tuning_local/timing.csv.
 #
 # --account and --partition are LIVE STATE; pass them at submit time:
-#   sbatch --account=stat-cadd --partition=medium --array=0-{last}%{throttle} {script_name}
+#   sbatch --account=stat-cadd --partition={partition} --array=0-{last}%{throttle} {script_name}
 #
 # Afterwards, and NOT optional -- a winner picked on the split that chose it
 # proves nothing (RERUN_PLAN.md 5.7i):
@@ -218,6 +227,11 @@ def main():
     ap.add_argument('--cpus', type=int, default=8)
     ap.add_argument('--mem', default='32G')
     ap.add_argument('--throttle', type=int, default=6)
+    ap.add_argument('--medium-max-hours', type=int, default=MEDIUM_MAX_HOURS,
+                    help=f'Longest request the medium partition takes; anything '
+                         f'above it is written for long (default '
+                         f'{MEDIUM_MAX_HOURS}, an assumption, not read from the '
+                         f'cluster).')
     ap.add_argument('--models', nargs='+', default=None)
     ap.add_argument('--qsar-dir', default=QSAR_DIR)
     ap.add_argument('--out-dir', default=str(_HERE))
@@ -258,6 +272,7 @@ def main():
         # per-representation sum, not that number times the task count.
         total_core_hours += sum(seconds.values()) * n_fits / 3600
 
+        partition = 'medium' if hours <= args.medium_max_hours else 'long'
         name = f'tune_{model}.sh'
         (out_dir / name).write_text(SCRIPT.format(
             model=model,
@@ -277,10 +292,11 @@ def main():
             slowest_rep=slowest_rep,
             slowest_s=slowest_s,
             script_name=name,
+            partition=partition,
             qsar_dir=args.qsar_dir,
         ))
         os.chmod(out_dir / name, 0o755)
-        written.append((model, len(reps), hours, slowest_rep, slowest_s))
+        written.append((model, len(reps), hours, partition, slowest_rep, slowest_s))
 
     if unmeasured:
         raise SystemExit(
@@ -295,14 +311,18 @@ def main():
     print(f'{len(written)} script(s) in {out_dir}')
     print(f'  {args.settings} settings + 1 default = {n_fits} fits per pairing')
     print(f'  sample size {args.sample_size}, seed {args.seed}\n')
-    for model, n_rep, hours, srep, ss in written:
+    for model, n_rep, hours, partition, srep, ss in written:
         print(f'  {model:28s} {n_rep} task(s)  --time={hours}:59:00  '
-              f'(slowest {srep} at {ss:.0f}s/fit)')
+              f'--partition={partition:6s} (slowest {srep} at {ss:.0f}s/fit)')
     print(f'\n  total compute across every task: '
           f'{total_core_hours:.1f} core-hours before headroom')
-    print(f'\nSubmit each with:')
-    print(f'  sbatch --account=stat-cadd --partition=medium '
-          f'--array=0-<n-1>%{args.throttle} tune_<model>.sh')
+    long_ones = [m for m, _, _, p, _, _ in written if p == 'long']
+    if long_ones:
+        print(f'  needs the long partition: {", ".join(long_ones)}')
+    print(f'\nSubmit each with the partition named in its own header:')
+    for model, n_rep, hours, partition, _, _ in written:
+        print(f'  sbatch --account=stat-cadd --partition={partition} '
+              f'--array=0-{n_rep - 1}%{args.throttle} tune_{model}.sh')
 
 
 if __name__ == '__main__':

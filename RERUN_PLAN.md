@@ -4875,6 +4875,35 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7j ✅ SETTLED 2026-08-28 — the sweep runs on the cluster, and NGBoost stays whole
+
+The local timing pass settled the shape of this by measurement rather than argument. One fit of
+each pairing at its shared default, at the production sample size of 10,000 molecules:
+
+| family | seconds per fit, across its representations |
+|---|---|
+| xgboost | 12, 16, 21, 21, 111, 149 |
+| lgb | 6, 23, 27, 34, 75, 143 |
+| svm | 15, 27, 55, 69, 109, 135 |
+| dnn | 33, 40, 98, 103, 254, 382 |
+| rf | 27, 65, 89, 146, 261, 377 |
+| mlp | 71, 84, 88, 121, 302, 373 |
+| dnn_bnn_full | 315, 426, 474, 477, 911, 974 |
+| mlp_bnn_full | 362, 507, 569, 875, 925, 1504 |
+| **ngboost** | 184, 517, 570, 992, **2931, 5443** |
+
+**NGBoost is the whole bill.** Its six fits cost 177 minutes against 16 for the forest, and one of
+them — ChemBERTa — is 91 minutes on its own. 500 boosting stages against 8,000 molecules.
+
+At twelve settings per pairing that gives NGBoost a **60-hour** array. **The author confirmed
+2026-08-28 that 60 hours is fine on the `long` partition**, so it stays as one array of six and is
+NOT split by representation to dodge the wall clock, and its search is not shortened. Every other
+model fits inside `medium`.
+
+`slurm_scripts_tuning/generate_scripts.py` names the partition per script from the computed hours.
+The cutoff it uses, 48 hours, is an assumption about where `medium` stops rather than something read
+from the cluster; `--medium-max-hours` corrects it.
+
 #### 5.7i 🔴 A WINNER IS NOT A RESULT — THE TWO CONFIRMATION STAGES
 
 **This is where Optuna failed, and it is not a detail.** The search picks the best of N candidates
