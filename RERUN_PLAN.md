@@ -3632,6 +3632,47 @@ below is one replicate at two levels.
   keep leaf 1 and report the two forests as having no aleatoric term at all — which is honest, and
   which throws away the only per-molecule split available without re-fitting a network.
 
+### 5.5d 🔴 MEASURED 2026-08-28 — "aleatoric rises, epistemic holds still" is WRONG for a bagged model
+
+I proposed question 7 as *does the aleatoric term rise with injected label noise while the
+epistemic term stays flat*. **The second half is false for the forests, and the statistic I
+proposed to rescue it does not survive either.**
+
+Real QM9, 4,000 training molecules, nine descriptors, 2,000 held out, ten replicates per level,
+`min_samples_leaf = 5`:
+
+| level | R² | aleatoric | epistemic | aleatoric share |
+|---|---|---|---|---|
+| 0.0 | 0.6439 | 0.1531 | 0.2558 | 0.3744 |
+| 0.2 | 0.6402 | 0.1689 | 0.2780 | 0.3779 |
+| 0.4 | 0.6291 | 0.2172 | 0.3438 | 0.3872 |
+| 0.6 | 0.6127 | 0.2973 | 0.4543 | 0.3955 |
+| 0.8 | 0.5918 | 0.4088 | 0.6104 | 0.4011 |
+| 1.0 | 0.5642 | 0.5515 | 0.8069 | 0.4060 |
+
+**Both terms rise, and they rise together.** At leaf 20 the same pattern holds with the share
+running 0.7182 to 0.7762. The share looked like the answer — monotone on real data at both leaf
+sizes — until it was checked on a synthetic linear set, where it runs the OTHER WAY, 0.5650 down to
+0.5208.
+
+**Why, and why it is not a bug.** Bootstrap resampling carries label noise into the trees twice:
+into the spread inside each leaf, which is the aleatoric term, and into where the trees choose to
+split at all, which moves the epistemic term. Which of the two races ahead depends on how stable
+the tree structure is under resampling, and that is a property of the dataset. So no ordering of
+the two is safe to assert for a bagged model.
+
+**What this changes.**
+
+- For the forests, the reportable statement is that both terms rise — with the components printed
+  side by side and never as a ratio alone (§0.6 guard 4).
+- **Question 7 has a clean answer only where the aleatoric term is a FITTED PREDICTION of the
+  observation noise rather than something that emerges from resampling.** That is the networks with
+  a variance output, and NGBoost. In those models the term is trained to be the noise, so its
+  response to injected noise is a test of the model rather than of the resampling scheme.
+- So the third part of the build — the variance output on the four Bayesian network families — is
+  not the expensive optional extra it looked like. **It is the only part under which question 7 has
+  an interpretable answer at all.**
+
 ---
 
 ### 5.6 The two representation repairs

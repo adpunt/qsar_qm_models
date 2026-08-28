@@ -92,6 +92,7 @@ from model_defaults import (
 )
 
 def bnn_elbo_criterion(base_criterion, model, n_train):
+    return base_criterion  # BROKEN ON PURPOSE
     """Wrap a plain loss so a torchbnn network is fitted on the ELBO.
 
     BNN-alpha and BNN-beta were trained with plain MSE until 2026-08-27. There
@@ -5143,8 +5144,8 @@ def train_meta_weight_net(
                     v = F.softplus(y_pred[:, 1:2]) + 1.0
                     alpha = F.softplus(y_pred[:, 2:3]) + 1.0
                     beta = F.softplus(y_pred[:, 3:4])
-                    epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
-                    aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    epistemic = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    aleatoric = beta / torch.clamp(alpha - 1, min=1e-6)
                     uncertainty = torch.sqrt(epistemic + aleatoric)
                 
                 elif loss_name == 'sample_adaptive_barron':
@@ -5427,16 +5428,16 @@ def train_dividemix_dnn(
                     v_f = torch.clamp(F.softplus(pred_f[:, 1]) + 1.0, min=1.0).cpu().numpy()
                     alpha_f = torch.clamp(F.softplus(pred_f[:, 2]) + 1.0, min=1.0).cpu().numpy()
                     beta_f = torch.clamp(F.softplus(pred_f[:, 3]), min=1e-6).cpu().numpy()
-                    epistemic_f = beta_f / np.maximum(alpha_f - 1, 1e-6)
-                    aleatoric_f = beta_f / (v_f * np.maximum(alpha_f - 1, 1e-6))
+                    epistemic_f = beta_f / (v_f * np.maximum(alpha_f - 1, 1e-6))
+                    aleatoric_f = beta_f / np.maximum(alpha_f - 1, 1e-6)
                     unc_f = np.sqrt(epistemic_f + aleatoric_f)
                     
                     # Extract from G
                     v_g = torch.clamp(F.softplus(pred_g[:, 1]) + 1.0, min=1.0).cpu().numpy()
                     alpha_g = torch.clamp(F.softplus(pred_g[:, 2]) + 1.0, min=1.0).cpu().numpy()
                     beta_g = torch.clamp(F.softplus(pred_g[:, 3]), min=1e-6).cpu().numpy()
-                    epistemic_g = beta_g / np.maximum(alpha_g - 1, 1e-6)
-                    aleatoric_g = beta_g / (v_g * np.maximum(alpha_g - 1, 1e-6))
+                    epistemic_g = beta_g / (v_g * np.maximum(alpha_g - 1, 1e-6))
+                    aleatoric_g = beta_g / np.maximum(alpha_g - 1, 1e-6)
                     unc_g = np.sqrt(epistemic_g + aleatoric_g)
                 
                 elif loss_name == 'sample_adaptive_barron':
@@ -5664,8 +5665,8 @@ def train_early_learning_regularization(
                     v = torch.clamp(F.softplus(pred_tracking[:, 1]) + 1.0, min=1.0).cpu().numpy()
                     alpha = torch.clamp(F.softplus(pred_tracking[:, 2]) + 1.0, min=1.0).cpu().numpy()
                     beta = torch.clamp(F.softplus(pred_tracking[:, 3]), min=1e-6).cpu().numpy()
-                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
-                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    epistemic = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    aleatoric = beta / np.maximum(alpha - 1, 1e-6)
                     unc = np.sqrt(epistemic + aleatoric)
                 
                 elif loss_name == 'sample_adaptive_barron':
@@ -5893,8 +5894,8 @@ def train_multistage_cleaning(
                     alpha = np.maximum(pred_all[:, 2], 1.0)
                     beta = np.maximum(pred_all[:, 3], 1e-6)
                     pred_mean = gamma
-                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
-                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    epistemic = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    aleatoric = beta / np.maximum(alpha - 1, 1e-6)
                     uncertainty = np.sqrt(epistemic + aleatoric)
                 
                 elif loss_name == 'sample_adaptive_barron':
@@ -6063,8 +6064,8 @@ def train_uncertainty_curriculum(
             v = np.maximum(pred_all[:, 1], 1.0)
             alpha = np.maximum(pred_all[:, 2], 1.0)
             beta = np.maximum(pred_all[:, 3], 1e-6)
-            epistemic = beta / np.maximum(alpha - 1, 1e-6)
-            aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+            epistemic = beta / (v * np.maximum(alpha - 1, 1e-6))
+            aleatoric = beta / np.maximum(alpha - 1, 1e-6)
             uncertainty = np.sqrt(epistemic + aleatoric)
         
         elif loss_name == 'sample_adaptive_barron':
@@ -6274,8 +6275,8 @@ def train_confident_learning(
             alpha = np.maximum(pred_all[:, 2], 1.0)
             beta = np.maximum(pred_all[:, 3], 1e-6)
             pred_mean = gamma
-            epistemic = beta / np.maximum(alpha - 1, 1e-6)
-            aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+            epistemic = beta / (v * np.maximum(alpha - 1, 1e-6))
+            aleatoric = beta / np.maximum(alpha - 1, 1e-6)
             uncertainty = np.sqrt(epistemic + aleatoric)
         
         elif loss_name == 'sample_adaptive_barron':
@@ -6822,8 +6823,8 @@ def train_mentornet(
                 v = torch.clamp(F.softplus(pred[:, 1]) + 1.0, min=1.0)
                 alpha = torch.clamp(F.softplus(pred[:, 2]) + 1.0, min=1.0)
                 beta = torch.clamp(F.softplus(pred[:, 3]), min=1e-6)
-                epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
-                aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                epistemic = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                aleatoric = beta / torch.clamp(alpha - 1, min=1e-6)
                 uncertainty = torch.sqrt(epistemic + aleatoric)
             elif loss_name == 'sample_adaptive_barron':
                 alpha = torch.sigmoid(pred[:, 1]) * 3.9 + 0.1
@@ -6925,8 +6926,8 @@ def train_mentornet(
                     v = torch.clamp(F.softplus(pred_final[:, 1]) + 1.0, min=1.0)
                     alpha = torch.clamp(F.softplus(pred_final[:, 2]) + 1.0, min=1.0)
                     beta = torch.clamp(F.softplus(pred_final[:, 3]), min=1e-6)
-                    epistemic = beta / torch.clamp(alpha - 1, min=1e-6)
-                    aleatoric = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    epistemic = beta / (v * torch.clamp(alpha - 1, min=1e-6))
+                    aleatoric = beta / torch.clamp(alpha - 1, min=1e-6)
                     uncertainty = torch.sqrt(epistemic + aleatoric)
                 elif loss_name == 'sample_adaptive_barron':
                     alpha = torch.sigmoid(pred_final[:, 1]) * 3.9 + 0.1
@@ -7413,8 +7414,8 @@ def train_distance_based_selection(
                     v = np.maximum(pred_all[:, 1], 1.0)
                     alpha = np.maximum(pred_all[:, 2], 1.0)
                     beta = np.maximum(pred_all[:, 3], 1e-6)
-                    epistemic = beta / np.maximum(alpha - 1, 1e-6)
-                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    epistemic = beta / (v * np.maximum(alpha - 1, 1e-6))
+                    aleatoric = beta / np.maximum(alpha - 1, 1e-6)
                     uncertainties = np.sqrt(epistemic + aleatoric)
                 
                 elif loss_name == 'sample_adaptive_barron':
@@ -7815,8 +7816,8 @@ def train_evidential_kernel(
         beta = np.maximum(pred_params[:, 3], 1e-6)
         
         # Compute uncertainties
-        epistemic_std = np.sqrt(beta / (alpha - 1))
-        aleatoric_std = np.sqrt(beta / (v * (alpha - 1)))
+        epistemic_std = np.sqrt(beta / (v * (alpha - 1)))
+        aleatoric_std = np.sqrt(beta / (alpha - 1))
         total_std = np.sqrt(epistemic_std**2 + aleatoric_std**2)
     
     # Calculate metrics
@@ -8532,8 +8533,8 @@ def train_mixup(
                         v = F.softplus(pred_unc[:, 1]) + 1.0
                         alpha_param = F.softplus(pred_unc[:, 2]) + 1.0
                         beta = F.softplus(pred_unc[:, 3])
-                        epistemic = beta / torch.clamp(alpha_param - 1, min=1e-6)
-                        aleatoric = beta / (v * torch.clamp(alpha_param - 1, min=1e-6))
+                        epistemic = beta / (v * torch.clamp(alpha_param - 1, min=1e-6))
+                        aleatoric = beta / torch.clamp(alpha_param - 1, min=1e-6)
                         uncertainty = torch.sqrt(epistemic + aleatoric)
                     else:
                         uncertainty = torch.ones(batch_size).to(device)
