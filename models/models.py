@@ -1079,7 +1079,7 @@ def apply_bayesian_transformation(model):
             # file cannot be changed from model_defaults.py, while every results
             # row carries a spec_hash asserting that it can (RERUN_PLAN.md 2.13).
             "prior_mu": BAYESIAN_DEFAULTS['bnn_prior_mu'],
-            "prior_sigma": 0.1,
+            "prior_sigma": BAYESIAN_DEFAULTS['bnn_prior_sigma'],
             "in_features": ".in_features",
             "out_features": ".out_features", 
             "bias": ".bias"
@@ -3375,8 +3375,6 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         model_name = model_type
 
     model.to(device)
-
-    criterion = get_loss_function(loss_name, **loss_kwargs)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
 
