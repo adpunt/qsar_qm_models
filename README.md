@@ -12,17 +12,20 @@ bits, computed in Python and carried through the record), **PDV**
 (`sns`, 1,024 substructure counts as uint16), **MHG-GNN**, **Avalon** and
 **ChemBERTa** (`DeepChem/ChemBERTa-77M-MTR`, 384 wide).
 
-Anything else is DELETED, not disabled. mol2vec went on 2026-08-26. One-hot
-SMILES and randomized SMILES went on 2026-08-28, with the tokenizer, the
-vocabulary, the record fields and the recurrent-model dispatch that was the only
-thing reading them. So did the bit-packed form of the descriptor vector, which
-used to hold the name `pdv` while the float32 form was called `continuous_pdv`.
+Anything else is refused by name, at the top of `main()` and again in
+`parse_mmap`, so no job can reach it.
 
-All four names are still refused by name, so a job script that still asks for one
-stops with a message rather than a KeyError two functions later. `continuous_pdv`
-is refused rather than treated as an alias, because `pdv` used to mean the other
-thing: a job script or a results file written before 2026-08-28 means the binary
-vector by it.
+**One-hot SMILES and randomized SMILES still build.** They are not in the study
+and will not be published, and the job generator never emits them — but the code
+stays, on the author's instruction of 2026-08-28. Not being called is the whole
+requirement.
+
+**Two things are deleted rather than disabled.** mol2vec, on 2026-08-26. And the
+bit-packed form of the descriptor vector, on 2026-08-28: it held the name `pdv`,
+which the study needs for the float32 vector, so deleting it was the only way to
+free the name. `continuous_pdv` — the old name for the float32 form — is refused
+rather than aliased, because `pdv` used to mean the binary one, so a job script
+or a results file written before that date means something else by it.
 Graph representations (GIN, GCN, GATv2, MPNN) exist for QM9 and are not in the
 job generator's roster.
 

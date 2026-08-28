@@ -97,13 +97,18 @@ after any resubmission; it does not duplicate.
   features. Together these are the RBF-versus-Tanimoto comparison, which
   separates "the GP is good" from "the kernel suits this representation".
 
-**Out by default, behind `--include-excluded`:** the conformal wrappers
-(ρ > 0.99 with their base models), the last-layer BNNs (no significant gain over
-base), the pre-VBLL variational BNNs (identical to last-layer — a bug), and the
-flexible-DNN architecture variants. `GLOBAL_MODELS_EXCLUDE` drops all of these
+**Out permanently, 2026-08-28:** the conformal wrappers. Not merely excluded —
+`-m conformal` and `-m conformal_hetero` are refused before any data is read, and
+the three entries are commented out of `EXCLUDED_MODELS`, so `--include-excluded`
+cannot bring them back (RERUN_PLAN.md §2.22).
+
+**Out by default, behind `--include-excluded`:** the last-layer BNNs (no
+significant gain over base), the pre-VBLL variational BNNs (identical to
+last-layer — a bug), and the flexible-DNN architecture variants. `GLOBAL_MODELS_EXCLUDE` drops all of these
 from **every** figure, so re-running them produces files nothing reads. They
-survive only in the no-exclusions supplementary table. Turning them on adds 8
-scripts and 144 tasks:
+survive only in the no-exclusions supplementary table. Turning them on adds 5
+scripts and 90 tasks — it was 8 and 144 before the three conformal entries were
+commented out:
 
 ```bash
 python generate_scripts.py --stage 0 --include-excluded   # 22 scripts, 384 tasks

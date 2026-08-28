@@ -2165,35 +2165,25 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
-### 2.24 ✅ 2026-08-28 — one-hot SMILES and randomized SMILES are deleted, not refused
+### 2.24 ⛔ 2026-08-28 — one-hot SMILES and randomized SMILES STAY IN THE CODE, uncalled
 
-**The author's instruction:** *"SMILES is not being run"*. It was not — both spellings were refused
-by name at the top of the run and again in the reader, and the generator never emitted them — but
-the machinery was all still there, and "still builds" is how a representation comes back.
+**The author's ruling, and it reverses what I did:** *"SMILES should not be deleted, just not
+called. It will not be published. do not delete it."*
 
-Gone from `rust/src/main.rs`: the `SmilesTokenizer` struct and its regex, `smiles_to_ohe`,
-`count_token_frequencies`, `trim_vocab`, the `max_vocab` config field, the `randomized_smiles`
-record field with its reader and writer, the one-hot writer block, and the vocabulary and
-maximum-sequence-length plumbing through `generate_aggregate_stats` → `preprocess_data` →
-`write_data`. `generate_aggregate_stats` returned five values and now returns the two it is named
-for; the standardisation constants are untouched and gate 4 still holds.
+I read *"SMILES is not being run"* as an instruction to remove it, deleted the tokenizer, the
+vocabulary, the record fields, the one-hot writer and reader and the recurrent-model dispatch in
+both halves, and removed the writer guard that went with the record field. **All of it is
+restored** (`rust/src/main.rs`, `rust/tests/writer_guards.rs`, `scripts/process_and_train.py` and
+the three test stubs, back to `053147a`). The writer guards are 6 again.
 
-Gone from `scripts/process_and_train.py`: `--max_vocab`, the length-prefixed randomized-SMILES
-field, both build sites, the three reader blocks, and the recurrent-model dispatch — which was the
-only thing that ever read either representation, and could not be reached by anything that still
-exists.
+**The standing position, so nobody re-derives it:** both spellings still BUILD and are **refused by
+name** — at the top of `main()` in `process_and_train.py` and again in `parse_mmap` — and the job
+generator never emits them, so no job can reach either. They are not in the study and will not be
+published. That is the whole requirement, and it is already met. Deletion is not part of it.
 
-**Both names stay in `DROPPED_REPS`.** They are deleted, so a job script that still asks for one
-must stop with a message rather than fail with a `KeyError` two functions later.
-
-**One guard was removed with the field it guarded.** `the_randomized_smiles_field_is_written_the_way_the_reader_reads_it`
-was added that same morning (`e6ce429`) for a real misalignment, and now tests a field that does not
-exist. It is deleted rather than left failing: a test that cannot pass is not a guard. The writer
-guards go from 6 to 5.
-
-**Green after the change:** `cargo test --release` — 28 noise gates and 5 writer guards, exit 0 —
-plus `test_record_alignment`, `test_embedding_storage`, `test_qm9_split_alignment`,
-`test_config_isolation`, the QM9 generator's own test, and `smoke_real_data` on real output.
+**What this does NOT cover.** The bit-packed descriptor vector is a different case and stays
+deleted: it held the name `pdv`, which the study now needs for the float32 vector (§2.21). Deleting
+it was the only way to free the name. mol2vec is also still deleted, from 2026-08-26.
 
 ### 2.23 🔴 FOUND AND FIXED 2026-08-28 — the launch smoke test failed a correct run, and contradicted a gate beside it
 
