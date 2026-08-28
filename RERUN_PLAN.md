@@ -8465,10 +8465,18 @@ noise there and the target is constant. And the rule is applied **within each re
 the verdict the conjunction across all six, because this project does not pool across
 representations. Both are written into the script's own docstring.
 
-**Verified on a real QM9 job, not asserted** (`qrf`, PDV, 400 molecules, levels 0.0 and 1.5,
-`--oof-folds 3 --score-validation`): both routes were written from one run; the analysis module reads
-both without a change; validation rows satisfy its one-scale check and satisfy
-`noise_scale = level × noise_pattern` to 4.6e-08, the same as a cross-fitted row.
+**Verified on real QM9 jobs, not asserted.** A check run at 400 molecules, PDV, levels 0.0 and 1.5,
+`--oof-folds 3 --score-validation`, was put through **every model path that gained a validation
+scorer** — `qrf`, `ngboost`, `gauche_rbf`, `het_gp`, `dnn_bnn_full`, `dnn_bnn_full_variational`,
+`mlp_bnn_full`, `mlp_bnn_full_variational`. **All eight exited 0 and all eight wrote validation
+rows** (80 test / 640 cross-fit / 80 validation each, 2026-08-28 04:27–05:34). The analysis module
+reads all eight together and computes both routes with no change to it; validation rows satisfy its
+one-scale check and satisfy `noise_scale = level × noise_pattern` to 4.6e-08, the same as a
+cross-fitted row.
+
+⚠️ **The check run's numbers are NOT the answer and must not be quoted as one.** 400 molecules
+leaves 40 in a validation cell, far below what the rule's interval needs. It proves the plumbing,
+nothing else. The verdict comes only from the 5,000-molecule run, where a validation cell holds 500.
 
 **🔴 Still open, and what each one waits on.**
 
