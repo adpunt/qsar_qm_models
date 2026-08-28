@@ -6579,6 +6579,7 @@ complete list. If it is not here it is not open from this session.**
 | 8 | ~~A7 the QM9 runbook~~ and the first audit's items for D and G | **verified fixed 2026-08-28** — the three validation scripts now carry the activation guard, all three generators call the environment probe, the orphaned Rust doc comment is retargeted, and the gate counts read 33 everywhere |
 | 9 | **The rank-versus-level charts** (§5.4a) | **chat J** |
 | 10 | **Which models and representations go deep** — NGBoost is locked on by a check that refuses to build without it | **the author, after the screen** |
+| 11 | **The uncertainty roster — which models and which representations the uncertainty runs use — is OPEN and stays open until the screen reports.** The generator's current 7 models × 4 representations is a typed-in default, not a measurement, and the author has said plainly they are not comfortable with it. The screen tests all seven models against **all six** representations, so Avalon and ChemBERTa can join and any model whose uncertainty says nothing can leave. **Nothing may quote a pair count as settled** — say "the same pairs as every other condition" | **the author, after the roster screen** |
 
 ---
 
