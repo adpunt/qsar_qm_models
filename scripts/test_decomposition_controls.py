@@ -157,6 +157,21 @@ def test_zero_level_keeps_the_shape_and_drops_the_amount():
             f"{condition}: labels moved at level 0")
 
 
+def test_absent_constant_and_undefined_are_three_different_things():
+    """They must not read the same in the output. A model with no such term
+    produced NOTHING. A constant term produced ONE number for the whole fit. An
+    undefined reading means the noise itself had no pattern to find, so there
+    was nothing to correlate against. Reading any of these as `the model found
+    nothing` is a claim about the model that the data does not support."""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'decomposition_controls.py')).read()
+    for label in ("'    (absent)'", "'  (constant)'", "' (undefined)'"):
+        assert label in src, f"{label} is no longer distinguished in the output"
+    assert "constant, rho = False, float('nan')" in src, (
+        "a term the model does not produce is being recorded as constant, which "
+        "says it produced one number when it produced none")
+
+
 def test_a_per_fold_constant_is_not_mistaken_for_a_varying_term():
     """The out-of-fold rows come from several fits, so a term that is one number
     per fit takes a different value in each fold. Judged down the whole column

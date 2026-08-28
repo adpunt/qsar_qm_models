@@ -633,8 +633,9 @@ def measure(models=None, conditions=CONDITIONS, level=0.6, n_molecules=2000,
                 for term, values, kind in (('aleatoric', alea, alea_kind),
                                            ('epistemic', epis, epis_kind)):
                     if values is None:
+                        # ABSENT, not constant: the model produced no such term.
                         v = None
-                        constant = True
+                        constant = False
                     else:
                         v = np.asarray(values, dtype=float)
                         good = ok & np.isfinite(v)
@@ -679,8 +680,11 @@ def measure(models=None, conditions=CONDITIONS, level=0.6, n_molecules=2000,
                     for ref_name in references:
                         def _fmt(t):
                             r = lookup(rows, name, condition, t, lvl, ref_name)
-                            return ('  (constant)' if r['is_constant']
-                                    else f"{r['spearman_vs_pattern']:+.4f}")
+                            if r['support'] == 'none':
+                                return '    (absent)'
+                            if r['is_constant']:
+                                return '  (constant)'
+                            return f"{r['spearman_vs_pattern']:+.4f}"
                         print(f"    {condition:<10} level {lvl:.1f}  "
                               f"vs {ref_name:<10} {name:<32} "
                               f"R2 {r2:+.4f}  aleatoric {_fmt('aleatoric')}  "
@@ -766,7 +770,11 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                     for term, values, kind in (('aleatoric', alea, alea_kind),
                                                ('epistemic', epis, epis_kind)):
                         if values is None:
-                            constant, rho = True, float('nan')
+                            # ABSENT, not constant. NGBoost has no model half at
+                            # all: one fit has no ensemble to disagree with.
+                            # Calling that 'constant' would say the model
+                            # produced one number, when it produced none.
+                            constant, rho = False, float('nan')
                         else:
                             v = np.asarray(values, dtype=float)
                             good = ok & np.isfinite(v)
@@ -788,8 +796,16 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                                  and r['noise_condition'] == condition
                                  and abs(r['level'] - lvl) < 1e-12
                                  and r['term'] == t][-1]
+                            # Three different things, and they must not read the
+                            # same: the model has no such term; the term is one
+                            # number for the whole fit; the noise itself has no
+                            # pattern to find.
+                            if r['support'] == 'none':
+                                return '    (absent)'
                             if r['is_constant']:
-                                return ' (constant)'
+                                return '  (constant)'
+                            if not r['pattern_varies']:
+                                return ' (undefined)'
                             if np.isnan(r['spearman_vs_pattern']):
                                 return ' (undefined)'
                             return f"{r['spearman_vs_pattern']:+.4f}"
