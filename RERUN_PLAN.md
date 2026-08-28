@@ -4731,6 +4731,21 @@ requirement is not met, that question cannot be answered and the run should not 
 | **Q5** | Does noisy training data make a model less sure about new molecules? | Mean predicted uncertainty against noise level — a **population-level** statement, and it must be labelled as one | Per (model, representation, noise type), across levels | Uncertainty magnitudes on a fixed scale — needs the standardisation fix (§2.4), which currently makes them shrink as noise rises |
 | **Q6** | With noisy training data, does uncertainty still rank which predictions to trust? | Spearman correlation between predicted uncertainty and absolute error **against the clean label** | Per (model, representation, noise type, level) | Clean test labels retained alongside noisy ones. Free — every run already produces both |
 
+| **Q7** | Does uncertainty track some KINDS of noise better than others? | The same two statistics as Q4 and Q6, read **across noise types** at one level: for each (dataset, model, representation) the correlation under each type, reported as a set and never averaged | Per (dataset, model, representation, level), one value per noise type | **All seven noise types in the uncertainty runs** — settled by the author 2026-08-28 and now the default (`slurm_scripts_uncertainty_rerun/generate_scripts.py`, 588 tasks). Three of the seven give some molecules more noise than others, so only those three can be compared on Q4; all seven can be compared on Q5 and Q6 |
+
+**Why Q7 exists, and it is the author's, 2026-08-28.** The seven noise types were chosen for the
+main grid on **accuracy** — which of them moves R². A kind of noise can barely move accuracy and
+still be the one a model is best, or worst, at noticing. That is a different property of the model
+and nothing has measured it. It is a result either way it comes out, and it costs 168 extra tasks
+on the uncertainty runs and nothing on the main grid.
+
+**One thing Q7 must not do.** Three of the seven — grouped-wider, censoring and outlier — give some
+molecules more noise than others. The other four give every molecule the same amount, so Q4 is
+undefined there rather than zero. A Q7 table that ranks all seven on the Q4 statistic would be
+ranking four undefined cells against three real ones. Q7 on the Q4 statistic is a comparison of
+**three**; Q7 on Q5 and Q6 is a comparison of seven. The gate on the job generator asserts at least
+three patterned types survive any future change to the set.
+
 **Two things this table settles.**
 
 Q4, Q5 and Q6 are three different questions and the paper has repeatedly fused them. Q5 is the
@@ -5772,7 +5787,7 @@ uncertainty).
 
 **Item 5, raised and settled 2026-08-27.** Those jobs never stated their conditions, so they
 inherited the runner's own list of seven — one of which, `outlier_p05`, the author had already
-retired. Naming them raised the real question: censoring runs on **about five
+retired. Naming them raised the real question: censoring runs on **a named subset of
 model-and-representation pairs** on QM9, not the full grid, and nothing said what it should do on
 the experimental datasets.
 
@@ -6190,25 +6205,27 @@ as their evidence.
 
 ---
 
-### 13.13 ✅ SETTLED 2026-08-27 — censoring runs on about five pairs, QM9 only
+### 13.13 ✅ SETTLED 2026-08-27 — censoring runs on a named subset of pairs, not the full grid
 
 **The author's instruction:** *"A SUPER SMALL set of model/rep pairs to test this with on QM9. Like
 5. Just to see the individual affects no need to run the full suite."*
 
-**Censoring comes off the full grid.** It runs on **about five model-and-representation pairs, on
-QM9, at all seven of its levels, 10 replicates.**
+**Censoring comes off the full grid.** It runs on **a small named subset of model-and-representation
+pairs, at all seven of its levels, 10 replicates.** The subset comes out of the screen; **no pairs are
+selected yet and no count is fixed** — the file holds the ceiling the generator enforces.
 
 | | Runs |
 |---|---|
 | Censoring as a full-grid condition (78 pairs) | 5,460 |
-| **Censoring on 5 pairs** | **350** |
-| Saved | 5,110 |
+| **Censoring on a named subset** | 70 per pair |
+| Saved | the rest |
 
-**Which five pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection.
+**Which pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection. **Nothing is
+chosen yet.**
 
 ##### ✅ RULED 2026-08-28 — censoring is NOT a special case inside the uncertainty runs
 
-The five-pair subset applies to the **robustness** runs: the QM9 grid and the validation robustness
+The named subset applies to the **robustness** runs: the QM9 grid and the validation robustness
 runs on logD, Caco-2 and hERG. **Inside the uncertainty runs censoring runs on the same pairs as
 every other condition, on every dataset.** The author's words: *"just run 28 for all uncertainty
 including censor for all datasets."*
@@ -6218,7 +6235,7 @@ the two lists currently at the top of the uncertainty generator. **Those lists a
 roster screen is running to settle** (chat N), and the author has said they are not comfortable with
 them until it reports. Write "the same pairs as every other condition", never a number.
 
-##### ✅ CONFIRMED BY THE AUTHOR 2026-08-28 — one selection of five, used on every dataset
+##### ✅ CONFIRMED BY THE AUTHOR 2026-08-28 — one selection, used on every dataset
 
 Asked directly whether cutting censoring to a named subset on logD, Caco-2 and hERG was theirs:
 *"Yes I did. The same thing that happens on QM9 happens on the others. Pick 5 or so
@@ -6226,14 +6243,14 @@ interesting/well-performing model/rep pairs and run them through the circus of u
 datasets."* So it is **one** selection of about five pairs, chosen from the screen on interest and
 clean performance, and the same five are used on QM9 and on all three laboratory datasets.
 
-##### ✅ RULED 2026-08-28 — at least two of the five must be a model that reports an uncertainty
+##### ✅ RULED 2026-08-28 — at least two of the pairs must be a model that reports an uncertainty
 
 The author's call, on being shown that the selection could otherwise leave censoring with nothing to
 say about uncertainty. Half the roster emits no per-molecule uncertainty at all — the random forest,
 XGBoost, LightGBM and the support vector machine. Censoring is one of only a few conditions where
 *does the model know which labels are unreliable* has an answer, because which molecules get clipped
-depends on their value and the model predicts values. A five-pair selection made on robustness alone
-could therefore contribute nothing to the uncertainty side.
+depends on their value and the model predicts values. A selection made on robustness alone could
+therefore contribute nothing to the uncertainty side.
 
 **Where it lives:** `min_uncertainty_models: 2` in the censoring scope of `noise_conditions.json`.
 **Where it is enforced:** the QM9 generator refuses a pair-subset condition whose `--models` name
@@ -6247,7 +6264,7 @@ accepted with `lgb qrf ngboost`.
 ✅ **APPLIED IN THE FILES 2026-08-27.**
 
 - `noise_conditions.json` carries a **`qm9_scope`** block on censoring — `mode: pair_subset`,
-  `n_pairs: 5`, with the reason and the sentence the paper owes. Censoring **stays in the
+  with a ceiling the generator enforces and the reason and the sentence the paper owes. Censoring **stays in the
   full-grid group**, because moving it would also remove it from the uncertainty runs, where it is
   one of only two conditions that can answer the which-molecules question. The scope is QM9 only and
   the file says so.
