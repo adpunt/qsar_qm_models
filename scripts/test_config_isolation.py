@@ -30,6 +30,7 @@ A static check runs in both: no source file may write a bare `config.json`.
 import argparse
 import json
 import os
+import time
 import platform
 import re
 import struct
@@ -215,6 +216,16 @@ def two_real_tasks(tmp_results):
             cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
 
+    # SNAPSHOT FIRST. The assertion at the end of this function used to be a bare
+    # existence check, so a config.json left behind by a run from MONTHS ago failed
+    # it and read as "concurrent tasks can interfere" -- and the runbook's cache
+    # clearing does not remove it, because that glob is `config_*.json` and a bare
+    # `config.json` has no underscore. Record what was there before, so the verdict
+    # can say whether THIS run created it.
+    shared_config = os.path.join(HERE, "config.json")
+    pre_existing = os.path.exists(shared_config)
+    pre_mtime = os.path.getmtime(shared_config) if pre_existing else None
+
     pa = launch("ecfp4", "task_a")
     pb = launch("pdv", "task_b")
     out_a, err_a = pa.communicate()
@@ -246,9 +257,21 @@ def two_real_tasks(tmp_results):
         assert os.path.isfile(path), f"{tag} produced no results file"
         assert len(open(path).read().splitlines()) > 1, f"{tag} produced no rows"
 
-    assert not os.path.exists(os.path.join(HERE, "config.json")), (
-        "a shared config.json was left in scripts/"
-    )
+    if os.path.exists(shared_config):
+        touched = (not pre_existing) or os.path.getmtime(shared_config) != pre_mtime
+        if touched:
+            raise AssertionError(
+                "THIS RUN wrote scripts/config.json -- the fixed shared name is "
+                "back. Two array tasks would overwrite each other's configuration, "
+                "and that file names the memory-mapped training files the binary "
+                "opens AND REWRITES. This is a real concurrency defect.")
+        raise AssertionError(
+            "scripts/config.json exists but THIS RUN did not touch it -- it is "
+            f"stale, last modified {time.strftime('%Y-%m-%d %H:%M', time.localtime(pre_mtime))}. "
+            "Nothing here wrote it, so this is not a concurrency result. The "
+            "runbook's cache clearing misses it because that glob is "
+            "`config_*.json` and this name has no underscore.\n"
+            "  Remove it and re-run:  rm -f scripts/config.json")
 
 
 def check(name, fn):
