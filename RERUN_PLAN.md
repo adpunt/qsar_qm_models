@@ -8949,6 +8949,44 @@ different files, so no duplicate exists for the deduplication to catch, and noth
 `scripts/confirm_tuned_on_validation_datasets.py --prune` rewrites them after they exist, so the
 hazard is "absent then present" AND "present then changed".
 
+#### ✅ 2026-08-28 — THE SCREEN IS READY TO SUBMIT. What is left is all on the cluster.
+
+**The author's instruction, 2026-08-28:** get the screen out first — one replicate, full grid.
+`long` if needed, `medium` if it fits; `/data/stat-ecr` is the live KIRBy checkout; the stale `.sh`
+files are dead weight; the figure script is being rewritten and is not chat H's concern; the
+uncertainty runs are not being submitted yet.
+
+**It fits `medium`.** With the cross-fit costed in, the screen's longest tier asks 23:59 against
+medium's two-day limit, and a shorter requested wall backfills sooner than a long one. `long` is for
+the main grid, which needs 202 hours a task and is generated with `--max-hours 720`.
+
+| screen tier | wall |
+|---|---|
+| `rf`, `xgboost`, `lgb` | 2:59 |
+| `svm`, `dnn`, `mlp` | 3:59 |
+| `qrf` | 11:59 |
+| `ngboost`, the four Bayesian networks, both Gaussian processes, the three decomposition models | 23:59 |
+
+**Fixed in this session, all committed and gated:** the wall times (above); the generator now
+refuses a script it cannot honour instead of capping at 47; the tuned flag is decided once at task
+start, so no degradation curve can mix two parameter settings along its own axis; the guard for that
+was passing on a text match and now proves the flag reaches the command line, verified red; the
+submit block covers 17 scripts rather than 14; failed tasks are visible (`qm90_`, not `qm9_`); the
+cluster pull is `pull_safely.sh`; KIRBy is `/data/stat-ecr`; the concurrency check runs on
+`interactive`; `--out-dir` creates its directory, which censoring needs; the 28 stale `.sh` files are
+deleted.
+
+**What only the author can do, in order — the runbook has the commands:** rebuild the Rust binary on
+ARC (the one there is from February and cannot parse the current flags); source `setup.sh` ONCE on a
+login node before the first `sbatch`, because `env.yml` changed today and nothing stops 294 array
+tasks pip-installing into the shared environment at once; clear the caches, including the old
+`anova_*.csv`; run the concurrency check; run one task and record its time; then submit.
+
+**One thing that cannot be checked from here:** whether `conda activate env_test` resolves by NAME on
+ARC. `setup.sh` decides whether to CREATE the environment by grepping `conda env list` for the bare
+name, and on ARC it lives at a prefix. If the name does not appear, every array task starts a conda
+solve. `conda env list | awk '{print $1}' | grep -x env_test` answers it in one line.
+
 #### 🔴 2026-08-28 — LAUNCH BLOCKER: eleven of seventeen scripts request wall time for one fit and do six
 
 `--oof-folds 5` was added to the generator on 2026-08-28 (`15c012c`, then `81db325`) and is appended
