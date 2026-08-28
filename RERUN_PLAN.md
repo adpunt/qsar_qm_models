@@ -6083,6 +6083,14 @@ QM9, at all seven of its levels, 10 replicates.**
 
 **Which five pairs is chosen from the screen** (§13.1 item 4), like the deep run's selection.
 
+##### ✅ CONFIRMED BY THE AUTHOR 2026-08-28 — one selection of five, used on every dataset
+
+Asked directly whether cutting censoring to a named subset on logD, Caco-2 and hERG was theirs:
+*"Yes I did. The same thing that happens on QM9 happens on the others. Pick 5 or so
+interesting/well-performing model/rep pairs and run them through the circus of uncertainty on all
+datasets."* So it is **one** selection of about five pairs, chosen from the screen on interest and
+clean performance, and the same five are used on QM9 and on all three laboratory datasets.
+
 ##### ✅ RULED 2026-08-28 — at least two of the five must be a model that reports an uncertainty
 
 The author's call, on being shown that the selection could otherwise leave censoring with nothing to
