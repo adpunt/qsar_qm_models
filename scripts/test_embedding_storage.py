@@ -83,10 +83,10 @@ def write_records(rep, vectors, targets):
         # `continuous_pdv`, and there is one now. Passing the old count shifted
         # every argument after it and handed `property_value` a None.
         P.write_to_mmap(
-            SMILES, SMILES, None,
+            SMILES, SMILES,
             None,
             kwargs['chemberta'], kwargs['mhggnn'], kwargs['avalon'],
-            float(targets[i]), 'train', files, [rep], 1, None, 0,
+            float(targets[i]), 'train', files, [rep], 1, None,
         )
     return split.buf.getvalue()
 
@@ -283,8 +283,8 @@ counts[present[1]] = 257
 split = FakeSplit()
 # One `None` fewer than before 2026-08-28: the writer's `continuous_pdv`
 # parameter went when the binary descriptor vector was deleted (see write_records).
-P.write_to_mmap(SMILES, SMILES, None, None, None, None, None,
-                1.0, 'train', {'train': split}, ['sns'], 1, counts, 0)
+P.write_to_mmap(SMILES, SMILES, None, None, None, None,
+                1.0, 'train', {'train': split}, ['sns'], 1, counts)
 raw = split.buf.getvalue()
 check(f"one record is {HEADER + SNS_WIDTH} bytes",
       len(raw) == HEADER + SNS_WIDTH, f"got {len(raw)}")

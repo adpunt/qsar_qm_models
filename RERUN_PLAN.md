@@ -2165,6 +2165,36 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.24 ✅ 2026-08-28 — one-hot SMILES and randomized SMILES are deleted, not refused
+
+**The author's instruction:** *"SMILES is not being run"*. It was not — both spellings were refused
+by name at the top of the run and again in the reader, and the generator never emitted them — but
+the machinery was all still there, and "still builds" is how a representation comes back.
+
+Gone from `rust/src/main.rs`: the `SmilesTokenizer` struct and its regex, `smiles_to_ohe`,
+`count_token_frequencies`, `trim_vocab`, the `max_vocab` config field, the `randomized_smiles`
+record field with its reader and writer, the one-hot writer block, and the vocabulary and
+maximum-sequence-length plumbing through `generate_aggregate_stats` → `preprocess_data` →
+`write_data`. `generate_aggregate_stats` returned five values and now returns the two it is named
+for; the standardisation constants are untouched and gate 4 still holds.
+
+Gone from `scripts/process_and_train.py`: `--max_vocab`, the length-prefixed randomized-SMILES
+field, both build sites, the three reader blocks, and the recurrent-model dispatch — which was the
+only thing that ever read either representation, and could not be reached by anything that still
+exists.
+
+**Both names stay in `DROPPED_REPS`.** They are deleted, so a job script that still asks for one
+must stop with a message rather than fail with a `KeyError` two functions later.
+
+**One guard was removed with the field it guarded.** `the_randomized_smiles_field_is_written_the_way_the_reader_reads_it`
+was added that same morning (`e6ce429`) for a real misalignment, and now tests a field that does not
+exist. It is deleted rather than left failing: a test that cannot pass is not a guard. The writer
+guards go from 6 to 5.
+
+**Green after the change:** `cargo test --release` — 28 noise gates and 5 writer guards, exit 0 —
+plus `test_record_alignment`, `test_embedding_storage`, `test_qm9_split_alignment`,
+`test_config_isolation`, the QM9 generator's own test, and `smoke_real_data` on real output.
+
 ### 2.23 🔴 FOUND AND FIXED 2026-08-28 — the launch smoke test failed a correct run, and contradicted a gate beside it
 
 `scripts/smoke_real_data.py` is the check an operator runs on **real QM9 output** before launching.
@@ -2501,7 +2531,7 @@ first time and **two stayed green**, which is the point of running it:
   did not guard the name rule at all. Its fixture's manifest now carries the
   results columns.
 
-**The checks.** Eighteen suites, all executing, none matching source text:
+**The checks.** Twenty suites, all executing, none matching source text:
 
 | where | what it guards |
 |---|---|
@@ -2521,17 +2551,18 @@ first time and **two stayed green**, which is the point of running it:
 | KIRBy `tests/smoke/smoke_kirby_merge.py` | a subset run does not destroy what it did not produce, and a model with no rows is named |
 | KIRBy `tests/smoke/smoke_kirby_dose_error.py` | a fatal injection failure reaches the surface instead of being swallowed as one printed line |
 | `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
+| `scripts/test_conformal_is_out.py` | conformal is refused by name, no dispatcher still branches on it, and the job generator writes no script that asks for it |
+| `scripts/test_replicate_is_not_a_fold.py` | QM9's ten replicates and the other three datasets' five folds stay separate axes under separate names |
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
-**Still yours.** Eight entries are real and unfixed because fixing them is a
-decision, not a repair:
+**Still yours.** Four entries are left, and three of them are the figure script
+you are rewriting. Updated 2026-08-28:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
    fractions of the label spread, no rescaling (§2.12).
-2. ~~`--calibration-size` for the conformal models~~ — **settled**: commented
-   out at `process_and_train.py:414`. The whole validation split is the
-   calibration set, which is the better estimator now that no model trains on it.
+2. ~~`--calibration-size` for the conformal models~~ — **settled, and now moot**:
+   conformal itself is commented out (§2.22), so the flag has nothing to size.
 3. ~~The heteroscedastic and evidential heads~~ — **settled**: the head's own
    predicted variance is reported, kept only on an uncertainty run (§2.17).
 4. ~~`grouped_shifted` off-registry, and the naming of off-registry conditions~~
@@ -2544,10 +2575,14 @@ decision, not a repair:
    the label's own units on both sides, with the conversion on every row (§2.18).
 7. **hERG N.** `paper.tex` says 1,482; the cached extract holds 1,415, and so does
    the module docstring. The loader reproduces 1,415 exactly.
-8. The remaining spec literals in models.py (the flexible/conformal hidden
-   sizes) and the retired-scheme methods figure — both listed in `verdicts.json`.
-   The `randomized_smiles` routes are settled: the record alignment is fixed and
-   the vocabulary is left alone (§2.19).
+8. ~~The remaining spec literals in models.py~~ — **settled 2026-08-28**:
+   `test_spec_is_live.py` reports `0 literals left` for everything it covers, and
+   the five remaining `[128, 64]` sit in `flexible_dnn`, which is excluded, and in
+   three models that appear in no generator table at all. The conformal widths
+   went with conformal (§2.22). The `randomized_smiles` routes are settled: the
+   record alignment is fixed and the vocabulary is left alone (§2.19). What is
+   left under this number is the retired-scheme methods figure, which is figure
+   work.
 
 `paper.tex` was not touched.
 
@@ -5303,25 +5338,32 @@ evidence behind it. The scrambling candidate is `real-fixed` — `split_qm9` ret
 the shuffled dataset and `scripts/test_qm9_split_alignment.py` fails 160/160 when the fix is
 removed. Leaving the old text in place sends the next chat looking for a fault that has a guard.
 
-Counted from `verdicts.json` on 2026-08-28: 79 real-fixed, 14 duplicate, **10 real-open**, **4
-partly-fixed**, 2 refuted, 2 not-a-fault.
+Counted from `verdicts.json` on 2026-08-28, after the close-out below: 84 real-fixed, 14
+duplicate, 5 wont-fix, **3 real-open**, **1 partly-fixed**, 2 refuted, 2 not-a-fault.
 
-**The fourteen that are still open, and which of them touch the re-run.** Four are cosmetic or
-latent behind a representation that is refused by name, and are listed here only so nobody
-re-derives them: the `randomized_smiles` one-hot vocabulary, the two latent record-misalignment
-routes in the Rust writer (one of which was closed anyway on 2026-08-28, `e6ce429`),
-`conformal_hetero` writing to a schema no reader looks for, and the discarded Optuna values,
-which are on the tuning path only.
+**The four that are still open, and which of them touch the re-run.** Three are pooling inside
+`generate_paper_figures_v2.py`, which is being rewritten from scratch, so they are reporting
+decisions rather than repairs. The fourth is the aleatoric/epistemic split, which chat I is
+building. **Nothing on this list blocks a job script.**
+
+Closed on 2026-08-28 by reading the code rather than changing it, listed so nobody re-derives
+them: `chemberta` is one encoder on both sides; the discarded Optuna values are all inside
+`if args.tuning:` and no queued job tunes; the spec literals that remain are in models no
+generator lists; and the temperature-scaled uncertainty column is read by no surviving consumer
+(`uncertainty_stats.py` loads uncalibrated, the figure script orders its candidates from
+`UNCERTAINTY_DEFAULTS['primary_column'] = 'raw'`). `--calibration-size` and
+`conformal_hetero`'s private schema went with conformal (§2.22). The replicate-versus-fold
+naming is now §3.2b with a guard.
 
 | What | Bites the re-run? |
 |---|---|
-| **`--calibration-size` is accepted, passed down and never used** — both conformal models calibrate on the whole validation split (`models/models.py:3631`, `:3822`) | Only under `--include-excluded`; the conformal wrappers are out of the default roster. Honour the flag or refuse it by name |
-| **Two decomposition helpers broadcast one aleatoric value to every molecule** (`scripts/utils.py:164`, `:222`) | Correct for a homoscedastic likelihood — a Gaussian process has one noise term by construction. The defect is in the reading: no per-molecule statistic may be computed from that column. Chat I and chat J |
-| **`sigma` holds three different physical quantities across the two writers**, and `auc_norm` normalises each by its own range | The mechanical half is fixed — both sides write `level_units`, and the combined figure names the mismatch instead of pooling. What the paper does about it is open. Chat J |
+| ~~**`--calibration-size` is accepted, passed down and never used**~~ | ✅ **Closed 2026-08-28.** Conformal is commented out and both model names are refused before any data is read (§2.22), so the flag has nothing to size. `conformal_hetero`'s private uncertainty schema closed with it |
+| **Two decomposition helpers broadcast one aleatoric value to every molecule** (`scripts/utils.py:164`, `:222`) | Chat I is building the replacement: `scripts/uncertainty_decomposition.py` carries a table saying, per model, whether each term varies per molecule or is one number per fit, and fails the run when a model disagrees with it (`a22d45a`). Correct for a homoscedastic likelihood — a Gaussian process has one noise term by construction. The defect is in the reading: no per-molecule statistic may be computed from that column. Chat I and chat J |
+| **`sigma` holds three different physical quantities across the two writers**, and `auc_norm` normalises each by its own range | Still the one partly-fixed entry. The mechanical half is fixed — both sides write `level_units`, and the combined figure names the mismatch instead of pooling. What the paper does about it is open. Chat J |
 | **Coverage and the uncertainty-error correlation are pooled across every noise level**, on both sides | Reporting only. Computing them per level changes the shape of table 4, which is the author's call. Chat J |
 | **`auc_norm` is averaged across every condition and representation** for the headline cross-dataset figures, and those averages are what justify `ANOVA_MODELS_EXCLUDE` | Reporting only, and it is failure mode 3 in §0.6. Chat J |
-| **"Replicate" is not the same statistic on the two sides** — an independently reseeded resample-and-split on QM9, one fixed CV fold on the experimental data | The dedup half is fixed; the naming half stands and needs a Methods sentence. Same subject as §3.3a |
-| **`model_defaults.py` values that `models.py` restates as literals** — batch size 32, the Adam rate outside `train_gnn`, the 100 MC passes, the flexible-DNN and conformal-DNN widths, the GNN settings | **Checked 2026-08-28: every live one matches the spec numerically**, so nothing trained today differs. It is a maintenance hazard, not a current divergence: change the spec and those do not move, while `spec_version` on every row asserts they did. The two that do not match are on models outside the roster |
+| ~~**"Replicate" is not the same statistic on the two sides**~~ | ✅ **Closed 2026-08-28.** The rule is now §3.2b, its own section: a replicate is QM9's, the other three datasets have folds, both may carry an error bar and the two must be labelled differently. Guard: `scripts/test_replicate_is_not_a_fold.py`. The Methods sentence is still owed |
+| ~~**`model_defaults.py` values that `models.py` restates as literals**~~ | ✅ **Closed 2026-08-28.** `test_spec_is_live.py` reports `0 literals left`; the five `[128, 64]` that remain are in `flexible_dnn` (excluded) and in three models no generator lists. Previously: **every live one matched the spec numerically**, so nothing trained today differs. It is a maintenance hazard, not a current divergence: change the spec and those do not move, while `spec_version` on every row asserts they did. The two that do not match are on models outside the roster |
 | **`chemberta` was two different pretrained encoders** | ✅ **Closed in code.** Both pipelines load `DeepChem/ChemBERTa-77M-MTR` at 384 wide (`process_and_train.py:145`), and `chemberta_buf` in `rust/src/main.rs:86` is 1,536 bytes to match. Anything cached before 2026-08-27 decodes at the wrong offset — see the runbook's cache step |
 
 One artefact to know about when reading that audit's output: it ran against a tree that was being
@@ -5334,10 +5376,12 @@ disproved.
 - Rewording any research question to fit the data. The instruction stands: the paper is fixed by
   re-running.
 - Editing `paper.tex`. §9 is a list for you, not a set of edits I will make.
-- The conformal wrapper — **with one caveat I had wrong.** Its output directory holds no
-  intervals, no coverage and no widths, so there is nothing to analyse today. But you asked that
-  it be excluded from the main roster *and flagged if it turns out to be good at per-molecule
-  noise tracking*. If the re-run produces usable intervals, it goes back on the table.
+- The conformal wrapper — **cut outright on 2026-08-28, and the caveat below is withdrawn with
+  it.** `-m conformal` and `-m conformal_hetero` are refused by name and cannot be turned back on
+  from a flag (§2.22). The training functions stay in `models/models.py` if it is ever wanted
+  again. The withdrawn caveat, recorded so it is not re-derived: its output directory held no
+  intervals, no coverage and no widths, and the standing instruction was to flag it if it turned
+  out to be good at per-molecule noise tracking.
 - The classification half of the framework. Untested in this study and unchanged by any of this.
 
 ## 13. THE PLAN — chat by chat

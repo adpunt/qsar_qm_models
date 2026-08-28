@@ -100,7 +100,6 @@ def build_task(tmp, file_no, rep, marker):
         "train_count": n_train,
         "test_count": n_held,
         "val_count": n_held,
-        "max_vocab": 30,
         "file_no": file_no,
         "molecular_representations": [rep],
         "k_domains": 1,
