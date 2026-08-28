@@ -57,16 +57,73 @@ def load_records(log_path=None):
     return paths, pd.concat(frames, ignore_index=True)
 
 
-def held_out_labels_are_never_touched(df):
-    """The original defect: test and validation molecules were given noise."""
-    held = df[df.split.isin(["val", "test"])]
-    assert len(held), "the run recorded no held-out molecules at all"
+def test_labels_are_never_touched(df):
+    """Half of the original defect: the SCORED split must carry no noise at all.
+
+    This used to assert it of validation as well, and validation is noisy on
+    purpose since 2026-08-27 -- the author settled that training is noisy,
+    validation carries its own independent draw, and only test is clean
+    (RERUN_PLAN.md 2.5, decision 2). So the old form failed a correct run, in the
+    file an operator runs on real output before launching, while the Rust gate
+    `validation_carries_its_own_independent_noise` asserted the opposite in the
+    same preflight. Two checks in one preflight disagreeing about what the
+    pipeline should do is worse than either being wrong on its own.
+    """
+    held = df[df.split == "test"]
+    assert len(held), "the run recorded no test molecules at all"
     worst = held.epsilon_raw.abs().max()
     assert worst == 0.0, (
-        f"{(held.epsilon_raw != 0).sum()} held-out molecules carry injected noise "
-        f"(largest {worst:.3e}). Held-out labels must be untouched."
+        f"{(held.epsilon_raw != 0).sum()} test molecules carry injected noise "
+        f"(largest {worst:.3e}). Test labels must be untouched: a score against a "
+        f"moving target mixes 'the model got worse' with 'the answer moved'."
     )
-    return f"{len(held):,} held-out molecules, every injected value exactly zero"
+    return f"{len(held):,} test molecules, every injected value exactly zero"
+
+
+def validation_noise_is_its_own(df):
+    """The other half: validation is noisy, and the noise is NOT the training row's.
+
+    The original defect was two things at once. Held-out labels were noised at
+    all, and `write_data` restarted `record_index` at 0 for each split while the
+    noise map was keyed by TRAINING index -- so each held-out molecule got the
+    noise drawn for the training molecule at the same position. The first is now
+    correct behaviour for validation. The second never is, and `record_index`
+    still restarts per split, so it is still exactly testable: if validation's
+    injected value at index i equals training's at index i, the map is being
+    read with the wrong key.
+    """
+    val = df[df.split == "val"]
+    train = df[df.split == "train"]
+    assert len(val), "the run recorded no validation molecules at all"
+
+    noisy_runs = sorted(set(train.loc[train.epsilon_raw != 0, "source_file"]))
+    if not noisy_runs:
+        return "no run in this batch injected any noise (skipped)"
+
+    silent = [f for f in noisy_runs
+              if not (val.loc[val.source_file == f, "epsilon_raw"] != 0).any()]
+    assert not silent, (
+        f"{len(silent)} run(s) noised training and left validation clean: "
+        f"{silent[:3]}. Validation carries its own draw (RERUN_PLAN.md 2.5); a clean "
+        f"validation split hands the models a tenth of their labels free and lets the "
+        f"neural ones stop early against an oracle."
+    )
+
+    copied = 0
+    for f in noisy_runs:
+        t = train[train.source_file == f].set_index("record_index").epsilon_raw
+        v = val[val.source_file == f].set_index("record_index").epsilon_raw
+        shared = v.index.intersection(t.index)
+        copied += int(((v[shared] == t[shared]) & (v[shared] != 0)).sum())
+    assert copied == 0, (
+        f"{copied} validation molecules were given the injected value belonging to the "
+        f"TRAINING molecule at the same record index. That is the index-restart defect "
+        f"(RERUN_PLAN.md 2.1), not an independent draw."
+    )
+
+    n = int((val.epsilon_raw != 0).sum())
+    return (f"{n:,} validation molecules carry their own noise across {len(noisy_runs)} "
+            f"run(s), none copied from the training row at the same index")
 
 
 def the_recorded_noise_reconstructs_the_label(df):
@@ -176,8 +233,10 @@ def main():
         levels_by_file[os.path.basename(p)] = lvl
 
     results = [
-        check("held-out labels are never touched",
-              lambda: held_out_labels_are_never_touched(df)),
+        check("test labels are never touched",
+              lambda: test_labels_are_never_touched(df)),
+        check("validation noise is its own, not the training row's",
+              lambda: validation_noise_is_its_own(df)),
         check("the recorded noise reconstructs the label",
               lambda: the_recorded_noise_reconstructs_the_label(df)),
         check("zero noise records exactly zero",

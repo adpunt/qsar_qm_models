@@ -2116,6 +2116,43 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.23 🔴 FOUND AND FIXED 2026-08-28 — the launch smoke test failed a correct run, and contradicted a gate beside it
+
+`scripts/smoke_real_data.py` is the check an operator runs on **real QM9 output** before launching.
+It exited 1 with *"400 held-out molecules carry injected noise. Held-out labels must be
+untouched."* — on a pipeline that is behaving exactly as settled.
+
+`held_out_labels_are_never_touched` asserted `epsilon_raw == 0` for `val` **and** `test`. That was
+right until 2026-08-27, when the author settled that training is noisy, **validation carries its
+own independent draw**, and only test is clean (§2.5, decision 2). The Rust gate
+`validation_carries_its_own_independent_noise` — one of the 28 in the same preflight — asserts the
+opposite of what this file asserted. Two checks in one preflight disagreeing about what the
+pipeline should do is worse than either being wrong alone, and this is the one an operator reads a
+message from.
+
+**Measured on the six provenance files from the last real run, 6,000 rows:**
+
+| split | rows | rows carrying noise |
+|---|---|---|
+| `test` | 3,000 | **0** |
+| `val` | 3,000 | 1,122 (the zero-noise runs supply the rest) |
+| `train` | 24,000 | 9,198 |
+
+So §2.1 is genuinely closed on real output, and the 400 the check objected to were validation.
+
+**The original defect was two things, and only one of them stopped being a defect.** Held-out
+labels were noised at all — now correct for validation. And `write_data` restarted `record_index`
+at 0 for each split while the noise map was keyed by TRAINING index, so each held-out molecule got
+the noise drawn for the training molecule at the same position. That is never correct, and
+`record_index` still restarts per split, so it is still exactly testable. The check is now two:
+
+- **`test labels are never touched`** — `epsilon_raw` exactly zero on the scored split.
+- **`validation noise is its own, not the training row's`** — validation is non-zero wherever
+  training is, and **no** validation molecule carries the injected value belonging to the training
+  molecule at the same `record_index`. Measured: 0 of 1,122 across every noisy run.
+
+Both green, and the whole smoke test now exits 0 on the real output.
+
 ### 2.21 ✅ 2026-08-28 — PDV is `pdv`, and the binary form is deleted rather than refused
 
 **The author's instruction:** *"pdv should just be pdv, not continuous pdv. All traces of binary

@@ -77,9 +77,14 @@ def write_records(rep, vectors, targets):
     for i, vec in enumerate(vectors):
         kwargs = dict(chemberta=None, mhggnn=None, avalon=None)
         kwargs[rep] = vec
+        # Positional, and the writer's signature lost a parameter on 2026-08-28
+        # when the binary descriptor vector was deleted and `continuous_pdv` was
+        # renamed to `pdv`: there used to be two arguments here, `pdv` and
+        # `continuous_pdv`, and there is one now. Passing the old count shifted
+        # every argument after it and handed `property_value` a None.
         P.write_to_mmap(
             SMILES, SMILES, None,
-            None, None,
+            None,
             kwargs['chemberta'], kwargs['mhggnn'], kwargs['avalon'],
             float(targets[i]), 'train', files, [rep], 1, None, 0,
         )
@@ -276,7 +281,9 @@ counts[present[0]] = 256
 counts[present[1]] = 257
 
 split = FakeSplit()
-P.write_to_mmap(SMILES, SMILES, None, None, None, None, None, None,
+# One `None` fewer than before 2026-08-28: the writer's `continuous_pdv`
+# parameter went when the binary descriptor vector was deleted (see write_records).
+P.write_to_mmap(SMILES, SMILES, None, None, None, None, None,
                 1.0, 'train', {'train': split}, ['sns'], 1, counts, 0)
 raw = split.buf.getvalue()
 check(f"one record is {HEADER + SNS_WIDTH} bytes",
