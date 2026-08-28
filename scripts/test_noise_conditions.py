@@ -176,7 +176,7 @@ def check_pair_subset_scope():
                              # (RERUN_PLAN.md 13.15) and the generator refuses a
                              # deep run without it, so this fixture carries it.
                              ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm', 'ngboost',
-                                    '--reps', 'continuous_pdv', 'ecfp4', 'mhggnn'])):
+                                    '--reps', 'pdv', 'ecfp4', 'mhggnn'])):
             r = run('--stage', stage, *extra, '--out-dir', tmp)
             assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
             line = [l for l in r.stdout.splitlines() if 'conditions:' in l]
@@ -191,7 +191,7 @@ def check_pair_subset_scope():
             f"the refusal does not point at the decision:\n{r.stderr[-400:]}"
 
         r = run('--stage', '1', '--conditions', 'censoring',
-                '--models', 'lgb', 'rf', '--reps', 'continuous_pdv', '--out-dir', tmp)
+                '--models', 'lgb', 'rf', '--reps', 'pdv', '--out-dir', tmp)
         assert r.returncode == 0, \
             f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
 

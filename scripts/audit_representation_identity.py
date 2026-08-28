@@ -41,7 +41,7 @@ USAGE
     # 1. get the QM9 pipeline's real features (needs the Rust binary)
     cd scripts
     python process_and_train.py -d QM9 -t homo_lumo_gap -m rf \\
-        -r ecfp4 sns pdv continuous_pdv --noise-level 0.0 -n 300 -b 1 \\
+        -r ecfp4 sns pdv pdv --noise-level 0.0 -n 300 -b 1 \\
         -s scaffold --dump-features /tmp/qm9feat -f /tmp/throwaway.csv
 
     # 2. audit them
@@ -250,7 +250,7 @@ def audit_dumps(prefix):
         print(f'  no dumps found at {prefix}__*.npz')
         print('  produce them first:')
         print('    cd scripts && python process_and_train.py -d QM9 -t homo_lumo_gap \\')
-        print('        -m rf -r ecfp4 sns pdv continuous_pdv --noise-level 0.0 -n 300 \\')
+        print('        -m rf -r ecfp4 sns pdv pdv --noise-level 0.0 -n 300 \\')
         print(f'        -b 1 -s scaffold --dump-features {prefix} -f /tmp/throwaway.csv')
         return 1
 
@@ -272,8 +272,9 @@ def audit_dumps(prefix):
             print('            presence bits. The model never sees a count.')
             problems += 1
         if rep == 'pdv' and info['kind'] == 'binary':
-            print('  ✗ DEFECT: the descriptor vector is binarised. The continuous one is')
-            print('            a separate representation under a different name.')
+            print('  ✗ DEFECT: the descriptor vector is binarised. PDV is 200 RDKit')
+            print('            descriptors as float32; the bit-packed form was deleted on')
+            print('            2026-08-28 and nothing should be able to produce one.')
             problems += 1
         if info['every row shares one min and max']:
             print('  ✗ DEFECT: every row has the same minimum and maximum, so each molecule')

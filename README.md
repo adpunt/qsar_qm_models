@@ -8,12 +8,15 @@ This repository contains a comprehensive framework for testing and evaluating QS
 
 The study's set, settled 2026-08-26, is six: **ECFP4** (Morgan radius 2, 2,048
 bits, computed in Python and carried through the record), **PDV**
-(`continuous_pdv`, 200 RDKit descriptors as float32), **Sort & Slice**
+(`pdv`, 200 RDKit descriptors as float32), **Sort & Slice**
 (`sns`, 1,024 substructure counts as uint16), **MHG-GNN**, **Avalon** and
 **ChemBERTa** (`DeepChem/ChemBERTa-77M-MTR`, 384 wide).
 
-Anything else is refused by name: one-hot SMILES, randomized SMILES and the
-binary `pdv` still build but are not part of the study, and mol2vec is deleted.
+Anything else is refused by name. mol2vec is deleted; so is the bit-packed form
+of the descriptor vector, which used to hold the name `pdv` while the float32
+form was called `continuous_pdv` (2026-08-28). `continuous_pdv` is refused rather
+than treated as an alias, because `pdv` used to mean the other thing, so a job
+script or a results file written before that date means something else by it.
 Graph representations (GIN, GCN, GATv2, MPNN) exist for QM9 and are not in the
 job generator's roster.
 
@@ -96,7 +99,7 @@ current Rust binary.
 
 #### Required Arguments
 - `-m`, `--models`: model(s) to run, e.g. `rf svm lgb`.
-- `-r`, `--molecular_representations`: representation(s), e.g. `ecfp4 continuous_pdv`.
+- `-r`, `--molecular_representations`: representation(s), e.g. `ecfp4 pdv`.
 
 #### Commonly used
 - `-d`, `--dataset`: dataset (default `QM9`).
@@ -138,7 +141,7 @@ and the default output path is relative to it.
 cd scripts
 python process_and_train.py \
     -d QM9 -t homo_lumo_gap \
-    -m rf lgb -r ecfp4 continuous_pdv \
+    -m rf lgb -r ecfp4 pdv \
     -n 10000 -b 10 -s scaffold \
     --noise-level 0.0 0.5 1.0 --noise-shape gaussian --noise-targeting uniform \
     -f ../results/example.csv
@@ -200,6 +203,7 @@ cd rust && cargo test --release
 | `scripts/test_condition_names.py` | one noise condition has one name on both injectors, against `condition_names.json` |
 | `scripts/test_predictive_head.py` | the network's own predicted variance is read back as fitted, and reaches the file per molecule |
 | `scripts/test_metric_units.py` | `rmse` and `mae` are in the label's own units, and the row carries the conversion |
+| `scripts/test_conformal_is_out.py` | conformal is refused by name, no dispatcher still branches on it, and the job generator writes no script that asks for it |
 | `scripts/crosscheck_injectors.py` | the Rust and Python injectors deliver the same thing (342 checks) |
 | `scripts/crosscheck_pipeline_reference.py` | the pipeline's injector against the reference implementation |
 | `scripts/check_environment.py` | this interpreter can build every model the job asks for |

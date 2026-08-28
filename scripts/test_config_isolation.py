@@ -61,7 +61,7 @@ def write_split(path, rows, rep):
         out += struct.pack("I", len(b)) + b
         out += struct.pack("I", len(b)) + b
         out += struct.pack("f", y)
-        if rep == "continuous_pdv":
+        if rep == "pdv":
             out += payload  # written BEFORE the label by the Rust writer
         elif rep == "ecfp4":
             # Not all zeros: an all-zero block is a featurisation failure and
@@ -75,7 +75,7 @@ def write_split(path, rows, rep):
 def build_task(tmp, file_no, rep, marker):
     """One task's inputs: a distinct file_no, representation and payload byte."""
     n_train, n_held = 12, 3
-    payload_len = PDV_BYTES if rep == "continuous_pdv" else 0
+    payload_len = PDV_BYTES if rep == "pdv" else 0
 
     # Five characters minimum: read_smiles_data rejects anything shorter.
     def rows(n, base):
@@ -117,7 +117,7 @@ def build_task(tmp, file_no, rep, marker):
 
 def record_len(smiles, rep):
     n = len(smiles.encode())
-    extra = PDV_BYTES if rep == "continuous_pdv" else FP_BYTES
+    extra = PDV_BYTES if rep == "pdv" else FP_BYTES
     return 4 + n + 4 + n + 4 + 4 + extra
 
 
@@ -132,7 +132,7 @@ def concurrent_tasks_do_not_corrupt_each_other():
         # Deliberately different in every way a mixed-up configuration would
         # show: different file_no, different representation, different payload.
         a_cfg, a_train = build_task(tmp, 101, "ecfp4", 0xAA)
-        b_cfg, b_train = build_task(tmp, 202, "continuous_pdv", 0xBB)
+        b_cfg, b_train = build_task(tmp, 202, "pdv", 0xBB)
 
         def launch(cfg):
             return subprocess.Popen(
@@ -150,7 +150,7 @@ def concurrent_tasks_do_not_corrupt_each_other():
         assert pa.returncode == 0, f"task A failed: {err_a}"
         assert pb.returncode == 0, f"task B failed: {err_b}"
 
-        for file_no, rep, train in ((101, "ecfp4", a_train), (202, "continuous_pdv", b_train)):
+        for file_no, rep, train in ((101, "ecfp4", a_train), (202, "pdv", b_train)):
             path = os.path.join(tmp, f"train_{file_no}.mmap")
             size = os.path.getsize(path)
             expected = sum(record_len(s, rep) for s, _, _ in train)
@@ -216,7 +216,7 @@ def two_real_tasks(tmp_results):
         )
 
     pa = launch("ecfp4", "task_a")
-    pb = launch("continuous_pdv", "task_b")
+    pb = launch("pdv", "task_b")
     out_a, err_a = pa.communicate()
     out_b, err_b = pb.communicate()
 

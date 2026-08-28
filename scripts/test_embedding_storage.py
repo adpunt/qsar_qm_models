@@ -130,7 +130,7 @@ rust = open(os.path.join(REPO, 'rust', 'src', 'main.rs')).read()
 rust_widths = dict(re.findall(r'(\w+)_buf: \[u8; (\d+)\]', rust))
 python_reads = open(os.path.join(REPO, 'scripts', 'process_and_train.py')).read()
 
-for rep, (dims, width) in list(EMBEDDINGS.items()) + [('continuous_pdv', (200, 800)), ('avalon', (2048, 256))]:
+for rep, (dims, width) in list(EMBEDDINGS.items()) + [('pdv', (200, 800)), ('avalon', (2048, 256))]:
     rust_name = rep
     check(f"{rep}: Rust buffer is {width} bytes",
           rust_widths.get(rust_name) == str(width),
@@ -209,7 +209,7 @@ check("no dimension dominates distance after standardising",
 
 # The standardisation must actually be reached by every continuous representation.
 check("every float-stored representation is in CONTINUOUS_REPS",
-      set(P.CONTINUOUS_REPS) == {'continuous_pdv', 'chemberta', 'mhggnn'},
+      set(P.CONTINUOUS_REPS) == {'pdv', 'chemberta', 'mhggnn'},
       f"CONTINUOUS_REPS = {P.CONTINUOUS_REPS}")
 
 # ── 5. The comparability check has teeth ───────────────────────────────────

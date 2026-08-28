@@ -81,7 +81,7 @@ from pathlib import Path
 # Representations
 # ---------------------------------------------------------------------------
 # The set was settled on 2026-08-26 and is enforced in the code: PDV
-# (continuous_pdv), MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. mol2vec is
+# (pdv), MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. mol2vec is
 # deleted outright; one-hot SMILES and randomized SMILES still build but are
 # refused by name in process_and_train.py parse_mmap, so a job that asked for
 # them would raise rather than produce results with nowhere to go.
@@ -89,7 +89,7 @@ from pathlib import Path
 #   ALL_REPS  the six.
 #   FP_REPS   binary fingerprints only. The Tanimoto kernel is defined on binary
 #             vectors, so the Tanimoto GP can only run here.
-ALL_REPS = ['ecfp4', 'continuous_pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']
+ALL_REPS = ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']
 FP_REPS = ['ecfp4', 'sns']
 
 # ---------------------------------------------------------------------------
@@ -241,9 +241,14 @@ MODELS = {
 # table1_supp_simple_effects_all_reps.csv, which runs with no exclusions.
 # Off by default; --include-excluded turns them on.
 EXCLUDED_MODELS = {
-    'conformal_rf':             ('-m conformal --cp-base-model rf -u True',  4, 35, 'conformal wrapper (rho > 0.99 with rf)', ALL_REPS),
-    'conformal_qrf':            ('-m conformal --cp-base-model qrf -u True', 4, 35, 'conformal wrapper', ALL_REPS),
-    'conformal_dnn':            ('-m conformal --cp-base-model dnn -u True', 4, 47, 'conformal wrapper', ALL_REPS),
+    # COMMENTED OUT 2026-08-28, on the author's instruction. Excluding them was
+    # not enough: --include-excluded turned them back on, and process_and_train.py
+    # now refuses `-m conformal` by name, so those three scripts would have been
+    # written and then died at the first line. Removed here rather than left to
+    # fail on the cluster (RERUN_PLAN.md 2.20).
+    # 'conformal_rf':             ('-m conformal --cp-base-model rf -u True',  4, 35, 'conformal wrapper (rho > 0.99 with rf)', ALL_REPS),
+    # 'conformal_qrf':            ('-m conformal --cp-base-model qrf -u True', 4, 35, 'conformal wrapper', ALL_REPS),
+    # 'conformal_dnn':            ('-m conformal --cp-base-model dnn -u True', 4, 47, 'conformal wrapper', ALL_REPS),
     # `last` matched no branch in models.py, which tests `last_layer`. The value
     # fell through, no Bayesian layer was applied, and the deterministic network
     # that resulted was put through 100 forward passes in eval mode -- all

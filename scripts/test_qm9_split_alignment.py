@@ -44,7 +44,7 @@ def _recording_writer(store):
     """Stand in for write_to_mmap and remember what each row held."""
 
     def write(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
-              continuous_pdv, chemberta, mhggnn, avalon, y, category, files,
+              pdv, chemberta, mhggnn, avalon, y, category, files,
               reps, k_domains, sns_fp, max_vocab, ecfp4=None):
         store.append((category, smiles_isomeric, float(y)))
 

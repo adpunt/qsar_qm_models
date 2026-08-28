@@ -72,8 +72,18 @@ struct SmilesData {
     // only carries the bytes through, but the WIDTH has to match the writer's or
     // every field after it decodes at the wrong offset.
     sns_buf: [u8; 2048],
-    pdv_buf: [u8; 25],
-    continuous_pdv_buf: [u8; 800],
+    // PDV: the 200 RDKit descriptors as float32, four bytes a descriptor.
+    //
+    // There used to be TWO fields here -- `pdv_buf` at 25 bytes, the same
+    // descriptors bit-packed with every magnitude thrown away, and
+    // `continuous_pdv_buf` at 800. The binary one is deleted and the float32 one
+    // took the name (2026-08-28, the author's instruction), which is also what
+    // the experimental pipeline has always called it. Two consequences: any
+    // record written before that date decodes every field after this one at the
+    // wrong offset, so the .mmap files and data/QM9/processed must be cleared;
+    // and `continuous_pdv` is refused by name in scripts/process_and_train.py
+    // rather than aliased, because `pdv` used to mean the other thing.
+    pdv_buf: [u8; 800],
     // The learned embeddings are 32-bit floats, four bytes a dimension:
     // chemberta 384 dims, mhggnn 1024. They used to be one byte a dimension,
     // min-max rescaled per molecule, which destroyed comparability between
@@ -2162,15 +2172,10 @@ fn read_smiles_data(
         reader.read_exact(&mut sns_buf).ok()?;
     }
 
-    // Read pdv (optional, 800 bytes)
-    let mut pdv_buf = [0u8; 25];
+    // Read pdv (optional, 800 bytes = 200 float32)
+    let mut pdv_buf = [0u8; 800];
     if molecular_representations.contains(&"pdv".to_string()) {
-        reader.read_exact(&mut pdv_buf).ok()?; 
-    }
-
-    let mut continuous_pdv_buf = [0u8; 800];
-    if molecular_representations.contains(&"continuous_pdv".to_string()) {
-        reader.read_exact(&mut continuous_pdv_buf).ok()?;
+        reader.read_exact(&mut pdv_buf).ok()?;
     }
 
     let mut chemberta_buf = [0u8; 1536];
@@ -2205,7 +2210,6 @@ fn read_smiles_data(
         target_value,
         sns_buf,
         pdv_buf,
-        continuous_pdv_buf,
         chemberta_buf,
         mhggnn_buf,
         avalon_buf,
@@ -2425,21 +2429,12 @@ fn write_data(
                 }
             }
 
-            // Write pdv (800 bytes)
+            // pdv (800 bytes = 200 float32)
             if config.molecular_representations.contains(&"pdv".to_string()) {
                 let pdv = smiles_data.pdv_buf;
                 writer.write_all(&pdv)?;
                 if log_writes {
                     println!("pdv: {:?}", pdv);
-                }
-            }
-
-            // continuous_pdv (800 bytes, float32)
-            if config.molecular_representations.contains(&"continuous_pdv".to_string()) {
-                let continuous_pdv = smiles_data.continuous_pdv_buf;
-                writer.write_all(&continuous_pdv)?;
-                if log_writes {
-                    println!("continuous_pdv: {:?}", continuous_pdv);
                 }
             }
 

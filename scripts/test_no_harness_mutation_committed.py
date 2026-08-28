@@ -32,15 +32,15 @@ the one thing no other check looks at is HEAD.
 
 WHAT IT CHECKS
 --------------
-The mutation payloads come from the harness's own CASES list, read at run time,
-so a new case is covered the day it is added and this file never restates one.
-A payload is only usable as a signature if it is distinctive -- `    pass` is
-not -- so short and non-unique payloads are reported as UNCHECKED rather than
-silently passing.
+The anchor and the payload both come from the harness's own CASES list, read at
+run time, so a new case is covered the day it is added and this file never
+restates one.
 
-Each usable payload is looked for in the working tree AND in `git show HEAD:`.
-The anchor is deliberately NOT checked: a live session may hold an uncommitted
-fix whose anchor is not in HEAD yet, and that is normal.
+A mutation is the payload PRESENT and the anchor ABSENT, in the working tree or
+in `git show HEAD:`, asked of each file's own repository. Both halves are needed.
+Some payloads are ordinary code -- `    pass` is one -- so presence alone
+over-reports; and a live session may legitimately edit an anchor away, so absence
+alone does too.
 
     python scripts/test_no_harness_mutation_committed.py
 
@@ -58,13 +58,18 @@ ROOT = os.path.dirname(HERE)
 HARNESS = os.path.join(HERE, "check_fixes_fail_when_removed.py")
 BACKUP_DIR = os.path.join(HERE, ".harness_unrestored")
 
-# A payload shorter than this, or one that occurs in ordinary code, cannot
-# identify a mutation. `    pass` is the case that forces this rule.
-MIN_SIGNATURE = 24
+# A mutation is the payload PRESENT and the anchor ABSENT -- both halves, because
+# neither is enough on its own. Some payloads are ordinary code (`    pass`) and
+# some are short (`    CONFORMAL_MODELS = ()`), so presence alone over-reports; and
+# a live session may legitimately edit an anchor away, so absence alone does too.
+#
+# A length rule was tried first and let `CONFORMAL_MODELS = ()` through as
+# "unchecked" on the very day that case was added -- which is the shape of every
+# other defect in this project: a check that reports a gap rather than closing it.
 
 
 def harness_cases():
-    """(name, path, payload) for every case in the harness's CASES list.
+    """(name, path, anchor, payload) for every case in the harness's CASES list.
 
     Read from the source rather than imported: importing the harness runs it,
     and running it breaks files.
@@ -103,11 +108,12 @@ def harness_cases():
         for entry in node.value.elts:
             name = literal(entry.elts[0])
             path = literal(entry.elts[1])
+            anchor = literal(entry.elts[2])
             payload = literal(entry.elts[3])
-            if name is None or path is None or payload is None:
-                yield ("<unreadable case>", None, None)
+            if None in (name, path, anchor, payload):
+                yield ("<unreadable case>", None, None, None)
             else:
-                yield (name, path, payload)
+                yield (name, path, anchor, payload)
         return
     sys.exit(f"{HARNESS} has no CASES list -- this check cannot read what it plants.")
 
@@ -146,24 +152,32 @@ def main():
     unchecked = []
     checked = 0
 
-    for name, path, payload in harness_cases():
+    anchors = {}
+    for name, path, anchor, payload in harness_cases():
+        anchors[name] = anchor
         if path is None:
             unchecked.append((name, "the harness case could not be read"))
             continue
-        if len(payload.strip()) < MIN_SIGNATURE:
-            unchecked.append((name, f"payload {payload.strip()!r} is too generic to search for"))
-            continue
-        checked += 1
         if not os.path.exists(path):
             findings.append((name, path, "the file the harness mutates does not exist"))
             continue
-        if payload in open(path).read():
-            findings.append((name, path, "the WORKING TREE is carrying the mutation"))
-        committed = head_text(path)
-        if committed is None:
-            unchecked.append((name, f"{os.path.relpath(path, ROOT)} is not in HEAD"))
-        elif payload in committed:
-            findings.append((name, path, "HEAD is carrying the mutation -- it was COMMITTED broken"))
+        checked += 1
+
+        for where, text in (("the WORKING TREE", open(path).read()),
+                            ("HEAD", head_text(path))):
+            if text is None:
+                unchecked.append((name, f"{os.path.relpath(path, ROOT)} is not in HEAD"))
+                continue
+            if payload not in text:
+                continue
+            if anchors[name] in text:
+                # Both present: the payload reads as ordinary code here, not as a
+                # replacement for the anchor. `    pass` is the usual reason.
+                continue
+            findings.append((
+                name, path,
+                f"{where} has the mutation payload and NOT the line it replaced"
+                + (" -- it was COMMITTED broken" if where == "HEAD" else "")))
 
     for name, why in unchecked:
         print(f"  UNCHECKED  {name:52} {why}")

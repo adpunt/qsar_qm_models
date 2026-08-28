@@ -158,7 +158,7 @@ def every_accepted_representation_is_fixed_width():
     # bytes each representation contributes to one record, in the reader's order
     block_bytes = {
         "sns": SNS_RECORD_BYTES,
-        "continuous_pdv": 800,
+        "pdv": 800,
         "chemberta": CHEMBERTA_BYTES,
         "mhggnn": MHGGNN_BYTES,
         "avalon": 256,

@@ -398,7 +398,7 @@ def end_to_end(failures):
         out = tmp / 'scripts'
         out.mkdir()
         script = generate(out, stub, '--stage', '0', '--models', 'rf',
-                          '--reps', 'continuous_pdv', '--conditions', 'groupedshift',
+                          '--reps', 'pdv', '--conditions', 'groupedshift',
                           '--sample-size', '400')[0]
         proc, calls = run_task(script, stub, 0)
         train = [c for c in calls if 'process_and_train.py' in c][0]
@@ -453,7 +453,7 @@ def main():
         # instead of the path. The refusal itself is checked in
         # check_generator_refusals.
         ('stage 2', ('--stage', '2', '--models', 'rf', 'lgb', 'ngboost',
-                     '--reps', 'continuous_pdv', 'ecfp4')),
+                     '--reps', 'pdv', 'ecfp4')),
         ('stage 0, excluded models', ('--stage', '0', '--include-excluded')),
     ]:
         print(f'{label}...')

@@ -107,11 +107,11 @@ MANUAL = [
      'but hard-coded at radius 3 (ECFP6), so it is not a drop-in fix. No parameter '
      'diff could ever have caught this — it took reading the binding.'),
     ('PDV identity — still open',
-     "the representation named pdv is BINARISED at (pdv > 0); continuous_pdv is "
+     "the representation named pdv is BINARISED at (pdv > 0); pdv is "
      "the real one",
      'PDV is continuous and standardised',
      'scripts/process_and_train.py:377 vs :385',
-     'The merge layer must map the experimental PDV to QM9 continuous_pdv. That '
+     'The merge layer must map the experimental PDV to QM9 pdv. That '
      'pair is the ONLY genuinely comparable representation across the two studies.'),
     ('SNS identity — still open',
      'counts computed then discarded by packbits; also casts to uint8 BEFORE '

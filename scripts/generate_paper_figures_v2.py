@@ -56,7 +56,7 @@ Outputs:
 #        * Candidates: 'hetero', 'valprop', 'outlier'
 #
 #   3. PRIMARY_REP: Which representation for main figures?
-#      - Currently 'continuous_pdv' (continuous physics-based descriptors)
+#      - Currently 'pdv' (continuous physics-based descriptors)
 #      - REVIEW: Does this generalize? Check SNS shows same pattern.
 #
 #   4. SUPPLEMENTARY_REP: Which rep for supplementary validation?
@@ -75,7 +75,7 @@ Outputs:
 # Primary choices (change these based on results)
 PRIMARY_STRATEGY = 'gaussian'    # The reference condition under the settled scheme
 CONTRAST_STRATEGY = 'grouped_shifted'  # The one condition that separates
-PRIMARY_REP = 'continuous_pdv'   # Continuous physicochemical descriptors
+PRIMARY_REP = 'pdv'   # Continuous physicochemical descriptors
 SUPPLEMENTARY_REP = 'ecfp4'      # ECFP4 is more robust and representative of QSAR practice
 
 # Canonical ordering for all noise conditions. The first six are the settled
@@ -140,7 +140,6 @@ ANOVA_REPS_EXCLUDE = {
     'sns',                # Redundant with ecfp4 (rho = 0.90)
     'randomized_smiles',  # Incomplete coverage
     'random_smiles',      # Alias
-    'pdv',                # Binary PDV; continuous_pdv used instead
     'morgan',             # Redundant with ecfp4 (rho = 0.995)
 }
 
@@ -400,7 +399,7 @@ MODEL_LABELS = {
 }
 
 REP_LABELS = {
-    'continuous_pdv': 'PDV',
+    'pdv': 'PDV',
     'ecfp4': 'ECFP4',
     'sns': 'SNS',
     'smiles': 'SMILES',
@@ -535,15 +534,15 @@ def make_heatmap_annotations(pivot, raw_df, index_col, columns_col, rep_filter=N
                 # PDV-only models (e.g. gauche_rbf) show N/A for non-PDV reps
                 is_pdv_only_on_nonpdv = (raw_idx in PDV_ONLY_MODELS and
                                          columns_col == 'rep' and
-                                         raw_col != 'continuous_pdv')
+                                         raw_col != 'pdv')
                 # PDV-only models on non-PDV rep_filter (model×strategy heatmaps)
                 is_pdv_only_wrong_rep = (raw_idx in PDV_ONLY_MODELS and
                                          rep_filter is not None and
-                                         rep_filter != 'continuous_pdv')
+                                         rep_filter != 'pdv')
                 # Tanimoto GP is incompatible with continuous PDV
                 is_tanimoto_on_pdv = (raw_idx == 'gauche' and
-                                      ((columns_col == 'rep' and raw_col == 'continuous_pdv') or
-                                       (rep_filter == 'continuous_pdv')))
+                                      ((columns_col == 'rep' and raw_col == 'pdv') or
+                                       (rep_filter == 'pdv')))
 
                 if (raw_idx, raw_col) in existing_combos or \
                    is_pdv_only_on_nonpdv or is_pdv_only_wrong_rep or \
@@ -883,7 +882,10 @@ def audit_data_completeness(df, output_dir, min_iterations=5):
     Prints a summary and saves detailed gap report to CSV.
     """
     EXPECTED_SIGMAS = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}
-    EXPECTED_REPS = {'ecfp4', 'continuous_pdv', 'smiles', 'mhggnn', 'mol2vec'}
+    # The settled set (RERUN_PLAN.md 13.7). `smiles` and `mol2vec` were in this
+    # literal long after both were removed from the study, so the gap report
+    # counted every model as missing two representations nobody was running.
+    EXPECTED_REPS = {'ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns'}
     EXPECTED_STRATEGIES = set(STRATEGY_ORDER)
 
     # Only audit ANOVA-included data
@@ -1378,7 +1380,7 @@ def _normalize_validation_names(df):
     for _name, _target in list(val_model_map.items()):
         val_model_map.setdefault(_name.replace('-', ''), _target)
     val_rep_map = {
-        'ECFP4': 'ecfp4', 'PDV': 'continuous_pdv', 'SNS': 'sns',
+        'ECFP4': 'ecfp4', 'PDV': 'pdv', 'SNS': 'sns',
         'MHG-GNN-pretrained': 'mhggnn', 'MHGGNNpretrained': 'mhggnn',
         'SMILES': 'smiles', 'ChemBERTa': 'chemberta', 'Avalon': 'avalon',
     }
@@ -2002,7 +2004,7 @@ def create_validation_figures(validation_df, val_auc_df, qm9_auc_df, output_dir)
         print("✓ Saved table_validation_auc_full.csv")
 
     # --- Figure: Validation auc_norm heatmap per dataset ---
-    # Show a single representation (PRIMARY_REP = continuous_pdv) so the figure
+    # Show a single representation (PRIMARY_REP = pdv) so the figure
     # represents an actual configuration rather than a cross-rep mean. auc_norm is
     # near rep-invariant (see ANOVA: representation η² for robustness is small),
     # so PDV is a defensible single choice and the rep is named in the title.
@@ -4341,7 +4343,8 @@ def create_interaction_figure(auc_df, raw_df, output_dir):
 
     # Include ANOVA reps with enough models
     valid_reps = [r for r in pivot.columns if pivot[r].notna().sum() >= 3]
-    rep_order = [r for r in ['ecfp4', 'continuous_pdv', 'smiles', 'mol2vec', 'mhggnn'] if r in valid_reps]
+    rep_order = [r for r in ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']
+                 if r in valid_reps]
 
     if len(rep_order) >= 2:
         # Reindex to show all models
@@ -4371,7 +4374,7 @@ def create_interaction_figure(auc_df, raw_df, output_dir):
     ax_b = axes[1]
 
     ecfp4_auc = auc_legacy[auc_legacy['rep'] == 'ecfp4'].groupby('model')['auc_norm'].mean()
-    pdv_auc = auc_legacy[auc_legacy['rep'] == 'continuous_pdv'].groupby('model')['auc_norm'].mean()
+    pdv_auc = auc_legacy[auc_legacy['rep'] == 'pdv'].groupby('model')['auc_norm'].mean()
 
     shared_models_set = set(ecfp4_auc.index) & set(pdv_auc.index)
     # Use MODEL_ORDER for consistent legend ordering

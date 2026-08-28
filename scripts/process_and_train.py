@@ -110,7 +110,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'smiles', 'randomized_smiles', 'continuous_pdv', 'chemberta', 'mhggnn', 'avalon']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'smiles', 'randomized_smiles', 'pdv', 'chemberta', 'mhggnn', 'avalon']
 
 # Representations stored as 32-bit floats rather than bits or bytes, and therefore
 # the ones that must be standardised per feature before a model sees them. The
@@ -130,7 +130,7 @@ from model_defaults import should_standardise, is_binary_matrix
 # representation by name". The standardisation decision itself is made from the
 # FEATURES -- `pdv` means the binarised vector here and the continuous one on
 # the experimental side, so no name-keyed list can be right for both.
-CONTINUOUS_REPS = ('continuous_pdv', 'chemberta', 'mhggnn')
+CONTINUOUS_REPS = ('pdv', 'chemberta', 'mhggnn')
 
 # ChemBERTa: ONE encoder across both pipelines, settled 2026-08-27 by the author.
 # This side used to load seyonec/ChemBERTa-zinc-base-v1 -- a masked language model
@@ -481,11 +481,28 @@ def parse_arguments():
 
     args = parser.parse_args()
 
+    # Conformal is COMMENTED OUT, 2026-08-28, on the author's instruction: it is
+    # not used. Refusing by name rather than letting the model names fall
+    # through, because the two dispatchers fail differently and both quietly --
+    # the tabular one returns None and writes no row, and the graph one trains an
+    # ordinary graph network and writes it under the name `conformal`
+    # (RERUN_PLAN.md 2.20).
+    CONFORMAL_MODELS = ('conformal', 'conformal_hetero')
+    _asked = [m for m in (args.models or []) if m in CONFORMAL_MODELS]
+    if _asked:
+        parser.error(
+            f"{', '.join(_asked)} is commented out and cannot be run. Conformal "
+            f"prediction is not part of this study: the job generator lists it in "
+            f"EXCLUDED_MODELS, the figure script drops its rows when it loads them, "
+            f"and no table reads one. The training code is still in models.py if it "
+            f"is ever wanted back; the dispatch in this file is what was removed."
+        )
+
     # One fold cannot score anything out of fold: the single "held-out" part is
     # the whole training set, so there is no fit set left. KIRBy used to accept
     # the value and silently do nothing with it (its trigger reads
     # `if oof_folds and oof_folds > 1`), which is the failure this refuses.
-    if False:
+    if args.oof_folds == 1:
         parser.error(
             "--oof-folds 1 is not a fold count. One fold leaves no rows to fit on, "
             "so nothing can be scored out of fold. Use 0 to switch the pass off, or "
@@ -602,7 +619,6 @@ def write_to_mmap(
     smiles_canonical,
     randomized_smiles,
     pdv,
-    continuous_pdv,
     chemberta,
     mhggnn,
     avalon,
@@ -690,18 +706,20 @@ def write_to_mmap(
         else:
             return  # skip incomplete entry
 
+    # PDV is the 200 RDKit descriptors as float32, 800 bytes.
+    #
+    # It used to be stored as `(pdv > 0)` bit-packed into 25 bytes under this
+    # same name, with the float32 form carried alongside as `continuous_pdv`.
+    # Bit-packing threw away every descriptor magnitude and handed the model 200
+    # raw 0/1 values, 47 of which are constant across QM9 because MolWt,
+    # HeavyAtomCount and the like are positive for every molecule. That form is
+    # DELETED, not disabled, on the author's instruction 2026-08-28: `pdv` now
+    # means the float32 vector, which is what the experimental pipeline has
+    # always meant by it and what the paper has always called PDV.
     if "pdv" in molecular_representations:
         if pdv is not None:
-            pdv_binary = (pdv > 0).astype(np.uint8)  # or any threshold rule
-            pdv_packed = np.packbits(pdv_binary, bitorder='little')
-            entry += pdv_packed.tobytes()
-        else:
-            return
-
-    if "continuous_pdv" in molecular_representations:
-        if continuous_pdv is not None:
-            continuous_pdv_fp32 = continuous_pdv.astype(np.float32)
-            entry += continuous_pdv_fp32.tobytes()
+            pdv_fp32 = pdv.astype(np.float32)
+            entry += pdv_fp32.tobytes()
         else:
             return
 
@@ -895,13 +913,6 @@ def load_and_split_polaris(dataset_tuple, args, files):
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
         
-        continuous_pdv = None
-        if 'continuous_pdv' in args.molecular_representations:
-            if 'pdv' in args.molecular_representations:
-                continuous_pdv = pdv
-            else:
-                continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-        
         chemberta = None
         if 'chemberta' in args.molecular_representations:
             chemberta = chemberta_fingerprint(smiles_canonical, dimensions=CHEMBERTA_DIMS)
@@ -918,7 +929,7 @@ def load_and_split_polaris(dataset_tuple, args, files):
         if 'ecfp4' in args.molecular_representations:
             ecfp4 = ecfp4_fingerprint(smiles_canonical)
 
-        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv, chemberta, mhggnn, avalon,
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, chemberta, mhggnn, avalon,
                      target_list[local_idx], category, files,
                      args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
                      ecfp4=ecfp4)
@@ -1051,13 +1062,6 @@ def split_qm9(qm9, args, files):
         if 'pdv' in args.molecular_representations:
             pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
 
-        continuous_pdv = None
-        if 'continuous_pdv' in args.molecular_representations:
-            if 'pdv' in args.molecular_representations:
-                continuous_pdv = pdv
-            else:
-                continuous_pdv = rdkit_mol_descriptors_from_smiles(smiles_canonical)
-
         chemberta = None
         if 'chemberta' in args.molecular_representations:
             chemberta = chemberta_fingerprint(smiles_canonical, dimensions=CHEMBERTA_DIMS)
@@ -1077,7 +1081,7 @@ def split_qm9(qm9, args, files):
         if smiles_canonical and not (category == "excluded"):
             if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
                 continue
-            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, continuous_pdv,
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
                           chemberta, mhggnn, avalon, data.y.item(), category, files,
                           args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
                           ecfp4=ecfp4)
@@ -1465,25 +1469,26 @@ def load_custom_model(model_path):
 # DELETED from the Rust side on 2026-08-26 (the author does not trust it), so the
 # guard below is now what stops the next one rather than that one
 # (RERUN_PLAN.md §2.7, §5.6).
-# The representation set settled on 2026-08-26 is: continuous_pdv (called PDV in
-# the paper), MHG-GNN, Avalon, ECFP4, ChemBERTa and Sort & Slice. Everything
-# below is OUTSIDE that set and refused by name, which is what stops a job
-# running one by accident. mol2vec has been deleted outright.
+# The representation set settled on 2026-08-26 is: PDV, MHG-GNN, Avalon, ECFP4,
+# ChemBERTa and Sort & Slice. Everything below is OUTSIDE that set and refused by
+# name, which is what stops a job running one by accident. mol2vec has been
+# deleted outright.
 #
-# `pdv` is the BINARY physicochemical vector: write_to_mmap stores
-# `(pdv > 0)` bit-packed, so every descriptor magnitude is thrown away before
-# storage and the model receives 200 raw 0/1 values -- 47 of which are constant
-# across QM9, because MolWt, HeavyAtomCount and the like are positive for every
-# molecule. `continuous_pdv` is the same 200 descriptors kept as float32, and it
-# is the one in the roster (RERUN_PLAN.md 2.13).
+# `continuous_pdv` IS NOT A THIRD THING. It was this pipeline's name for the
+# float32 descriptor vector while `pdv` meant the same 200 descriptors
+# bit-packed to 25 bytes. The binary form is deleted (2026-08-28, the author's
+# instruction), `pdv` now means the float32 vector -- which is what the
+# experimental pipeline has always meant by it, so the two pipelines finally
+# agree on the name -- and the old spelling is refused rather than aliased.
 #
-# One-hot SMILES and randomized SMILES still BUILD -- pulling out the tokenizer
-# would mean editing the record layout and the vocabulary handling -- so they are
-# refused here rather than deleted.
-DROPPED_REPS = {"smiles", "randomized_smiles", "pdv"}
+# Refused, not silently accepted, because the meaning of `pdv` CHANGED. Every
+# QM9 job script and results file written before 2026-08-28 that says `pdv`
+# means the binary vector. A job written against the old naming must stop and
+# be read by a person, not run and produce rows that look like the others.
+DROPPED_REPS = {"smiles", "randomized_smiles", "continuous_pdv"}
 
 PARSEABLE_REPS = {
-    "randomized_smiles", "sns", "pdv", "continuous_pdv",
+    "randomized_smiles", "sns", "pdv",
     "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
     # "graph" contributes no bytes to the record -- the graph models read the
     # dataset object and use parse_mmap only to pull the processed targets back
@@ -1510,10 +1515,11 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
     if dropped:
         raise RuntimeError(
             f"representation(s) {sorted(dropped)} are not in the study. The study's set is "
-            f"continuous_pdv (the paper calls it PDV), mhggnn, avalon, ecfp4, chemberta and sns. "
-            f"mol2vec is gone from the code entirely; one-hot SMILES, randomized SMILES and the "
-            f"binary pdv still build but have nowhere to go, so a job asking for one would "
-            f"produce results nothing reads."
+            f"pdv, mhggnn, avalon, ecfp4, chemberta and sns.\n"
+            f"`continuous_pdv` was renamed to `pdv` on 2026-08-28 when the binary form was "
+            f"deleted. It is refused rather than aliased because `pdv` used to mean the binary "
+            f"vector, so a job or a file written before that date means something else by it.\n"
+            f"mol2vec, one-hot SMILES and randomized SMILES are gone from the code entirely."
         )
 
     unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
@@ -1578,25 +1584,15 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     if logging:
                         print(f"[{entry}] sns_fp: {sns_fp}")
             
-            # --- pdv ---
+            # --- pdv (200 descriptors as float32, 800 bytes) ---
             pdv = None
             if "pdv" in molecular_representations:
-                pdv_bytes = mmap_file.read(25)
+                pdv_bytes = mmap_file.read(800)
                 if "pdv" == rep:
-                    pdv = np.unpackbits(np.frombuffer(pdv_bytes, dtype=np.uint8), bitorder="little")
+                    pdv = np.frombuffer(pdv_bytes, dtype=np.float32)
                     feature_vector.append(pdv)
-                    if logging: 
+                    if logging:
                         print(f"pdv: {pdv}")
-
-            # --- continuous pdv ---
-            continuous_pdv = None
-            if "continuous_pdv" in molecular_representations:
-                continuous_pdv_bytes = mmap_file.read(800)
-                if "continuous_pdv" == rep:
-                    continuous_pdv = np.frombuffer(continuous_pdv_bytes, dtype=np.float32)
-                    feature_vector.append(continuous_pdv)
-                    if logging: 
-                        print(f"continuous_pdv: {continuous_pdv}")
 
             # --- chemberta ---
             if "chemberta" in molecular_representations:
@@ -1638,7 +1634,7 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                     print(f"[{entry}] domain_flag bytes: {[f'{b:02X}' for b in domain_byte]}")
 
             # --- sns_fp ---
-            if rep in ("sns", "pdv", "continuous_pdv", "chemberta", "mhggnn", "avalon"):
+            if rep in ("sns", "pdv", "chemberta", "mhggnn", "avalon"):
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
@@ -2782,7 +2778,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
                 print("CREATING HYBRID REPRESENTATION")
                 print("="*70)
                 
-                sources = ['continuous_pdv', 'ecfp4', 'chemberta']
+                sources = ['pdv', 'ecfp4', 'chemberta']
                 available = [r for r in sources if r in args.molecular_representations]
                 
                 if len(available) >= 2:
@@ -3082,11 +3078,12 @@ def main():
     if dropped:
         raise SystemExit(
             f"\nERROR: {dropped} are not in the study.\n"
-            f"The study's set is: continuous_pdv (the paper calls it PDV), mhggnn, avalon,\n"
-            f"ecfp4, chemberta, sns.\n"
-            f"mol2vec no longer exists in the code. One-hot SMILES, randomized SMILES and the\n"
-            f"binary pdv still build, but none is part of the study, so this job would produce\n"
-            f"results with nowhere to go.\n"
+            f"The study's set is: pdv, mhggnn, avalon, ecfp4, chemberta, sns.\n"
+            f"`continuous_pdv` was renamed to `pdv` on 2026-08-28, when the binary descriptor\n"
+            f"vector was deleted. It is refused rather than treated as an alias: `pdv` used to\n"
+            f"mean the binary form, so a job script written before that date means the other\n"
+            f"thing by it and must be read by a person.\n"
+            f"mol2vec, one-hot SMILES and randomized SMILES no longer exist in the code.\n"
         )
 
     # Prepare for communication with Rust

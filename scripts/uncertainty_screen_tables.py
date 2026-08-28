@@ -86,7 +86,7 @@ MODEL_LABELS = {
 }
 REP_LABELS = {
     'ecfp4': 'ECFP4',
-    'continuous_pdv': 'PDV',
+    'pdv': 'PDV',
     'sns': 'SNS',
     'mhggnn': 'MHG-GNN-pretrained',
     'avalon': 'Avalon',
@@ -302,7 +302,7 @@ def build(run_dir, out_dir, report_level=REPORT_LEVEL, n_boot=300):
 # executed here so the two lists follow from the table rather than from a
 # reading of it. Change the rule in both places or in neither.
 
-INCUMBENT_REPS = ['ecfp4', 'continuous_pdv', 'sns', 'mhggnn']
+INCUMBENT_REPS = ['ecfp4', 'pdv', 'sns', 'mhggnn']
 N_REPS_REQUIRED = 3          # of six, for a model to stay
 RANK_FLOOR = 0.2             # rho_unc_vs_clean_error a model must reach
 COVERAGE_FLOOR, COVERAGE_CEILING = 0.02, 0.99

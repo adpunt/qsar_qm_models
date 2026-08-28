@@ -6,7 +6,7 @@ writes during a real run and checks the properties the whole re-run depends on.
 Run the pipeline first, then point this at the directory it wrote into.
 
     python scripts/process_and_train.py -d QM9 -t homo_lumo_gap \\
-        -m rf lgb -r ecfp4 continuous_pdv --noise-level 0.0 0.4 0.8 \\
+        -m rf lgb -r ecfp4 pdv --noise-level 0.0 0.4 0.8 \\
         -n 1000 -b 2 -s scaffold --normalize True -f /tmp/out.csv
     python scripts/smoke_real_data.py /tmp/out.csv
 """

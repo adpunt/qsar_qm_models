@@ -2146,20 +2146,6 @@ like the others. The refusal names the rename and the date.
 `data/QM9/processed` written before today decodes every field after PDV at the wrong offset. The
 runbook's cache step (§2b there) already clears both.
 
-### 2.22 ✅ 2026-08-28 — conformal prediction is out of the study
-
-The author's instruction, carried out the same day. Both dispatch branches are commented out in
-`models/models.py`; `-m conformal` and `-m conformal_hetero` are refused **before any work
-starts**, which is the part that matters, because the two dispatchers failed differently and both
-quietly — the tabular one ends its chain with no `else` and returned `None`, writing no row and
-saying nothing, and the graph one ends with `else: return train_gnn(...)`, so `-m conformal
--r graph` would have trained an ordinary graph network and written it to a file named for
-conformal. `--cp-base-model`, `--calibration-size` and `--alpha` are commented out of the parser,
-and the three conformal entries are gone from the job generator's excluded list, so
-`--include-excluded` cannot bring them back. Guard: `scripts/test_conformal_is_out.py`.
-
-This closes the `--calibration-size` row in §11.1: the flag no longer exists.
-
 ### 2.20 🔴 FOUND AND FIXED 2026-08-28 — the repository shipped a defect the fix-guard harness planted
 
 Two findings, and they are the same shape: **something that was true on this laptop was not true
@@ -2186,13 +2172,24 @@ file, because the harness restores the correct version before it reports, and it
 directory recovers a killed run only when the harness is next run. Fixed in `f095982`.
 
 **The guard is `scripts/test_no_harness_mutation_committed.py`** (`fbc0b6f`). It reads the
-payloads out of the harness's own `CASES` at run time — so a new case is covered the day it is
-added — and looks for each one in the working tree AND in HEAD, asking each file's own
-repository, since the harness mutates KIRBy and NoiseInject too. 22 payloads checked, 2 too
-generic to search for and reported as unchecked rather than passed. It refuses to run while the
-harness is running, because the mutation it would find then is the one the harness planted on
-purpose. Verified against the real event: the payload is in `a22d45a:models/models.py` and not
-in HEAD. **Put it in the preflight (§8).**
+anchor and the payload out of the harness's own `CASES` at run time — so a new case is covered the
+day it is added — and calls it a mutation when the payload is PRESENT and the anchor ABSENT, in the
+working tree or in HEAD, asked of each file's own repository, since the harness mutates KIRBy and
+NoiseInject too. Both halves are needed: some payloads are ordinary code (`    pass`), so presence
+alone over-reports, and a live session may edit an anchor away, so absence alone does too. 25
+payloads checked, none unchecked. It refuses to run while the harness is running, because the
+mutation it would find then is the one the harness planted on purpose. Verified against the real
+event: the payload is in `a22d45a:models/models.py` and not in HEAD. **Put it in the preflight
+(§8).**
+
+**It caught a second one within the hour, and that is the point.** The first version used a length
+rule and reported `    CONFORMAL_MODELS = ()` as "too generic to check" — on the day that case was
+added. Replacing the length rule with the anchor-and-payload rule turned it red immediately: a
+harness run had exited cleanly, emptied its backup directory, and still left
+`scripts/process_and_train.py` with `CONFORMAL_MODELS = ()`, so `-m conformal` was **not refused**.
+It would have fallen through the dispatcher, returned `None`, written no row and exited 0 — the
+exact failure §2.22's refusal exists to prevent. Restored, and the guard is green on 25 payloads.
+Twice in one day, on two files, from two different sessions.
 
 **Two. Eleven guard scripts were never added to git.** Nine of them are checks
 `check_fixes_fail_when_removed.py` runs — `test_bnn_kl_term`, `test_ecfp4_identity`,
@@ -2206,6 +2203,68 @@ results are produced. Committed in `fbc0b6f`.
 **What both say about the run.** The local tree passing every gate is not the claim that matters.
 The claim that matters is that **HEAD** passes them, on the branch the cluster pulls, after it has
 been pushed. Two of the three had already been violated at once.
+
+### 2.22 ✅ CUT 2026-08-28 — conformal prediction is commented out, and asking for it stops the run
+
+The author's instruction: conformal is not used, comment it out. Audit entries 5 and 60 are
+closed by the cut rather than by a repair.
+
+**What was already true.** `conformal_rf`, `conformal_qrf` and `conformal_dnn` sit in
+`EXCLUDED_MODELS` in `slurm_scripts_qm9_rerun/generate_scripts.py`, so no job script asked for
+them. The figure script drops conformal rows when it loads them. No table in the paper reads one.
+`--calibration-size` was commented out on 2026-08-27, because it was accepted, passed down to
+`train_conformal_model` and never read — the advertised 20% carve-out never happened and every
+conformal interval was calibrated on the whole validation split (entry 5).
+
+**What was still live.** `-m conformal` ran. `--include-excluded` turned the three job scripts
+back on. And `conformal_hetero` wrote its per-molecule learned spread to
+`<filepath>_uncertainty/uncertainty_<model>_<rep>_...csv`, a name no reader looks for, so the one
+column it produced that nothing else produces never reached a table (entry 60).
+
+**Commenting out the branches alone would not have been safe.** The two dispatchers fail
+differently and both quietly:
+
+| dispatcher | end of the chain | what `-m conformal` would have done |
+|---|---|---|
+| tabular, `process_and_train.py` | no `else` | returns `None`, writes no row, exits 0 |
+| graph, `process_and_train.py` | `else: return train_gnn(...)` | trains an ordinary graph network and writes it under the name `conformal` |
+
+Measured, not argued: with the branch commented out and no refusal, `-m conformal_hetero -r ecfp4
+-n 50` ran for 20 seconds, printed `model: conformal_hetero`, and exited 0 having written nothing.
+
+**What changed.** All in `scripts/process_and_train.py` and the job generator; the training
+functions in `models/models.py` are untouched and can be dispatched again if they are ever wanted.
+
+- The three dispatch branches are commented out — tabular `conformal`, tabular `conformal_hetero`,
+  graph `conformal`.
+- The two model names are refused by name, immediately after the arguments are parsed and before
+  any data is touched.
+- `--cp-base-model` and `--alpha` are commented out. They exist only for conformal; both readers
+  in `models.py` fall back to `[0.1]` when `--alpha` is absent.
+- The three `EXCLUDED_MODELS` entries are commented out, so `--include-excluded` cannot write a
+  script that dies on its first line.
+
+**The check.** `scripts/test_conformal_is_out.py`, six assertions: `-m conformal` and
+`-m conformal_hetero` each stop with the model named and no file written; neither dispatcher has a
+live branch for either name, established by PARSING the file rather than searching its text, so a
+commented-out branch and a live one are told apart; the parser accepts neither flag; and the job
+generator, run with the excluded models turned ON, writes no script containing `-m conformal`.
+The revert case sets `CONFORMAL_MODELS = ()`, and both refusal assertions go red.
+
+This also closes the `--calibration-size` row in §11.1: the flag no longer exists.
+
+**A third instance of the §2.20 shape, found on the way.** `process_and_train.py` carried
+
+```
+    if False:
+        parser.error("--oof-folds 1 is not a fold count. ...")
+```
+
+`--oof-folds 1` was therefore accepted and did nothing — the exact failure the comment above it
+says it refuses. This one was not planted by a killed harness run: `git log -S` puts it in
+`1bcd308`, the commit that introduced the block, so it has never fired. Restored to
+`if args.oof_folds == 1:`. Note that `test_no_harness_mutation_committed.py` could not have caught
+it, because it searches for the harness's own payloads and `if False:` is not one of them.
 
 ### 2.18 ✅ FIXED 2026-08-28 — `rmse` and `mae` are in the label's own units on both sides
 
@@ -5751,7 +5810,7 @@ that owns it in its first cell.
 | ~~A3~~ | ~~code~~ | ✅ **FIXED** — censoring silently ran **270** runs, not the decided 300: it inherited the main grid's `replicates=9, start=1`, which only makes sense because the screen supplies replicate 0 — and censoring is not in the screen | Defaults to `10, start=0` for a pair-subset condition |
 | ~~A4~~ | ~~code~~ | ✅ **FIXED** — generating censoring into the generator's own directory **overwrote the main-grid scripts** for the same models. Exit 0, no warning, files untracked so git could not restore them | Refused; pass `--out-dir` |
 | ~~**A5**~~ | code | ✅ **FIXED 2026-08-28, both routes.** `sub_id_enumerator` raises for an unparseable molecule, and — the half `mol is None` does not reach — `ecfp_featuriser` raises for a molecule with no enumerable substructures, which is what RDKit gives for `''`: a VALID Mol with no atoms, the same case Avalon's fix calls out by name. `write_to_mmap` refuses the shape mismatch instead of zero-filling it. Guarded by three new cases in `scripts/test_avalon_failure.py`. Note what is NOT a fault: a molecule whose substructures all fall outside the top 1,024 gives a full-width vector of zeros, and that is the method as designed. Original report: 🔴 **Sort & Slice silently produces an all-zero feature block** where every other featuriser now raises. `scripts/process_and_train.py`: the enumerator returns `{}` for an unparseable molecule (`:1290`), the sum over an empty list is scalar 0.0 (`:1324`), and `write_to_mmap` turns the resulting shape mismatch into `np.zeros(SNS_DIM)` and writes it as a legitimate block (`:651-659`). **The full-width all-zero case passes the shape check entirely.** The unparseable path is reachable — `:1026-1027` reparses and passes `None` straight in. This is the same defect as Avalon's, in the one featuriser that was not checked | Raise, as ChemBERTa, MHG-GNN and now Avalon do, and add a case to `scripts/test_avalon_failure.py` |
-| **A6** → **chat D** | code | 🔴 **`scripts/check_fixes_fail_when_removed.py` exits 1** — four of its twenty-one mutation anchors no longer match their target files, so four fix-guards are never exercised. One is a single trailing space in the anchor. `README.md:198` claims this script proves every check fails when its fix is removed; that claim is currently false | Re-derive the four anchors and run it to green |
+| ~~**A6**~~ | code | ✅ **CLOSED — verified 2026-08-28 by running it.** 24 cases, every one RED when its fix is removed, exit 0. `README.md:198`'s claim is true again. Original report: 🔴 **`scripts/check_fixes_fail_when_removed.py` exits 1** — four of its twenty-one mutation anchors no longer match their target files, so four fix-guards are never exercised. One is a single trailing space in the anchor. `README.md:198` claims this script proves every check fails when its fix is removed; that claim is currently false | Re-derive the four anchors and run it to green |
 | ~~**A7**~~ | doc | ✅ **FIXED 2026-08-28 (`ea32396`), and the class of defect with it.** Confirmed live first by running the generator: it emits 3 conditions and 240 tasks against the runbook's 4 and 320, and `qm9_s0_gauche.sh` was `--array=0-7` against 6 tasks. Every count now comes from the generator's own printed summary, and `slurm_scripts_qm9_rerun/test_runbook_matches_generator.py` re-reads it and checks every `--array=` against the task count of the script that line names — verified red by putting one `0-23` back. Two sections added that were nowhere an operator would find them: **5b** for censoring (why it is not in the array, that the five pairs come out of the screen, that the generator refuses full breadth and refuses its own directory, and that `copy_zero_rows.py` supplies its clean row from Gaussian) and **2b** for the three caches. The cost lever ran `--bootstrapping 5`, a flag the generator does not have. Original report: 🔴 **`slurm_scripts_qm9_rerun/RUNBOOK.md` describes the pre-decision run** — four conditions, 320 tasks, 22,400 runs, `--array=0-23`. The generator emits three conditions, 240 tasks, `--array=0-17`. Following it mis-submits every array: six of twenty-four tasks per model exit 2 on the generator's own out-of-range guard. **And `grep -i censor` returns one hit, so there is no instruction for running censoring at all.** This is the file an operator reads before spending cluster time | Regenerate its grid table and every `sbatch` line from the generator's output, and add the censoring command with its `--out-dir` |
 
 #### For chat D

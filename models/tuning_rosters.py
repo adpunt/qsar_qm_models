@@ -169,7 +169,7 @@ MODEL_NAME_MAP = {
 
 REP_NAME_MAP = {
     'ecfp4':          'ECFP4',
-    'continuous_pdv': 'PDV',
+    'pdv': 'PDV',
     'sns':            'SNS',
     'mhggnn':         'MHG-GNN-pretrained',
     'avalon':         'Avalon',

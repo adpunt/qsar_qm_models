@@ -332,7 +332,7 @@ def featurise(pat, rep, smiles, train_idx):
     elif rep == 'avalon':
         rows = [np.unpackbits(pat.avalon_fingerprint(s), bitorder='little')
                 for s in smiles]
-    elif rep == 'continuous_pdv':
+    elif rep == 'pdv':
         rows = [pat.rdkit_mol_descriptors_from_smiles(s) for s in smiles]
     elif rep == 'chemberta':
         rows = [pat.chemberta_fingerprint(s) for s in smiles]
