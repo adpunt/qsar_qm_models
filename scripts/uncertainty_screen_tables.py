@@ -79,6 +79,9 @@ MODEL_LABELS = {
     'ngboost': 'NGBoost',
     'gauche': 'GP',
     'gauche_rbf': 'GP',
+    # The pipeline writes the DNN Bayesian variants without the 'dnn_' prefix.
+    'bnn_full': 'BNN-Full',
+    'bnn_full_variational': 'VBLL-Full',
     'dnn_bnn_full': 'BNN-Full',
     'dnn_bnn_full_variational': 'VBLL-Full',
     'mlp_bnn_full': 'MLP-BNN-Full',
