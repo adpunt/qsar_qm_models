@@ -4878,6 +4878,30 @@ already the default.
 
 #### 5.7k 📚 WHAT THE LITERATURE ACTUALLY SETS FOR NGBOOST (2026-08-28)
 
+> ✅ **CLOSED 2026-08-28 (author's decision): the laboratory side now stops early too.** It used to
+> read the two stage-selection settings and throw them away, so NGBoost on an experimental dataset
+> was a more heavily trained model than NGBoost on QM9 while the settings fingerprint on every row
+> said the two matched. `EarlyStoppingNGBRegressor` in the runner applies them: it holds back a
+> fifth of the fold's training rows, grouped by scaffold through the same helper the neural path
+> already used, watches the log-likelihood on those rows, stops when it stops improving and predicts
+> at the best round.
+>
+> **Two consequences for the Methods.** NGBoost on this side now fits on 80% of the training block
+> while the other tree models fit on all of it — already true of the four neural families here, for
+> the same reason. And without scaffold ids it trains to the cap rather than carving an ungrouped
+> split, because early stopping scored on molecules whose frameworks were just fitted is the
+> optimism the outer split exists to rule out.
+>
+> **Two library traps, both measured, both guarded.** ngboost keeps every round it fitted and
+> `predict` with no cap then uses all of them: on a 900-row fixture it fitted 288 rounds, the best
+> was 237, and capping moved predictions by up to 0.44 against a label spread of 2.58. And setting
+> `early_stopping_rounds` as a CONSTRUCTOR argument makes ngboost override the value passed to
+> `fit` and build its own **ungrouped random** validation split when none is supplied — the
+> fallback path stopped at 324 rounds that way before the settings were moved to private names.
+> Verified after the fix: fitted 288, best 237, capping changes the prediction, the watched rows
+> share zero scaffolds with the fitted rows, and with no scaffold ids it trains the full 500.
+
+
 Read from the primary source, not from memory. **`Duan2020` — Duan, Avati, Ding, Thai, Basu, Ng and
 Schuler, "NGBoost: Natural Gradient Boosting for Probabilistic Prediction", ICML 2020, PMLR v119,
 pp. 2690–2700**, §4:
