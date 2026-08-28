@@ -7752,6 +7752,90 @@ for validation rows no model fits, which had silently disabled training-molecule
 quantile forest, NGBoost and the Gaussian process) and the censoring name normalisation in
 `scripts/uncertainty_stats.py`.
 
+#### Chat O — Do validation molecules replace the out-of-fold refitting?
+
+🔴 **OPEN, and it settles a question the author asked on 2026-08-25 that was never answered:**
+*"Can this be reworked with the initial 80:10:10 split?"* I answered that it largely could, named one
+blocker, and no decision was ever recorded. The expensive route was built anyway and is what the
+uncertainty runs now cost.
+
+**What it is worth.** One uncertainty task is 7 levels × 5 folds × (1 fit + 5 cross-fits). **Five of
+every six model fits are the cross-fit.** If validation molecules answer the same question, that
+disappears.
+
+**Why it might work.** A scored molecule has to satisfy two things: no model fitted it, and its
+injected noise is known exactly. Neither held on 2026-08-25. Both hold now — validation is out of
+every model's fit (settled 2026-08-27) and carries its own independently drawn noise.
+
+##### What is already true, read from the tree 2026-08-28
+
+| | |
+|---|---|
+| QM9 validation noise is recorded per molecule | `noise_record.splits['val']['epsilon_raw']`, `scripts/process_and_train.py:2765` |
+| QM9 cannot write a validation uncertainty row | `VALID_SPLITS = ("test", "train_oof")`, `scripts/utils.py:345` |
+| Lab folds carve 20% of the training block as validation, scaffold-grouped, **before any model is fitted** | `scaffold_validation_carve`, `alternative_data_noise_robustness.py:1976`, called `:2219` — so validation is unfitted by the trees and the GP as well as the networks |
+| Lab validation noise is drawn and **the per-molecule draw is thrown away** | `:1661-1669` keeps `.y_noisy` only |
+| The lab tree path has no validation at all | `run_tree_experiment`, `:1348`, takes no validation argument |
+
+**Molecules scored, per fold, if the route changes** — validation is a fifth of each training block:
+logD 806 against 4,031; Caco-2 346 against 1,729; hERG 226 against 1,132. QM9: 1,000 per replicate.
+
+##### Two leaks, and only one of them matters
+
+**Early stopping is real.** The four neural families choose when to stop by watching the validation
+molecules, so their errors there are slightly optimistic. **This is the thing the test is looking
+for**, and it is confined to those four.
+
+**Temperature calibration is not a leak here.** It is a single multiplier applied to every molecule
+(`models/models.py:2145`), so it cannot change the order of them, and every statistic in question is
+a rank correlation. Read the uncalibrated column and name it. Coverage is the exception and stays on
+the test rows, where it already is.
+
+##### Do this, in order
+
+1. **QM9 only.** Let the uncertainty writer take a `validation` split, requiring the recorded draw,
+   and score the held-out validation molecules with the model that is already fitted — a prediction,
+   not a refit. The clean label, the recorded draw and the corrupted label must satisfy the analysis
+   module's own one-scale check (`scripts/uncertainty_stats.py`, `_normalise_qm9`).
+2. **Re-run the screen's configuration with both splits written:** QM9, 5,000 molecules, one
+   replicate, plain Gaussian, levels 0.0 and 1.5, all six representations, all seven uncertainty
+   models, `--oof-folds 3`. In `env_test`, never base Anaconda. Large files on `/Volumes/seagate`.
+3. **Compute both routes with the module that exists** — `q4_error_ratio` and `q6_error_ranking` in
+   `scripts/uncertainty_stats.py`, within one level, one cell per (model, representation, split).
+   Invent no statistic.
+4. **The rule, fixed before any number comes back.** Rank the seven models by `rho_delta` under each
+   route. **Drop the cross-fit everywhere** if the two rankings agree at Spearman ≥ 0.8 *and* every
+   model's validation value falls inside the 300-resample interval of its out-of-fold value.
+   **Keep it for the four neural families only** if that holds for the trees and the Gaussian process
+   and fails for the networks. **Keep it everywhere** otherwise, and write down what disagreed.
+5. **Only if the answer is "validation is enough", do the lab plumbing:** keep the validation draw,
+   give the tree path the carve, score and write validation rows. Then take `--oof-folds` out of the
+   generated jobs and restate the fit count before and after.
+
+**The deliverable is the edit, not the finding.** Either the job scripts change or they do not and
+the reason is in this document, with the fit count both ways.
+
+> **Prompt.** Settle whether scoring the validation molecules replaces the out-of-fold refitting in
+> the uncertainty runs. The author asked this on 2026-08-25 and it was never answered; the expensive
+> route was built and five of every six model fits in those runs are now the cross-fit. Read
+> `RERUN_PLAN.md` §13 chat O in full first, then the code it cites — do not work from the summary.
+> The question a scored molecule has to satisfy is that no model fitted it and its injected noise is
+> known exactly, and both now hold for validation molecules on QM9. Do the QM9 half first: allow the
+> uncertainty writer to take a validation split, score the held-out validation molecules with the
+> model that is already fitted, and re-run the screen's configuration so both routes are written from
+> one run. Then compare them with the statistics that already exist in `scripts/uncertainty_stats.py`
+> — invent none — and apply the decision rule in §13 chat O, which is fixed before the numbers and
+> must not be revised after seeing them. Two things to hold on to: the neural families watch the
+> validation molecules to decide when to stop training, so their errors there are optimistic and that
+> is exactly what the comparison is looking for; and the temperature calibration is a single
+> multiplier that cannot change a rank correlation, so read the uncalibrated column and say so. Run
+> in `env_test`, never base Anaconda, with large files on `/Volumes/seagate`. Commit each piece as it
+> goes green — a concurrent session destroyed uncommitted work on 2026-08-28. The deliverable is an
+> edit to the job scripts or a written reason not to, with the fit count before and after, plus this
+> section closed out in `RERUN_PLAN.md`. Do not touch `paper.tex`.
+
+---
+
 #### Chat H — Job scripts, preflight, gates, launch
 
 **Blocked** on the run design in §13.1. A, B, C, D, E and G are all done, so that is the only
