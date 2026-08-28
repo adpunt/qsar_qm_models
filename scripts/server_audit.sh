@@ -198,7 +198,9 @@ if [ "$USE_SETUP" = "1" ] && [ -z "$ENV_PREFIX" ]; then
   say "     Skipping the setup step and reporting what does not need it."
   say "     Override with FORCE_SETUP=1 if you WANT this run to build it."
   USE_SETUP=0
+  ENV_MISSING=1
 fi
+ENV_MISSING="${ENV_MISSING:-0}"
 [ "${FORCE_SETUP:-0}" = "1" ] && USE_SETUP=1
 
 # The shell preamble that puts a child into the job environment. Resolution order
@@ -275,7 +277,30 @@ run_py() {
 # compared. A check that passes in one and fails in the other is the failure
 # mode that produced the two dead jobs.
 # -----------------------------------------------------------------------------
-for WHO in "${RUNNERS[@]}"; do
+# Without an interpreter that has the modelling packages, sections 3 to 6 all
+# fail for one reason and report it as six. Say it once.
+if [ "$ENV_MISSING" = "1" ]; then
+  section "3-6. MODELS, QUANTILE FOREST, GAUSSIAN PROCESS, PIPELINE PARITY"
+  say ""
+  say "  NOT CHECKED. env_test does not exist, so there is no interpreter with"
+  say "  torch, gpytorch, quantile_forest or ngboost in it. Running these anyway"
+  say "  reports eight launch blockers that are all the same missing environment,"
+  say "  which is worse than reporting nothing."
+  say ""
+  say "  Rebuild the environment, then run this again. Sections 1, 2 and 7 do not"
+  say "  need it and are still worth reading."
+  # Only the job environment is dropped. The second interpreter is a separate
+  # install and may still be usable, so it is left in rather than assumed dead.
+  KEPT=()
+  for r in ${RUNNERS[@]+"${RUNNERS[@]}"}; do [ "$r" = "job" ] || KEPT+=("$r"); done
+  RUNNERS=(${KEPT[@]+"${KEPT[@]}"})
+  if [ "${#RUNNERS[@]}" -gt 0 ]; then
+    say ""
+    say "  The second interpreter IS present, so sections 3 to 6 run under it below."
+  fi
+fi
+
+for WHO in ${RUNNERS[@]+"${RUNNERS[@]}"}; do
 
 if [ "$WHO" = "job" ]; then
   section "INTERPRETER: the job environment$([ "$USE_SETUP" = 1 ] && echo ' (via . setup.sh)')"
@@ -442,7 +467,13 @@ section "8. THE QM9 JOB GENERATOR   (chat M)"
 # interpreter's pipeline accepts. It emitted --sigma and --noise-strategy for
 # weeks after both were refused by name, because nobody had run its output.
 GENTEST="$QSAR_ROOT/slurm_scripts_qm9_rerun/test_generate_scripts.py"
-if [ -f "$GENTEST" ]; then
+if [ "$ENV_MISSING" = "1" ]; then
+  say "  NOT CHECKED. This test feeds every command the generator writes through"
+  say "  the training program's own settings reader, which means importing the"
+  say "  pipeline. With env_test absent the import fails, and a failed import is"
+  say "  NOT evidence that the generator is wrong. Reporting it as such is how a"
+  say "  missing environment gets recorded as a code fault."
+elif [ -f "$GENTEST" ]; then
   say "  running $GENTEST (this imports the whole pipeline; about a minute)"
   say ""
   GENOUT="$(cd "$QSAR_ROOT" && printf '%s' "import runpy,sys; sys.argv=['t']; runpy.run_path('$GENTEST', run_name='__main__')" | run_job_env 2>&1)"
@@ -466,6 +497,14 @@ section "WHAT THIS MEANS"
 say ""
 say "  Read the exit codes above. In order of what stops a launch:"
 say ""
+if [ "$ENV_MISSING" = "1" ]; then
+  say "   * env_test DOES NOT EXIST. That is the only finding this run can make."
+  say "                        Sections 3 to 6 and 8 all need an interpreter with the"
+  say "                        modelling packages, so none of them ran. Rebuild the"
+  say "                        environment and run this again; nothing else here is"
+  say "                        evidence of anything until you do."
+  say ""
+fi
 say "   * Section 5 FAIL  -> every Gaussian-process task dies silently. Fix before submitting"
 say "                        any GP job. This is the one with no error message."
 say "   * Section 4 FAIL  -> every quantile-forest task dies on contact."
