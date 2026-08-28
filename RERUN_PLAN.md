@@ -2957,7 +2957,7 @@ apparatus.
 
 | Capability | QM9 | Experimental | What has to happen |
 |---|---|---|---|
-| Independent repeats of the whole experiment | **10** | **none** — 5 folds only, every model pinned to one seed | The experimental variance decomposition has no true replicate term |
+| Independent repeats of the whole experiment | **10** | **none** — 5 folds only, every model pinned to one seed | The experimental variance decomposition has no true replicate term. **§3.2b** defines the two words |
 | Out-of-fold scoring of training molecules | no | yes | QM9 cannot ask the uncertainty question at all (§2.6) |
 | Inner split grouped by scaffold | no — validation is halved by position, and `scaffold` appears **zero** times in `models/models.py` | yes, `GroupKFold`, with a logged fall back to random when a fold has too few scaffolds | QM9's calibration set sits on a different split geometry from its test set |
 | The injected noise recorded per molecule | ✅ recorded (chat A) | ✅ recorded, and now with the full provenance beside it (chat B) | Done on both sides. Every result row carries `unit_dose_g`, `solved_scale`, `target_dose_label_units`, `realised_dose_label_units`, `realised_dose_fraction_of_spread`, `mean_epsilon`, `affected_molecule_fraction`, `effective_n` and the clean standardisation constants — under **the same column names in both pipelines**, checked by the cross-check |
@@ -3602,7 +3602,8 @@ two have been applied and one is answered by measurement:
   direction. **What the paper now has to say, because it is no longer optional:** the experimental
   variance decomposition has **no estimable residual term**, and no experimental model-vs-model
   comparison carries a run-to-run error bar. The five folds are a partition, not repeats, so their
-  spread mixes randomness with scaffold difficulty and cannot stand in for one (§3.3). QM9 keeps
+  spread mixes randomness with scaffold difficulty and cannot stand in for one (**§3.2b**, which
+  is where this rule now lives in full). QM9 keeps
   its ten repetitions, so the two studies are asymmetric here on purpose. Recorded in the audit
   script's manual checklist so it cannot be forgotten at writing time.
 
@@ -5477,7 +5478,8 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    permutation null.** *"Yes one replicate for uncertainty runs."* Do not reopen it.
    **What this commits the paper to saying**, because it is no longer optional: the uncertainty
    results have **no run-to-run error bar**. The five scaffold folds are a partition, not repeats,
-   so their spread mixes randomness with scaffold difficulty and cannot stand in for one (§3.3).
+   so their spread mixes randomness with scaffold difficulty and cannot stand in for one
+   (**§3.2b**, which is where this rule now lives in full).
    The permutation null is what tells the reader whether an observed correlation is distinguishable
    from chance; it is not a substitute for a repeat, and the Methods must say so in those words.
    **Where it is enforced:** the runner has no replicate axis at all
@@ -7845,6 +7847,34 @@ is. The sourced literature review is in `research_archive/f692d614/`.
 > check that fails if the fix is removed. Do not touch `paper.tex`.
 
 ---
+
+#### Chat I-b — Wire the decomposition in, then check it
+
+Chat I built the decomposition and connected none of it. The full handoff, with every number
+traced and every gap named, is `HANDOFF_UNCERTAINTY_DECOMPOSITION.md`; the prompt is at the end of
+that file. In short:
+
+**Built and committed:** one shared definition in variances (`scripts/uncertainty_decomposition.py`,
+25 gates), forest branch ends at 5 (live in both pipelines), the twelve corrected evidential pairs,
+and a variational layer that predicts noise per molecule (`scripts/test_heteroscedastic_vbll.py`,
+6 gates).
+
+**Not wired — four searches, all empty:** nothing imports the shared module, nothing can reach the
+new layer, neither new model is in a roster, and the laboratory runner still writes no component
+columns.
+
+**Measured:** the noise-predicting Gaussian process costs 0.0003 of R² and correlates with the true
+noise size at +0.79 while its model term sits at −0.12. **The forest does not separate the two —
++0.84 and +0.81, the same signal twice — which may mean the forests should carry no decomposition
+column at all.**
+
+**Three checks the author asked for and chat I did not run:** even noise where the honest answer is
+nothing found; a graded scale rather than the two-block split every correlation so far has used; and
+the variational layer measured to the same standard as the Gaussian process, which it currently is
+not.
+
+🔴 **A concurrent session destroyed one uncommitted change in `models/models.py` on 2026-08-28 after
+it had passed its tests.** Commit each piece as it goes green.
 
 #### Chat J — Figure script consolidation and the five analyses
 
