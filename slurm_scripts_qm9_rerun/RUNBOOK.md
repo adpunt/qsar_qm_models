@@ -138,7 +138,8 @@ be cut without gutting the paper's first research question. Replicates can be cu
 ssh gateway.arc.ox.ac.uk && ssh arc-login
 
 cd /data/stat-cadd/scat9264/qsar_qm_models
-git fetch origin && git checkout additional_reps && git pull --ff-only origin additional_reps
+git fetch origin && git checkout additional_reps
+bash scripts/pull_safely.sh        # NEVER a bare `git pull` here -- RERUN_PLAN.md, chat H
 
 cd rust && cargo build --release && cd ..
 ls -l rust/target/release/rust_processor      # must exist and be executable
@@ -289,6 +290,15 @@ cd /data/stat-cadd/scat9264/qsar_qm_models
 #    A task writes train_<file_no>.mmap and the binary rewrites it in place.
 rm -f train_*.mmap test_*.mmap val_*.mmap config_*.json
 rm -f noise_manifest_*.json noise_provenance_*.csv scaffold_groups_*.json
+# The jobs `cd scripts` before running, and the intermediates are opened relative
+# to the working directory, so they land there and not in the repository root.
+rm -f scripts/train_*.mmap scripts/test_*.mmap scripts/val_*.mmap \
+      scripts/config_*.json scripts/noise_provenance_*.csv
+
+# 1b. The results of the OLD grid. Section 2 above archives them; nothing deleted
+#     them, and every anova_*.csv left in place carries rows produced under the
+#     held-out-noise bug and the merged-validation-split bug. Archive first, then:
+rm -f results/anova_*.csv
 
 # 2. The processed QM9 directory. ChemBERTa changed encoder on 2026-08-27 -- 768 wide to
 #    384 -- and the record layout moved with it, so anything cached before that decodes
@@ -331,10 +341,22 @@ Only `svm`, `xgboost`, `lgb` and `ngboost` can flip this way — `--write-master
 whose tuned key is shared with another — so the blast radius is 24 of 98 pairings. That is small and
 it is not zero, and NGBoost is in it.
 
-**Until a start-gate exists, the two safe orders are:** finish `--write-master` (and
-`confirm_tuned_on_validation_datasets.py --prune`, which rewrites both files a second time) BEFORE
-submitting; or submit with the tuned files absent and accept that the whole grid runs on the shared
-defaults.
+✅ **THE START-GATE NOW EXISTS, 2026-08-28.** Each generated script decides ONCE, at task
+start, whether the two files are present, and passes `--use-best-params` or does not
+(`generate_scripts.py`, the `TUNED_FLAG` block). A task is therefore entirely tuned or entirely
+default, whichever was true when it started, and `params_source` on every row says which. The
+mixed-curve failure above cannot happen any more; what remains is that different tasks in one
+array can differ, which `params_source` records and which the level-by-level mixture did not.
+
+**One operational rule the code cannot enforce:** `confirm_tuned_on_validation_datasets.py
+--prune` is a SECOND writer of both files and rewrites them after they exist. Do not run it
+against a live grid — a task that already decided to use the tuned setting would pick up the
+pruned one on its next training run.
+
+**For the screen specifically, the intended state is the shared defaults**, uniformly, because
+the sweep is not finished. Moving the two files aside below is what guarantees it, and it makes
+the screen's replicate 0 comparable with the main grid only if the main grid also runs on the
+defaults. If tuning is adopted later, replicate 0 has to be re-run — one tenth of the grid.
 
 Move them aside:
 
@@ -352,11 +374,27 @@ leaves less to reason about. The local checkout already carries
 ## 3. Account and partition
 
 ```bash
-cd /data/stat-cadd/scat9264/KIRBy
+# The live KIRBy checkout is /data/stat-ecr, NOT stat-cadd. 125 of the 127 job
+# scripts in that repository use stat-ecr, and where_to_submit.sh's own header
+# says so (RERUN_PLAN.md 2.8b). This block used to `cd` to stat-cadd with no
+# `|| exit`, so on a missing directory it ran the next line from the wrong place
+# and returned an EMPTY account and partition -- and every sbatch below then
+# failed on an empty --account.
+cd /data/stat-ecr/scat9264/KIRBy || { echo "KIRBy checkout not found"; exit 1; }
 bash tests/slurm_scripts/where_to_submit.sh            # read sections 2, 3, 5
-read -r ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
-echo "account=$ACCT partition=$PART"
-sinfo -o "%.12P %.12l" | grep -E "medium|long"         # confirm >= 48 h wall
+
+# --emit returns the association with the HIGHEST FAIRSHARE, which is not
+# necessarily the one these jobs bill to. QM9 runs under stat-cadd. Take the
+# partition from the script and pin the account by hand.
+read -r EMIT_ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
+ACCT=stat-cadd
+echo "account=$ACCT (emit suggested $EMIT_ACCT)  partition=$PART"
+
+# Recorded limits, 2026-08-28: short 12 h, medium 2 days, long 30 days.
+# The screen's longest tier asks 23:59, so `medium` holds all of it and a shorter
+# requested wall backfills sooner. Use `long` only for the main grid.
+sinfo -o "%.12P %.12l" | grep -E "medium|long"
+PART=medium
 ```
 
 ## 4. Generate the scripts, then run ONE task — do not submit the grid blind
@@ -389,8 +427,11 @@ nothing to do with this. The cluster is the only place the check means anything.
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models
-srun --account=$ACCT --partition=short --mem=32G --pty \
-    python scripts/test_config_isolation.py --end-to-end
+# `interactive` is the partition for --pty. `short` was advised twice and had
+# ZERO idle nodes both times, so the request was valid and had nothing to land
+# on (RERUN_PLAN.md 2.8i).
+srun --account=stat-cadd --partition=interactive --cpus-per-task=8 --mem=32G \
+     --time=01:00:00 --pty python scripts/test_config_isolation.py --end-to-end
 ```
 
 Three checks must pass. It is also the first end-to-end confirmation that the pipeline runs on
@@ -434,7 +475,17 @@ Tanimoto Gaussian process runs on the two binary fingerprints only, so it is 6 a
 `--array=0-5`. An index past the end exits 2 on the generator's own guard, so a range
 that is too wide mis-submits and one that is too narrow drops cells silently.
 
+⚠️ **This block covers all SEVENTEEN scripts.** Until 2026-08-28 it listed fourteen: the
+three decomposition models added that day — `heteroscedastic_gp` and the two heteroscedastic
+variational networks — appeared in no `sbatch` line, so 54 of the 294 tasks would never have
+been queued. Those three are the only models in the roster that report both halves of the
+uncertainty per molecule, so their absence would have been discovered at analysis time.
+Submit by looping over the generator's own output rather than a hand-typed list:
+
 ```bash
+# Every script the generator wrote, nothing hand-typed. 17 scripts, 294 tasks.
+ls qm9_s0_*.sh | wc -l          # must print 17
+
 # Tier 1 — the ANOVA roster, tree and deterministic models
 for s in rf xgboost lgb svm ngboost dnn mlp; do
     sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_$s.sh
@@ -445,7 +496,11 @@ for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variati
     sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 
-# Tier 3 — outside the ANOVA: uncertainty and both Gaussian processes
+# Tier 3 — outside the ANOVA: uncertainty, both Gaussian processes, and the three
+# models that report BOTH uncertainty components per molecule
+for s in heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero; do
+    sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
+done
 sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_qrf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-5%4  qm9_s0_gauche.sh   # fingerprints only
@@ -455,12 +510,23 @@ The main grid is the same 294 tasks at replicates 1–9, appending to the same f
 is submitted the same way once the screen has landed and been checked:
 
 ```bash
-python generate_scripts.py --stage 1
+# THE MAIN GRID GOES TO `long`, AND IT MUST. Nine replicates is 63 training runs
+# per task, and every model that emits an uncertainty does six fits per run, so
+# ngboost's tier needs 202 hours against medium's 48. The generator REFUSES to
+# write a script it cannot honour -- it does not cap the request -- so this needs
+# the long partition's ceiling passed explicitly.
+python generate_scripts.py --stage 1 --max-hours 720
 for s in rf xgboost lgb svm ngboost dnn mlp; do
-    sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s1_$s.sh
+    sbatch --account=$ACCT --partition=long --array=0-17%5 qm9_s1_$s.sh
 done
 # ...and the other two tiers as above, with qm9_s1_ in place of qm9_s0_
 ```
+
+⚠️ **Read the levers below before submitting the main grid.** A 202-hour request cannot
+backfill into a short idle gap, which is exactly the reason `where_to_submit.sh` gives for a
+job sitting on (Priority) while CPUs are free. `--replicates 4` is the lever, and the screen
+supplies replicate 0, so four gives five in total — the minimum the balanced decomposition
+accepts.
 
 ## 5b. Censoring — separate, and it must be, twice over
 
@@ -498,8 +564,8 @@ pairs. Run it after these land as well.
 
 ```bash
 squeue -u $USER -o "%.12i %.22j %.8T %.10M %.10L %R" | head -40
-sacct -X -S today --format=JobID%18,JobName%24,State,Elapsed,MaxRSS | grep qm9_
-grep -l "exit=[^0]" qm9_*.out            # failed tasks
+sacct -X -S today --format=JobID%18,JobName%24,State,Elapsed,MaxRSS | grep qm9[01]_
+grep -l "exit=[^0]" qm90_*.out           # failed tasks -- the screen is qm90_, the main grid qm91_
 sbatch --account=$ACCT --partition=$PART --array=7,15 qm9_s0_dnn.sh   # only those
 ```
 
@@ -563,7 +629,7 @@ so it is a real trade, not a free one. The screen supplies replicate 0, so the m
 grid's four give five in total:
 
 ```bash
-python generate_scripts.py --stage 1 --replicates 4
+python generate_scripts.py --stage 1 --replicates 4 --max-hours 720
 ```
 
 The generator's flag is `--replicates`. `--bootstrapping` was its old spelling, and

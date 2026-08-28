@@ -456,9 +456,39 @@ echo "=== started: $(date)"
 # finish, the winners could be written to results/, and the grid would still have
 # trained on the shared defaults with nothing saying so.
 #
-# It is safe with no tuned files present: load_best_hyperparameters says which
-# file is missing, by name, and returns None, and the row records
-# params_source='default'. It is NOT a silent switch either way.
+# THE DECISION IS MADE ONCE, HERE, AND NOT AGAIN.
+#
+# load_best_hyperparameters re-reads the two files inside EVERY training run, and
+# a task runs one per (noise level, replicate). The author's plan is to submit
+# while the tuning sweep is still going and let the files land during the queue
+# wait, so without this block a task in flight when they appear would produce ONE
+# degradation curve whose early noise levels were fitted at the shared defaults
+# and whose later levels were fitted at the tuned setting. auc_norm is a statistic
+# OF that curve, so it would measure neither. Different array tasks write
+# different files, so there would be no duplicate row for the deduplication to
+# reveal, and nothing downstream reads params_source -- the figure script warns on
+# a mixed spec_hash, which cannot see this, because the hash covers only the
+# shared spec.
+#
+# Deciding here means a task is entirely tuned or entirely default, whichever was
+# true when it started, and the row's params_source says which. It is safe with no
+# tuned files present: load_best_hyperparameters names the missing file and
+# returns None. It is NOT a silent switch either way.
+#
+# RESIDUAL HAZARD, and it is operational rather than code: --write-master is not
+# the only writer of those two files. confirm_tuned_on_validation_datasets.py
+# --prune rewrites BOTH after they exist, dropping pairings the shared default
+# beat. Running that WHILE the grid is running would change the setting under a
+# task that had already decided to use it. Do not run --prune against a live grid.
+TUNED_FLAG=""
+if [ -f ../results/master_tuned_hyperparameters.json ] \\
+   && [ -f ../results/hyperparameter_decisions.json ]; then
+    TUNED_FLAG="--use-best-params"
+    echo "=== tuned hyperparameters: PRESENT at task start -> --use-best-params"
+else
+    echo "=== tuned hyperparameters: ABSENT at task start -> shared defaults for this whole task"
+fi
+
 python -u process_and_train.py -d QM9 -t homo_lumo_gap \\
     {flags} \\
     -r "$rep" \\
@@ -470,7 +500,7 @@ python -u process_and_train.py -d QM9 -t homo_lumo_gap \\
     --start-iteration {first_iter} \\
     -s scaffold \\
     --normalize True \\
-    --use-best-params \\
+    $TUNED_FLAG \\
     -f "$OUT"
 
 status=$?
@@ -543,6 +573,13 @@ def main():
                          "(1 + this), which is the price of having no leakage anywhere in "
                          "the comparison (RERUN_PLAN.md 13, the validation-versus-"
                          "refitting section). 5 matches the laboratory jobs.")
+    ap.add_argument('--max-hours', type=int, default=47,
+                    help='Refuse to write a script that needs more wall time than this, '
+                         'rather than capping the request silently. 47 is the safe default '
+                         'for `medium` (limit 2 days, so a 47:59 request fits). `long` is 30 '
+                         'days: pass --max-hours 720 for it. Recorded partition limits are in '
+                         'RERUN_PLAN.md 2.8i. A capped request is a job that dies on the wall '
+                         'clock after the queue wait, which is why this raises instead.')
     ap.add_argument('--throttle', type=int, default=5)
     ap.add_argument('--models', nargs='+', default=None, help='Subset of model labels.')
     ap.add_argument('--reps', nargs='+', default=None, choices=ALL_REPS,
@@ -654,6 +691,11 @@ def main():
         ap.error(f'--replicates must be at least 1, got {n_reps_run}')
 
     out = Path(args.out_dir)
+    # --out-dir is REQUIRED for censoring (RUNBOOK 5b) and points at a directory
+    # that does not exist yet, so creating it is part of honouring the flag. It
+    # used to raise FileNotFoundError from write_text, several models into the
+    # run, after printing a summary that made it look like it had worked.
+    out.mkdir(parents=True, exist_ok=True)
     pool = dict(MODELS)
     if args.include_excluded:
         pool.update(EXCLUDED_MODELS)
@@ -720,10 +762,35 @@ def main():
             continue
         n_tasks = len(conditions) * len(reps)
         grand += n_tasks
-        # The hours column is quoted for 110 training runs; scale it to what this
-        # stage actually asks for, keep a 25% margin, and stay inside the 47-hour
-        # partition limit.
-        hours = max(1, min(47, math.ceil(hours_per_110 * runs_per_task / 110 * 1.25)))
+        # The hours column is quoted for 110 training runs at ONE fit per run.
+        #
+        # THE CROSS-FIT IS NOT FREE, AND THIS IS WHERE THAT GETS PAID FOR.
+        # --oof-folds scores the training molecules with inner models that never
+        # fitted them, so a model carrying it does (1 + folds) fits per training
+        # run, not one. hours_per_110 was measured before that existed
+        # (afd92ec) and nothing rescaled it, so for a day every model with
+        # `-u True` -- 11 of the 17 -- requested a wall for one fit and would
+        # have done six. The screen's ngboost tier asked 4:59 and needs about 24
+        # hours; the main grid asked 34:59 and needs about 204. Those jobs queue
+        # for days and are then killed by the clock, which is the most expensive
+        # way this run can fail (RERUN_PLAN.md, chat H).
+        #
+        # The multiplier is deliberately the pessimistic (1 + folds) rather than
+        # (1 + folds * (folds-1)/folds), which is what the inner fits actually
+        # cost on a smaller training set. Over-requesting delays a start;
+        # under-requesting loses the whole job after the queue wait.
+        fits_per_run = 1 + args.oof_folds if '--oof-folds' in flags else 1
+        hours = max(1, math.ceil(
+            hours_per_110 * runs_per_task * fits_per_run / 110 * 1.25))
+        if hours > args.max_hours:
+            raise SystemExit(
+                f"ERROR: {model} needs {hours}h ({runs_per_task} training runs x "
+                f"{fits_per_run} fits) but --max-hours is {args.max_hours}.\n"
+                f"       medium is 2 days, long is 30 (RERUN_PLAN.md 2.8i).\n"
+                f"       Either submit this tier to long with --max-hours 720, or cut "
+                f"the replicate count.\n"
+                f"       Silently capping the request is what would get the job killed "
+                f"after days in the queue.")
         script_name = f'qm9_s{args.stage}_{model}.sh'
         (out / script_name).write_text(TEMPLATE.format(
             model=model, note=note or model, jobslug=model, stage=args.stage,

@@ -446,14 +446,19 @@ def main():
     emitted = []
     for label, stage_args in [
         ('stage 0', ('--stage', '0')),
-        ('stage 1', ('--stage', '1')),
+        # The main grid needs `long`. With the cross-fit costed in, ngboost is
+        # 202 h per task and the generator refuses rather than capping, so it is
+        # generated with that partition's ceiling -- the way the RUNBOOK submits it.
+        ('stage 1', ('--stage', '1', '--max-hours', '720')),
         # ngboost is on the deep run's shortlist, so the generator refuses a deep
         # run without it. Ask for the run the author would actually submit rather
         # than passing --drop-shortlisted here, which would test the escape hatch
         # instead of the path. The refusal itself is checked in
         # check_generator_refusals.
+        # The deep run is 10 replicates -- 70 training runs per task -- so with the
+        # cross-fit costed in it needs `long` for the same reason the main grid does.
         ('stage 2', ('--stage', '2', '--models', 'rf', 'lgb', 'ngboost',
-                     '--reps', 'pdv', 'ecfp4')),
+                     '--reps', 'pdv', 'ecfp4', '--max-hours', '720')),
         ('stage 0, excluded models', ('--stage', '0', '--include-excluded')),
     ]:
         print(f'{label}...')

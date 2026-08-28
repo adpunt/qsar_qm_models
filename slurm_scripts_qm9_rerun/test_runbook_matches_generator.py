@@ -106,9 +106,14 @@ def check_counts(text):
 
     Every figure comes from the generator's own printed summary.
     """
+    # The main grid needs `long`, not `medium`: with the cross-fit costed in,
+    # ngboost's tier is 202 hours per task, and the generator now REFUSES to
+    # write a script it cannot honour rather than capping the request. So the
+    # main grid is generated the way the RUNBOOK submits it -- with the long
+    # partition's ceiling. The screen stays on `medium`'s 47.
     for label, args in [
             ('screen', ('--stage', '0')),
-            ('main grid', ('--stage', '1')),
+            ('main grid', ('--stage', '1', '--max-hours', '720')),
             ('include-excluded', ('--stage', '0', '--include-excluded'))]:
         summary = generator_summary(*args)
         if summary is None:

@@ -95,8 +95,22 @@ def check_generated_scripts():
                      f'script(s) never pass {FLAG}, so no tuned hyperparameter '
                      f'can reach the model. First few: {without[:4]}')
             else:
-                ok(f'{gen.name}: all {len(scripts)} generated script(s) pass '
+                ok(f'{gen.name}: all {len(scripts)} generated script(s) mention '
                    f'{FLAG}')
+
+            # MENTIONING THE FLAG IS NOT PASSING IT.
+            #
+            # The QM9 template decides the flag once at task start and passes it
+            # through $TUNED_FLAG, so the literal appears in an assignment. A
+            # containment test is satisfied by that assignment even if the
+            # variable is never referenced on the command line -- which is this
+            # project's recurring failure: a check that searches the file as text
+            # and passes for the wrong reason (RERUN_PLAN.md 2.23).
+            #
+            # So: find the invocation itself and require that the flag reaches it,
+            # either literally or through a variable that is set to it.
+            for s in scripts:
+                check_flag_reaches_the_invocation(s)
 
             for s in scripts:
                 text = s.read_text()
@@ -113,6 +127,81 @@ def check_generated_scripts():
                                  f'either unrecognised or swallows the next '
                                  f'token as a positional.')
                             break
+
+
+
+def check_flag_reaches_the_invocation(script):
+    """The flag must be ON THE COMMAND LINE, not merely somewhere in the file.
+
+    Accepts the literal, or a shell variable that the script sets to the literal
+    and then references in the call. Anything else means the tuned path is dead
+    however many times the file names it.
+    """
+    text = script.read_text()
+    m = re.search(r'python -u process_and_train\.py(.*?)\n\nstatus=', text, re.S)
+    if not m:
+        m = re.search(r'python -u process_and_train\.py(.*?)-f "\$OUT"', text, re.S)
+    if not m:
+        fail(f'{script.name}: no process_and_train.py invocation found, so '
+             f'nothing could be checked')
+        return
+    call = m.group(1)
+
+    if FLAG in call:
+        return
+
+    # A variable on the command line: $NAME or ${NAME}
+    for var in set(re.findall(r'\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?', call)):
+        # ...that the script assigns the flag to, anywhere above.
+        if re.search(rf'^\s*{var}=.*{re.escape(FLAG)}', text, re.M):
+            # And prove the two branches behave, by running the decision itself.
+            _check_decision_runs_both_ways(script, var)
+            return
+
+    fail(f'{script.name}: {FLAG} appears in the file but never reaches the '
+         f'process_and_train.py command line, directly or through a variable. '
+         f'The tuned path is dead in this script.')
+
+
+def _check_decision_runs_both_ways(script, var):
+    """Execute the script's own decision block and assert both outcomes.
+
+    The block tests for the two tuned files relative to the working directory the
+    job runs in (`scripts/`), so it is exercised in a stub with and without them.
+    """
+    text = script.read_text()
+    block = re.search(rf'({re.escape(var)}=""\nif .*?\nfi)\n', text, re.S)
+    if not block:
+        fail(f'{script.name}: {var} is used on the command line but its decision '
+             f'block could not be located, so the two branches were not proven')
+        return
+    snippet = block.group(1)
+
+    for present in (True, False):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'scripts').mkdir()
+            (root / 'results').mkdir()
+            if present:
+                for name in ('master_tuned_hyperparameters.json',
+                             'hyperparameter_decisions.json'):
+                    (root / 'results' / name).write_text('{}')
+            proc = subprocess.run(
+                # The block echoes a progress line; send it away so stdout
+                # carries only the value being asserted.
+                ['bash', '-c',
+                 f'set -uo pipefail\n{{\n{snippet}\n}} >/dev/null 2>&1\n'
+                 f'printf "%s" "${var}"'],
+                capture_output=True, text=True, cwd=str(root / 'scripts'))
+            got = proc.stdout.strip()
+            want = FLAG if present else ''
+            if got != want:
+                fail(f'{script.name}: with the tuned files '
+                     f'{"present" if present else "absent"} the decision block set '
+                     f'{var}={got!r}, expected {want!r}')
+                return
+    ok(f'{script.name}: the flag is decided once at task start and both branches '
+       f'behave')
 
 
 def main():
