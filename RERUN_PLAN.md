@@ -4930,22 +4930,36 @@ Two things in it need correcting before it is used again:
 - The noise types and levels are the old ones.
 - The completeness check at the end globs for the old type names.
 
-### 6.3 The experimental datasets and the uncertainty runs
+### 6.3 The validation datasets — the robustness runs and the uncertainty runs
 
-One set of jobs produces both the robustness numbers and the uncertainty numbers, because the
-out-of-fold pass is the only added cost and the five scaffold folds are trained regardless.
+**Two separate runs, and they no longer have the same shape. Read which one a number belongs to
+before quoting it.**
 
-Scope, updated for the settled condition set (§13.9): 3 datasets × 7 models that emit a per-molecule
-uncertainty × 4 representations × **4 noise conditions** × 6 levels × 5 folds. Two changes from what
-the built scripts assume, and they compound: six levels instead of eleven, and four conditions
-instead of six.
+#### The robustness runs — the accuracy grid on logD, Caco-2 and hERG
 
-⚠️ **The four are the full-grid four, and one of them behaves differently here.** Gaussian, both
-grouped conditions and censoring. Grouped-shifted matters more on the experimental datasets than
-anywhere, because it is the condition that mimics a laboratory offset and these are the datasets
-where that is a real mechanism rather than a simulation. The single-setting conditions —
-Student-t at ν = 5 and Outlier at p = 10% — belong to the depth stage, so they enter here only if
-the depth stage is run on the experimental side.
+**8 models × 6 representations × 3 datasets**, on the conditions read from `noise_conditions.json`,
+one shared level ladder, 5 scaffold folds, **no replicates** (§3.2b — a replicate is QM9's; these
+have folds).
+
+✅ **All six representations, from 2026-08-28.** Avalon and ChemBERTa were missing while the rest of
+the study moved to six, so every representation claim here would have rested on four of six against
+QM9's six — and the representation half of the model-versus-representation split is the paper's
+spine. The author: *"it should run all 6 this is a mistake."* The generator now emits 8 models × 6
+representations; `scripts/test_validation_job_scripts.py` parses every script it writes.
+
+#### The uncertainty runs
+
+⚠️ **No shape is quoted here on purpose.** The conditions are **all seven**, read from the settled
+file. The models and representations are **exactly what the roster screen is running to settle**
+(§13.17 B), so any count written here would be a typed-in default masquerading as a decision — which
+is what the previous version of this section did, at 7 models × 4 representations × 4 conditions.
+
+What is fixed about them: the out-of-fold pass over the training molecules is the only added cost,
+the five scaffold folds are trained regardless, and there is **one replicate plus a permutation
+null** (§13.1 item 2).
+
+⚠️ **Chat O may change how much this costs.** Five of every six model fits in these runs are the
+extra refitting. If validation molecules replace it, that goes.
 
 **One thing to check before pricing this, not to assume — and it is §13.1 open item 6, not just a
 note here.** §13.9 measured redundancy **on QM9**, one representation and three tree/linear models.
@@ -6034,7 +6048,8 @@ models and representations go deep in stage 2, which cannot be chosen until stag
    and is **not** established for corruption detection.
    **The options and what they cost:** inherit the four full-grid conditions (free, and the honest
    default) — or add the two single-setting conditions to the uncertainty grid to test it, which is
-   two conditions × 3 datasets × 7 models × 4 representations × 6 levels × 5 folds. Recommend
+   two conditions across the uncertainty grid, whose model and representation lists the roster
+   screen settles (§13.17 B). Recommend
    inheriting, and saying so in the Methods rather than implying it was tested. Raised by chat G
    2026-08-27; the scope of the uncertainty runs is already §4 Decision 1.
 
@@ -6792,8 +6807,9 @@ squeezed for time**, in which case say in the Methods that censoring carries a s
 
 #### The uncertainty runs, which are not on this grid at all
 
-Three experimental datasets × 4 representations × 7 models, on the four main-grid conditions plus the
-outlier one (§13.1 item 6), one replicate plus a permutation null (§13.1 item 2). **336 jobs.**
+Three validation datasets, on all seven settled conditions, one replicate plus a permutation null
+(§13.1 item 2). **The model and representation lists — and therefore the job count — are what the
+roster screen settles (§13.17 B), so no total is written here.**
 
 **Why the training-run count is not given here.** Each job trains its model more than once. To ask
 "is the model unsure about the molecules whose labels were corrupted", every training molecule needs
