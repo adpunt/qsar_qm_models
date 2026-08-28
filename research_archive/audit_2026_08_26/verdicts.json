@@ -312,8 +312,8 @@
     "severity": "changes-numbers",
     "source": "QM9 model construction \u2014 parameter paths, shared-defaults wiring, train/val handling, Bayesian transformations (models/models.py)",
     "orig_index": 5,
-    "verdict": "real-open",
-    "evidence": "Confirmed by reading: train_conformal_model and train_conformal_graph_model take calibration_size and never reference it; the only use of args.calibration_size in models.py is in conformal_hetero. Conformity scores are np.abs(y_val - y_val_pred) over the WHOLE validation split. NOT changed: with the base model now fitted on x_train alone, all of validation is legitimately a calibration set and more calibration points is the better estimator -- carving 20 percent would shrink it for no gain. The flag should either be honoured or refused by name for these two models; that is the author's call."
+    "verdict": "wont-fix",
+    "evidence": "Confirmed by reading: train_conformal_model and train_conformal_graph_model take calibration_size and never reference it; the only use of args.calibration_size in models.py is in conformal_hetero. Conformity scores are np.abs(y_val - y_val_pred) over the WHOLE validation split. NOT changed: with the base model now fitted on x_train alone, all of validation is legitimately a calibration set and more calibration points is the better estimator -- carving 20 percent would shrink it for no gain. The flag should either be honoured or refused by name for these two models; that is the author's call. || CUT 2026-08-28 on the author's instruction: conformal is not used. The three dispatch branches in scripts/process_and_train.py are commented out and both model names are refused before any data is read; --cp-base-model and --alpha are commented out of the parser (--calibration-size already was, 2026-08-27); the three conformal entries are commented out of EXCLUDED_MODELS so --include-excluded cannot bring them back. The training functions stay in models.py. Check: scripts/test_conformal_is_out.py, six assertions, revert case sets CONFORMAL_MODELS = () and two go red. RERUN_PLAN.md 2.22."
   },
   {
     "title": "gp_fit_collapsed is written and never called",
@@ -1046,8 +1046,8 @@
     "other_pipeline": "n/a",
     "source": "Uncertainty machinery (per-molecule uncertainty, aleatoric/epistemic decomposition, temperature calibration, and what reaches disk) across the QM9 pipeline (models/models.py, scripts/utils.py, rust/src/main.rs) and the experimental pipeline (KIRBy tests/alternative_data_noise_robustness.py)",
     "orig_index": 60,
-    "verdict": "real-open",
-    "evidence": "Confirmed by reading: train_conformal_heteroscedastic writes its own schema to its own filename, which no reader looks for, and the tabular conformal writer is called twice with identical arguments. conformal_hetero is not in the job generator's roster."
+    "verdict": "wont-fix",
+    "evidence": "Confirmed by reading: train_conformal_heteroscedastic writes its own schema to its own filename, which no reader looks for, and the tabular conformal writer is called twice with identical arguments. conformal_hetero is not in the job generator's roster. || CUT 2026-08-28 on the author's instruction: conformal is not used. The three dispatch branches in scripts/process_and_train.py are commented out and both model names are refused before any data is read; --cp-base-model and --alpha are commented out of the parser (--calibration-size already was, 2026-08-27); the three conformal entries are commented out of EXCLUDED_MODELS so --include-excluded cannot bring them back. The training functions stay in models.py. Check: scripts/test_conformal_is_out.py, six assertions, revert case sets CONFORMAL_MODELS = () and two go red. RERUN_PLAN.md 2.22."
   },
   {
     "title": "QRF and RF get no calibration set, write a null temperature, and the tuned quantile is discarded",

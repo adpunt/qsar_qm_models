@@ -221,6 +221,15 @@ CASES = [
   "        mae, mse, rmse = mae * sd, mse * sd * sd, rmse * sd",
   "    pass  # BROKEN ON PURPOSE",
   [sys.executable, f"{QSAR}/scripts/test_metric_units.py"]),
+
+ # Put the dispatch branch back without the refusal, which is the state the file
+ # was in before 2026-08-28: `-m conformal_hetero` runs, falls off the end of the
+ # elif chain, returns None, and the run exits 0 having written no row.
+ ("conformal is out and asking for it stops the run",
+  f"{QSAR}/scripts/process_and_train.py",
+  "    CONFORMAL_MODELS = ('conformal', 'conformal_hetero')",
+  "    CONFORMAL_MODELS = ()",
+  [sys.executable, f"{QSAR}/scripts/test_conformal_is_out.py"]),
 ]
 
 
