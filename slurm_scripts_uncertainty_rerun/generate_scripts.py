@@ -35,38 +35,50 @@ noise_conditions.json is the settled set. It is read by tests on both
 injectors, by the QM9 job generator, and here -- restating it is how the two
 injectors drifted apart for the life of the project.
 
-This run takes the four conditions the main grid runs and adds one, which is
-RERUN_PLAN.md 13.1 item 2's recorded default: gaussian, grouped_wider,
-grouped_shifted, censoring, outlier_p10.
+This run uses ALL SEVEN settled conditions: gaussian, grouped_wider,
+grouped_shifted, censoring, student_t_nu5, outlier_p10 and laplace. The author's
+decision, 2026-08-28. It used to be five.
 
-The reason for the fifth is the whole shape of the two questions. Under a
-condition that gives every molecule the SAME amount of noise, "does the
-uncertainty find which molecules were corrupted" is undefined, not zero -- so
-only the conditions with a per-molecule pattern can answer it at all:
+WHY ALL SEVEN, AND WHAT IT BUYS
+-------------------------------
+Three questions are asked here, not two.
 
-  gaussian          the same amount for every molecule. Question A's condition,
-                    and the leakage check.
-  grouped_shifted   also the same amount for every molecule -- whole scaffold
-                    families are pushed one way, by a constant. Question A's.
+  A. Does a model become less sure of itself as its training labels get worse?
+  B. Can a model's uncertainty point at WHICH labels are bad?
+  C. Does uncertainty track some KINDS of noise better than others?
+
+C is the reason for all seven, and it is a result either way it comes out. The
+conditions were chosen for the main grid on ACCURACY -- which of them changes
+R2. A kind of noise can barely move accuracy and still be the one a model is
+best, or worst, at noticing. That is a different property and nothing has
+measured it.
+
+WHAT EACH CONDITION CAN AND CANNOT ANSWER
+-----------------------------------------
+For B to mean anything, some molecules must be more corrupted than others. Under
+a condition that gives every molecule the SAME amount, B is undefined -- not
+zero, undefined.
+
+  gaussian          same amount for every molecule. A's condition, and the
+                    leakage check.
+  laplace           same amount for every molecule, heavier tails.
+  student_t_nu5     same amount for every molecule, heavier tails still.
+  grouped_shifted   same amount for every molecule -- whole scaffold families
+                    pushed one way, by a constant.
   grouped_wider     whole scaffold families get a LARGER amount. A real
                     per-molecule pattern, keyed to the scaffold.
   censoring         values past the assay limit recorded as the limit, so the
                     damage is keyed to the label. A real per-molecule pattern.
   outlier_p10       a tenth of the molecules take nearly all of the noise. The
-                    only depth-only condition that is not flat by design, and
-                    the only concentrated-noise condition left in the study --
-                    which is the case the question was raised about. Adding it
-                    costs 25% of this run; the other two depth-only conditions
-                    are flat and would buy nothing here.
+                    most concentrated pattern in the study.
+
+So B is answered by three of the seven. All seven answer A and C.
 
 Both grouped conditions are keyed to something a scaffold split holds out
 whole, which is RERUN_PLAN.md 3.1d: on HELD-OUT molecules the grouped pattern
 is flat, truthfully, and the predicted-label control is degenerate for it. That
 is a Methods sentence, not a defect here. Censoring and outlier are keyed to the
 label and to the draw, so neither is affected.
-
---include-deep-conditions adds Student-t and Laplace as well, both flat by
-design, so they buy shape coverage for question A and nothing for question B.
 
 The levels are NOT passed. The runner sweeps one shared grid in fractions of
 each dataset's own clean training label spread -- 0, 0.2, 0.3, 0.5, 0.75, 1.0,
@@ -396,15 +408,13 @@ def main():
                          'this only limits the expensive out-of-fold TRAINING pass. '
                          '1 cuts the added cost about threefold.')
     ap.add_argument('--conditions', nargs='+', default=None, choices=KNOWN_CONDITIONS,
-                    help='Run exactly these noise conditions instead of the four the main grid '
-                         'runs. Names come from noise_conditions.json.')
+                    help='Run exactly these noise conditions instead of all seven. Names come '
+                         'from noise_conditions.json.')
     ap.add_argument('--include-deep-conditions', action='store_true',
-                    help=f'Run every depth-only condition ({", ".join(DEEP_RUN_CONDITIONS)}) '
-                         f'alongside the main grid\'s four, rather than only '
-                         f'{", ".join(ADDED_FOR_QUESTION_B)}. This TESTS the settled set on the '
-                         f'experimental datasets rather than inheriting it (RERUN_PLAN.md 13.1 '
-                         f'item 6). The two it adds are flat by design, so they buy shape '
-                         f'coverage for question A and nothing for question B.')
+                    help='Accepted and ignored. Every settled condition is the DEFAULT here '
+                         'since 2026-08-28, so this flag no longer adds anything. Kept so a '
+                         'command written before that date still runs and still means what it '
+                         'said.')
     ap.add_argument('--drop-conditions', nargs='+', default=[], choices=KNOWN_CONDITIONS,
                     help='Conditions to leave out. gaussian is the one condition that spreads '
                          'the noise evenly across molecules, which is what makes it question '
@@ -430,13 +440,12 @@ def main():
     if args.conditions:
         conditions = list(dict.fromkeys(args.conditions))
         source = 'named on the command line'
-    elif args.include_deep_conditions:
-        conditions = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
-        source = f'the main grid plus every depth-only condition ({NOISE_CONDITIONS_FILE.name})'
     else:
-        conditions = MAIN_GRID_CONDITIONS + ADDED_FOR_QUESTION_B
-        source = (f"the main grid's four plus {', '.join(ADDED_FOR_QUESTION_B)} "
-                  f"({NOISE_CONDITIONS_FILE.name}; RERUN_PLAN.md 13.1 item 2)")
+        # ALL SEVEN, by the author's decision of 2026-08-28. See the header.
+        conditions = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
+        source = (f'every settled condition ({NOISE_CONDITIONS_FILE.name}) — '
+                  f'the run answers whether uncertainty tracks some kinds of noise '
+                  f'better than others, which needs all of them')
     dropped = set(args.drop_conditions)
     conditions = [c for c in conditions if c not in dropped]
     if not conditions:

@@ -204,23 +204,33 @@ def conditions_come_from_the_settled_file(_runner, gen):
     assert gen.MAIN_GRID_CONDITIONS == main_grid, (
         f'{gen.MAIN_GRID_CONDITIONS} != {main_grid}')
     assert gen.DEEP_RUN_CONDITIONS == deep, f'{gen.DEEP_RUN_CONDITIONS} != {deep}'
-    # The recorded default (RERUN_PLAN.md 13.1 item 2): the main grid's four
-    # plus the one depth-only condition that can answer question B at all.
-    added = gen.ADDED_FOR_QUESTION_B
-    assert all(c in deep for c in added), f'{added} is not depth-only'
-    assert all(c not in gen.FLAT_BY_DESIGN for c in added), (
-        f'{added} gives every molecule the same amount, so adding it buys nothing '
-        f'for question B — which is the only reason it is added')
+    # ALL SEVEN by default, the author's decision of 2026-08-28. It used to be
+    # five -- the main grid's four plus outlier_p10. The uncertainty runs now
+    # also answer whether uncertainty tracks some KINDS of noise better than
+    # others, and that question needs every kind.
+    want = main_grid + deep
     with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp)
         got = conditions_of(Path(tmp, scripts[0]).read_text())
-        assert got == main_grid + added, (
-            f'the default run is {got}, not {main_grid + added}')
+        assert got == want, f'the default run is {got}, not all seven: {want}'
+
+    # Three of the seven carry a per-molecule pattern, and only those can answer
+    # "which labels are bad". If a change ever leaves fewer than three, that
+    # question has quietly lost its evidence.
+    patterned = [c for c in got if c not in gen.FLAT_BY_DESIGN]
+    assert len(patterned) >= 3, (
+        f'only {patterned} give some molecules more noise than others; the '
+        f'which-labels-are-bad question needs a pattern to find')
+
+    # --include-deep-conditions is accepted and ignored now that all seven are
+    # the default. A command written before 2026-08-28 must still run and still
+    # mean what it said.
+    with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp, '--include-deep-conditions')
-        got = conditions_of(Path(tmp, scripts[0]).read_text())
-        assert got == main_grid + deep, got
-    print(f'    default = the main grid {main_grid} plus {added}; '
-          f'--include-deep-conditions runs all of {deep}')
+        assert conditions_of(Path(tmp, scripts[0]).read_text()) == want, (
+            '--include-deep-conditions changed the run; it should be a no-op')
+    print(f'    default = all seven: {want}')
+    print(f'    {len(patterned)} of them give some molecules more noise than others: {patterned}')
 
 
 def the_run_can_still_answer_both_questions(_runner, gen):  # noqa: D401
@@ -230,8 +240,8 @@ def the_run_can_still_answer_both_questions(_runner, gen):  # noqa: D401
         assert 'question A has no clean reference' in stdout, stdout
         _, stdout = generate(tmp, '--conditions', 'gaussian', 'grouped_shifted')
         assert 'question B is undefined throughout' in stdout, stdout
-        # The one that is added is added BECAUSE it is not flat.
-        _, stdout = generate(tmp, '--conditions', *gen.ADDED_FOR_QUESTION_B)
+        # A patterned condition on its own must NOT be reported as flat.
+        _, stdout = generate(tmp, '--conditions', 'outlier_p10')
         assert 'question B is undefined throughout' not in stdout, stdout
         _, stdout = generate(tmp)
         assert 'WARNING' not in stdout, f'the default run warns, and should not:\n{stdout}'
