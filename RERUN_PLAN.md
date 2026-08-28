@@ -8325,10 +8325,30 @@ both without a change; validation rows satisfy its one-scale check and satisfy
 **🔴 Still open, and what each one waits on.**
 
 1. **The verdict.** Waiting on the comparison run: QM9, 5,000 molecules, one replicate, plain
-   Gaussian, levels 0.0 and 1.5, all six representations, all seven uncertainty models,
-   `--oof-folds 3 --score-validation`. Launched 2026-08-28 04:00 from the pinned checkout
+   Gaussian, levels 0.0 and 1.5, **five representations**, all seven uncertainty models,
+   `--oof-folds 3 --score-validation`. Relaunched 2026-08-28 04:39 from the pinned checkout
    `/Volumes/seagate/chatO_run` into `/Volumes/seagate/chatO_screen`. Then
    `python scripts/compare_validation_vs_oof.py --run-dir /Volumes/seagate/chatO_screen`.
+
+   **ChemBERTa was dropped from this test on 2026-08-28, the author's call, and the reason is
+   recorded because it narrows a configuration this section fixed in advance.** It cannot bias the
+   verdict: no number had been produced when the change was made, and the decision rule was already
+   committed. What the test measures is a SCORING SCHEME -- which molecules are scored by which fit
+   -- and nothing about that is representation-specific; the representation is a control, there so
+   the verdict is not a fluke of one feature set. Five of them still serve that.
+
+   The cost was the whole run. `process_and_run` sits inside the noise-level loop
+   (`process_and_train.py:3200`), so representations are rebuilt at every level in every process --
+   2 levels x 7 model runs = 14 ChemBERTa passes over 5,000 molecules. `chemberta_fingerprint`
+   tokenises ONE MOLECULE AT A TIME on CPU with no disk cache; 100 molecules did not finish in 120
+   seconds under the run's own load. Thirty-four minutes in, not one of the four processes had
+   reached a model. The weak-representation case -- where two rank correlations are noisiest and a
+   disagreement between routes is likeliest -- stays covered by PDV and Avalon, which sit in the
+   same accuracy band on QM9.
+
+   ⚠️ **The rebuild-per-level cost is not specific to this test and is not fixed.** Every QM9 job
+   on the grid pays it for every representation it carries. Worth a look when the QM9 jobs are
+   built (chat H).
 2. **The lab plumbing** (step 5 below), only if the verdict says validation is enough.
 3. **The job-script edit**, which is the deliverable either way.
 
