@@ -153,7 +153,9 @@ SUPPORT = {
     # Normal-Inverse-Gamma parameters.
     'evidential_kernel':         (PER_MOLECULE, PER_MOLECULE),
     'conformal_hetero':          (PER_MOLECULE, PER_MOLECULE),
-    'ntk_gnn':                   (NONE, PER_MOLECULE),
+    # It writes a single total from the neural-tangent-kernel variance and
+    # performs no split.
+    'ntk_gnn':                   (NONE, NONE),
     # Refused by name at the top of process_and_train.py (RERUN_PLAN.md 2.22),
     # and it never computed a split.
     'conformal':                 (NONE, NONE),

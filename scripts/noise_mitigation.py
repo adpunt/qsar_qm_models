@@ -761,6 +761,13 @@ def train_baseline_model(X_train, y_train, X_test, y_test, model_type='random_fo
                         sigma_noise=info['sigma'],
                         iteration=info['iteration'],
                         file_no=info.get('file_no', 0),
+                        # This path writes a total and performs no split, which
+                        # is what the SUPPORT entry records. The model column
+                        # says 'gauche', so the key is given explicitly rather
+                        # than letting the guard read this as the roster's
+                        # Gaussian process and demand two components it does not
+                        # compute (RERUN_PLAN.md 5.5).
+                        support_model='noise_mitigation_gauche',
                         split='test'
                     )
                 

@@ -1346,6 +1346,68 @@ class VBLLLoss(nn.Module):
         return nn.MSELoss()(pred, target)
 
 
+def sample_network_split(model, x_tensor, num_samples, loss_name):
+    """The stochastic-pass split for a Bayesian or variational network.
+
+    ONE routine. The two neural trainers carried byte-identical copies of this
+    block and that duplication is exactly why fixes to it drifted apart
+    (RERUN_PLAN.md 5.5, "Wire -- four trainers, and they must move together").
+
+    Where the aleatoric term comes from, in the order the model is asked:
+
+      1. a variational layer that predicts the noise FROM THE INPUT
+         (`heteroscedastic=True`) -- read on the SAME pass that produced the
+         prediction, because that is the value its loss was fitted against;
+      2. a variational layer with one learned observation noise -- one number,
+         broadcast, and the row records that it is one number;
+      3. a two-output head under --loss heteroscedastic or --loss evidential;
+      4. none of these, which is a plain Bayesian network: it predicts a mean
+         and nothing else, so it has NO observation-noise term. That is Kendall
+         & Gal's epistemic-only model, not a zero.
+
+    A variational layer is asked before the head because a VBLL is fitted with
+    VBLLLoss, so the layer's noise is the quantity the fit actually optimised.
+
+    Returns (mean, aleatoric_var, epistemic_var, total_var), each a variance and
+    each of length n_molecules; aleatoric_var is None in case 4.
+    """
+    vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
+    vbll_layer = vbll_layers[-1] if vbll_layers else None
+
+    means, head_vars, vbll_vars = [], [], []
+    with torch.no_grad():
+        for _ in range(num_samples):
+            output = model(x_tensor).cpu().numpy()
+            output, variance = split_predictive_head(output, loss_name)
+            means.append(np.asarray(output, dtype=float).reshape(-1))
+            if variance is not None:
+                head_vars.append(np.asarray(variance, dtype=float).reshape(-1))
+            if vbll_layer is not None and vbll_layer.heteroscedastic:
+                cached = getattr(vbll_layer, '_last_noise_var', None)
+                if cached is None:
+                    raise RuntimeError(
+                        "the variational layer is heteroscedastic but recorded "
+                        "no per-molecule noise on this pass. Reading the layer's "
+                        "single noise instead would write a constant column "
+                        "under a name that claims it varies per molecule.")
+                vbll_vars.append(
+                    cached.detach().cpu().numpy().reshape(-1).astype(float))
+
+    mean_passes = np.stack(means, axis=0)
+    if vbll_vars:
+        var_passes = np.stack(vbll_vars, axis=0)
+    elif vbll_layer is not None:
+        var_passes = np.full_like(mean_passes, float(vbll_layer.noise_var.item()))
+    elif head_vars:
+        var_passes = np.stack(head_vars, axis=0)
+    else:
+        var_passes = None
+
+    aleatoric_var, epistemic_var, total_var = decompose_sampling(mean_passes,
+                                                                 var_passes)
+    return mean_passes.mean(axis=0), aleatoric_var, epistemic_var, total_var
+
+
 def apply_bayesian_transformation_last_layer_variational(model):
     """
     Converts the last Linear layer of a PyTorch model to a VBLLLayer
@@ -2887,58 +2949,31 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         # Find optimal temperature
         temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
 
-        # Get test predictions
-        preds = []
-        # The per-molecule variance the heteroscedastic and evidential heads
-        # predict, kept alongside the prediction instead of sliced off. This
-        # whole block runs only under -u/--uncertainty, so a run that is not
-        # asked for uncertainty never holds it.
-        head_vars = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                output = model(x_test_tensor).cpu().numpy()
-                output, variance = split_predictive_head(output, loss_name)
-                preds.append(output)
-                if variance is not None:
-                    head_vars.append(variance)
-
-        preds = np.stack(preds, axis=0)  # Shape: (num_samples, num_datapoints, 1)
-        y_pred_mean = preds.mean(axis=0).flatten()
-
-        # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
-        # Use the LAST VBLLLayer (output layer) for observation noise
-        vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
-        vbll_layer = vbll_layers[-1] if vbll_layers else None
-
-        if vbll_layer is not None:
-            learned_noise_var = vbll_layer.noise_var.item()
-            epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
-        elif head_vars:
-            # The head predicted a variance per molecule, so the observation term
-            # is that variance rather than absent. Without this the two losses
-            # reported the spread over the stochastic passes and nothing else.
-            epistemic, aleatoric, total = decompose_uncertainty_sampling_heteroscedastic(
-                preds.squeeze(), np.stack(head_vars, axis=0).squeeze())
-        else:
-            epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
+        # The stochastic passes and the split, in ONE shared routine -- see
+        # sample_network_split. This block used to be duplicated byte for byte
+        # in the MLP trainer.
+        y_pred_mean, alea_var, epis_var, total_var = sample_network_split(
+            model, x_test_tensor, num_samples, loss_name)
 
         # The TOTAL predictive spread, not the spread of the MC passes.
         #
-        # `preds.std(axis=0)` is the epistemic term alone. For a VBLL the layer
-        # also carries a learned observation noise, and `total` -- computed just
-        # above -- is sqrt(epistemic^2 + aleatoric^2). The reported column used to
-        # be the MC spread, so the learned noise was computed and thrown away and
-        # the VBLL models' coverage was a statement about the latent function
-        # rather than about an observation (RERUN_PLAN.md 2.13). A plain BNN has
-        # no learned noise, so total equals the MC spread there and nothing moves.
-        y_pred_std_uncalibrated = (np.asarray(total).flatten()
-                                   if total is not None
-                                   else preds.std(axis=0).flatten())
+        # The spread over passes is the epistemic term alone. A VBLL layer also
+        # carries an observation noise, and the total is the SUM OF THE TWO
+        # VARIANCES -- adding the two standard deviations instead overstates it
+        # by up to 41%, which is the trap in RERUN_PLAN.md 5.5 part 3. The
+        # reported column used to be the MC spread, so the learned noise was
+        # computed and thrown away and the VBLL models' coverage was a statement
+        # about the latent function rather than about an observation
+        # (RERUN_PLAN.md 2.13). A plain Bayesian network has no observation
+        # noise, so the total equals the MC spread there and nothing moves.
+        y_pred_std_uncalibrated = np.sqrt(np.asarray(total_var, dtype=float))
         y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
 
-        # Apply calibration to epistemic (aleatoric stays None for standard BNN)
-        if epistemic is not None:
-            epistemic = epistemic * temperature
+        # The components are written RAW. The temperature calibrates the total
+        # and rides on the row in its own column (RERUN_PLAN.md 3.4.4f); it used
+        # to be applied to the epistemic term as though it were a standard
+        # deviation, which left the test rows on a different scale from the
+        # out-of-fold rows, where no temperature is applied at all.
 
         y_pred = y_pred_mean
 
@@ -2957,8 +2992,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
-        epistemic = None
-        aleatoric = None
+        alea_var = None
+        epis_var = None
 
     # Calculate metrics normally
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
@@ -3036,8 +3071,10 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
-            epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric,
+            aleatoric_var=alea_var,
+            epistemic_var=epis_var,
+            support_model=model_name,
+            loss_name=loss_name,
             split='test',
             **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
@@ -3057,19 +3094,18 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
                 x_fit[nv:], y_fit[nv:], x_fit[:nv], y_fit[:nv])
             inner_model.eval()
             xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
-            draws = []
-            with torch.no_grad():
-                for _ in range(num_samples):
-                    out = inner_model(xs).cpu().numpy()
-                    if loss_name == 'heteroscedastic':
-                        out = out[:, 0:1]
-                    draws.append(out)
-            draws = np.stack(draws, axis=0)
-            return draws.mean(axis=0).flatten(), draws.std(axis=0).flatten()
+            # The same routine the test rows go through, so the two splits are
+            # the same quantity. It used to slice the variance head off here and
+            # report the spread over passes alone, which is a different column
+            # from the one the test rows carry.
+            _mean, _a, _e, _t = sample_network_split(
+                inner_model, xs, num_samples, loss_name)
+            return _mean, np.sqrt(np.asarray(_t, dtype=float)), _a, _e
 
         score_training_molecules_out_of_fold(
             _fp, x_train, y_train, train_noise, args, s, rep, iteration,
             iteration_seed, file_no, full_model_name,
+            support_model=model_name, loss_name=loss_name,
             val_slice=None, restore_torch_rng=True)
 
     return metrics[3]
@@ -3206,6 +3242,10 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
     # Always Bayesian (dedicated BNN Last function), consistent with train_dnn_model/train_mlp_model
     is_bayesian = True
     if args.uncertainty and is_bayesian:
+        # A plain Bayesian network predicts a mean and nothing else, so the
+        # spread over the stochastic passes IS the epistemic term and there is
+        # no observation-noise term at all. Both are variances.
+        _alea_var, _epis_var, _ = decompose_sampling(predictions)
         save_uncertainty_values(
             y_pred_mean=y_pred,
             y_pred_std=y_pred_std,
@@ -3218,7 +3258,9 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std,
-            temperature=1.0
+            temperature=1.0,
+            aleatoric_var=_alea_var,
+            epistemic_var=_epis_var,
         )
 
     return metrics[3]
@@ -3386,20 +3428,12 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
 
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
 
-        preds = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                output = model(x_test_tensor).cpu().numpy()
-                # The predicted variance is dropped here and nowhere else, because
-                # this model writes no decomposition at all. `flexible_dnn` is in
-                # EXCLUDED_MODELS and no figure reads it; wiring the variance
-                # through would have nothing to write it to.
-                output, _ = split_predictive_head(output, loss_name)
-                preds.append(output)
-        
-        preds = np.stack(preds, axis=0)
-        y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
+        # The same shared routine every other network path uses. The predicted
+        # variance used to be dropped here on the grounds that this model writes
+        # no decomposition; it writes one now, like the rest.
+        y_pred_mean, alea_var, epis_var, total_var = sample_network_split(
+            model, x_test_tensor, num_samples, loss_name)
+        y_pred_std_uncalibrated = np.sqrt(np.asarray(total_var, dtype=float))
         
         if args.uncertainty:
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
@@ -3420,6 +3454,8 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
+        alea_var = None
+        epis_var = None
     
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     
@@ -3440,7 +3476,11 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
             iteration=iteration,
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
-            temperature=temperature
+            temperature=temperature,
+            aleatoric_var=alea_var,
+            epistemic_var=epis_var,
+            support_model='flexible_dnn',
+            loss_name=loss_name,
         )
     
     return metrics[3]
@@ -3643,52 +3683,26 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
 
-        # Get test predictions
-        preds = []
-        # The per-molecule variance the heteroscedastic and evidential heads
-        # predict. This loop runs whether or not uncertainty was asked for, since
-        # the prediction itself comes out of it, so the variance is kept ONLY
-        # under -u/--uncertainty -- nothing else would read it.
-        head_vars = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                output = model(x_test_tensor).cpu().numpy()
-                output, variance = split_predictive_head(output, loss_name)
-                preds.append(output)
-                if args.uncertainty and variance is not None:
-                    head_vars.append(variance)
-
-        preds = np.stack(preds, axis=0)
-        y_pred_mean = preds.mean(axis=0).flatten()
-        y_pred_std_uncalibrated = preds.std(axis=0).flatten()
+        # The stochastic passes and the split, from the SAME routine the DNN
+        # trainer uses. The two trainers held byte-identical copies of this
+        # block and they had already drifted: this one reported the spread over
+        # the passes as its total while the other reported the two components
+        # added, so the two variational models published different quantities
+        # under one heading (RERUN_PLAN.md 5.5a, "a second route into questions
+        # 4, 5 and 6").
+        y_pred_mean, alea_var, epis_var, total_var = sample_network_split(
+            model, x_test_tensor, num_samples, loss_name)
+        y_pred_std_uncalibrated = np.sqrt(np.asarray(total_var, dtype=float))
 
         if args.uncertainty:
             y_pred_std_calibrated = y_pred_std_uncalibrated * temperature
-
-            # Decompose uncertainty — use VBLL decomposition if model has a VBLLLayer
-            # Use the LAST VBLLLayer (output layer) for observation noise
-            vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]
-            vbll_layer = vbll_layers[-1] if vbll_layers else None
-
-            if vbll_layer is not None:
-                learned_noise_var = vbll_layer.noise_var.item()
-                epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)
-            elif head_vars:
-                # The head predicted a variance per molecule, so the observation
-                # term is that variance rather than absent.
-                epistemic, aleatoric, total = decompose_uncertainty_sampling_heteroscedastic(
-                    preds.squeeze(), np.stack(head_vars, axis=0).squeeze())
-            else:
-                epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)
-
-            # Apply calibration to epistemic (aleatoric stays None for standard BNN)
-            if epistemic is not None:
-                epistemic = epistemic * temperature
+            # Components written RAW; the temperature calibrates the total and
+            # travels in its own column (RERUN_PLAN.md 3.4.4f).
         else:
             y_pred_std_calibrated = None
             temperature = None
-            epistemic = None
-            aleatoric = None
+            alea_var = None
+            epis_var = None
 
         y_pred = y_pred_mean
 
@@ -3704,8 +3718,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         y_pred_std_uncalibrated = None
         y_pred_std_calibrated = None
         temperature = None
-        epistemic = None
-        aleatoric = None
+        alea_var = None
+        epis_var = None
 
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
 
@@ -3788,8 +3802,10 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             file_no=file_no,
             y_pred_std_calibrated=y_pred_std_calibrated,
             temperature=temperature,
-            epistemic_uncertainty=epistemic,
-            aleatoric_uncertainty=aleatoric,
+            aleatoric_var=alea_var,
+            epistemic_var=epis_var,
+            support_model=model_name,
+            loss_name=loss_name,
             split='test',
             **_held_out_noise_columns(train_noise, len(y_test), y_pred),
         )
@@ -3804,19 +3820,14 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
                 x_fit[nv:], y_fit[nv:], x_fit[:nv], y_fit[:nv])
             inner_model.eval()
             xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
-            draws = []
-            with torch.no_grad():
-                for _ in range(num_samples):
-                    out = inner_model(xs).cpu().numpy()
-                    if loss_name in ('heteroscedastic', 'evidential'):
-                        out = out[:, 0:1]
-                    draws.append(out)
-            draws = np.stack(draws, axis=0)
-            return draws.mean(axis=0).flatten(), draws.std(axis=0).flatten()
+            _mean, _a, _e, _t = sample_network_split(
+                inner_model, xs, num_samples, loss_name)
+            return _mean, np.sqrt(np.asarray(_t, dtype=float)), _a, _e
 
         score_training_molecules_out_of_fold(
             _fp, x_train, y_train, train_noise, args, s, rep, iteration,
             iteration_seed, file_no, full_model_name,
+            support_model=model_name, loss_name=loss_name,
             val_slice=None, restore_torch_rng=True)
 
     return metrics[3]
@@ -4040,8 +4051,7 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     Data objects in loaders have .y_noisy attached.
     """
     from utils import (calculate_regression_metrics, save_results,
-                      save_uncertainty_values, calibrate_uncertainty_simple,
-                      decompose_uncertainty_sampling)
+                      save_uncertainty_values, calibrate_uncertainty_simple)
     
     # Get num_node_features from first batch
     for batch in train_loader:
@@ -4134,14 +4144,12 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         predictions_array = np.array(predictions_list)
         predictions = predictions_array.mean(axis=0)
         
-        # decompose_uncertainty_sampling(predictions_array, num_samples) returns
-        # THREE values. This called it with one argument and unpacked two, so the
-        # Bayesian branch of train_gnn raised TypeError on its first line and the
-        # caller's blanket handler turned it into a missing row -- one of two
-        # reasons no QM9 graph-model uncertainty has ever been written
-        # (RERUN_PLAN.md 2.13).
-        epistemic, aleatoric, _total = decompose_uncertainty_sampling(
-            predictions_array, predictions_array.shape[0])
+        # A graph network here predicts a mean and nothing else, so it has an
+        # epistemic term (the spread over the dropout passes) and NO observation
+        # noise term at all -- Kendall & Gal's epistemic-only model. Both are
+        # VARIANCES.
+        aleatoric_var, epistemic_var, _total = decompose_sampling(
+            predictions_array.reshape(predictions_array.shape[0], -1))
         
     else:
         # Deterministic
@@ -4152,11 +4160,11 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
                 pred = model(batch).cpu().numpy()
                 preds.append(pred)
         predictions = np.concatenate(preds)
-        epistemic = None
-        aleatoric = None
+        aleatoric_var = None
+        epistemic_var = None
     
     # Calibrate on validation
-    if epistemic is not None:
+    if epistemic_var is not None:
         val_preds_list = []
         for _ in range(100):
             model.train()
@@ -4170,8 +4178,9 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         
         val_predictions_array = np.array(val_preds_list)
         val_predictions = val_predictions_array.mean(axis=0)
-        val_epistemic, _val_aleatoric, _ = decompose_uncertainty_sampling(
-            val_predictions_array, val_predictions_array.shape[0])
+        _val_alea, val_epistemic_var, _ = decompose_sampling(
+            val_predictions_array.reshape(val_predictions_array.shape[0], -1))
+        val_epistemic = np.sqrt(val_epistemic_var)
         
         # Get val targets
         val_targets = []
@@ -4185,7 +4194,7 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
             val_epistemic[:n_cal],
             val_targets[:n_cal]
         )
-        epistemic = epistemic * temperature
+        # The component is left RAW; the temperature travels on the row.
     else:
         temperature = 1.0
     
@@ -4207,7 +4216,8 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     save_results(args.filepath, s, iteration, model_name, 'graph', args.sample_size, metrics)
     
     if args.uncertainty:
-        total_unc = epistemic if epistemic is not None else np.zeros_like(predictions)
+        total_unc = (np.sqrt(epistemic_var) if epistemic_var is not None
+                     else np.zeros_like(predictions))
         # The clean and the noisy label are the SAME array here, and always were:
         # a graph run has one label column. Under the old writer that made the
         # regressed-out "injected noise" exactly zero regardless of anything else.
@@ -4216,8 +4226,10 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
         save_uncertainty_values(
             predictions, total_unc, test_targets, test_targets,
             args.filepath, model_name, 'graph', s, iteration, file_no,
-            y_pred_std_calibrated=epistemic, temperature=temperature,
-            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric,
+            y_pred_std_calibrated=total_unc * temperature,
+            temperature=temperature,
+            aleatoric_var=aleatoric_var, epistemic_var=epistemic_var,
+            support_model='gnn',
             split='test'
         )
     
@@ -4258,8 +4270,7 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     """
     from grakel.kernels import WeisfeilerLehman, VertexHistogram
     from utils import (calculate_regression_metrics, save_results,
-                      save_uncertainty_values, calibrate_uncertainty_simple,
-                      decompose_uncertainty_gp)
+                      save_uncertainty_values, calibrate_uncertainty_simple)
     
     print(f"Converting {len(train_graphs)} molecules to grakel format...")
     
@@ -4372,25 +4383,30 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
     
     val_predictions = (K_val_train_tensor @ alpha).numpy()
     _vv = torch.linalg.solve_triangular(L, K_val_train_tensor.T, upper=False)
-    val_std = torch.sqrt((1.0 - (_vv ** 2).sum(dim=0)).clamp_min(0.0)
-                         + best_noise).numpy()
+    _val_post_var = (1.0 - (_vv ** 2).sum(dim=0)).clamp_min(0.0)
+    val_std = torch.sqrt(_val_post_var + best_noise).numpy()
     
-    # decompose_uncertainty_gp returns THREE values. These unpacked two, so
-    # train_graph_gp raised ValueError here every time it was reached
-    # (RERUN_PLAN.md 2.13).
-    epistemic, aleatoric, _total = decompose_uncertainty_gp(std, best_noise)
-    val_epistemic, val_aleatoric, _ = decompose_uncertainty_gp(val_std, best_noise)
+    # THE LATENT VARIANCE, not the predictive standard deviation.
+    #
+    # This passed `std` -- which is sqrt(latent variance + noise) -- to a function
+    # whose first argument is a latent VARIANCE. Two errors in one call: the
+    # square root made the epistemic term the FOURTH ROOT of the quantity wanted,
+    # and the noise was already inside it, so it was counted twice
+    # (RERUN_PLAN.md 5.5a point 4, the one live defect of the four).
+    alea_var, epis_var, _total_var = decompose_gp(_post_var.numpy(), best_noise)
+    _val_alea, _val_epis, _ = decompose_gp(_val_post_var.numpy(), best_noise)
     
     # Calibrate
     n_cal = len(val_predictions) // 2
     temperature = calibrate_uncertainty_simple(
         val_predictions[:n_cal],
-        val_epistemic[:n_cal],
+        np.sqrt(_val_epis[:n_cal]),
         val_labels[:n_cal]
     )
     
-    epistemic = epistemic * temperature
-    total = np.sqrt(epistemic**2 + aleatoric**2)
+    # Components raw; the total is the sum of the two VARIANCES, which is what
+    # `std` above already is.
+    total = np.sqrt(_total_var)
     
     # CRITICAL: Evaluate on normalized targets (same scale as training)
     metrics = calculate_regression_metrics(test_labels, predictions)
@@ -4408,8 +4424,9 @@ def train_graph_gp(train_graphs, y_train_noisy, test_graphs, y_test_noisy,
         save_uncertainty_values(
             predictions, total, test_labels, test_labels,
             args.filepath, 'graph_gp', 'graph', s, iteration, file_no,
-            y_pred_std_calibrated=total, temperature=temperature,
-            epistemic_uncertainty=epistemic, aleatoric_uncertainty=aleatoric,
+            y_pred_std_calibrated=total * temperature, temperature=temperature,
+            aleatoric_var=alea_var, epistemic_var=epis_var,
+            support_model='graph_gp',
             split='test'
         )
     
@@ -5074,6 +5091,7 @@ def train_conformal_graph_model(train_loader, test_loader, val_loader, args, s, 
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            support_model='conformal',
         )
         
         save_conformal_intervals(
@@ -7857,71 +7875,73 @@ def train_heteroscedastic_gp(
         def forward(self, x):
             return self.net(x).squeeze(-1) + 1e-4  # Add small epsilon
     
-    # Create models
-    likelihood = GaussianLikelihood().to(device)
-    gp_model = HeteroscedasticGPModel(
-        x_train_t, y_train_t, likelihood, kernel_type
-    ).to(device)
-    noise_model = NoiseModel(x_train.shape[1]).to(device)
+    # ONE fit routine, used for the reported model AND for every inner fold of
+    # the out-of-fold pass. Written as a function rather than inline because the
+    # out-of-fold pass has to build exactly the same model; two copies of a fit
+    # is how the rest of this file drifted (RERUN_PLAN.md 5.5).
+    def _fit_het_gp(x_fit, y_fit, x_score, announce=False):
+        xf = torch.tensor(np.asarray(x_fit), dtype=torch.float32).to(device)
+        yf = torch.tensor(np.asarray(y_fit), dtype=torch.float32).to(device)
+        xs = torch.tensor(np.asarray(x_score), dtype=torch.float32).to(device)
 
-    # Training
-    gp_model.train()
-    likelihood.train()
-    noise_model.train()
+        lik = GaussianLikelihood().to(device)
+        gp = HeteroscedasticGPModel(xf, yf, lik, kernel_type).to(device)
+        noise_net = NoiseModel(np.asarray(x_fit).shape[1]).to(device)
 
-    optimizer = torch.optim.Adam([
-        {'params': gp_model.parameters(), 'lr': 0.1},
-        {'params': noise_model.parameters(), 'lr': 0.001}
-    ], lr=0.1)
+        gp.train()
+        lik.train()
+        noise_net.train()
 
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, gp_model)
+        opt = torch.optim.Adam([
+            {'params': gp.parameters(), 'lr': 0.1},
+            {'params': noise_net.parameters(), 'lr': 0.001}
+        ], lr=0.1)
+        inner_mll = gpytorch.mlls.ExactMarginalLogLikelihood(lik, gp)
 
-    print(f"Training Heteroscedastic GP with {kernel_type} kernel...")
+        if announce:
+            print(f"Training Heteroscedastic GP with {kernel_type} kernel...")
 
-    for epoch in range(args.epochs):
-        # Train GP
-        optimizer.zero_grad()
-        output = gp_model(x_train_t)
-        gp_loss = -mll(output, y_train_t)
-        
-        # Train noise model
-        with torch.no_grad():
-            gp_pred = gp_model(x_train_t).mean
-        residuals = (y_train_t - gp_pred) ** 2
-        pred_var = noise_model(x_train_t)
-        
-        # Negative log-likelihood for noise model
-        noise_loss = torch.mean(0.5 * torch.log(pred_var) + residuals / (2 * pred_var))
-        
-        # Combined loss
-        total_loss = gp_loss + noise_loss
-        total_loss.backward()
-        optimizer.step()
-        
-        if epoch % 20 == 0:
-            print(f"  Epoch {epoch}: GP Loss = {gp_loss.item():.4f}, Noise Loss = {noise_loss.item():.4f}")
-    
-    # Test
-    gp_model.eval()
-    likelihood.eval()
-    noise_model.eval()
-    
-    with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        # GP predictions
-        pred_dist = gp_model(x_test_t)
-        pred_mean = pred_dist.mean.cpu().numpy()
-        
-        # Epistemic uncertainty (from GP)
-        epistemic_var = pred_dist.variance.cpu().numpy()
-        epistemic_std = np.sqrt(epistemic_var)
-        
-        # Aleatoric uncertainty (learned noise)
-        aleatoric_var = noise_model(x_test_t).cpu().numpy()
-        aleatoric_std = np.sqrt(aleatoric_var)
-        
-        # Total uncertainty
-        total_std = np.sqrt(epistemic_var + aleatoric_var)
-    
+        for epoch in range(args.epochs):
+            opt.zero_grad()
+            output = gp(xf)
+            gp_loss = -inner_mll(output, yf)
+
+            with torch.no_grad():
+                gp_pred = gp(xf).mean
+            residuals = (yf - gp_pred) ** 2
+            pred_var = noise_net(xf)
+            noise_loss = torch.mean(
+                0.5 * torch.log(pred_var) + residuals / (2 * pred_var))
+
+            (gp_loss + noise_loss).backward()
+            opt.step()
+
+            if announce and epoch % 20 == 0:
+                print(f"  Epoch {epoch}: GP Loss = {gp_loss.item():.4f}, "
+                      f"Noise Loss = {noise_loss.item():.4f}")
+
+        gp.eval()
+        lik.eval()
+        noise_net.eval()
+
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            posterior = gp(xs)
+            mean = posterior.mean.cpu().numpy()
+            # The LATENT variance is the epistemic term. The observation noise is
+            # predicted per molecule by the second network, which is what makes
+            # this the only Gaussian process in either roster that can answer a
+            # per-molecule question at all -- an ordinary one has a single
+            # likelihood noise and reports the same number for every molecule
+            # (RERUN_PLAN.md 5.5e).
+            latent_var = posterior.variance.cpu().numpy()
+            noise_var = noise_net(xs).cpu().numpy()
+
+        alea, epis, total = decompose_hetero_gp(latent_var, noise_var)
+        return mean, np.sqrt(total), alea, epis
+
+    pred_mean, total_std, aleatoric_var, epistemic_var = _fit_het_gp(
+        x_train, y_train, x_test, announce=True)
+
     # Calculate metrics
     metrics = calculate_regression_metrics(y_test, pred_mean, logging=True)
     
@@ -7936,11 +7956,9 @@ def train_heteroscedastic_gp(
             y_pred_mean=pred_mean,
             y_pred_std=total_std,
             # These two are the whole point of this model, and the call used to
-            # omit them, so the columns came out NaN. It and evidential_kernel
-            # are the only models in the file that produce a per-molecule
-            # ALEATORIC term (RERUN_PLAN.md 2.13).
-            epistemic_uncertainty=epistemic_std,
-            aleatoric_uncertainty=aleatoric_std,
+            # omit them, so the columns came out NaN (RERUN_PLAN.md 2.13).
+            aleatoric_var=aleatoric_var,
+            epistemic_var=epistemic_var,
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -7949,9 +7967,24 @@ def train_heteroscedastic_gp(
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            split='test',
+            **_held_out_noise_columns(train_noise, len(y_test), pred_mean),
         )
 
-    
+        # The TRAINING molecules, scored by models that never saw their labels.
+        # Without this the model's per-molecule noise term is only ever compared
+        # against a held-out molecule's REGION, never against the corruption a
+        # molecule actually received -- and a test label is never corrupted, so
+        # the question this model exists to answer would have no data behind it
+        # (RERUN_PLAN.md 3.1c).
+        def _fp(x_fit, y_fit, x_score):
+            return _fit_het_gp(x_fit, y_fit, x_score)
+
+        score_training_molecules_out_of_fold(
+            _fp, x_train, y_train, train_noise, args, s, rep, iteration,
+            iteration_seed, file_no, model_name, val_slice=None,
+            restore_torch_rng=True)
+
     return metrics[3]
 
 def train_evidential_kernel(
@@ -8049,10 +8082,14 @@ def train_evidential_kernel(
         alpha = np.maximum(pred_params[:, 2], 1.0)
         beta = np.maximum(pred_params[:, 3], 1e-6)
         
-        # Compute uncertainties
-        epistemic_std = np.sqrt(beta / (v * (alpha - 1)))
-        aleatoric_std = np.sqrt(beta / (alpha - 1))
-        total_std = np.sqrt(epistemic_std**2 + aleatoric_std**2)
+        # The Normal-Inverse-Gamma split, in VARIANCES. The data-driven term is
+        # beta/(alpha-1) and the model term is beta/(v(alpha-1)); v > 1, so the
+        # model term is always the smaller of the two. Confirmed against
+        # chemprop's own implementation, research_archive/f692d614/
+        # chemprop_v1_uncertainty_predictor.py:740-800.
+        epistemic_var = beta / (v * (alpha - 1))
+        aleatoric_var = beta / (alpha - 1)
+        total_std = np.sqrt(epistemic_var + aleatoric_var)
     
     # Calculate metrics
     metrics = calculate_regression_metrics(y_test, gamma, logging=True)
@@ -8068,11 +8105,10 @@ def train_evidential_kernel(
             y_pred_mean=gamma,
             y_pred_std=total_std,
             # These two are the whole point of this model, and the call used to
-            # omit them, so the columns came out NaN. It and evidential_kernel
-            # are the only models in the file that produce a per-molecule
-            # ALEATORIC term (RERUN_PLAN.md 2.13).
-            epistemic_uncertainty=epistemic_std,
-            aleatoric_uncertainty=aleatoric_std,
+            # omit them, so the columns came out NaN (RERUN_PLAN.md 2.13).
+            aleatoric_var=aleatoric_var,
+            epistemic_var=epistemic_var,
+            support_model='evidential_kernel',
             y_true_original=y_test_original,
             y_true_noisy=y_test,
             filepath=args.filepath,
@@ -8301,6 +8337,7 @@ def train_ntk_gnn(
             sigma_noise=s,
             iteration=iteration,
             file_no=file_no,
+            support_model='ntk_gnn',
         )
     
     return metrics[3]

@@ -427,21 +427,6 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
 
     n = len(y_pred_mean)
 
-    # THE GUARD, before anything reaches disk. A component declared per molecule
-    # that is in fact one number copied onto every row -- or the reverse -- is
-    # the failure that has cost this project most, and it is invisible in the
-    # output file. assert_matches_support raises rather than writing a column
-    # nobody can interpret (RERUN_PLAN.md 5.5b).
-    _support_key = support_model or model_name
-    assert_matches_support(_support_key, aleatoric_var, epistemic_var,
-                           n_molecules=n, loss_name=loss_name,
-                           blocks=support_blocks)
-    _alea_kind, _epis_kind = support(_support_key, loss_name)
-    # The single conversion. Variances add; standard deviations do not, so the
-    # arithmetic is all done upstream in variance space and this is the last
-    # step before the numbers are written.
-    aleatoric_uncertainty = variance_to_std(aleatoric_var)
-    epistemic_uncertainty = variance_to_std(epistemic_var)
 
     if injected_noise is None:
         if split == 'train_oof':
@@ -464,6 +449,22 @@ def save_uncertainty_values(y_pred_mean, y_pred_std, y_true_original, y_true_noi
     noise_pattern_rows = _per_row_values(noise_pattern, n, 'noise_pattern')
     noise_pattern_pred_rows = _per_row_values(
         noise_pattern_pred, n, 'noise_pattern_pred')
+
+    # THE GUARD, before anything reaches disk. A component declared per molecule
+    # that is in fact one number copied onto every row -- or the reverse -- is
+    # the failure that has cost this project most, and it is invisible in the
+    # output file. assert_matches_support raises rather than writing a column
+    # nobody can interpret (RERUN_PLAN.md 5.5b).
+    _support_key = support_model or model_name
+    assert_matches_support(_support_key, aleatoric_var, epistemic_var,
+                           n_molecules=n, loss_name=loss_name,
+                           blocks=support_blocks)
+    _alea_kind, _epis_kind = support(_support_key, loss_name)
+    # The single conversion. Variances add; standard deviations do not, so the
+    # arithmetic is all done upstream in variance space and this is the last
+    # step before the numbers are written.
+    aleatoric_uncertainty = variance_to_std(aleatoric_var)
+    epistemic_uncertainty = variance_to_std(epistemic_var)
 
     rows = []
     for i in range(n):

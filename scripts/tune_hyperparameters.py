@@ -312,9 +312,11 @@ def build_split(pat, sample_size, seed):
     train_idx, val_idx, test_idx = (list(map(int, train_idx)),
                                     list(map(int, val_idx)),
                                     list(map(int, test_idx)))
-    with open(cached, 'w') as fh:
+    tmp = f'{cached}.{os.getpid()}.tmp'
+    with open(tmp, 'w') as fh:
         json.dump({'smiles': smiles, 'y': y.tolist(), 'train_idx': train_idx,
                    'val_idx': val_idx, 'test_idx': test_idx}, fh)
+    os.replace(tmp, cached)   # atomic; concurrent array tasks share this file
     return smiles, y, train_idx, val_idx, test_idx
 
 
@@ -361,7 +363,14 @@ def features_for(pat, rep, smiles, train_idx, sample_size, seed, cache=True):
         return np.load(path)
     x = featurise(pat, rep, smiles, train_idx)
     if cache:
-        np.save(path, x)
+        # Write to a private name and rename into place. On the cluster every
+        # array task featurises the same representation at the same time, and a
+        # half-written .npy that another task then reads is the config-race
+        # defect class again (RERUN_PLAN.md 2.8a). rename is atomic within a
+        # filesystem, so a reader sees either the old file or a complete one.
+        tmp = f'{path}.{os.getpid()}.tmp'
+        np.save(tmp, x)
+        os.replace(tmp if tmp.endswith('.npy') else tmp + '.npy', path)
     return x
 
 
@@ -549,7 +558,10 @@ def run(args_cli):
     # is interrupted at hour three should leave the three hours of measurements
     # it made, not nothing.
     stem = 'timing' if args_cli.time else 'trials'
-    out = os.path.join(OUT_DIR, f'{stem}.csv')
+    # One file per task. A fixed name would have every array task on the cluster
+    # writing the same path, and the last one to finish would be the only one
+    # that survived -- silently, with a plausible-looking file left behind.
+    out = os.path.join(OUT_DIR, f'{stem}{args_cli.tag}.csv')
     stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
     fields = ['model', 'rep', 'setting', 'r2', 'seconds', 'status', 'detail',
               'sample_size', 'seed', 'written']
@@ -682,6 +694,53 @@ def write_best(rows, args_cli):
     print(f'  pairings where the default won: '
           f'{sum(1 for g, _, _ in gains if g <= 0)} of {len(gains)}')
 
+
+
+
+def merge(args_cli):
+    """Read every tagged trials file back and build one best_by_pairing.json.
+
+    On the cluster each array task tunes one pairing and writes its own
+    trials_<tag>.csv (--tag). This is the step that turns those back into the
+    single file --confirm and --write-master read, and it is where a task that
+    died is noticed: a pairing on the roster with no rows is reported by name,
+    not quietly absent from the result.
+    """
+    import glob
+
+    import tuning_rosters as rosters
+
+    paths = sorted(glob.glob(os.path.join(OUT_DIR, 'trials*.csv')))
+    if not paths:
+        print(f'no trials*.csv under {OUT_DIR} -- nothing to merge.')
+        return 1
+    rows = []
+    for path in paths:
+        with open(path) as fh:
+            rows.extend(csv.DictReader(fh))
+    print(f'{len(rows)} rows from {len(paths)} file(s)')
+
+    sizes = {r['sample_size'] for r in rows if r.get('sample_size')}
+    seeds = {r['seed'] for r in rows if r.get('seed')}
+    if len(sizes) > 1 or len(seeds) > 1:
+        print(f'REFUSING to merge: the files disagree on the split. '
+              f'sample sizes {sorted(sizes)}, seeds {sorted(seeds)}. '
+              f'Settings tuned on different splits are not comparable and the '
+              f'best-of would be picked across two different experiments.')
+        return 1
+
+    write_best(rows, args_cli)
+
+    scored = {(r['model'], r['rep']) for r in rows if r['status'] == 'ok'}
+    blocked = {(r['model'], r['rep']) for r in rows if r['status'] == 'blocked'}
+    missing = [p for p in rosters.qm9_pairings()
+               if p not in scored and p not in blocked]
+    if missing:
+        print(f'\n  {len(missing)} pairing(s) on the roster produced no scored '
+              f'row. A task that died leaves no trace but this:')
+        for m, r in missing:
+            print(f'      {m} x {r}')
+    return 0
 
 
 def confirm(args_cli):
@@ -876,6 +935,10 @@ def main():
                            'record the seconds. Prices the sweep.')
     mode.add_argument('--sweep', action='store_true',
                       help='The random search itself.')
+    mode.add_argument('--merge', action='store_true',
+                      help='Combine the per-task trials files from a cluster '
+                           'sweep into one best_by_pairing.json, and name any '
+                           'pairing that produced no rows.')
     mode.add_argument('--confirm', action='store_true',
                       help='Refit the winner and the shared default and score '
                            'both on the TEST split, which the search never saw. '
@@ -900,11 +963,19 @@ def main():
                     help='Recorded in the output. Tuning runs on CLEAN labels '
                          'unless this is set; the injector is not wired in here '
                          'yet, so a value only labels the run.')
+    ap.add_argument('--tag', default='',
+                    help='Suffix for this run\'s output files, so concurrent '
+                         'tasks do not share a path. The cluster generator sets '
+                         'it per array task; --merge reads them all back.')
     ap.add_argument('--traceback', action='store_true')
     args_cli = ap.parse_args()
+    if args_cli.tag and not args_cli.tag.startswith('_'):
+        args_cli.tag = '_' + args_cli.tag
 
     if args_cli.write_master:
         return write_master(args_cli)
+    if args_cli.merge:
+        return merge(args_cli)
     if args_cli.confirm:
         return confirm(args_cli)
     return run(args_cli)

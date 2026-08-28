@@ -97,6 +97,19 @@ def make_arrays(n):
 # C1 -- the writer itself
 # ---------------------------------------------------------------------------
 
+def _support_label(tmp, model_name, alea, epis, n):
+    """The aleatoric_support value a model's rows come out carrying."""
+    y_true, y_pred, y_std = make_arrays(n)
+    path = os.path.join(tmp, f'res_sup_{model_name}.csv')
+    save_uncertainty_values(
+        y_pred_mean=y_pred, y_pred_std=y_std,
+        y_true_original=y_true, y_true_noisy=y_true,
+        filepath=path, model_name=model_name, rep='pdv',
+        sigma_noise=0.6, iteration=0, file_no=1,
+        aleatoric_var=alea, epistemic_var=epis)
+    return read_back(unc_path(path))['aleatoric_support'].iloc[0]
+
+
 def test_writer(tmp):
     print("\nC1  save_uncertainty_values: the noise is recorded, not reconstructed")
 
@@ -119,7 +132,9 @@ def test_writer(tmp):
         y_pred_mean=y_pred, y_pred_std=y_std,
         y_true_original=y_true, y_true_noisy=y_noisy_confounded,
         filepath=f_test, model_name='qrf', rep='pdv',
-        sigma_noise=0.6, iteration=0, file_no=1)
+        sigma_noise=0.6, iteration=0, file_no=1,
+        aleatoric_var=np.linspace(0.04, 0.25, n),
+        epistemic_var=np.linspace(0.01, 0.09, n))
     df = read_back(unc_path(f_test))
 
     check("a test row writes injected_noise as exactly 0.0, not the regression residual",
@@ -157,7 +172,9 @@ def test_writer(tmp):
         split='train_oof', injected_noise=HOSTILE,
         canonical_smiles=smiles, noise_scale=scale,
         noise_pattern=pattern, noise_pattern_pred=pattern * 1.1,
-        oof_folds_ok=np.full(n, 5))
+        oof_folds_ok=np.full(n, 5),
+        aleatoric_var=np.linspace(0.04, 0.25, n),
+        epistemic_var=np.linspace(0.01, 0.09, n))
     dfo = read_back(unc_path(f_oof))
 
     got = dfo['injected_noise'].to_numpy(dtype=np.float64)
@@ -200,6 +217,8 @@ def test_writer(tmp):
            y_true_original=y_true, y_true_noisy=y_true,
            filepath=f_bad, model_name='qrf', rep='pdv',
            sigma_noise=0.6, iteration=0, file_no=1,
+           aleatoric_var=np.linspace(0.04, 0.25, n),
+           epistemic_var=np.linspace(0.01, 0.09, n),
            noise_pattern=np.arange(n - 1, dtype=float))
 
     # ---- appending --------------------------------------------------------
@@ -209,7 +228,9 @@ def test_writer(tmp):
         filepath=f_oof, model_name='qrf', rep='pdv',
         sigma_noise=0.0, iteration=0, file_no=1,
         split='train_oof', injected_noise=np.zeros(n),
-        canonical_smiles=smiles, noise_pattern=pattern)
+        canonical_smiles=smiles, noise_pattern=pattern,
+        aleatoric_var=np.linspace(0.04, 0.25, n),
+        epistemic_var=np.linspace(0.01, 0.09, n))
     dfa = read_back(unc_path(f_oof))
     check("a second call appends rather than overwriting, under one header",
           len(dfa) == 2 * n and set(dfa['sigma']) == {0.6, 0.0},
@@ -232,6 +253,54 @@ def test_writer(tmp):
            y_pred_mean=y_pred, y_pred_std=y_std,
            y_true_original=y_true, y_true_noisy=y_true,
            filepath=f_stale, model_name='qrf', rep='pdv',
+           sigma_noise=0.6, iteration=0, file_no=1,
+           aleatoric_var=np.linspace(0.04, 0.25, n),
+           epistemic_var=np.linspace(0.01, 0.09, n))
+
+    # ---- the support columns ---------------------------------------------
+    # The distinction that decides whether a correlation means anything: does
+    # the component vary per molecule, or is it one number copied onto every
+    # row? No file recorded this before 2026-08-28 (RERUN_PLAN.md 5.5a point 5).
+    f_sup = os.path.join(tmp, 'res_support.csv')
+    save_uncertainty_values(
+        y_pred_mean=y_pred, y_pred_std=y_std,
+        y_true_original=y_true, y_true_noisy=y_true,
+        filepath=f_sup, model_name='gauche_rbf', rep='pdv',
+        sigma_noise=0.6, iteration=0, file_no=1,
+        aleatoric_var=np.full(n, 0.09),
+        epistemic_var=np.linspace(0.01, 0.4, n))
+    dfsup = read_back(unc_path(f_sup))
+    check("the Gaussian process's data term is labelled one number per fit",
+          bool((dfsup['aleatoric_support'] == 'constant').all()))
+    check("its model term is labelled per molecule",
+          bool((dfsup['epistemic_support'] == 'per_molecule').all()))
+    check("a model with no data term at all says so, rather than leaving it blank",
+          _support_label(tmp, 'dnn_bnn_full', None,
+                         np.linspace(0.01, 0.4, n), n) == 'none')
+    check("the two columns are written as standard deviations, the square roots "
+          "of the variances handed in",
+          np.allclose(dfsup['aleatoric_uncertainty'].to_numpy(), 0.3)
+          and np.allclose(dfsup['epistemic_uncertainty'].to_numpy(),
+                          np.sqrt(np.linspace(0.01, 0.4, n))))
+
+    raises("a constant sold as per molecule is refused, not written",
+           RuntimeError,
+           save_uncertainty_values,
+           y_pred_mean=y_pred, y_pred_std=y_std,
+           y_true_original=y_true, y_true_noisy=y_true,
+           filepath=os.path.join(tmp, 'res_reject1.csv'),
+           model_name='qrf', rep='pdv', sigma_noise=0.6, iteration=0, file_no=1,
+           aleatoric_var=np.full(n, 0.09),
+           epistemic_var=np.linspace(0.01, 0.4, n))
+    check("...and nothing was written while refusing",
+          not os.path.exists(unc_path(os.path.join(tmp, 'res_reject1.csv'))))
+
+    raises("a model with no SUPPORT entry is refused by name", RuntimeError,
+           save_uncertainty_values,
+           y_pred_mean=y_pred, y_pred_std=y_std,
+           y_true_original=y_true, y_true_noisy=y_true,
+           filepath=os.path.join(tmp, 'res_reject2.csv'),
+           model_name='a_model_nobody_declared', rep='pdv',
            sigma_noise=0.6, iteration=0, file_no=1)
 
     # ---- a scalar broadcasts ---------------------------------------------
@@ -241,6 +310,7 @@ def test_writer(tmp):
         y_true_original=y_true, y_true_noisy=y_true,
         filepath=f_scalar, model_name='ngboost', rep='ecfp4',
         sigma_noise=0.3, iteration=0, file_no=2,
+        aleatoric_var=np.linspace(0.04, 0.25, n),
         canonical_smiles='CCO', noise_scale=0.3, oof_folds_ok=3)
     dfs = read_back(unc_path(f_scalar))
     check("a scalar per-molecule value broadcasts to every row",
