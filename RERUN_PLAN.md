@@ -8757,8 +8757,48 @@ they are the source, and the `.sh` files are rebuilt from them every time.
 compute node, one threading runtime, both blockers passing in the same interpreter, all 33
 `env.yml` pins truthful. Nothing here waits on chat L any longer.
 
-**Blocked** on the run design in §13.1. A, B, C, D, E and G are all done, so that is the only
-remaining block, and it applies to the QM9 half only.
+✅ **NOT BLOCKED ANY LONGER, 2026-08-28.** This line read *"Blocked on the run design in §13.1"*
+for a day after §13.1's own header changed to *"Nothing on this list blocks anything"* -- every one
+of its six items is settled. A, B, C, D, E and G are done, the environment gate passes on ARC
+(§2.8i), and the branch is pushed (A3 -- `git status -sb` shows nothing ahead of
+`origin/additional_reps`, checked 2026-08-28). **The screen can be generated and submitted.**
+
+#### 🔴 2026-08-28 — a tuned setting cannot reach the cluster, and the screen is replicate 0
+
+**The tuned path is unreachable from every script this project generates.** All twelve reads of
+`load_best_hyperparameters` in `models/models.py` sit behind
+`if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:`, and
+`grep -r use.best.params slurm_scripts_qm9_rerun/ slurm_scripts_uncertainty_rerun/` returns
+nothing. So the sweep can finish, `--write-master` can adopt settings, and the grid still trains
+on `models/model_defaults.py`. The runbook's §2b said the two files alone were enough; corrected
+there the same day.
+
+**Why that is a decision and not a one-line fix.** The screen IS replicate 0 of the main grid
+(§13.1, and `generate_scripts.py:55`), so the two must be trained the same way. Launching the
+screen on the shared defaults and then switching the main grid to tuned settings makes replicate 0
+a different model from replicates 1--9 for every pairing that adopted one, and the reuse the whole
+staged design rests on stops being true.
+
+**What the sweep would cost, measured rather than estimated.** `scripts/tune_hyperparameters.py
+--time` was still running on 2026-08-28 05:59; `results/tuning_local/timing.csv` had 55 of the 80
+pairings, one fit each at the 10,000-molecule sample the jobs themselves use, all `ok`:
+
+| | one fit each | at 12 candidates (§4 decision 7a) |
+|---|---|---|
+| all 55 pairings timed so far | 6.59 h | ~79 h |
+| the 24 that can actually be delivered (§5.7a) | 3.25 h | ~39 h |
+| those 24 **without NGBoost** | 0.29 h | **~3.5 h** |
+
+NGBoost is 2.95 of those 3.25 hours -- 91% of the deliverable sweep, and 5,443 s of it is
+`ngboost`/`chemberta` alone. Laptop time, before either confirmation stage in §5.7i.
+
+**Recommendation, for the author.** Run the whole re-run on the shared defaults and launch the
+screen now. The tuning experiment then reports as a side experiment -- "tuning was measured and
+did not change the settings the study ran" -- rather than driving the grid. The reasons are three:
+the sweep has not started (only the pricing pass is running); only 24 of 80 pairings could receive
+a value even if it had; and the experimental pipeline has no reader at all (§5.7d), so adopting on
+QM9 breaks parity with LogD, Caco-2 and hERG, which is the comparison the validation section
+rests on.
 
 🟡 **The uncertainty half is already done, 2026-08-27 (§2.8j).**
 `slurm_scripts_uncertainty_rerun/` — generator, merge step, preflight and runbook — is off the six

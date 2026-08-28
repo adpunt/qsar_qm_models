@@ -299,11 +299,24 @@ rm -rf data/QM9/processed
 ls -l results/master_tuned_hyperparameters.json results/hyperparameter_decisions.json
 ```
 
-`load_best_hyperparameters` (`models/models.py`) substitutes tuned hyperparameters whenever
-**both** of those files are present and the decisions file says `USE_TUNED`. The copies on
-the cluster are from February, months before any of this. Leaving them in place means the
-re-run does not use the hyperparameters anyone thinks it uses, and the results rows say
-nothing about it. Move them aside:
+`load_best_hyperparameters` (`models/models.py`) substitutes tuned hyperparameters when
+**both** of those files are present, the decisions file says `USE_TUNED`, **and the job was
+given `--use-best-params`**. All twelve call sites are behind
+`if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:` -- checked
+in `models/models.py` on 2026-08-28, twelve guards against twelve calls.
+
+**No script this generator writes passes that flag** (`grep -r use.best.params
+slurm_scripts_qm9_rerun/` returns nothing). Two consequences, and the second is the one that
+costs something:
+
+1. The February files on the cluster cannot fire. Move them aside anyway -- it is free, and it
+   removes the need to reason about the flag at all.
+2. **A tuned setting cannot reach the cluster today.** The sweep can finish, `--write-master`
+   can adopt settings, and the grid will still train on the shared defaults in
+   `models/model_defaults.py` until the generator is changed to emit `--use-best-params`. That
+   is a decision for the author, not a silent edit -- see `RERUN_PLAN.md` chat H.
+
+Move them aside:
 
 ```bash
 for f in master_tuned_hyperparameters hyperparameter_decisions; do
