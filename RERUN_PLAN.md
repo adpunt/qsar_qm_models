@@ -1783,6 +1783,45 @@ git add research_archive/env_test_before_rebuild_2026-08-27.txt
 git commit -m "The environment that was working, recorded" && git push
 ```
 
+#### The compute-node check, 2026-08-28 — one runtime, both blockers, seven gaps
+
+Run on a `devel` node, which is where the login node's answers were never valid:
+
+| | |
+|---|---|
+| QM9 roster constructed | **26 of 30** (the four `conformal*` are the only failures) |
+| threading runtimes, statically | ✅ **one**, `libomp.so` |
+| threading runtimes, `/proc/self/maps` after importing every backend | ✅ **one** |
+| LightGBM fits, no thread count / both pinned to 4 | ✅ / ✅ |
+| GP fits after lightgbm+xgboost, no thread count / both pinned to 4 | ✅ / ✅ |
+| `ngboost` and `qrf` actually fit | ✅ / ✅ |
+| `noiseInject` 1.0.0, `kirby` 0.2.0 | ✅ |
+
+**The two failures that forced this whole section are gone, in one environment, measured on a
+compute node.** That is §2.8i's actual goal and it is met.
+
+**Every remaining failure is the same thing: the environment drifted AWAY from `env.yml`, and the
+fix is to move it back.** The restore's pip step installed `botorch 0.16.1` where the recipe pins
+`0.10.0`, and that dragged `gpytorch` forward to 1.14 — but **`gauche 0.1.6` imports
+`gpytorch.likelihoods.hadamard_gaussian_likelihood`, which exists in 1.11 and not in 1.14**. That
+single mismatch is why `models/models.py` will not import at all and why the validation roster
+reports `HAS_GP` unavailable. Five more packages the recipe pins were simply absent from the
+archive: `transformers` (ChemBERTa, and what the four `conformal*` labels actually failed on),
+`grakel` (graph kernels), `huggingface_hub`, `diskcache`, `lightning`.
+
+```bash
+. ./setup.sh     # exports PIP_CONSTRAINT, which pins all of these to the same values
+python -m pip install "gpytorch==1.11" "botorch==0.10.0" "transformers==4.51.3" \
+    "huggingface_hub==0.30.2" "grakel==0.1.10" "diskcache==5.6.3" "lightning==2.5.1.post0"
+```
+
+⚠️ `grakel` is compiled, so **re-run the check afterwards and read the runtime count first**. If
+it goes above one, that wheel is the cause: remove it and take it from conda-forge instead
+(`micromamba install --override-channels -c conda-forge grakel=0.1.10`).
+
+This also closes the `env.yml` truthfulness check, which is the point of it — the environment
+becomes one the recipe describes, which is what makes it reproducible rather than merely working.
+
 #### `short` had no idle nodes — read `sinfo` before advising a partition (2026-08-28)
 
 An `srun --partition=short --pty` sat in the queue indefinitely. `sinfo -s` says why, and names
