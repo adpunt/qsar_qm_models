@@ -32,7 +32,10 @@ is not a convergence problem and no amount of training fixes it. Trained on the
 fitted residuals the same model reaches +0.53 to +0.60 with its accuracy
 unchanged.
 
-Both pipelines wrote it the first way. This check goes red if either goes back.
+Both pipelines wrote it the first way. This check goes red if either goes back:
+it MEASURES the laboratory model, which can be built here, and READS the QM9 one,
+which needs the whole QM9 stack to run and would otherwise go unchecked on this
+laptop. The two carry the identical model and must move together.
 
     python scripts/test_hetero_gp_learns_the_noise.py
 """
@@ -123,6 +126,24 @@ def main():
     print(f"  R2 on held-out molecules    {r2:6.3f}    (needs >= 0.5)")
     if r2 < 0.5:
         failures.append(f"accuracy collapsed (R2={r2:.3f}); the split is not worth having.")
+
+    # 5. The QM9 twin must not have drifted back. It is the same model; running
+    #    it here needs the whole QM9 stack, so this reads it instead of guessing.
+    qm9 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'models', 'models.py')
+    src = open(qm9).read()
+    if 'def train_heteroscedastic_gp' not in src:
+        failures.append(f"{qm9} has no train_heteroscedastic_gp to check")
+    else:
+        body = src[src.index('def train_heteroscedastic_gp'):]
+        body = body[:body.index('\ndef ', 1)] if '\ndef ' in body[1:] else body
+        if 'gp_pred = gp(xf).mean' in body and 'gp.eval()' not in body:
+            failures.append(
+                "the QM9 model computes its residuals with the process in train mode, so "
+                "it is learning from PRIOR residuals and its predicted noise will be flat. "
+                "Same one-line fix as the laboratory side: gp.eval() around the residual.")
+        else:
+            print("  the QM9 twin uses fitted residuals too")
 
     if failures:
         print(f"\nFAIL — {len(failures)} problem(s):")

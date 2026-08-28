@@ -2257,6 +2257,60 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.25 🔴 FOUND AND FIXED 2026-08-28 — the noise-predicting Gaussian process was learning from the wrong residual
+
+**This is the model the aleatoric/epistemic split rests on**, because it is the only one measured
+that separates the two halves at all: both forest halves track the true corruption at +0.84 and
++0.81, which is one signal reported twice. It was added to the uncertainty runs on the author's
+instruction. **It did not work, on either side, and the defect was one line.**
+
+**What it does.** An ordinary Gaussian process learns a single noise level for the whole dataset,
+so it reports the same data-noise number for every molecule. This one fits a small network
+alongside it that predicts the noise from each molecule's own features, trained on the squared
+residuals of the process.
+
+**The defect.** gpytorch returns the **prior** at the training inputs while the model is in train
+mode, which is where the training loop calls it. So `y − mean` was `y − a constant`: the spread of
+the labels themselves, dominated by real structure, saying almost nothing about which labels are
+corrupted. Measured on 300 molecules whose loud half carries 100× the noise variance of the quiet
+half:
+
+| residual the network learns from | loud | quiet | ratio |
+|---|---|---|---|
+| prior (what it used) | 6.44 | 5.92 | **1.09** |
+| fitted (what it needed) | 0.88 | 0.033 | **27.08** |
+
+**It is not a convergence problem, and this is worth knowing before anyone tunes it.** Trained on
+the prior residual, the rank correlation between predicted noise and true corruption sat between
+−0.12 and +0.09 at **every** learning rate from 0.001 to 0.05 and **every** length from 60 to 2,000
+epochs. More training does not help a model learning the wrong target.
+
+**The fix, and what it bought.** Call the process in eval mode for the residual and back to train
+after. On held-out molecules:
+
+| | before | after |
+|---|---|---|
+| predicted noise, loud vs quiet | 1.06× | **6.68×** |
+| rank correlation with the true corruption | 0.09 | **0.618** |
+| the two halves against each other | +0.79 | **−0.18** |
+| R² | 0.890 | 0.890 |
+
+Nothing was traded for it. And the two halves now move *oppositely*, which is what "two different
+quantities" looks like — against the forests' +0.84/+0.81.
+
+**⚠️ What this means for the number already in the handoff.** `HANDOFF_UNCERTAINTY_DECOMPOSITION.md`
+records this model's data half at **+0.79** against the true noise. That was measured on the code
+as it stood, which is the version that scores +0.09 here. Either it was measured some other way or
+the figure does not mean what it says. **Do not quote +0.79.** The measured figure on the fixed
+code is +0.618, on a two-level fixture; the graded-scale check the handoff asks for has still not
+been run.
+
+**Both pipelines carried it and both are fixed** — `models/models.py` and
+`KIRBy/tests/alternative_data_noise_robustness.py`. Guard:
+`scripts/test_hetero_gp_learns_the_noise.py`, which **measures** the laboratory side and **reads**
+the QM9 side, since running the QM9 one needs the whole QM9 stack. Verified red with the fix
+removed: 1.03× and rho = 0.012, and it names the cause.
+
 ### 2.24 ⛔ 2026-08-28 — one-hot SMILES and randomized SMILES STAY IN THE CODE, uncalled
 
 **The author's ruling, and it reverses what I did:** *"SMILES should not be deleted, just not
