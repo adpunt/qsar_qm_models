@@ -23,6 +23,9 @@ WHAT IT COVERS
   * the guards: no partition, index out of range, unactivated environment,
     wrong environment, missing rust binary -- each must FAIL, and the run
     with everything satisfied must pass
+  * the generator's own refusals, which never produce a script at all: a deep
+    run with no models, a deep run missing a shortlisted model, and a
+    pair-subset condition generated over the top of the main-grid scripts
 
 WHAT IT DOES NOT COVER
 ----------------------
@@ -288,6 +291,67 @@ def check_guards(failures, checked):
         binary.chmod(0o755)
 
 
+def check_generator_refusals(failures, checked):
+    """The generator's OWN refusals, which check_guards does not reach.
+
+    check_guards runs generated shell scripts; these three never get that far.
+    Each one exists because the alternative is compute spent on a grid nobody
+    chose: a blind deep run, a deep run missing the model the screen singled
+    out, and censoring generated at full breadth over the top of the main-grid
+    scripts (RERUN_PLAN.md §13.12 A3/A4). A refusal nothing exercises is a
+    refusal that gets deleted the next time it is inconvenient.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        stub = build_stub(tmp / 'stub')
+        out = tmp / 'scripts'
+        out.mkdir()
+
+        cases = [
+            ('deep run with no models or reps',
+             ('--stage', '2'), '--models'),
+            ('deep run missing a shortlisted model',
+             ('--stage', '2', '--models', 'rf', '--reps', 'ecfp4'), 'ngboost'),
+        ]
+        for name, args, expect in cases:
+            cmd = [sys.executable, str(GENERATOR), '--out-dir', str(out),
+                   '--qsar-dir', str(stub), *args]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            checked[0] += 1
+            if proc.returncode == 0:
+                failures.append(f'generator guard "{name}" did not fire')
+            elif expect not in proc.stderr + proc.stdout:
+                failures.append(f'generator guard "{name}" fired without naming {expect!r}')
+
+        # The escape hatch has to work, or the guard above is a wall.
+        cmd = [sys.executable, str(GENERATOR), '--out-dir', str(out),
+               '--qsar-dir', str(stub), '--stage', '2', '--models', 'rf',
+               '--reps', 'ecfp4', '--drop-shortlisted']
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        checked[0] += 1
+        if proc.returncode != 0:
+            failures.append('--drop-shortlisted did not let the deep run through:\n'
+                            f'{proc.stdout}\n{proc.stderr}')
+
+        # A pair-subset condition written into the generator's own directory
+        # overwrites the main-grid scripts for those models, exit 0, untracked.
+        pair_subset = sorted(gen.PAIR_SUBSET_CONDITIONS)
+        if not pair_subset:
+            failures.append('no pair-subset condition to test the overwrite guard with')
+        else:
+            own_dir = Path(GENERATOR).parent
+            cmd = [sys.executable, str(GENERATOR), '--out-dir', str(own_dir),
+                   '--qsar-dir', str(stub), '--stage', '0',
+                   '--conditions', pair_subset[0], '--models', 'rf']
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            checked[0] += 1
+            if proc.returncode == 0:
+                failures.append('generator guard "pair-subset into its own directory" did not '
+                                'fire -- it may have just overwritten the main-grid scripts')
+            elif pair_subset[0] not in proc.stderr + proc.stdout:
+                failures.append('the pair-subset refusal did not name the condition')
+
+
 def check_against_real_parser(emitted, failures):
     """Feed every emitted command line through scripts/process_and_train.py's own parser.
 
@@ -383,7 +447,13 @@ def main():
     for label, stage_args in [
         ('stage 0', ('--stage', '0')),
         ('stage 1', ('--stage', '1')),
-        ('stage 2', ('--stage', '2', '--models', 'rf', 'lgb', '--reps', 'continuous_pdv', 'ecfp4')),
+        # ngboost is on the deep run's shortlist, so the generator refuses a deep
+        # run without it. Ask for the run the author would actually submit rather
+        # than passing --drop-shortlisted here, which would test the escape hatch
+        # instead of the path. The refusal itself is checked in
+        # check_generator_refusals.
+        ('stage 2', ('--stage', '2', '--models', 'rf', 'lgb', 'ngboost',
+                     '--reps', 'continuous_pdv', 'ecfp4')),
         ('stage 0, excluded models', ('--stage', '0', '--include-excluded')),
     ]:
         print(f'{label}...')
@@ -391,6 +461,9 @@ def main():
 
     print('guards...')
     check_guards(failures, checked)
+
+    print('the generator\'s own refusals...')
+    check_generator_refusals(failures, checked)
 
     if not args.skip_parser:
         print('the real parser...')
