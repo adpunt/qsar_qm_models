@@ -49,9 +49,13 @@ and level 0 is one seventh of the cost.
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**The screen (`--stage 0`): 14 array scripts, 240 tasks** — 1,680 training runs.
-**The main grid (`--stage 1`): the same 240 tasks** at replicates 1–9 — 15,120 training runs.
-**16,800 between them**, plus censoring's 300 (§5b).
+**The screen (`--stage 0`): 17 array scripts, 294 tasks** — 2,058 training runs.
+**The main grid (`--stage 1`): the same 294 tasks** at replicates 1–9 — 18,522 training runs.
+**20,580 between them**, plus censoring, which is generated and submitted separately (§5b).
+
+The roster grew on 2026-08-28 with the noise-predicting Gaussian process and the two variational
+networks that predict noise per molecule, which is why these are larger than the figures this file
+carried before.
 
 Every figure in this section is printed by the generator. Do not retype one: the numbers
 above are checked against its output by
@@ -414,7 +418,7 @@ sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-5%4  qm9_s0_gauche.sh   # fingerprints only
 ```
 
-The main grid is the same 240 tasks at replicates 1–9, appending to the same files, so it
+The main grid is the same 294 tasks at replicates 1–9, appending to the same files, so it
 is submitted the same way once the screen has landed and been checked:
 
 ```bash
@@ -429,8 +433,8 @@ done
 
 Censoring is the fourth settled condition, and it is **not in the array above**. It runs on
 a named subset of model-and-representation pairs rather than all 80, because the question there is
-how big the effect is and not which model resists it best — 300 training runs instead of
-5,460 (`noise_conditions.json`, RERUN_PLAN.md §13.13). Which pairs comes out of the screen, and none are chosen yet;
+how big the effect is and not which model resists it best — 70 training runs per pair against 5,460
+for the full grid (`noise_conditions.json`, RERUN_PLAN.md §13.13). Which pairs comes out of the screen, and none are chosen yet;
 the same way the deep run's selection does, so this is submitted **after** §5 has landed.
 
 Two things the generator refuses, both found by the close-out audit after they had already
