@@ -1783,6 +1783,66 @@ git add research_archive/env_test_before_rebuild_2026-08-27.txt
 git commit -m "The environment that was working, recorded" && git push
 ```
 
+#### `short` had no idle nodes — read `sinfo` before advising a partition (2026-08-28)
+
+An `srun --partition=short --pty` sat in the queue indefinitely. `sinfo -s` says why, and names
+the partition to use instead:
+
+| partition | time limit | allocated / idle / down |
+|---|---|---|
+| `short` | 12:00:00 | 177 / **0** / 90 |
+| `medium` | 2 days | 173 / **0** / 88 |
+| `long` | 30 days | 173 / **0** / 88 |
+| `devel` | **10 minutes** | 0 / 2 / 0 |
+| `interactive` | 4:00:00 | 1 / **1** / 1 |
+
+The request was valid and had nothing to land on. **`interactive` is the partition for `--pty`**
+and had a node free; `devel` schedules at once but caps at ten minutes, which covers
+`check_environment.py --deep --validation` and not the end-to-end fit in the audit's section 10.
+This was recorded a day earlier in weaker form — the audit went in as batch job `12914447`
+*"because an interactive session was not being scheduled"* — and advising `--pty` on a full
+partition anyway is the same mistake twice.
+
+```bash
+sinfo -s     # the idle counts decide this, not the time limit
+srun --account=stat-cadd --partition=interactive --cpus-per-task=4 --mem=32G \
+     --time=01:00:00 --pty bash
+```
+
+#### `bash scripts/pull_safely.sh` — the pull, without the wall of names (2026-08-28)
+
+The *"would be overwritten by merge"* abort recurred four times in one day on four different
+families of file, each round costing a hand-cleared list before anything could move. Three of
+those families are now untracked (below); the script handles whatever is left, in a form that
+cannot be got wrong: locally **modified** files that the incoming commits touch are copied aside
+and the edit discarded, **untracked** files the pull would overwrite are moved aside, then
+`git pull --ff-only`. Nothing is deleted, everything lands in a dated directory beside the
+repository, and the count is printed at the end. `DRY_RUN=1` changes nothing.
+
+Tested against a faithful reproduction of the failure — a local edit to a tracked file the pull
+changes, plus an untracked copy of a path the pull adds. Plain `git pull` refuses on both; the
+script pulls, and both originals are intact in the backup afterwards.
+
+#### `results/`, the generated job scripts and `Cargo.lock` are out of git — 2026-08-28
+
+Three families of generated file were tracked while the cluster held its own copies at the same
+paths, so every `git pull` there aborted: **515** under `results/`, **508** generated
+`slurm_scripts_*/*.sh`, `rust/Cargo.lock`, `data/smiles_db.sqlite` and five `slurm-*.out` logs.
+Untracking is a fix rather than a deferral — with those paths in neither the old commit nor the
+new one, a pull neither adds nor removes them.
+
+**The generators stay tracked.** `generate_scripts.py` and its siblings, and the runbooks, are
+the source; §2.8j's whole argument is that the generator is the only thing worth auditing because
+the scripts are rebuilt from it every time.
+
+**Nothing is lost:** the files stay on disk everywhere they already are, every version stays in
+history (`git checkout <commit> -- <path>`), and only their presence in a fresh clone goes.
+Checked before doing it — nothing in `models/` or `scripts/` reads a tracked `results/` file at
+run time; the references there are comments recording where a number came from.
+
+⚠️ `research_archive/` stays tracked on purpose: it holds the record of the environment, which is
+the one artefact that has to survive a filesystem.
+
 **Still open here:** the cross-check step is skipped unless `rust/target/release/rust_processor`
 is built on the cluster (`cd rust && cargo build --release`, inside the activated environment),
 and `GP_DEFAULTS['single_thread_fit']` stays `True` until the gate passes on ARC.
