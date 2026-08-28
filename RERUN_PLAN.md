@@ -1596,7 +1596,22 @@ done. Three things it exposed, all now fixed in the script:
    is sourced by every task, and importing torch where there are two threading runtimes is the
    hang), and skips the extras with a note when they differ. Activation, the library paths, the
    RDKit symlinks and libstdc++ all still happen. `SETUP_FORCE_EXTRAS=1` overrides.
-5. **The archive on ARC has no version line**, so the torch step was skipped —
+5. **The restored torch is conda-forge's 2.5.1, not the pip wheel** — the interpreter reports
+   `2.5.1.post108`. The archive is a list of conda packages, and the pip wheel of `2.3.1+cu121`
+   that was shadowing it in `site-packages` is not in it, so what came back is the conda package
+   that was underneath all along. That is the version `env.yml` pins, arrived at from the other
+   direction. **Two things had to change for it to be recognised as such.** `==2.5.1` does not
+   match a post-release under PEP 440, so `pip-constraints.txt` would have had pip treat the
+   conda torch as unsatisfying and pull the PyPI wheel over the top — the wheel-bundled runtime
+   the file exists to keep out; it reads `torch==2.5.1.*` now. And the check in item 4 compared
+   the full version string, so it skipped the extras on an environment that matches the recipe.
+   Both compare on the release alone: `2.5.1.post108`, `2.5.1+cu121` and `2.5.1` are one version,
+   `2.3.1+cu121` is not.
+6. **`quantile-forest` and `ngboost` are absent from the restored environment**, because they
+   were absent from the environment it records — `quantile-forest` is the package the server
+   audit found missing, which is why every quantile-forest task died on contact. They are conda
+   packages in `env.yml` and have to be added to a restored environment by hand.
+7. **The archive on ARC has no version line**, so the torch step was skipped —
    `REBUILD_TORCH=<version>` names it. Whether torch is present at all comes from the conda half
    and has to be checked in the restored environment, not assumed.
 
@@ -4518,7 +4533,7 @@ requirement is not met, that question cannot be answered and the run should not 
 |---|---|---|---|---|
 | **Q1** | Is noise robustness decided by the model, the representation, or their pairing? | Two-way variance decomposition, model × representation, reported as the share of variance each term explains, with the residual shown | One value per (model, representation, replicate) cell, **separately for each noise type** | ≥2 replicates per cell for the residual to be real; **≥6 for any paired follow-up test** (§13.1); one roster and one exclusion rule applied everywhere |
 | **Q2** | Does the *kind* of noise matter, or only the amount? | (a) Spread in accuracy across noise types at matched delivered amount; (b) paired signed-rank test, each type against Gaussian, per model, **not pooled** | Paired on the replicate, within one representation and one noise level | Delivered amount verified flat across types (§8 gate 1). Six replicates minimum, or no result can reach significance |
-| **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset. ✅ **All four settled 2026-08-27** — QM9 1.0, logD 1.0, Caco-2 0.2, hERG still to set (§13.11) |
+| **Q3** | What does model choice actually buy you at a realistic amount of error? | Accuracy at the anchored noise level; best-minus-worst across models at each level; retention area **printed beside its clean baseline, never alone** | Per (model, representation, noise type, level) | The anchored level chosen per dataset. ✅ **All four settled, and every one is ON the shared ladder** (`NOISE_DESIGN.md` §6.4: 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5), so Q3 can be read at the settled level without interpolating: **QM9 1.0, logD 1.0, Caco-2 0.75, hERG 1.0**, as `models/model_defaults.py` `REPORTING_LEVELS` has them. Caco-2 was 0.2 for one day and is 0.75 since `82556a0` |
 | **Q4** | Can a model's uncertainty tell you which labels are bad? | **Two numbers, settled 2026-08-26, reported side by side under names that cannot be confused.** (a) The plain Spearman correlation between predicted uncertainty and the size of the injected noise, **within each noise level**, scored **out-of-fold** — near zero by design, because the scoring model never saw that molecule's draw and under an even condition every molecule gets the same amount. (b) The answer: take the out-of-fold error `\|y_clean + injected − y_pred\|`, which does track the noise, and ask whether dividing it by the predicted uncertainty ranks corrupted labels better than the error alone. Both with a permutation null | Per (dataset, model, representation, noise type, level) — never pooled | The noise **recorded**, not reconstructed (§5.2); out-of-fold scoring on scaffold groups; a zero-noise run of the same type to subtract. ✅ **All three now exist on both pipelines** (§3.1c). Built in `scripts/uncertainty_stats.py` |
 | **Q5** | Does noisy training data make a model less sure about new molecules? | Mean predicted uncertainty against noise level — a **population-level** statement, and it must be labelled as one | Per (model, representation, noise type), across levels | Uncertainty magnitudes on a fixed scale — needs the standardisation fix (§2.4), which currently makes them shrink as noise rises |
 | **Q6** | With noisy training data, does uncertainty still rank which predictions to trust? | Spearman correlation between predicted uncertainty and absolute error **against the clean label** | Per (model, representation, noise type, level) | Clean test labels retained alongside noisy ones. Free — every run already produces both |
@@ -5610,7 +5625,7 @@ Checked 2026-08-27, by reading the files rather than the notes:
 
 | # | Default, in force unless the author says otherwise | Owner |
 |---|---|---|
-| 1 | ✅ **SETTLED by the author 2026-08-27, per dataset: QM9 1.0, logD 1.0, Caco-2 0.2.** All three on the settled scale (fraction of the clean training label spread, §2.12); `0.25` is not on the ladder. See §13.11 for the one consequence on Caco-2 | chat J |
+| 1 | ✅ **SETTLED, per dataset: QM9 1.0, logD 1.0, Caco-2 0.75, hERG 1.0** (`82556a0`, superseding the Caco-2 0.2 of the day before). All four on the settled scale (fraction of the clean training label spread, §2.12) and all four on the shared ladder; `0.25` is not on it. The one place they live is `models/model_defaults.py` `REPORTING_LEVELS` | chat J |
 | 2 | **Inherit the four, and add `outlier_p10`** — the only one of the three depth-only conditions that is not flat by design, so the only one that can answer the question. +25% on the uncertainty runs | ✅ **CONFIRMED by the author 2026-08-27** and built, §2.8j. Not optional: there is no flag to run fewer than the five |
 | 3 | **One replicate, plus a permutation null.** Without the null there is no reference distribution and no error bar of any kind | ✅ built 2026-08-27, §2.8j. The runner has no replicate axis; the null is `permutation_null` in `scripts/uncertainty_stats.py` |
 | 4 | ✅ **RULED by the author 2026-08-27** — chosen from the screen's results, and documented as such. The open piece is the *rule* for choosing, which should be fixed before the screen is read (§13.1 item 4) | before the screen lands |
@@ -5761,9 +5776,18 @@ and it is the question a referee asks. Fixing the rule beforehand costs nothing 
 
 ### 13.11 ✅ SETTLED 2026-08-27 — the reporting levels, per dataset
 
-**QM9 1.0, logD 1.0, Caco-2 0.2.** The author's call. All three read on the settled scale — a
-fraction of that fold's clean training label spread (§2.12). `0.25` was also considered and is **not
+**QM9 1.0, logD 1.0, Caco-2 0.75, hERG 1.0.** The author's call. All four read on the settled
+scale — a fraction of that fold's clean training label spread (§2.12) — and all four are on the
+shared ladder, so each can be read straight off the grid. `0.25` was also considered and is **not
 on the ladder** (`NOISE_DESIGN.md` §6.4), so it cannot be reported.
+
+⚠️ **Caco-2 was 0.2 for one day.** It moved to **0.75** in `82556a0` on the rank-flip tables: 0.75
+gives the same two rank flips out of four as 1.0 with every model 0.04–0.11 higher, at 1.0 the
+quantile forest falls to 0.256, and **at 0.2 nothing moves at all**. hERG was set on the anchor
+rather than a rank table — label spread 0.9143, published assay error 0.60 of that, twice that is
+1.21, so 1.0 sits just under the design's own rule; re-check it when the re-run lands. The three
+places in this document that still said "Caco-2 0.2, hERG still to set" are corrected above; the
+authority is `REPORTING_LEVELS` and `NOISE_DESIGN.md` §6.4a, which already had it right.
 
 **Why they are not the same number.** The experimental labels already carry measurement error and
 QM9's do not, so one nominal level is not one amount of noise (`NOISE_DESIGN.md` §4d). The caption

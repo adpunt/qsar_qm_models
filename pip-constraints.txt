@@ -22,7 +22,12 @@
 # fails if the two disagree with what is actually installed.
 
 # --- the four whose wheels bundle an OpenMP runtime -----------------------
-torch==2.5.1
+# `==2.5.1` does NOT match a post-release under PEP 440, and conda-forge's
+# build of this version calls itself 2.5.1.post108. With the exact pin, pip
+# treats the conda torch as not satisfying the constraint and downloads the
+# PyPI wheel over the top -- which is the wheel-bundled OpenMP runtime this
+# whole file exists to keep out. `2.5.1.*` accepts the conda build.
+torch==2.5.1.*
 scikit-learn==1.6.1
 lightgbm==4.4.0
 xgboost==3.0.0

@@ -244,10 +244,15 @@ fi
 # task, and importing torch in an environment with two threading runtimes is
 # the hang this whole section is about.
 SETUP_SKIP_EXTRAS=0
+# Compare on the release only. conda-forge's torch 2.5.1 reports itself as
+# 2.5.1.post108 and a pip wheel as 2.5.1+cu121; both ARE the pinned 2.5.1, and
+# a comparison that says otherwise skips the extras on a correctly built
+# environment -- which it did on ARC on 2026-08-28.
+setup_release_of() { local v="${1%%+*}"; echo "${v%%.post*}"; }
 _installed_torch="$(python -c "import importlib.metadata as m; print(m.version('torch'))" 2>/dev/null)"
 _pinned_torch="$(grep -E '^torch==' "$CONSTRAINTS" 2>/dev/null | head -1 | cut -d'=' -f3)"
 if [ -n "$_installed_torch" ] && [ -n "$_pinned_torch" ] \
-   && [ "${_installed_torch%%+*}" != "$_pinned_torch" ]; then
+   && [ "$(setup_release_of "$_installed_torch")" != "$(setup_release_of "$_pinned_torch")" ]; then
     echo "NOTE: torch here is $_installed_torch, and the recipe pins $_pinned_torch."
     echo "  This environment is not the one env.yml describes -- most likely restored"
     echo "  from research_archive/. Skipping the extras so they cannot change it."
