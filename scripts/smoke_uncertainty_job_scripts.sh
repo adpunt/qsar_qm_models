@@ -46,7 +46,20 @@ bad()  { FAIL=$((FAIL+1)); echo "    FAIL  $1"; }
 # ---------------------------------------------------------------------------
 # the stubs
 # ---------------------------------------------------------------------------
-mkdir -p "$TMP/fake_qsar" "$TMP/env_test/bin" "$TMP/run"
+mkdir -p "$TMP/fake_qsar/scripts" "$TMP/env_test/bin" "$TMP/run"
+
+# The generated script runs the model-backend check before anything else, and
+# the stub repository had no copy of it -- so every task and every guard below
+# died on `can't open file .../scripts/check_environment.py` instead of doing
+# what it was written to test, and the two guards that print their own message
+# reported "exit 2 but no message about it". The real check needs the model's
+# backend installed and this harness deliberately has no backends, so it is
+# stubbed to pass; what it guards is covered by the preflight, on the machine
+# that will run the jobs.
+cat > "$TMP/fake_qsar/scripts/check_environment.py" <<'EOF'
+import sys
+sys.exit(0)
+EOF
 
 cat > "$TMP/fake_qsar/setup.sh" <<EOF
 # Stands in for the cluster's setup.sh: activate an environment called env_test
@@ -62,8 +75,8 @@ cat > "$TMP/env_test/bin/python" <<EOF
 # real, so the noiseInject check actually imports noiseInject. The job itself
 # is recorded, not run.
 #
-# SMOKE_FAST skips the real interpreter. It is set only for the sweep over all
-# 60 array indices, which is checking the index arithmetic and needs no imports
+# SMOKE_FAST skips the real interpreter. It is set only for the sweep over
+# every array index, which is checking the index arithmetic and needs no imports
 # -- importing noiseInject takes about 3 seconds, so a real one there would put
 # three minutes on a test that otherwise takes twenty seconds. The four
 # representative tasks above it, and every guard below, use the real one.

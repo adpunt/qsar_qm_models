@@ -3053,116 +3053,147 @@ def compute_icc_and_redundancy(auc_df, output_dir):
 # METHODS FIGURE: NOISE STRATEGY DISTRIBUTIONS
 # =============================================================================
 
+def _methods_figure_groups(n_samples, seed=42):
+    """Scaffold-like grouping for the two grouped conditions.
+
+    Those conditions corrupt whole scaffold families, so a panel drawn without a
+    grouping shows the wrong thing. The shape here is the shape measured on the
+    study's own three laboratory sets: about 2.3 molecules per group, roughly
+    62% of groups singletons, largest group 126. A grouping with uniform group
+    sizes would make `grouped_wider` look like plain Gaussian noise on a
+    randomly chosen fifth of the data, which is exactly what it is not.
+    """
+    rng = np.random.default_rng(seed)
+    SINGLETON_FRACTION, LARGEST = 0.62, 126
+    groups, gid = [], 0
+    while len(groups) < n_samples:
+        if rng.random() < SINGLETON_FRACTION:
+            size = 1
+        else:
+            size = min(int(rng.pareto(1.05)) + 2, LARGEST)
+        groups.extend([gid] * size)
+        gid += 1
+    return np.asarray(groups[:n_samples], dtype=np.int64)
+
+
 def create_methods_figure(output_dir):
     """
-    Methods Figure: Visualization of how each noise strategy transforms labels.
+    Methods Figure: what each settled noise condition does to a label distribution.
 
-    This figure belongs in the Methods section to help readers understand
-    what each noise injection strategy does before seeing results.
+    Drawn with the REAL injector. This function used to carry its own
+    reimplementation of six noise strategies, all six of them retired on
+    2026-08-26, and fell through to `np.zeros(n)` for every condition the study
+    actually runs -- so a Methods figure claiming to show the noise scheme would
+    have shown seven panels of no noise at all. It also plotted
+    `list(STRATEGY_ORDER)`, thirteen names including the retired ones, into a
+    hard-coded six-panel grid, and raised IndexError on the seventh before any
+    other figure or table in this script was reached.
+
+    Conditions come from noise_conditions.json, the file both injectors' tests
+    read; the panel count follows from it. The values come from noiseInject,
+    the injector the laboratory pipeline runs.
     """
-    from scipy import stats as sp_stats
+    try:
+        from noiseInject import NoiseInjectorRegression, CONDITIONS as NI_CONDITIONS
+    except Exception as exc:                                  # pragma: no cover
+        raise RuntimeError(
+            "the Methods noise figure is drawn with the real injector and "
+            f"noiseInject will not import here: {exc}. Drawing it from a local "
+            "reimplementation is what made this figure describe a noise scheme "
+            "the study had already replaced -- install noiseInject rather than "
+            "restating it."
+        ) from exc
 
-    np.random.seed(42)
+    conditions = [c for c in SETTLED_CONDITIONS if c in NI_CONDITIONS]
+    missing = [c for c in SETTLED_CONDITIONS if c not in NI_CONDITIONS]
+    if not conditions:
+        raise RuntimeError(
+            "noise_conditions.json named no condition the installed injector "
+            f"knows. Settled: {SETTLED_CONDITIONS}. Installed: "
+            f"{sorted(NI_CONDITIONS)}")
+    if missing:
+        print(f"  ! settled conditions the installed injector does not know, "
+              f"omitted from the Methods figure: {missing}")
 
-    # Generate synthetic data resembling a molecular property distribution
+    # Synthetic data resembling a molecular property distribution.
+    rng = np.random.default_rng(42)
     n_samples = 2000
     y_clean = np.concatenate([
-        np.random.normal(-0.5, 0.3, n_samples // 3),
-        np.random.normal(0.2, 0.4, n_samples // 3),
-        np.random.normal(0.8, 0.25, n_samples // 3 + n_samples % 3),
+        rng.normal(-0.5, 0.3, n_samples // 3),
+        rng.normal(0.2, 0.4, n_samples // 3),
+        rng.normal(0.8, 0.25, n_samples // 3 + n_samples % 3),
     ])
+    groups = _methods_figure_groups(len(y_clean))
 
-    def apply_noise(y, sigma, strategy):
-        """Apply noise strategy to labels."""
-        n = len(y)
+    # The settled scale: a level is a fraction of the clean label spread.
+    # Censoring is exempt -- its level is already the fraction of labels
+    # clipped, which is dimensionless -- and the runner treats it the same way
+    # (alternative_data_noise_robustness.py, the `_censoring` branch).
+    LEVEL = 0.5
+    CENSORED_FRACTION = 0.25
+    label_sd = float(np.std(y_clean))
 
-        if strategy == 'legacy':
-            noise = np.random.normal(0, sigma, n)
-        elif strategy == 'valprop':
-            noise = np.random.normal(0, 1, n) * (sigma + 0.1 * np.abs(y))
-        elif strategy == 'quantile':
-            quantiles = sp_stats.rankdata(y) / len(y)
-            multipliers = np.where((quantiles < 0.1) | (quantiles > 0.9), 2.0, 0.1)
-            noise = np.random.normal(0, sigma, n) * multipliers
-        elif strategy == 'threshold':
-            median = np.median(y)
-            multipliers = np.where(y > median, 2.0, 0.1)
-            noise = np.random.normal(0, sigma, n) * multipliers
-        elif strategy == 'outlier':
-            z_scores = np.abs(sp_stats.zscore(y))
-            multipliers = np.where(z_scores > 2.0, 3.0, 0.1)
-            noise = np.random.normal(0, sigma, n) * multipliers
-        elif strategy == 'hetero':
-            alpha, beta = 0.1, 0.05
-            variance = alpha * sigma**2 + beta * sigma**2 * np.abs(y)
-            noise = np.random.normal(0, np.sqrt(variance))
-        else:
-            noise = np.zeros(n)
+    def noisy(condition):
+        spec = NI_CONDITIONS[condition]
+        censoring = spec.get('strategy') == 'censoring'
+        dose = CENSORED_FRACTION if censoring else LEVEL * label_sd
+        inj = NoiseInjectorRegression.from_condition(condition, random_state=42,
+                                                     selection_state=1337)
+        return inj.inject(y_clean, dose, groups=groups, reference=y_clean)
 
-        return y + noise
+    drawn = {c: noisy(c) for c in conditions}
 
-    strategies = list(STRATEGY_ORDER)
-    sigma = 0.5  # Representative noise level
-
-    # Pre-compute one bin grid wide enough to contain every panel's noisy
-    # distribution. Without this, recomputing bins per panel from
-    # (y_clean ∪ y_noisy) shifts bin edges between panels — re-binning the
-    # SAME y_clean against shifted edges then produces visibly different
-    # "clean" outlines across panels even though the data is identical.
-    # Save/restore RNG state so each strategy gets a reproducible draw and
-    # the real plotting loop below sees the same RNG as before this fix.
-    rng_state = np.random.get_state()
-    all_y = [y_clean]
-    for strategy in strategies:
-        np.random.set_state(rng_state)
-        all_y.append(apply_noise(y_clean, sigma, strategy))
-    np.random.set_state(rng_state)
-    lo = min(arr.min() for arr in all_y)
-    hi = max(arr.max() for arr in all_y)
+    # One bin grid wide enough for every panel. Recomputing bins per panel from
+    # (y_clean union y_noisy) shifts the edges between panels, and re-binning
+    # the SAME y_clean against shifted edges draws visibly different "clean"
+    # outlines across panels from identical data.
+    lo = min([y_clean.min()] + [v.min() for v in drawn.values()])
+    hi = max([y_clean.max()] + [v.max() for v in drawn.values()])
     bins = np.linspace(lo, hi, 51)
 
-    # 3x2 grid (portrait page: 3 rows tall rather than 3 columns wide)
-    fig, axes = plt.subplots(3, 2, figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.95))
-    axes = axes.flatten()
+    # The grid follows the condition count. Hard-coding it is what crashed.
+    ncols = 2
+    nrows = int(np.ceil(len(conditions) / ncols))
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.32 * nrows))
+    axes = np.atleast_1d(axes).flatten()
 
-    panel_labels = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)']
-
-    for i, strategy in enumerate(strategies):
+    for i, condition in enumerate(conditions):
         ax = axes[i]
-        y_noisy = apply_noise(y_clean, sigma, strategy)
+        y_noisy = drawn[condition]
+        colour = STRATEGY_COLORS.get(condition, '#666666')
 
-        # Filled histograms: very transparent so overlap is visible
         ax.hist(y_clean, bins=bins, alpha=0.15, color=CLEAN_COLOR, density=True)
-        ax.hist(y_noisy, bins=bins, alpha=0.15, color=STRATEGY_COLORS[strategy], density=True)
-
-        # Step outlines on TOP of curves (slightly transparent so crossings visible)
+        ax.hist(y_noisy, bins=bins, alpha=0.15, color=colour, density=True)
         ax.hist(y_clean, bins=bins, density=True,
                 histtype='step', linewidth=2.0, color=CLEAN_COLOR, alpha=0.7)
         ax.hist(y_noisy, bins=bins, density=True,
-                histtype='step', linewidth=2.0, color=STRATEGY_COLORS[strategy], alpha=0.7)
+                histtype='step', linewidth=2.0, color=colour, alpha=0.7)
 
-        ax.set_title(STRATEGY_LABELS[strategy], fontweight='bold',
-                     color=STRATEGY_COLORS[strategy])
+        ax.set_title(STRATEGY_LABELS.get(condition, condition),
+                     fontweight='bold', color=colour)
         ax.set_yticks([])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_visible(False)
+        for side in ('top', 'right', 'left'):
+            ax.spines[side].set_visible(False)
 
-        # Add vertical headroom so the RMSE annotation clears the histogram bars.
+        # Vertical headroom so the RMSE annotation clears the bars.
         ax.set_ylim(top=ax.get_ylim()[1] * 1.30)
-        rmse = np.sqrt(np.mean((y_noisy - y_clean)**2))
+        rmse = float(np.sqrt(np.mean((y_noisy - y_clean) ** 2)))
         ax.text(0.97, 0.96, f'RMSE={rmse:.2f}', transform=ax.transAxes,
                 ha='right', va='top')
-
-        # Panel label (a), (b), ... in upper-left, outside the title.
-        ax.text(-0.10, 1.08, panel_labels[i], transform=ax.transAxes,
+        ax.text(-0.10, 1.08, f'{chr(ord("a") + i)})', transform=ax.transAxes,
                 fontweight='bold', ha='left', va='bottom')
 
-    plt.tight_layout()
+    for ax in axes[len(conditions):]:
+        ax.axis('off')
 
-    plt.savefig(output_dir / 'fig_methods_noise_strategies.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.tight_layout()
+    plt.savefig(output_dir / 'fig_methods_noise_strategies.png', dpi=300,
+                bbox_inches='tight', facecolor='white')
     plt.close()
-    print("✓ Saved fig_methods_noise_strategies.png")
+    print(f"✓ Saved fig_methods_noise_strategies.png "
+          f"({len(conditions)} conditions, level {LEVEL} of the label spread; "
+          f"censoring at {CENSORED_FRACTION:.0%} clipped)")
 
     # Detailed sigma progression version cut (was fig_methods_noise_strategies_detailed.png)
 

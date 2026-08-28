@@ -124,15 +124,6 @@ MODELS = {
     'QRF':            (1, 8,  '128G', 36, 'quantile spread; strongest error-ranker in existing results'),
     'NGBoost':        (1, 8,  '128G', 47, '500 estimators; slowest of the tree models by far'),
     'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)'),
-    # The only model measured that SEPARATES the two halves of its uncertainty.
-    # An ordinary process learns one noise level for the whole dataset and
-    # reports it for every molecule; this one predicts a level per molecule, so
-    # its data half tracks the true corruption at +0.62 while its model half
-    # sits at -0.18 against the same thing, for the same accuracy. Both forest
-    # halves sit at +0.84 and +0.81 -- one signal reported twice. Added
-    # 2026-08-28 on the author's instruction, to THIS run only: it answers an
-    # uncertainty question and does not need a place on the accuracy grid.
-    'GP-Hetero':      (1, 8,  '128G', 47, 'the same process with a network predicting each molecule\'s noise; the only model that separates the two halves'),
     'BNN-Full':       (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'VBLL-Full':      (2, 8,  '128G', 47, '100 stochastic forward passes'),
     'MLP-BNN-Full':   (2, 8,  '128G', 47, '100 stochastic forward passes'),
@@ -148,6 +139,17 @@ MODELS = {
     # the model is, so a null read off those columns is a property of the model
     # (RERUN_PLAN.md 5.5a point 5). These three can answer the question.
     # -----------------------------------------------------------------------
+    # The only model measured that SEPARATES the two halves of its uncertainty.
+    # An ordinary process learns one noise level for the whole dataset and
+    # reports it for every molecule; this one predicts a level per molecule, so
+    # its data half tracks the true corruption at +0.62 while its model half
+    # sits at -0.18 against the same thing, for the same accuracy. Both forest
+    # halves sit at +0.84 and +0.81 -- one signal reported twice.
+    #
+    # Listed ONCE. It was written twice, here and above the tier-2 block, and a
+    # duplicate key in a dict literal is not an error -- the second silently
+    # replaced the first, so the model count printed at generate time was one
+    # short of the entries an author could see in this file.
     'GP-Hetero':      (1, 8,  '128G', 47, 'the same ExactGP with a network predicting the '
                                           'observation noise per molecule; measured free on QM9 '
                                           '(RERUN_PLAN.md 5.5e)'),
@@ -515,7 +517,16 @@ def main():
         # GP is gated to PDV only unless told otherwise, and the kernel has to
         # be RBF for it to be valid on every representation (Tanimoto is only
         # defined on binary fingerprints).
-        gp_args = '--gp-reps "$rep" --gp-kernel rbf \\\n    ' if model == 'GP' else ''
+        #
+        # The gate is the FAMILY, not the exact name. GP-Hetero is registered
+        # inside the runner's `rname in gp_rep_set` block
+        # (alternative_data_noise_robustness.py:2570-2594), so it inherits the
+        # same PDV-only default. Testing `model == 'GP'` sent it out with no
+        # --gp-reps at all: five of its six representations would have produced
+        # nothing, silently, and it is the one model on this roster added
+        # specifically to separate the two halves of an uncertainty.
+        gp_args = ('--gp-reps "$rep" --gp-kernel rbf \\\n    '
+                   if model == 'GP' or model.startswith('GP-') else '')
         body = TEMPLATE.format(
             model=model, note=note, jobslug=slug, model_slug=slug,
             cpus=cpus, mem=mem, hours=hours, oof=args.oof_folds,

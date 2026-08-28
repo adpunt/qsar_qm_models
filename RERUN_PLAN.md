@@ -7071,18 +7071,35 @@ written as that, not as a single pooled claim.
 
 ### 13.14 The run design — what runs, and what each part costs
 
-**Read off `slurm_scripts_qm9_rerun/generate_scripts.py` on 2026-08-27, not derived here.** Rebuild
-this table by re-running the generator, never by editing the numbers.
+**Read off `slurm_scripts_qm9_rerun/generate_scripts.py` on 2026-08-28, not derived here.** Rebuild
+this table by re-running the generator, never by editing the numbers. The commands that produced
+every figure below are in the note after the table.
 
-QM9 has 13 models × 6 representations = **78 pairs**.
+QM9 has **17 models** and **98 model-and-representation pairs** — not every model runs on every
+representation, so the pair count is the generator's own sum, not 17 × 6.
 
-| Part | Noise types | Pairs | Replicates | Training runs |
+| Part | Noise types | Array scripts | Tasks | Training runs |
 |---|---|---|---|---|
-| **The screen** | Gaussian, grouped-wider, grouped-shifted | 78 | 1 | **1,680** |
-| **The main grid** | the same three | 78 | 9 more | **15,120** |
-| **Censoring** | censoring | **5** | 10 | **300** |
-| **The deep run** | the three above **plus** Student-t, outlier, Laplace | 12 (example: 4 models × 3 reps) | 10 | **5,040** |
-| **QM9 total** | | | | **22,140** |
+| **The screen** — 1 replicate | Gaussian, grouped-wider, grouped-shifted | 17 | 294 | **2,058** |
+| **The main grid** — 9 more replicates | the same three | 17 | 294 | **18,522** |
+| **QM9 total, generated** | | | **588** | **20,580** |
+
+Each task is up to 7 noise levels; the screen is replicate 0 of the main grid and is reused, which
+is why the main grid adds nine replicates rather than ten.
+
+**Censoring and the deep run are NOT in that total, and cannot be.** Both need `--models` and
+`--reps`, and which pairs go deep is decided from the screen's results (13.1 item 4) — the
+generator refuses to guess and exits with that message. Their cost, once the pairs are chosen:
+censoring is pairs × 7 levels × 10 replicates, the deep run is pairs × 7 conditions × 7 levels ×
+10 replicates.
+
+> These figures came from, in order:
+> `--stage 0`, `--stage 1 --max-hours 720`, each into its own `--out-dir`, plus the generator's
+> own `MODELS` for the model and pair counts. The previous version of this table said 13 models,
+> 78 pairs and 22,140 runs, against a generator that had grown to 17 models and 98 pairs — which
+> is exactly what the instruction at the top of this section exists to prevent. The QM9 runbook is
+> check-locked to the generator by `slurm_scripts_qm9_rerun/test_runbook_matches_generator.py`;
+> **this section is not, and has now drifted twice.**
 
 The screen is replicate 0 of the main grid and is reused, so the main grid adds nine more rather
 than ten. **Censoring is not in the screen, so it has no replicate 0 to inherit and runs all ten

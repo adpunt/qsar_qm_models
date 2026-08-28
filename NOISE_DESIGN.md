@@ -1259,6 +1259,50 @@ is uniform noise wearing a grouped name. So the grouped conditions cannot be com
 a real assignment — and the check now reports **PARTIAL and exits non-zero** rather than
 saying 15 of 17 conditions agree and calling it a pass.
 
+**4. ✅ SETTLED 2026-08-28 — for censoring, "affected" is the top *k* by rank, not a comparison
+against the limit.** The count used to be the fraction of labels the clip actually MOVED, i.e.
+`y > limit`. On a coarsely recorded assay a block of labels sits exactly ON the limit; clipping
+leaves them where they are, so they were never counted. LogD is recorded to one decimal place —
+72 distinct values across 5,039 molecules — and asking for 10% clipped moved 8.57%. The Rust
+`--self-test` compares the requested fraction against this number and failed on LogD, on the
+dataset rather than on the code.
+
+Widening it to `y >= limit` is **worse**, and this was measured rather than argued. It swings
+from excluding the whole tie block to including all of it, and the requested fraction lies inside
+the block:
+
+| asked | `y > limit` | `y >= limit` |
+|---|---|---|
+| 10% | 8.57% | 10.14% |
+| 20% | 19.88% | 22.15% |
+| 25% | 24.69% | 27.29% |
+| 40% | 39.39% | 42.83% |
+| 50% | 49.39% | 52.93% |
+
+At four of the five levels the wider rule misses by more. **No single value can separate the tie
+block, in either direction.**
+
+The rule, in both injectors. On the reference labels — the training set, whose distribution
+defines the assay limit — the censored set is the top *k* = round(fraction × n) by rank, ties
+broken by position. Exact at every level by construction. On any other split the limit is a fixed
+property of the assay, so the censored set is whatever sits at or past it; a held-out set does not
+get the requested fraction censored, and it should not.
+
+**This does not touch the limit.** The limit stays the interpolated quantile, which §5.1's own
+verification pinned ("reverting the censoring limit to nearest-rank makes it report the limit
+mismatch and the dose gap on three levels"). Measured on every dataset in the study, the *k*-th
+largest label IS that quantile to three decimals, so the same molecules are clipped to the same
+value as before and **not one label changes anywhere**. Only the count changes.
+
+Both injectors were wrong in the same way, which is why `scripts/crosscheck_injectors.py` passed
+throughout — **the first case in the project of a specification being wrong in both
+implementations rather than the two drifting apart.** Gates: the Rust `--self-test` now delivers
+exactly 10/20/25/30/40/50% on the real LogD labels, `noiseInject`'s
+`test_censoring_counts_the_requested_fraction_on_a_coarse_assay` fixes the rule on a coarse
+fixture and asserts no label moved differently, and
+`test_censoring_on_a_held_out_split_uses_the_training_limit` fixes the other half. 28 Rust noise
+gates, 64 `noiseInject` tests and all 342 cross-check checks pass after the change.
+
 ---
 
 ### 5.2 The noise types are genuinely distinguishable ✅

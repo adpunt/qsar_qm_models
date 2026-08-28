@@ -829,7 +829,59 @@ fn build_noise_plan(
         // For censoring the amount applied is the shift itself — there is no scale
         // parameter behind it.
         let noise_scale: Vec<f32> = epsilon.iter().map(|e| e.abs()).collect();
-        let affected = epsilon.iter().filter(|e| **e != 0.0).count() as f32 / n as f32;
+        // WHICH MOLECULES COUNT AS CENSORED. Changes no label, only the count.
+        //
+        // The count used to be "how many labels the clip actually MOVED", which
+        // is `y > cut`. On a coarsely recorded assay a block of labels sits
+        // exactly ON the limit; clipping leaves them where they are, so they
+        // were never counted. LogD is recorded to one decimal place — 72
+        // distinct values across 5,039 molecules — and asking for 10% clipped
+        // moved 8.57%. The self-test below compares the requested fraction
+        // against this number, so it failed on the dataset, not on the code.
+        //
+        // Widening it to `y >= cut` is WORSE, and this was measured rather than
+        // argued. It swings from excluding the whole tie block to including all
+        // of it, and the requested fraction lies inside the block:
+        //
+        //     asked   y > cut   y >= cut
+        //      10%      8.57%     10.14%
+        //      20%     19.88%     22.15%
+        //      25%     24.69%     27.29%
+        //      40%     39.39%     42.83%
+        //      50%     49.39%     52.93%
+        //
+        // so at four of the five levels the wider rule misses by more. No single
+        // value can separate the tie block, in either direction.
+        //
+        // THE RULE. On the reference labels — the training set, whose
+        // distribution defines the assay limit — the censored set is the top
+        // k = round(fraction * n) by rank, ties broken by position. That is
+        // exactly the requested fraction at every level, by construction, and it
+        // changes no label: the k-th largest value IS the quantile cut on every
+        // dataset measured, so the same molecules are clipped to the same value.
+        // On any other split the limit is a fixed property of the assay, so the
+        // censored set is whatever sits at or past it — a held-out set does not
+        // get the same fraction censored as training, and it should not.
+        //
+        // `noiseInject/core.py` carries the same rule in `_censored_set`; the two
+        // are compared by `scripts/crosscheck_injectors.py`. That gate had both
+        // sides wrong in the same way, which is what a two-implementation check
+        // cannot see.
+        let affected = if !ctx.apply || fraction <= 0.0 || n == 0 {
+            0.0
+        } else if labels == ctx.reference_labels {
+            let k = (fraction * n as f32).round() as usize;
+            k.min(n) as f32 / n as f32
+        } else {
+            labels
+                .iter()
+                .filter(|y| match side {
+                    CensorSide::Upper => **y >= cut,
+                    CensorSide::Lower => **y <= cut,
+                })
+                .count() as f32
+                / n as f32
+        };
         let realised = rms(&epsilon);
         let mean_eps = population_mean(&epsilon);
         params.insert("censor_limit".to_string(), serde_json::json!(cut));

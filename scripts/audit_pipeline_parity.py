@@ -61,8 +61,10 @@ slurm_scripts_uncertainty_rerun/preflight.sh as check 0.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -246,7 +248,32 @@ def audit_spec_parity(exp_path=None, skip_experimental=False):
 # 2. build every model with the installed libraries
 # ---------------------------------------------------------------------------
 
-def _effective_params(mod_name, cls_name, kwargs):
+def _constructor_params(est):
+    """Every constructor argument the estimator is actually holding.
+
+    sklearn's own get_params() is generated from the __init__ signature, so it
+    is complete. A library that hand-writes get_params() can silently omit its
+    own settings: ngboost 0.5.5 does exactly that (ngboost/ngboost.py:495), and
+    the ten keys it returns leave out `tol`, `validation_fraction`,
+    `verbose_eval` and `early_stopping_rounds` -- four settings its fit() reads.
+    An audit that trusted get_params() would report NGBoost as fully checked
+    while blind to the stage-selection settings the two pipelines disagree
+    about. Recover anything the signature names and the instance is holding.
+    """
+    params = dict(est.get_params()) if hasattr(est, 'get_params') else {}
+    try:
+        names = inspect.signature(type(est).__init__).parameters
+    except (TypeError, ValueError):
+        return params
+    for name in names:
+        if name in ('self', 'args', 'kwargs') or name in params:
+            continue
+        if hasattr(est, name):
+            params[name] = getattr(est, name)
+    return params
+
+
+def _effective_params(mod_name, cls_name, kwargs, fit_time=None):
     try:
         mod = importlib.import_module(mod_name)
     except Exception as exc:
@@ -256,10 +283,30 @@ def _effective_params(mod_name, cls_name, kwargs):
         return None, f'{cls_name} not found in {mod_name}'
     try:
         est = cls(**kwargs)
-        params = est.get_params() if hasattr(est, 'get_params') else dict(kwargs)
+        params = _constructor_params(est) or dict(kwargs)
     except Exception as exc:
         return None, f'{type(exc).__name__}: {exc}'
-    return {k: _jsonable(v) for k, v in params.items() if k not in BENIGN}, None
+    out = {k: _jsonable(v) for k, v in params.items() if k not in BENIGN}
+    # A nested estimator collapses to '<DecisionTreeRegressor>' under _jsonable,
+    # which would hide exactly the drift the spec pins it against: ngboost's
+    # get_params() is NOT sklearn-deep, so `Base__max_depth` is not in `params`
+    # (measured on ngboost 0.5.5 -- the keys are Base, Dist, Score and the seven
+    # scalars, nothing prefixed). Expand one level by hand so a library upgrade
+    # moving the base learner's depth still shows up as DRIFTED.
+    for name, value in list(params.items()):
+        if name in BENIGN or not hasattr(value, 'get_params'):
+            continue
+        for sub, sub_value in value.get_params().items():
+            if sub in BENIGN:
+                continue
+            out[f'{name}__{sub}'] = _jsonable(sub_value)
+    # Settings the spec pins that are applied at fit()/predict() time rather
+    # than passed to the constructor. They are not in get_params() and never
+    # will be, so record them here or the spec can move without the audit
+    # noticing -- see _build_kwargs for which ones and why.
+    for name, value in (fit_time or {}).items():
+        out[f'fit__{name}'] = _jsonable(value)
+    return out, None
 
 
 def _jsonable(v):
@@ -275,14 +322,40 @@ def _jsonable(v):
 
 
 def _build_kwargs(spec_key, canonical):
+    """Return (constructor kwargs, fit-time settings) for one spec entry."""
     kwargs = dict(canonical.SKLEARN_DEFAULTS[spec_key])
+    fit_time = {}
     if spec_key == 'ngboost':
         # Names, not classes, in the spec. Resolve them the way both pipelines do.
         from ngboost.distns import Normal
         from ngboost.scores import MLE
+        from sklearn.tree import DecisionTreeRegressor
         kwargs['Dist'] = {'Normal': Normal}[kwargs.pop('dist')]
         kwargs['Score'] = {'MLE': MLE}[kwargs.pop('score')]
-    return kwargs
+        # The base learner gets the same treatment as Dist and Score: the spec
+        # names it in PARTS because it is a constructed object rather than a
+        # literal, and the caller builds it. Both pipelines do exactly this --
+        # models/models.py train_ngboost_model and KIRBy's _ngboost_params --
+        # so handing `base_max_depth` straight to NGBRegressor, as this function
+        # used to, raised TypeError and reported that every NGBoost job would
+        # die on contact. They would not: no pipeline builds it that way.
+        kwargs['Base'] = DecisionTreeRegressor(
+            max_depth=kwargs.pop('base_max_depth'),
+            criterion=kwargs.pop('base_criterion'),
+            random_state=42)
+        # Stage selection is a fit()/predict() concern, not a constructor
+        # argument: `early_stopping_rounds` goes to fit and `use_best_iteration`
+        # decides whether predict is capped at the validation optimum. Both
+        # pipelines pop them here for the same reason. They stay in the spec so
+        # the difference between the two pipelines stays visible -- QM9 applies
+        # them, the laboratory pipeline does not (RERUN_PLAN.md 5.7k). Carry
+        # them out as fit-time settings rather than dropping them: they are the
+        # two the pipelines disagree about, so they are the last two the audit
+        # should stop watching.
+        for name in ('early_stopping_rounds', 'use_best_iteration'):
+            if name in kwargs:
+                fit_time[name] = kwargs.pop(name)
+    return kwargs, fit_time
 
 
 def audit_effective_params(write_baseline=False):
@@ -304,11 +377,11 @@ def audit_effective_params(write_baseline=False):
     problems, current = 0, {}
     for spec_key, mod_name, cls_name, _extra in BUILDERS:
         try:
-            kwargs = _build_kwargs(spec_key, canonical)
+            kwargs, fit_time = _build_kwargs(spec_key, canonical)
         except Exception as exc:
             print(f'\n{spec_key}\n  SKIPPED — {type(exc).__name__}: {exc}')
             continue
-        params, err = _effective_params(mod_name, cls_name, kwargs)
+        params, err = _effective_params(mod_name, cls_name, kwargs, fit_time)
         print(f'\n{spec_key}  ({mod_name}.{cls_name})')
         if params is None:
             print(f'  CANNOT BUILD — {err}')
@@ -318,6 +391,7 @@ def audit_effective_params(write_baseline=False):
             continue
         current[spec_key] = params
         pinned = {k for k in kwargs if k not in BENIGN}
+        pinned |= {f'fit__{k}' for k in fit_time}
         print(f'  pinned by the spec: {len(pinned)}   '
               f'effective parameters: {len(params)}')
 
@@ -576,6 +650,27 @@ def self_test():
     print('SELF-TEST — does --strict fail when the spec is perturbed?')
     print('=' * 78)
     spec_file = REPO / 'models' / 'model_defaults.py'
+
+    # THIS FUNCTION EDITS A TRACKED SOURCE FILE IN PLACE, so only one copy of it
+    # may run at a time. Two interleaved runs corrupt the spec and neither
+    # notices: A reads the real file and writes the perturbed one; B then reads
+    # the PERTURBED file as its "original", perturbs and restores it to that;
+    # A's restore may or may not win. It happened on 2026-08-28 and left the
+    # quantile forest on 100 trees where the spec says 300 -- a silent change to
+    # every quantile-forest result, in the file whose whole purpose is to stop
+    # silent changes. The `finally` restore below cannot help: both runs restore
+    # faithfully, to different text.
+    lock_path = spec_file.with_suffix('.py.selftest.lock')
+    lock_handle = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_handle.close()
+        print(f'  REFUSING TO RUN — another --self-test holds {lock_path.name}.')
+        print('  This test rewrites models/model_defaults.py, so two at once')
+        print('  corrupt it. Wait for the other one and run again.')
+        return 1
+
     original = spec_file.read_text()
     failures = []
 
@@ -612,6 +707,8 @@ def self_test():
         spec_file.write_text(original)
         assert spec_file.read_text() == original, 'FAILED TO RESTORE THE SPEC'
         print('  spec restored')
+        fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        lock_handle.close()
 
     print()
     if failures:

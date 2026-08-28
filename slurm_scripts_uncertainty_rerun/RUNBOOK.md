@@ -18,9 +18,9 @@
   have a pattern to learn. Where every molecule gets the same amount the
   question-B correlation is **undefined, not zero**.
 
-**The five conditions, and which question each serves.** The run takes the four
-the main grid runs and adds one — `outlier_p10` — which is the recorded default,
-`RERUN_PLAN.md` §13.1 item 2. Under a condition that gives every molecule the
+**The seven conditions, and which question each serves.** The run takes every
+settled condition in `noise_conditions.json` — the author's decision of
+2026-08-28. It used to be five. Under a condition that gives every molecule the
 same amount of noise, "which molecules were corrupted" is undefined, not zero, so
 only the patterned ones can answer question B at all.
 
@@ -28,16 +28,25 @@ only the patterned ones can answer question B at all.
 |---|---|---|
 | `gaussian` | no — every molecule gets the same amount | question A, and the leakage check |
 | `grouped_shifted` | no — whole scaffold families pushed one way, by a constant | question A |
+| `student_t_nu5` | no — same amount, heavier tails | question A, question C |
+| `laplace` | no — same amount, heavier tails | question A, question C |
 | `grouped_wider` | **yes**, keyed to the scaffold | question B |
 | `censoring` | **yes**, keyed to the label | question B |
 | `outlier_p10` | **yes** — a tenth of the molecules take nearly all of it | question B |
 
-`outlier_p10` is depth-only on the main grid and is added here because it is the
-only one of the three depth-only conditions that is not flat by design, and the
-only concentrated-noise condition left in the study — which is the case the
-question was raised about. It costs 25% of the run. `--include-deep-conditions` adds Student-t
-and Laplace as well, both flat, so they buy shape coverage for question A and
-nothing for question B.
+There is a third question, and it is why all seven run rather than the three that
+answer B:
+
+> **(C) Does uncertainty track some *kinds* of noise better than others?**
+
+The conditions were chosen for the main grid on accuracy — which of them moves
+R². A kind of noise can barely move accuracy and still be the one a model is best,
+or worst, at noticing. That is a different property and nothing has measured it.
+All seven answer A and C; three answer B.
+
+`--include-deep-conditions` is accepted and ignored: every settled condition is
+the default here now, so the flag no longer adds anything. It is kept so a command
+written before 2026-08-28 still runs and still means what it said.
 
 **Both grouped conditions are keyed to something a scaffold split holds out
 whole.** On held-out molecules the grouped pattern is flat, truthfully, and the
@@ -81,9 +90,9 @@ Their role is in question A and as the leakage check. Preflight section 4b print
 the per-(dataset, condition) count of distinct noise scales, so a condition that
 is flat where it should not be is visible before the queue is spent.
 
-**Scope:** 3 datasets × 7 models × 4 representations × 5 conditions × 7 noise
-levels × 5 scaffold folds. 7 array scripts, 60 tasks each, **420 tasks**,
-**88,200 model fits**.
+**Scope:** 3 datasets × 10 models × 4 representations × 7 conditions × 7 noise
+levels × 5 scaffold folds. 10 array scripts, 84 tasks each, **840 tasks**,
+**176,400 model fits**.
 
 The levels are **not** passed on the command line. The runner sweeps one shared
 grid in fractions of each dataset's own clean training label spread — 0, 0.2,
@@ -164,7 +173,7 @@ a second**, before python was ever reached. And a dangling line-continuation tha
   re-flushing a fold neither duplicates nor overwrites.
 - The generated job scripts are **executed** with a stubbed python, on every
   run of `scripts/smoke_uncertainty_job_scripts.sh`: hyphenated representation
-  names survive quoting, all 60 indices write 60 distinct results directories,
+  names survive quoting, all 84 indices write 84 distinct results directories,
   and six guards fire (missing partition, index out of range, unset
   `CONDA_PREFIX`, the wrong environment, a KIRBy checkout with no
   `--conditions`, and no KIRBy checkout at all).
@@ -289,7 +298,7 @@ python generate_scripts.py            # add --kirby-dir if stat-ecr is the live 
 
 On a laptop, prove they work before they are copied anywhere. The first runs each generated
 command line through the runner's own argument parser; the second **executes** a generated script
-60 times against a stubbed environment, checking that the happy path reaches the runner and that
+84 times against a stubbed environment, checking that the happy path reaches the runner and that
 each of six guards stops the job it exists to stop. About a minute for both.
 
 ```bash
@@ -354,16 +363,17 @@ running and confirm they work before committing the rest of the queue.
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
 
-sbatch --account=$ACCT --partition=$PART --array=0-59%6 unc_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-59%6 unc_ngboost.sh
-sbatch --account=$ACCT --partition=$PART --array=0-59%6 unc_gp.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_ngboost.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_gp.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_gp_hetero.sh
 ```
 
-> `0-59` is 3 datasets × 4 representations × 5 conditions. Each script's own header prints the
+> `0-83` is 3 datasets × 4 representations × 7 conditions. Each script's own header prints the
 > range it was generated for — use that, not this line, if you regenerated with a different
 > condition or representation set.
 
-`%6` caps each array at 6 concurrent tasks — 18 running at once across tier 1.
+`%6` caps each array at 6 concurrent tasks — 24 running at once across tier 1.
 Raise it if `where_to_submit.sh` §3 shows idle capacity, lower it if §5 shows a
 backlog.
 
@@ -378,10 +388,12 @@ tail -40 logs/unc_ngboost_*_0.out
 ## 6. Submit tier 2
 
 ```bash
-sbatch --account=$ACCT --partition=$PART --array=0-59%4 unc_bnn_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-59%4 unc_vbll_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-59%4 unc_mlp_bnn_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-59%4 unc_mlp_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_bnn_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_bnn_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_vbll_full_hetero.sh
+sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_vbll_full_hetero.sh
 ```
 
 ## 7. Monitor
@@ -408,7 +420,7 @@ python merge_results.py --root /data/stat-cadd/scat9264/KIRBy/tests/results/unce
     --kirby-dir /data/stat-cadd/scat9264/KIRBy
 ```
 
-**Read `coverage.csv` first** — it lists all 420 expected cells and marks each
+**Read `coverage.csv` first** — it lists all 840 expected cells and marks each
 `OK` / `MISSING` / `NO_OOF` / `OOF_ALL_NAN` / `TRUNCATED_OOF` / `PARTIAL_FOLDS` /
 `PARTIAL_LEVELS`. Do not analyse anything until you know what is missing.
 
@@ -503,7 +515,7 @@ training rows.
 ## Cost and the one thing to decide
 
 Each task is 7 noise levels × 5 scaffold folds × (1 + 5) fits = **210 model
-fits**, against 35 without cross-fitting. 420 tasks, **88,200 fits**.
+fits**, against 35 without cross-fitting. 840 tasks, **176,400 fits**.
 
 ⚠️ **The `--time` requests are sized for a grid that no longer exists.** 36 h for
 QRF and 47 h for the rest were set when a task was 11 levels, i.e. 330 fits; it is
