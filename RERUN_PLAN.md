@@ -2010,6 +2010,53 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.20 🔴 FOUND AND FIXED 2026-08-28 — the repository shipped a defect the fix-guard harness planted
+
+Two findings, and they are the same shape: **something that was true on this laptop was not true
+of what the cluster pulls.** The cluster's only route in is
+`git fetch && git checkout additional_reps && git pull --ff-only` (the runbook, §1b), so HEAD is
+exactly what runs and an untracked file does not exist there at all.
+
+**One. `models/models.py` was committed carrying a mutation, and stayed in HEAD.**
+`scripts/check_fixes_fail_when_removed.py` proves each guard fails when its fix is removed by
+BREAKING the real source file, running the guard, and restoring it in a `finally`. A `finally`
+does not run when the process is killed — a timeout, a Ctrl-C, a session ending — and that has
+happened at least three times this week. On 2026-08-28 commit `a22d45a` committed the file in
+that state:
+
+```
+def bnn_elbo_criterion(base_criterion, model, n_train):
+    return base_criterion  # BROKEN ON PURPOSE
+```
+
+It survived the commit above it. **BNN-alpha and BNN-beta — two of the fourteen models, on all
+six representations — would have trained with plain MSE and no KL term**, which is the defect
+`e659a1c` says it closed. Nothing could have caught it: the harness's own guard passes on that
+file, because the harness restores the correct version before it reports, and its backup
+directory recovers a killed run only when the harness is next run. Fixed in `f095982`.
+
+**The guard is `scripts/test_no_harness_mutation_committed.py`** (`fbc0b6f`). It reads the
+payloads out of the harness's own `CASES` at run time — so a new case is covered the day it is
+added — and looks for each one in the working tree AND in HEAD, asking each file's own
+repository, since the harness mutates KIRBy and NoiseInject too. 22 payloads checked, 2 too
+generic to search for and reported as unchecked rather than passed. It refuses to run while the
+harness is running, because the mutation it would find then is the one the harness planted on
+purpose. Verified against the real event: the payload is in `a22d45a:models/models.py` and not
+in HEAD. **Put it in the preflight (§8).**
+
+**Two. Eleven guard scripts were never added to git.** Nine of them are checks
+`check_fixes_fail_when_removed.py` runs — `test_bnn_kl_term`, `test_ecfp4_identity`,
+`test_figure_conditions`, `test_no_shadowed_definitions`, `test_noise_arms`,
+`test_qm9_split_alignment`, `test_result_row_condition`, `test_spec_is_live`,
+`test_uncertainty_writer` — plus `check_bib_and_docs.py`. Nothing ignored them; they were simply
+never `git add`ed, and `git status` shows two hundred untracked files, so they did not stand out.
+On the cluster they are missing files, so the fix each one guards is unguarded exactly where the
+results are produced. Committed in `fbc0b6f`.
+
+**What both say about the run.** The local tree passing every gate is not the claim that matters.
+The claim that matters is that **HEAD** passes them, on the branch the cluster pulls, after it has
+been pushed. Two of the three had already been violated at once.
+
 ### 2.18 ✅ FIXED 2026-08-28 — `rmse` and `mae` are in the label's own units on both sides
 
 Audit entry 78. Every QM9 label is standardised in the injector
@@ -4233,6 +4280,28 @@ Its dose-matching check was verified to fail, on 8 of 10 conditions, when the so
 Gates 6 and 9 need a training run and are chat H's. Gates 8, 10 and 11 are chat D's. Each of chat
 A's gates was checked by removing the fix and confirming the gate fails.
 
+**Two gates added 2026-08-28, and between them they cost about a second.** Both check something
+no other gate looks at — what is in HEAD, and whether the operator's own instructions match the
+generator:
+
+```
+# nothing in the tree or in HEAD is carrying a mutation the fix-guard harness planted (2.20)
+python scripts/test_no_harness_mutation_committed.py
+
+# every count and every --array= range in the QM9 runbook comes from the generator (13.12 A7)
+python slurm_scripts_qm9_rerun/test_runbook_matches_generator.py
+```
+
+The first refuses to run while `check_fixes_fail_when_removed.py` is running, and says so, because
+what it would find then is the mutation the harness planted on purpose. Both were verified red:
+the mutation payload is present in `a22d45a:models/models.py`, and putting one `--array=0-23` back
+in the runbook fails with that line number.
+
+**And one thing the gates cannot check, which belongs in the preflight as a step rather than a
+script:** the branch has to be **pushed**. The cluster's only route in is
+`git pull --ff-only origin additional_reps`, so a gate that passes on an unpushed commit has
+proved nothing about what runs.
+
 **One more gate, and it costs a second — chat G, 2026-08-27.** It guards the settled condition set:
 
 ```
@@ -4818,42 +4887,41 @@ Two contradictions between those documents are resolved here rather than carried
 
 ---
 
-### 11.1 🔴 OPEN — seventy-nine possible faults nobody has checked
+### 11.1 ✅ CLOSED 2026-08-27 — every one of the 151 carries a verdict, and 14 are still open
 
-The full audit of both pipelines on 2026-08-26 produced **151 candidate faults** across nine
-areas — model settings, preprocessing, feature handling, noise, uncertainty, and what reaches
-disk. Each non-cosmetic one was to be handed to a separate reviewer told to disprove it.
+**This section said 79 candidates were unchecked and named the QM9 graph-model scrambling as
+"the first thing to check". Both were out of date, and re-read on 2026-08-28 from the archive
+itself.** `research_archive/audit_2026_08_26/README.md` records the close-out: `unverified.json`
+is empty, and all 111 that had never been examined are in `verdicts.json` with a verdict and the
+evidence behind it. The scrambling candidate is `real-fixed` — `split_qm9` returns positions in
+the shuffled dataset and `scripts/test_qm9_split_alignment.py` fails 160/160 when the fix is
+removed. Leaving the old text in place sends the next chat looking for a fault that has a guard.
 
-**The verification was capped at 40. It was my cap, and it means 111 candidates were never
-examined at all — 79 of them non-cosmetic, and 8 of those rated at the HIGHEST severity.** They are
-unchecked, not dismissed. All 151 are saved in `research_archive/audit_2026_08_26/`:
-`unverified.json` (the 111), `confirmed_35.json`, `refuted_5.json`, `synthesis.md`.
+Counted from `verdicts.json` on 2026-08-28: 79 real-fixed, 14 duplicate, **10 real-open**, **4
+partly-fixed**, 2 refuted, 2 not-a-fault.
 
-**One of the eight unchecked top-severity candidates is another scrambling fault**, of the same
-class as §2.10: the QM9 graph models are said to index the unshuffled dataset with indices computed
-on the shuffled one, which would mean every graph model has been trained on molecules that do not
-match their labels. That is unverified and it is the first thing to check.
+**The fourteen that are still open, and which of them touch the re-run.** Four are cosmetic or
+latent behind a representation that is refused by name, and are listed here only so nobody
+re-derives them: the `randomized_smiles` one-hot vocabulary, the two latent record-misalignment
+routes in the Rust writer (one of which was closed anyway on 2026-08-28, `e6ce429`),
+`conformal_hetero` writing to a schema no reader looks for, and the discarded Optuna values,
+which are on the tuning path only.
 
-Caveat on the count: candidates were matched by title, and a few titles differ only in wording
-between a dimension report and the cross-pipeline pass, so a handful of the 111 may already be
-covered by the 40 that were checked. Two are known duplicates of faults already fixed (the
-network-setting one, and the early-stopping-label one). Of the 40 that were checked, 35 survived and
-5 were disproved — but that survival rate should be treated with suspicion: every reviewer returned
-"certain", with no gradation, and the surviving list contains obvious duplicates (three entries for
-the same fingerprint fault, two for the same graph-model unpacking error). The genuine count is
-smaller than 35 and the genuine total is unknown.
-
-Three of the confirmed ones were re-checked by hand against the source and acted on: the scrambled
-fingerprint (§2.10), the neural-network setting that matched no branch, and the feature-scaling
-divergence (§3.4.3a). **The rest are unactioned.**
+| What | Bites the re-run? |
+|---|---|
+| **`--calibration-size` is accepted, passed down and never used** — both conformal models calibrate on the whole validation split (`models/models.py:3631`, `:3822`) | Only under `--include-excluded`; the conformal wrappers are out of the default roster. Honour the flag or refuse it by name |
+| **Two decomposition helpers broadcast one aleatoric value to every molecule** (`scripts/utils.py:164`, `:222`) | Correct for a homoscedastic likelihood — a Gaussian process has one noise term by construction. The defect is in the reading: no per-molecule statistic may be computed from that column. Chat I and chat J |
+| **`sigma` holds three different physical quantities across the two writers**, and `auc_norm` normalises each by its own range | The mechanical half is fixed — both sides write `level_units`, and the combined figure names the mismatch instead of pooling. What the paper does about it is open. Chat J |
+| **Coverage and the uncertainty-error correlation are pooled across every noise level**, on both sides | Reporting only. Computing them per level changes the shape of table 4, which is the author's call. Chat J |
+| **`auc_norm` is averaged across every condition and representation** for the headline cross-dataset figures, and those averages are what justify `ANOVA_MODELS_EXCLUDE` | Reporting only, and it is failure mode 3 in §0.6. Chat J |
+| **"Replicate" is not the same statistic on the two sides** — an independently reseeded resample-and-split on QM9, one fixed CV fold on the experimental data | The dedup half is fixed; the naming half stands and needs a Methods sentence. Same subject as §3.3a |
+| **`model_defaults.py` values that `models.py` restates as literals** — batch size 32, the Adam rate outside `train_gnn`, the 100 MC passes, the flexible-DNN and conformal-DNN widths, the GNN settings | **Checked 2026-08-28: every live one matches the spec numerically**, so nothing trained today differs. It is a maintenance hazard, not a current divergence: change the spec and those do not move, while `spec_version` on every row asserts they did. The two that do not match are on models outside the roster |
+| **`chemberta` was two different pretrained encoders** | ✅ **Closed in code.** Both pipelines load `DeepChem/ChemBERTa-77M-MTR` at 384 wide (`process_and_train.py:145`), and `chemberta_buf` in `rust/src/main.rs:86` is 1,536 bytes to match. Anything cached before 2026-08-27 decodes at the wrong offset — see the runbook's cache step |
 
 One artefact to know about when reading that audit's output: it ran against a tree that was being
 changed underneath it, so at least one finding was marked "disproved" only because the fix had
 landed while the reviewer was reading. The feature-scaling fault is real despite being marked
 disproved.
-
-To resume it, re-run the workflow with a higher cap. The candidate list and every reviewer verdict
-are in the run's own journal file, so nothing has to be regenerated.
 
 ## 12. What is deliberately not in scope
 
@@ -5462,9 +5530,9 @@ that owns it in its first cell.
 | ~~A2~~ | ~~code~~ | ✅ **FIXED IN THE FILE, NOT IN THE DATA** — that script hardcoded `REPORTING_LEVEL = 0.5`, the value this document records as withdrawn, and its level list `[0.5, 1.5]` never measured 1.0 at all. **So every "at the reporting level" figure in §13.9 and in `noise_conditions.json` was computed at 0.5.** Now `1.0` and `[0.5, 1.0, 1.5]` | 🔴 **The CSV on disk still predates this. Re-run the screen and restate those rationales at the level actually measured** |
 | ~~A3~~ | ~~code~~ | ✅ **FIXED** — censoring silently ran **270** runs, not the decided 300: it inherited the main grid's `replicates=9, start=1`, which only makes sense because the screen supplies replicate 0 — and censoring is not in the screen | Defaults to `10, start=0` for a pair-subset condition |
 | ~~A4~~ | ~~code~~ | ✅ **FIXED** — generating censoring into the generator's own directory **overwrote the main-grid scripts** for the same models. Exit 0, no warning, files untracked so git could not restore them | Refused; pass `--out-dir` |
-| **A5** → **chat D** | code | 🔴 **Sort & Slice silently produces an all-zero feature block** where every other featuriser now raises. `scripts/process_and_train.py`: the enumerator returns `{}` for an unparseable molecule (`:1290`), the sum over an empty list is scalar 0.0 (`:1324`), and `write_to_mmap` turns the resulting shape mismatch into `np.zeros(SNS_DIM)` and writes it as a legitimate block (`:651-659`). **The full-width all-zero case passes the shape check entirely.** The unparseable path is reachable — `:1026-1027` reparses and passes `None` straight in. This is the same defect as Avalon's, in the one featuriser that was not checked | Raise, as ChemBERTa, MHG-GNN and now Avalon do, and add a case to `scripts/test_avalon_failure.py` |
+| ~~**A5**~~ | code | ✅ **FIXED 2026-08-28, both routes.** `sub_id_enumerator` raises for an unparseable molecule, and — the half `mol is None` does not reach — `ecfp_featuriser` raises for a molecule with no enumerable substructures, which is what RDKit gives for `''`: a VALID Mol with no atoms, the same case Avalon's fix calls out by name. `write_to_mmap` refuses the shape mismatch instead of zero-filling it. Guarded by three new cases in `scripts/test_avalon_failure.py`. Note what is NOT a fault: a molecule whose substructures all fall outside the top 1,024 gives a full-width vector of zeros, and that is the method as designed. Original report: 🔴 **Sort & Slice silently produces an all-zero feature block** where every other featuriser now raises. `scripts/process_and_train.py`: the enumerator returns `{}` for an unparseable molecule (`:1290`), the sum over an empty list is scalar 0.0 (`:1324`), and `write_to_mmap` turns the resulting shape mismatch into `np.zeros(SNS_DIM)` and writes it as a legitimate block (`:651-659`). **The full-width all-zero case passes the shape check entirely.** The unparseable path is reachable — `:1026-1027` reparses and passes `None` straight in. This is the same defect as Avalon's, in the one featuriser that was not checked | Raise, as ChemBERTa, MHG-GNN and now Avalon do, and add a case to `scripts/test_avalon_failure.py` |
 | **A6** → **chat D** | code | 🔴 **`scripts/check_fixes_fail_when_removed.py` exits 1** — four of its twenty-one mutation anchors no longer match their target files, so four fix-guards are never exercised. One is a single trailing space in the anchor. `README.md:198` claims this script proves every check fails when its fix is removed; that claim is currently false | Re-derive the four anchors and run it to green |
-| **A7** → **chat H** | doc | 🔴 **`slurm_scripts_qm9_rerun/RUNBOOK.md` describes the pre-decision run** — four conditions, 320 tasks, 22,400 runs, `--array=0-23`. The generator emits three conditions, 240 tasks, `--array=0-17`. Following it mis-submits every array: six of twenty-four tasks per model exit 2 on the generator's own out-of-range guard. **And `grep -i censor` returns one hit, so there is no instruction for running censoring at all.** This is the file an operator reads before spending cluster time | Regenerate its grid table and every `sbatch` line from the generator's output, and add the censoring command with its `--out-dir` |
+| ~~**A7**~~ | doc | ✅ **FIXED 2026-08-28 (`ea32396`), and the class of defect with it.** Confirmed live first by running the generator: it emits 3 conditions and 240 tasks against the runbook's 4 and 320, and `qm9_s0_gauche.sh` was `--array=0-7` against 6 tasks. Every count now comes from the generator's own printed summary, and `slurm_scripts_qm9_rerun/test_runbook_matches_generator.py` re-reads it and checks every `--array=` against the task count of the script that line names — verified red by putting one `0-23` back. Two sections added that were nowhere an operator would find them: **5b** for censoring (why it is not in the array, that the five pairs come out of the screen, that the generator refuses full breadth and refuses its own directory, and that `copy_zero_rows.py` supplies its clean row from Gaussian) and **2b** for the three caches. The cost lever ran `--bootstrapping 5`, a flag the generator does not have. Original report: 🔴 **`slurm_scripts_qm9_rerun/RUNBOOK.md` describes the pre-decision run** — four conditions, 320 tasks, 22,400 runs, `--array=0-23`. The generator emits three conditions, 240 tasks, `--array=0-17`. Following it mis-submits every array: six of twenty-four tasks per model exit 2 on the generator's own out-of-range guard. **And `grep -i censor` returns one hit, so there is no instruction for running censoring at all.** This is the file an operator reads before spending cluster time | Regenerate its grid table and every `sbatch` line from the generator's output, and add the censoring command with its `--out-dir` |
 
 #### For chat D
 
@@ -7223,6 +7291,31 @@ should not be submitted before chat N has chosen the two lists.
 
 **Does:** regenerates one deduplicated set of job scripts from the settled design; wires every gate
 in §8 into a preflight that must pass; clears the caches; launches one task, then the grid.
+
+#### ✅ Swept 2026-08-28 — what was actually still wrong in the code, and what is left
+
+Every gate run locally on this date, on the tree as it stood: `cargo test --release` (28 noise
+gates and 6 writer guards), `scripts/crosscheck_injectors.py` (342 checks on all 133,885 real QM9
+labels), `scripts/test_noise_conditions.py`, and the job-script tests for QM9, the uncertainty runs
+and the validation runs. All green. Four things were not, and all four are fixed above: the
+committed harness mutation and the eleven untracked guards (§2.20), the QM9 generator's own test
+(it predated the ngboost shortlist guard), and A7. A5 was closed the same day.
+
+**What is left before a launch, and none of it is code:**
+
+| | Whose | Why it cannot wait until after the grid |
+|---|---|---|
+| **`min_samples_leaf = 1` gives both forests exactly zero aleatoric term** (§5.5c) | the author | It is a shared-spec value, so changing it changes *every* forest number in the paper, not only the uncertainty ones. Deciding after the grid means re-running the forests |
+| **Do the uncertainty runs inherit the settled condition set, or test it?** (§13.1 item 6) | the author, asked by chat H | The set was settled on **accuracy** on QM9. A model can lose the same accuracy while being much better or worse at spotting which labels were corrupted, which is exactly what those runs measure |
+| **Which five model-and-representation pairs censoring runs on** (§13.13) | the author, from the screen | Comes out of the screen, like the deep run's selection, so it is not blocking the screen — but it blocks the censoring submission, and the runbook §5b now says where it goes |
+| **The experimental pipeline draws noise per fold, not once per label column** (§3.3a) | the author | Recommendation unchanged: keep the per-fold draw, and say so in the Methods in one sentence. It needs a decision because it changes what a *molecule* means, and chat J must not average injected noise across folds either way |
+| **Push the branch** | chat H | The cluster's only route in is `git pull --ff-only`. A gate that passed on an unpushed commit proved nothing about what runs (§2.20) |
+
+**One evidence gap, not a code gap.** §13.15's screen figures — and the rationales
+`noise_conditions.json` cites for them — were computed at level **0.5**, the value this document
+records as withdrawn, before `setting_selection_test.py` was corrected to 1.0 (§13.12 A2). The
+condition set itself is settled and is not reopened by this; what needs restating is every number
+quoted under it, at the level actually measured.
 
 **Caches to clear — this is not just `results/`.** The author's standing instruction is that
 everything is re-run and the cache cleared. Three items, and the third has not been recorded before:
