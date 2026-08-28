@@ -41,6 +41,10 @@
 # one report, no half answers.
 
 REPORT="$HOME/env_rebuild_report.txt"
+# Keep the previous one. This file is the only record of what a failed run saw,
+# and truncating it on every attempt means a second attempt destroys the
+# evidence from the first.
+[ -f "$REPORT" ] && mv "$REPORT" "$HOME/env_rebuild_report_prev.txt"
 : > "$REPORT"
 say() { echo "$@" | tee -a "$REPORT"; }
 section() { say ""; say "=============================================================================="
@@ -194,12 +198,18 @@ say "  current prefix: ${OLD_PREFIX:-<env_test not found>}"
 # not writable, and a full solve pulls down several gigabytes -- straight into
 # the home quota. Keep it beside the environment.
 if [ -z "${CONDA_PKGS_DIRS:-}" ] && [ -n "$OLD_PREFIX" ]; then
-    export CONDA_PKGS_DIRS="$(dirname "$OLD_PREFIX")/conda_pkgs"
-    mkdir -p "$CONDA_PKGS_DIRS"
-    say "  package cache: $CONDA_PKGS_DIRS  (off the home quota)"
+    # New downloads land off the home quota; the existing cache stays on the
+    # list so packages already there are linked rather than fetched again --
+    # which is what makes a restore from the explicit list nearly instant.
+    export CONDA_PKGS_DIRS="$(dirname "$OLD_PREFIX")/conda_pkgs:$HOME/.conda/pkgs"
+    mkdir -p "$(dirname "$OLD_PREFIX")/conda_pkgs"
+    say "  package cache: $CONDA_PKGS_DIRS"
 fi
 
 ARCHIVE="$REPO/research_archive/env_test_before_rebuild_$(date +%Y-%m-%d).txt"
+# An existing record is a backup of an environment that may no longer exist.
+# Never write over it.
+[ -f "$ARCHIVE" ] && ARCHIVE="${ARCHIVE%.txt}_$(date +%H%M).txt"
 if [ -n "$OLD_PREFIX" ] && [ -x "$OLD_PREFIX/bin/python" ]; then
     mkdir -p "$(dirname "$ARCHIVE")"
     {
@@ -271,8 +281,45 @@ if [ "$BUILD_RC" -ne 0 ] || [ -z "${CONDA_PREFIX:-}" ] \
     say "  active prefix:      ${CONDA_PREFIX:-<none>}"
     say ""
     say "  Nothing below would be a test of env_test, so nothing below was run."
-    say "  The previous environment, if there was one, has been left in place or"
-    say "  put back -- see the build output above."
+    say ""
+
+    # Do not leave the account with no environment. If the prefix is empty and
+    # a record of the previous one exists, put it back from that record. An
+    # explicit package list runs NO solver -- which is what failed -- and the
+    # packages are already in the cache, so this links rather than downloads.
+    LAST_ARCHIVE="$(ls -1t "$REPO"/research_archive/env_test_before_rebuild_*.txt 2>/dev/null | head -1)"
+    if [ -n "$OLD_PREFIX" ] && [ ! -x "$OLD_PREFIX/bin/python" ] && [ -n "$LAST_ARCHIVE" ]; then
+        section "RESTORING the previous environment, so you are not left with none"
+        say "  from: $LAST_ARCHIVE"
+        say "  This is an explicit package list: no solve, no dependency"
+        say "  resolution, and the packages are in the cache already."
+        rm -rf "$OLD_PREFIX"
+        conda create --yes --prefix "$OLD_PREFIX" --file "$LAST_ARCHIVE" \
+            2>&1 | tail -15 | tee -a "$REPORT"
+        if [ -x "$OLD_PREFIX/bin/python" ]; then
+            say "  conda half restored at $OLD_PREFIX"
+            say "  The pip half is not in that record -- reinstalling it from the"
+            say "  pinned list. These versions come from env.yml, so they may not"
+            say "  be identical to what was there."
+            # PIP_CONSTRAINT pins torch 2.5.1, which is the environment being
+            # built, not the one being restored. It must not apply here.
+            env -u PIP_CONSTRAINT "$OLD_PREFIX/bin/python" -m pip install \
+                --no-cache-dir gauche==0.1.6 torchbnn==1.2 torchhk==0.86.14 \
+                deepchem==2.8.0 polaris-lib==0.11.10 torchcp==1.1.0 \
+                2>&1 | tail -6 | tee -a "$REPORT"
+            for c in "$HOME/repos/NoiseInject" /data/stat-cadd/scat9264/NoiseInject \
+                     /data/stat-ecr/scat9264/NoiseInject "$HOME/repos/KIRBy" \
+                     /data/stat-cadd/scat9264/KIRBy /data/stat-ecr/scat9264/KIRBy; do
+                [ -d "$c" ] && env -u PIP_CONSTRAINT "$OLD_PREFIX/bin/python" \
+                    -m pip install --no-deps -e "$c" >/dev/null 2>&1
+            done
+            say "  RESTORED. It is the environment you had before -- two OpenMP"
+            say "  runtimes and all -- but it works, and nothing is lost."
+        else
+            say "  The restore did not produce an interpreter either. The record is"
+            say "  still there and still valid: $LAST_ARCHIVE"
+        fi
+    fi
     say ""
     say "written to: $REPORT"
     exit 1
