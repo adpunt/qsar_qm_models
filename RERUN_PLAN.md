@@ -1545,9 +1545,43 @@ injector cross-check both need 1.0.0, and the checkout on ARC is 0.1.0. Push fro
 pull at `/data/stat-ecr/scat9264/NoiseInject` before either route, and the install is editable,
 so nothing needs reinstalling after a pull.
 
+**A restored environment has to be able to launch jobs, so the refusal has a switch.** The
+per-task check is `check_environment.py --models <model>`, it runs inside every generated job
+script, and it fails on more than one threading runtime — so on the restored environment it
+refuses every task in the study. `QSAR_ALLOW_MULTIPLE_OPENMP=1` downgrades that one check to a
+warning and changes nothing else; both places that count runtimes honour it, and the static
+count was measured going 1 → 0 with it set on 2026-08-28. What it costs is the hang, not a wrong
+number: a task that hangs writes no rows, so watch for rows appearing rather than trusting a
+task the queue still calls running.
+
+**The Rust build failed for the same one reason, and no Rust code changed.** `rust/build.rs`
+reads `CONDA_PREFIX` and adds `$CONDA_PREFIX/lib` as the only place to find RDKit; with
+`env_test` gone that directory is gone, and the linker reports it as ten separate
+`cannot find -lRDKit...` lines plus `cannot find -liconv` (conda-forge's `libiconv` lived there
+too). Restoring the environment and building inside it is the whole fix. Two changes so it
+cannot present that way again: the build script now emits `rerun-if-env-changed=CONDA_PREFIX`,
+so a moved or rebuilt environment re-runs it instead of reusing a stale `-L` path, and it stops
+with one readable line naming the directory it looked in. It tells apart "RDKit is not here"
+from "only the versioned files are here", which is `setup.sh`'s symlink step not having run —
+those need different fixes. Both messages were executed, and a real `cargo build --release`
+against a working RDKit still finishes.
+
+**The environment is not in git and cannot be.** git holds the recipe — `env.yml`, `setup.sh`,
+`pip-constraints.txt` — not several gigabytes of compiled packages. The one artefact that makes
+the old environment recoverable is `research_archive/env_test_before_rebuild_2026-08-27.txt`, it
+was written on ARC, and it has never been committed from there. It is 190 lines of text and
+nothing ignores it. **Commit it from the cluster**, so the only copy is not one directory on one
+filesystem:
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+git add research_archive/env_test_before_rebuild_2026-08-27.txt
+git commit -m "The environment that was working, recorded" && git push
+```
+
 **Still open here:** the cross-check step is skipped unless `rust/target/release/rust_processor`
-is built on the cluster (`cd rust && cargo build --release`), and `GP_DEFAULTS['single_thread_fit']`
-stays `True` until the gate passes on ARC.
+is built on the cluster (`cd rust && cargo build --release`, inside the activated environment),
+and `GP_DEFAULTS['single_thread_fit']` stays `True` until the gate passes on ARC.
 
 ### 2.8j ✅ FIXED 2026-08-27 — the uncertainty jobs asked for six conditions that no longer exist
 

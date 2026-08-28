@@ -519,7 +519,16 @@ def check_threading_runtimes(failures):
         print()
         return
 
-    print(f"  FAIL  {len(by_file)} DISTINCT OpenMP runtime files are reachable from the "
+    # The escape hatch, and what it is for. This check is run per task by every
+    # generated job script, so on an environment with two runtimes it does not
+    # warn -- it refuses every job in the study. That is right when there is
+    # time to rebuild and wrong when there is not: the environment restored from
+    # research_archive/ has two runtimes and is the one the study ran on for
+    # months. QSAR_ALLOW_MULTIPLE_OPENMP=1 downgrades this to a warning and
+    # changes nothing else.
+    allowed = os.environ.get("QSAR_ALLOW_MULTIPLE_OPENMP", "") == "1"
+    head = "WARN " if allowed else "FAIL "
+    print(f"  {head} {len(by_file)} DISTINCT OpenMP runtime files are reachable from the "
           f"installed packages:")
     for key, e in sorted(by_file.items()):
         print(f"          {key}   [{e['family']}]")
@@ -532,7 +541,14 @@ def check_threading_runtimes(failures):
     print("        allocation and writes no rows and no error.")
     print("        Pinning threads does NOT cure it (measured, RERUN_PLAN.md 2.8e-bis).")
     print("        Rebuild the environment: SETUP_REBUILD=1 . setup.sh")
-    failures.append("multiple threading runtimes")
+    if allowed:
+        print("        QSAR_ALLOW_MULTIPLE_OPENMP=1 is set, so this is a warning and the")
+        print("        job will start. It is the environment the study ran on before.")
+        print("        The risk it carries is the hang, not a wrong number: a task that")
+        print("        hangs writes no rows, so check that rows are appearing rather")
+        print("        than trusting a task that is still queued as running.")
+    else:
+        failures.append("multiple threading runtimes")
     print()
 
 
@@ -684,11 +700,17 @@ for k, v in sorted(seen.items()):
         if not lines:
             print("  OK    no OpenMP runtime mapped")
     else:
-        print(f"  FAIL  {len(lines)} distinct OpenMP runtimes mapped into ONE process:")
+        # Same escape hatch as the static count above, for the same reason.
+        allowed = os.environ.get("QSAR_ALLOW_MULTIPLE_OPENMP", "") == "1"
+        print(f"  {'WARN ' if allowed else 'FAIL '} {len(lines)} distinct OpenMP "
+              f"runtimes mapped into ONE process:")
         for l in lines:
             path, _, name = l.partition("\t")
             print(f"          {path} ({name})")
-        failures.append("multiple threading runtimes loaded")
+        if allowed:
+            print("        QSAR_ALLOW_MULTIPLE_OPENMP=1 is set, so this is a warning.")
+        else:
+            failures.append("multiple threading runtimes loaded")
     print()
 
 
