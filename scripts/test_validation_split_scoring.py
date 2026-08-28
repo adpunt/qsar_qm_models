@@ -138,7 +138,7 @@ def main():
         noise_pattern_pred=np.ones(n),
         aleatoric_var=np.linspace(0.04, 0.25, n),
         epistemic_var=np.linspace(0.01, 0.09, n))
-    df = pd.read_csv(unc_path(f_val))
+    df = pd.read_csv(unc_path(f_val), float_precision='round_trip')
     check("a validation row reaches the CSV under split='validation'",
           len(df) == n and bool((df['split'] == 'validation').all()))
     check("its injected_noise is the recorded draw, to the last bit",
@@ -160,16 +160,20 @@ def main():
     n_val = len(rec.splits['val']['epsilon_raw'])
 
     def predict(x):
-        # Deterministic, and every column varies per molecule so the writer's
-        # own support guard has something real to check.
+        # Deterministic, and both components vary per molecule -- which is what
+        # SUPPORT says the quantile forest produces, so the writer's own guard
+        # has something real to check rather than being stepped around.
         m = np.asarray(x, dtype=float).ravel()
-        return m, 0.3 + 0.01 * np.arange(len(m)), None, None
+        k = len(m)
+        alea = 0.04 + 0.01 * np.arange(k)
+        epis = 0.01 + 0.002 * np.arange(k)
+        return m, np.sqrt(alea + epis), alea, epis
 
     f_s = os.path.join(tmp, 's.csv')
     x_val = np.arange(n_val, dtype=float)
     got = M.score_validation_molecules(
         predict, x_val, rec, Args(f_s), 1.5, 'pdv', 0, 1, 'qrf')
-    dfs = pd.read_csv(unc_path(f_s))
+    dfs = pd.read_csv(unc_path(f_s), float_precision='round_trip')
     check("the scorer writes one row per validation molecule",
           got == n_val and len(dfs) == n_val, f"{got} rows")
     check("it writes the injector's recorded validation draw, not a reconstruction",

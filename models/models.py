@@ -8162,8 +8162,34 @@ def train_heteroscedastic_gp(
             output = gp(xf)
             gp_loss = -inner_mll(output, yf)
 
+            # THE RESIDUAL MUST COME FROM THE FITTED PROCESS, NOT THE PRIOR.
+            #
+            # gpytorch returns the PRIOR at the training inputs while the model
+            # is in train mode, so `y - mean` is `y - a constant`: the spread of
+            # the labels themselves, dominated by real structure and saying
+            # almost nothing about which labels are corrupted. That is the
+            # target this network learned from until 2026-08-28, and it is why
+            # its output was flat.
+            #
+            # Measured on 300 molecules whose loud half carries 100x the noise
+            # variance of the quiet half:
+            #
+            #   prior residuals    loud 6.44  quiet 5.92   ratio  1.09
+            #   fitted residuals   loud 0.88  quiet 0.033  ratio 27.08
+            #
+            # Trained on the first, the rank correlation between the predicted
+            # noise and the true corruption sat between -0.12 and +0.09 at every
+            # learning rate from 0.001 to 0.05 and every length from 60 to 2,000
+            # epochs. It is not convergence, it is the wrong target. With the
+            # fitted residual it reaches +0.61 and the accuracy does not move.
+            #
+            # The laboratory runner carries the identical model and the identical
+            # fix; the two must move together. Guard:
+            # scripts/test_hetero_gp_learns_the_noise.py.
             with torch.no_grad():
+                gp.eval()
                 gp_pred = gp(xf).mean
+                gp.train()
             residuals = (yf - gp_pred) ** 2
             pred_var = noise_net(xf)
             noise_loss = torch.mean(
