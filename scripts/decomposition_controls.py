@@ -376,7 +376,7 @@ def fit_vbll(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150,
     from models import (VBLLLayer, VBLLLoss,
                         apply_bayesian_transformation_full_variational,
                         sample_network_split)
-    from model_defaults import NEURAL_DEFAULTS
+    from model_defaults import NEURAL_DEFAULTS, gp_fit_threads
 
     torch.manual_seed(seed)
     xf, xs = _standardise(x_fit, x_score)
@@ -399,16 +399,23 @@ def fit_vbll(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150,
         torch.utils.data.TensorDataset(xt, yt),
         batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
     net.train()
-    for _ in range(epochs):
-        for bx, by in loader:
-            opt.zero_grad()
-            loss_fn(net(bx), by).backward()
-            opt.step()
+    # SINGLE-THREADED, for the same reason the Gaussian process is. Importing
+    # models.py pulls in gpytorch, gauche and KeOps, and once they are loaded a
+    # plain torch training loop on this machine spends most of its wall clock
+    # blocked rather than computing -- measured at 10% of one core
+    # (RERUN_PLAN.md 2.8e-bis, 2.8i). The context manager is the shared spec's,
+    # not a second copy of the workaround.
+    with gp_fit_threads():
+        for _ in range(epochs):
+            for bx, by in loader:
+                opt.zero_grad()
+                loss_fn(net(bx), by).backward()
+                opt.step()
 
-    net.eval()
-    # The pipeline's OWN routine, not a copy of it: if the split changes there,
-    # this measurement changes with it.
-    mean, alea, epis, _total = sample_network_split(net, xst, passes, 'mse')
+        net.eval()
+        # The pipeline's OWN routine, not a copy of it: if the split changes
+        # there, this measurement changes with it.
+        mean, alea, epis, _total = sample_network_split(net, xst, passes, 'mse')
     return mean, alea, epis
 
 

@@ -121,6 +121,18 @@ CANONICAL_COLS = [
     'mol_id', 'sample_idx', 'y_true_clean', 'y_pred', 'uncertainty',
     'injected_noise', 'noise_scale', 'noise_pattern', 'noise_pattern_pred',
     'oof_folds_ok', 'source_file',
+    # The two halves of the uncertainty and, for each, whether it varies per
+    # molecule or is one number per fit. Both producers write all four from
+    # 2026-08-28 (RERUN_PLAN.md 5.5g); a file written before that has them
+    # blank, which is not the same as a model that has no split -- the support
+    # columns are what tell the two apart.
+    #
+    # NOTHING IN THIS MODULE CORRELATES A COMPONENT WITH ANYTHING YET. They are
+    # carried so the split is readable at all; a statistic built on them must
+    # first condition on the support column, because a rank correlation against
+    # a constant column is undefined rather than zero.
+    'aleatoric_uncertainty', 'epistemic_uncertainty',
+    'aleatoric_support', 'epistemic_support',
 ]
 
 # The conditions the injector can produce. Read from the injector itself where it
