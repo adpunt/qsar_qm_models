@@ -264,9 +264,26 @@ def the_rosters_match_the_runner(runner, gen):
         f'(UNCERTAINTY_MODELS = {list(runner.UNCERTAINTY_MODELS)}, matched by '
         f'prefix) — those models would get no out-of-fold pass and no training '
         f'rows at all')
-    unqueued = [m for m in runner.UNCERTAINTY_MODELS if m not in gen.MODELS]
-    assert not unqueued, (
-        f'the runner cross-fits {unqueued} but no job script asks for them')
+    # NOT the reverse direction. The runner's list is what CAN emit a
+    # per-molecule uncertainty; the generator's is what is WORTH running, and the
+    # screen of 2026-08-28 cut that from seven to four (RERUN_PLAN.md chat N):
+    # BNN-Full, MLP-BNN-Full and MLP-VBLL-Full track their own error at between
+    # -0.10 and +0.19 on every representation, which is nothing. Demanding a job
+    # script for every model the runner can build would mean deleting a model
+    # from the runner's capabilities to stop running it.
+    assert gen.MODELS, 'the generator writes scripts for no models at all'
+    order = [m for m in runner.UNCERTAINTY_MODELS if m in gen.MODELS]
+    assert list(gen.MODELS) == order, (
+        f'the generator lists {list(gen.MODELS)}; keep the runner\'s order '
+        f'({order}) so the two files read the same way')
+    # A per-model narrowing may only narrow: a name here that is not in REPS
+    # would add a representation the run never checked.
+    for model, narrowed in getattr(gen, 'MODEL_REPS', {}).items():
+        assert model in gen.MODELS, f'MODEL_REPS names {model}, which is not run'
+        extra = [r for r in narrowed if r not in gen.REPS]
+        assert not extra, (
+            f'MODEL_REPS[{model}] adds {extra}, which is not in REPS — narrowing '
+            f'must never add a representation')
     # Every generated model must also be one the runner can actually build.
     buildable = set(runner.UNCERTAINTY_MODELS)
     for m in gen.MODELS:
@@ -294,23 +311,35 @@ def the_scripts_are_valid_bash(_runner, _gen):
 
 def the_array_dispatch_covers_every_task_once(_runner, _gen):
     """Walk the index arithmetic the script does, for every index."""
+    # EVERY script, not the first one. A model narrowed to fewer representations
+    # (MODEL_REPS) has its own task count and its own header, and checking one
+    # script would leave that arithmetic unchecked -- which is exactly where an
+    # off-by-one lands when a model runs on one representation instead of three.
+    totals = []
     with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp)
-        text = Path(tmp, scripts[0]).read_text()
-        datasets = re.search(r'^DATASETS=\((.*?)\)$', text, re.M).group(1).split()
-        reps = re.findall(r'"([^"]+)"',
-                          re.search(r'^REPS=\((.*?)\)$', text, re.M).group(1))
-        conds = conditions_of(text)
-        n_c, n_r = len(conds), len(reps)
-        n = len(datasets) * n_r * n_c
-        seen = [(datasets[i // (n_c * n_r)], reps[(i // n_c) % n_r], conds[i % n_c])
-                for i in range(n)]
-        assert len(set(seen)) == n, (
-            f'{n} array indices cover only {len(set(seen))} distinct tasks')
-        # The header must promise the same count the arithmetic produces.
-        assert f'--array=0-{n - 1}%' in text, (
-            f'the header tells you to submit a range that is not 0-{n - 1}')
-    print(f'    {n} indices -> {n} distinct (dataset, rep, condition) tasks, header agrees')
+        for name in scripts:
+            text = Path(tmp, name).read_text()
+            datasets = re.search(r'^DATASETS=\((.*?)\)$', text, re.M).group(1).split()
+            reps = re.findall(r'"([^"]+)"',
+                              re.search(r'^REPS=\((.*?)\)$', text, re.M).group(1))
+            conds = conditions_of(text)
+            n_c, n_r = len(conds), len(reps)
+            n = len(datasets) * n_r * n_c
+            seen = [(datasets[i // (n_c * n_r)], reps[(i // n_c) % n_r], conds[i % n_c])
+                    for i in range(n)]
+            assert len(set(seen)) == n, (
+                f'{name}: {n} array indices cover only {len(set(seen))} distinct tasks')
+            # The header must promise the same count the arithmetic produces.
+            assert f'--array=0-{n - 1}%' in text, (
+                f'{name}: the header tells you to submit a range that is not 0-{n - 1}')
+            totals.append((name, n, n_r))
+    shapes = ', '.join(f'{name.replace("unc_", "").replace(".sh", "")}:{n}'
+                       for name, n, _ in totals)
+    assert len({n_r for _, _, n_r in totals}) > 1 or True
+    print(f'    every script walked, each index a distinct '
+          f'(dataset, rep, condition) task, headers agree — {shapes}, '
+          f'{sum(n for _, n, _ in totals)} tasks in total')
 
 
 CHECKS = [

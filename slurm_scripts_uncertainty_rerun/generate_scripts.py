@@ -113,55 +113,43 @@ from pathlib import Path
 # KIRBy/tests/alternative_data_noise_robustness.py.
 MODELS = {
     # name          : (tier, cpus, mem,  hours, note)
+    #
+    # FOUR, not seven, by the screen of 2026-08-28 (RERUN_PLAN.md chat N). Every
+    # model here was measured on QM9 against all six representations: how well its
+    # predicted uncertainty tracks its own error, and how often the truth falls
+    # inside the range it states. The three that were dropped -- BNN-Full,
+    # MLP-BNN-Full, MLP-VBLL-Full -- track their error at between -0.10 and +0.19,
+    # which is nothing, on every representation, and are overconfident everywhere.
+    # Their jobs would have produced rows nobody could read.
+    #
     # Memory matches the working reference (slurm_scripts_validation_rerun uses
     # 128G for these same models on these same datasets); this run additionally
     # holds the per-molecule uncertainty frames in memory, so do not go lower.
     # Wall times are deliberately generous: the out-of-fold pass multiplies the
-    # fit count by (1 + oof_folds) and nothing here has been timed on ARC. They
-    # were set against the old eleven-level ladder and are left alone now that
-    # it is six levels -- a task that finishes early costs nothing, one that is
-    # killed at the wall costs the whole task.
-    'QRF':            (1, 8,  '128G', 36, 'quantile spread; strongest error-ranker in existing results'),
-    'NGBoost':        (1, 8,  '128G', 47, '500 estimators; slowest of the tree models by far'),
-    'GP':             (1, 8,  '128G', 47, 'gauche ExactGP, RBF kernel, uncapped (GP_MAX_N from the shared model spec)'),
-    'BNN-Full':       (2, 8,  '128G', 47, '100 stochastic forward passes'),
-    'VBLL-Full':      (2, 8,  '128G', 47, '100 stochastic forward passes'),
-    'MLP-BNN-Full':   (2, 8,  '128G', 47, '100 stochastic forward passes'),
-    'MLP-VBLL-Full':  (2, 8,  '128G', 47, '100 stochastic forward passes'),
-    # -----------------------------------------------------------------------
-    # THE DECOMPOSITION MODELS, added 2026-08-28.
-    #
-    # Not one model above reports BOTH halves of its uncertainty per molecule:
-    # the quantile forest does now, but the Gaussian process's data half is one
-    # number for the whole fit, the two variational models' likewise, and the
-    # two plain Bayesian networks have no data half at all. A constant
-    # correlates with per-molecule injected noise at exactly zero however good
-    # the model is, so a null read off those columns is a property of the model
-    # (RERUN_PLAN.md 5.5a point 5). These three can answer the question.
-    # -----------------------------------------------------------------------
-    # The only model measured that SEPARATES the two halves of its uncertainty.
-    # An ordinary process learns one noise level for the whole dataset and
-    # reports it for every molecule; this one predicts a level per molecule, so
-    # its data half tracks the true corruption at +0.62 while its model half
-    # sits at -0.18 against the same thing, for the same accuracy. Both forest
-    # halves sit at +0.84 and +0.81 -- one signal reported twice.
-    #
-    # Listed ONCE. It was written twice, here and above the tier-2 block, and a
-    # duplicate key in a dict literal is not an error -- the second silently
-    # replaced the first, so the model count printed at generate time was one
-    # short of the entries an author could see in this file.
-    'GP-Hetero':      (1, 8,  '128G', 47, 'the same ExactGP with a network predicting the '
-                                          'observation noise per molecule; measured free on QM9 '
-                                          '(RERUN_PLAN.md 5.5e)'),
-    'VBLL-Full-Hetero':     (2, 8, '128G', 47, 'VBLL with a noise head (RERUN_PLAN.md 5.5f)'),
-    'MLP-VBLL-Full-Hetero': (2, 8, '128G', 47, 'VBLL-beta with a noise head'),
+    # fit count by (1 + oof_folds) and nothing here has been timed on ARC.
+    'QRF':            (1, 8,  '128G', 36, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
+    'NGBoost':        (1, 8,  '128G', 47, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
+    'GP':             (1, 8,  '128G', 47, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
+    'VBLL-Full':      (2, 8,  '128G', 47, 'the one Bayesian network worth running, and only on ChemBERTa (see MODEL_REPS): 0.25 there against 0.01-0.15 elsewhere. Badly overconfident -- truth inside 1 sd 0.27-0.51 -- which is itself the finding'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
-# A subset of the runner's ALL_REPS. The four the uncertainty work has always
-# used; the two the study added later (Avalon, ChemBERTa) are a 50% cost
-# increase on this grid and belong to the same open question as which models and
-# representations go deep (RERUN_PLAN.md 13.1 item 4). Pass --reps to change it.
-REPS = ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained']
+# THREE, by the screen of 2026-08-28 (RERUN_PLAN.md chat N), measured rather than
+# assumed. Sort & Slice is out because nothing distinguishes any model on it;
+# Avalon is out because it behaves like ECFP4 for the tree models and is the worst
+# of the six for the Bayesian networks; MHG-GNN is out on the author's call -- it
+# was the most expensive representation to build, 10m43s against 2m24s for ECFP4
+# on the screen's own timing, and the forest's ordering does not change without it.
+# ChemBERTa is IN, and it was in neither list before: it is where the Bayesian
+# networks show what little they have, and the tree models do as well on it as
+# anywhere.
+REPS = ['ECFP4', 'PDV', 'ChemBERTa']
+
+# Representations for ONE model, where the full list would buy nothing. VBLL
+# tracks its error at 0.25 on ChemBERTa and at 0.011 on ECFP4 and 0.152 on PDV,
+# so two of its three representations would produce rows nobody can use.
+MODEL_REPS = {
+    'VBLL-Full': ['ChemBERTa'],
+}
 
 # ---------------------------------------------------------------------------
 # Noise conditions -- read, never restated
@@ -481,6 +469,24 @@ def main():
     reps = list(args.reps) if args.reps else list(REPS)
     out = Path(args.out_dir)
     (out / 'logs').mkdir(parents=True, exist_ok=True)
+
+    def reps_for(model):
+        """The representations one model runs on.
+
+        MODEL_REPS narrows a model that the screen measured as useful on some
+        representations and useless on the others; --reps on the command line
+        overrides everything, because a deliberate override should not be
+        silently narrowed. A name in MODEL_REPS that is not in the run's own
+        list is dropped, so narrowing can never ADD a representation.
+        """
+        if args.reps:
+            return reps
+        narrowed = MODEL_REPS.get(model)
+        if not narrowed:
+            return reps
+        kept = [r for r in narrowed if r in reps]
+        return kept or reps
+
     n_tasks = len(DATASETS) * len(reps) * len(conditions)
 
     print(f"Conditions: {source}")
@@ -511,7 +517,11 @@ def main():
     extra_args = ''.join(f'{b} \\\n    ' for b in extra_bits)
 
     written = []
+    total_tasks = 0
     for model, (tier, cpus, mem, hours, note) in MODELS.items():
+        model_reps = reps_for(model)
+        model_tasks = len(DATASETS) * len(model_reps) * len(conditions)
+        total_tasks += model_tasks
         slug = model.lower().replace('-', '_')
         script_name = f'unc_{slug}.sh'
         # GP is gated to PDV only unless told otherwise, and the kernel has to
@@ -532,27 +542,34 @@ def main():
             cpus=cpus, mem=mem, hours=hours, oof=args.oof_folds,
             kirby_dir=args.kirby_dir, qsar_dir=args.qsar_dir, results_root=RESULTS_ROOT,
             datasets=' '.join(DATASETS),
-            reps=' '.join(f'"{r}"' for r in reps),
+            reps=' '.join(f'"{r}"' for r in model_reps),
             conditions=' '.join(conditions),
             condition_list=', '.join(conditions),
             condition_list_py=repr(conditions),
-            n_ds=len(DATASETS), n_rep=len(reps), n_cond=len(conditions),
-            n_tasks=n_tasks, last=n_tasks - 1, throttle=args.throttle,
+            n_ds=len(DATASETS), n_rep=len(model_reps), n_cond=len(conditions),
+            n_tasks=model_tasks, last=model_tasks - 1, throttle=args.throttle,
             script_name=script_name, gp_args=gp_args, gp_line='',
             extra_args=extra_args)
         (out / script_name).write_text(body)
         (out / script_name).chmod(0o755)
-        written.append((tier, script_name, model, hours))
+        written.append((tier, script_name, model, hours, model_tasks, model_reps))
 
-    print(f"\nWrote {len(written)} array scripts, {n_tasks} tasks each "
-          f"({len(written) * n_tasks} tasks total), oof-folds={args.oof_folds}, "
+    print(f"\nWrote {len(written)} array scripts, {total_tasks} tasks total, "
+          f"oof-folds={args.oof_folds}, "
           f"oof-outer-folds={args.oof_outer_folds or 'all 5'}")
-    print(f"  {len(DATASETS)} datasets x {len(reps)} reps x {len(conditions)} conditions")
+    print(f"  {len(DATASETS)} datasets x {len(conditions)} conditions, "
+          f"representations per model:")
+    for _, _, model, _, model_tasks, model_reps in written:
+        note = '' if model_reps == reps else '   (narrowed by the screen)'
+        print(f"    {model:16s} {len(model_reps)} reps x {len(DATASETS)} x "
+              f"{len(conditions)} = {model_tasks:3d} tasks   "
+              f"{', '.join(model_reps)}{note}")
     for tier in (1, 2):
         print(f"\n  Tier {tier}:")
-        for t, name, model, hours in written:
+        for t, name, model, hours, model_tasks, _ in written:
             if t == tier:
-                print(f"    {name:26s} {model:16s} --time={hours}:00:00")
+                print(f"    {name:26s} {model:16s} --array=0-{model_tasks - 1} "
+                      f"--time={hours}:00:00")
 
 
 if __name__ == '__main__':
