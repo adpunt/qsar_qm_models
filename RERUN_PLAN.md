@@ -1168,7 +1168,49 @@ agent told to refute it**. 106 raised, **34 survived**, 72 refuted.
 - `load_and_split_polaris` returns unfiltered split indices while skipping molecules it could not
   write, so `config.train_count` can exceed the records in the file — which chat D's new hard
   error in `read_train_labels` now turns from silent truncation into an abort.
-### 2.8i 🔴 THE ENVIRONMENT REBUILD — one threading runtime, and the roster completed (2026-08-27)
+### 2.8i ✅ CLOSED 2026-08-28 — the environment gate passes on ARC
+
+`python scripts/check_environment.py --deep --validation` **exited 0** in
+`/data/stat-cadd/scat9264/conda_envs/env_test`, on a compute node, on 2026-08-28:
+
+| check | result |
+|---|---|
+| QM9 roster — every backend imported and the estimator constructed | ✅ **30 of 30**, the four `conformal*` included |
+| `ngboost` and `qrf` actually fit | ✅ / ✅ |
+| threading runtimes a job would load | ✅ **one**, `libomp.so` |
+| `/proc/self/maps` after importing every backend | ✅ **one runtime mapped** |
+| `models/models.py` imports for real | ✅ |
+| LightGBM fits — no thread count / both pinned to 4 | ✅ / ✅ |
+| GP fits after lightgbm+xgboost — no thread count / both pinned to 4 | ✅ / ✅ |
+| `env.yml` is a truthful record | ✅ all 33 pins |
+| `noiseInject` 1.0.0, `kirby` 0.2.0 | ✅ |
+| validation roster, every optional backend | ✅ |
+
+**Both failures that forced this section are gone in ONE environment**, which is what it set out
+to produce. The per-task guard therefore passes on its own terms and
+`QSAR_ALLOW_MULTIPLE_OPENMP=1` is not needed.
+
+**Consequence applied the same day:** `GP_DEFAULTS['single_thread_fit']` is now `False`
+(`models/model_defaults.py`). Its own comment made that conditional on one runtime being present,
+the condition is met and measured, and the workaround cost 11% on every Gaussian-process fit. It
+goes back to `True` if that check ever reports more than one runtime again — it is the net, not
+the fix.
+
+**How the environment got there, and the honest caveat.** Not by the rebuild: `env_test` was
+restored from `research_archive/env_test_before_rebuild_2026-08-27.txt`, then reconciled against
+`env.yml` by `setup.sh`. The single runtime is a consequence of that — the second one came in on
+a pip torch wheel that was *shadowing* the conda package, and a restore from a list of conda
+packages cannot bring it back. ⚠️ **The interpreter now matches every pin in `env.yml`, but it
+was not built from it.** A fresh build from the recipe remains the only way to prove the recipe
+reproduces it, and that is worth doing before it matters — not before the deadline.
+
+**Still open, and not blocking a launch:** the audit's end-to-end section (a real 300-molecule
+fit that writes rows) needs a slot longer than `devel`'s ten minutes, and the leftover
+`<prefix>.old` should be deleted if one exists.
+
+---
+
+### 2.8i (history) 🔴 THE ENVIRONMENT REBUILD — one threading runtime, and the roster completed (2026-08-27)
 
 ⚠️ **Since 2026-08-27 this is a hard stop for every job in the study, not a warning.** The
 per-task guard runs the threading count, and it is now in all three job families (§13.2 chat D,

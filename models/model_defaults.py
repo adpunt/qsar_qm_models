@@ -195,10 +195,22 @@ GP_DEFAULTS = {
     # across the entire grid. This limits only the Gaussian-process fit and puts
     # the setting back afterwards, so nothing else pays.
     #
-    # Set False only if the environment has been rebuilt so one threading
-    # runtime is present -- install xgboost and lightgbm from the same channel
-    # as pytorch. Confirm with scripts/server_audit.sh before turning it off.
-    'single_thread_fit': True,
+    # SET FALSE 2026-08-28, on the condition this comment named. The condition
+    # is met and was measured on an ARC compute node, not argued from a laptop:
+    #
+    #   threading runtimes (what a job would load)      one, libomp.so
+    #   /proc/self/maps after importing every backend   one runtime mapped
+    #   LightGBM fits, no thread count / both at 4      OK / OK
+    #   GP fits after lightgbm+xgboost, none / both 4   OK / OK
+    #
+    # `python scripts/check_environment.py --deep --validation` exited 0 in
+    # /data/stat-cadd/scat9264/conda_envs/env_test (RERUN_PLAN.md 2.8i). The
+    # workaround cost 11% on every Gaussian-process fit and was the net under a
+    # failure that no longer exists.
+    #
+    # Put it back to True if that check ever reports more than one runtime
+    # again: this setting is the net, not the fix.
+    'single_thread_fit': False,
     # Start the RBF lengthscale at the median distance between training
     # molecules instead of gpytorch's default of ~0.69.
     #
