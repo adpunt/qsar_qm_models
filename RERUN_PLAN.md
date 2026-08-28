@@ -8221,6 +8221,60 @@ refitting, it costs a sixth of what it otherwise would. Build it after that answ
 
 #### Chat O — Do validation molecules replace the out-of-fold refitting?
 
+##### ⏳ STATE 2026-08-28: THE ROUTE IS BUILT AND PROVEN; THE VERDICT IS WAITING ON ONE RUN
+
+**What has landed, each with a check that fails if it is removed.**
+
+| | Where | Proof |
+|---|---|---|
+| The writer takes a `validation` split and demands the injector's recorded draw for it, exactly as it does for a cross-fitted training row | `scripts/utils.py`, `VALID_SPLITS` / `CORRUPTED_SPLITS` | `scripts/test_validation_split_scoring.py` |
+| `score_validation_molecules` scores the held-out validation molecules with the model that ALREADY fitted — a prediction, not a refit | `models/models.py` | same |
+| Wired into every family that cross-fits: both forests, NGBoost, the Gaussian process, the DNN family, the MLP family, the noise-predicting GP | `models/models.py` | same test reads the COMPILED code object, so a call deleted or commented out fails it |
+| `--score-validation`, which also loads the per-molecule provenance so it works with or without `--oof-folds` | `scripts/process_and_train.py` | `scripts/test_generated_job_flags.py` still passes |
+| The decision rule, applied by machine | `scripts/compare_validation_vs_oof.py` | committed BEFORE the run finished, so the rule provably predates the numbers |
+
+Commits `9931baf` (the route) and the one after it (the rule).
+
+**Two readings the rule left open, fixed in the script before any number came back.** The level is
+**1.5** — `rho_delta` is NaN at level zero by construction, because every molecule gets exactly zero
+noise there and the target is constant. And the rule is applied **within each representation**, with
+the verdict the conjunction across all six, because this project does not pool across
+representations. Both are written into the script's own docstring.
+
+**Verified on a real QM9 job, not asserted** (`qrf`, PDV, 400 molecules, levels 0.0 and 1.5,
+`--oof-folds 3 --score-validation`): both routes were written from one run; the analysis module reads
+both without a change; validation rows satisfy its one-scale check and satisfy
+`noise_scale = level × noise_pattern` to 4.6e-08, the same as a cross-fitted row.
+
+**🔴 Still open, and what each one waits on.**
+
+1. **The verdict.** Waiting on the comparison run: QM9, 5,000 molecules, one replicate, plain
+   Gaussian, levels 0.0 and 1.5, all six representations, all seven uncertainty models,
+   `--oof-folds 3 --score-validation`. Launched 2026-08-28 04:00 from the pinned checkout
+   `/Volumes/seagate/chatO_run` into `/Volumes/seagate/chatO_screen`. Then
+   `python scripts/compare_validation_vs_oof.py --run-dir /Volumes/seagate/chatO_screen`.
+2. **The lab plumbing** (step 5 below), only if the verdict says validation is enough.
+3. **The job-script edit**, which is the deliverable either way.
+
+**The fit count, before and after, from the generator's own output.**
+`slurm_scripts_uncertainty_rerun/generate_scripts.py` prints 840 tasks at `oof-folds=5` over all five
+outer folds; the runner sweeps seven levels (`NOISE_LEVELS`) with `N_FOLDS = 5`.
+
+| | model fits |
+|---|---|
+| as generated today | 176,400 |
+| of which are cross-fits | 147,000 — **83.3%, five in six** |
+| with the cross-fit dropped | 29,400 |
+
+⚠️ **A separate finding, true whatever the verdict.** The QM9 job scripts pass **neither**
+`--oof-folds` nor `--score-validation` — checked in the generator and in all seventeen generated
+scripts, 2026-08-28. QM9 test labels are never corrupted, so as the grid stands **the QM9 run writes
+no rows that can answer "does the uncertainty find the corrupted labels?" at all.** The whole
+147,000-fit cost above is the laboratory jobs. `--score-validation` would give QM9 that answer for
+one forward pass per model, and that is chat H's to add to the QM9 generator.
+
+---
+
 🔴 **OPEN, and it settles a question the author asked on 2026-08-25 that was never answered:**
 *"Can this be reworked with the initial 80:10:10 split?"* I answered that it largely could, named one
 blocker, and no decision was ever recorded. The expensive route was built anyway and is what the
