@@ -8977,9 +8977,11 @@ cluster pull is `pull_safely.sh`; KIRBy is `/data/stat-ecr`; the concurrency che
 deleted.
 
 **What only the author can do, in order — the runbook has the commands:** rebuild the Rust binary on
-ARC (the one there is from February and cannot parse the current flags); source `setup.sh` ONCE on a
-login node before the first `sbatch`, because `env.yml` changed today and nothing stops 294 array
-tasks pip-installing into the shared environment at once; clear the caches, including the old
+ARC (the one there is from February and cannot parse the current flags); source `setup.sh` ONCE
+before the first `sbatch`, **inside an interactive allocation and not on a login node** — the login
+node caps memory per user, which is what made an earlier audit report sixteen phantom failures
+(§2.8i) — because `env.yml` changed today and nothing stops 294 array tasks pip-installing into the
+shared environment at once; clear the caches, including the old
 `anova_*.csv`; run the concurrency check; run one task and record its time; then submit.
 
 **One thing that cannot be checked from here:** whether `conda activate env_test` resolves by NAME on
