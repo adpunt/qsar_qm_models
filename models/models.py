@@ -92,7 +92,6 @@ from model_defaults import (
 )
 
 def bnn_elbo_criterion(base_criterion, model, n_train):
-    return base_criterion  # BROKEN ON PURPOSE
     """Wrap a plain loss so a torchbnn network is fitted on the ELBO.
 
     BNN-alpha and BNN-beta were trained with plain MSE until 2026-08-27. There
