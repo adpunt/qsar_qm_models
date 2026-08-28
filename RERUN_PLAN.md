@@ -2116,6 +2116,50 @@ The other half of entry 48 — a record rejected mid-read leaving the stream
 misaligned — was closed earlier: `read_smiles_data` panics rather than returning
 `None` part-way through a record.
 
+### 2.21 ✅ 2026-08-28 — PDV is `pdv`, and the binary form is deleted rather than refused
+
+**The author's instruction:** *"pdv should just be pdv, not continuous pdv. All traces of binary
+pdv should have been fully removed."*
+
+What was there. Two representations under two names for the same 200 RDKit descriptors: `pdv`,
+bit-packed to 25 bytes by `(pdv > 0)`, and `continuous_pdv`, the same descriptors as float32 in
+800 bytes. The binary one threw away every magnitude and handed the model 200 raw 0/1 values, 47
+of them constant across QM9 because MolWt, HeavyAtomCount and the like are positive for every
+molecule. It was refused by name but still built, and it still held the short name.
+
+**It also closes a cross-pipeline naming split.** The experimental pipeline has always meant the
+float32 vector by `pdv` (§3.4.1), so the two sides now agree, and the code finally says what the
+paper says.
+
+| Where | What changed |
+|---|---|
+| `scripts/process_and_train.py` | The binary block is gone from `write_to_mmap`, which now stores `pdv` as float32; the second build site and the `continuous_pdv` parameter are gone; the reader takes one 800-byte block |
+| `rust/src/main.rs` | `pdv_buf` was 25 bytes and `continuous_pdv_buf` 800. There is one field now, `pdv_buf` at 800, and one reader and one writer branch |
+| the generator, the figure script, the roster and the tests | Renamed. The figure script's `ANOVA_REPS_EXCLUDE` had `'pdv'` in it as "binary PDV" — left alone, the rename would have **dropped the study's primary representation from the ANOVA by name** |
+
+**`continuous_pdv` is refused, not aliased**, and this is the part that matters. The meaning of
+`pdv` CHANGED: every QM9 job script and every results file written before 2026-08-28 that says
+`pdv` means the binary vector. An alias would let an old script run and produce rows that look
+like the others. The refusal names the rename and the date.
+
+**Consequence for the run.** This is a record-layout change, so every `.mmap` file and
+`data/QM9/processed` written before today decodes every field after PDV at the wrong offset. The
+runbook's cache step (§2b there) already clears both.
+
+### 2.22 ✅ 2026-08-28 — conformal prediction is out of the study
+
+The author's instruction, carried out the same day. Both dispatch branches are commented out in
+`models/models.py`; `-m conformal` and `-m conformal_hetero` are refused **before any work
+starts**, which is the part that matters, because the two dispatchers failed differently and both
+quietly — the tabular one ends its chain with no `else` and returned `None`, writing no row and
+saying nothing, and the graph one ends with `else: return train_gnn(...)`, so `-m conformal
+-r graph` would have trained an ordinary graph network and written it to a file named for
+conformal. `--cp-base-model`, `--calibration-size` and `--alpha` are commented out of the parser,
+and the three conformal entries are gone from the job generator's excluded list, so
+`--include-excluded` cannot bring them back. Guard: `scripts/test_conformal_is_out.py`.
+
+This closes the `--calibration-size` row in §11.1: the flag no longer exists.
+
 ### 2.20 🔴 FOUND AND FIXED 2026-08-28 — the repository shipped a defect the fix-guard harness planted
 
 Two findings, and they are the same shape: **something that was true on this laptop was not true
@@ -3829,6 +3873,70 @@ reporting level, against 0.025 and 0.006 for the ordinary forest.
   from the quantile interval the model actually reports, so it does not by itself invalidate the
   0.688, but the quantile interval's coverage at leaf 5 is **not checked** and belongs in the next
   forest run.
+
+### 5.5e ✅ MEASURED 2026-08-28 — the noise-predicting Gaussian process is worth running, and it is free
+
+The author asked for it to be tried locally rather than argued about. It is written at
+`models/models.py:7562`, has never been in a job script, and it **runs, localises noise strongly,
+and costs no accuracy.**
+
+**The test.** 1,500 training molecules from real QM9, 600 held out, nine descriptors. The injected
+noise is deliberately UNEVEN — molecules above the median of one descriptor get three times the
+spread of the rest — so there is something to find. Under an even condition there would not be, and
+a null would say nothing about the model. Level 0.6, radial basis kernel, 150 epochs, the
+repository's own function called directly rather than a copy of it.
+
+| | noise-predicting GP | ordinary GP, identical data |
+|---|---|---|
+| R² on held-out molecules | **0.5315** | **0.5318** |
+| aleatoric varies per molecule | **yes** | no, by construction |
+| aleatoric against the true noise size | **rho +0.7307** | undefined — it is one number |
+| epistemic against the true noise size | rho −0.1561 | rho −0.1555 |
+| mean aleatoric, noisier half | 1.951 | 2.227 for every molecule |
+| mean aleatoric, quieter half | 1.407 | 2.227 for every molecule |
+
+**Three things this settles.**
+
+- **It is free.** 0.0003 of R² between the two, which is far inside the replicate spread. The
+  epistemic correlations agree to three decimal places, so the mean model is the same model.
+- **It answers the question the ordinary Gaussian process cannot.** rho +0.7307 between its
+  aleatoric term and the true amount of noise a held-out molecule's region carries. The ordinary
+  model reports 2.227 for everything, which is wrong for both halves — the true noise variances are
+  0.36 and 3.24.
+- **The two components do different jobs.** The aleatoric term tracks the noise at +0.73 while the
+  epistemic term sits at −0.16 against the same quantity. That separation is the evidence that the
+  split is real rather than one number split two ways.
+
+**One caveat to carry into the writing: it compresses.** The true spreads differ threefold between
+the two halves and the model reports a 1.39-fold difference. It ranks correctly and understates the
+magnitude, so it supports "which molecules are bad" and not "how bad is this molecule".
+
+**Not checked:** whether it behaves the same under an EVEN noise condition, where the honest answer
+should be no correlation. That is the negative control and it belongs in the same run.
+
+### 5.5f ✅ BUILT 2026-08-28 — the variational layer can now predict noise per molecule
+
+The layer had one learned observation noise for the whole fit, so its aleatoric term was identical
+for every molecule. The reference library the project already holds carries a heteroscedastic
+variant — `research_archive/f692d614/vbll_regression.py:277-370`, `HetRegression`, whose noise is a
+function of the input. That variant is now built into `VBLLLayer` behind `heteroscedastic=True`,
+following the reference: the noise head is **variational too**, so it carries a KL term rather than
+being a free function fitting residuals.
+
+Gated by `scripts/test_heteroscedastic_vbll.py`, six checks, all passing:
+
+- the default layer is untouched — a check fails if adding the option changed it;
+- the noise varies per molecule, and every value is positive;
+- the head starts at the single-noise value, so it must earn any departure from it;
+- the head contributes to the KL term, so it is regularised;
+- the loss reads what the head predicted on the pass that produced the prediction, and gradient
+  reaches the head — without this the head is attached and never trained, which writes a
+  per-molecule column that means nothing;
+- **trained on labels where half the molecules carry three times the noise, it puts more aleatoric
+  on that half, on molecules it never saw.**
+
+**Not yet done:** wiring it to a command-line option, adding it to the rosters, and the same
+negative control as the Gaussian process above.
 
 ### 5.5d 🔴 MEASURED 2026-08-28 — "aleatoric rises, epistemic holds still" is WRONG for a bagged model
 
