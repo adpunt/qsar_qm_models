@@ -1485,6 +1485,12 @@ def load_custom_model(model_path):
 # QM9 job script and results file written before 2026-08-28 that says `pdv`
 # means the binary vector. A job written against the old naming must stop and
 # be read by a person, not run and produce rows that look like the others.
+#
+# One-hot SMILES and randomized SMILES are a different case: they still BUILD,
+# and they stay that way on the author's instruction of 2026-08-28 -- "SMILES
+# should not be deleted, just not called. It will not be published." Not being
+# called is the whole requirement, and this set is what enforces it, together
+# with the job generator, which never emits either name.
 DROPPED_REPS = {"smiles", "randomized_smiles", "continuous_pdv"}
 
 PARSEABLE_REPS = {
@@ -1519,7 +1525,9 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             f"`continuous_pdv` was renamed to `pdv` on 2026-08-28 when the binary form was "
             f"deleted. It is refused rather than aliased because `pdv` used to mean the binary "
             f"vector, so a job or a file written before that date means something else by it.\n"
-            f"mol2vec, one-hot SMILES and randomized SMILES are gone from the code entirely."
+            f"One-hot SMILES and randomized SMILES still build and are kept on purpose "
+            f"(2026-08-28, the author's instruction), but they are not in the study and "
+            f"produce results nothing reads. mol2vec is gone from the code entirely."
         )
 
     unreadable = [r for r in molecular_representations if r not in PARSEABLE_REPS]
@@ -3083,7 +3091,9 @@ def main():
             f"vector was deleted. It is refused rather than treated as an alias: `pdv` used to\n"
             f"mean the binary form, so a job script written before that date means the other\n"
             f"thing by it and must be read by a person.\n"
-            f"mol2vec, one-hot SMILES and randomized SMILES no longer exist in the code.\n"
+            f"One-hot SMILES and randomized SMILES still build and are kept on purpose, but\n"
+            f"neither is part of the study, so this job would produce results with nowhere\n"
+            f"to go. mol2vec no longer exists in the code.\n"
         )
 
     # Prepare for communication with Rust
