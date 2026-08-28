@@ -120,6 +120,15 @@ CASES = [
   "MODELS = _GEN.MODELS\nALL_REPS = list(_GEN.ALL_REPS) + ['pdv', 'smiles', 'randomized_smiles', 'graph']",
   [sys.executable, f"{QSAR}/scripts/test_tuning_rosters.py"]),
 
+ # Drop the flag from the generated command, which is where it was until
+ # 2026-08-28: every reader of the tuned files sits behind it, so the grid
+ # trains on the shared defaults no matter what the sweep wrote.
+ ("a generated job script can deliver a tuned value",
+  f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
+  "    --use-best-params \\\\\n",
+  "",
+  [sys.executable, f"{QSAR}/scripts/test_tuned_params_reach_the_cluster.py"]),
+
  # Put the base loss back after the Bayesian transformation, which is where
  # NN-beta had it: the ELBO wrapper is discarded and the Bayesian variants train
  # on plain MSE with no KL term.

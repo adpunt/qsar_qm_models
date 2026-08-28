@@ -2225,6 +2225,8 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     from ngboost import NGBRegressor
     from ngboost.distns import Normal
     from ngboost.scores import MLE
+    # The base learner is ours now, not the library's default (see the spec).
+    from sklearn.tree import DecisionTreeRegressor
     
     params = {}
     params_source = 'default'
@@ -2269,26 +2271,83 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     # key, so fall back to the spec's own values.
     _ngb_dist = {'Normal': Normal}[params.get('dist', SKLEARN_DEFAULTS['ngboost']['dist'])]
     _ngb_score = {'MLE': MLE}[params.get('score', SKLEARN_DEFAULTS['ngboost']['score'])]
+
+    def _ngb_spec(key):
+        """A tuned dict carries only the parameters the search moved, so
+        anything else comes from the shared spec rather than the library."""
+        return params.get(key, SKLEARN_DEFAULTS['ngboost'][key])
+
+    # The base learner, built from the spec in parts. It is a constructed object
+    # rather than a literal, so it cannot live in model_defaults.py whole -- but
+    # leaving it to the library meant depth 3 was ngboost's choice and not ours,
+    # and an upgrade could move it under both pipelines with nothing recording
+    # that it had. Depth 3 is the paper's own (Duan et al., ICML 2020, section 4).
+    _ngb_base = DecisionTreeRegressor(
+        max_depth=_ngb_spec('base_max_depth'),
+        criterion=_ngb_spec('base_criterion'),
+        random_state=iteration_seed,
+    )
     model = NGBRegressor(
         Dist=_ngb_dist,
         Score=_ngb_score,
+        Base=_ngb_base,
         natural_gradient=params['natural_gradient'],
         n_estimators=params['n_estimators'],
         learning_rate=params['learning_rate'],
+        minibatch_frac=_ngb_spec('minibatch_frac'),
+        col_sample=_ngb_spec('col_sample'),
         verbose=False,
         random_state=iteration_seed,
     )
-    model.fit(x_val_train, y_val_train)
-    
+
+    # HOW MANY STAGES: read off the validation curve, not fixed at n_estimators.
+    #
+    # The paper does not fix M. Section 4: a validation set selects the M with the
+    # best log-likelihood and the model is refitted at that M. Our validation
+    # split is held out of every fit already, carries its own independently drawn
+    # noise, and is what the neural families early-stop on -- so it is the same
+    # split doing the same job, and no model gains training data from this.
+    #
+    # `n_estimators` becomes the cap.
+    _ngb_stop = int(_ngb_spec('early_stopping_rounds') or 0)
+    _ngb_best_iter = None
+    if _ngb_stop > 0 and x_val is not None and len(x_val) > 0:
+        model.fit(x_val_train, y_val_train, X_val=x_val, Y_val=y_val,
+                  early_stopping_rounds=_ngb_stop)
+        if _ngb_spec('use_best_iteration'):
+            # THE TRAP. ngboost stops at (best + patience) and keeps every stage
+            # it fitted; `predict(X)` with no max_iter then uses ALL of them.
+            # Measured: best_val_loss_itr 249 against 300 fitted, and the two
+            # predictions differ. Those extra stages are fitted past the
+            # validation optimum on noisy labels -- exactly what the neural
+            # models were doing when they returned the last epoch rather than
+            # the best one, and it was a procedural reason their degradation
+            # curves looked steeper.
+            _ngb_best_iter = getattr(model, 'best_val_loss_itr', None)
+        print(f"      [ngboost] stages: cap {params['n_estimators']}, "
+              f"validation optimum {_ngb_best_iter}, "
+              f"predicting at {'the optimum' if _ngb_best_iter else 'the cap'}",
+              flush=True)
+    else:
+        # No validation split to read the curve off -- the stage count is then
+        # whatever the cap says, which is the pre-2026-08-28 behaviour.
+        model.fit(x_val_train, y_val_train)
+
+    def _ngb_predict(x):
+        return model.predict(x, max_iter=_ngb_best_iter)
+
+    def _ngb_pred_dist(x):
+        return model.pred_dist(x, max_iter=_ngb_best_iter)
+
     # STEP 2: Get predictions and calibrate
-    y_pred = model.predict(x_test)
-    y_dist = model.pred_dist(x_test)
+    y_pred = _ngb_predict(x_test)
+    y_dist = _ngb_pred_dist(x_test)
     y_pred_std_uncalibrated = y_dist.scale
     
     if args.uncertainty:
         # Get calibration predictions
-        y_cal_pred = model.predict(x_val_cal)
-        y_cal_dist = model.pred_dist(x_val_cal)
+        y_cal_pred = _ngb_predict(x_val_cal)
+        y_cal_dist = _ngb_pred_dist(x_val_cal)
         y_cal_pred_std = y_cal_dist.scale
         
         # Find temperature
@@ -2351,12 +2410,22 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         # provenance then covered 250 molecules the model never saw.
 
         def _fp(x_fit, y_fit, x_score):
+            # The same model as the outer one, base learner included. An inner
+            # fold has no validation split of its own, so its stage count is the
+            # cap -- the outer model's optimum is not transferable, it was read
+            # off a curve fitted on different molecules.
             inner = NGBRegressor(
                 Dist=_ngb_dist,
                 Score=_ngb_score,
+                Base=DecisionTreeRegressor(
+                    max_depth=_ngb_spec('base_max_depth'),
+                    criterion=_ngb_spec('base_criterion'),
+                    random_state=iteration_seed),
                 natural_gradient=params['natural_gradient'],
                 n_estimators=params['n_estimators'],
                 learning_rate=params['learning_rate'],
+                minibatch_frac=_ngb_spec('minibatch_frac'),
+                col_sample=_ngb_spec('col_sample'),
                 verbose=False,
                 random_state=iteration_seed,
             )

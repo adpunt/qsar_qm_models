@@ -4877,8 +4877,9 @@ already the default.
 
 #### 5.7k 📚 WHAT THE LITERATURE ACTUALLY SETS FOR NGBOOST (2026-08-28)
 
-Read from the primary source, not from memory. **Duan, Avati, Ding, Thai, Basu, Ng and Schuler,
-"NGBoost: Natural Gradient Boosting for Probabilistic Prediction", ICML 2020, PMLR v119**, §4:
+Read from the primary source, not from memory. **`Duan2020` — Duan, Avati, Ding, Thai, Basu, Ng and
+Schuler, "NGBoost: Natural Gradient Boosting for Probabilistic Prediction", ICML 2020, PMLR v119,
+pp. 2690–2700**, §4:
 
 > "For all experiments, NGBoost was configured with the Normal distribution, decision tree base
 > learner with a maximum depth of three levels, and log scoring rule. The Year MSD dataset, being
@@ -4919,14 +4920,51 @@ roster by a wide margin — 177 of the first 265 measured minutes, and 91 minute
 fit alone — so this is not a small saving, and it is not a cut to the search: it is the procedure
 the method's own paper prescribes.
 
-**The cheminformatics guideline paper does not cover NGBoost.** Boldini, Ballabio, Consonni, Todeschini,
-Grisoni and Sieber, "Practical guidelines for the use of gradient boosting for molecular property
-prediction", *J Cheminform* 2023;15:73 — 16 datasets, 94 endpoints, about 1.4 million compounds — is
+**The cheminformatics guideline paper does not cover NGBoost.** `Boldini2023` — Boldini, Grisoni,
+Kuhn, Friedrich and Sieber, "Practical guidelines for the use of gradient boosting for molecular
+property prediction", *J Cheminform* 2023;15:73 — 16 datasets, 94 endpoints, about 1.4 million compounds — is
 XGBoost, LightGBM and CatBoost only. Two things in it still bear on this work: it ranks **learning
 rate first** among gradient-boosting hyperparameters by fANOVA importance, and it reports that
 tuning the seven most important hyperparameters over 30 iterations gave gains that **did not
 generalise to unseen datasets**. That is a caution about how much a small search buys, and an
 argument for the confirmation stages in §5.7i rather than against tuning.
+
+**Sources, both in `citations.bib`:**
+
+- `Duan2020` — Duan T, Avati A, Ding DY, Thai KK, Basu S, Ng AY, Schuler A. *NGBoost: Natural
+  Gradient Boosting for Probabilistic Prediction.* Proceedings of the 37th International Conference
+  on Machine Learning, PMLR 119:2690–2700, 2020. <https://proceedings.mlr.press/v119/duan20a.html>
+- `Boldini2023` — Boldini D, Grisoni F, Kuhn D, Friedrich L, Sieber SA. *Practical guidelines for
+  the use of gradient boosting for molecular property prediction.* J Cheminform 2023;15:73.
+  doi:10.1186/s13321-023-00743-7
+
+⚠️ **The NGBoost paper is in `citations.bib` TWICE, under `Duan2020` and `duan2020ngboost`.** Same
+paper, two keys. `scripts/check_bib_and_docs.py` catches two entries sharing a key, not two keys
+sharing a paper, so it passes. Whichever the paper cites, the other should go.
+
+#### 5.7l ✅ IMPLEMENTED 2026-08-28 — what changed, and the one gap it leaves
+
+`models/model_defaults.py` **SPEC_VERSION 1.5.0**. Four of the paper's values pinned that were
+library defaults before: `base_max_depth` 3, `base_criterion` friedman_mse, `minibatch_frac` 1.0,
+`col_sample` 1.0. **No fitted model moves** — all four equal ngboost 0.3.12's own defaults — so
+nothing already computed is invalidated. What changes is that an upgrade can no longer move them.
+
+Two more keys carry the paper's stage selection: `early_stopping_rounds` 50 and
+`use_best_iteration` True. **`n_estimators` 500 is now a CAP, not the answer.**
+
+`models/models.py train_ngboost_model` builds the base learner from the spec and fits against the
+held-out validation split, then predicts at the validation optimum. Measured on a 400-molecule
+smoke test: cap 500, **278 stages fitted, optimum at 227**, and predicting at the optimum scored
+0.9606 against 0.9596 at the cap. Both effects are real — it is cheaper AND it is better, because
+the 51 stages past the optimum are fitted on noisy labels.
+
+🔴 **THE GAP, AND IT IS A PARITY GAP.** The experimental pipeline's tree path receives `X_train` and
+`X_test` and carves no validation split — `scaffold_validation_carve` exists but only the neural
+path uses it — so there is no curve to read M off. `_ngboost_kwargs` therefore **pops those two keys
+and does not apply them**, with a comment saying so, rather than deleting them from the spec and
+hiding the difference. Until that is closed, NGBoost fits 500 stages on LogD, Caco-2 and hERG and
+a validation-selected number on QM9. Closing it means handing `run_tree_experiment` the fold's
+groups and carving a validation split for NGBoost the way the neural path already does.
 
 #### 5.7j ✅ SETTLED 2026-08-28 — the sweep runs on the cluster, and NGBoost stays whole
 

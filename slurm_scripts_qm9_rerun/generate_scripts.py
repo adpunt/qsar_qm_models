@@ -450,6 +450,15 @@ echo "=== replicates: {n_reps_run} starting at {first_iter}"
 echo "=== out: $OUT"
 echo "=== started: $(date)"
 
+# --use-best-params is what lets a tuned hyperparameter reach a model AT ALL.
+# All twelve places models/models.py reads the tuned files sit behind it, and
+# until 2026-08-28 no script this generator wrote passed it -- so the sweep could
+# finish, the winners could be written to results/, and the grid would still have
+# trained on the shared defaults with nothing saying so.
+#
+# It is safe with no tuned files present: load_best_hyperparameters says which
+# file is missing, by name, and returns None, and the row records
+# params_source='default'. It is NOT a silent switch either way.
 python -u process_and_train.py -d QM9 -t homo_lumo_gap \\
     {flags} \\
     -r "$rep" \\
@@ -461,6 +470,7 @@ python -u process_and_train.py -d QM9 -t homo_lumo_gap \\
     --start-iteration {first_iter} \\
     -s scaffold \\
     --normalize True \\
+    --use-best-params \\
     -f "$OUT"
 
 status=$?

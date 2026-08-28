@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.4.0'
+SPEC_VERSION = '1.5.0'
 
 
 # ---------------------------------------------------------------------------
@@ -140,11 +140,54 @@ SKLEARN_DEFAULTS = {
     # they are named here and resolved by the caller; the audit asserts that the
     # names still point where they used to.
     'ngboost': {
+        # EVERY VALUE HERE IS THE ONE NGBOOST'S OWN AUTHORS USED. Duan, Avati,
+        # Ding, Thai, Basu, Ng and Schuler, "NGBoost: Natural Gradient Boosting
+        # for Probabilistic Prediction", ICML 2020 (PMLR v119), section 4:
+        #
+        #   "For all experiments, NGBoost was configured with the Normal
+        #    distribution, decision tree base learner with a maximum depth of
+        #    three levels, and log scoring rule. [...] the rest of the datasets
+        #    were fit with a learning rate of 0.01. In general we recommend
+        #    small learning rates, subject to computational feasibility. [...]
+        #    for all other datasets we use 100%."
+        #
+        # They match ngboost 0.3.12's own defaults today. They are pinned anyway,
+        # under rule 2: a library upgrade must not be able to move a result
+        # silently, and the base learner's depth is exactly the kind of thing an
+        # upgrade moves.
         'n_estimators': 500,
         'learning_rate': 0.01,
         'natural_gradient': True,
         'dist': 'Normal',        # ngboost.distns.Normal
-        'score': 'MLE',          # ngboost.scores.MLE
+        'score': 'MLE',          # ngboost.scores.MLE -- MLE IS LogScore, the
+                                 # same class object, verified in 0.3.12. So this
+                                 # is the paper's "log scoring rule".
+        'minibatch_frac': 1.0,   # the paper's 100%
+        'col_sample': 1.0,
+        # The base learner. Not a literal in the library -- it is a constructed
+        # DecisionTreeRegressor -- so it is named here in parts and built by the
+        # caller, the same way Dist and Score are.
+        'base_max_depth': 3,             # the paper's "maximum depth of three levels"
+        'base_criterion': 'friedman_mse',
+        # HOW MANY STAGES, and this is the one the paper does NOT fix. Section 4
+        # again: a validation set selects the M giving the best log-likelihood,
+        # and the model is then refitted at that M. So `n_estimators` above is a
+        # CAP, not the answer, and the answer is read off the validation curve.
+        #
+        # `early_stopping_rounds` is our operationalisation of that, not the
+        # paper's number -- the paper evaluates the whole grid of M. 50 stages of
+        # patience against a 500 cap is the computational shortcut that makes the
+        # selection affordable; NGBoost is the most expensive model on the
+        # roster by a wide margin.
+        #
+        # `use_best_iteration` is NOT optional and is the trap. ngboost stops at
+        # (best + patience) and `predict(X)` then uses EVERY stage it fitted, not
+        # the best one -- measured: best_val_loss_itr 249, 300 fitted, and the
+        # two predictions differ. Fifty stages past the validation optimum, on
+        # noisy labels, is the same defect the neural models had when they
+        # returned the last epoch instead of the best one.
+        'early_stopping_rounds': 50,
+        'use_best_iteration': True,
     },
     # sklearn.svm.SVR. RBF on EVERY representation, on both sides -- no per-rep
     # kernel switching, so the model is free of a kernel/representation
@@ -661,6 +704,15 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------------------
 # CHANGE LOG
 # ---------------------------------------------------------------------------
+# 1.5.0  2026-08-28  NGBoost pinned to the settings its own paper used, read
+#                    from Duan et al., ICML 2020 section 4: base learner depth 3,
+#                    friedman_mse, minibatch fraction 1.0, column sample 1.0. All
+#                    four were ngboost 0.3.12 defaults and match the paper, so no
+#                    fitted model moves -- this closes the door on a library
+#                    upgrade moving them. Added with them: the paper's stage
+#                    selection, which reads M off a validation curve rather than
+#                    fixing it, and the flag that makes prediction use the best
+#                    iteration rather than every fitted one.
 # 1.3.0  2026-08-27  BNN-alpha and BNN-beta gained the KL term they never had.
 #                    Decided by the author after being shown that no KL, ELBO or
 #                    BKLLoss existed anywhere in either pipeline while the VBLL
