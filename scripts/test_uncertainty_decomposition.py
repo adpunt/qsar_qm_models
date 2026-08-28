@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from uncertainty_decomposition import (  # noqa: E402
     CONSTANT, NONE, PER_MOLECULE, SUPPORT, DecompositionError,
+    decompose_single_distribution,
     assert_matches_support, decompose_forest, decompose_gp,
     decompose_hetero_gp, decompose_sampling, decompose_seed_ensemble,
     support, to_raw_variance, variance_to_std)
@@ -341,6 +342,51 @@ def test_guard_accepts_the_honest_cases():
     assert assert_matches_support('QRF', np.linspace(0.1, 0.2, 5),
                                   np.linspace(1, 2, 5))
     assert assert_matches_support('svm', None, None)
+
+
+def test_single_distribution_has_no_epistemic_axis():
+    """NGBoost is one fit. Zero would read as a model certain of its own
+    parameters; absent reads as a model that was never asked."""
+    alea, epis, total = decompose_single_distribution(np.array([0.25, 4.0]))
+    assert np.allclose(alea, [0.25, 4.0])
+    assert epis is None
+    assert np.allclose(total, alea)
+    assert SUPPORT['ngboost'] == (PER_MOLECULE, NONE)
+    assert SUPPORT['NGBoost'] == (PER_MOLECULE, NONE)
+
+
+def test_a_variance_head_makes_a_constant_term_per_molecule():
+    """--loss heteroscedastic gives a network a per-molecule noise output, so
+    the guard must not stop a run for producing a better term than the table
+    claims. No queued job passes --loss (RERUN_PLAN.md 5.5a)."""
+    assert support('dnn_bnn_full') == (NONE, PER_MOLECULE)
+    assert support('dnn_bnn_full', 'heteroscedastic') == (PER_MOLECULE,
+                                                          PER_MOLECULE)
+    assert support('dnn_bnn_full', 'mse') == (NONE, PER_MOLECULE)
+    # A model with no epistemic axis at all does not acquire one from a loss.
+    assert support('svm', 'evidential') == (NONE, NONE)
+    assert assert_matches_support('dnn_bnn_full', np.linspace(0.1, 0.5, 5),
+                                  np.linspace(1, 2, 5),
+                                  loss_name='heteroscedastic')
+
+
+def test_the_plain_bayesian_networks_report_no_observation_noise():
+    """Kendall & Gal's epistemic-only model. Claiming otherwise would have
+    stopped every BNN run the moment the guard was wired in."""
+    alea, epis, total = decompose_sampling(np.array([[1.0, 2.0], [3.0, 2.0]]))
+    assert alea is None
+    assert np.allclose(total, epis)
+    for name in ('dnn_bnn_full', 'mlp_bnn_full', 'BNN-Full', 'MLP-BNN-Full'):
+        assert SUPPORT[name][0] == NONE, name
+    assert assert_matches_support('BNN-Full', None, np.linspace(1, 2, 5))
+
+
+def test_the_heteroscedastic_models_claim_both_terms_per_molecule():
+    for name in ('heteroscedastic_gp', 'het_gp_rbf',
+                 'dnn_bnn_full_variational_hetero',
+                 'mlp_bnn_full_variational_hetero',
+                 'Hetero-GP', 'Hetero-VBLL-Full', 'MLP-Hetero-VBLL-Full'):
+        assert SUPPORT[name] == (PER_MOLECULE, PER_MOLECULE), name
 
 
 def test_unknown_model_is_refused_by_name():

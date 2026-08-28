@@ -110,7 +110,7 @@ properties = {
     'G_a': 15, 'H_a': 14, 'U_a': 13, 'mu': 0, 'A': 16, 'B': 17, 'C': 18
 }
 
-bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'pdv', 'chemberta', 'mhggnn', 'avalon']
+bit_vectors = ['ecfp4', 'mpnn', 'sns', 'plec', 'smiles', 'randomized_smiles', 'pdv', 'chemberta', 'mhggnn', 'avalon']
 
 # Representations stored as 32-bit floats rather than bits or bytes, and therefore
 # the ones that must be standardised per feature before a model sees them. The
@@ -354,6 +354,7 @@ def parse_arguments():
     parser.add_argument("-k", "--k_domains", type=int, default=1, help="Number of domains for clustering (default is 1)")
     parser.add_argument("-s", "--split", type=str, default="scaffold", help="Method for splitting data (default is scaffold)")
     parser.add_argument("-c", "--clustering_method", type=str, default="Agglomerative", help="Method to cluster the chemical domain (default is Agglomerative)")
+    parser.add_argument("--max_vocab", type=int, default=30, help="Max vocab length of SMILES OHE generation (default is 30)")
     parser.add_argument("--custom_model", type=str, default=None, help="Filepath to custom PyTorch model in .pt file")
     parser.add_argument("--metadata_file", type=str, default=None, help="Filepath to custom model's metadata ie. hyperparameters")
     parser.add_argument("-f", "--filepath", type=str, default='../results/test.csv', help="Filepath to save raw results in csv (default is None)")
@@ -616,6 +617,7 @@ def build_scaffold_groups(smiles_canonical_list):
 def write_to_mmap(
     smiles_isomeric,
     smiles_canonical,
+    randomized_smiles,
     pdv,
     chemberta,
     mhggnn,
@@ -626,6 +628,7 @@ def write_to_mmap(
     molecular_representations,
     k_domains,
     sns_fp,
+    max_vocab,
     ecfp4=None,
 ):
     entry = b""
@@ -642,6 +645,15 @@ def write_to_mmap(
 
     # Encode property value (float)
     entry += struct.pack("f", property_value)
+
+    # Encode randomized SMILES (optional, with length prefix)
+    if "randomized_smiles" in molecular_representations:
+        if randomized_smiles:
+            randomized_smiles_bytes = randomized_smiles.encode("utf-8")
+            entry += struct.pack("I", len(randomized_smiles_bytes))
+            entry += randomized_smiles_bytes
+        else:
+            entry += struct.pack("I", 0)  # Zero length = missing
 
     # Sort & Slice substructure COUNTS, fixed length.
     #
@@ -878,6 +890,10 @@ def load_and_split_polaris(dataset_tuple, args, files):
         if not smiles_canonical:
             continue
         
+        smiles_randomized = None
+        if 'randomized_smiles' in args.molecular_representations:
+            smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
+        
         sns_fp = None
         if 'sns' in args.molecular_representations:
             # Featurise THIS row's molecule.
@@ -913,9 +929,9 @@ def load_and_split_polaris(dataset_tuple, args, files):
         if 'ecfp4' in args.molecular_representations:
             ecfp4 = ecfp4_fingerprint(smiles_canonical)
 
-        write_to_mmap(smiles_isomeric, smiles_canonical, pdv, chemberta, mhggnn, avalon,
+        write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv, chemberta, mhggnn, avalon,
                      target_list[local_idx], category, files,
-                     args.molecular_representations, args.k_domains, sns_fp,
+                     args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
                      ecfp4=ecfp4)
         written_canonical.append(smiles_canonical)
     
@@ -1001,6 +1017,7 @@ def split_qm9(qm9, args, files):
     for index, data in enumerate(qm9[:args.sample_size]):
         smiles_isomeric = data.smiles
         smiles_canonical = None
+        smiles_randomized = None
         mol = None
 
         category = "excluded"
@@ -1020,13 +1037,18 @@ def split_qm9(qm9, args, files):
         # every pass.
         smiles_canonical = None
 
-        mol = Chem.MolFromSmiles(smiles_isomeric)
-        if not mol:
-            continue
+        if smiles_canonical is None or 'randomized_smiles' in args.molecular_representations:
+            mol = Chem.MolFromSmiles(smiles_isomeric)
+            if not mol:
+                continue
 
-        smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
-        if smiles_canonical is None:
-            continue
+            if not smiles_canonical:
+                smiles_canonical = Chem.MolToSmiles(mol, isomericSmiles=False)
+                if smiles_canonical is None:
+                    continue
+
+            if 'randomized_smiles' in args.molecular_representations:
+                smiles_randomized = Chem.MolToSmiles(mol, isomericSmiles=False, doRandom=True)
 
         sns_fp = None
         if 'sns' in args.molecular_representations:
@@ -1057,9 +1079,11 @@ def split_qm9(qm9, args, files):
             ecfp4 = ecfp4_fingerprint(smiles_canonical)
 
         if smiles_canonical and not (category == "excluded"):
-            write_to_mmap(smiles_isomeric, smiles_canonical, pdv,
+            if 'randomized_smiles' in args.molecular_representations and not smiles_randomized:
+                continue
+            write_to_mmap(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
                           chemberta, mhggnn, avalon, data.y.item(), category, files,
-                          args.molecular_representations, args.k_domains, sns_fp,
+                          args.molecular_representations, args.k_domains, sns_fp, args.max_vocab,
                           ecfp4=ecfp4)
 
             written_canonical.append(smiles_canonical)
@@ -1462,11 +1486,10 @@ def load_custom_model(model_path):
 # means the binary vector. A job written against the old naming must stop and
 # be read by a person, not run and produce rows that look like the others.
 DROPPED_REPS = {"smiles", "randomized_smiles", "continuous_pdv"}
-# All three are DELETED, not disabled. They stay in this set so a job script that
-# still names one stops with a message instead of a KeyError two functions later.
 
 PARSEABLE_REPS = {
-    "sns", "pdv", "chemberta", "mhggnn", "avalon", "ecfp4",
+    "randomized_smiles", "sns", "pdv",
+    "chemberta", "mhggnn", "avalon", "smiles", "ecfp4",
     # "graph" contributes no bytes to the record -- the graph models read the
     # dataset object and use parse_mmap only to pull the processed targets back
     # out. It still has to be listed: `-r graph` puts it in
@@ -1539,6 +1562,19 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
             if logging:
                 print(f"[{entry}] target_value: {target_value}")
 
+            # --- randomized SMILES (length-prefixed) ---
+            randomized_smiles = None
+            if "randomized_smiles" in molecular_representations:
+                rand_len_bytes = mmap_file.read(4)
+                rand_len = struct.unpack("I", rand_len_bytes)[0]
+                if rand_len > 0:
+                    rand_bytes = mmap_file.read(rand_len)
+                    randomized_smiles = rand_bytes.decode("utf-8")
+                else:
+                    rand_bytes = b""
+                if logging:
+                    print(f"[{entry}] randomized_smiles: {randomized_smiles}")
+
             # --- sns_fp ---
             if "sns" in molecular_representations:
                 sns_bytes = mmap_file.read(SNS_RECORD_BYTES)
@@ -1602,6 +1638,32 @@ def parse_mmap(mmap_file, entry_count, rep, molecular_representations, k_domains
                 x_data.append(np.concatenate([f for f in feature_vector if f is not None]))
                 y_data.append(processed_target)
                 y_data_original.append(target_value)
+
+            # --- SMILES OHE ---
+            if "smiles" in molecular_representations:
+                ohe_len_bytes = mmap_file.read(4)
+                ohe_len = struct.unpack("I", ohe_len_bytes)[0]
+                packed = mmap_file.read(ohe_len)
+                if rep == "smiles":
+                    smiles_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
+                    x_data.append(smiles_ohe)
+                    y_data.append(processed_target)
+                    y_data_original.append(target_value)
+                    if logging:
+                        print(f"[{entry}] smiles_ohe: {smiles_ohe}")
+
+            # --- randomized SMILES OHE ---
+            if "randomized_smiles" in molecular_representations:
+                ohe_len_bytes = mmap_file.read(4)
+                ohe_len = struct.unpack("I", ohe_len_bytes)[0]
+                packed = mmap_file.read(ohe_len)
+                if rep == "randomized_smiles":
+                    rand_ohe = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
+                    x_data.append(rand_ohe)
+                    y_data.append(processed_target)
+                    y_data_original.append(target_value)
+                    if logging:
+                        print(f"[{entry}] randomized_ohe: {rand_ohe}")
 
             # --- ECFP4 fingerprint ---
             if "ecfp4" in molecular_representations:
@@ -1745,12 +1807,8 @@ def run_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, 
             return train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, y_test_original, trial,
                                          domain_labels_train=domain_labels_train, domain_labels_val=domain_labels_val, domain_labels_test=domain_labels_test, train_noise=train_noise)
 
-        # The recurrent models were only ever dispatched on one-hot SMILES and
-        # randomized SMILES, both deleted on 2026-08-28 (RERUN_PLAN.md 2.24), so
-        # this branch could not be reached by any representation that still
-        # exists. `train_rnn_variant_model` is left in models.py.
-        # elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
-        #     return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial, train_noise=train_noise)
+        elif model_type in ["rnn", "gru"] and rep in ['smiles', 'randomized_smiles']:
+            return train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, model_type, args, s, rep, iteration, iteration_seed, file_no, trial, train_noise=train_noise)
 
         # COMMENTED OUT 2026-08-28, on the author's instruction: conformal is not
         # used. It is in EXCLUDED_MODELS in the job generator, the figure script
@@ -2546,6 +2604,7 @@ def process_and_run(args, iteration, iteration_seed, file_no, train_idx, test_id
         'train_count': len(train_idx),
         'test_count': len(test_idx),
         'val_count': len(val_idx),
+        'max_vocab': args.max_vocab,
         'file_no': file_no,
         'molecular_representations': args.molecular_representations,
         'k_domains': args.k_domains,

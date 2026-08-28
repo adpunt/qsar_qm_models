@@ -312,10 +312,144 @@ fn the_configuration_path_has_no_default() {
     );
 }
 
-// The randomized-SMILES field had a guard here until 2026-08-28. One-hot SMILES
-// and randomized SMILES were deleted that day on the author's instruction
-// (RERUN_PLAN.md 2.24) -- the tokenizer, the vocabulary, the record fields and
-// the recurrent-model dispatch that was the only thing reading them -- so the
-// field it guarded no longer exists to be written the wrong way. The guard was
-// added the same morning, for a real misalignment; it is removed rather than
-// left failing, because a test that cannot pass is not a guard.
+/// The randomized-SMILES field, in the two states the record format allows.
+///
+/// Nothing separates one molecule from the next in this file. The reader consumes
+/// four bytes of length whenever `randomized_smiles` is among the representations,
+/// and copes with a length of zero; the writer used to emit those four bytes only
+/// when the molecule actually had one, so the two sides disagreed about the shape
+/// of a record (RERUN_PLAN.md 2.19). The writer's condition now mirrors the
+/// reader's exactly.
+///
+/// A molecule with no randomized SMILES cannot be one-hot encoded against the
+/// vocabulary either. That used to be an `unwrap()`, which panicked with no
+/// message and no molecule name; it now says which molecule and why. Writing an
+/// all-zero row instead would put a molecule with no features into the training
+/// column under its own name, which is the failure this refuses.
+///
+/// Nothing in the study takes either path -- the representation is refused by name
+/// in `process_and_train.py`, and QM9 drops molecules with no randomized SMILES
+/// before writing -- but the record stream is the one thing that cannot survive
+/// misalignment.
+#[test]
+fn the_randomized_smiles_field_is_written_the_way_the_reader_reads_it() {
+    fn write(dir: &Path, name: &str, file_no: usize, rows: &[(&str, f32, Option<&str>)]) {
+        let mut out: Vec<u8> = Vec::new();
+        for (smiles, y, randomized) in rows {
+            let b = smiles.as_bytes();
+            out.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            out.extend_from_slice(b);
+            out.extend_from_slice(&(b.len() as u32).to_le_bytes());
+            out.extend_from_slice(b);
+            out.extend_from_slice(&y.to_le_bytes());
+            let r = randomized.map(|s| s.as_bytes()).unwrap_or(&[]);
+            out.extend_from_slice(&(r.len() as u32).to_le_bytes());
+            out.extend_from_slice(r);
+            out.extend_from_slice(&ecfp4_block(smiles, false));
+        }
+        fs::write(dir.join(format!("{}_{}.mmap", name, file_no)), out).unwrap();
+    }
+
+    /// What the reader expects a record to be, with this representation on. The
+    /// one-hot block is appended after these bytes, so this is a floor, not the
+    /// whole record -- a missing length prefix takes the total BELOW it.
+    fn floor(rows: &[(&str, f32, Option<&str>)]) -> usize {
+        rows.iter()
+            .map(|(s, _, r)| {
+                let n = s.len();
+                4 + n + 4 + n + 4 + 4 + r.map(|x| x.len()).unwrap_or(0) + 256
+            })
+            .sum()
+    }
+
+    fn run(tag: &str, file_no: usize, rows: &[(&str, f32, Option<&str>)])
+        -> (PathBuf, std::process::Output)
+    {
+        let dir = std::env::temp_dir()
+            .join(format!("writer_guards_rand_{}_{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let held: Vec<(&str, f32, Option<&str>)> = vec![("CCCCO", 4.0, Some("OCCCC"))];
+        write(&dir, "train", file_no, rows);
+        write(&dir, "val", file_no, &held);
+        write(&dir, "test", file_no, &held);
+        let config = serde_json::json!({
+            "sample_size": rows.len() + held.len() * 2,
+            "noise": true,
+            "train_count": rows.len(),
+            "test_count": held.len(),
+            "val_count": held.len(),
+            "max_vocab": 30,
+            "file_no": file_no,
+            "molecular_representations": ["ecfp4", "randomized_smiles"],
+            "k_domains": 1,
+            "logging": false,
+            "regression": true,
+            "normalize": true,
+            "uncertainty": false,
+        });
+        fs::write(
+            dir.join(format!("config_{}.json", file_no)),
+            serde_json::to_string(&config).unwrap(),
+        )
+        .unwrap();
+        let out = Command::new(BIN)
+            .current_dir(&dir)
+            .args(["--seed", "42", "--config", &format!("config_{}.json", file_no)])
+            .args(["--model", "rf", "--noise-level", "0.3"])
+            .args(["--noise-shape", "gaussian", "--noise-targeting", "uniform"])
+            .output()
+            .unwrap();
+        (dir, out)
+    }
+
+    // Every molecule has one: the run completes and no record is short.
+    let present: Vec<(&str, f32, Option<&str>)> = vec![
+        ("CCCCO", 4.0, Some("OCCCC")),
+        ("CCCCN", 4.5, Some("NCCCC")),
+        ("CCCCC", 5.0, Some("CCCCC")),
+        ("COCCO", 5.5, Some("OCCOC")),
+    ];
+    let (dir, out) = run("present", 23, &present);
+    assert!(
+        out.status.success(),
+        "the run failed with every randomized SMILES present:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let written = fs::read(dir.join("train_23.mmap")).unwrap().len();
+    assert!(
+        written >= floor(&present),
+        "the training column is {} bytes, below the {} the reader expects before \
+         the one-hot block -- a record is short and every molecule after it \
+         decodes from the wrong offset",
+        written,
+        floor(&present)
+    );
+    let _ = fs::remove_dir_all(&dir);
+
+    // One molecule has none: the run stops, and says which molecule.
+    let missing: Vec<(&str, f32, Option<&str>)> = vec![
+        ("CCCCO", 4.0, Some("OCCCC")),
+        ("CCCCN", 4.5, Some("NCCCC")),
+        ("CCCCC", 5.0, None),
+        ("COCCO", 5.5, Some("OCCOC")),
+    ];
+    let (dir, out) = run("missing", 24, &missing);
+    assert!(
+        !out.status.success(),
+        "a molecule with no randomized SMILES was written anyway; an all-zero \
+         one-hot row would be a molecule with no features under its own name"
+    );
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("CCCCC") && said.contains("randomized SMILES"),
+        "the refusal does not name the molecule or say what is missing:\n{}",
+        said
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

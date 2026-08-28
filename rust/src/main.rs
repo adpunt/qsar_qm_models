@@ -1,5 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use regex::Regex;
 use std::io::{self, BufReader, BufRead, Read, Seek, SeekFrom};
+use ndarray::Array2;
 use std::fs::File;
 use serde::{Deserialize, Serialize};
 use clap::{Arg, Command, ArgAction};
@@ -7,6 +10,7 @@ use num_traits::{Float, FromPrimitive};
 use std::iter::Sum;
 use rand_distr::{ChiSquared, Distribution, StandardNormal};
 use std::io::Write;
+use std::cmp::Reverse;
 use std::io::BufWriter;
 use std::fs::{OpenOptions, remove_file, rename};
 use rand::{Rng, SeedableRng};
@@ -21,6 +25,23 @@ use cxx::CxxVector;
 
 const DELIMITER: u8 = 0x1F;  // ASCII 31 (Unit Separator)
 
+struct SmilesTokenizer {
+    regex: Regex,
+}
+
+impl SmilesTokenizer {
+    fn new() -> Self {
+        let regex_pattern = r"(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\|/|:|~|@|\?|>>?|\*|\$|%[0-9]{2}|[0-9])";
+        SmilesTokenizer {
+            regex: Regex::new(regex_pattern).unwrap(),
+        }
+    }
+
+    fn tokenize(&self, smiles: &str) -> Vec<String> {
+        self.regex.find_iter(smiles).map(|mat| mat.as_str().to_owned()).collect()
+    }
+}
+
 #[derive(Deserialize, Debug)]
 struct Config {
     sample_size: usize,
@@ -28,6 +49,7 @@ struct Config {
     train_count: usize, 
     test_count: usize,
     val_count: usize,
+    max_vocab: usize,
     file_no: usize,
     molecular_representations: Vec<String>,
     k_domains: usize, 
@@ -41,6 +63,7 @@ struct Config {
 struct SmilesData {
     isomeric_smiles: String,
     canonical_smiles: String,
+    randomized_smiles: Option<String>,
     target_value: f32,
     // Sort & Slice: 1024 substructure COUNTS as u16, not one presence bit per
     // substructure. The Python writer flattened the counts to bits and cast to
@@ -2130,6 +2153,20 @@ fn read_smiles_data(
     reader.read_exact(&mut prop_buf).ok()?;
     let target_value = f32::from_le_bytes(prop_buf);
 
+    // Read randomized_smiles if applicable
+    let mut randomized_smiles = None;
+    if molecular_representations.contains(&"randomized_smiles".to_string()) {
+        let mut len_buf = [0u8; 4];
+        reader.read_exact(&mut len_buf).ok()?;
+        let rand_len = u32::from_le_bytes(len_buf) as usize;
+        if rand_len > 0 {
+            let mut rand_buf = vec![0u8; rand_len];
+            reader.read_exact(&mut rand_buf).ok()?;
+            randomized_smiles = String::from_utf8(rand_buf).ok();
+        }
+    }
+
+    // Read sns_fp if applicable
     let mut sns_buf = [0u8; 2048];
     if molecular_representations.contains(&"sns".to_string()) {
         reader.read_exact(&mut sns_buf).ok()?;
@@ -2169,6 +2206,7 @@ fn read_smiles_data(
     Some(SmilesData {
         isomeric_smiles,
         canonical_smiles,
+        randomized_smiles,
         target_value,
         sns_buf,
         pdv_buf,
@@ -2265,6 +2303,10 @@ fn write_data(
     mean: f32,
     std_dev: f32,
     plan: &NoisePlan,
+    tokenizer: &SmilesTokenizer,
+    vocab: &HashMap<String, usize>,
+    vocab_size: usize,
+    max_sequence_length: usize,
     data_count: usize,
     log_writes: bool,
     apply_noise: bool,
@@ -2337,6 +2379,54 @@ fn write_data(
             if log_writes {
                 println!("property_value: {}", smiles_data.target_value);
                 println!("property_value bytes: {:02X?}", target_bytes);
+            }
+
+            // Write randomized_smiles. The LENGTH GOES OUT EITHER WAY.
+            //
+            // There is nothing between one molecule and the next in this file, so
+            // a field that is sometimes four bytes and sometimes nothing is not a
+            // missing field -- it moves every molecule after it. The reader
+            // consumes four bytes whenever this representation was asked for
+            // (read_smiles_data), and the Python writer has always emitted a zero
+            // for a molecule that has none (process_and_train.py). This used to
+            // write nothing at all, so one molecule without a randomized SMILES
+            // put the rest of the file out of step, silently.
+            //
+            // No molecule in the study takes this path -- QM9 drops molecules with
+            // no randomized SMILES before writing, and the representation is
+            // refused by name anyway -- so nothing that has been run changes.
+            // The condition MIRRORS the reader's exactly -- the config, not
+            // whether this molecule happens to have one. Writing the field when
+            // the reader will not read it moves the file the other way.
+            if config
+                .molecular_representations
+                .contains(&"randomized_smiles".to_string())
+            {
+                let bytes = smiles_data
+                    .randomized_smiles
+                    .as_ref()
+                    .map(|s| s.as_bytes())
+                    .unwrap_or(&[]);
+                let len_bytes = (bytes.len() as u32).to_le_bytes();
+                writer.write_all(&len_bytes)?;
+                writer.write_all(bytes)?;
+                if log_writes {
+                    println!(
+                        "randomized_smiles: {}",
+                        smiles_data.randomized_smiles.as_deref().unwrap_or("(none)")
+                    );
+                    println!("randomized_smiles_len bytes: {:02X?}", len_bytes);
+                    println!("randomized_smiles bytes: {:02X?}", bytes);
+                }
+            }
+
+            // Write sns_fp
+            if config.molecular_representations.contains(&"sns".to_string()) {
+                let sns_fp = smiles_data.sns_buf;
+                writer.write_all(&sns_fp)?;
+                if log_writes {
+                    println!("sns_fp: {:?}", sns_fp);
+                }
             }
 
             // pdv (800 bytes = 200 float32)
@@ -2458,6 +2548,62 @@ fn write_data(
                 }
             }
 
+            // Write smiles or randomized_smiles OHE if used
+            for smiles_type in ["smiles", "randomized_smiles"] {
+                if config.molecular_representations.contains(&smiles_type.to_string()) {
+                    let smiles_string = if smiles_type == "smiles" {
+                        &smiles_data.canonical_smiles
+                    } else {
+                        // A molecule with no randomized SMILES cannot be encoded
+                        // against the vocabulary, and an all-zero row would be a
+                        // silent lie in a column a model then trains on. The
+                        // record format allows the field to be empty -- the
+                        // Python writer emits a zero length for it and the reader
+                        // yields nothing -- so this says which molecule and stops,
+                        // rather than unwrapping and panicking with no name in the
+                        // message (RERUN_PLAN.md 2.19).
+                        match smiles_data.randomized_smiles.as_ref() {
+                            Some(s) => s,
+                            None => panic!(
+                                "molecule {:?} has no randomized SMILES, but \
+                                 `randomized_smiles` is among the representations. \
+                                 It cannot be one-hot encoded, and writing an \
+                                 all-zero row would put a molecule with no features \
+                                 into the training column under its own name.",
+                                smiles_data.canonical_smiles
+                            ),
+                        }
+                    };
+
+                    let smiles_ohe = smiles_to_ohe(
+                        smiles_string,
+                        tokenizer,
+                        vocab,
+                        vocab_size,
+                        max_sequence_length,
+                    );
+
+                    let bit_packed_len = (smiles_ohe.len() + 7) / 8;
+                    let mut bit_packed_data = vec![0u8; bit_packed_len];
+                    for (i, &bit) in smiles_ohe.iter().enumerate() {
+                        let byte_index = i / 8;
+                        let bit_offset = i % 8;
+                        if bit > 0.0 {
+                            bit_packed_data[byte_index] |= 1 << bit_offset;
+                        }
+                    }
+
+                    let len_bytes = (bit_packed_data.len() as u32).to_le_bytes();
+                    writer.write_all(&len_bytes)?;
+                    writer.write_all(&bit_packed_data)?;
+                    if log_writes {
+                        println!("{}: {:?}", smiles_type, bit_packed_data);
+                        println!("{}_ohe_len bytes: {:02X?}", smiles_type, len_bytes);
+                        println!("{}_ohe bytes: {:02X?}", smiles_type, bit_packed_data);
+                    }
+                }
+            }
+
             // Write ECFP4 fingerprint. Always 256 bytes, always written — the
             // block was prepared at the top of this record and a failure has
             // already been recorded against `failures`.
@@ -2487,6 +2633,19 @@ fn tanimoto_distance(fp1: &Vec<u64>, fp2: &Vec<u64>) -> f32 {
     1.0 - (intersection as f32 / union as f32)
 }
 
+fn smiles_to_ohe(smiles: &str, tokenizer: &SmilesTokenizer, vocab: &HashMap<String, usize>, vocab_size: usize, max_length: usize) -> Array2<f32> {
+    let tokens = tokenizer.tokenize(smiles);
+    let mut ohe = Array2::<f32>::zeros((max_length, vocab_size));
+    for (i, token) in tokens.iter().enumerate().take(max_length) {
+        if let Some(&index) = vocab.get(token) {
+            if i < max_length {
+                ohe[(i, index)] = 1.0;
+            }
+        }
+    }
+    ohe
+}
+
 fn mean_absolute_error<T: Float + FromPrimitive + Sum<T>>(y_true: &[T], y_pred: &[T]) -> T {
     y_true.iter().zip(y_pred.iter())
           .map(|(true_val, pred_val)| (*true_val - *pred_val).abs())
@@ -2512,22 +2671,48 @@ fn r2_score<T: Float + FromPrimitive + Sum<T>>(y_true: &[T], y_pred: &[T]) -> T 
     T::one() - (ss_res / ss_tot)
 }
 
-/// The standardisation constants.
+fn count_token_frequencies(smiles_list: &[String], tokenizer: &SmilesTokenizer) -> HashMap<String, usize> {
+    let mut token_counts: HashMap<String, usize> = HashMap::new();
+    for smiles in smiles_list {
+        let tokens = tokenizer.tokenize(smiles);
+        for token in tokens {
+            *token_counts.entry(token).or_insert(0) += 1;
+        }
+    }
+    token_counts
+}
+
+fn trim_vocab<T: Eq + Hash + Ord + Clone>(token_counts: HashMap<T, usize>, max_vocab_size: usize) -> HashMap<T, usize> {
+    let mut token_counts_vec: Vec<(T, usize)> = token_counts.into_iter().collect();
+
+    // Sort tokens by count, descending
+    token_counts_vec.sort_by_key(|&(_, count)| Reverse(count));
+
+    // Truncate to keep only the top max_vocab_size tokens
+    token_counts_vec.truncate(max_vocab_size);
+
+    let trimmed_vocab: HashMap<T, usize> = token_counts_vec.into_iter()
+        .enumerate()
+        .map(|(idx, (token, _))| (token, idx))
+        .collect();
+
+    trimmed_vocab
+}
+
+/// Vocabulary, sequence length, and the standardisation constants.
 ///
-/// They come from the CLEAN training labels. They used to come from the noisy
-/// ones (RERUN_PLAN.md §2.4), which made the standardised target scale a function
-/// of the noise level: the same nominal amount of noise produced a different
-/// learning problem at every level, and the paper's claim that noise was added
-/// "on normalized data" was false besides. Nothing here sees the noise now.
-///
-/// It also used to build the one-hot SMILES vocabulary and measure the longest
-/// token sequence, and return both. One-hot SMILES and randomized SMILES were
-/// deleted on 2026-08-28 (RERUN_PLAN.md §2.24), so this computes the two numbers
-/// it is named for and nothing else.
+/// The constants come from the CLEAN training labels. They used to come from the
+/// noisy ones (RERUN_PLAN.md §2.4), which made the standardised target scale a
+/// function of the noise level: the same nominal amount of noise produced a
+/// different learning problem at every level, and the paper's claim that noise was
+/// added "on normalized data" was false besides. Nothing here sees the noise now.
 fn generate_aggregate_stats(
     config: &Config,
-) -> io::Result<(f32, f32)> {
+) -> io::Result<(f32, f32, usize, HashMap<String, usize>, usize)> {
+    let tokenizer = SmilesTokenizer::new();
+    let mut smiles_list: Vec<String> = Vec::new();
     let mut y_values: Vec<f32> = Vec::new();
+    let mut max_sequence_length = 0usize;
 
     let train_file = File::open(format!("train_{}.mmap", config.file_no))?;
     let mut reader = BufReader::new(train_file);
@@ -2535,9 +2720,19 @@ fn generate_aggregate_stats(
 
     for _index in 0..config.train_count {
         if let Some(smiles_data) = read_smiles_data(&mut reader, config.molecular_representations.clone(), config.k_domains) {
+            if ["smiles", "randomized_smiles"].iter().any(|r| config.molecular_representations.contains(&r.to_string())) {
+                smiles_list.push(smiles_data.canonical_smiles.clone());
+                let tokens = tokenizer.tokenize(&smiles_data.canonical_smiles);
+                max_sequence_length = std::cmp::max(max_sequence_length, tokens.len());
+            }
+
             y_values.push(smiles_data.target_value);
         }
     }
+
+    let token_counts = count_token_frequencies(&smiles_list, &tokenizer);
+    let trimmed_vocab = trim_vocab(token_counts, config.max_vocab);
+    let vocab_size = trimmed_vocab.len();
 
     let mean: f32 = y_values.iter().sum::<f32>() / y_values.len() as f32;
     let variance: f32 = y_values.iter().map(|value| {
@@ -2546,21 +2741,26 @@ fn generate_aggregate_stats(
     }).sum::<f32>() / y_values.len() as f32;
     let std_deviation: f32 = variance.sqrt();
 
-    Ok((mean, std_deviation))
+    Ok((mean, std_deviation, vocab_size, trimmed_vocab, max_sequence_length))
 }
 
 fn preprocess_data(
     config: &Config,
     mean: f32,
     std_dev: f32,
+    vocab_size: usize,
+    vocab: &HashMap<String, usize>,
     train_plan: &NoisePlan,
     val_plan: &NoisePlan,
     test_plan: &NoisePlan,
     noise_validation: bool,
+    max_sequence_length: usize,
     provenance_path: &str,
     failures_path: &str,
     allow_featurisation_failures: bool,
 ) -> io::Result<()> {
+    let tokenizer = SmilesTokenizer::new();
+
     // Molecules whose fingerprint could not be computed. Collected across all
     // three splits and dealt with at the end of this function.
     let mut failures: Vec<FeaturisationFailure> = Vec::new();
@@ -2610,6 +2810,10 @@ noise_pattern_raw,y_noisy_raw,y_written"
         mean,
         std_dev,
         train_plan,
+        &tokenizer,
+        vocab,
+        vocab_size,
+        max_sequence_length,
         config.train_count,
         config.logging,
         true,   // apply_noise
@@ -2636,6 +2840,10 @@ noise_pattern_raw,y_noisy_raw,y_written"
         mean,
         std_dev,
         val_plan,
+        &tokenizer,
+        vocab,
+        vocab_size,
+        max_sequence_length,
         config.val_count,
         config.logging,
         // Decision 3, settled 2026-08-26: validation labels carry their own noise,
@@ -2666,6 +2874,10 @@ noise_pattern_raw,y_noisy_raw,y_written"
         mean,
         std_dev,
         test_plan,
+        &tokenizer,
+        vocab,
+        vocab_size,
+        max_sequence_length,
         config.test_count,
         config.logging,
         // The test split is NEVER noised. This is the original bug's fix and it is
@@ -3234,16 +3446,20 @@ fn main() -> io::Result<()> {
     write_noise_manifest(&manifest_path, &plan, &spec, &val_plan, noise_validation)?;
 
     // Standardisation constants come from the CLEAN training labels only.
-    let (mean, std_dev) = generate_aggregate_stats(&config)?;
+    let (mean, std_dev, vocab_size, vocab, max_sequence_length) =
+        generate_aggregate_stats(&config)?;
 
     preprocess_data(
         &config,
         mean,
         std_dev,
+        vocab_size,
+        &vocab,
         &plan,
         &val_plan,
         &test_plan,
         noise_validation,
+        max_sequence_length,
         &provenance_path,
         &failures_path,
         allow_featurisation_failures,

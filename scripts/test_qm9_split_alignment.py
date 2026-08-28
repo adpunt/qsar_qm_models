@@ -43,11 +43,9 @@ SAMPLE_SIZE = 200
 def _recording_writer(store):
     """Stand in for write_to_mmap and remember what each row held."""
 
-    # Mirrors write_to_mmap, which lost `randomized_smiles` and `max_vocab` on
-    # 2026-08-28 when one-hot SMILES and randomized SMILES were deleted.
-    def write(smiles_isomeric, smiles_canonical, pdv,
+    def write(smiles_isomeric, smiles_canonical, smiles_randomized, pdv,
               chemberta, mhggnn, avalon, y, category, files,
-              reps, k_domains, sns_fp, ecfp4=None):
+              reps, k_domains, sns_fp, max_vocab, ecfp4=None):
         store.append((category, smiles_isomeric, float(y)))
 
     return write
@@ -72,7 +70,7 @@ def the_returned_dataset_is_the_one_the_indices_index():
     try:
         args = types.SimpleNamespace(
             split="scaffold", sample_size=SAMPLE_SIZE,
-            molecular_representations=[], k_domains=1,
+            molecular_representations=[], k_domains=1, max_vocab=30,
             logging=False, target="homo_lumo_gap",
         )
         torch.manual_seed(0)

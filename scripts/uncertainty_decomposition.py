@@ -75,48 +75,102 @@ PER_MOLECULE = 'per_molecule'
 CONSTANT = 'constant'
 NONE = 'none'
 
+# CORRECTED 2026-08-28, when the module was wired into the two runners. Three
+# families claimed a term the queued configuration does not produce, and
+# `assert_matches_support` would have stopped every one of their runs. The table
+# now says what the pipelines ACTUALLY write; where that is less than the plan
+# wants, the gap is recorded in `RERUN_PLAN.md` 5.5g rather than asserted away.
+#
+#   NGBoost      -- one fit, so there is no ensemble to disagree with itself and
+#                   no model-uncertainty axis at all. `decompose_seed_ensemble`
+#                   gives it one, at the price of as many fits as seeds; nobody
+#                   has agreed to pay that, so the queued model has NONE.
+#   BNN-alpha,
+#   BNN-beta     -- a plain Bayesian network predicts a mean and nothing else,
+#                   so it has no observation-noise term to report. Kendall &
+#                   Gal's epistemic-only model.
+#   rf, qrf      -- both terms per molecule, from `decompose_forest`, and only
+#                   because `min_samples_leaf` is now 5 (RERUN_PLAN.md 5.5c).
 SUPPORT = {
     # QM9 roster
     'rf':                        (PER_MOLECULE, PER_MOLECULE),
     'qrf':                       (PER_MOLECULE, PER_MOLECULE),
-    'ngboost':                   (PER_MOLECULE, PER_MOLECULE),
+    'ngboost':                   (PER_MOLECULE, NONE),
     'dnn':                       (NONE, NONE),
     'mlp':                       (NONE, NONE),
-    'dnn_bnn_full':              (PER_MOLECULE, PER_MOLECULE),
-    'mlp_bnn_full':              (PER_MOLECULE, PER_MOLECULE),
+    'dnn_bnn_full':              (NONE, PER_MOLECULE),
+    'mlp_bnn_full':              (NONE, PER_MOLECULE),
     'dnn_bnn_full_variational':  (CONSTANT, PER_MOLECULE),
     'mlp_bnn_full_variational':  (CONSTANT, PER_MOLECULE),
+    # The variational layer with `heteroscedastic=True`, which predicts the
+    # observation noise FROM THE INPUT (RERUN_PLAN.md 5.5f). Same base networks,
+    # different aleatoric term, so it is a different row name.
+    'dnn_bnn_full_variational_hetero': (PER_MOLECULE, PER_MOLECULE),
+    'mlp_bnn_full_variational_hetero': (PER_MOLECULE, PER_MOLECULE),
     'gauche':                    (CONSTANT, PER_MOLECULE),
     'gauche_rbf':                (CONSTANT, PER_MOLECULE),
     'heteroscedastic_gp':        (PER_MOLECULE, PER_MOLECULE),
+    # The names the heteroscedastic Gaussian process actually WRITES, which
+    # carry the kernel. The roster label above is what the job generator emits.
+    'het_gp_rbf':                (PER_MOLECULE, PER_MOLECULE),
+    'het_gp_tanimoto':           (PER_MOLECULE, PER_MOLECULE),
+    'het_gp_matern':             (PER_MOLECULE, PER_MOLECULE),
     'xgboost':                   (NONE, NONE),
     'lgb':                       (NONE, NONE),
     'svm':                       (NONE, NONE),
     # Laboratory roster
+    'RF':                        (PER_MOLECULE, PER_MOLECULE),
     'QRF':                       (PER_MOLECULE, PER_MOLECULE),
-    'NGBoost':                   (PER_MOLECULE, PER_MOLECULE),
+    'NGBoost':                   (PER_MOLECULE, NONE),
     'GP':                        (CONSTANT, PER_MOLECULE),
+    'GP-Tanimoto':               (CONSTANT, PER_MOLECULE),
     'Hetero-GP':                 (PER_MOLECULE, PER_MOLECULE),
-    'BNN-Full':                  (PER_MOLECULE, PER_MOLECULE),
-    'MLP-BNN-Full':              (PER_MOLECULE, PER_MOLECULE),
+    'BNN-Full':                  (NONE, PER_MOLECULE),
+    'MLP-BNN-Full':              (NONE, PER_MOLECULE),
     'VBLL-Full':                 (CONSTANT, PER_MOLECULE),
     'MLP-VBLL-Full':             (CONSTANT, PER_MOLECULE),
+    'Hetero-VBLL-Full':          (PER_MOLECULE, PER_MOLECULE),
+    'MLP-Hetero-VBLL-Full':      (PER_MOLECULE, PER_MOLECULE),
+    'DNN':                       (NONE, NONE),
+    'MLP':                       (NONE, NONE),
+    'XGBoost':                   (NONE, NONE),
+    'LightGBM':                  (NONE, NONE),
+    'SVM':                       (NONE, NONE),
 }
+
+# Two losses give a network a second output that predicts the observation noise
+# for each molecule, so a model whose aleatoric term is absent or constant under
+# the default loss has a PER-MOLECULE one under either of them. No queued job
+# passes `--loss` today (RERUN_PLAN.md 5.5a point 1), but a run that did would
+# otherwise be stopped by the guard for producing BETTER data than the table
+# claims.
+LOSSES_WITH_A_VARIANCE_HEAD = ('heteroscedastic', 'evidential')
 
 
 class DecompositionError(RuntimeError):
     """A split that cannot be trusted. Never caught and turned into a blank row."""
 
 
-def support(model_name):
-    """(aleatoric behaviour, epistemic behaviour) for a queued model name."""
+def support(model_name, loss_name=None):
+    """(aleatoric behaviour, epistemic behaviour) for a queued model name.
+
+    `loss_name` is the loss the model was actually FITTED with. Two of them give
+    the network a second output that predicts the observation noise per
+    molecule, which turns an absent or constant aleatoric term into a
+    per-molecule one -- see LOSSES_WITH_A_VARIANCE_HEAD. Passing it keeps the
+    guard live in that configuration instead of stopping a run for producing a
+    better term than the table claims.
+    """
     try:
-        return SUPPORT[model_name]
+        alea, epis = SUPPORT[model_name]
     except KeyError:
         raise DecompositionError(
             f"{model_name!r} has no entry in SUPPORT, so nothing knows whether "
             f"its aleatoric term varies per molecule or is one number per fit. "
             f"Add it rather than letting the row be written unlabelled.")
+    if loss_name in LOSSES_WITH_A_VARIANCE_HEAD and epis != NONE:
+        alea = PER_MOLECULE
+    return alea, epis
 
 
 def _as_1d(a, name):
@@ -295,6 +349,30 @@ def decompose_hetero_gp(latent_variance, predicted_noise_variance):
     return aleatoric, epistemic, aleatoric + epistemic
 
 
+def decompose_single_distribution(predicted_variance):
+    """A model that predicts a distribution per molecule from ONE fit -- NGBoost.
+
+    There is no second fit to disagree with, so there is no model-uncertainty
+    axis and the epistemic term is absent rather than zero. Zero would read as a
+    model that is certain about its own parameters; None reads as a model that
+    was never asked.
+
+    `predicted_variance` is a VARIANCE. NGBoost's `pred_dist().scale` is a
+    standard deviation and must be squared before it reaches here -- squaring it
+    at the call site is where the repository's earlier
+    `decompose_uncertainty_distributional` went wrong, because it returned the
+    scale untouched and every consumer added it to a variance.
+
+    `decompose_seed_ensemble` gives the same model an epistemic term, at the
+    price of one fit per seed. Nothing in either roster pays that today.
+
+    Returns (aleatoric_var, None, total_var).
+    """
+    aleatoric = _check_nonneg(_as_1d(predicted_variance, 'predicted_variance'),
+                              'aleatoric')
+    return aleatoric, None, aleatoric
+
+
 def decompose_seed_ensemble(mean_by_seed, var_by_seed):
     """A model with a per-molecule predicted variance but no internal spread --
     NGBoost -- fitted under several seeds.
@@ -358,7 +436,8 @@ def variance_to_std(variance):
     return np.sqrt(_check_nonneg(np.asarray(variance, dtype=float), 'variance'))
 
 
-def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None):
+def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None,
+                           loss_name=None):
     """Fail the run when what a model produced disagrees with what SUPPORT says.
 
     This is the guard, not a comment. It catches the failure that has cost this
@@ -366,7 +445,7 @@ def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None):
     onto every row, whose correlation with anything per-molecule is zero however
     good the model is.
     """
-    alea_kind, epis_kind = support(model_name)
+    alea_kind, epis_kind = support(model_name, loss_name)
 
     for kind, values, name in ((alea_kind, aleatoric, 'aleatoric'),
                                (epis_kind, epistemic, 'epistemic')):
