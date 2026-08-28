@@ -220,8 +220,26 @@ def two_real_tasks(tmp_results):
     out_a, err_a = pa.communicate()
     out_b, err_b = pb.communicate()
 
-    assert pa.returncode == 0, f"task A failed:\n{out_a[-3000:]}\n{err_a[-3000:]}"
-    assert pb.returncode == 0, f"task B failed:\n{out_b[-3000:]}\n{err_b[-3000:]}"
+    # A TASK THAT NEVER STARTED IS NOT TWO TASKS INTERFERING.
+    #
+    # On ARC on 2026-08-28 both tasks died at `import polaris` -- a module-scope
+    # import of a dataset loader QM9 never calls -- and this check reported
+    # "concurrent tasks can interfere. Do NOT raise job concurrency." The real
+    # answer was that no task could start at all, concurrently or alone, and the
+    # verdict pointed at the wrong thing entirely. Separate the two, because they
+    # have opposite fixes: one is an environment repair, the other is a throttle.
+    for tag, proc, out, err in (("A", pa, out_a, err_a), ("B", pb, out_b, err_b)):
+        if proc.returncode == 0:
+            continue
+        tail = f"{out[-3000:]}\n{err[-3000:]}"
+        if "Traceback" in tail and "ImportError" in tail or "ModuleNotFoundError" in tail:
+            raise AssertionError(
+                f"task {tag} could not START -- this is NOT a concurrency result.\n"
+                f"The interpreter cannot import what the pipeline needs, so a task "
+                f"run entirely alone would fail the same way. Fix the environment "
+                f"and re-run; do not read anything into the concurrency verdict.\n"
+                f"{tail}")
+        raise AssertionError(f"task {tag} failed:\n{tail}")
 
     for tag in ("task_a", "task_b"):
         path = os.path.join(tmp_results, f"{tag}.csv")

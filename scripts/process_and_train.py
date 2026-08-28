@@ -25,8 +25,18 @@ import deepchem as dc
 import gpytorch
 from gpytorch.likelihoods import GaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
-import polaris as po
-from polaris.hub.client import PolarisHubClient
+# polaris is imported INSIDE load_adme (the only place it is used) and not here.
+#
+# At module scope it broke every QM9 job on ARC on 2026-08-28: polaris pulls
+# pydantic, whose pydantic_core wants a typing_extensions new enough to carry
+# `Sentinel`, and the environment there still has the 4.12.2 that an old
+# pip-constraints pin had downgraded it to. The pin was removed from the recipe
+# for exactly this reason (pip-constraints.txt, "Ten pins were removed"), but the
+# built environment predates that, so the import failed at line 28 and no QM9
+# task could start -- for a dataset loader QM9 never calls.
+#
+# PolarisHubClient went with it: imported here since the file was written and
+# referenced nowhere in the repository.
 import optuna
 import logging
 import sqlite3
