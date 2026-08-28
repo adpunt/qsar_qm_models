@@ -3807,6 +3807,24 @@ emit to resolve; it also requires the three figure registries to cover the roste
 resolve to the same canonical name on both sides.** It is case 1 of
 `scripts/check_fixes_fail_when_removed.py` and goes RED when one entry is taken out.
 
+#### 3.4c ✅ 2026-08-28 — three cross-pipeline alignments landed in `KIRBy`, recorded here because this file is the state document
+
+All three are committed in the `KIRBy` checkout and none of them touches this repository. They are
+listed here so this file does not go on describing a parity that has changed.
+
+| `KIRBy` commit | What moved | Cost |
+|---|---|---|
+| `53a0ad4` | **The reported uncertainty is both halves added, the way QM9 reports it.** The ordinary Gaussian process returned the latent spread alone and the neural path returned the spread over the stochastic passes — the model half in both cases — while the observation-noise half was computed on the line above and thrown away. The two variances are now added and converted once. Measured on one fitted model each: the total is **2.94×** the latent spread for the process and **1.49×** the spread over passes for the variational network | **Every Gaussian-process and variational uncertainty number on LogD, Caco-2 and hERG must be regenerated.** No accuracy number moves |
+| `9419af4` | **The radial kernel's distance scale starts from the data on this side too**, from the same two `GP_DEFAULTS` keys QM9 reads. The word `lengthscale` appeared nowhere in that file | None. **The collapse did not reproduce**: measured on 900 real molecules through the file's own PDV builder, held-out R² was 0.8426 from the library default and 0.8498 from the data, neither flagged collapsed. Both pipelines standardise continuous features, which puts the typical distance at 17.3 rather than the 1,100 the original QM9 diagnosis was measured at. Existing numbers do **not** have to be discarded on account of it. Untested on the learned embeddings, which are 1,024 columns wide |
+| `6e7b860` | NGBoost stops when it stops improving, the way QM9 does | — |
+
+**This is very likely the recorded VBLL coverage anomaly** (coverage at one standard deviation
+0.27–0.45 against a 0.68 target, carried in the paper status notes as unexplained). An interval
+built from one half of the variance under-covers by construction, and the measured ratio is the
+right size: on one fitted process, coverage at one standard deviation at level 1.0 was **0.230
+before and 0.690 after**. Treat the anomaly as explained by the column definition rather than as a
+property of the model, and re-measure rather than re-word.
+
 #### 3.4.1 Four representations share a name and are not the same features
 
 | Name | QM9 | Experimental | Verdict |
