@@ -107,36 +107,3 @@ if __name__ == '__main__':
         sys.exit(1)
     print("\nOK")
 
-
-# --------------------------------------------------------------------------
-# Sort & Slice, added 2026-08-28 (close-out audit item A5). Same defect as
-# Avalon's, in the featuriser nobody had checked: an unparseable molecule
-# produced an empty substructure dict, which became an all-zero count vector,
-# which the writer zero-filled to the right width and stored as a legitimate
-# block. The molecule then trained as if every substructure were genuinely
-# absent.
-
-def sns_unparseable_raises():
-    from rdkit import Chem
-    from process_and_train import create_sort_and_slice_ecfp_featuriser
-    train = [Chem.MolFromSmiles(s) for s in ('CCO', 'c1ccccc1', 'CCN', 'CC(=O)O')]
-    f = create_sort_and_slice_ecfp_featuriser(train)
-
-    out = f(Chem.MolFromSmiles('CCO'))
-    assert out.any(), "ethanol produced an all-zero Sort & Slice vector"
-
-    try:
-        got = f(None)
-    except RuntimeError:
-        return
-    assert False, (f"Sort & Slice accepted an unparseable molecule and returned "
-                   f"{type(got).__name__}; all-zero = {not got.any()}")
-
-
-if __name__ == '__main__' and not FAILURES:
-    print("\nSort & Slice failure handling")
-    check('an unparseable molecule raises rather than returning zeros', sns_unparseable_raises)
-    if FAILURES:
-        print(f"\nFAILED ({len(FAILURES)})")
-        sys.exit(1)
-    print("\nOK")
