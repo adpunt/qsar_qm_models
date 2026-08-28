@@ -23,7 +23,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'models'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from models import VBLLLayer, VBLLLoss  # noqa: E402
+from models import (VBLLLayer, VBLLLoss,  # noqa: E402
+                    apply_bayesian_transformation_full_variational,
+                    apply_bayesian_transformation_last_layer_variational)
 
 FAILURES = []
 
@@ -169,6 +171,60 @@ def test_it_learns_where_the_noise_is():
     assert noisy > quiet * 1.5, (
         f"the separation is too small to be worth reporting: noisy {noisy:.4g} "
         f"vs quiet {quiet:.4g} (the true spreads differ by 3x)")
+
+
+def test_the_switch_reaches_the_layer():
+    """It was built and nothing could reach it: no command-line flag, no roster
+    entry, and the transformation that builds the layers took no argument. This
+    is the wiring, from the flag through to the layer (RERUN_PLAN.md 5.5f)."""
+    def _net():
+        return torch.nn.Sequential(torch.nn.Linear(4, 6), torch.nn.ReLU(),
+                                   torch.nn.Linear(6, 1))
+
+    plain = apply_bayesian_transformation_full_variational(_net())
+    layers = [m for m in plain.modules() if isinstance(m, VBLLLayer)]
+    assert layers and not any(l.heteroscedastic for l in layers), (
+        "the default must be untouched")
+
+    het = apply_bayesian_transformation_full_variational(_net(),
+                                                         heteroscedastic=True)
+    layers = [m for m in het.modules() if isinstance(m, VBLLLayer)]
+    assert layers[-1].heteroscedastic, "the OUTPUT layer must carry the noise head"
+    assert not any(l.heteroscedastic for l in layers[:-1]), (
+        "a hidden layer has no observation noise to make heteroscedastic")
+
+    last = apply_bayesian_transformation_last_layer_variational(
+        _net(), heteroscedastic=True)
+    assert [m for m in last.modules()
+            if isinstance(m, VBLLLayer)][-1].heteroscedastic
+
+    # The flag itself. Read from the source rather than by importing
+    # process_and_train.py, which pulls in the whole training stack.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, 'scripts', 'process_and_train.py')).read()
+    assert '--heteroscedastic-vbll' in src, "the flag is not declared"
+    assert 'heteroscedastic_vbll' in src and 'parser.error' in src, (
+        "the flag is declared but nothing refuses it where it means nothing")
+    assert 'heteroscedastic_vbll' in open(
+        os.path.join(root, 'models', 'models.py')).read(), (
+        "no trainer reads the flag, so it would be accepted and ignored")
+
+    gen = open(os.path.join(root, 'slurm_scripts_qm9_rerun',
+                            'generate_scripts.py')).read()
+    for label in ('dnn_bnn_full_variational_hetero',
+                  'mlp_bnn_full_variational_hetero',
+                  'heteroscedastic_gp'):
+        assert label in gen, f"{label} is in no job script, so it never runs"
+
+
+def test_the_row_name_separates_the_two_models():
+    """A per-molecule column and a broadcast constant under one model name are
+    indistinguishable once they are in a file."""
+    from uncertainty_decomposition import SUPPORT, PER_MOLECULE, CONSTANT
+    assert SUPPORT['dnn_bnn_full_variational'][0] == CONSTANT
+    assert SUPPORT['dnn_bnn_full_variational_hetero'][0] == PER_MOLECULE
+    assert SUPPORT['mlp_bnn_full_variational'][0] == CONSTANT
+    assert SUPPORT['mlp_bnn_full_variational_hetero'][0] == PER_MOLECULE
 
 
 if __name__ == '__main__':

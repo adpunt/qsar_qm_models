@@ -1,0 +1,973 @@
+{
+ "area": "Noise magnitude / anchoring \u03c3 to published experimental error \u2014 full literature + decision salvage from REVISION_GUIDE.md (\u00a710, \u00a711, \u00a712, \"Noise magnitude\", \"Ranking at \u03c3=0.6\"), DISCUSSION_TRACKER.md D11 blocks, NOISE_DESIGN.md \u00a73/\u00a74/\u00a76.4/Sources, immediate_next_steps.md D1, RERUN_PLAN.md \u00a76.1, and the citations.bib / new_citations.bib coverage check",
+ "items": [
+  {
+   "kind": "research-finding",
+   "headline": "The central claim the whole literature chase existed to support: \u03c3 \u2248 0.6 is approximately one unit of real experimental measurement error for the paper's endpoints.",
+   "verbatim": "**The idea.** The paper sweeps $\\sigma$ from 0 to 1 and never says what those numbers mean physically. A reviewer can reasonably ask \"why 0.5? why 1.0? is any of this the amount of noise real data actually has?\" There is a published answer, and it is a strong one: **for the endpoints in this paper, $\\sigma \\approx 0.6$ is approximately one unit of real experimental measurement error.** That converts an arbitrary knob into a claim worth making.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:345",
+   "verification": "verified",
+   "why_it_matters": "This is the single sentence the whole 31-agent literature search was run to license. Without it \u03c3 is an arbitrary knob and a reviewer can dismiss the entire sweep."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The units argument that makes the comparison legitimate \u2014 noise is injected in raw label units and all three external labels are logs.",
+   "verbatim": "**Why the comparison is legitimate \u2014 the units line up.** Noise is injected as $y_\\text{noisy} = y + \\sigma \\cdot \\mathcal{N}(0,1)$ in the label's own **raw units** (`NoiseInject/noiseInject/core.py:68`; only $X$ is standardised, never $y$). And all three external labels are on a log scale: logD natively, hERG as $pK_i$, and Caco-2 efflux via `log_transform=True` at `KIRBy/tests/alternative_data_noise_robustness.py:1256`. So $\\sigma$ is directly comparable to a published assay error quoted in log units \u2014 no conversion, no hand-waving.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:347",
+   "verification": "verified",
+   "why_it_matters": "Without this the \u03c3\u2194assay-error comparison is a category error. It also names the exact two code lines that ground it, so it can be re-checked."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The master table of published experimental error in log units \u2014 nine rows, one flagged as failed verification.",
+   "verbatim": "| Endpoint | Error | Statistic / scope | Source |\n|---|---|---|---|\n| hERG $pK_i$ | **0.54** | SD of an individual measurement, inter-lab public data | Kramer et al. 2012, *J. Med. Chem.* **55**:5165, doi:10.1021/jm300131x |\n| $pIC_{50}$ (general) | **0.68** | SD, inter-lab, 20{,}356 pairs, ChEMBL 14 | Kalliokoski et al. 2013, *PLoS ONE* **8**:e61007, doi:10.1371/journal.pone.0061007 |\n| $pIC_{50}$, intra-lab floor | 0.17\u20130.22 | SD, one laboratory, inter-day | Kalliokoski et al. 2013 |\n| hERG $pIC_{50}$ | 0.737 | RMSD, binding vs electrophysiology, 209 compounds | Sato et al. 2018, *PLoS ONE* **13**:e0199348 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:351-356",
+   "verification": "verified",
+   "why_it_matters": "This is the evidence table. Every row is the endpoint-specific number the paper would cite; the table is the thing that would be lost outright if REVISION_GUIDE.md is deleted."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The rest of the master table \u2014 the logD rows (one withdrawn), logP best case, and Caco-2.",
+   "verbatim": "| logD$_{7.4}$ | ~~0.27~~ | \u26a0 **UNVERIFIED \u2014 DO NOT USE.** Verification could not confirm this number exists in the paper (ACS returns 403, Unpaywall reports closed with no repository copy; the abstract contains neither 0.27 nor 307). See \u00a711 closing assessment. | Bruneau \\& McElroy 2006, *JCIM* **46**:1379, doi:10.1021/ci0504014 |\n| logD, modern benchmark | **MAE 0.48** after curation (0.7 before) | repeat-test agreement, deliberately worst-case | Niu et al. 2024, *Sci. Data* **11**:985, Table 5 \u2014 **fully verified, open access; use this instead of Bruneau** |\n| logD$_{7.4}$ | 0.43\u20130.62 | inter-source **upper bounds** (derived from MAE 0.48 / RMSE 0.881) | Niu et al. 2024 |\n| logP, best case | 0.07\u20130.09 | two laboratories, one prescribed protocol, $n=23$ | Tak\u00e1cs-Nov\u00e1k \\& Avdeef 1996, *JPBA* **14**:1405 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:357-360",
+   "verification": "FAILED VERIFICATION (Bruneau 0.27 row only); the Niu and Tak\u00e1cs-Nov\u00e1k rows are verified",
+   "why_it_matters": "Publishing the Bruneau 0.27 figure is the single largest citation risk in the project. The replacement (Niu 2024 MAE 0.48) is already identified and verified."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The scale-free conclusion drawn from the table: assay error in log units is roughly constant across endpoints regardless of label spread.",
+   "verbatim": "Every estimate falls roughly between 0.4 and 0.74, clustered near 0.5\u20130.6 \u2014 **regardless of endpoint**. That is the useful fact: assay error in log units is roughly scale-free across these assays. (The range was previously written as \"0.27\u20130.74\" on the strength of the Bruneau figure; with that number withdrawn, the verified logD support is Niu 2024's MAE 0.48, which sits comfortably inside the same band and does not change the conclusion.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:363",
+   "verification": "verified",
+   "why_it_matters": "This is the argument that kills per-dataset label-SD matching and licenses a single fixed \u03c3. It also records that withdrawing Bruneau did NOT change the conclusion."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The paste-ready Methods sentence anchoring \u03c3 to published assay error (drafted, pending insertion).",
+   "verbatim": "**Draft sentence for Methods (pending the D11 decision \u2014 do not insert yet):**\n> Noise magnitudes are reported in the units of the label itself. Because all external endpoints are expressed on a logarithmic scale, the injected $\\sigma$ is directly comparable to published estimates of experimental measurement error, which lie between roughly 0.4 and 0.7 log units for $pK_i$ [Kramer 2012], $pIC_{50}$ [Kalliokoski 2013], logD [Niu 2024] and hERG potency under standardised protocols [Alvarez Baron 2025]. An injected $\\sigma$ of 0.6 therefore corresponds to approximately one additional unit of the measurement error already present in public bioactivity data.\n\n*(Citation set updated after verification: Bruneau 2006 and Hayeshi 2008 are dropped from the draft sentence \u2014 neither number survived checking. Kalliokoski, Niu and Alvarez Baron are all open access and fully verified.)*",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:365-368",
+   "verification": "verified",
+   "why_it_matters": "This is finished prose the author can paste. Losing it means re-drafting from scratch, and the post-verification citation swap (drop Bruneau and Hayeshi) would be silently undone."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Four caveats that must travel with the \u03c3=0.6 claim \u2014 QM9 exclusion, quadrature doubling, weak Caco-2 evidence, intra- vs inter-lab.",
+   "verbatim": "1. **QM9 is computed data.** Its labels come from DFT, so there is no experimental error to match and this justification does not transfer. $\\sigma$ on QM9 is a controlled perturbation, not a simulation of measurement noise, and the paper must say so rather than letting the reader carry the ADME framing across.\n2. **The error is already in the data.** Public labels *already* carry this noise; injecting $\\sigma = 0.6$ roughly doubles it rather than creating it. Errors add in quadrature: $\\sqrt{0.54^2 + 0.6^2} \\approx 0.81$. Phrase it as \"an additional unit\", never as \"we introduce realistic noise into clean data\".\n3. **The Caco-2 evidence is the weakest of the three.** ... **Cite the underlying Hayeshi 10-lab study instead**, where atenolol alone spans 0.18 to 3.76 across laboratories.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:370-373",
+   "verification": "verified",
+   "why_it_matters": "Each caveat pre-empts a specific referee objection. Caveat 2 in particular changes the required wording from 'we add realistic noise' to 'an additional unit'."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Caveat 4 \u2014 intra-lab and inter-lab figures must not be swapped, and Alvarez Baron's \u03c4=0.18 is a within-lab residual.",
+   "verbatim": "4. **Intra- vs inter-laboratory matters and is easy to misquote.** The 0.17\u20130.22 $pIC_{50}$ figures are a single-lab repeatability floor; the 0.54\u20130.68 figures are inter-laboratory. Public databases aggregate many sources, so the inter-laboratory number is the relevant one. Alvarez Baron et al. 2025 (*Sci. Rep.* **15**:29995) report $\\tau = 0.18$, which despite being a five-lab study is a *within*-lab residual \u2014 do not quote it as an inter-lab error.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:374",
+   "verification": "verified",
+   "why_it_matters": "\u03c4=0.18 looks like an inter-lab number and is not. Quoting it that way would make the injected \u03c3 look 3\u00d7 too large relative to reality."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The abandoned approach, recorded with its reason: matching \u03c3 to each dataset's label spread is the wrong normaliser.",
+   "verbatim": "**This also corrects an approach I proposed and then abandoned.** I had suggested matching $\\sigma$ to each dataset's label spread, so that noise was a constant fraction of signal. That is the wrong normaliser: assay error in log units is roughly constant across endpoints *irrespective* of how spread out the labels are, so a fixed $\\sigma$ in log units is more defensible than a per-dataset one. The label-spread ratios remain useful for one narrow purpose \u2014 explaining why Caco-2 degrades earliest, since its labels are the most tightly spread (SD 0.434 against 1.19 for logD, so a given $\\sigma$ is ~2.7$\\times$ harsher there).",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:376",
+   "verification": "verified",
+   "why_it_matters": "Records a whole abandoned design branch and the one purpose the label-SD ratios survive for. Without it the SD-matching idea would be re-proposed."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Five citations still need to be added to citations.bib; none are among the 51 keys currently used.",
+   "verbatim": "**Citations to add to `citations.bib`** (none of these are among the 51 keys currently used): Kramer 2012, Kalliokoski 2013, Sato 2018, Bruneau 2006, Hayeshi 2008. Niu 2024 and Tak\u00e1cs-Nov\u00e1k 1996 are optional supporting cites.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:378",
+   "verification": "n-a",
+   "why_it_matters": "Concrete bib to-do list. NOTE: I checked \u2014 Kramer2012 IS now present in citations.bib:1290; Kalliokoski 2013, Sato 2018, Bruneau 2006, Hayeshi 2008, Niu 2024, Tak\u00e1cs-Nov\u00e1k 1996 are all still ABSENT from both bib files."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Direct links for every anchor source, split into open-access and paywalled (the author has institutional access).",
+   "verbatim": "**Direct links.** Open access, no login:\n- Kalliokoski et al. 2013, *PLoS ONE* \u2014 https://doi.org/10.1371/journal.pone.0061007\n- Sato et al. 2018, *PLoS ONE* \u2014 https://doi.org/10.1371/journal.pone.0199348\n- Chen et al. 2017, *Fluids Barriers CNS* (reports the Hayeshi 10-lab data) \u2014 https://doi.org/10.1186/s12987-017-0078-x\n- Niu et al. 2024, *Scientific Data* \u2014 https://doi.org/10.1038/s41597-024-03793-0\n- Alvarez Baron et al. 2025, *Sci. Rep.* \u2014 https://doi.org/10.1038/s41598-025-15761-8\n\nPaywalled \u2014 institutional access needed:\n- Kramer et al. 2012, *J. Med. Chem.* (the $pK_i$ SD 0.54) \u2014 https://doi.org/10.1021/jm300131x\n- Bruneau \\& McElroy 2006, *JCIM* (the logD 0.27) \u2014 https://doi.org/10.1021/ci0504014\n- Hayeshi et al. 2008, *Eur. J. Pharm. Sci.* (the Caco-2 10-lab study) \u2014 https://doi.org/10.1016/j.ejps.2008.08.004\n- Tak\u00e1cs-Nov\u00e1k \\& Avdeef 1996, *JPBA* \u2014 https://doi.org/10.1016/0731-7085(96)01773-6",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:380-391",
+   "verification": "n-a",
+   "why_it_matters": "The three paywalled DOIs are exactly the ones whose numbers failed or partly failed verification. This list is the shortest route to closing the Bruneau gap by hand."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 \u2014 the pKi headline numbers, verbatim from the abstract: SD 0.54, mean error 0.44, median error 0.34.",
+   "verbatim": "> \"The experimental uncertainty is estimated to yield a mean error of 0.44 pK(i) units, a standard deviation of 0.54 pK(i) units, and a median error of 0.34 pK(i) units.\"\n\n*Location: abstract.*\nGives a directly citable magnitude \u2014 \u03c3 \u2248 0.54 in log units for heterogeneous public binding-affinity data \u2014 so a noise-injection sweep spanning roughly \u03c3 = 0.1 to 0.5 can be described as running from optimistic to realistic rather than as an arbitrary range.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1422-1425",
+   "verification": "verified (independently re-fetched and re-checked character-for-character; abstract only \u2014 full text never retrieved)",
+   "why_it_matters": "The hERG anchor. 0.54 is the number the paper's \u03c3=0.6 is compared against, and this is the exact quotable sentence."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 \u2014 rendering note: 'pK(i)' is the MEDLINE ASCII convention; the ACS PDF prints pK\u1d62.",
+   "verbatim": "*Note on rendering:* \"pK(i)\" is the MEDLINE ASCII de-subscripting convention. The ACS-published version prints pK\u1d62 with a subscript, so a transcription from the publisher PDF would read \"0.54 pKi units\".",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1427",
+   "verification": "verified",
+   "why_it_matters": "Prevents a referee or co-author flagging the quote as a mis-transcription when checked against the publisher PDF."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 \u2014 the reproducibility-definition sentence: what is being measured is the spread between independent repeat measurements.",
+   "verbatim": "> \"The data deposited in ChEMBL was analyzed for reproducibility, i.e., the experimental uncertainty of independent measurements.\"\n\n*Location: abstract, fifth sentence.*\nEstablishes that the quantity being measured is the spread between genuinely independent repeat measurements of the same quantity, which is exactly the quantity a \u03c3-sized Gaussian perturbation of a log-unit label is meant to imitate.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1417-1420",
+   "verification": "verified",
+   "why_it_matters": "Establishes that Kramer's 0.54 measures the same physical quantity the injected Gaussian imitates \u2014 the justification for treating them as commensurable."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 \u2014 the curation-required sentence, plus the caveat that '90%' attaches only to repeated citations, not to pairs discarded.",
+   "verbatim": "> \"Careful filtering of the data was required because ChEMBL contains unit-transcription errors, undifferentiated stereoisomers, and repeated citations of single measurements (90% of all pairs).\"\n\n*Caveat, important:* the abstract does **not** say 90% of pairs were removed. The parenthetical attaches to the third list item only \u2014 repeated citations of single measurements. Any gloss along the lines of \"90% of pairs were discarded\" goes beyond what the retrieved text supports, and the paywalled Methods would be needed to check it.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1429-1434",
+   "verification": "verified (quote); the '90% of pairs discarded' gloss is explicitly NOT supported",
+   "why_it_matters": "A very easy misquote to make. Also supports the honest statement that the 0.54 figure applies to curated, not raw, repository data."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 access status \u2014 abstract only, ACS returns HTTP 403; fetched via Europe PMC and cross-checked against PMID 22643060.",
+   "verbatim": "**Access. ABSTRACT ONLY.** The ACS landing page (`https://pubs.acs.org/doi/10.1021/jm300131x`) returns HTTP 403. Abstract fetched from the Europe PMC REST API: `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:%2210.1021/jm300131x%22&resultType=core&format=json`, and cross-checked against PubMed PMID 22643060. **No full text was retrieved for this paper.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1413",
+   "verification": "verified (access status)",
+   "why_it_matters": "Bounds exactly what can be quoted from Kramer: three numbers and two sentences, nothing else."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2012 \u2014 the R\u00b2 = 0.81 ceiling on large datasets, with an attribution warning that it is not a universal ceiling.",
+   "verbatim": "**The ceiling this imposes**, verbatim from Kramer et al. 2012:\n\n> \"The maximum possible squared Pearson correlation coefficient (R\u00b2) on large data sets is\n> estimated to be **0.81**.\"\n> \"Models that yield errors smaller than the experimental uncertainty are necessarily\n> overtrained.\"\n\n\u26a0\ufe0f Attribute as *estimated for heterogeneous public Ki data with SD 0.54 pKi units*, not as\na universal ceiling \u2014 the derivation is in the paywalled body and is unverified.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:349-357",
+   "verification": "unverified (the derivation is in the paywalled body; the quote itself is presented as verbatim but the guide flags the claim's scope as unverified)",
+   "why_it_matters": "The strongest available 'why does label noise matter at all' framing sentence for the paper's introduction \u2014 but only if attributed narrowly."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 the pIC50 headline: \u03c3 = 0.68, MUE 0.55, MedUE 0.43, with a caveat that the 0.55 is a scaled estimate.",
+   "verbatim": "> \"For heterogeneous biochemical pIC50 data, we find a variability with \u03c3pIC50 = 0.68, MUEpIC50 = 0.55 and MedUEpIC50 = 0.43.\"\n\n*Location: Summary and Conclusions; the same figures also appear in the Discussion.*\n\n*Caveat:* the verification pass flagged that the 0.55 MUE in this sentence is an estimate obtained by scaling the pKi metrics upward by 25%; the paper's directly measured MUE from \u0394pIC50 data with a 2.5 threshold is 0.54, not 0.55. That alternative sentence was not part of the independently confirmed set, so it is reported here as a caution only and must not be quoted from this document. The \u03c3 = 0.68 figure is unaffected.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1470-1475",
+   "verification": "verified (\u03c3=0.68); the MUE 0.55 carries a flagged caveat and must not be quoted from the guide",
+   "why_it_matters": "0.68 is the upper anchor of the range and the single best-evidenced number in the whole set. The MUE caveat prevents quoting a derived figure as a measured one."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 the fold-change translation of \u03c3 = 0.68: 68.2% of IC50 measurements agree within a factor of 4.8.",
+   "verbatim": "> \"A standard deviation of 0.68 corresponds to a factor of 4.8, meaning that 68.2% of all IC50 measurements agree within a factor of 4.8, even when measured in different laboratories under potentially different assay conditions.\"\n\n*Location: Discussion, second paragraph.*\nTranslates a log-unit \u03c3 into a concentration-fold interpretation, which lets a noise-injection paper explain to a non-modelling reader what \u03c3 = 0.68 physically means without inventing its own conversion.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1477-1480",
+   "verification": "verified",
+   "why_it_matters": "Lets the paper explain what a log-unit \u03c3 means to a chemist without doing its own arithmetic \u2014 a published conversion is far safer than an invented one."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 the intra-laboratory floor: \u03c3 = 0.22 (rolipram/PDE4D) and \u03c3 = 0.17 (cilostamide/PDE3).",
+   "verbatim": "> \"IC50 values measured in the same laboratory usually show a better reproducibility. From our in-house database, we extracted series of reference pIC50 values measured for assay standards. The plots in Figure 9 show the pIC50 values measured for rolipram on PDE4D and cilostamide on PDE3. The standard deviation of the pIC50 values are \u03c3 = 0.22 for rolipram/PDE4D and \u03c3 = 0.17 for cilostamide/PDE3.\"\n\n*Location: Discussion, the paragraph introducing Figure 9.*\nProvides the low end of the realistic range \u2014 \u03c3 \u2248 0.17\u20130.22 for repeat measurements within one laboratory \u2014 so a \u03c3 sweep can be anchored at both ends with measured values rather than round numbers.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1482-1485",
+   "verification": "verified",
+   "why_it_matters": "Anchors the LOW end of the \u03c3 ladder with a measured number. Also the source of the \u03bb=3 contamination ratio (0.68/0.17\u20130.22 = 3.1\u20134.0)."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 the sample size behind \u03c3=0.68: 20,356 independent measurement pairs, with a thousands-separator transcription warning.",
+   "verbatim": "> \"From the initially available 616.555 IC50 values with confidence score greater or equal to four 10.895 IC50 values for 3.480 Protein/Ligand systems remained, yielding 20.356 pairs of independent measurements.\"\n\n*Location: Materials and Methods \u2192 \"Dataset Preparation\", the paragraph immediately preceding Table 1.* (A verification pass corrected this from \"Results\"; the paper uses \".\" as a thousands separator, so this is 616,555 \u2192 10,895 values, 3,480 systems, 20,356 pairs.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1465-1467",
+   "verification": "verified (with a location correction applied by the verification pass)",
+   "why_it_matters": "Lets the paper present 0.68 as well-powered rather than anecdotal. The '.' thousands separator would otherwise be transcribed as a decimal point."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 the \u221a2 correction: a \u03c3 from measurement PAIRS must be divided by \u221a2 to get the per-measurement \u03c3.",
+   "verbatim": "> \"Note that since the \u03c3 here is calculated from pairs of measurements each containing experimental uncertainty and other sources of variability, it has to be divided by \u221a2 in order to obtain the true \u03c3 of the individual measurements [13].\"\n\n*Location: Kalliokoski et al. 2013, caption of Figure 5.*\nThis is the single most important methodological point for a noise-injection paper: a \u03c3 computed from differences between duplicate measurements is \u221a2 larger than the \u03c3 of one measurement, so the value injected into a label must be the per-measurement \u03c3, not the pairwise one.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1440-1443",
+   "verification": "verified \u2014 but this is Kalliokoski's sentence, NOT Kramer's; must be attributed to Kalliokoski 2013",
+   "why_it_matters": "Called 'the single most important methodological point for a noise-injection paper'. Getting it wrong makes every quoted \u03c3 41% too large."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 a re-analysis of Kramer's data lands at 0.47, not 0.54, so \u03c3\u22480.5 should be quoted as an approximate anchor.",
+   "verbatim": "> \"After dividing by \u221a2, the \u03c3 for the Gaussian distribution fitted to all \u0394pKi values <2.5 then becomes 0.47 (a bit lower than the \u03c3 value of 0.54 previously calculated for heterogeneous pKi data from ChEMBL version 12 data without upper threshold for \u0394pKi data.\"\n\n*Location: Kalliokoski et al. 2013, Results/Discussion, the paragraph following Table 3.*\nShows that the 0.54 figure is sensitive to how outlying pairs are handled \u2014 a comparable re-analysis lands at 0.47 \u2014 which supports quoting \u03c3 \u2248 0.5 as an approximate anchor rather than a precise constant.\n\n*Note:* the unbalanced open parenthesis is genuinely in the published text and has been reproduced rather than tidied.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1445-1450",
+   "verification": "verified (including the unbalanced parenthesis, reproduced deliberately)",
+   "why_it_matters": "Prevents over-claiming 0.54 as a precise constant. Also flags a typography trap: the unbalanced parenthesis will look like a transcription error."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 public aggregated data is noisier than single-laboratory data, which justifies sweeping \u03c3 rather than fixing one value.",
+   "verbatim": "> \"The standard deviation of public ChEMBL IC50 data, as expected, resulted greater than the standard deviation of in-house intra-laboratory/inter-day IC50 data.\"\n\n*Location: abstract.*\nEstablishes that label noise is not one number but a function of provenance \u2014 public aggregated data is noisier than single-laboratory data \u2014 which justifies sweeping \u03c3 rather than fixing a single value.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1460-1463",
+   "verification": "verified",
+   "why_it_matters": "The published justification for running a \u03c3 SWEEP at all, rather than a single calibrated level."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 measurement error does NOT depend on the value measured, tested directly on 16,844 repeat pairs.",
+   "verbatim": "> \"We checked whether the \u0394pIC50 depends on the overall activity measured or on\n> physicochemical ligand properties like logP, logD, molecular weight (MW), polar surface\n> area (PSA), the number hydrogen bond acceptors (HBA), the number hydrogen bond donors\n> (HBD) or the number of rotatable bonds... **The \u0394pIC50's depend neither on the average\n> measured pIC50 nor on any of the ligand properties examined.**\"\n\n> \"One might assume that higher IC50 values show a larger variability than for example\n> single digit \u00b5M IC50 values because of solubility limits. **However, our analysis shows\n> that on the average this is clearly not the case.**\"",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:229-240",
+   "verification": "verified",
+   "why_it_matters": "This is the empirical basis for DROPPING four of the six noise strategies (threshold, quantile, value-proportional, heteroscedastic) \u2014 they all assume error scales with the label value, and that premise is directly refuted here."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 \u2014 real error is not Gaussian in the tail; the guide computes how wrong a Gaussian is at 2, 3 and 4 log units.",
+   "verbatim": "**Kalliokoski et al. (2013)** could only fit a Gaussian after truncating at 1.5\u20132.5 log\nunits, and the fitted width grows with the cut (0.80 \u2192 0.84 \u2192 0.86). The largest single\ndisagreement is **7.7 log units** \u2014 a nine-sigma event that a Gaussian says should occur\n6\u00d710\u207b\u00b9\u2075 times in 16,844 pairs. It occurred once.\n\nHow wrong a Gaussian is in the tail *(computed from their Figure 2)*:\n\n| Disagreement | Observed | Gaussian predicts | Wrong by |\n|---|---|---|---|\n| > 2 log units | 9.0% | 4.7% | 1.9\u00d7 |\n| > 3 log units | 2.2% | 0.29% | 7.7\u00d7 |\n| > 4 log units | 0.40% | 0.007% | **58\u00d7** |\n\nFitting the full tail gives Student-t with **\u03bd \u2248 4\u20136**; fitting only the truncated core\ngives \u03bd \u2248 8\u201316.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:206-220",
+   "verification": "computed by the author from Kalliokoski's Figure 2 (marked as computed, not quoted)",
+   "why_it_matters": "Quantifies exactly how badly a homoscedastic Gaussian misrepresents real error, and sets the \u03bd parameter for the replacement Student-t noise type."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Honest limitation: matching the real tail would need \u03bd\u22481.1, which has no finite variance and cannot be dose-matched.",
+   "verbatim": "\u26a0\ufe0f **Honest limitation to state in the paper:** matching the *real* tail needs about\n\u03bd = 1.1, which has no finite variance and therefore cannot be dose-matched. Strategy 2 at\n\u03bd = 3 is a **conservative** heavy-tailed setting. Real data is heavier than anything that can\nbe fairly tested.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:222-225",
+   "verification": "n-a (design reasoning)",
+   "why_it_matters": "Pre-empts the obvious referee question 'why only \u03bd=3?' and turns a limitation into a stated, defensible design choice."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kalliokoski 2013 Table 2 \u2014 the extreme tail of disagreement is database ERROR, not imprecision.",
+   "verbatim": "Kalliokoski's Table 2 manually inspected 10 pairs per disagreement band. Number invalid:\n\u0394 4.7\u20137.8 \u2192 **9/10**; \u0394 3.2 \u2192 **10/10**; \u0394 2.5 \u2192 **8/10**; \u0394 1.5 \u2192 6/10; \u0394 1.1 \u2192 1/10;\n\u0394 0.02 \u2192 0/10. Error types named: unit-transcription, receptor-subtype confusion,\ncellular-versus-biochemical assay mix-up, undifferentiated stereochemistry, retracted papers.\n\n> \"The extreme disagreements are all due to clear errors.\"\n\nThis is why strategy 5 is called Outlier and why its victims are chosen at random: a\nmistyped unit is a property of the *record*, not of the value.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:281-289",
+   "verification": "verified (quote); the 9/10, 10/10, 8/10 breakdown is read from their Table 2",
+   "why_it_matters": "This is the published justification for the Outlier noise type AND for changing its selection rule from 'extreme labels' to 'random records'."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Sato 2018 \u2014 the measured agreement ceiling between two hERG assay technologies: R\u00b2 = 0.517, RMSD = 0.737 log units on 209 compounds.",
+   "verbatim": "> \"The coefficient of determination and the root mean square deviation between the pIC50 values measured by binding assays and electrostatic assays were 0.517 and 0.737, respectively.\"\n\n*Location: Results and discussion \u2192 \"Comparison between binding assays and electro static assays\".*\nGives a measured ceiling on agreement between two experimental methods \u2014 R\u00b2 = 0.517, RMSD = 0.737 log units \u2014 which is the most direct available justification for the claim that a model cannot be expected to beat a certain error floor on aggregated hERG labels.\n\n*Caveat:* R\u00b2 = 0.517 here is agreement between two assay technologies, **not** a predictive model's R\u00b2. If this is used as a performance ceiling it must be framed as inter-assay-method agreement.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1510-1515",
+   "verification": "verified (open-access full text)",
+   "why_it_matters": "0.737 is the upper end of the assay-error band and the most direct 'why the model can't do better' number. The caveat prevents it being mistaken for a model R\u00b2."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Sato 2018 \u2014 the 209-compound cross-assay sample size.",
+   "verbatim": "> \"To compare the two methods, 209 compounds for which the IC50 values were measured by both methods were investigated.\"\n\n*Location: Results and discussion \u2192 \"Comparison between binding assays and electro static assays\".* (The two-word \"electro static\" is the published heading.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1505-1507",
+   "verification": "verified",
+   "why_it_matters": "Gives the basis for the 0.737 figure. The 'electro static' two-word heading is a published typo that must be reproduced, not corrected."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Sato 2018 \u2014 real hERG label error is heavy-tailed: of 263 compounds, 144 agree within one order of magnitude but 47 disagree by more than 100-fold.",
+   "verbatim": "> \"Among the 263 compounds, 144 compounds showed consistent IC50 values with less than one order of magnitude differences between the maximum and minimum results. However, 47 compounds recorded more than 100-fold differences between the maximum and minimum IC50 values.\"\n\n*Location: Results and discussion \u2192 \"Deviation of IC50 values and classification of hERG inhibitors and inactive compounds\" (the paragraph after Fig 4).*\nEstablishes that real label error is heavy-tailed \u2014 most compounds agree within one log unit but a substantial minority disagree by more than two \u2014 which is a concrete, citable limitation of a homoscedastic Gaussian noise model and a motivation for outlier-style or heteroscedastic noise strategies.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1517-1520",
+   "verification": "verified",
+   "why_it_matters": "A second, independent published demonstration of heavy tails \u2014 the citable motivation for the Outlier and Student-t noise types."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Sato 2018 \u2014 hERG label noise is partly structural: two different assay technologies measuring different physical things.",
+   "verbatim": "> \"The assay protocols of hERG blocking activities could roughly classified into electrostatic assays such as automated patch clamp assays that measure the change in the voltage between the cell-membrane by the presence of small molecules, and binding assays, such as radio-ligand replacement assays that measure the binding affinity of small molecules by the replacement ratio of radiolabeled inhibitors.\"\n\n*Location: Materials and methods \u2192 \"Formatting activity information\".* (The missing \"be\" in \"could roughly classified\" is in the original.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1495-1497",
+   "verification": "verified (the grammatical error is in the original and is reproduced deliberately)",
+   "why_it_matters": "Supports framing label noise as systematic-plus-random rather than purely random. The 'could roughly classified' error must be reproduced or the quote will look mis-transcribed."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Sato 2018 \u2014 assay-protocol heterogeneity is treated in the literature as a first-class source of label deviation (location corrected to the Introduction).",
+   "verbatim": "> \"Since the integrated dataset contained heterogeneous data entries, the deviations of the hERG inhibitory activities due to the differences in the assay protocols were analyzed, to assess the influence of the deviations on the classification of the tested compounds into hERG inhibitors and non-inhibitors.\"\n\n*Location: **Introduction** \u2014 a verification pass corrected this from \"Materials and methods \u2192 Data set\". In the Introduction it reads as a stated aim of the study, not as an executed procedure, and should be cited that way.*",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1500-1502",
+   "verification": "verified, with a location correction applied by the verification pass",
+   "why_it_matters": "Records a location correction that would be silently lost. Citing it as an executed procedure rather than a stated aim would be an over-claim."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "FAILED VERIFICATION \u2014 the Bruneau & McElroy 2006 'logD 0.27 log units across 307 compounds' figure has no verified quote and must not be used.",
+   "verbatim": "**LogD from Bruneau & McElroy 2006: the \"0.27 log units across 307 compounds\" figure has no verified quote.** This is the significant gap. Three separate claimed sentences from this paper's Methodology and Results \u2014 the one containing 0.27 and 307, the preceding clause about the 2-log-unit exclusion threshold, and two sentences from the \"Database\" subsection including a 0.3-log-unit discard threshold \u2014 all failed verification with the verdict \"could not access\". The ACS full text returns HTTP 403, Unpaywall reports the article as closed with zero repository copies, and only the abstract could be read; the abstract contains none of those numbers.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1702",
+   "verification": "FAILED VERIFICATION \u2014 do not use",
+   "why_it_matters": "This is the single number in the whole set that would be a hallucination if published. It is currently cited in two repo files and must be struck from both."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Bruneau 2006 \u2014 the three honest options for the 0.27 number, in order of preference.",
+   "verbatim": "1. **Obtain the PDF manually** through Oxford institutional access at pubs.acs.org, or from the archived author copy, and check pages 1380 and 1382\u20131383 by eye. This is the only route that turns 0.27 into a quotable figure, and it is cheap.\n2. **Cite without quoting.** Write \"Bruneau and McElroy report a mean per-compound replicate standard deviation of approximately 0.27 log units for in-house logD7.4 data\" with a plain citation and no quotation marks. This is defensible only if you have actually seen the number somewhere you trust; do not do this on the strength of this document alone, because this document has not confirmed it.\n3. **Use a different source.** PharmaBench Table 5 (MAE 0.48\u20130.7 for LogD) is fully verified, open access, and covers the same endpoint.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1704-1708",
+   "verification": "n-a (recommendation)",
+   "why_it_matters": "Names the exact pages (1380, 1382\u20131383) to check by eye. This is the cheapest route to closing the only failed-verification gap in the set."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Bruneau 2006 \u2014 the ONE quote that did survive verification: a selection-bias warning about replicate-derived error estimates.",
+   "verbatim": "> \"A measurement is more likely repeated if an apparently abnormal result is obtained. Thus, high ranges in duplicated measurements do not indicate a global variability of the experimental methodology.\"\n\n*Location: reference/endnote list, note (32), final page \u2014 the note cited at the point in the text where the replicate-variability estimate is given.*\nEstablishes a selection-bias warning that directly constrains any noise-injection justification: replicate spreads in industrial datasets are not a random sample of measurement error, because repeats are preferentially triggered by suspicious results, so replicate-derived \u03c3 estimates skew high.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1532-1535",
+   "verification": "verified \u2014 retrieved from an author-hosted PDF via the Internet Archive (https://web.archive.org/web/20240423025829if_/https://www.people.iup.edu/nate/docs/ci0504014.pdf); other passes could not reach any full text",
+   "why_it_matters": "A genuinely useful caveat that survives even though the paper's headline number does not \u2014 replicate-derived \u03c3 estimates skew HIGH, so the paper's anchors may be upper bounds."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Two internal inconsistencies flagged: the repo cites Bruneau for 0.27 in two places, and a separate claimed sentence gives 0.3 as a discard threshold \u2014 different quantities, neither verified.",
+   "verbatim": "Also note two internal inconsistencies flagged during verification, which should be resolved before the guide is used: the repository currently cites Bruneau for 0.27 in `REVISION_GUIDE.md` line 357 and `DISCUSSION_TRACKER.md` line 116, while a separate claimed sentence from the same paper gives 0.3 as a *discard threshold* \u2014 different quantities that should not be conflated. Neither is verified.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1710",
+   "verification": "FAILED VERIFICATION (both quantities)",
+   "why_it_matters": "Names the exact two repo lines carrying the unverified number, so they can be struck. NOTE: the DISCUSSION_TRACKER.md:116 reference is to the older layout; the current live warning is at DISCUSSION_TRACKER.md:125."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Niu 2024 (PharmaBench) \u2014 the verified LogD replacement for Bruneau: repeat-test MAE 0.7 before curation, 0.48 after.",
+   "verbatim": "> \"LogD 0.774 1.196 0.7 0.881 0.881 0.48\"\n\n*Location: Table 5, first data row. Caption: \"Comparison of Metrics Between the Regression Datasets Before and After the Data Processing Workflow.\" Column structure: ADMET Property Name | Before Data Processing Workflow (R, RMSE, MAE) | After Data Processing Workflow (R, RMSE, MAE). So LogD before: R = 0.774, RMSE = 1.196, MAE = 0.7; after: R = 0.881, RMSE = 0.881, MAE = 0.48. The repeated 0.881 is genuine, not a transcription error.*",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1633-1636",
+   "verification": "verified (open access; Table 5 fetched by direct HTML parse from nature.com)",
+   "why_it_matters": "This is the number that REPLACES the failed Bruneau 0.27. Fully verified, open access, same endpoint, and it sits inside the same 0.4\u20130.7 band so the conclusion is unchanged."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Niu 2024 \u2014 the agreement statistics are deliberately worst-case, so any \u03c3 derived from them is an upper bound.",
+   "verbatim": "> \"The maximum and minimum experimental results for each group are selected as the worst-case scenario.\"\n\n*Location: Technical Validation \u2192 \"Repeated test for data quality assessment\", immediately preceding Table 5.*\nEstablishes that the reported agreement statistics are deliberately worst-case, so any \u03c3 derived from them is an upper bound rather than a typical value.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1623-1626",
+   "verification": "verified",
+   "why_it_matters": "Frames MAE 0.48/0.7 as upper bounds, which is the honest reading and matters for whether \u03c3=0.6 is 'one unit' or 'more than one unit' of real error."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Niu 2024 \u2014 the standard modern procedure for estimating label noise from a public dataset (repeat records of the same compound).",
+   "verbatim": "> \"A raw dataset often contains multiple records for the same compound due to different sources and varying experimental conditions. Repeated testing compares the maximum and minimum values for the same compound under the same condition to validate the data quality.\"\n\n*Location: Technical Validation \u2192 \"Repeated test for data quality assessment\".*\nEstablishes the standard modern procedure for estimating label noise from a public dataset \u2014 comparing repeat records of the same compound \u2014 which is the empirical basis a noise-injection study should point to when choosing \u03c3.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1618-1621",
+   "verification": "verified",
+   "why_it_matters": "Gives the paper a documented, current methodology to point at when justifying how a \u03c3 can be derived from a public dataset."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Niu 2024 \u2014 even a well-curated modern LogD benchmark only reaches 'wet-lab-comparable' reproducibility; the noise floor does not vanish with curation.",
+   "verbatim": "> \"The results of repeated tests for certain experiments, such as the LogD experiment, have significantly improved data quality after the data processing workflow, reaching a level comparable to that of traditional wet lab experiments.\"\n\n*Caveat:* this sentence cites no external wet-lab benchmark; the supporting comparison is the dataset against itself, before versus after processing. The next sentence in the paper explicitly excludes CYP and clearance endpoints from the claim.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1638-1643",
+   "verification": "verified (quote); the caveat notes the comparison is internal, not against an external benchmark",
+   "why_it_matters": "Supports 'the noise floor does not vanish with curation' \u2014 the strongest general argument for why label-noise robustness matters at all."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Alvarez Baron 2025 \u2014 hERG assay repeatability is about five-fold under standardised, ICH-compliant protocols.",
+   "verbatim": "> \"Descriptive statistics and meta-analysis were applied to the dataset to estimate what the distribution in hERG block potencies would be if a laboratory were to test the same drug repeatedly. This measure, or hERG data variability, was ~ 5X.\"\n\n*Location: abstract. (The space before \"5X\" is a thin space in the published version.)*\nProvides a current, headline-level statement of hERG assay repeatability \u2014 about five-fold \u2014 that a noise-injection study can quote as the physical meaning of its chosen \u03c3 on hERG labels.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1653-1656",
+   "verification": "verified (open access; fetched via Europe PMC PMC12357877 and direct nature.com curl)",
+   "why_it_matters": "The most CURRENT (2025) hERG number, and the one cited in the drafted Methods sentence. 'Even under standardised protocols' is a strong rhetorical position."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Alvarez Baron 2025 \u2014 the \u03c4 figures with an arithmetic caveat: 0.18 alone does NOT generate the 4.9\u00d7 figure; cite the 0.69 / 4.9\u00d7 pair.",
+   "verbatim": "> \"The estimated overall variability (\u03c4) not explained by drug and laboratory and expressed as SD was 0.18, and as 95% CI 0.69, corresponding to an IC50 ratio of 4.9X (95% CI: 4.0 to 6.2).\"\n\n*Caveat, arithmetic:* 0.18 alone does not generate the 4.9\u00d7 figure; 0.69 is the half-width of the 95% interval and 10^0.69 \u2248 4.9. If this sentence is used to justify a noise magnitude, cite the 0.69 / 4.9\u00d7 pair, or the numbers will not reproduce. Also note the paper reports \u03c4 as an SD in pIC50 units \u2014 pIC50 is already a negative log10, so \"log10 pIC50 units\" is a unit-of-a-unit error.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1668-1673",
+   "verification": "verified (quote), with an arithmetic caveat that must travel with it",
+   "why_it_matters": "Quoting 0.18 with 4.9\u00d7 would produce numbers a referee cannot reproduce. The unit-of-a-unit warning is a real trap in log-scale endpoints."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Alvarez Baron 2025 \u2014 noise magnitude differs nearly three-fold BETWEEN laboratories even under standardised protocols (3.4\u00d7 to 9.6\u00d7).",
+   "verbatim": "> \"The modelling results shown in Fig. 10 also suggest that variability in hERG block potency is laboratory-specific, ranging from 3.4X to 9.6X for different laboratories in this study.\"\n\n*Location: Discussion, subsection \"Limitations and lessons learned\" \u2014 a verification pass corrected this from the subsection \"Variability in hERG block potency\". Cite the corrected subsection.*\nEstablishes that even under standardised protocols the noise magnitude differs nearly three-fold between laboratories, which supports reporting results across a \u03c3 range rather than at a single calibrated \u03c3.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1675-1678",
+   "verification": "verified, with a subsection location correction applied by the verification pass",
+   "why_it_matters": "The published argument for reporting a \u03c3 RANGE rather than one calibrated point \u2014 directly relevant to whether \u03c3=0.6 can stand alone."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Alvarez Baron 2025 \u2014 the definition of the noise quantity: the distribution of potencies on repeat measurement of the same drug, residual after removing drug and laboratory effects.",
+   "verbatim": "> \"A goal of this study is to assess variability of hERG block potency, which is defined as the distribution of potencies for the same drug when measured repeatedly by the same laboratory.\"\n\n> \"These approaches used strategies to estimate and then remove drug- (i.e., potency) and laboratory-specific impacts (i.e., systematic differences to the group average) to reveal unexplained or residual variability in data not tied to drug or laboratory.\"\n\n*Location: Results, section \"Variability in hERG block potency\", third sentence of the opening paragraph (a verification pass corrected this from \"second sentence\").*",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1658-1666",
+   "verification": "verified, with a sentence-position correction applied by the verification pass",
+   "why_it_matters": "Establishes that the reported variability is the irreducible residual \u2014 exactly the quantity an injected Gaussian stands in for."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Hayeshi 2008 \u2014 the four usable abstract quotes (design, mechanism, compound-dependence, qualitative disagreement); NO number is quotable from the paper itself.",
+   "verbatim": "> \"In this study, Caco-2 cells from 10 different laboratories were compared in terms of mRNA expression levels of 72 drug and nutrient transporters, and 17 other target genes, including drug metabolising enzymes, using real-time PCR.\"\n\n> \"Absolute expression of genes was variable indicating that small differences in culture conditions have a significant impact on gene expression, although the overall expression patterns were similar.\"\n\n> \"Atenolol permeability was more variable across laboratories than metoprolol permeability.\"\n\n> \"Talinolol efflux was observed by all the laboratories, whereas only five laboratories observed significant apical uptake of Gly-Sar.\"",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1547-1567",
+   "verification": "verified (abstract only; full text paywalled at Elsevier, abstract fetched via Europe PMC PMID 18782614 and cross-checked via NCBI efetch)",
+   "why_it_matters": "These four sentences are all that can be quoted from Hayeshi. The atenolol/metoprolol contrast is a citable argument for value-proportional or heteroscedastic noise; the Gly-Sar sentence shows disagreement can be qualitative, not just scatter."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Hayeshi 2008 gap \u2014 no quantitative statement can be quoted from Hayeshi itself; every number attributed to it comes from a secondary source.",
+   "verbatim": "**Hayeshi's own numbers.** No quantitative statement can currently be quoted from Hayeshi et al. 2008 itself, because the full text is paywalled at Elsevier and only the abstract was retrieved. If a number attributed directly to Hayeshi is load-bearing, either obtain the PDF or attribute the number explicitly to Chen et al. 2017 or Kell & Oliver 2015, marked as reported-by.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1712",
+   "verification": "unverified \u2014 every Hayeshi NUMBER is secondary",
+   "why_it_matters": "The Caco-2 anchor rests entirely on secondary attribution. Any Hayeshi number in the paper must be marked reported-by or it is a misattribution."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Chen 2017 \u2014 the quotable Caco-2 magnitude: atenolol efflux ratios ranged 0.18 to 3.76 across 10 laboratories.",
+   "verbatim": "> \"In a collaborative study comparing Caco-2 cells from 10 laboratories, atenolol showed highly variable permeability and its efflux ratios ranged from 0.18 to 3.76, indicating the possibility of an involvement of transporter-mediated transport [38].\"\n\n*Location: Discussion, the paragraph on ABC/Pgp transporter evidence, immediately before the sentence beginning \"In summary, it is not clear which transporter(s)\u2026\". Reference 38 is Hayeshi et al. 2008.*\n\n*Caveat:* this range is Chen et al.'s characterisation of Hayeshi's data, so it should be cited as reported by Chen et al., or checked against Hayeshi directly.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1586-1591",
+   "verification": "verified in Chen et al. (open access, PMC5664587) \u2014 but it is a SECONDARY characterisation of Hayeshi's data",
+   "why_it_matters": "This 20.9-fold spread is where the ~0.43 log10 Caco-2 figure in the master table was derived from. Note: memory records that this Caco-2 route is now SUPERSEDED by Bentz 2013's 0.35."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Chen 2017 \u2014 the Papp range across cell models, with an explicit warning not to re-attribute it to Hayeshi alone.",
+   "verbatim": "> \"The reported Papp values from other in vitro cell models bearing tight junctions for both A\u2013B and B\u2013A directions were in the range of 0.18 \u00d7 10\u22126 \u2212 11 \u00d7 10\u22126 cm/s for Caco-2 cells and 0.13 \u00d7 10\u22126 \u2212 0.8 \u00d7 10\u22126 cm/s for MDCKII (Madin-Darby canine kidney II cells) [37\u201340].\"\n\n*Caveat:* the range is attributed to references [37\u201340] collectively (Hakkarainen 2010, Hayeshi 2008, Wang 2005, Gartzke 2015). It must **not** be re-attributed to Hayeshi alone.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1593-1598",
+   "verification": "verified (quote); the collective-attribution caveat is explicit",
+   "why_it_matters": "A ~60-fold Caco-2 range that would be very tempting to attribute to Hayeshi. The caveat names all four underlying references."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kell & Oliver 2015 (PeerJ) \u2014 the 'factor of 2\u20135' characterisation of the Hayeshi spread, the only citable magnitude without the paywalled full text.",
+   "verbatim": "> \"An interlaboratory comparison (Hayeshi et al., 2008) indicated that while on occasion measurements could vary by more than an order of magnitude, overall the groupings were normally reasonably tight (say within a factor of 2\u20135).\"\n\n*Location: Kell DB, Oliver SG, PeerJ 2015;3:e1405, Introduction. Retrieved from `https://www.ebi.ac.uk/europepmc/webservices/rest/PMC4655101/fullTextXML`. The dash in \"2\u20135\" is an en dash in the original.*\n\n*Caveat:* this is Kell & Oliver's own prose describing Hayeshi, not Hayeshi's text. The factor-of-2\u20135 figure is verified only as a secondary characterisation and remains unchecked against Hayeshi 2008 itself.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1571-1576",
+   "verification": "verified verbatim in Kell & Oliver \u2014 secondary characterisation, unchecked against Hayeshi itself",
+   "why_it_matters": "Factor 2\u20135 corresponds to 0.30\u20130.70 log10, which brackets the paper's Caco-2 anchor. Note the same paper is cited elsewhere in the repo as 'O'Hagan & Kell 2015' \u2014 same PeerJ 3:e1405."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "SUPERSEDED \u2014 the Caco-2 anchor moved from Hayeshi/Chen ~0.43 to Bentz 2013's computed 0.35, because the Hayeshi fold figures in circulation are Fagerholm's preprint re-analysis.",
+   "verbatim": "| **Caco-2 efflux (log10)** | **0.35** \u2190 USE THIS | **computed** from per-laboratory digoxin efflux ratios across 11 Caco-2 labs, Table 6 | **Bentz et al. 2013, *Drug Metab Dispos* 41(7):1347, doi:10.1124/dmd.112.050500** (peer-reviewed, open access) |\n| Caco-2 corroboration | 0.33 | median, computed from max/min Papp ratios over 11 studies, Table IV | Larregieu & Benet 2013, *AAPS J* 15(2):483 |\n| Caco-2 corroboration | 0.30\u20130.70 | \"within a factor of 2\u20135\", secondary characterisation of Hayeshi | O'Hagan & Kell 2015, *PeerJ* 3:e1405 |\n| ~~Caco-2 ~0.43\u20130.45 via Hayeshi/Chen~~ | \u26a0 **SUPERSEDED** | Hayeshi 2008 is paywalled and its abstract is qualitative only; the fold figures circulating under its name are Fagerholm's preprint re-analysis, not Hayeshi's | use Bentz 2013 |",
+   "source": "/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/memory/experimental_noise_magnitudes.md",
+   "verification": "Bentz 0.35 = computed by the author from Bentz Table 6 (peer-reviewed, open access); the Hayeshi/Chen ~0.43 route is SUPERSEDED",
+   "why_it_matters": "REVISION_GUIDE.md:361 still carries the superseded ~0.43-via-Hayeshi row. The current answer is Bentz 2013's 0.35 \u2014 if the guide is deleted without recording this, the superseded number is the one that survives."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Bentz 2013 \u2014 62% of Caco-2 measurement variance is BETWEEN laboratories; the dominant structure in real error is provenance, not label magnitude.",
+   "verbatim": "**Bentz J, O'Connor MP, Bednarczyk D, et al. (2013).** *Drug Metab Dispos* 41(7):1347\u20131366.\n23 participating laboratories. Variance decomposition of log efflux ratio (Table 7):\n\n| Source | Share |\n|---|---|\n| **Laboratory** | **62%** |\n| Laboratory \u00d7 experiment | 20% |\n| Residual error | 10% |\n| Cell line | 8% |\n\nAlso, justifying the modelling scale: *\"Log ER and log IC50 were used in variance component\nanalysis since data are log normally distributed.\"*\n\n**This is the strongest single argument in the whole design.** The dominant structure in\nreal label error is *where the measurement came from*, not how big the value was.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:259-277",
+   "verification": "verified (Table 7 read directly; the log-scale sentence is quoted verbatim)",
+   "why_it_matters": "Called 'the strongest single argument in the whole design'. It is the published basis for the new Grouped (by-laboratory / by-scaffold) noise type and for dropping the four value-dependent ones."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Landrum & Riniker 2024 \u2014 curating IC50 data to a single assay cuts mean absolute disagreement from 0.50 to 0.27 log units.",
+   "verbatim": "Corroborating: **Landrum GA, Riniker S (2024)**, *JCIM* 64(5):1560\u20131567 \u2014 curating IC50 data\ndown to a single assay cuts mean absolute disagreement from **0.50 to 0.27 log units**, so\nroughly half the apparent noise in public potency data is provenance, not imprecision.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:272-274",
+   "verification": "verified (already has a bib entry: citations.bib:1910, key `landrum2024`, and is already cited in paper Methods L211)",
+   "why_it_matters": "Quantifies the provenance share directly \u2014 half the apparent noise. This citation is ALREADY in the bib and already used, so it is the cheapest one to lean on."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kr\u00fcger & Overington 2012 \u2014 real bioactivity error is FORMALLY non-Gaussian: Anderson-Darling rejects normality at p<2e-16, and a Laplace fits instead.",
+   "verbatim": "> \"The density distribution of differences in bioactivity has a central peak at 0 and is\n> **non-normal as established by Anderson-Darling test (p<2e-16)**.\"\n\nThey then fitted a **Laplace** distribution \u2014 *\"Both distributions can be approximately\ndescribed by a Laplace distribution... the scale parameter b... is b = 0.7 for the paralogs\nand b = 1.3 for human-to-rat orthologs.\"*",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:188-197",
+   "verification": "verified (open access, read in full; 2,782 compound-ortholog pairs, 41,733 paralog combinations)",
+   "why_it_matters": "The only FORMAL statistical test in the whole evidence base that real error is not Gaussian. It is the citational basis for the Student-t and Laplace noise types."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kr\u00fcger & Overington 2012 \u2014 cite it accurately: do NOT inject b=0.7 or 1.3 as measurement error, and do not use words the paper never uses.",
+   "verbatim": "\u26a0\ufe0f **Cite this accurately.** The paper never uses the words \"heavy-tailed\", \"leptokurtic\"\nor \"Gaussian\". Cite what they did \u2014 rejected normality, fitted Laplace. Also note their b\nvalues describe differences between *related proteins* (biology); their separate\ninter-assay control distribution (measurement error) is stated only to *\"closely resemble\"*\nthe ortholog one. **Do not inject b = 0.7 or 1.3 as measurement error.** Take the shape,\ndose-match it like everything else.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:199-204",
+   "verification": "verified",
+   "why_it_matters": "b=0.7 and b=1.3 look like ready-made noise parameters and are not \u2014 they describe biology, not measurement. This warning prevents injecting the wrong quantity."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kramer 2016 (AstraZeneca, every assay 2005\u20132014) \u2014 average experimental uncertainty less than a twofold difference, with no assay type worse than another.",
+   "verbatim": "- **Kramer C, Dahl G, Tyrchan C, Ulander J (2016).** *Drug Discov Today* 21(8):1213\u20131221.\n  Every AstraZeneca assay 2005\u20132014: *\"an average experimental uncertainty of less than a\n  twofold difference and no technologies or assay types had higher variability than\n  others.\"* A constant fold-difference is a constant standard deviation in log space.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:243-246",
+   "verification": "verified",
+   "why_it_matters": "Independent industrial corroboration that error is constant in log space \u2014 the second of three lines supporting value-independence."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Srinivasan & Lloyd 2025 and Horwitz & Albert 2006 \u2014 two further lines supporting constant error on the log scale.",
+   "verbatim": "- **Srinivasan B, Lloyd MD (2025).** *J Med Chem* 68(3):2052\u20132056. Potency data is\n  lognormal; taking logs *\"converts multiplicative variability... to arithmetic\n  variability\"* \u2014 constant error on the scale actually modelled.\n- **Horwitz W, Albert R (2006).** *J AOAC Int* 89(4):1095. Error scales as concentration to\n  the power 0.85 \u2014 near-constant *relative* error, i.e. near-constant error in logs.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:247-251",
+   "verification": "verified (Srinivasan quote); Horwitz power-0.85 stated as a finding, not quoted",
+   "why_it_matters": "Completes the three-way corroboration that a fixed \u03c3 in log units is the physically correct instrument \u2014 the core of the anchoring argument."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Where value-dependence DOES exist it is censoring at the assay limits, not smooth scaling.",
+   "verbatim": "Where value-dependence *does* exist, it takes the form of **censoring at the assay limits,\nnot smooth scaling.** Outside the working range an assay does not return a noisier number;\nit returns no number, only a `>` or `<` qualifier. That is strategy 6, not a scale rule.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:253-255",
+   "verification": "n-a (design reasoning grounded in \u00a73.5)",
+   "why_it_matters": "Explains why the four value-dependent strategies are replaced by ONE mechanism (censoring) rather than kept \u2014 the whole redesign turns on this distinction."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Svensson 2025 and the Assay Guidance Manual \u2014 censoring is the most PREVALENT real mechanism: 25\u201363% of labels censored in ten of fifteen industrial assays.",
+   "verbatim": "**Svensson et al. (2025)** report 25\u201363% of labels censored in ten of fifteen real\nindustrial assays, including 8% in a logD assay of 88,114 compounds. Assay Guidance Manual\n(NCBI Bookshelf NBK91994): values outside the tested range *\"should be '<Xmin' or '>Xmax',\nas appropriate.\"*",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:293-296",
+   "verification": "verified (AGM quote); Svensson percentages stated as reported findings",
+   "why_it_matters": "Censoring turned out to be 12\u00d7 more damaging than any shape difference in the author's own tests, and this is the published prevalence evidence that it is worth studying."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid 2023 \u2014 noise SHAPE does not matter once the amount is matched; this is already published for homoscedastic noise, so novelty lies in the concentrated case.",
+   "verbatim": "> \"We did not observe any difference in overall model performance between different error\n> distributions, **as long as the mean and standard deviation of the noise was the same**,\n> respectively. Though noise distributions found in real data may be non-Gaussian, **if\n> homoscedastic**, they should still follow the same trends.\"\n\nThis confirms dose-matching is the right move. It also means \"shape does not matter at equal\ndose\" is **already published for evenly-spread noise**. The open question \u2014 where novelty\nremains \u2014 is whether it holds when noise is *concentrated*, either on a structural group\n(strategy 4) or on a sparse random subset (strategy 5). Heid explicitly excludes that case.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:300-310",
+   "verification": "verified (already has a bib entry: citations.bib:683, key `Heid2023`, already cited in Methods)",
+   "why_it_matters": "Simultaneously the published precedent for dose-matching AND the boundary of what is already known \u2014 it defines exactly where this paper's novelty sits."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Heid 2023 \u2014 a misreading this project itself previously made, and the exact sentence to rewrite.",
+   "verbatim": "\u26a0\ufe0f **Do not claim Heid et al. showed noise is structure-dependent.** A common misreading \u2014\nand one this project previously made \u2014 is that they *\"used mean-variance estimation and\nbias-variance decomposition to show that noise can be tied to specific modalities, for\nexample structure dependence.\"* They did not. They **imposed**\nstructure-dependent noise by hand \u2014 *\"Gaussian noise of standard deviation 20 kcal/mol for\nnitrogen-containing molecules and... 2 kcal/mol for non-nitrogen-containing molecules\"* \u2014\nthen showed a method could detect what they themselves injected. Rewrite the sentence.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:312-318",
+   "verification": "verified",
+   "why_it_matters": "This misreading is currently IN the paper (RERUN_PLAN.md:777 flags it at paper line :186). It is a live factual error about a cited source."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kolmar & Grulke 2021 \u2014 the direct predecessor: they parameterise noise by its standard deviation and report the achieved magnitude in label units.",
+   "verbatim": "Kolmar & Grulke (*J Cheminform* 2021, **13**:92 \u2014 the direct predecessor, same journal, same\nexperiment) already parameterise noise by its standard deviation: their Eq. 7 is\nY_noise = Y + N(0, \u03c3_noise), with \u03c3_noise set per noise level. They also convert back to label units\nwhen interpreting, writing that for BACE *\"1.1 log units of noise were added, or 1.6 times the average\nstandard deviation reported in ChemBL\"*. That is the precedent for both halves of this decision \u2014\nparameterising by SD, and reporting the achieved magnitude in units a chemist can read.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:545-550",
+   "verification": "verified (bib entry exists: citations.bib:39 and scripts/new_citations.bib:140, key `Kolmar2021`)",
+   "why_it_matters": "This is THE precedent for how other noise-injection papers parameterise noise level, in the same journal, on the same experiment. The '1.6 times the average ChEMBL SD' line is the exact move this paper is copying."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kolmar & Grulke \u2014 QM9/DFT has no random experimental error, quoted outright.",
+   "verbatim": "- **QM9 has no assay error to anchor to.** Kolmar & Grulke state it outright: *\"quantum\n  mechanical calculations do not have random experimental error, because the same\n  calculation will give exactly the same number.\"* For QM9, `k` is the only honest axis and\n  the noise is a controlled perturbation, not a simulated measurement.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:344-347",
+   "verification": "verified",
+   "why_it_matters": "A published sentence that carries caveat 1 (QM9 exclusion) for free. It means the paper does not have to argue the point itself."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Zhao 2017 (ACS Omega) \u2014 the published precedent for the k = \u03c4/SD(y) form of noise level.",
+   "verbatim": "**Precedent for the k form:** Zhao Y, Wang J, Sedykh A, Zhu H (2017). *ACS Omega*\n2(6):2805\u20132812 \u2014 *\"the standard deviation of each data set was multiplied by a parameter k\n(k = 0.1, 0.2, 0.5, 1.0).\"*",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:90-92",
+   "verification": "verified",
+   "why_it_matters": "The other convention in the noise-injection literature \u2014 noise as a multiple of label SD. This is the citation that licenses the QM9 fraction-of-spread axis."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Song 2023 (IEEE TNNLS) \u2014 the machine-learning noise-RATE convention does not transfer to regression, and they say so.",
+   "verbatim": "**Why root-mean-square and not something else:** RMSE and R\u00b2 are second-moment quantities,\nso matching the noise's second moment is what makes them comparable. The machine-learning\nconvention of fixing the *fraction* of corrupted labels does not transfer \u2014 Song et al.\n(2023) *IEEE TNNLS* 34(11):8135\u20138153 define noise by a rate and state explicitly that they\n*\"focus on the classification setting\"*. A flipped class label has no magnitude; a\nperturbed continuous label is nothing but magnitude.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:107-112",
+   "verification": "verified (bib entry exists: citations.bib:765, key `Song2022`)",
+   "why_it_matters": "Third parameterisation convention in the literature, and the reasoned rejection of it. Pre-empts a referee asking 'why not report a noise rate like the ML literature does?'"
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Hampel 2001 \u2014 the source for the outlier contamination fraction p = 1\u201310%.",
+   "verbatim": "- **p = 1\u201310%** \u2014 Hampel (2001): *\"for scientific routine data, not taken with utmost care,\n  their fraction is typically between 1 percent and 10 percent.\"*",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:147-148",
+   "verification": "verified",
+   "why_it_matters": "Turns an arbitrary contamination fraction into a cited one. Pairs with Huber 1964 (already in the bib) for the contamination model itself."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Four independent lines agreeing on \u03bb = 3, the contamination severity multiplier.",
+   "verbatim": "- **\u03bb = 3** \u2014 four independent lines agree. Solubility within-laboratory error must be\n  *\"multiplied by a factor of 3\"* to reach between-laboratory error (Avdeef 2019,\n  *ADMET & DMPK* 7(3):210\u2013219); solubility test sets 0.62/0.17 = 3.6 (Llin\u00e0s & Avdeef 2019,\n  *JCIM* 59:3036\u20133040); potency 0.68/0.17\u20130.22 = 3.1\u20134.0 (Kalliokoski et al. 2013); and it\n  is Tukey's conventional value for contaminated normals.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:142-146",
+   "verification": "verified (Avdeef quote); the ratios are computed from the cited figures",
+   "why_it_matters": "Four-way agreement on a design parameter that would otherwise look arbitrary. Note it reuses the Kalliokoski intra/inter-lab pair (0.68 vs 0.17\u20130.22)."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Wenlock 2011 \u2014 the logD within-laboratory figure (0.15) that replaced the failed Bruneau number in the current design.",
+   "verbatim": "| **logD** | **\u22480.15** within a laboratory; **\u00b10.5** between methods | Wenlock MC, Potter T, Barton P, Austin RP (2011), *J Biomol Screen* 16(3):348\u2013355; OECD Test Guideline 117 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:330",
+   "verification": "the memory file records it as 'derived from RMSE 0.21 between two independent determinations, n=287' \u2014 computed, not quoted",
+   "why_it_matters": "NOISE_DESIGN's \u00a74 table uses Wenlock 0.15 for logD where REVISION_GUIDE's table used Niu 0.48 \u2014 these are DIFFERENT quantities (within-lab vs worst-case repeat-test) and the paper must not blur them."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "The hERG stand-in caveat \u2014 there is no target-specific published SD for hERG; Kramer's 0.54 is ChEMBL-wide and must be labelled a stand-in.",
+   "verbatim": "- **hERG has no target-specific published standard deviation.** Kramer's 0.54 is\n  ChEMBL-wide and must be labelled a stand-in. It is the right one: the endpoint matches\n  (Ki), it is a standard deviation, and it is bracketed by a hERG cross-assay-format RMSD\n  of 0.737 (Sato 2018, n=209) and a best-case standardised-protocol residual of 0.18\n  (Alvarez Baron 2025).",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:336-340",
+   "verification": "verified reasoning; the 0.54 is explicitly a labelled stand-in",
+   "why_it_matters": "Prevents the paper claiming a hERG-specific published SD that does not exist, while still defending 0.54 as the right stand-in with a bracketing argument."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "The Caco-2 dynamic-range note and its two corroborating sources.",
+   "verbatim": "- **Caco-2 is noisier per log unit than it looks**, because its dynamic range is narrower.\n  Corroborated by Larregieu & Benet 2013 *AAPS J* 15(2):483\u2013497 (median 0.33, computed) and\n  O'Hagan & Kell 2015 *PeerJ* 3:e1405 (*\"within a factor of 2\u20135\"* = 0.30\u20130.70).",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:341-343",
+   "verification": "Larregieu 0.33 marked as computed; O'Hagan & Kell quote verified",
+   "why_it_matters": "Two independent corroborations landing on 0.30\u20130.35 for Caco-2 \u2014 the replacement evidence base after Hayeshi/Chen was superseded."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "THE BLOCKLIST \u2014 six numbers in circulation that are wrong, each traced to source, with the correct replacement.",
+   "verbatim": "| Bad number | Why it is wrong | Use instead |\n|---|---|---|\n| \"0.68 log units for **pKi**\" | 0.68 is **pIC50**. The two get swapped constantly \u2014 this project's own earlier notes had them swapped | pKi = **0.54** (Kramer 2012); pIC50 = **0.68** (Kalliokoski 2013) |\n| \"**Matsson et al. 2019**, Caco-2 intra-lab CV ~14%\" | **No such paper exists.** Matsson's only 2019 paper is about unbound intracellular drug fraction | **Prieto et al. 2010**, *ATLA* 38(5):367\u2013386 \u2014 median CV 10.4% and 14.7% |\n| \"**Pham-The 2013**, Caco-2 inter-lab standard error 18.5%\" | That paper contains **no reproducibility experiment**. 18.5% is a regression standard error | Bentz et al. 2013 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:364-368",
+   "verification": "FAILED VERIFICATION \u2014 all listed numbers must NOT enter the paper",
+   "why_it_matters": "'Matsson et al. 2019' is a fabricated citation that was in circulation in this project. This blocklist is the direct anti-hallucination artefact and must survive any file deletion."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "THE BLOCKLIST, part 2 \u2014 the Caco-2 0.6 unit error, the Hayeshi fold figures, and the Fagerholm preprint ban.",
+   "verbatim": "| \"Caco-2 SD reaches almost **0.6 log units**\" | **Unit error.** Lanevskij & Didziapetris (2019) converted Lee et al. (2017)'s *range-normalised, dimensionless* RMSE of 0.581 into \"log units\" | **\u22480.35 log\u2081\u2080**, computed from Bentz 2013 Table 6 |\n| \"Hayeshi 2008 found 4-fold / 44-fold / 16-fold variability\" | Those are **Fagerholm's re-analysis in a rejected preprint**, not statements in Hayeshi | O'Hagan & Kell 2015 \u2014 *\"within a factor of 2\u20135\"*, cited as secondary |\n| Any Caco-2 figure from **Fagerholm et al., bioRxiv 2022.09.27.509731** | Preprint, not peer reviewed | Bentz et al. 2013 |\n\n**Rule going forward: no number is written down without a peer-reviewed primary source and a\nverbatim quote.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:369-374",
+   "verification": "FAILED VERIFICATION \u2014 all listed numbers must NOT enter the paper",
+   "why_it_matters": "The 0.6 log-unit Caco-2 figure is dangerously close to the paper's own \u03c3=0.6 and would look like confirmation. The Fagerholm preprint DOI is named so it can be recognised on sight."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "\u03c3 = 0.6 CHOSEN by the author \u2014 the decision quote, with the literature block that backs it.",
+   "verbatim": "**\u2705 D11 \u2192 \u03c3 = 0.6 CHOSEN (2026-08-20, author: \"Why don't we just use 0.6?\") \u2014 and the literature backs it.** 31-agent verified search (workflow `wf_b419480e-a74`, full output `tasks/wqrlyif68.output`). Published experimental error, in the SAME log units as the labels: hERG pKi **SD 0.54** (Kramer 2012 *JMC* 55:5165); pIC50 **0.68** (Kalliokoski 2013 *PLoS ONE* 8:e61007, 20356 pairs); hERG pIC50 RMSD **0.737** (Sato 2018); logD **MAE 0.48** after curation / 0.7 before, repeat-test worst case (Niu 2024 *Sci Data* 11:985 Table 5, VERIFIED). \u26a0 **The Bruneau & McElroy 2006 \"0.27\" figure FAILED verification \u2014 do not use** ... **All estimates fall 0.27\u20130.74, clustered ~0.5 \u21d2 \u03c3=0.6 \u2248 ONE UNIT OF REAL EXPERIMENTAL ERROR for every endpoint.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:125",
+   "verification": "verified (except the flagged Bruneau row)",
+   "why_it_matters": "This is the author's own decision in their own words, with the date and the evidence attached. It is the anchor decision the entire \u03c3 discussion converged on."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The author's three successive directions on \u03c3, in order, showing how the decision evolved.",
+   "verbatim": "**D11 \u2192 AUTHOR DIRECTION (2026-08-20): \"I don't think we need a whole new metric. Just rank R\u00b2 under a set noise level (we need to determine this level).\"** \u21d2 no `delivered`/composite metric. Report plain R\u00b2 read off at ONE \u03c3.\n...\n**D11 \u2192 AUTHOR DIRECTION 2 (2026-08-20): \"So it should be a different sigma per dataset\" \u2014 YES, and it costs NOTHING to run.**\n...\n**D11 \u2192 AUTHOR DIRECTION 3 (2026-08-20): \"Every dataset has a different threshold. Determine the threshold on percentage of models falling above/below.\"** \u21d2 drop the label-SD ratio arithmetic; set \u03c3 per dataset empirically from where models start failing.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:55, :97, :110",
+   "verification": "n-a (author's own words)",
+   "why_it_matters": "The full decision trajectory in the author's own words. Directions 2 and 3 were both superseded by the literature anchor, but they record what was tried and why it was dropped."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "auc_norm STAYS \u2014 the author's framing that R\u00b2 at \u03c3=0.6 is a sanity check, not a replacement metric.",
+   "verbatim": "**(a) ANSWERED \u2014 `auc_norm` STAYS.** Author's framing: *\"auc_norm needs to take into account baseline performance at higher sigmas. The r2 at sigma=0.6 is a bit of a sanity check on auc_norm. Obviously other noise levels exist, but it catches a few cases.\"* \u21d2 NOT a metric replacement; the fix is to make baseline visible beside auc_norm.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:155",
+   "verification": "n-a (author's own words)",
+   "why_it_matters": "Settles whether R\u00b2@0.6 replaces auc_norm. It does not \u2014 and this quote is what the entire \u00a712 figure spec is built on."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The author's approval of the noise-SD dose rule, with the instruction to cite Kolmar in the paper.",
+   "verbatim": "| **The noise level becomes the noise actually delivered** | 2026-08-21 | *\"Fine lets do Noise SD, add it to the next steps doc, make sure to cite kolmar and make sure that ends up in the paper (add a note)\"* \u2014 this is the dose-matching rule. It is approved, and it must appear in the Methods with the Kolmar & Grulke citation |",
+   "source": "/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:61",
+   "verification": "n-a (author's own words)",
+   "why_it_matters": "An explicit, dated author instruction that the Kolmar citation must appear in the Methods. This is a paper-insertion obligation, not a suggestion."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "THE DERIVATION, part 1 \u2014 the discrimination evidence that originally recommended \u03c3=0.8, kept as evidence after being superseded as the method.",
+   "verbatim": "| \u03c3 | separation | echo of baseline ranking | %R\u00b2>0 | %diverged (R\u00b2<\u22121) |\n|---|---|---|---|---|\n| 0.0 | 0.068 | \u2014 | 100.0 | 0.0 |\n| 0.2 | 0.069 | 0.921 | 99.4 | 0.3 |\n| 0.4 | 0.075 | 0.860 | 99.2 | 0.3 |\n| 0.5 | 0.086 | 0.833 | 98.6 | 0.3 |\n| 0.6 | 0.124 | 0.810 | 94.2 | 0.7 |\n| 0.7 | 0.142 | 0.791 | 92.1 | 0.4 |\n| 0.8 | 0.177 | 0.760 | 87.7 | 0.7 |\n| 0.9 | 0.221 | 0.737 | 82.9 | 1.0 |\n| 1.0 | 0.257 | 0.708 | 79.1 | 3.0 |\n\n- **Below \u03c3\u22480.5 the experiment is uninformative**: separation (0.066\u20130.086) is no larger than at \u03c3=0 (0.068), and the ranking echoes the clean ranking at \u03c1 \u2265 0.83.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1300-1312",
+   "verification": "locally re-derived (validation, fold-averaged, baseline-gated \u22650.3, 709 configs)",
+   "why_it_matters": "The statistical half of the \u03c3 argument. It independently rules out \u03c3<0.5 as uninformative, which is what makes 0.6 the lowest defensible choice \u2014 the literature and the statistics agree."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "THE DERIVATION, part 2 \u2014 the ranking is locally stable at every \u03c3, so the choice is not knife-edge but it does matter across the range.",
+   "verbatim": "- **Ranking is locally stable**: adjacent-\u03c3 Spearman \u2265 0.947 throughout (0.7\u21940.8 = 0.982). So no \u03c3 choice is knife-edge \u2014 but the choice matters across the range (\u03c3=0.2 vs 1.0 = 0.801).",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1313",
+   "verification": "locally re-derived",
+   "why_it_matters": "Pre-empts 'why not 0.5 or 0.7?' \u2014 the answer is that neighbouring choices give the same ranking, so the literature anchor can carry the decision alone."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "ARGUMENT AGAINST \u03c3=0.6 \u2014 it is NOT where models separate best, and the paper must not pretend otherwise.",
+   "verbatim": "\u03c3 = 0.6 is **not** where models separate best. Model discrimination \u2014 between-model spread over\nbetween-fold spread \u2014 is flat across the whole grid (1.88 to 2.34, no peak). That is convenient rather\nthan a problem: 0.6 costs nothing in discriminating power, so the assay-error argument carries it\nalone. Do not manufacture a data-driven justification the data does not support.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:594-597",
+   "verification": "locally computed",
+   "why_it_matters": "The honest counter-argument, recorded by the author's own analysis. It explicitly forbids dressing 0.6 up as a data-driven optimum."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Two DIFFERENT jobs for \u03c3 that must be kept separate in the paper: discriminating between models vs mimicking real noise.",
+   "verbatim": "- **Two DIFFERENT jobs for \u03c3, keep them separate in the paper:** \u03c3 chosen to DISCRIMINATE between models (statistical, \u2192 0.8) vs \u03c3 chosen to MIMIC REAL EXPERIMENTAL NOISE (physical, \u2192 TBD from literature). Either is legitimate; the paper must say which it is doing.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:139",
+   "verification": "n-a (design reasoning)",
+   "why_it_matters": "The clearest statement of the conceptual split. Conflating the two is what made the \u03c3 discussion go round in circles for days."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "THE UNITS PROBLEM \u2014 one \u03c3 is NOT one noise condition; Caco-2 receives ~2.7\u00d7 the noise-to-signal of LogD at any given \u03c3.",
+   "verbatim": "| dataset | label SD | \u03c3=0.5 | \u03c3=0.6 | \u03c3=0.8 | \u03c3=1.0 |\n|---|---|---|---|---|---|\n| OpenADMET-LogD | 1.191 | 0.42\u00d7 | 0.50\u00d7 | 0.67\u00d7 | 0.84\u00d7 |\n| ChEMBL-hERG-Ki | 0.905 | 0.55\u00d7 | 0.66\u00d7 | 0.88\u00d7 | 1.10\u00d7 |\n| OpenADMET-Caco2_Efflux | 0.434 | 1.15\u00d7 | 1.38\u00d7 | **1.84\u00d7** | 2.30\u00d7 |\n| QM9 | 1.051 (IQR 1.041\u20131.065 \u21d2 effectively standardised) | 0.48\u00d7 | 0.57\u00d7 | 0.76\u00d7 | 0.95\u00d7 |\n\n**Consequence for the paper as it stands:** a fixed \u03c3 is *not* a fixed noise condition. Caco-2 receives ~2.7\u00d7 the noise-to-signal of LogD at any given \u03c3. Cross-dataset comparisons at one \u03c3 are not like-for-like, and this is the mechanism behind Caco-2 supplying most of the negative-R\u00b2 cells (it is not purely model fragility).",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1285-1292",
+   "verification": "locally re-derived (label SD back-computed as RMSE\u00b2/(1\u2212R\u00b2) from \u03c3=0 rows; n=1219\u20131362 per validation dataset)",
+   "why_it_matters": "Surfaced by the author challenging '0.8 seems really extreme'. It affects the paper AS IT STANDS, not just the \u03c3 choice \u2014 every cross-dataset comparison at fixed \u03c3 needs a caveat sentence."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "An in-house fix for the units problem exists and was NEVER USED \u2014 noise_spec.py, with its own docstring condemning the current approach.",
+   "verbatim": "\u26a0 In-house fix exists but was **not used**: `KIRBy/src/kirby/noise_spec.py` expresses level as a fraction of label SD and binary-searches the raw \u03c3. Its own docstring: *\"This is what makes a level comparable across datasets; the four ad-hoc definitions never were.\"* The paper run hardcodes raw `SIGMA_LEVELS` (L79).",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1294",
+   "verification": "verified from code",
+   "why_it_matters": "A working solution already exists in the repo and was bypassed. Its docstring is a self-indictment that a referee could find."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The cost of label-SD matching, measured: it equalises the damage but KILLS Caco-2 as a discriminator.",
+   "verbatim": "- **Matching DOES equalise the damage (validated):** % of baseline R\u00b2 retained \u2014 fixed \u03c3=0.8 gives LogD 90.8 / hERG 65.6 / **Caco-2 53.1**; matched r=0.7 gives 90.8 / 82.1 / **86.1**. \u21d2 confirms the fixed-\u03c3 Caco-2 collapse was a UNITS artifact, not a dataset property.\n- **\u26a0 THE COST \u2014 matching kills Caco-2 as a discriminator.** Model separation (IQR of R\u00b2 across models): Caco-2 falls 0.200 \u2192 **0.057** at r=0.7, and 0.057 \u2248 the \u03c3=0 separation (0.068) \u21d2 no signal. hERG falls 0.169 \u2192 0.102. LogD unchanged (0.162, since \u03c3=0.8 is its matched level). **Caco-2's apparent discriminating power in current results comes from being hit ~3\u00d7 harder than the others.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:106-107",
+   "verification": "locally computed on the gated set (baseline\u22650.3, fold-averaged, 709 configs)",
+   "why_it_matters": "The full argument FOR and AGAINST label-SD matching, with numbers. It also explains a headline result (Caco-2 discriminates best) as an artifact of dose."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Caco-2 granularity constraint \u2014 its narrow label SD means the 0.1 grid gives only ~4 usable noise levels.",
+   "verbatim": "- **\u26a0 Caco-2 GRANULARITY:** labelSD 0.434 \u21d2 each 0.1 grid step moves r by 0.23. Only ~4 usable levels (0.23/0.46/0.69/0.92) vs 10 for LogD. r=0.7 landing at 0.69 is luck. A calibrated re-run (`noise_spec.calibrate_sigma`) would be needed for finer control.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:108",
+   "verification": "computed",
+   "why_it_matters": "Explains why the neat r=0.7 match across all four datasets was partly luck, and what a genuine fix would cost."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "THE THRESHOLD RULE \u2014 where each dataset actually breaks, and the finding that LogD reaches no threshold at all.",
+   "verbatim": "| rule (R\u00b2>0.3) | Caco-2 | hERG | LogD |\n|---|---|---|---|\n| fewer than 75% remain | \u03c3=0.5 (55%) | \u03c3=0.6 (69%) | **never** (88% at \u03c3=1.0) |\n| fewer than 50% remain | \u03c3=0.6 (38%) | \u03c3=0.9 (42%) | **never** (88%) |\n| fewer than 25% remain | \u03c3=1.0 (23%) | never (41%) | **never** (88%) |\n\n**\u26a0 LogD reaches no threshold at all** \u2014 88.1% of configs still clear R\u00b2=0.3 and 97.7% still clear R\u00b2=0 at maximum noise. LogD is insensitive to the entire noise range tested. That is a reportable finding in its own right (and independently matches the earlier \"LogD barely discriminates\" note), not a defect to hide.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1321-1327",
+   "verification": "locally computed on the gated set",
+   "why_it_matters": "This is the author's third \u03c3-selection method, and it independently lands on \u03c3=0.6 for hERG. The LogD insensitivity is a genuine reportable finding."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "R\u00b2=0.3 is the only workable threshold \u2014 R\u00b2=0 is never crossed and R\u00b2=0.5 is already failed at \u03c3=0.",
+   "verbatim": "**Threshold choice is constrained, not free:** R\u00b2=0 is useless (nothing crosses it but Caco-2 at \u03c3=0.9); R\u00b2=0.5 is useless the other way (hERG has only 29.6% of configs above 0.5 at \u03c3=0 \u2014 already \"failed\" before any noise). **R\u00b2=0.3 is the only workable threshold**, and it coincides with `ROBUSTNESS_BASELINE_THRESHOLD`.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:122",
+   "verification": "locally computed",
+   "why_it_matters": "Shows the R\u00b2=0.3 gate was not chosen arbitrarily \u2014 it is the only threshold the data admits, and it happens to match the existing code constant."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "OPEN \u2014 the threshold percentages POOL the six noise strategies, which violates the no-averaging rule and needs a per-strategy breakout.",
+   "verbatim": "- **\u26a0 OPEN:** these percentages POOL the 6 strategies (hetero barely degrades, threshold/valprop degrade hard) \u21d2 crossing \u03c3 will differ by strategy. Needs per-strategy breakout before it goes in the paper, per the no-averaging rule.",
+   "source": "/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:123",
+   "verification": "n-a (open item)",
+   "why_it_matters": "An unresolved blocker on using the threshold-rule tables in the paper. It would be silently lost if DISCUSSION_TRACKER.md is deleted."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Heteroscedastic noise never separates models at ANY \u03c3 \u2014 a property of the strategy, not of the cutoff.",
+   "verbatim": "**\u26a0 Heteroscedastic noise never separates models at any \u03c3** \u2014 separation flat at 0.061\u20130.071 from \u03c3=0 to \u03c3=1.0, median R\u00b2 only 0.485 \u2192 0.400. Per-strategy separation at \u03c3=0.8: threshold 0.390, valprop 0.219, legacy 0.139, quantile 0.128, outlier 0.122, **hetero 0.063**. This is a property of the strategy, not of the cutoff, and any hetero column in a robustness ranking essentially reproduces the baseline ranking. Needs an explicit caveat sentence wherever hetero is reported.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1315",
+   "verification": "locally computed",
+   "why_it_matters": "No \u03c3 choice can rescue the heteroscedastic column \u2014 it reproduces the baseline ranking in disguise. This requires a footnote on every AUC_norm heatmap."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Under mild noise \u03c3=0.6 just reproduces the clean ranking; only threshold and value-proportional noise change who wins.",
+   "verbatim": "2. **Under mild noise, ranking at \u03c3=0.6 just reproduces the clean ranking** (0.91\u20131.00 for hetero/legacy/outlier/quantile on LogD and hERG). Noise of this magnitude does not change which model you would pick.\n3. **Under the stress strategies it does change** \u2014 R\u00b2@0.6 vs clean falls to 0.26 (hERG threshold) and 0.20 (hERG valprop), and 0.70 on LogD threshold. **Threshold and value-proportional noise are where robustness actually decides the winner**; the other four largely do not.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:434-435",
+   "verification": "locally computed from validation_rerun, rep=PDV, gate\u22650.3",
+   "why_it_matters": "A direct consequence of choosing \u03c3=0.6: at that level most noise types do not change the answer. This is both a limitation and the strongest support for the three-tier strategy framing."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Clean R\u00b2 and AUC_norm are essentially unrelated \u2014 the last column runs \u22120.36 to +0.49 and sits near zero in 14 of 18 cells.",
+   "verbatim": "1. **Clean R\u00b2 and AUC$_\\text{norm}$ are essentially unrelated** \u2014 the last column runs from \u22120.36 to +0.49 and sits near zero in 14 of 18 cells. Whatever AUC$_\\text{norm}$ ranks models by, it is not how accurate they are. This is the same near-independence seen at model-mean level (Spearman 0.179), now reproduced per dataset \u00d7 strategy on 13 models.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:433",
+   "verification": "locally computed from validation_rerun, rep=PDV, gate\u22650.3",
+   "why_it_matters": "This near-independence is the reason \u03c3=0.6 was needed at all \u2014 retention alone does not tell you which model to pick."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The clearest demonstration that retention crowns models for having less to lose \u2014 on LogD the AUC podium and the accuracy podium share NO models.",
+   "verbatim": "| Dataset | by R\u00b2 at \u03c3=0.6 | by clean R\u00b2 | by AUC$_\\text{norm}$ |\n|---|---|---|---|\n| LogD | DNN, GP, MLP | DNN, GP, SVM | **NGBoost, MLP-VBLL-Full, BNN-Full** |\n| hERG | RF, LightGBM, QRF | LightGBM, RF, QRF | **NGBoost, RF, SVM** |\n| Caco-2 | MLP-VBLL-Full, DNN, MLP | DNN, SVM, GP | **MLP-BNN-Full, MLP-VBLL-Full, GP** |\n\nOn LogD the AUC$_\\text{norm}$ podium and the accuracy podium share **no models at all**, and the AUC winners are the low-baseline ones \u2014 NGBoost's clean R\u00b2 on PDV/LogD is 0.661 against DNN's 0.797. This is the clearest single demonstration that the retention metric crowns models for having less to lose.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:439-445",
+   "verification": "locally computed from validation_rerun (13 models, 48,510 rows), rep=PDV, gate\u22650.3",
+   "why_it_matters": "The single most persuasive figure-worthy result from the \u03c3=0.6 work, and the direct justification for the \u00a712 figure changes."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The revised per-dataset noise grids, each anchored in log units to one unit of that endpoint's real assay error \u2014 this SUPERSEDES the old eleven-point \u03c3 ladder.",
+   "verbatim": "| Dataset | One unit of real error | Proposed levels (log units) |\n|---|---|---|\n| logD | 0.15 within a lab; 0.50 between methods | 0, 0.15, 0.3, 0.5, 0.75, 1.0 |\n| Caco-2 | 0.35 between 11 labs | 0, 0.1, 0.2, 0.35, 0.5, 0.7 |\n| hERG | 0.54 (stand-in) | 0, 0.15, 0.3, 0.54, 0.8, 1.1 |\n\nEach grid brackets one unit of real error and runs to roughly twice it. Report the resulting\nfraction-of-spread alongside, because **one unit of real error is 0.13 of the label spread on\nlogD but 0.76 on Caco-2** \u2014 a factor of six. A single shared ladder would mean six different\nexperiments.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:732-741",
+   "verification": "n-a (design decision, sourced to the \u00a74 anchor table)",
+   "why_it_matters": "This is where all the literature work actually LANDS \u2014 the per-dataset grids. Each level is now a published assay-error figure, not a round number."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "QM9 gets a fraction-of-spread axis, set by the range-finding run, because no assay error exists to anchor to.",
+   "verbatim": "**QM9 \u2014 no assay error exists**, so fraction-of-label-spread is the only honest axis.\n**Grid set by the range-finding run (\u00a75.5): 0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5.** Below 0.2 the\nmodels are indistinguishable from clean; 1.5 is retained because it is the only level where\nthe noise types separate at all.\n\n**Censoring is swept separately** on its own axis \u2014 fraction of labels clipped \u2014 because it\nhas no variance parameter and is not zero-mean. **Grid set by the range-finding run (\u00a75.5): 0, 10, 20, 25, 30, 40, 50%.** There is no sharp\nknee \u2014 damage accelerates smoothly, becoming serious around 20% and severe past 30%.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:743-750",
+   "verification": "n-a (design decision; grids set by the range-finding run)",
+   "why_it_matters": "Implements caveat 1 (QM9 exclusion) concretely. The two axes are now different quantities and the paper must present them separately."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "\u03c3=0.6 survives the translation to the new design \u2014 on the experimental datasets it becomes 0.6 log units, still one unit of published assay error.",
+   "verbatim": "**This supersedes the old eleven-point ladder.** Your choice of 0.6 as the reporting level\nsurvives the translation intact: on the experimental datasets it becomes 0.6 log units, which is\nstill one unit of published assay error, and it is still a sanity check on the retention metric\nrather than a replacement for it.",
+   "source": "/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:622-625",
+   "verification": "n-a (design reasoning)",
+   "why_it_matters": "Confirms the \u03c3=0.6 decision is NOT invalidated by the noise redesign. Everything in this salvage remains live."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The two-axis reporting rule that resolves the whole \u03c3 argument: \u03c4 in label units for choosing/realism, k = \u03c4/SD(y) for reporting/comparison.",
+   "verbatim": "| Axis | Use it for | Why |\n|---|---|---|\n| **\u03c4 in the label's own units** (log units for the experimental sets) | **Choosing** the noise levels, and claiming realism | Assay error in log units is roughly constant across endpoints *regardless of label spread*, so a fixed value in log units is more defensible as \"one unit of real error\" than a spread-matched one |\n| **k = \u03c4 / SD(y)** | **Reporting** and cross-dataset comparison | Unitless, so electronvolts and log units land on one axis, and it is what determines how hard the learning problem becomes |\n\n**Report both.** They are not interchangeable: a dataset with a narrow label spread suffers\nfar more from the same absolute error, which is exactly why Caco-2 degrades first\n(\u03c4 \u2248 0.35 log\u2081\u2080 but a narrow dynamic range).",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:75-82",
+   "verification": "n-a (design decision)",
+   "why_it_matters": "This is the synthesis that ends the fixed-\u03c3 vs SD-matched argument: both, for different jobs. It is the durable form of everything above it."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The dose-matching rule \u2014 each strategy solves for its own scale so the delivered noise amount is equal, and the current six strategies are one strategy at six doses.",
+   "verbatim": "**Control the realised dose \u03c4: the root-mean-square noise actually added, in the label's\nown units.** Every strategy must deliver the same \u03c4, or a comparison between strategies is\nmeasuring amount rather than shape.\n\nThis is the fix. Today a single knob is set and each strategy delivers whatever it happens\nto deliver \u2014 between 0.49\u00d7 and 2.00\u00d7 the Gaussian amount on QM9. **\u03c4 must be the result,\nnot the knob.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:63-69",
+   "verification": "measured on QM9 (first 10,000 molecules, gap in eV)",
+   "why_it_matters": "The confound that invalidated the entire six-strategy comparison, stated in one paragraph. The 0.49\u00d7\u20132.00\u00d7 spread is the measured evidence."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The measured per-strategy dose multipliers on QM9 that prove the confound.",
+   "verbatim": "| Strategy | RMS noise per unit \u03c3, as implemented |\n|---|---|\n| Threshold | 2.000 |\n| Value-proportional | 1.701 |\n| Gaussian | 1.000 |\n| Quantile | 0.899 |\n| Heteroscedastic | 0.669 |\n| Outlier | 0.502 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:566-573",
+   "verification": "measured on QM9 (first 10,000 molecules, gap in eV)",
+   "why_it_matters": "The raw numbers behind 'six strategies are one strategy at six doses'. Threshold gets 4\u00d7 the dose of Outlier at the same nominal \u03c3, which entirely explains the apparent severity ordering."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Once \u03c3 IS the achieved noise SD, the \u03c3=0.6 anchor gets stronger \u2014 it becomes literally true for every strategy, not just Gaussian.",
+   "verbatim": "3. **The \u03c3 = 0.6 anchor survives and gets stronger.** Published assay error is 0.54 log units for hERG\n   pKi, 0.27\u20130.62 for logD and about 0.43 for Caco-2 (Kalliokoski et al., *PLoS ONE* 2013, **8**:e61007\n   reports \u03c3_pIC50 = 0.68). Once \u03c3 *is* the achieved noise SD, \"\u03c3 = 0.6 is one unit of assay error\"\n   becomes literally true for every strategy rather than true only for Gaussian.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:587-590",
+   "verification": "the logD 0.27 lower bound in this sentence is the FAILED Bruneau figure and must be corrected to 0.48 (Niu 2024); the Caco-2 0.43 is the SUPERSEDED Hayeshi/Chen route and should be 0.35 (Bentz 2013)",
+   "why_it_matters": "The dose-matching decision and the literature anchor reinforce each other. But this sentence carries two stale numbers that must be updated before use."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Do not truncate the \u03c3 grid \u2014 only half the damage has happened by \u03c3=0.6, and a second reporting point at \u03c3=0.9 is recommended.",
+   "verbatim": "- **Do not truncate the grid.** Only about half the total damage has happened by \u03c3 = 0.6 and the\n  curves are still steep above it. Report a second point at \u03c3 = 0.9 where robustness rather than\n  baseline skill dominates the ordering.\n- **Report damage per dataset, not pooled.** Mean relative drop at \u03c3 = 0.6 differs 3.4-fold: LogD\n  0.155, hERG 0.356, Caco-2 0.529.\n- **\u03c3 = 0 stays permanently** as a negative control.\n- **Do not rescale the grid by each dataset's label standard deviation.** Assay error is absolute in\n  log units and roughly constant across these three assays, so an absolute scale is the physically\n  correct instrument.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:603-614",
+   "verification": "locally computed (the 0.155 / 0.356 / 0.529 relative drops)",
+   "why_it_matters": "Four settled sub-decisions about the grid, including a concrete recommendation (a second point at \u03c3=0.9) that is not recorded anywhere else."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The three-number reporting rule, with Kolmar & Grulke as the precedent for printing all three in the same cell.",
+   "verbatim": "- **Clean R\u00b2 (\u03c3 = 0)** \u2014 can this model and representation learn the property at all. Precondition for\n  the other two meaning anything.\n- **R\u00b2 at \u03c3 = 0.6** \u2014 what you actually get when labels carry roughly one unit of real assay error.\n- **`auc_norm`** \u2014 the shape of the decline, each model divided by its own clean score so models with\n  different starting accuracy can be compared on decline alone.\n\nReporting rules that follow: print all three together in the same cell (Kolmar & Grulke do exactly this\nin the same journal for the same kind of ratio); and make the existing 0.3 clean-R\u00b2 gate visible in the\nprinted tables, so a reader can tell a real 0.97 from a meaningless one.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:428-459",
+   "verification": "locally computed (the 20/72 and 17/24 and 13/24 counts)",
+   "why_it_matters": "The concrete reporting spec that the \u03c3=0.6 decision implies, with a same-journal precedent for the format."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The two metrics name the same best model in only 20 of 72 validation cells \u2014 and a GP with clean R\u00b2 of \u22120.156 still produces a retention number.",
+   "verbatim": "- The two metrics name the same best model in **20 of 72 cells (28 %)**.\n- On LogD, LightGBM has the highest R\u00b2 at \u03c3 = 0.6 in **17 of 24** cells and the highest retention in\n  **none**. NGBoost is the mirror image \u2014 13 of 24 on retention, none on accuracy \u2014 because its clean\n  R\u00b2 is 0.661 against LightGBM's 0.758.\n- The Gaussian process on hERG has a clean R\u00b2 of \u22120.156, worse than predicting the mean, and still\n  produces a retention number.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:437-442",
+   "verification": "locally computed across all 72 validation dataset \u00d7 representation \u00d7 strategy cells",
+   "why_it_matters": "The strongest quantified case that retention alone is insufficient. The GP hERG example is the reductio \u2014 a meaningless model still scores on the metric."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE \u00a712 FIGURE SPEC \u2014 the decision in the author's framing, and the five concrete changes it implies.",
+   "verbatim": "**The decision, in the author's framing:** AUC$_\\text{norm}$ **stays** as the robustness metric. It is not replaced. The problem is narrower than \"wrong metric\" \u2014 AUC$_\\text{norm}$ needs to carry baseline performance alongside it, because on its own it rewards a model for having had little to lose. **R\u00b2 at $\\sigma = 0.6$ is a sanity check on AUC$_\\text{norm}$, not a competing metric.** Other noise levels exist; this one catches a useful set of cases.\n\nThat framing is what these changes implement. Nothing here proposes a new metric or a new figure.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1719-1721",
+   "verification": "n-a (author's framing, recorded)",
+   "why_it_matters": "The entire figure-work programme that follows from \u03c3=0.6. It is code-actionable and would be lost with the file."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "\u00a712.1 \u2014 fig1 Panel B needs a baseline R\u00b2 column, and Panel A needs a \u03c3=0.6 reference line.",
+   "verbatim": "`create_figure1`, `generate_paper_figures_v2.py` L2647; Panel B is the model \u00d7 strategy AUC$_\\text{norm}$ heatmap built from L2680 onward, PDV-only.\n\n**Problem.** Panel B is the figure a reader ranks models from, and it contains no baseline information whatsoever. A row reading 0.989 looks like the best model on the page. NGBoost's clean R\u00b2 on PDV/LogD is 0.661 against DNN's 0.797 \u2014 the reader cannot see this.\n\n**Change.** Prepend one column to the heatmap: **R\u00b2 at \u03c3=0**, visually separated from the strategy columns (its own colour scale or a gap, since it is a different quantity and must not be read as a seventh strategy). Plumbing exists \u2014 `auc_df` already carries `baseline_r2`, and `calculate_robustness` returns it.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1725-1731",
+   "verification": "verified from code (line numbers and available columns checked)",
+   "why_it_matters": "Named as the highest-payoff, smallest change. The exact function, line numbers and available data columns are given, so it is directly implementable."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "\u00a712.2 \u2014 fig3's y-axis zoom is now arguing for a retired claim and must be changed or re-captioned.",
+   "verbatim": "**Change 2 \u2014 the y-axis zoom is now arguing for a retired claim.** L2928\u20132934 deliberately tightens the y-range to the data (`auc_norm` \u2248 0.78\u20130.86, padded by 25%) with the stated rationale *\"so the flatness (the whole point) fills the panel\"*. That flatness **was** the point when the paper claimed robustness is decoupled from accuracy. \u00a79.1 retires that claim. A zoomed axis that magnifies a 0.08 spread into a full panel visually manufactures the very effect being withdrawn. On a [0,1] axis the same data reads as a tight cluster, which is the honest picture. **Change the axis or change the caption \u2014 do not leave the zoom paired with the new text.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1739",
+   "verification": "verified from code (the rationale comment is quoted from the script)",
+   "why_it_matters": "A figure that visually manufactures a withdrawn claim is a serious integrity issue. This is an unresolved author call (listed as D11 sub-item (b))."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "\u00a712.4 \u2014 the new third panel on fig3 (R\u00b2@0.6 vs AUC_norm) and the three worked cases that land in the flattered quadrant.",
+   "verbatim": "R\u00b2 at \u03c3=0.6 on one axis, AUC$_\\text{norm}$ on the other, one point per model. Bottom-right = high retention, low delivered accuracy \u2014 the flattered quadrant. This is the sanity check as a single image.\n\n- **BNN-Full, LogD, quantile** \u2014 AUC$_\\text{norm}$ rank **1** (0.999), R\u00b2@0.6 rank **13 of 13**. Clean R\u00b2 0.585 against DNN's 0.801. The clearest single example in the dataset.\n- **NGBoost, LogD, Gaussian** \u2014 AUC rank 1 (0.989), R\u00b2@0.6 rank 11.\n- **LightGBM, Caco-2** \u2014 the reverse case the metric under-credits: clean rank 4, R\u00b2@0.6 rank 12, and \u22128 rank places under Gaussian, outlier, quantile *and* valprop. R\u00b2 falls from a clean 0.486 to 0.008 at \u03c3=0.6 under Gaussian. Consistent across strategies, not a fluke.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1749-1754",
+   "verification": "locally computed from \u00a710.4 tables (validation_rerun)",
+   "why_it_matters": "Three named, quantified worked examples for the new panel. Finding these again would require re-running the whole \u03c3=0.6 analysis."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "\u00a712.6 \u2014 the caveat that must travel with every AUC_norm heatmap, because the hetero column is the baseline ranking in disguise.",
+   "verbatim": "**Heteroscedastic noise does not separate models at any \u03c3** \u2014 separation flat at 0.061\u20130.071 from \u03c3=0 to \u03c3=1.0, median R\u00b2 only 0.485 \u2192 0.400 (\u00a710.2). Its column in any AUC$_\\text{norm}$ heatmap is therefore approximately the baseline ranking in disguise. This is a property of the strategy, not of the figure, and cannot be fixed by design \u2014 it needs one footnote wherever the heatmap appears. The same applies to the hetero column in fig1 Panel B once 12.1 lands, where it will sit directly beside the actual baseline column and the similarity will be visible.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1764",
+   "verification": "locally computed",
+   "why_it_matters": "Once the baseline column is added next to the hetero column, the similarity becomes visible to any reader. Better to footnote it than be caught by it."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "\u00a712.7 \u2014 the ordered work list for the figure changes, with the blocking dependency named first.",
+   "verbatim": "1. Settle the validation directory question (`alternative_full` 7 models vs `validation_rerun` 13) \u2014 12.3 depends on it.\n2. Do 12.1 (fig1 Panel B baseline column + \u03c3=0.6 line in Panel A). Self-contained, highest payoff.\n3. Do 12.2 (fig3 colouring + axis decision). The axis decision is an author call, not a code question.\n4. Do 12.4 (third panel on fig3).\n5. Do 12.3 once D1 is settled.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1766-1772",
+   "verification": "n-a (work plan)",
+   "why_it_matters": "Ordered, dependency-aware work list. Step 1 is a blocker that must be resolved before any validation figure work."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "BLOCKING \u2014 the validation directory ambiguity: alternative_full (7 models) vs validation_rerun (13 models) are different runs, and every \u03c3=0.6 table depends on which one wins.",
+   "verbatim": "**\u26a0 Data provenance \u2014 read before quoting any number here.** These tables come from\n`KIRBy/tests/results/validation_rerun/` (13 models \u00d7 4 reps \u00d7 3 datasets, 48{,}510 rows), which is the\n**local per-\u03c3 source**. The paper pipeline is fed `alternative_full` on ARC, which carries only 7 models.\nThe two are different runs. Numbers below must be reproduced from whichever directory the final figures\nuse before they enter the paper. Representation held at PDV (`PRIMARY_REP`), baseline gate R\u00b2 \u2265 0.3.\nBacking CSVs: `scratchpad/rank_sigma06_pdv.csv`, `scratchpad/rank_sigma06_all_reps.csv`.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:401-406",
+   "verification": "n-a (provenance warning)",
+   "why_it_matters": "Every \u03c3=0.6 table in this salvage carries this warning. NOTE: the two backing CSVs are GONE \u2014 /Users/apunt/repos/qsar_qm_models/scratchpad/ no longer exists, so all these tables would have to be recomputed."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "REOPENS A CLOSED ASSUMPTION \u2014 validation_rerun contains MLP, BNN-Full, VBLL-Full and GP, contradicting the standing note that KIRBy has no such models.",
+   "verbatim": "**\u26a0 Also found, needs checking before it changes anything:** `validation_rerun` contains **13 models**, including MLP, BNN-Full, VBLL-Full, MLP-BNN-Full, MLP-VBLL-Full and GP. This contradicts the standing note that \"KIRBy has no MLP/VBLL models\" and the D2 finding that the BNN comparison pairs \"never fire on validation\". That note was true of `alternative_full`; it is **not** true of `validation_rerun`. Which directory the paper's validation section should use is now an open question \u2014 resolving it may unblock the BNN/VBLL validation comparisons that were written off as impossible. Do not act on this until the directory question is settled.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:447",
+   "verification": "n-a (open question)",
+   "why_it_matters": "May unblock validation comparisons previously declared impossible. This is a live opportunity that would be lost with the file."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The \u03c3=0.6 R\u00b2 table for LogD (rep=PDV) \u2014 13 models \u00d7 clean + 6 strategies, with NGBoost's retention-flattery visible in one row.",
+   "verbatim": "| model | CLEAN | legacy | outlier | quantile | threshold | valprop | hetero |\n|---|---|---|---|---|---|---|---|\n| DNN | 0.797 | 0.751 | 0.769 | 0.761 | 0.699 | 0.723 | 0.788 |\n| GP | 0.784 | 0.746 | 0.759 | 0.749 | 0.705 | 0.728 | 0.772 |\n| SVM | 0.779 | 0.744 | 0.771 | 0.757 | 0.700 | 0.723 | 0.769 |\n| XGBoost | 0.740 | 0.663 | 0.723 | 0.688 | **0.492** | 0.598 | 0.737 |\n| NGBoost | 0.661 | 0.657 | 0.656 | 0.657 | 0.653 | 0.652 | 0.661 |\n\nNote NGBoost: lowest spread across strategies of any model (0.652\u20130.661) but also near the bottom on absolute R\u00b2. This is the retention-flattery case made visible in one row \u2014 it barely moves because it barely had anything to lose.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1335-1351",
+   "verification": "locally computed from validation_rerun; the backing CSVs no longer exist locally",
+   "why_it_matters": "The NGBoost row is the single clearest visual proof of the retention-flattery problem. Full 13-row tables for hERG and Caco-2 are at REVISION_GUIDE.md:1355-1363 and :1369-1385."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The Caco-2 \u03c3=0.6 table kills several claims \u2014 LightGBM has the second-best clean R\u00b2 and collapses to 0.008 under Gaussian noise.",
+   "verbatim": "**This table alone kills several claims.** LightGBM has the second-best clean R\u00b2 on Caco-2 (0.486) and collapses to 0.008 under Gaussian noise \u2014 a model that looks excellent clean and is useless at \u03c3=0.6. XGBoost goes negative under three strategies. Meanwhile the neural models (MLP-VBLL, DNN, MLP) hold up best. Note this is the **opposite** of the QM9 picture, where neural models are the fragile ones \u2014 direct support for the dataset-size argument already in \u00a79 (F6b).",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1385",
+   "verification": "locally computed from validation_rerun",
+   "why_it_matters": "A headline result that only becomes visible at a chosen \u03c3 \u2014 the strongest single argument that reporting a fixed noise level was worth doing."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The T25 tracker row \u2014 the one-line summary of the whole \u03c3-anchoring thread as it stood.",
+   "verbatim": "| T25 | **$\\sigma$ anchored to real experimental error** | LOGGED (needs D11) | New section \"Noise magnitude \u2014 anchoring $\\sigma$\u2026\". Published assay error is 0.27\u20130.74 log units across all three external endpoints (Kramer 2012 $pK_i$ 0.54; Bruneau 2006 logD 0.27; Hayeshi 2008 Caco-2 ~0.43) \u21d2 **$\\sigma \\approx 0.6$ = one unit of real measurement error**. Units check out: injection is in raw label units and all three labels are logs. Needs 5 new `citations.bib` entries. **QM9 excluded** \u2014 computed data, no experimental error to match. |",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:30",
+   "verification": "the Bruneau 0.27 and Hayeshi ~0.43 figures in this row are FAILED / SUPERSEDED respectively; the row predates those corrections",
+   "why_it_matters": "The tracker row is what a reader would find first, and it still carries the two withdrawn numbers. Anyone salvaging only this row would reintroduce both errors."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "BIB STATUS \u2014 which of the noise-anchor citations already have entries, checked directly against both bib files.",
+   "verbatim": "Kramer2012 : citations.bib:1290 PRESENT (@article{Kramer2012, ... doi = {10.1021/jm300131x}})\nKolmar2021 : citations.bib:39 and scripts/new_citations.bib:140 PRESENT\nHeid2023   : citations.bib:683 PRESENT\nlandrum2024: citations.bib:1910 PRESENT\nhuber1964robust : citations.bib:1804 and scripts/new_citations.bib:45 PRESENT\nSong2022   : citations.bib:765 PRESENT\nABSENT FROM BOTH FILES: Kalliokoski 2013 (appears only as a co-author of Kramer2012), Sato 2018, Bruneau 2006, Hayeshi 2008, Niu 2024 / PharmaBench, Alvarez Baron 2025, Takacs-Novak & Avdeef 1996, Bentz 2013, Kruger & Overington 2012, Chen 2017, O'Hagan & Kell 2015, Wenlock 2011, Prieto 2010, Larregieu & Benet 2013, Horwitz & Albert 2006, Hampel 2001, Srinivasan & Lloyd 2025, Kramer 2016, Svensson 2025, Zhao 2017 (ACS Omega), Avdeef 2019, Llinas & Avdeef 2019, OECD TG 117, Lange 1989.",
+   "source": "/Users/apunt/repos/qsar_qm_models/citations.bib and /Users/apunt/repos/qsar_qm_models/scripts/new_citations.bib (grepped 2026-08-25)",
+   "verification": "verified by direct grep of both files",
+   "why_it_matters": "Answers the task's bib question exactly. Twenty-four of the noise-literature sources have no bib entry at all \u2014 that is the real size of the citation work still outstanding."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "The complete Sources list from NOISE_DESIGN.md \u2014 24 entries with DOIs, the canonical bibliography of the noise chase.",
+   "verbatim": "- Alvarez Baron C, et al. (2025). *Sci Rep* 15:29995. doi:10.1038/s41598-025-15761-8\n- Avdeef A (2019). *ADMET & DMPK* 7(3):210\u2013219. doi:10.5599/admet.698\n- Bentz J, O'Connor MP, Bednarczyk D, et al. (2013). *Drug Metab Dispos* 41(7):1347\u20131366. doi:10.1124/dmd.112.050500\n- Hampel F (2001). Robust statistics: a brief introduction and overview. ETH Z\u00fcrich, Seminar f\u00fcr Statistik Research Report.\n- Heid E, McGill CJ, Vermeire FH, Green WH (2023). *J Chem Inf Model* 63(13):4012\u20134029. doi:10.1021/acs.jcim.3c00373\n- Horwitz W, Albert R (2006). *J AOAC Int* 89(4):1095.\n- Huber PJ (1964). *Ann Math Statist* 35(1):73\u2013101. doi:10.1214/aoms/1177703732\n- Kalliokoski T, Kramer C, Vulpetti A, Gedeck P (2013). *PLoS ONE* 8(4):e61007. doi:10.1371/journal.pone.0061007\n- Kolmar SS, Grulke CM (2021). *J Cheminform* 13:92. doi:10.1186/s13321-021-00571-7",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:803-811",
+   "verification": "n-a (bibliography)",
+   "why_it_matters": "First half of the canonical source list with DOIs \u2014 everything needed to write the bib entries. Second half at NOISE_DESIGN.md:812-826."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "The complete Sources list, second half \u2014 Kramer through Zhao.",
+   "verbatim": "- Kramer C, Kalliokoski T, Gedeck P, Vulpetti A (2012). *J Med Chem* 55(11):5165\u20135173. doi:10.1021/jm300131x\n- Kramer C, Dahl G, Tyrchan C, Ulander J (2016). *Drug Discov Today* 21(8):1213\u20131221. doi:10.1016/j.drudis.2016.03.015\n- Kr\u00fcger FA, Overington JP (2012). *PLoS Comput Biol* 8(1):e1002333. doi:10.1371/journal.pcbi.1002333\n- Landrum GA, Riniker S (2024). *J Chem Inf Model* 64(5):1560\u20131567. doi:10.1021/acs.jcim.4c00049\n- Lange KL, Little RJA, Taylor JMG (1989). *JASA* 84(408):881\u2013896.\n- Larregieu CA, Benet LZ (2013). *AAPS J* 15(2):483\u2013497. doi:10.1208/s12248-013-9456-8\n- Llin\u00e0s A, Avdeef A (2019). *J Chem Inf Model* 59:3036\u20133040. doi:10.1021/acs.jcim.9b00345\n- O'Hagan S, Kell DB (2015). *PeerJ* 3:e1405. doi:10.7717/peerj.1405\n- OECD (2022). Test Guideline No. 117. doi:10.1787/9789264069824-en\n- Prieto P, Hoffmann S, Tirelli V, et al. (2010). *ATLA* 38(5):367\u2013386. doi:10.1177/026119291003800510\n- Sato T, et al. (2018). *PLoS ONE* 13:e0199348.\n- Song H, et al. (2023). *IEEE TNNLS* 34(11):8135\u20138153.\n- Srinivasan B, Lloyd MD (2025). *J Med Chem* 68(3):2052\u20132056. doi:10.1021/acs.jmedchem.5c00131\n- Wenlock MC, Potter T, Barton P, Austin RP (2011). *J Biomol Screen* 16(3):348\u2013355. doi:10.1177/1087057110396372\n- Zhao Y, Wang J, Sedykh A, Zhu H (2017). *ACS Omega* 2(6):2805\u20132812. doi:10.1021/acsomega.7b00274",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:812-826",
+   "verification": "n-a (bibliography)",
+   "why_it_matters": "Completes the canonical source list. Note Sato 2018 and Song 2023 lack DOIs here; Sato's is 10.1371/journal.pone.0199348 per REVISION_GUIDE.md:1491."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "The full 31-agent literature-search evidence dump, including every REJECTED claim and why it was wrong, is recorded as a path that no longer exists.",
+   "verbatim": "**Full evidence** (31-agent verified search, including the rejected claims and what was wrong with them): `tasks/wqrlyif68.output`; per-agent journal under `subagents/workflows/wf_b419480e-a74/`. Summary in memory as `experimental_noise_magnitudes.md`.",
+   "source": "/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:449",
+   "verification": "n-a \u2014 the referenced file is GONE (I checked: /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f0d5f5cb-.../tasks/ and scratchpad/ are both empty)",
+   "why_it_matters": "The single largest irrecoverable loss. The rejected-claims register survives only as the blocklist in NOISE_DESIGN.md \u00a74 and the memory file; everything else in that dump is gone."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "paper.tex L354 carries a false claim about \u03c3 that must be deleted or rewritten.",
+   "verbatim": "Also delete the claim at paper.tex L354 that *\"the difficulty scaling controlled by \u03c3 is consistent\"*\nacross strategies. Under the current code it is false; under this decision it becomes true, and the\nsentence should be rewritten to say how it was made true.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:599-601",
+   "verification": "verified against the measured per-strategy dose multipliers (0.502\u20132.000)",
+   "why_it_matters": "A live false statement in the paper about the very quantity this whole salvage concerns. It is made true only by the dose-matching fix."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Threshold noise is an accident of a unit conversion \u2014 its cut catches 99.9992% of QM9 molecules and would have caught zero in Hartree.",
+   "verbatim": "`threshold` has a second, independent problem: its cut fires on `|y| \u2265 1.0` against raw\nelectronvolts, and QM9's smallest gap is 0.67 eV, so **99.9992% of molecules clear it**.\nIt is homoscedastic Gaussian noise at double dose, with no threshold behaviour at all. Had\nthe pipeline stayed in Hartree the same cut would have caught *zero* molecules. Its entire\ncharacter is an accident of a unit conversion.",
+   "source": "/Users/apunt/repos/qsar_qm_models/NOISE_DESIGN.md:176-180",
+   "verification": "verified from code and the QM9 label range",
+   "why_it_matters": "Threshold is the strategy the \u03c3=0.6 analysis found most discriminating \u2014 and it turns out to be a units bug, not a mechanism. This invalidates any claim built on it."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The threshold-noise code fix \u2014 the paper's specification is right and the code is wrong.",
+   "verbatim": "| | Cut applied to | QM9 affected | LogD affected |\n|---|---|---|---|\n| What the paper says | standardised label, \\|z\\| > 1.0 | **33.8 %** | **33.2 %** |\n| What the code does | raw label, \\|y\\| > 1.0 | **100.00 %** | **83.8 %** |\n\n**Fix: apply the threshold to the standardised label.** In `rust/src/main.rs`, the Threshold branch of\n`generate_adaptive_noise` compares raw target values against \u00b11.0; it must compare\n(y \u2212 mean) / sd instead, using the training mean and standard deviation. Do not re-specify the paper.",
+   "source": "/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:623-635",
+   "verification": "verified from code",
+   "why_it_matters": "Names the exact function and file to fix, and settles which of paper and code is authoritative. Also revises a D2 argument: threshold's dataset-reversal was this bug, not a finding."
+  }
+ ],
+ "gaps": [
+  "IRRECOVERABLE \u2014 the full 31-agent literature-search output is GONE. REVISION_GUIDE.md:449 and DISCUSSION_TRACKER.md:125 both point to `tasks/wqrlyif68.output` (workflow wf_b419480e-a74) as the complete evidence dump 'including the rejected claims and what was wrong with them'. I checked /private/tmp/claude-501/-Users-apunt-repos-qsar-qm-models/f0d5f5cb-b850-4648-bb63-1384701a7f7f/ \u2014 both its `tasks/` and `scratchpad/` directories exist but are EMPTY. The per-agent journal at subagents/workflows/wf_b419480e-a74/journal.jsonl is likewise not present. What survives of the rejected claims is only the six-row blocklist at NOISE_DESIGN.md:359-374 and the three-item update in the memory file. Anything else that search rejected is lost.",
+  "IRRECOVERABLE \u2014 the backing CSVs for every \u03c3=0.6 table are GONE. REVISION_GUIDE.md:406 names `scratchpad/rank_sigma06_pdv.csv` and `scratchpad/rank_sigma06_all_reps.csv`, and DISCUSSION_TRACKER.md:19 names `scratchpad/absR2gated_*.csv`. /Users/apunt/repos/qsar_qm_models/scratchpad/ does not exist. Every number in REVISION_GUIDE \u00a710.2, \u00a710.3, \u00a710.4 and the 'Ranking at \u03c3=0.6' section would have to be recomputed from `KIRBy/tests/results/validation_rerun/` before it can enter the paper.",
+  "The verbatim-quote extraction workflow `wf_a08b90aa-22c` is referenced at REVISION_GUIDE.md:393 and DISCUSSION_TRACKER.md:129 as the pass that produced \u00a711. Its own raw output was not located; \u00a711 in REVISION_GUIDE.md appears to be the only surviving record of it, which is exactly why deleting that file would be destructive.",
+  "\u00a711 says '35 quotes passed; 4 failed and were discarded' (REVISION_GUIDE.md:1397). Only ONE of the four failures is described in detail \u2014 the Bruneau 0.27/307 sentence and its two companions (REVISION_GUIDE.md:1702). The identity of the fourth discarded quote is not recorded anywhere I could find.",
+  "CONFLICT, unresolved \u2014 the Caco-2 anchor has two different values in two live documents. REVISION_GUIDE.md:361 says ~0.43 log10 via Hayeshi 2008/Chen 2017; the memory file `experimental_noise_magnitudes.md` marks that route SUPERSEDED and gives 0.35 computed from Bentz 2013 Table 6, which is what NOISE_DESIGN.md:329 and the new grid at NOISE_DESIGN.md:735 use. The guide was never updated. If REVISION_GUIDE.md is deleted the superseded 0.43 disappears too, which is fine \u2014 but nothing in the repo currently records that the change happened except the memory file.",
+  "CONFLICT, unresolved \u2014 the logD anchor also has two different values. REVISION_GUIDE.md:358 uses Niu 2024's MAE 0.48 (repeat-test, worst case); NOISE_DESIGN.md:330 uses Wenlock 2011's ~0.15 within-laboratory with \u00b10.5 between methods, and the new logD grid (NOISE_DESIGN.md:734) is built on 0.15/0.50. These are different quantities, not a correction of one by the other, and no document states which the paper should quote.",
+  "immediate_next_steps.md:588 still carries BOTH stale numbers in one sentence \u2014 'Published assay error is 0.54 log units for hERG pKi, 0.27\u20130.62 for logD and about 0.43 for Caco-2'. The 0.27 is the FAILED Bruneau figure and the 0.43 is the SUPERSEDED Hayeshi route. That sentence must not be reused as written.",
+  "Bentz et al. 2013 is the source of two load-bearing numbers (the Caco-2 0.35 anchor and the 62% between-laboratory variance share) but I found NO verbatim quote for the 0.35 \u2014 NOISE_DESIGN.md:329 marks it '*Computed* from 11 laboratories' digoxin efflux ratios, Table 6'. Only the log-scale justification sentence at NOISE_DESIGN.md:269-270 is quoted. If the project's own rule ('no number without a peer-reviewed primary source AND a verbatim quote', NOISE_DESIGN.md:373) is applied, 0.35 does not yet meet it.",
+  "Svensson et al. (2025) is cited at NOISE_DESIGN.md:293 for '25\u201363% of labels censored in ten of fifteen real industrial assays' but appears in NO Sources list, has no DOI recorded anywhere in the repo, and has no bib entry. Censoring is now the strongest effect in the study, so this is a load-bearing citation with no locatable reference.",
+  "Hampel (2001), Horwitz & Albert (2006), Lange et al. (1989) and OECD TG 117 appear in the NOISE_DESIGN Sources list but I found no verbatim quote for any of them except Hampel's p=1\u201310% sentence. Their DOIs are partly absent (Horwitz, Hampel, Lange have none).",
+  "'Kell & Oliver 2015' (REVISION_GUIDE.md:1571) and 'O'Hagan & Kell 2015' (NOISE_DESIGN.md:343) are the same paper \u2014 PeerJ 3:e1405 \u2014 cited under two different author orders in two live documents. Which is correct was never checked; the verified quote block (REVISION_GUIDE.md:1573) gives 'Kell DB, Oliver SG'.",
+  "No document records what OTHER noise-injection papers do beyond four: Kolmar & Grulke 2021 (noise SD in label units, plus a fold-of-ChEMBL-SD interpretation), Zhao 2017 (k \u00d7 label SD), Heid 2023 (matched SD across distribution shapes), and Song 2023 (noise rate, classification only, explicitly rejected as non-transferable). If a broader survey of parameterisation conventions was ever done, it was in the lost wqrlyif68 output.",
+  "The task asked for section 11 of REVISION_GUIDE.md \u2014 that is '\u00a711 \u2014 VERIFIED VERBATIM QUOTES', lines 1395-1715, and I have extracted all eight sources and the full closing assessment from it. There is no separate numbered 'section 11' elsewhere in the file; the numbered sections are \u00a79 (line 1230), \u00a710 (1275), \u00a711 (1395) and \u00a712 (1717).",
+  "DISCUSSION_TRACKER.md:116 is cited (at REVISION_GUIDE.md:1710) as a second place carrying the unverified Bruneau 0.27. In the CURRENT file, line 116 is a threshold-rule table row; the live Bruneau warning is at line 125. The line reference in the guide is stale \u2014 check both when striking the number."
+ ]
+}

@@ -1,0 +1,254 @@
+{
+ "area": "Aleatoric/epistemic decomposition \u2014 concrete delete-and-replace code spec (models.py, utils.py, loss_functions.py, rust/src/main.rs, process_and_train.py)",
+ "items": [
+  {
+   "kind": "code-spec",
+   "headline": "DELETE decompose_uncertainty_sampling entirely \u2014 it returns aleatoric=None and total=epistemic, so it cannot decompose anything.",
+   "verbatim": "def decompose_uncertainty_sampling(predictions_array, num_samples):\n    \"\"\"\n    Decompose uncertainty from sampling-based methods (BNN, ensembles).\n    ...\n    \"\"\"\n    # Epistemic: variance across different model samples\n    epistemic = predictions_array.std(axis=0)\n    \n    # Aleatoric: for simple sampling, we can't separate this without explicit noise modeling\n    # So we return None - only models with heteroscedastic outputs can provide this\n    aleatoric = None\n    \n    # Total uncertainty\n    total = epistemic  # When aleatoric is unknown\n    \n    return epistemic, aleatoric, total",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:62-85",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "This is the function that produces the empty 'Mean Aleatoric' cells for every BNN row in the table4 CSVs. It also mislabels: total is set equal to epistemic, so any coverage or NLL computed downstream from 'total' silently omits observation noise. Call sites to change: models.py:2121, models.py:2724, models.py:3133, models.py:3162, and the import at models.py:3077."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "DELETE decompose_uncertainty_distributional \u2014 it hardcodes epistemic=None, which is why QRF and NGBoost have a blank epistemic column in every published table.",
+   "verbatim": "def decompose_uncertainty_distributional(pred_mean, pred_std_or_var, model_type='ngboost', is_variance=False):\n    \"\"\"\n    Decompose uncertainty from distributional models (NGBoost, QRF, heteroscedastic NN).\n    These models only capture aleatoric uncertainty directly.\n    ...\n    \"\"\"\n    # Convert to std if variance was provided\n    if is_variance:\n        aleatoric = np.sqrt(pred_std_or_var)\n    else:\n        aleatoric = pred_std_or_var\n    \n    # Single distributional models can't estimate epistemic uncertainty\n    epistemic = None\n    \n    # Total is just aleatoric for these models\n    total = aleatoric\n    \n    return epistemic, aleatoric, total",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:138-166",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "Two call sites must change with it: models.py:1395-1397 (QRF) and models.py:1536-1538 (NGBoost). The QRF claim is false \u2014 a quantile forest IS an ensemble and its per-tree spread is a legitimate epistemic estimate (Mentch & Hooker 2016, already in citations.bib:1794). The NGBoost claim is true as configured and should be stated in the paper rather than papered over with a None."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "REPLACE decompose_uncertainty_gp \u2014 its maths is right only if it is handed a variance, and one of its two call sites hands it a standard deviation.",
+   "verbatim": "def decompose_uncertainty_gp(posterior_variance, likelihood_noise):\n    ...\n    # Epistemic: posterior variance (model uncertainty)\n    epistemic = np.sqrt(posterior_variance)\n    \n    # Aleatoric: likelihood noise (observation noise)\n    aleatoric = np.full_like(epistemic, np.sqrt(likelihood_noise))\n    \n    # Total: GP predictive includes both\n    total = np.sqrt(posterior_variance + likelihood_noise)\n    \n    return epistemic, aleatoric, total",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:113-135",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "At models.py:1775 it is correctly passed `pred_vars` (a variance). At models.py:3375 it is passed `std` (already a standard deviation, models.py:3354), so the graph-GP epistemic column is the fourth root of the noise. Replacement must take (posterior_variance, noise_variance) and assert both are variances, or take explicit `*_var` argument names so the mistake cannot recur."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "KEEP and START USING decompose_uncertainty_sampling_heteroscedastic \u2014 it is the only correct decomposition in the file and it is called from nowhere.",
+   "verbatim": "def decompose_uncertainty_sampling_heteroscedastic(mean_predictions, var_predictions):\n    ...\n    # Epistemic: variance of the predicted means across samples\n    epistemic = mean_predictions.std(axis=0)\n    \n    # Aleatoric: average of the predicted variances\n    aleatoric = np.sqrt(var_predictions.mean(axis=0))\n    \n    # Total: sqrt(epistemic^2 + aleatoric^2)\n    total = np.sqrt(epistemic**2 + aleatoric**2)\n    \n    return epistemic, aleatoric, total",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:88-110",
+   "verification": "verified \u2014 `grep -rn decompose_uncertainty_sampling_heteroscedastic --include=*.py` over the whole repo returns exactly one hit, the definition itself",
+   "why_it_matters": "This is the Kendall & Gal (citations.bib:775, :1786) law-of-total-variance split. It is already written, already correct, and has never been wired to a single trainer. Every Bayesian trainer must be rewired to call THIS, which requires the two-output head so var_predictions exists."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "REWRITE decompose_uncertainty_vbll \u2014 it can only ever return a homoscedastic aleatoric term, because VBLL has one scalar noise parameter.",
+   "verbatim": "    # Epistemic: variance across different weight samples\n    epistemic = predictions_array.std(axis=0)\n\n    # Aleatoric: learned observation noise (constant per-sample)\n    aleatoric = np.full_like(epistemic, np.sqrt(learned_noise_var))\n\n    # Total predictive uncertainty\n    total = np.sqrt(epistemic**2 + aleatoric**2)",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:185-191",
+   "verification": "verified \u2014 read in full; the scalar is VBLLLayer.log_noise_var, a single nn.Parameter (models.py:1153)",
+   "why_it_matters": "The composition is right, but the aleatoric term is one number broadcast to every molecule. It cannot track per-sample injected noise by construction, so the within-\u03c3 uncertainty\u2013noise correlation for VBLL is guaranteed \u22480 regardless of model quality. Either give VBLL a two-output head (then aleatoric becomes per-sample) or say plainly in the paper that VBLL's aleatoric estimate is homoscedastic. Call sites: models.py:2119, models.py:2722."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "models.py:3133 and 3162 CRASH \u2014 decompose_uncertainty_sampling is called with one argument and unpacked into two, against a two-argument function returning three values.",
+   "verbatim": "        # Decompose uncertainty\n        epistemic, aleatoric = decompose_uncertainty_sampling(predictions_array)\n        \n    else:",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:3132-3135",
+   "verification": "verified \u2014 signature at /Users/apunt/repos/qsar_qm_models/scripts/utils.py:62 is `def decompose_uncertainty_sampling(predictions_array, num_samples):` and returns a 3-tuple at utils.py:85",
+   "why_it_matters": "TypeError: missing 1 required positional argument: 'num_samples'. Any GNN run with --bayesian-transformation dies here before writing a single row. The same call form appears at models.py:3162 (`val_epistemic, _ = decompose_uncertainty_sampling(val_predictions_array)`). This is evidence that no MC-dropout GNN uncertainty run has ever completed \u2014 the paper must not claim GNN uncertainty results."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "models.py:3375-3376 CRASH \u2014 decompose_uncertainty_gp unpacked into two values, and fed a standard deviation where a variance is required.",
+   "verbatim": "    # Decompose uncertainty\n    epistemic, aleatoric = decompose_uncertainty_gp(std, best_noise)\n    val_epistemic, val_aleatoric = decompose_uncertainty_gp(val_std, best_noise)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:3374-3376",
+   "verification": "verified \u2014 utils.py:113 returns `epistemic, aleatoric, total`; `std` is defined at models.py:3354 as `std = np.ones(len(test_grakel)) * np.sqrt(best_noise)`",
+   "why_it_matters": "ValueError: too many values to unpack. train_graph_gp cannot run. Worse, even if unpacked correctly, `std` is a CONSTANT vector equal to sqrt(best_noise) \u2014 the graph GP never computes a posterior variance at all, so its 'epistemic' term would be identical to its 'aleatoric' term for every molecule. Graph GP must compute k** \u2212 k*\u1d40(K+\u03c3\u00b2I)\u207b\u00b9k* before any split can be claimed for it."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE TWO-OUTPUT HEAD: DNNRegressionModel.__init__ line 1015 becomes a two-unit head under a constructor flag; delete the post-hoc monkey-patch at models.py:2031.",
+   "verbatim": "        super(DNNRegressionModel, self).__init__()\n        self.fc1 = nn.Linear(input_size, hidden_size1)\n        self.fc2 = nn.Linear(hidden_size1, hidden_size2)\n        self.fc3 = nn.Linear(hidden_size2, 1)\n        self.activation = nn.ReLU()  # Default activation (will be tuned)\n        self.dropout = nn.Dropout(p=0.2)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:1012-1017",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "Line 1015 becomes `self.fc3 = nn.Linear(hidden_size2, 2 if heteroscedastic else 1)` with `heteroscedastic=False` added to __init__ and stored as `self.heteroscedastic`. The current mechanism patches the head AFTER construction (models.py:2031 `model.fc3 = nn.Linear(params['hidden_size2'], 2)`), which is why the Bayesian transform then wraps the wrong layer. The same edit is needed at FlexibleDNNRegressionModel (models.py:1040 `layers.append(nn.Linear(in_size, 1))`, patched at models.py:2390) and MLPRegressor (models.py:492 `self.output_layer = nn.Linear(hidden_size, 1)`, patched at models.py:2628)."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The two-output head silently breaks VBLLLoss: pred is (B,2), target is (B,1), and the subtraction broadcasts to (B,2) instead of erroring.",
+   "verbatim": "    def forward(self, pred, target):\n        if self.output_layer is not None:\n            noise_var = self.output_layer.noise_var\n            # Gaussian NLL with learned observation noise\n            nll = 0.5 * torch.log(noise_var) + 0.5 * ((pred - target) ** 2) / noise_var\n            nll = nll.mean()\n            # Sum KL from all variational layers\n            kl = sum(layer.kl_divergence() for layer in self.vbll_layers)\n            return nll + kl / self.n_data",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:1226-1234",
+   "verification": "verified \u2014 read in full; the collision path is models.py:2023-2034 (het head) followed by models.py:2054-2058 (criterion overwritten with VBLLLoss)",
+   "why_it_matters": "When loss='heteroscedastic' AND --bayesian-transformation variational, models.py:2058 throws away HeteroscedasticLoss and installs VBLLLoss on a 2-output model. The mean and the log-variance head are then both regressed onto y. Fix: VBLLLoss.forward must slice `mu = pred[..., 0:1]` and, when the model is heteroscedastic, use the head's log_var in place of the scalar noise_var: `nll = 0.5*log_var + 0.5*(mu-target)**2/exp(log_var)` plus KL/n_data."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE LOSS CHANGE: the replacement Gaussian NLL already exists in the repo at loss_functions.py:47-62 \u2014 lift it, do not rewrite it.",
+   "verbatim": "    def forward(self, outputs, y_true):\n        \"\"\"\n        Args:\n            outputs: tensor of shape (batch, 2) where [:, 0] is mean, [:, 1] is log_var\n            y_true: true values\n        \"\"\"\n        mean = outputs[:, 0:1]\n        log_var = outputs[:, 1:2]\n        \n        # Prevent numerical instability\n        log_var = torch.clamp(log_var, -10, 10)\n        \n        # NLL = 0.5 * (log(var) + (y - mu)^2 / var)\n        precision = torch.exp(-log_var)\n        loss = 0.5 * (log_var + precision * (y_true - mean) ** 2)\n        return loss.mean()",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/loss_functions.py:47-62",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "What exists now for every Bayesian trainer is `nn.MSELoss()` (models.py:2044 via get_loss_function('mse'), models.py:2200 for the standalone BNN, models.py:3091 for the GNN). MSE has no variance term, so no aleatoric quantity is ever learned. Two more copies of the identical expression already sit in the repo and can be cross-checked: models.py:6810 (`noise_loss = torch.mean(0.5 * torch.log(pred_var) + residuals / (2 * pred_var))`) and models.py:1230 (VBLLLoss). Use loss_functions.py:47-62 as the single source."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "loss_functions.py defines get_loss_function TWICE; only the second definition is live. Delete the first.",
+   "verbatim": "def get_loss_function(loss_name, **kwargs):\n    \"\"\"Factory function to get loss by name\"\"\"\n    loss_map = {\n        'mse': nn.MSELoss(),",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/loss_functions.py:170-173 (dead) and /Users/apunt/repos/qsar_qm_models/scripts/loss_functions.py:453-457 (live)",
+   "verification": "verified \u2014 both definitions read in full; the module-level rebinding at line 453 shadows line 170",
+   "why_it_matters": "The dead map at line 172 has no 'evidential' key; the live one at line 455 does. Anyone reading the first definition will wrongly conclude evidential losses are unavailable. Delete lines 170-203 so the file has exactly one factory, and add the new key there: `'gaussian_nll': HeteroscedasticLoss()` as the canonical name if the author prefers it over the existing 'heteroscedastic'."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "TRAINER REWIRE 1 \u2014 train_dnn_model: replace the sampling branch at models.py:2112-2126 with the heteroscedastic-MC split.",
+   "verbatim": "        # Decompose uncertainty \u2014 use VBLL decomposition if model has a VBLLLayer\n        # Use the LAST VBLLLayer (output layer) for observation noise\n        vbll_layers = [m for m in model.modules() if isinstance(m, VBLLLayer)]\n        vbll_layer = vbll_layers[-1] if vbll_layers else None\n\n        if vbll_layer is not None:\n            learned_noise_var = vbll_layer.noise_var.item()\n            epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)\n        else:\n            epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)\n\n        # Apply calibration to epistemic (aleatoric stays None for standard BNN)\n        if epistemic is not None:\n            epistemic = epistemic * temperature",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:2112-2125",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "The MC loop at models.py:2098-2105 already discards the variance head: `if loss_name == 'heteroscedastic': output = output[:, 0:1]`. That slice must be removed and both columns collected \u2014 accumulate `mu_samples` from output[:,0] and `var_samples = np.exp(np.clip(output[:,1], -10, 10))` \u2014 then call decompose_uncertainty_sampling_heteroscedastic(mu_samples, var_samples). Also: temperature is currently applied to epistemic only, but it was fitted at models.py:2095 against the MC spread alone; refit it against the TOTAL predictive std and scale total, then rescale the two parts so their variances still sum to the calibrated total."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "TRAINER REWIRE 2 \u2014 train_mlp_variant_model carries a byte-identical copy of the same broken block; both must change together.",
+   "verbatim": "            if vbll_layer is not None:\n                learned_noise_var = vbll_layer.noise_var.item()\n                epistemic, aleatoric, total = decompose_uncertainty_vbll(preds.squeeze(), learned_noise_var)\n            else:\n                epistemic, aleatoric, total = decompose_uncertainty_sampling(preds.squeeze(), num_samples)\n\n            # Apply calibration to epistemic (aleatoric stays None for standard BNN)\n            if epistemic is not None:\n                epistemic = epistemic * temperature",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:2720-2728",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "mlp_bnn_full, mlp_bnn_last and mlp_bnn_variational are three of the nine models in the uncertainty roster (generate_uncertainty_slurm_scripts.py:62-64). The duplication is the reason fixes drift: the correct move is to extract one shared `_mc_predict_with_decomposition(model, x_tensor, num_samples, heteroscedastic)` helper in models.py and call it from train_dnn_model, train_mlp_variant_model and train_flexible_dnn_model."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "TRAINER REWIRE 3 \u2014 train_flexible_dnn_model computes NO decomposition at all and its save call omits both columns.",
+   "verbatim": "        save_uncertainty_values(\n            y_pred_mean=y_pred,\n            y_pred_std=y_pred_std_uncalibrated,\n            y_true_original=y_test_original,\n            y_true_noisy=y_test,\n            filepath=args.filepath,\n            model_name=full_model_name,\n            rep=rep,\n            sigma_noise=s,\n            iteration=iteration,\n            file_no=file_no,\n            y_pred_std_calibrated=y_pred_std_calibrated,\n            temperature=temperature\n        )",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:2494-2507",
+   "verification": "verified \u2014 read in full; the MC block at models.py:2453-2465 slices `output = output[:, 0:1]` for both heteroscedastic and evidential and then only takes preds.std(axis=0)",
+   "why_it_matters": "Every flexible_bnn_* run writes NaN into both decomposition columns. This is the trainer used for all the architecture-sweep results (flexible_dnn_128_64 etc.), so none of that family can currently contribute to the decomposition analysis."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "TRAINER REWIRE 4 \u2014 train_gauche_model: the GP calibration is fitted against the LATENT variance, not the predictive variance, and then applied to the noise term as well.",
+   "verbatim": "            temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)\n            y_pred_std_calibrated = y_pred_std_uncalibrated * temperature\n            \n            # Decompose GP uncertainty\n            likelihood_noise = likelihood.noise.item()\n            epistemic, aleatoric, total = decompose_uncertainty_gp(pred_vars, likelihood_noise)\n            \n            # Apply calibration to epistemic\n            epistemic = epistemic * temperature\n            aleatoric = aleatoric * temperature",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:1770-1779",
+   "verification": "verified \u2014 read in full; `test_preds = model(x_test_tensor)` at models.py:1757 and `cal_preds = model(x_val_cal_tensor)` at models.py:1765 are both the latent posterior, not likelihood(model(x))",
+   "why_it_matters": "GP is the one model whose split is analytically exact, and it is the one being fitted wrongly. Required change: `test_preds = likelihood(model(x_test_tensor))` for the TOTAL, keep `model(x_test_tensor).variance` for the epistemic part, and take `likelihood.noise.item()` for aleatoric. Fit temperature against the total. Scaling aleatoric by a temperature fitted on latent-only variance (line 1779) has no justification and must go."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE QUANTILE-FOREST POST-HOC VARIANT \u2014 replace the IQR heuristic at models.py:1388-1397 with a bagging-variance split.",
+   "verbatim": "    if model_type == 'qrf':\n        q16, q50, q84 = model.predict(x_test, quantiles=[0.16, 0.5, 0.84]).T\n        y_pred = q50\n        y_pred_mean = q50\n        std_est = (q84 - q16) / 2  # IQR-based std estimate\n        \n        if args.uncertainty:\n            # Decompose distributional uncertainty\n            epistemic, aleatoric, total = decompose_uncertainty_distributional(\n                y_pred_mean, std_est, model_type='qrf', is_variance=False\n            )",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:1387-1397",
+   "verification": "verified \u2014 read in full. RandomForestQuantileRegressor inherits sklearn.ensemble._forest.ForestRegressor (checked via __mro__), so `.estimators_` is available after fit; `predict` accepts `aggregate_leaves_first` (checked via inspect.signature)",
+   "why_it_matters": "Concrete replacement: (1) total variance from the pooled conditional distribution \u2014 `var_total = ((q84 - q16) / 2.0) ** 2` retained, or better `model.predict(x_test, quantiles=[0.025,0.5,0.975])` with the /3.92 normal-equivalent; (2) epistemic variance from the spread of per-tree conditional means \u2014 `per_tree = np.stack([t.predict(x_test) for t in model.estimators_]); var_epi = per_tree.var(axis=0)`; (3) `var_alea = np.maximum(var_total - var_epi, 0.0)`. Record how often the clip fires as a `n_clipped` diagnostic. Cite Meinshausen2006 (citations.bib:896) for the quantile part and mentch2016quantifying (citations.bib:1794) for the ensemble-variance part. Apply the identical route to model_type=='rf', which currently emits no uncertainty at all (models.py:1420)."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "ALREADY PRESENT, JUST DISABLED (1) \u2014 train_heteroscedastic_gp computes a textbook split three lines above a save call that drops it.",
+   "verbatim": "        # Epistemic uncertainty (from GP)\n        epistemic_var = pred_dist.variance.cpu().numpy()\n        epistemic_std = np.sqrt(epistemic_var)\n        \n        # Aleatoric uncertainty (learned noise)\n        aleatoric_var = noise_model(x_test_t).cpu().numpy()\n        aleatoric_std = np.sqrt(aleatoric_var)\n        \n        # Total uncertainty\n        total_std = np.sqrt(epistemic_var + aleatoric_var)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:6830-6839",
+   "verification": "verified \u2014 read in full; the save at models.py:6851-6862 passes only y_pred_std=total_std and ends at `file_no=file_no,` with no decomposition kwargs",
+   "why_it_matters": "This is a per-sample, input-dependent aleatoric estimate \u2014 strictly better than anything the BNN roster produces \u2014 and it is thrown away at the CSV boundary. Change is two added kwargs: `epistemic_uncertainty=epistemic_std, aleatoric_uncertainty=aleatoric_std`. het_gp is also absent from UNCERTAINTY_MODELS in generate_uncertainty_slurm_scripts.py:50-65, so it must be added to the roster to appear in any results."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "ALREADY PRESENT, JUST DISABLED (2) \u2014 train_evidential_kernel and train_ntk_gnn both compute the parts and both drop them.",
+   "verbatim": "        # Compute uncertainties\n        epistemic_std = np.sqrt(beta / (alpha - 1))\n        aleatoric_std = np.sqrt(beta / (v * (alpha - 1)))\n        total_std = np.sqrt(epistemic_std**2 + aleatoric_std**2)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:6962-6965",
+   "verification": "verified \u2014 read in full; save at models.py:6977-6988 omits both kwargs. NTK equivalent: models.py:7171 `uncertainty = torch.sqrt(torch.clamp(variances, min=0)).cpu().numpy()`, saved without decomposition at models.py:7183-7194",
+   "why_it_matters": "Same two-kwarg fix. For NTK-GNN the split is `epistemic = uncertainty` (the kernel-ridge posterior variance from models.py:7165) and `aleatoric = np.full_like(uncertainty, np.sqrt(ridge_lambda))` \u2014 homoscedastic, but honest and labelled as such. NOTE the evidential labels here are swapped relative to Amini et al.; see the next item."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE EVIDENTIAL LABELS ARE SWAPPED \u2014 \u03b2/(\u03b1\u22121) is the ALEATORIC term and \u03b2/(v(\u03b1\u22121)) is the EPISTEMIC term, and the repo has them the other way round in eleven places.",
+   "verbatim": "                    epistemic = beta / np.maximum(alpha - 1, 1e-6)\n                    aleatoric = beta / (v * np.maximum(alpha - 1, 1e-6))\n                    unc = np.sqrt(epistemic + aleatoric)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:4818-4820 (identical at 4297-4299, 4581-4583, 4589-4591, 5047-5049, 5217-5219, 5428-5430, 5976-5978, 6079-6081, 6567-6569, 7657-7659, and inverted-name form at 6963-6964)",
+   "verification": "unverified against the paper itself \u2014 amini2020deep is in the repo bib (citations.bib:1130) but the PDF is not in the repo, so this rests on the standard Normal-Inverse-Gamma moments E[\u03c3\u00b2]=\u03b2/(\u03b1\u22121) and Var[\u03bc]=\u03b2/(v(\u03b1\u22121)), NOT on a file I can quote. The author must confirm before this is acted on.",
+   "why_it_matters": "Because v = softplus(\u00b7)+1 > 1, \u03b2/(v(\u03b1\u22121)) is always the SMALLER quantity \u2014 so the repo systematically reports the smaller number as aleatoric and the larger as epistemic. The total, sqrt(epistemic+aleatoric), is unaffected by the swap (addition is symmetric), which is exactly why this has never surfaced: it only corrupts the split, which is the thing being built. Fix once in a shared helper `nig_decompose(gamma, v, alpha, beta)` in utils.py and call it from all eleven sites."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE STANDARDISATION TRAP, part 1: the scale divisor is computed from NOISY labels, so it changes with \u03c3 and silently rescales every uncertainty number.",
+   "verbatim": "            let mut property_value = smiles_data.target_value;\n            if config.noise {\n                if let Some(&artificial_noise) = noise_map.get(&index) {\n                    property_value += artificial_noise;\n                }\n            }\n            y_values.push(property_value);\n        }\n    }\n...\n    let mean: f32 = y_values.iter().sum::<f32>() / y_values.len() as f32;\n    let variance: f32 = y_values.iter().map(|value| {\n        let diff = mean - *value;\n        diff * diff\n    }).sum::<f32>() / y_values.len() as f32;\n    let std_deviation: f32 = variance.sqrt();",
+   "source": "/Users/apunt/repos/qsar_qm_models/rust/src/main.rs:959-978",
+   "verification": "verified \u2014 read in full; applied at rust/src/main.rs:759-760 `if config.regression && config.normalize { property_value = (property_value - mean) / std_dev; }`",
+   "why_it_matters": "For additive noise, sd_noisy(\u03c3) = sqrt(sd_clean\u00b2 + \u03c3\u00b2). Every model therefore trains and reports in units that shrink as \u03c3 grows. A model whose aleatoric term perfectly recovers \u03c3 will report \u03c3/sqrt(sd_clean\u00b2+\u03c3\u00b2), which saturates below 1 and is compressed at high \u03c3 \u2014 so the aleatoric-vs-\u03c3 curve is bent by the axis, not by the model. REQUIRED CHANGE: compute mean/std_dev from CLEAN labels (drop the `if config.noise` block at main.rs:960-964 from the statistics pass only, leaving main.rs:750-756 untouched), and write both constants to a sidecar `norm_{file_no}.json` next to the mmaps."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE STANDARDISATION TRAP, part 2: there is NO inverse transform anywhere \u2014 instead a linear regression guesses the scale back, twice, in two different files.",
+   "verbatim": "    y_orig = np.asarray(y_true_original, dtype=np.float64)\n    y_noisy = np.asarray(y_true_noisy, dtype=np.float64)\n    finite_mask = np.isfinite(y_orig) & np.isfinite(y_noisy)\n    if finite_mask.sum() >= 10:\n        from scipy.stats import linregress\n        slope, intercept, _, _, _ = linregress(y_orig[finite_mask], y_noisy[finite_mask])\n        injected_noise = y_noisy - (slope * y_orig + intercept)\n    else:\n        injected_noise = y_noisy - y_orig  # fallback",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:215-223",
+   "verification": "verified \u2014 read in full; duplicated as fix_injected_noise at /Users/apunt/repos/qsar_qm_models/scripts/generate_paper_figures_v2.py:980-1021",
+   "why_it_matters": "The mismatch is real: process_and_train.py:1086 appends the RAW `target_value` to y_data_original while process_and_train.py:1162 appends the noisy+standardised `processed_target` to y_data (both returned together at process_and_train.py:1237). REQUIRED CHANGE: parse_mmap returns `(x_data, y_data, y_data_original, y_offset, y_scale)` read from the sidecar; run_model (process_and_train.py:1239) threads them to every trainer; save_uncertainty_values takes them as arguments. Then delete the linregress block here AND fix_injected_noise in the figures script \u2014 a fitted slope is not a transform, it is a guess that absorbs any real signal in the residual."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE STANDARDISATION TRAP, part 3: converting back scales the STANDARD DEVIATION by y_scale, never the variance \u2014 and the repo already gets this wrong once by adding SDs.",
+   "verbatim": "                ax_d.fill_between(stats_by_sigma['sigma'],\n                                 stats_by_sigma['aleatoric_uncertainty'],\n                                 stats_by_sigma['aleatoric_uncertainty'] + stats_by_sigma['epistemic_uncertainty'],\n                                 alpha=0.3, color=color,\n                                 label=f\"{label} (Epistemic)\")",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/generate_figures.py:1045-1049",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "That stacked area adds two standard deviations, which is only correct if the two sources are perfectly correlated \u2014 they are by construction independent, so the stack overstates the total by up to 41%. The single rule the new code must enforce everywhere: variances add, standard deviations do not; and the raw-unit conversion is sd_raw = sd_z * y_scale, equivalently var_raw = var_z * y_scale**2. Multiplying a variance by y_scale (rather than y_scale\u00b2) is the specific error to guard against \u2014 add an assertion `np.allclose(var_total, var_alea + var_epi)` at write time."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "THE OUTPUT CSV COLUMNS \u2014 replace the current fifteen with an explicit variance-based schema plus back-compatible aliases.",
+   "verbatim": "        row = {\n            'model': model_name,\n            'representation': rep,\n            'sigma': sigma_noise,\n            'iteration': iteration,\n            'file_no': file_no,\n            'sample_idx': i,\n            'y_pred_mean': y_pred_mean[i],\n            'y_pred_std_uncalibrated': y_pred_std[i],\n            'y_true_original': y_true_original[i],\n            'y_true_noisy': y_true_noisy[i],\n            'injected_noise': injected_noise[i]\n        }",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/utils.py:227-239",
+   "verification": "verified \u2014 read in full; the remaining columns y_pred_std_calibrated, temperature, epistemic_uncertainty, aleatoric_uncertainty are added at utils.py:242-259",
+   "why_it_matters": "New schema: model, representation, sigma, iteration, file_no, sample_idx, y_pred_mean_z, y_pred_mean_raw, var_total_z, var_aleatoric_z, var_epistemic_z, sd_total_z, sd_aleatoric_z, sd_epistemic_z, y_scale, y_offset, sd_total_raw, sd_aleatoric_raw, sd_epistemic_raw, y_true_original_raw, y_true_noisy_raw, y_true_noisy_z, injected_noise_raw, temperature, sd_total_calibrated_z, decomposition_method, epistemic_available, aleatoric_available. `decomposition_method` takes one of: gp_exact, het_head_mc, vbll_mc, evidential_nig, qrf_posthoc, ntk_ridge, none \u2014 so the paper can report per-model provenance instead of a bare NaN. KEEP y_pred_std_uncalibrated, y_pred_std_calibrated, epistemic_uncertainty, aleatoric_uncertainty, injected_noise as aliases: generate_paper_figures_v2.py reads them by name at lines 758, 3077, 3472, 3477, 3426."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "CALL SITE THAT WILL BREAK ON THE SIGNATURE CHANGE \u2014 noise_mitigation.py:742 already calls save_uncertainty_values with a keyword that does not exist.",
+   "verbatim": "                    save_uncertainty_values(\n                        y_pred_mean=y_pred,\n                        y_pred_std=np.sqrt(pred_vars),\n                        y_true=y_test,\n                        filepath=info['filepath'],\n                        model_name=\"gauche\",\n                        rep=info['rep'],\n                        sigma_noise=info['sigma'],\n                        iteration=info['iteration']\n                    )",
+   "source": "/Users/apunt/repos/qsar_qm_models/scripts/noise_mitigation.py:742-751",
+   "verification": "verified \u2014 read in full; the signature at scripts/utils.py:200-203 takes y_true_original and y_true_noisy, and file_no is a required positional",
+   "why_it_matters": "TypeError on both counts (unexpected keyword 'y_true', missing 'file_no'). It is dead-on-arrival today and must be brought to the new signature or deleted along with the rest of the mitigation-path uncertainty saving. Full call-site list for the signature change: models.py 1403, 1555, 1793, 2155, 2272, 2494, 2761, 3196, 3397, 4000, 6851, 6977, 7183, plus noise_mitigation.py:742."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The torchbnn BNNs are trained by plain MSE with no KL term anywhere in the repo, so their 'epistemic' spread is an unregularised artefact that shrinks toward zero with training.",
+   "verbatim": "    elif args.bayesian_transformation == \"full\":\n        model = apply_bayesian_transformation(model)\n        model_name = \"bnn_full\"\n    elif args.bayesian_transformation == \"last_layer\":\n        model = apply_bayesian_transformation_last_layer(model)\n        model_name = \"bnn_last\"",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:2048-2053",
+   "verification": "verified \u2014 `grep -rn \"BKLLoss|kl_loss|kl_weight\" models/models.py scripts/*.py` returns nothing; criterion is set at models.py:2044 from get_loss_function and is only overwritten for the two variational cases at models.py:2058 and 2062",
+   "why_it_matters": "torchbnn initialises weight_log_sigma to log(prior_sigma) = log(0.1) (torchbnn/modules/linear.py:54) and the only gradient it receives is through the sampled forward pass under MSE, which rewards shrinking sigma. So bnn_full and bnn_last are closer to a noisy-weights regulariser than to a posterior. Either add `bnn.BKLLoss` weighted by 1/n_train to the criterion for these two paths, or the paper must describe them as MC-perturbation baselines, not Bayesian posteriors. Four of the nine roster models are affected (generate_uncertainty_slurm_scripts.py:57-58, 62-63)."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "EVIDENCE that the split is currently half-empty in the published tables: QRF and NGBoost rows have no epistemic value, several BNN rows have neither.",
+   "verbatim": "Model,Unc-Error \u03c1,Unc-Noise \u03c1 (pooled),ECE,Coverage 1\u03c3,Coverage 2\u03c3,Mean Uncertainty,Mean Aleatoric,Mean Epistemic,...\nQRF,0.29713404842648333,0.35516693158890017,0.13630797893440366,0.7028297170282972,0.9401059894010599,0.5622016490936451,0.5622016490936451,,...\nNGBoost,0.2869622510098105,0.47196501660753837,0.11298155878861624,0.6897272727272727,0.952,0.5601902636045724,0.5601902636045724,,...\nBNN-\u03b2,0.2405961239308484,0.37589311795623587,0.19311006864542604,0.7212,0.9402,0.5926578137042999,,0.5926578137042999,...",
+   "source": "/Users/apunt/repos/qsar_qm_models/results/paper_figures_v2/table4_uncertainty_metrics_continuous_pdv.csv:1-4",
+   "verification": "verified as the file's literal content \u2014 BUT the file is dated 2026-07-08 and is therefore QM9-contaminated output per the standing repo warning; the NUMBERS must not be quoted in the paper, only the column-emptiness pattern",
+   "why_it_matters": "This is the concrete cost of the two deleted functions: the empty trailing field on QRF/NGBoost rows is decompose_uncertainty_distributional's `epistemic = None`, and the empty Mean Aleatoric on BNN rows is decompose_uncertainty_sampling's `aleatoric = None`. In table4_uncertainty_metrics_ecfp4.csv:4 the BNN-\u03b2 row has BOTH fields empty. Any decomposition claim built on these files is built on a column that was never populated."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "EVIDENCE the VBLL epistemic term is not merely uncalibrated but physically impossible: epistemic 24.1 against a label standard deviation of 1.0 in the same units.",
+   "verbatim": "Model,Unc-Error \u03c1,Unc-Noise \u03c1 (pooled),ECE,Coverage 1\u03c3,Coverage 2\u03c3,Mean Uncertainty,Mean Aleatoric,Mean Epistemic,...\nVBLL-\u03b2,0.1517262580119137,-0.0250433362856551,23.863978261930963,0.44835454545454545,0.5796545454545454,24.099843087596913,0.8426672664545455,24.099843087596913,...\nVBLL-\u03b1,0.06799419903680148,0.03049158546502659,10.76905739375604,0.37412844036697246,0.4852935779816514,10.784028155022582,0.9249816287155965,10.784028155022582,...",
+   "source": "/Users/apunt/repos/qsar_qm_models/results/paper_figures_v2/table4_uncertainty_metrics_mol2vec.csv:1-3",
+   "verification": "verified as file content; file dated 2026-07-08, QM9-contaminated \u2014 treat the magnitudes as a diagnostic of the code, not as a result",
+   "why_it_matters": "Labels are standardised to unit variance, so an epistemic standard deviation of 24 means the MC weight samples are producing predictions spread over 24 label-widths. That is the VBLL coverage anomaly (coverage 1\u03c3 0.45 against a 0.68 target) showing up in the decomposition columns. Note the aleatoric column sits sensibly near 0.84 \u2014 so the aleatoric half of VBLL is behaving and the epistemic half is diverging, most likely because VBLLLayer.forward samples the posterior at eval time unconditionally (models.py:1196-1201) with weight_log_sigma unconstrained by any likelihood term on the hidden layers."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "WHICH MODELS CAN support an honest split, with the mechanism and the evidence line for each.",
+   "verbatim": "        # Epistemic uncertainty (from GP)\n        epistemic_var = pred_dist.variance.cpu().numpy()\n        ...\n        # Aleatoric uncertainty (learned noise)\n        aleatoric_var = noise_model(x_test_t).cpu().numpy()",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:6830-6835",
+   "verification": "verified \u2014 each mechanism traced to the cited line; the QRF route verified statically via class MRO, not by execution (see gaps)",
+   "why_it_matters": "CAN, once the spec is applied \u2014 (1) Gauche/exact GP: epistemic = latent posterior variance, aleatoric = likelihood.noise, homoscedastic, exact [models.py:1757, 1774]. (2) het_gp: epistemic = GP variance, aleatoric = input-dependent NN, per-sample [models.py:6831, 6835]. (3) BNN full/last with a two-output head: variance of MC means / mean of MC variances, per-sample [needs models.py:1015 + 2098-2105 changes]. (4) VBLL: epistemic per-sample, aleatoric homoscedastic scalar only [models.py:1153]. (5) Evidential NIG 4-output: analytic, per-sample [models.py:6963-6964, labels to be swapped]. (6) MC-dropout GNN with a het head [models.py:3116-3133, currently crashes]. (7) NTK-GNN: epistemic = kernel posterior variance, aleatoric = ridge_lambda, homoscedastic [models.py:7165]. (8) QRF and RF: post-hoc bagging split [models.py:1388, 1420]."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "WHICH MODELS CANNOT support the split, with the reason the paper can state honestly.",
+   "verbatim": "    model = NGBRegressor(\n        Dist=Normal,\n        Score=MLE,\n        natural_gradient=params['natural_gradient'],\n        n_estimators=params['n_estimators'],\n        learning_rate=params['learning_rate'],\n        verbose=False,\n        random_state=iteration_seed,\n    )\n    model.fit(x_val_train, y_val_train)",
+   "source": "/Users/apunt/repos/qsar_qm_models/models/models.py:1509-1518",
+   "verification": "verified \u2014 read in full",
+   "why_it_matters": "CANNOT \u2014 (1) NGBoost with Dist=Normal, Score=MLE: one fitted boosting path yields one predictive Normal per molecule; there is no distribution over parameters, so aleatoric only. It could be given an epistemic term by bagging NGBoost over bootstrap resamples, which is a new experiment, not a code fix. (2) Split conformal (train_conformal_model, models.py:3670-3699): the conformity quantile is a single marginal number; `y_lower = y_test_pred - quantile` is constant-width, so there is nothing to decompose \u2014 and the graph variant fabricates a pseudo-std from it at models.py:3998. (3) SVM, XGBoost, LightGBM: point predictors with no predictive distribution at all [models.py:1463, 1627, 1677]. (4) graph_gp as written: `std = np.ones(len(test_grakel)) * np.sqrt(best_noise)` (models.py:3354) \u2014 no posterior variance is ever computed, so it must be rewritten before it can be listed either way."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Every reference the rebuilt decomposition needs is already in citations.bib \u2014 nothing new has to be found.",
+   "verbatim": "@misc{kendall2017,\n  author       = {Alex Kendall and\n                  Yarin Gal},\n  title        = {What Uncertainties Do We Need in {B}ayesian Deep Learning for Computer\n                  Vision?},\n  year         = {2017},\n  doi          = {10.48550/arXiv.1703.04977},\n}",
+   "source": "/Users/apunt/repos/qsar_qm_models/citations.bib:775-782",
+   "verification": "verified \u2014 entry read in full from the repo bib",
+   "why_it_matters": "The supporting set, all present: kendall2017 (citations.bib:775) and its DUPLICATE kendall2017uncertainties (citations.bib:1786) for the two-output-head split; lakshminarayanan2017 (:866) duplicated as lakshminarayanan2017simple (:1852) for the ensemble form; Meinshausen2006 (:896) for quantile forests; mentch2016quantifying (:1794) for random-forest ensemble variance; amini2020deep (:1130) and soleimany2021evidential (:1139) for the NIG split; Harrison2024 (:996) for VBLL; Gal & Ghahramani (:930) for MC dropout. The two duplicate key pairs should be merged before the next bib compile."
+  }
+ ],
+ "gaps": [
+  "I did NOT read models.py (8001 lines) end to end. I read in full: lines 1-130, 480-640, 990-1350 (all network classes, both Bayesian transforms, VBLLLayer, VBLLLoss), 1340-1820 (rf/qrf, svm, ngboost, xgboost, lgb, gauche), 1820-2300 (train_nn, train_dnn_model, train_bnn_last_standalone), 2299-2790 (flexible_dnn, mlp_variant), 3067-3416 (train_gnn, train_graph_gp), 3485-3775 and 3960-4160 (conformal, calibration helpers), 6712-7011 (het_gp, evidential_kernel), 7120-7460 (ntk_gnn tail, conformal_heteroscedastic). Regions 4160-6712 and 7460-8001 were located by grep for epistemic/aleatoric and read only at the hit sites (models.py:4810-4830 and 5040-5060 read as samples). If the author needs the noise-mitigation trainers (meta_weight_net, dividemix, mentornet, contrast_divide, mixup, sam) specified too, that is a second pass.",
+  "The claim that the evidential NIG labels are swapped (epistemic and aleatoric transposed at eleven sites) rests on the standard Normal-Inverse-Gamma moments, NOT on any file in this repo. amini2020deep is cited in citations.bib:1130 but the paper itself is not in the repo, so I could not verify it against a source I can quote. The author must confirm before this change is made.",
+  "I could not execute a quantile-forest fit locally to verify the per-tree epistemic route: the local conda env has quantile_forest 1.4.1 against sklearn 1.3.2 and RandomForestQuantileRegressor.fit raises \"ValueError: Invalid parameter 'monotonic_cst' for estimator DecisionTreeRegressor\". The route was verified statically only \u2014 RandomForestQuantileRegressor.__mro__ includes sklearn.ensemble._forest.ForestRegressor, so .estimators_ exists after fit. It must be smoke-tested on the ARC environment before the re-run.",
+  "No per-sample uncertainty CSV exists locally. results/ contains only uncertainty_gaps.csv; the only decomposition evidence available is the aggregated results/paper_figures_v2/table4_*.csv files, all dated 2026-07-08 and therefore QM9-contaminated. The exact on-disk header of the *_uncertainty_values.csv files is INFERRED from scripts/utils.py:227-259, not observed. I have no SSH, so I could not check what exists on the server.",
+  "I did not verify whether het_gp, evidential_kernel, ntk_gnn or conformal_hetero have ever been run: they are dispatchable from process_and_train.py (lines 1336, 1341, 1346, 1355) but are absent from UNCERTAINTY_MODELS in scripts/generate_uncertainty_slurm_scripts.py:50-65, so no SLURM script generates them. Switching their decomposition on is necessary but not sufficient \u2014 they also need adding to that roster.",
+  "I did not check whether generate_paper_figures_v2.py needs edits beyond the column aliases. It reads y_pred_std_calibrated / y_pred_std / uncertainty / std at lines 758, 3077, 3370, 3512 and the decomposition columns at 3472-3481 and 3584-3593; I traced those reads but did not audit the aggregation logic that consumes them, so I cannot say whether Mean Aleatoric / Mean Epistemic are being averaged in a way the no-averaging rule permits.",
+  "The calibration question is specified but not settled: temperature is currently fitted against the MC spread alone (models.py:2095) and applied to epistemic only (models.py:2125), against the latent GP variance and applied to BOTH parts (models.py:1770-1779), and skipped entirely for QRF (models.py:1400). I have specified fitting against the total and rescaling both parts to preserve the variance sum, but the author has not decided this and it is a modelling choice, not a bug fix."
+ ]
+}

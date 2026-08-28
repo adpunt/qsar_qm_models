@@ -1,0 +1,694 @@
+Title: Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number
+
+URL Source: https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number
+
+Published Time: 2013-01-01
+
+Markdown Content:
+close
+
+Welcome to Academia
+
+Sign up to get access to over 65 million papers
+
+By clicking Continue, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+![Image 1](https://a.academia-assets.com/images/google/google-color-transparent-bg-2.svg)Continue with Google![Image 2](https://a.academia-assets.com/images/apple/apple-black.svg)Continue with Apple![Image 3](https://a.academia-assets.com/images/facebook/facebook-color-transparent-bg-2.svg)Continue with Facebook email Continue with Email
+
+arrow_back
+Continue with Email
+
+Sign up or log in to continue.
+
+Email 
+
+Next arrow_forward
+
+arrow_back
+Welcome to Academia
+
+Sign up to continue.
+
+By clicking Sign Up, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+First name 
+
+Last name 
+
+Password 
+
+Sign Up arrow_forward
+
+arrow_back
+Hi,
+
+Log in to continue.
+
+Password 
+
+Reset password
+
+Log in arrow_forward
+
+arrow_back
+Password reset
+
+Check your email for your reset link.
+
+Your link was sent to
+
+Done
+
+arrow_back
+Facebook login is no longer available
+
+Reset your password to access your account:
+
+[Reset Password](https://www.academia.edu/reset_password)
+
+Please hold while we log you in
+
+[![Image 4: Academia.edu](https://a.academia-assets.com/images/academia-logo-redesign-2015-A.svg)![Image 5: Academia.edu](https://a.academia-assets.com/images/academia-logo-redesign-2015.svg)](https://www.academia.edu/)
+
+Log In Sign Up
+
+*   [Log In](https://www.academia.edu/login)
+*   [Sign Up](https://www.academia.edu/signup)
+*   more
+*       *   [About](https://www.academia.edu/about)
+    *   [Press](https://www.academia.edu/press)
+    *   [Papers](https://www.academia.edu/documents)
+    *   [Terms](https://www.academia.edu/terms)
+    *   [Privacy](https://www.academia.edu/privacy)
+    *   [Copyright](https://www.academia.edu/copyright)
+    *   [We're Hiring!](https://www.academia.edu/hiring)
+    *   [Help Center](https://support.academia.edu/hc/en-us)
+    *   less
+
+Outline
+
+keyboard_arrow_down
+
+[Title](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#title)
+
+[Abstract](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#abstract)
+
+[Key Takeaways](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#key-takeaways)
+
+[Figures](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#figures)
+
+[Introduction](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#outer_page_1)
+
+[Results](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#outer_page_5)
+
+[Conclusions](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#outer_page_14)
+
+[References](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#references)
+
+[FAQs](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number#faq)
+
+[All Topics](https://www.academia.edu/topics)
+
+[Medicine and Health Sciences](https://www.academia.edu/Documents/in/Medicine_and_Health_Sciences)
+
+[Drug Discovery](https://www.academia.edu/Documents/in/Drug_Discovery)
+
+![Image 6: First page of “Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number”](https://0.academia-photos.com/attachment_thumbnails/45377756/mini_magick20220705-16643-aul91a.png?1657009915)![Image 7: PDF Icon](https://a.academia-assets.com/images/single_work_splash/adobe_icon.svg)
+
+download
+Download Free PDF
+
+Download Free PDF
+
+# Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number
+
+[![Image 8: Profile image of Maikel Cruz Monteagudo](https://0.academia-photos.com/1781225/609597/757207/tiny_maikel.cruz_monteagudo.jpg)Maikel Cruz Monteagudo](https://independent.academia.edu/MaikelCruzMonteagudo)[![Image 9: Profile image of Maykel Cruz-monteagudo](https://a.academia-assets.com/images/tiny_no_pic.png)Maykel Cruz-monteagudo](https://up-pt.academia.edu/MaykelCruzmonteagudo)[![Image 10: Profile image of Teresa Garrigues](https://0.academia-photos.com/32661994/12919920/14299823/tiny_teresa.garrigues.jpg)Teresa Garrigues](https://metode.academia.edu/TeresaGarrigues)[![Image 11: Profile image of Miguel Angel Cabrera Pérez](https://0.academia-photos.com/32629433/9742198/18890398/tiny_miguel_angel.cabrera_p_rez.jpg)Miguel Angel Cabrera Pérez](https://uclv.academia.edu/MiguelAngelCabreraP%C3%A9rez)[![Image 12: Profile image of Hai Pham-The](https://0.academia-photos.com/9816014/3175545/3737883/tiny_hai.pham-the.jpg)Hai Pham-The](https://hupedu.academia.edu/HaiPhamThe)
+
+2013, Molecular Pharmaceutics
+
+[https://doi.org/10.1021/MP4000585](https://doi.org/10.1021/MP4000585)
+
+visibility
+206 views
+
+description
+17 pages
+
+description See full PDF download Download PDF
+
+format_quote Cite
+
+Cite this paper close
+
+MLA content_copy
+
+Cabrera Pérez, Miguel Angel, et al. “Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number.” Molecular Pharmaceutics, 2013.
+
+APA content_copy
+
+Cabrera Pérez, M. A., Cruz Monteagudo, M., Cruz-monteagudo, M., Pham-The, H., & Garrigues, T. (2013). Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number. Molecular Pharmaceutics. https://doi.org/10.1021/MP4000585
+
+Chicago content_copy
+
+Cabrera Pérez, Miguel Angel, Maikel Cruz Monteagudo, Maykel Cruz-monteagudo, Hai Pham-The, and Teresa Garrigues. “Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number.” Molecular Pharmaceutics, 2013. doi:10.1021/MP4000585.
+
+Vancouver content_copy
+
+Cabrera Pérez MA, Cruz Monteagudo M, Cruz-monteagudo M, Pham-The H, Garrigues T. Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number. Molecular Pharmaceutics. 2013; doi:10.1021/MP4000585
+
+Harvard content_copy
+
+Cabrera Pérez, M. A. et al. (2013) “Provisional Classification and in Silico Study of Biopharmaceutical System Based on Caco-2 Cell Permeability and Dose Number,” Molecular Pharmaceutics. doi: 10.1021/MP4000585.
+
+bookmark Save to Library share Share
+
+close
+
+![Image 13](https://a.academia-assets.com/images/academia-logo-capital-white.svg)
+#### Sign up for access to the world's latest research
+
+Sign up for free arrow_forward
+
+check Get notified about relevant papers
+
+check Save papers to use in your research
+
+check Join the discussion with peers
+
+check Track your impact
+
+## Abstract
+
+Today, early characterization of drug properties by the Biopharmaceutics Classification System (BCS) has attracted significant attention in pharmaceutical discovery and development. In this direction, the present report provides a systematic study of the development of a BCS-based provisional classification (PBC) for a set of 322 oral drugs. This classification, based on the revised aqueous solubility and the apparent permeability across Caco-2 cell monolayers, displays a high correlation (overall 76%) with the provisional BCS classification published by World Health Organization (WHO). Current database contains 91 (28.3%) PBC class I drugs, 76 (23.6%) class II drugs, 97 (31.1%) class III drugs, and 58 (18.0%) class IV drugs. Other approaches for provisional classification of drugs have been surveyed. The use of a calculated polar surface area with a labetalol value as a high permeable cutoff limit and aqueous solubility higher than 0.1 mg/mL could be used as alternative criteria for provisionally classifying BCS permeability and solubility in early drug discovery. To develop QSPR models that allow screening PBC and BCS classes of new molecular entities (NMEs), 18 statistical linear and nonlinear models have been constructed based on 803 0-2D Dragon and 126 Volsurf+ molecular descriptors to classify the PBC solubility and permeability. The voting consensus model of solubility (VoteS) showed a high accuracy of 88.7% in training and 92.3% in the test set. Likewise, for the permeability model (VoteP), accuracy was 85.3% in training and 96.9% in the test set. A combination of VoteS and VoteP appropriately predicts the PBC class of drugs (overall 73% with class I precision of 77.2%). This consensus system predicts an external set of 57 WHO BCS classified drugs with 87.5% of accuracy. Interestingly, computational assignments of the PBC class reasonably correspond to the Biopharmaceutics Drug Disposition Classification System (BDDCS) allocations of drugs (accuracy of 63.3−69.8%). A screening assay has been simulated using a large data set of compounds in different drug development phases (1, 2, 3, and launched) and NMEs. Distributions of PBC forecasts illustrate the current status in drug discovery and development. It is anticipated that a combination of the QSPR approach and well-validated in vitro experimentations could offer the best estimation of BCS for NMEs in the early stages of drug discovery.
+
+... Read more
+
+## Key takeaways
+
+![Image 14: sparkles](https://a.academia-assets.com/images/icons/sparkle.svg)
+AI
+
+1.   The study proposes a Provisional Biopharmaceutical Classification (PBC) for 322 drugs, showing 76% correlation with WHO's BCS.
+2.   PBC class distribution includes 28.3% class I, 23.6% class II, 31.1% class III, and 18.0% class IV drugs.
+3.   Voting consensus models achieved accuracies of 88.7% for solubility and 85.3% for permeability in training sets.
+4.   Caco-2 cell permeability remains a critical method for estimating drug absorption and classifying PBC.
+5.   In silico predictions can enhance early drug development by estimating BCS class without clinical data.
+
+thumb_up Helpful thumb_down Not Helpful
+
+Figures (12)
+
+arrow_back_ios
+
+[![Image 15](https://figures.academia-assets.com/45377756/figure_001.jpg)](https://www.academia.edu/figures/22231074/figure-1-provisional-classification-and-in-silico-study-of)
+
+[![Image 16: Figure 1. Scatter plots with error bar illustrating the sigmoidal and rank- order relationships between Caco-2 cell permeability (P,,,,) and human intestinal absorption (Fa). The fitting constants (A; B; C) of Fa function f(x) = AQ + B exp(—C-P,pp) were determined as (103.837; 0.001; 1.124). The pink and blue dotted lines express the high BCS permeability cutoff as defined by US FDA (Fa > 90%) and WHO (Fa > 85%) guidelines. The continuous red line indicates the high PBC permeability criterion derived from Caco-2 permeability of metoprolol. ](https://figures.academia-assets.com/45377756/figure_002.jpg)](https://www.academia.edu/figures/22231077/figure-1-scatter-plots-with-error-bar-illustrating-the)
+
+Figure 1. Scatter plots with error bar illustrating the sigmoidal and rank- order relationships between Caco-2 cell permeability (P,,,,) and human intestinal absorption (Fa). The fitting constants (A; B; C) of Fa function f(x) = AQ + B exp(—C-P,pp) were determined as (103.837; 0.001; 1.124). The pink and blue dotted lines express the high BCS permeability cutoff as defined by US FDA (Fa > 90%) and WHO (Fa > 85%) guidelines. The continuous red line indicates the high PBC permeability criterion derived from Caco-2 permeability of metoprolol. 
+
+[![Image 17: Figure 2. Comparison of concordances between BCS permeability classifications using calculated physicochemical properties (partition coefficient, distribution coefficient, and polar surface area) and intestinal absorption criteria (Al, B1, C1). The same procedure was carried out for comparing with the Caco-2 permeability classification (A2, B2, C2). The pink, blue, and red dotted lines express the high BCS permeability cutoff as defined by the US FDA (Fa > 90%), WHO (Fa > 85%), and Caco-2 permeability. The continuous red lines in Al, A2, B1, and B2 indicate the calculated log P/log D values of metoprolol. The continuous red lines in C1 and C2 are calculated PSA of labetalol. ](https://figures.academia-assets.com/45377756/figure_003.jpg)](https://www.academia.edu/figures/22231082/figure-2-comparison-of-concordances-between-bcs-permeability)
+
+Figure 2. Comparison of concordances between BCS permeability classifications using calculated physicochemical properties (partition coefficient, distribution coefficient, and polar surface area) and intestinal absorption criteria (Al, B1, C1). The same procedure was carried out for comparing with the Caco-2 permeability classification (A2, B2, C2). The pink, blue, and red dotted lines express the high BCS permeability cutoff as defined by the US FDA (Fa > 90%), WHO (Fa > 85%), and Caco-2 permeability. The continuous red lines in Al, A2, B1, and B2 indicate the calculated log P/log D values of metoprolol. The continuous red lines in C1 and C2 are calculated PSA of labetalol. 
+
+[![Image 18: Figure 3. Relationship among intestinal absorption (Al), Caco-2 permeability (A2), and efflux ratios. The legend of pink and blue dotted lines and continuous red line are found in Figure 2 capture. The dotted gray line and continuous gray line show two criteria for defining substrate status (NES vs ES) according to in vitro data. ](https://figures.academia-assets.com/45377756/figure_004.jpg)](https://www.academia.edu/figures/22231089/figure-3-relationship-among-intestinal-absorption-al-caco)
+
+Figure 3. Relationship among intestinal absorption (Al), Caco-2 permeability (A2), and efflux ratios. The legend of pink and blue dotted lines and continuous red line are found in Figure 2 capture. The dotted gray line and continuous gray line show two criteria for defining substrate status (NES vs ES) according to in vitro data. 
+
+[![Image 19](https://figures.academia-assets.com/45377756/figure_005.jpg)](https://www.academia.edu/figures/22231092/figure-5-provisional-classification-and-in-silico-study-of)
+
+[![Image 20: Table 1. Physicochemical Profiles of PBC Classes Table 2. Performances of the Three Best Models for PBC Solubility Classification ](https://figures.academia-assets.com/45377756/table_001.jpg)](https://www.academia.edu/figures/22231102/table-1-physicochemical-profiles-of-pbc-classes-performances)
+
+Table 1. Physicochemical Profiles of PBC Classes Table 2. Performances of the Three Best Models for PBC Solubility Classification 
+
+[![Image 21: CLASSp,(+/—) = —1.59 — 0.54 X P_VSA_v_3+0.80 X nArC=N + 0.65 X C-005 — 0.84 X CATS2D_04_AL + 0.79 X DLS_04+ 4.51 X ID3 + 0.28 X A— 0.41 X LgDS; N = 2587; A = 0.60; D* = 2.74; F = 25.61; p < 0.0001 (S1) CLASSp,(+/—) = —0.36 — 0.90 X Me — 1.40 x nCt — 0.79 X NssNH + 1.22 X BLTD48 + 0.87 X DLS_04 — 0.82 X CMC-SO — 1.86 x nArC=N x N-067 + 0.41 x N-067 X NssNH — 0.73 X Me X CMC-S0 + 0.51 X nR10; N = 257; 4 = 0.59; D? = 2.88; p < 0.0001 ($2) In(P,/P_) = 2.63 — 0.59 X nCp + 4.44 x nArC=N + 0.20 X H-052 + 1.82 X N-067 — 1.32 x NssNH + 1.09 X BLTD48 + 4.58 X LDS_04 — 1.38 CMC-S0 — 0.38 X nO (S3) “Measured performances of training/test set. Area under the ROC curve determined on test set by nonparametric assumptions in 95% asymptotic confidence interval. ](https://figures.academia-assets.com/45377756/table_002.jpg)](https://www.academia.edu/figures/22231107/table-2-classp-vsa-narc-catsd-al-dls-id-lgds-classp-me-nct)
+
+CLASSp,(+/—) = —1.59 — 0.54 X P_VSA_v_3+0.80 X nArC=N + 0.65 X C-005 — 0.84 X CATS2D_04_AL + 0.79 X DLS_04+ 4.51 X ID3 + 0.28 X A— 0.41 X LgDS; N = 2587; A = 0.60; D* = 2.74; F = 25.61; p < 0.0001 (S1) CLASSp,(+/—) = —0.36 — 0.90 X Me — 1.40 x nCt — 0.79 X NssNH + 1.22 X BLTD48 + 0.87 X DLS_04 — 0.82 X CMC-SO — 1.86 x nArC=N x N-067 + 0.41 x N-067 X NssNH — 0.73 X Me X CMC-S0 + 0.51 X nR10; N = 257; 4 = 0.59; D? = 2.88; p < 0.0001 ($2) In(P,/P_) = 2.63 — 0.59 X nCp + 4.44 x nArC=N + 0.20 X H-052 + 1.82 X N-067 — 1.32 x NssNH + 1.09 X BLTD48 + 4.58 X LDS_04 — 1.38 CMC-S0 — 0.38 X nO (S3) “Measured performances of training/test set. Area under the ROC curve determined on test set by nonparametric assumptions in 95% asymptotic confidence interval. 
+
+[![Image 22: Table 3. Performances of the Three Best Models for PBC Permeability Classification ](https://figures.academia-assets.com/45377756/table_003.jpg)](https://www.academia.edu/figures/22231110/table-3-performances-of-the-three-best-models-for-pbc)
+
+Table 3. Performances of the Three Best Models for PBC Permeability Classification 
+
+[![Image 23: Table 5. External Validation of 57 Drugs (without Caco-2 Permeability) Appeared on the World Health Organization (WHO) Lis of Essential Medicines systems. First, 57 drugs with BCS classification reported by WHO,’ which do not belong to current PBC data set were used for external validation of computational models. Their computa- tional PBC assignments are listed in Table S. data sets,°>®° are selected. Generally, current finding structure— property (Do) relationships (SDoR) are rather similar with Khandelwal et al.’s analysis.”* ](https://figures.academia-assets.com/45377756/table_004.jpg)](https://www.academia.edu/figures/22231117/table-5-external-validation-of-drugs-without-caco)
+
+Table 5. External Validation of 57 Drugs (without Caco-2 Permeability) Appeared on the World Health Organization (WHO) Lis of Essential Medicines systems. First, 57 drugs with BCS classification reported by WHO,’ which do not belong to current PBC data set were used for external validation of computational models. Their computa- tional PBC assignments are listed in Table S. data sets,°>®° are selected. Generally, current finding structure— property (Do) relationships (SDoR) are rather similar with Khandelwal et al.’s analysis.”* 
+
+[![Image 24: Table 4. Confusion Matrix of Consensus System for the Prediction of PBC Classes“ ](https://figures.academia-assets.com/45377756/table_005.jpg)](https://www.academia.edu/figures/22231119/table-4-confusion-matrix-of-consensus-system-for-the)
+
+Table 4. Confusion Matrix of Consensus System for the Prediction of PBC Classes“ 
+
+[![Image 25: As can be appreciated from Figure 5, more than 40% of drugs and phase 3 are similar to PBC class I. The phase 3 compounds Figure 5. Distribution comparison of computational PBC assignments of launched drugs, compounds in different drug development stages (phase 1, 2, 3), and bioactive micromolar (W6) and nanomolar (W9) compounds.” ](https://figures.academia-assets.com/45377756/figure_006.jpg)](https://www.academia.edu/figures/22231099/figure-5-as-can-be-appreciated-from-more-than-of-drugs-and)
+
+As can be appreciated from Figure 5, more than 40% of drugs and phase 3 are similar to PBC class I. The phase 3 compounds Figure 5. Distribution comparison of computational PBC assignments of launched drugs, compounds in different drug development stages (phase 1, 2, 3), and bioactive micromolar (W6) and nanomolar (W9) compounds.” 
+
+[![Image 26: “Bold values indiciate the number of accurately classified cases according to BDDCS classes. ’Number in parentheses: drugs that due to being outliers of ADs are predicted as nonconclusive-class (two using predictions are different). Table 6. Correspondence between in Silico PBC Class Assignments and Experimental BDDCS Classifications* ](https://figures.academia-assets.com/45377756/table_006.jpg)](https://www.academia.edu/figures/22231125/table-6-bold-values-indiciate-the-number-of-accurately)
+
+“Bold values indiciate the number of accurately classified cases according to BDDCS classes. ’Number in parentheses: drugs that due to being outliers of ADs are predicted as nonconclusive-class (two using predictions are different). Table 6. Correspondence between in Silico PBC Class Assignments and Experimental BDDCS Classifications* 
+
+arrow_forward_ios
+
+## Related papers
+
+[Experimental and computational approaches to estimate solubility and permeability in drug discovery and development settings](https://www.academia.edu/37933365/Experimental_and_computational_approaches_to_estimate_solubility_and_permeability_in_drug_discovery_and_development_settings)
+
+[Química Medicinal](https://coalchamber.academia.edu/Qu%C3%ADmicaMedicinal)
+
+Experimental and computational approaches tn estimate soluhility and permeability in discovery and development settings are described. In the discovery setting 'the rule of 5' predicts that poor absorption or permeation is more likely when there are more than 5 H-bond donors. 10 H-bond acceptors, the molecular weight (MWT) is greater than 500 and the calculated Log P (CLogP) is greater than 5 (or MlogP > 4.15). Computational methodology for the rule-based Moriguchi Log P (MLogP) calculation is described. Turbidimetric solubility measurement is described and applied to known drugs. High throughput screening (HTS) leads tend to have higher MWT and Log P and lower turbidimetric solubility than leads in the pre-HTS era. In the development setting, solubility calculations focus on exact value prediction and are difficult because of polymorphism. Recent work on linear free energy relationships and Log P approaches are critically reviewed. Useful predictions are possible in closely related analog series when coupled with experimental thermodynamic solubility measurements.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/37933365/Experimental_and_computational_approaches_to_estimate_solubility_and_permeability_in_drug_discovery_and_development_settings)
+
+[4-QSPR Prediction of Aqueous Solubility of Drug-Like Organic Compounds](https://www.academia.edu/49894211/4_QSPR_Prediction_of_Aqueous_Solubility_of_Drug_Like_Organic_Compounds)
+
+[Jahan B Ghasemi](https://tehran.academia.edu/JahanBGhasemi)
+
+The aqueous solubility of organic compounds is an important molecular property, playing a large role in the behavior of compounds in many areas of interest. Given the importance of solubility, a means of prediction based solely on molecular structure should prove a useful tool, as many compounds exist for which the solubility simply is not available. The solubility of chemicals and drugs in the water phase has an essential influence on the extent of their absorption and transport in a body. That is why solubility is considered to be a very important parameter in current ADMET (Absorption, Distribution, Metabolism, Excretion, and Toxicity) research. 1-5) Water solubility plays a key role in areas such as drug dosage, anesthesiology, corrosion of metals, transport fate of pollutants in terrestrial, aquatic and atmospheric ecosystems, deposition of minerals and composition of ground waters, and availability of oxygen and other gases in life support systems. The widespread relevance of water solubility data to many branches and disciplines of science, medicine, technology, and engineering has led to the development of several models to predict water solubility. Hence, it was deemed advantageous to develop a model to predict water solubility using only theoretically derived descriptors. 6-9) Comparing with the time-consuming experimental procedures to determine aqueous solubility directly, reliable computational methods to predict aqueous solubility are more popular in today's research. 10-12) There are some reports about the applications of QSPR approaches to predict the aqueous solubility of organic compounds. 13-19) In our previous papers, we reported on the application of QSPR techniques in the development of a new, simplified approach to prediction of compounds properties. 20-22) Several articles have published with MLR models for the prediction of aqueous solubility. 23-26) In a QSPR study, a mathematical model is developed which relates the structure of a set of compounds to a physical property such as aqueous solubility. In a QSPR study is that there is some sort of relationship between the physical property of interest and structural descriptors. These descriptors are numerical representations of structural features of molecules that attempt to encode important information that causes structurally different compounds to have different physical property values. Even though the descriptors used to build a QSPR model can be empirical, it is generally more useful to use descriptors derived mathematically from the 3D molecular structure, since this allow any relationship so derived to be extended to the prediction of the property for unavailable compounds. In this work a QSPR study is performed, to develop model that relate the structures of a heterogeneous group of 150 drug-like compounds to their aqueous solubility. The stepwise MLR was used to select the most informative descriptors from the calculated descriptors by Molecular Modeling Pro Plus software. The selected descriptors were used to develop a MLR model for predicting the solubility for 40 drug compounds in water at 25°C. The aim of this work was to investigate molecular descriptors important in determining aqueous solubility. Data and Methods The QSPR model for the estimation of the log S w 's of various drug organic compounds is established in the following six steps: the molecular structure input and generation of the files containing the chemical structures is stored in a computer-readable format; quantum mechanics geometry is optimized with a semi-empirical (AM1) method; structural descriptors are computed; structural descriptors are selected; and the structure-log S w model is generated by the multiple linear regression and statistical analysis. Data Set All solubility data for all 150 compounds was taken from the literature. 27) These values were converted from mole/liter to logarithm of drug solubility (log S w). These were measured at 25°C in aqueous solution. The data set was split into a training set (110 compounds) and a prediction set (40 compounds). The solubility's of these compounds are deposited in Journal log as supporting material (see Table 1). Computer Hardware and Software All calculations were run on a Pentium IV personal computer with windows XP operating system. The
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/49894211/4_QSPR_Prediction_of_Aqueous_Solubility_of_Drug_Like_Organic_Compounds)
+
+[Development of Reliable Aqueous Solubility Models and Their Application in Druglike Analysis](https://www.academia.edu/77484127/Development_of_Reliable_Aqueous_Solubility_Models_and_Their_Application_in_Druglike_Analysis)
+
+[George Krudy](https://independent.academia.edu/GeorgeKrudy)
+
+Journal of Chemical Information and Modeling, 2007
+
+In this work, two reliable aqueous solubility models, ASMS (aqueous solubility based on molecular surface) and ASMS-LOGP (aqueous solubility based on molecular surface using ClogP as a descriptor), were constructed by using atom type classified solvent accessible surface areas and several molecular descriptors for a diverse data set of 1708 molecules. For ASMS (without using ClogP as a descriptor), the leave-oneout q 2 and root-mean-square error (RMSE) were 0.872 and 0.748 log unit, respectively. ASMS-LOGP was slightly better than ASMS (q 2) 0.886, RMSE) 0.705). Both models were extensively validated by three cross-validation tests and encouraging predictability was achieved. High throughput aqueous solubility prediction was conducted for a number of data sets extracted from several widely used databases. We found that real drugs are about 20-fold more soluble than the so-called druglike molecules in the ZINC database, which have no violation of Lipinski's "Rule of 5" at all. Specifically, oral drugs are about 16-fold more soluble, while injection drugs are 50-60-fold more soluble. If the criterion of a molecule to be soluble is set to-5 log unit, about 85% of real drugs are predicted as soluble; in contrast only 50% of druglike molecules in ZINC are soluble. We concluded that the two models could be served as a rule in druglike analysis and an efficient filter in prioritizing compound libraries prior to high throughput screenings (HTS).
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/77484127/Development_of_Reliable_Aqueous_Solubility_Models_and_Their_Application_in_Druglike_Analysis)
+
+[Purely in Silico BCS Classification: Science Based Quality Standards for the World’s Drugs](https://www.academia.edu/83688914/Purely_in_Silico_BCS_Classification_Science_Based_Quality_Standards_for_the_World_s_Drugs)
+
+[omri wolk](https://independent.academia.edu/omriwolk)
+
+Molecular Pharmaceutics, 2013
+
+BCS classification is a vital tool in the development of both generic and innovative drug products. The purpose of this work was to provisionally classify the world's top selling oral drugs according to the BCS, using in-silico methods. Three different in-silico methods were examined: the wellestablished group contribution (CLogP) and atom contribution (ALogP) methods, and a new method based solely on the molecular formula and element contribution (KLogP). Metoprolol was used as the benchmark for the low/high permeability class boundary. Solubility was estimated in-silico using a thermodynamic equation that relies on the partition coefficient and melting point. The validity of each method was affirmed by comparison to reference data and literature. We then used each method to provisionally classify the orally administered, IR drug products found in the WHO Model list of Essential Medicines, and the top-selling oral drug products in the United States (US), Great Britain (GB), Spain (ES), Israel (IL), Japan (JP), and South Korea (KR). A combined list of 363 drugs was compiled from the various lists, and 257 drugs were classified using the different in-silico permeability methods and literature solubility data, as well as BDDCS classification. Lastly, we calculated the solubility values for 185 drugs from the combined set using insilico approach. Permeability classification with the different in silico methods was correct for 69-72.4% of the 29 reference drugs with known human jejunal permeability, and for 84.6-92.9% of the 14 FDA reference drugs in the set. The correlations (r 2 ) between experimental log P values of 154 drugs and their CLogP, ALogP and KLogP were 0.97, 0.82 and 0.71, respectively. The different in-silico permeability methods produced comparable results; 30-34% Page 2 of 54 ACS Paragon Plus Environment Molecular Pharmaceutics of the US,GB,ES and IL top selling drugs were Class 1, 27-36.4% were Class 2, 22-25.5% were Class 3, and 5.46-14% were Class 4 drugs, while ~8% could not be classified. The WHO list included significantly less Class 1 and more Class 3 drugs in comparison to the countries lists, probably due to differences in commonly used drugs in developing vs industrial countries. BDDCS classified more drugs as class 1 compared to in-silico BCS, likely due to the more lax benchmark for metabolism (70%), in comparison to the strict permeability benchmark (metoprolol). For 185 out of the 363 drugs, in-silico solubility values were calculated, and successfully matched the literature solubility data. In conclusion, relatively simple in-silico methods can be used to estimate both permeability and solubility. While CLogP produced the best correlation to experimental values, even KLogP, the most simplified in-silico method that is based on molecular formula with no knowledge of molecular structure, produced comparable BCS classification to the sophisticated methods. This KLogP, when combined with a mean melting point and estimated dose, can be used to provisionally classify potential drugs from just molecular formula, even before synthesis. 49-59% of the world's top-selling drugs are highly soluble (Class 1 and Class 3), and are therefore candidates for waivers of in-vivo bioequivalence studies. For these drugs, the replacement of expensive human studies with affordable in-vitro dissolution tests would ensure their bioequivalence, and encourage the development and availability of generic drug products in both industrial and developing countries.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/83688914/Purely_in_Silico_BCS_Classification_Science_Based_Quality_Standards_for_the_World_s_Drugs)
+
+[Integrating theoretical and experimental permeability estimations for provisional biopharmaceutical classification: Application to the WHO essential medicines](https://www.academia.edu/37341390/Integrating_theoretical_and_experimental_permeability_estimations_for_provisional_biopharmaceutical_classification_Application_to_the_WHO_essential_medicines)
+
+[Miguel Angel Cabrera Pérez](https://uclv.academia.edu/MiguelAngelCabreraP%C3%A9rez)
+
+The accuracy of provisional estimation of the Biopharmaceutics Classification System (BCS) is heavily influenced by the permeability measurement. In this study, several theoretical and experimental models currently employed for BCS permeability classification has been analyzed.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/37341390/Integrating_theoretical_and_experimental_permeability_estimations_for_provisional_biopharmaceutical_classification_Application_to_the_WHO_essential_medicines)
+
+[Al-Malah, K. “Prediction of Drug-in-rat Permeability as a Function of Selected Relevant Molecular Descriptors”. Int. J. Pharm. Sci. Res. Rev., 7(2): 40-45 (2011)](https://www.academia.edu/16948542/Al_Malah_K_Prediction_of_Drug_in_rat_Permeability_as_a_Function_of_Selected_Relevant_Molecular_Descriptors_Int_J_Pharm_Sci_Res_Rev_7_2_40_45_2011_)
+
+[Kamal Al-Malah](https://independent.academia.edu/KAlMalah)
+
+The drug-in-rat permeability rate coefficient for thirteen types was examined. As drug or drug-like molecules are, in general, complex structures of amphiphilic nature, (i.e., having both hydrophobic and hydrophilic moieties), the permeation rate was expressed as a function of some selected molecular descriptors; namely, the Ghose-Crippen octanol-water partition coefficient, ALOGP; the hydrophilicity, Hy; the mean topological charge index of order 1, JGI1; the mean topological charge index of order 2, JGI2; the mean atomic polarizability (scaled on carbon atom), Mp; the mean electro-topological state, Ms; the mean atomic van der Waals volume (scaled on carbon atom), Mv; the number of rotatable bonds, RBN; the number of acceptor atoms for H-bonds (N,O,F), nHAcc; the number of donor atoms for H-bonds (N and O), nHDon; and finally the Kier flexibility index, PHI. Using the nonlinear regression approach, it was found that the drug-in-rat permeability rate data can be adequately and sati...
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/16948542/Al_Malah_K_Prediction_of_Drug_in_rat_Permeability_as_a_Function_of_Selected_Relevant_Molecular_Descriptors_Int_J_Pharm_Sci_Res_Rev_7_2_40_45_2011_)
+
+[Diagnostic of a qSPR model: Aqueous solubility of drug-like compounds](https://www.academia.edu/125850872/Diagnostic_of_a_qSPR_model_Aqueous_solubility_of_drug_like_compounds)
+
+[Sorana D. Bolboacă](https://umfcluj.academia.edu/SBolboaca)
+
+2010
+
+A diagnostic test for a qSPR (quantitative Structure-Property Relationship) model was carried out using a series of statistical indicators for correctly classifying compounds into actives and non-actives. A previously reported qSPR model, able to characterize the aqueous solubility of drug-like compounds, was used in this study. Eleven statistical indicators like those used in medical diagnostic tests were defined and applied on training, test and overall data sets. The associated 95% confidence interval under the binomial distribution assumption was also computed for each defined indicator in order to allow a correct interpretation. Similar results were obtained in the training and test sets with some exceptions. The prior probabilities of active and nonactive compounds proved not to be significantly different in the training and test sets. However, the probability of classification as active compounds proved to be significantly smaller in the training set as compared to the test set (p = 0.0042). The total fraction of correctly classified compounds proved to be identical in the training and test sets as well as in the overall set. Nevertheless, the overall model and the model obtained in the test set show a higher ability to correctly assign the non-active compounds to the non-active class while the model obtained in the training set has a higher ability to correctly assign the active compounds to the active class.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/125850872/Diagnostic_of_a_qSPR_model_Aqueous_solubility_of_drug_like_compounds)
+
+[Absorption Classification of Oral Drugs Based on Molecular Surface Properties](https://www.academia.edu/110797335/Absorption_Classification_of_Oral_Drugs_Based_on_Molecular_Surface_Properties)
+
+[Lucia Lazorova](https://uppsala.academia.edu/LuciaLazorova)
+
+Journal of Medicinal Chemistry, 2003
+
+The aim of this study was to investigate whether easily calculated and comprehended molecular surface properties can predict drug solubility and permeability with sufficient accuracy to allow theoretical absorption classification of drug molecules. For this purpose, structurally diverse, orally administered model drugs were selected from the World Health Organization (WHO)'s list of essential drugs. The solubility and permeability of the drugs were determined using well-established in vitro methods in highly accurate experimental settings. Descriptors for molecular surface area were generated from low-energy conformations obtained by conformational analysis using molecular mechanics calculations. Correlations between the calculated molecular surface area descriptors, on one hand, and solubility and permeability, on the other, were established with multivariate data analysis (partial least squares projection to latent structures (PLS)) using training and test sets. The obtained models were challenged with external test sets. Both solubility and permeability of the druglike molecules could be predicted with high accuracy from the calculated molecular surface properties alone. The established correlations were used to perform a theoretical biopharmaceutical classification of the WHOlisted drugs into six classes, resulting in a correct prediction for 87% of the essential drugs. An external test set consisting of Food and Drug Administration (FDA) standard compounds for biopharmaceutical classification was predicted with 77% accuracy. We conclude that PLS models of easily comprehended molecular surface properties can be used to rapidly provide absorption profiles of druglike molecules early on in drug discovery.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/110797335/Absorption_Classification_of_Oral_Drugs_Based_on_Molecular_Surface_Properties)
+
+[Experimental and computational screening models for prediction of aqueous drug solubility](https://www.academia.edu/15058674/Experimental_and_computational_screening_models_for_prediction_of_aqueous_drug_solubility)
+
+[Per Artursson](https://independent.academia.edu/PerArtursson)
+
+Pharmaceutical Research, 2002
+
+To devise experimental and computational models to predict aqueous drug solubility. Methods. A simple and reliable modification of the shake flask method to a small-scale format was devised, and the intrinsic solubilities of 17 structurally diverse drugs were determined. The experimental solubility data were used to investigate the accuracy of commonly used theoretical and semiexperimental models for prediction of aqueous drug solubility. Computational models for prediction of intrinsic solubility, based on lipophilicity and molecular surface areas, were developed. Results. The intrinsic solubilities ranged from 0.7 ng/mL to 6.0 mg/ mL, covering a range of almost seven log 10 units, and the values determined with the new small-scale shake flask method agreed well with published solubility data. Solubility data computed with established theoretical models agreed poorly with the experimentally determined solubilities, but the correlations improved when experimentally determined melting points were included in the models. A new, fast computational model based on lipophilicity and partitioned molecular surface areas, which predicted intrinsic drug solubility with a good accuracy (R 2 of 0.91 and RMSE tr of 0.61) was devised.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/15058674/Experimental_and_computational_screening_models_for_prediction_of_aqueous_drug_solubility)
+
+[Quantitative Biopharmaceutics Classification System: The Central Role of Dose/Solubility Ratio](https://www.academia.edu/5294717/Quantitative_Biopharmaceutics_Classification_System_The_Central_Role_of_Dose_Solubility_Ratio)
+
+[Georgia Valsami](https://princeoliver.academia.edu/GeorgiaValsami)
+
+Pharmaceutical Research, 2003
+
+Purpose. To develop a quantitative biopharmaceutics drug classification system (QBCS) based on fundamental parameters controlling rate and extent of absorption. Methods. A simple absorption model that considers transit flow, dissolution, and permeation processes stochastically was used to illustrate the primary importance of dose/solubility ratio and permeability on drug absorption. Simple mean time considerations for dissolution, uptake, and transit were used to identify relationships between the extent of absorption and a drug's dissolution and permeability characteristics. Results. The QBCS developed relies on a (permeability, dose/solubility ratio) plane with cutoff points 2 × 10−6-10−5cm/s for the permeability and 0.5-1 (unitless) for the dose/solubility ratio axes. Permeability estimates, P app are derived from Caco-2 studies, and a constant intestinal volume content of 250 ml is used to express the dose/solubility ratio as a dimensionless quantity, q. A physiologic range of 250-500 ml was used to account for variability in the intestinal volume. Drugs are classified into the four quadrants of the plane around the cutoff points according to their P app, q values, establishing four drug categories, i.e., I (P app> 10−5cm/s, q ≤ 0.5), II (P app> 10−5cm/s, q >1), III (P app< 2 × 10−6cm/s, q ≤0.5), and IV (P app< 2 × 10−6cm/s, q >1). A region for borderline drugs (2 × 10−6< P app< 10−5cm/s, 0.5 < q< 1) was defined too. For category I, complete absorption is anticipated, whereas categories II and III exhibit dose/solubility ratio-limited and permeability-limited absorption, respectively. For category IV, both permeability and dose/solubility ratio are controlling drug absorption. Semiquantitative predictions of the extent of absorption were pointed out on the basis of mean time considerations for dissolution, uptake, and transit in conjunction with drug's dose/solubility ratio and permeability characteristics. A set of 42 drugs were classified into the four categories, and the predictions of intestinal drug absorption were in accord with the experimental observations. Conclusions. The QBCS provides a basis for compound classification into four explicitly defined drug categories using the fundamental biopharmaceutical properties, permeability, and dose/solubility ratio. Semiquantitative predictions for the extent of absorption are essentially based on these drug properties, which either determine or are strongly related to the in vivo kinetics of drug dissolution and intestinal wall permeation.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/5294717/Quantitative_Biopharmaceutics_Classification_System_The_Central_Role_of_Dose_Solubility_Ratio)
+
+See full PDF download Download PDF
+
+![Image 27: Loading...](https://a.academia-assets.com/images/loaders/paper-load.gif)
+Loading Preview
+
+Sorry, preview is currently unavailable. You can download the paper by clicking the button above.
+
+## References (70)
+
+1.   BCS, Biopharmaceutics Classification System; API, active pharma- ceutical ingredient; US FDA, US Food and Drug Administration; EMA, European Medicines Agency; WHO, World Health Organization; EML, Essential Medicine List; IR, immediate release;
+2.   BA, bioavailability; BE, bioequivalence; Fa, % fraction absorbed; GI, gastrointestinal; BDDCS, Biopharmaceutical Drug Disposition Classification System; P-gp, P-glycoprotein; PBC, Provisional Biopharmaceutical Classification; NMEs, new molecular entities;
+3.   P app , Caco-2 cell apparent permeability; QSAR/QSPR, Quantitative Structure Activity/Property Relationship; MD, molecular descrip- tor;
+4.   ADME, absorption-distribution-metabolism-excretion; SD, standard deviation; LDA, linear discriminant analysis; QDA, quadratic discriminant analysis; BLR, binary logistic regression;
+5.   FN, false negative; FP, false positive; TN, true negative; TP, true positive; MCC, Matthews correlation coefficient; ROC, receiver operating characteristic curve; AUC, area under ROC curve; AD, applicability domains; S min , minimum aqueous solubility in the pH range of 1.2-6.8 at 37 °C; S max , maximum aqueous solubility in the pH range of 1.2-6.8 at 37 °C; D max , drug's highest dose strength;
+6.   D min , drug's lowest dose strength; log P, pH-independent n-octanol/ water partition coefficients; log D, pH-dependent n-octanol/water partition coefficients; PSA, polar surface area; EfR, efflux ratio; ES, efflux substrate; NES, nonefflux-substrate; ATC, anatomical therapeutic chemical; VoteS, solubility consensus model; VoteP, permeability consensus model; HTS, high throughput screening ■ REFERENCES
+7.   Amidon, G. L.; Lennernas, H.; Shah, V. P.; Crison, J. R. A theoretical basis for a biopharmaceutic drug classification: the correlation of in vitro drug product dissolution and in vivo bioavailability. Pharm. Res. 1995, 12 (3), 413-420.
+8.   Chen, M. L.; Amidon, G. L.; Benet, L. Z.; Lennernas, H.; Yu, L. X. The BCS, BDDCS, and regulatory guidances. Pharm. Res. 2011, 28 (7), 1774-1778.
+9.   CDER/FDA. FDA Guidance for Industry: Waiver of In Vivo Bioavailability and Bioequivalence Studies for Immediate-Release Solid Oral Dosage Forms Based on a Biopharmaceutics Classification System; Federal Drug and Food Administration: Rockville, MD, Center for Drug Evaluation and Research, 2000; www.fda.gov/downloads/Drugs/ GuidanceComplianceRegulatoryInformation/Guidances/ucm070246. pdf (accessed July 26, 2012).
+10.   CPMP/EWP/QWP/1401/98 Note for Guidance on the Inves- tigation of Bioavailability and Bioequivalence; The European Agency for the Evaluation of Medicinal Products (EMEA): London, Evaluation of Medicines for Human Use, December 14, 2000; http://www.ema. europa.eu/docs/en_GB/document_library/Scientific_guideline/ 2009/09/WC500003519.pdf (accessed July 26, 2012). (5) Annex 8: Proposal to waive in vivo bioequivalence requirements for WHO Model List of Essential Medicines immediate-release, solid oral dosage forms; Technical Report Series No. 937; 40th; WHO Expert Committee on Specification for Pharmaceutical Preparations, WHO Technical Report Series, No. 937, 2006; pp 391-461; http://www.who.int/ medicines/publications/essentialmedicines/en/index.html (accessed March 3, 2012).
+11.   Cook, J. A.; Davit, B. M.; Polli, J. E. Impact of Biopharmaceutics Classification System-Based Biowaivers. Mol. Pharmaceutics 2010, 7 (5), 1539-1544.
+12.   CDER/FDA Immediate Release Solid Oral Dosage Forms Scale-Up and Postapproval Changes: Chemistry, Manufacturing, and Controls, In Vitro Dissolution Testing, and In Vivo Bioequivalence Documentation; Center for Drug Evaluation and Research (CDER), November, 1995; http://www.fda.gov/downloads/Drugs/GuidanceComplianceRegulatory Information/Guidances/ucm070636.pdf (accessed July 26, 2012).
+13.   Ku, M. S. Use of the Biopharmaceutical Classification System in early drug development. AAPS J. 2008, 10 (1), 208-212.
+14.   Kasim, N. A.; Whitehouse, M.; Ramachandran, C.; Bermejo Sanz, M.; Lennernas, H.; Hussain, A. S.; Junginger, H. E.; Stavchansky, S. A.; Midha, K. K.; Shah, V. P.; Amidon, G. Molecular Properties of WHO Essential Drugs and Provisional Biopharmaceutical Classification. Mol. Pharmaceutics 2004, 1 (1), 85-96.
+15.   Dahan, A.; Miller, J. M.; Amidon, G. L. Prediction of solubility and permeability class membership: provisional BCS classification of the world's top oral drugs. AAPS J. 2009, 11 (4), 740-746.
+16.   Takagi, T.; Ramachandran, S.; Bermejo, M.; Yamashita, S.; Yu, L. X.; Amidon, G. L. A Provisional Biopharmaceutical Classification of the Top 200 Oral Drug Products in the United States, Great Britain, Spain, and Japan. Mol. Pharmaceutics 2006, 3 (6), 631-643.
+17.   Lindenberg, M.; Kopp, S.; Dressman, J. B. Classification of orally administered drugs on the World Health Organization Model list of Essential Medicines according to the biopharmaceutics classification system. Eur. J. Pharm. Biopharm. 2004, 58 (2), 265-278.
+18.   Varma, M. V.; Gardner, I.; Steyn, S. J.; Nkansah, P.; Rotter, C. J.; Whitney-Pickett, C.; Zhang, H.; Di, L.; Cram, M.; Fenner, K. S.; El- Kattan, A. F. pH-Dependent Solubility and Permeability Criteria for Provisional Biopharmaceutics Classification (BCS and BDDCS) in Early Drug Discovery. Mol. Pharmaceutics 2012, 9 (5), 1199-1212.
+19.   Nair, A. K.; Anand, O.; Chun, N.; Conner, D. P.; Mehta, M. U.; Nhu, D. T.; Polli, J. E.; Yu, L. X.; Davit, B. M. Statistics on BCS Classification of Generic Drug Products Approved Between 2000 and 2011 in the USA. AAPS J. 2012, 14 (4), 664-666.
+20.   Shawahna, R.; Rahman, N. U. Evaluation of the use of partition coefficients and molecular surface properties as predictors of drug absorption: a provisional biopharmaceutical classification of the list of national essential medicines of Pakistan. DARU 2011, 19 (2), 83-99.
+21.   The International Pharmacopoeia, 4th ed.; World Health Organization, WHO Press: Geneva, 2006; Vols. 1 & 2, p 1520. (17) The Merck Index, 14th ed.; Merck Research Laboratories: Whitehouse Station, NJ, 2006.
+22.   Wu, C. Y.; Benet, L. Z. Predicting drug disposition via application of BCS: transport/absorption/ elimination interplay and development of a biopharmaceutics drug disposition classification system. Pharm. Res. 2005, 22 (1), 11-23.
+23.   Ungell, A. L.; Artursson, P. An Overview of Caco-2 and Alternatives for Prediction of Intestinal Drug Transport and Absorption. In Drug Bioavailability. Estimation of Solubility, Permeability, Absorption and Bioavailability, 2nd ed.; van de Waterbeemd, H., Testa, B., Eds.; Wiley-VCH: Weinheim, 2008; Vol. 40; pp 133-159.
+24.   Sun, H.; Pang, K. S. Permeability, transport, and metabolism of solutes in Caco-2 cell monolayers: a theoretical study. Drug Metab. Dispos. 2008, 36 (1), 102-123.
+25.   Benet, L. Z.; Broccatelli, F.; Oprea, T. I. BDDCS Applied to Over 900 Drugs. AAPS J. 2011, 13 (4), 519-547.
+26.   WHO Model List of Essential Medicines (17th list), March 2011; http://www.who.int/medicines/publications/essentialmedicines/en/ index.html (accessed July 26, 2012).
+27.   Electronic Orange Book, Approved Drug Products with Therapeutic Equivalence Evaluations, 32nd ed.; Office of Generic Drugs Center for Drug Evaluation and Research, Food and Drug Administration, updated August 2012; http://www.fda.gov/ downloads/Drugs/InformationOnDrugs/UCM086233.pdf (accessed July 26, 2012).
+28.   Kim, J. S.; Mitchell, S.; Kijek, P.; Tsume, Y.; Hilfinger, J.; Amidon, G. L. The Suitability of an in Situ Perfusion Model for Permeability Determinations: Utility for BCS Class I Biowaiver Requests. Mol. Pharmaceutics 2006, 3 (6), 686-694.
+29.   Pham-The, H.; Gonzalez Diaz, I.; Bermejo Sanz, M.; Mangas Sanjuan, V.; Centelles, I.; Garriges, T. M.; Cabrera Perez, M. A. In Silico Prediction of Caco-2 Permeability by a Classification QSAR Approach. Mol. Inf. 2011, 30 (4), 376-385.
+30.   Prieto, P.; Hoffmann, S.; Tirelli, V.; Tancredi, F.; Gonzaĺez, I.; Bermejo, M.; De Angelis, I. An Exploratory Study of Two Caco-2 Cell Models for Oral Absorption: A Report on Their Within-laboratory and Between-laboratory Variability, and Their Predictive Capacity. Altern. Lab. Anim. 2010, 38 (5), 367-386.
+31.   Behrens, I.; Kissel, T. Do cell culture conditions influence the carrier-mediated transport of peptides in Caco-2 cell monolayers? Eur. J. Pharm. Sci. 2003, 19 (5), 433-442.
+32.   Khandelwal, A.; Bahadduri, P. M.; Chang, C.; Polli, J. E.; Swaan, P. W.; Ekins, S. Computational models to assign biopharmaceutics drug disposition classification from molecular structure. Pharm. Res. 2007, 24 (12), 2249-2262.
+33.   Broccatelli, F.; Cruciani, G.; Benet, L. Z.; Oprea, T. I. BDDCS class prediction for new molecular entities. Mol. Pharmaceutics 2012, 9 (3), 570-580.
+34.   VolSurf+, version 1.0.4; available from Molecular Discovery Ltd., London, U.K., 2010; http://www.moldiscovery.com.
+35.   Marrero-Ponce, Y.; Cabrera, M. A.; Romero, V.; Bermejo, M.; Siverio, D.; Torrens, F. Prediction of Intestinal Epithelial Transport of Drug in (Caco-2) Cell Culture from Molecular Structure using in silico Approaches During Early Drug Discovery. Internet Electron. J. Mol. Des. 2005, 4 (2), 124-150.
+36.   Artursson, P.; Karlsson, J. Correlation between oral drug absorption in humans and apparent drug permeability coefficients in human intestinal epithelial (Caco-2) cells. Biochem. Biophys. Res. Commun. 1991, 175 (3), 880-885.
+37.   Yee, S. In vitro permeability across Caco-2 cells (colonic) can predict in vivo (small intestinal) absorption in man-fact or myth. Pharm. Res. 1997, 14 (6), 763-766.
+38.   Volpe, D. A., Drug Permeability Studies in Regulatory Biowaiver Applications. In Drug Absorption Studies: In Situ, In Vitro and In Silico Models;
+39.   Ehrhardt, C., Kim, K.-J., Eds.; Springer: New York, 2008; Vol. VII, pp 665-680. (35) DRAGON for Windows (Sof tware for Molecular Descriptor Calculator). 6.0; Talete srl, Milano Chemometrics and QSAR Research Group: http://www.talete.mi.it/products/dragon_description.htm.
+40.   Todeschini, R.; Consonni, V. Molecular Descriptors for Chemo- informatics; Wiley VCH Verlag GmbH & Co.: Weinheim, Germany, 2009; Vols. I & II.
+41.   Cruciani, G.; Crivori, P.; Carrupt, P. A.; Testa, B. Molecular fields in quantitative structure-permeation relationships: the VolSurf approach. J. Mol. Struct.: THEOCHEM 2000, 503 (1-2), 17-30. (38) STATISTICA (data analysis software system), 8.0; StatSoft, Inc.: Tulsa, OK, 2007; www.statsoft.com.
+42.   Fisher, R. A. The use of multiple measurements in taxonomic problems. Ann. Eugenic 1936, 7, 179-188.
+43.   Hosmer, D. W.; Lemeshow, S. Applied Logistic Regression, 2nd ed.; John Wiley & Sons, Inc.: Hoboken, NJ, 2000; p 392. (41) SPSS (Statistical Software for the Social Sciences) 17.0; SPSS Inc.: Chicago, IL, 2008; http://www.spss.com.
+44.   Hanley, J. A.; McNeil, B. J. The meaning and use of the area under a receiver operating characteristic (ROC) curve. Radiology 1982, 143 (1), 29-36.
+45.   Netzeva, T. I.; Worth, A.; Aldenberg, T.; Benigni, R.; Cronin, M. T.; Gramatica, P.; Jaworska, J. S.; Kahn, S.; Klopman, G.; Marchant, C. A.; Myatt, G.; Nikolova-Jeliazkova, N.; Patlewicz, G. Y.; Perkins, R.; Roberts, D.; Schultz, T.; Stanton, D. W.; van de Sandt, J. J.; Tong, W.; Veith, G.; Yang, C. Current status of methods for defining the applicability domain of (quantitative) structure-activity relationships. The report and recommendations of ECVAM Workshop 52. Altern. Lab. Anim. 2005, 33 (2), 155-173.
+46.   Custodio, J. M.; Wu, C. Y.; Benet, L. Z. Predicting drug disposition, absorption/elimination/transporter interplay and the role of food on drug absorption. Adv. Drug Delivery Rev. 2008, 60 (6), 717- 733.
+47.   Dressman, J.; Butler, J.; Hempenstall, J.; Reppas, C. The BCS: Where Do We Go from Here? Pharm. Technol. 2001, 7, 69-76.
+48.   Tetko, I. V. Computing chemistry on the web. Drug Discovery Today 2005, 10 (22), 1497-1500.
+49.   Regardh, C. G.; Borg, K. O.; Johansson, R.; Johnsson, G.; Palmer, L. PK studies on the selective beta1-receptor antagonist metoprolol in man. J. Pharmacokinet. Biopharm. 1974, 2 (4), 347-364.
+50.   Polli, J. E.; Yu, L. X.; Cook, J. A.; Amidon, G. L.; Borchardt, R. T.; Burnside, B. A.; Burton, P. S.; Chen, M. L.; Conner, D. P.; Faustino, P. J.; Hawi, A. A.; Hussain, A. S.; Joshi, H. N.; Kwei, G.; Lee, V. H.; Lesko, L. J.; Lipper, R. A.; Loper, A. E.; Nerurkar, S. G.; Polli, J. W.; Sanvordeker, D. R.; Taneja, R.; Uppoor, R. S.; Vattikonda, C. S.; Wilding, I.; Zhang, G. Summary workshop report: Biopharmaceutics classification system- implementation challenges and extension opportunities. J. Pharm. Sci. 2004, 93 (6), 1375-1381.
+51.   Tomei, S.; Yuasa, H.; Inoue, K.; Watanabe, J. Transport functions of riboflavin carriers in the rat small intestine and colon: Site difference and effects of tricyclictype drugs. Drug Delivery 2001, 8 (3), 119-124.
+52.   Bates, T. R.; Sequeira, J. A. Use of 24-hr urinary excretion data to assess bioavailability of griseofulvin in humans. J. Pharm. Sci. 1975, 64 (5), 709-710.
+53.   Takano, R.; Sugano, K.; Higashida, A.; Hayashi, Y.; Machida, M.; Aso, Y.; Yamashita, S. Oral absorption of poorly water-soluble drugs: computer simulation of fraction absorbed in humans from a miniscale dissolution test. Pharm. Res. 2006, 23 (6), 1144-1156.
+54.   Blum, R. A.; D'Andrea, D. T.; Florentino, B. M.; Wilton, J. H.; Hilligoss, D. M.; Gardner, M. J.; Henry, E. B.; Goldstein, H.; Schentag, J. J. Increased gastric pH and the bioavailability of fluconazole and ketoconazole. Ann. Intern. Med. 1991, 114 (9), 755-757.
+55.   Elsby, R.; Surry, D. D.; Smith, V. N.; Gray, A. J. Validation and application of Caco-2 assays for the in vitro evaluation of development candidate drugs as substrates or inhibitors of P-glycoprotein to support regulatory submissions. Xenobiotica 2008, 38 (7-8), 1140-1164.
+56.   Yazdanian, M.; Briggs, K.; Jankovsky, C.; Hawi, A. The "high solubility" definition of the current FDA Guidance on Biopharmaceut- ical Classification System may be too strict for acidic drugs. Pharm. Res. 2004, 21 (2), 293-299.
+57.   Dahan, A.; Miller, J. M.; Hilfinger, J. M.; Yamashita, S.; Yu, L. X.; Lennernas, H.; Amidon, G. L. High-Permeability Criterion for BCS Classification: Segmental/pH Dependent Permeability Considerations. Mol. Pharmaceutics 2010, 7 (5), 1827-1834.
+58.   Kelder, J.; Grootenhuis, P. D.; Bayada, D. M.; Delbressine, L. P.; Ploemen, J. P. Polar molecular surface as a dominating determinant for oral absorption and brain penetration of drugs. Pharm. Res. 1999, 16 (10), 1514-1519.
+59.   Stenberg, P.; Norinder, U.; Luthman, K.; Artursson, P. Experimental and computational screening models for the prediction of intestinal drug absorption. J. Med. Chem. 2001, 44 (12), 1927-1937.
+60.   Hunter, J.; Jepson, M. A.; Tsuruo, T.; Simmons, N. L.; Hirst, B. H. Functional expression of P-glycoprotein in apical membranes of human intestinal Caco-2 cells. Kinetics of vinblastine secretion and interaction with modulators. J. Biol. Chem. 1993, 268 (20), 14991-14997.
+61.   Hirohashi, T.; Suzuki, H.; Chu, X. Y.; Tamai, I.; Tsuji, A.; Sugiyama, Y. Function and expression of multidrug resistance-associated protein family in human colon adenocarcinoma cells (Caco-2). J. Pharmacol. Exp. Ther. 2000, 292 (1), 265-270.
+62.   Polli, J. W.; Wring, S. A.; Humphreys, J. E.; Huang, L.; Morgan, J. B.; Webster, L. O.; Serabjit-Singh, C. S. Rational use of in vitro P- glycoprotein assays in drug discovery. J. Pharmacol. Exp. Ther. 2001, 299 (2), 620-628.
+63.   Lin, X.; Skolnik, S.; Chen, X.; Wang, J. Attenuation of Intestinal Absorption by Major Efflux Transporters: Quantitative Tools and Strategies Using a Caco-2 Model. Drug Metab. Dispos. 2011, 39 (2), 265-274.
+64.   Merino, G.; Jonker, J. W.; Wagenaar, E.; van Herwaarden, A. E.; Schinkel, A. H. The breast cancer resistance protein (BCRP/ABCG2) affects pharmacokinetics, hepatobiliary excretion, and milk secretion of the antibiotic nitrofurantoin. Mol. Pharmacol. 2005, 67 (5), 1758-1764.
+65.   Lipinski, C. A.; Lombardo, F.; Dominy, B. W.; Feeney, P. J. Experimental and computational approaches to estimate solubility and permeability in drug discovery and development settings. Adv. Drug Delivery Rev. 2001, 46 (1-3), 3-26.
+66.   Chen, G.; Zheng, S.; Luo, X.; Shen, J.; Zhu, W.; Liu, H.; Gui, C.; Zhang, J.; Zheng, M.; Puah, C. M.; Chen, K.; Jiang, H. Focused combinatorial library design based on structural diversity, druglikeness and binding affinity score. J. Comb. Chem. 2005, 7 (3), 398-406.
+67.   Ghose, A. K.; Viswanadhan, V. N.; Wendoloski, J. J. A knowledge- based approach in designing combinatorial or medicinal chemistry libraries for drug discovery. 1. A qualitative and quantitative character- ization of known drug databases. J. Comb. Chem. 1999, 1 (1), 55-68.
+68.   Zamora, I.; Oprea, T. I.; Ungell, A. L. Prediction of oral drug permeability. In Rational Approaches to Drug Design; Holtje, H. D., Sippl, W., Eds.; Prous Science Press: Barcelona, Spain, 2001; pp 271-280.
+69.   Dahan, A.; Lennernas, H.; Amidon, G. L. The Fraction Dose Absorbed, in Humans, and High Jejunal Human Permeability Relationship. Mol. Pharmaceutics 2012, 9 (6), 1847-1851.
+70.   Igel, S.; Drescher, S.; Murdter, T.; Hofmann, U.; Heinkele, G.; Tegude, H.; Glaeser, H.; Brenner, S. S.; Somogyi, A. A.; Omari, T.; Schafer, C.; Eichelbaum, M.; Fromm, M. F. Increased absorption of digoxin from the human jejunum due to inhibition of intestinal transporter-mediated efflux. Clin. Pharmacokinet. 2007, 46 (9), 777- 785.
+
+View more arrow_downward
+
+## FAQs
+
+![Image 28: sparkles](https://a.academia-assets.com/images/icons/sparkle.svg)
+AI
+
+What are the key findings on solubility classification among the analyzed drugs?add
+
+The analysis classified 188 out of 322 drugs as high-solubility, according to the Do parameter. This classification exhibited a true positive rate of 78.44% for drugs with minimum solubility above 0.1 mg/mL.
+
+How does the Caco-2 model contribute to permeability classification?add
+
+Caco-2 cell permeability data identified 167 compounds as high permeability, with a benchmark based on metoprolol. This model provides insights into the in vitro intestinal absorption potential, correlating well with in vivo data.
+
+What methodologies were used for the provisional classification of the drug dataset?add
+
+Provisional classification utilized an extensive literature review of solubility and permeability data, applying statistical modeling techniques like LDA, QDA, and BLR. The final predictive models achieved accuracy rates of 73% for the PBC classification.
+
+What implications do provisional classifications have for drug development costs?add
+
+The provisional biopharmaceutical classification system could potentially reduce bioequivalence testing costs, estimated to save over $120 million annually. This underscores the BCS's role in streamlining drug development processes.
+
+How does solubility correlate with the dose number in this study?add
+
+A strong correlation (r^2 > 0.76) between solubility and dose number indicated that low solubility could impair oral absorption. Furthermore, using maximum solubility values altered classification for 28 drugs, highlighting solubility's critical role.
+
+About the authors
+
+![Image 29](https://0.academia-photos.com/32629433/9742198/18890398/s65_miguel_angel.cabrera_p_rez.jpg)
+
+[Miguel Angel Cabrera Pérez](https://uclv.academia.edu/MiguelAngelCabreraP%C3%A9rez)
+
+Universidad Central de Las Villas, Faculty Member
+
+add Follow mail Message
+
+![Image 30](https://0.academia-photos.com/1781225/609597/757207/s65_maikel.cruz_monteagudo.jpg)
+
+[Maikel Cruz Monteagudo](https://independent.academia.edu/MaikelCruzMonteagudo)
+
+add Follow mail Message
+
+![Image 31](https://a.academia-assets.com/images/s65_no_pic.png)
+
+[Maykel Cruz-monteagudo](https://up-pt.academia.edu/MaykelCruzmonteagudo)
+
+Universidade do Porto, Post-Doc
+
+add Follow mail Message
+
+View all keyboard_arrow_down
+
+## Related papers
+
+[pH-Dependent Solubility and Permeability Criteria for Provisional Biopharmaceutics Classification (BCS and BDDCS) in Early Drug Discovery](https://www.academia.edu/32810539/pH_Dependent_Solubility_and_Permeability_Criteria_for_Provisional_Biopharmaceutics_Classification_BCS_and_BDDCS_in_Early_Drug_Discovery)
+
+[Ayman El-kattan](https://independent.academia.edu/AymanElkattan)
+
+Molecular Pharmaceutics, 2012
+
+The Biopharmaceutics Classification System (BCS) is a scientific framework that provides a basis for predicting the oral absorption of drugs. These concepts have been extended in the Biopharmaceutics Drug Disposition Classification System (BDDCS) to explain the potential mechanism of drug clearance and understand the effects of uptake and efflux transporters on absorption, distribution, metabolism, and elimination. The objective of present work is to establish criteria for provisional biopharmaceutics classification using pH-dependent passive permeability and aqueous solubility data generated from high throughput screening methodologies in drug discovery settings. The apparent permeability across monolayers of clonal cell line of Madin−Darby canine kidney cells, selected for low endogenous efflux transporter expression, was measured for a set of 105 drugs, with known BCS and BDDCS class. The permeability at apical pH 6.5 for acidic drugs and at pH 7.4 for nonacidic drugs showed a good correlation with the fraction absorbed in human (Fa). Receiver operating characteristic (ROC) curve analysis was utilized to define the permeability class boundary. At permeability ≥5 × 10 −6 cm/s, the accuracy of predicting Fa of ≥0.90 was 87%. Also, this cutoff showed more than 80% sensitivity and specificity in predicting the literature permeability classes (BCS), and the metabolism classes (BDDCS). The equilibrium solubility of a subset of 49 drugs was measured in pH 1.2 medium, pH 6.5 phosphate buffer, and in FaSSIF medium (pH 6.5). Although dose was not considered, good concordance of the measured solubility with BCS and BDDCS solubility class was achieved, when solubility at pH 1.2 was used for acidic compounds and FaSSIF solubility was used for basic, neutral, and zwitterionic compounds. Using a cutoff of 200 μg/mL, the data set suggested a 93% sensitivity and 86% specificity in predicting both the BCS and BDDCS solubility classes. In conclusion, this study identified pH-dependent permeability and solubility criteria that can be used to assign provisional biopharmaceutics class at early stage of the drug discovery process. Additionally, such a classification system will enable discovery scientists to assess the potential limiting factors to oral absorption, as well as help predict the drug disposition mechanisms and potential drug−drug interactions.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/32810539/pH_Dependent_Solubility_and_Permeability_Criteria_for_Provisional_Biopharmaceutics_Classification_BCS_and_BDDCS_in_Early_Drug_Discovery)
+
+[Prediction of Solubility and Permeability Class Membership: Provisional BCS Classification of the World’s Top Oral Drugs](https://www.academia.edu/14923075/Prediction_of_Solubility_and_Permeability_Class_Membership_Provisional_BCS_Classification_of_the_World_s_Top_Oral_Drugs)
+
+[Julian toledo jimenez](https://independent.academia.edu/Juliantoledojimenez)
+
+The Biopharmaceutics Classification System (BCS) categorizes drugs into one of four biopharmaceutical classes according to their water solubility and membrane permeability characteristics and broadly allows the prediction of the rate-limiting step in the intestinal absorption process following oral administration. Since its introduction in 1995, the BCS has generated remarkable impact on the global pharmaceutical sciences arena, in drug discovery, development, and regulation, and extensive validation/discussion/extension of the BCS is continuously published in the literature. The BCS has been effectively implanted by drug regulatory agencies around the world in setting bioavailability/ bioequivalence standards for immediate-release (IR) oral drug product approval. In this review, we describe the BCS scientific framework and impact on regulatory practice of oral drug products and review the provisional BCS classification of the top drugs on the global market. The Biopharmaceutical Drug Disposition Classification System and its association with the BCS are discussed as well. One notable finding of the provisional BCS classification is that the clinical performance of the majority of approved IR oral drug products essential for human health can be assured with an in vitro dissolution test, rather than empirical in vivo human studies.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/14923075/Prediction_of_Solubility_and_Permeability_Class_Membership_Provisional_BCS_Classification_of_the_World_s_Top_Oral_Drugs)
+
+[QSAR-based permeability model for drug-like compounds](https://www.academia.edu/21912225/QSAR_based_permeability_model_for_drug_like_compounds)
+
+[Robert Annand](https://independent.academia.edu/AnnandRobert)
+
+Bioorganic & Medicinal Chemistry, 2011
+
+a b s t r a c t A QSAR model was developed for predicting intestinal drug permeability, one of the most important parameters when evaluating compounds in drug discovery projects. First, a set of relevant properties for establishing a drug-like chemical space was applied to a database of compounds with Caco-2 permeability values obtained from previous studies. Several QSAR regression models were then developed from this set of drug-like structures. The best model was selected based on the accuracy of correct classifications obtained for training and validation subsets previously defined, including 17 structures from the FDA Biopharmaceutics Classification System (BCS). Further validation of the QSAR model was performed by applying it to 21 drugs for which Caco-2 permeability values were experimentally determined by us. The good agreement between predictions and experimental values in all cases confirmed the reliability of the equation. Since the model was developed with very simple descriptors, easy to calculate, its applicability to large collections of in silico chemicals is guaranteed.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/21912225/QSAR_based_permeability_model_for_drug_like_compounds)
+
+[Biopharmaceutics classification systems for new molecular entities (BCS-NMEs) and marketed drugs (BCS-MD): Theoretical basis and practical examples](https://www.academia.edu/5294722/Biopharmaceutics_classification_systems_for_new_molecular_entities_BCS_NMEs_and_marketed_drugs_BCS_MD_Theoretical_basis_and_practical_examples)
+
+[Vasiliki Papadopoulou](https://independent.academia.edu/VasilikiPapadopoulou1), [Georgia Valsami](https://princeoliver.academia.edu/GeorgiaValsami)
+
+International Journal of Pharmaceutics, 2008
+
+The aim of this work is to develop biopharmaceutics classification systems for new molecular entities (BCS-NMEs) and marketed drugs (BCS-MD). The kinetics of gastrointestinal (GI) wall permeation and dissolution were re-considered theoretically. The relationships between the solubility/dose ratio and the fractions of dose dissolved and absorbed, were also examined. Mean time calculations for drug dissolution (MDT) and permeation (MPT) of the GI wall were analyzed in respect to the mean intestinal transit time (MITT) to identify a cutoff point for drug dissolution and GI wall permeation. Dissolution experiments for marketed drugs were carried out. NMEs were classified into four classes of BCS-NMEs, based on solubility/dose ratio and apparent permeability estimates. A physiologically based cutoff time point for dissolution and permeation was used to differentiate rapidly from slowly dissolving-permeating marketed drugs, which were classified into four classes of BCS-MD using their dissolution index (DI = MITT/MDT) and permeation index (PI = MITT/MPT) values as follows: I (DI ≥ 3, PI ≥ 3), II (DI < 3, PI ≥ 3), III (DI ≥ 3, PI < 3) and IV (DI < 3, PI < 3). In conclusion, two classification systems were developed, one for NMEs based on solubility/dose ratio and permeability estimates and one for marketed drugs based on MDT and MPT estimates.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/5294722/Biopharmaceutics_classification_systems_for_new_molecular_entities_BCS_NMEs_and_marketed_drugs_BCS_MD_Theoretical_basis_and_practical_examples)
+
+[QSPR Prediction of Aqueous Solubility of Drug-Like Organic Compounds](https://www.academia.edu/86178940/QSPR_Prediction_of_Aqueous_Solubility_of_Drug_Like_Organic_Compounds)
+
+[saadi Saaidpour](https://independent.academia.edu/sSaaidpour)
+
+Chemical and Pharmaceutical Bulletin, 2007
+
+The aqueous solubility of organic compounds is an important molecular property, playing a large role in the behavior of compounds in many areas of interest. Given the importance of solubility, a means of prediction based solely on molecular structure should prove a useful tool, as many compounds exist for which the solubility simply is not available. The solubility of chemicals and drugs in the water phase has an essential influence on the extent of their absorption and transport in a body. That is why solubility is considered to be a very important parameter in current ADMET (Absorption, Distribution, Metabolism, Excretion, and Toxicity) research. 1-5) Water solubility plays a key role in areas such as drug dosage, anesthesiology, corrosion of metals, transport fate of pollutants in terrestrial, aquatic and atmospheric ecosystems, deposition of minerals and composition of ground waters, and availability of oxygen and other gases in life support systems. The widespread relevance of water solubility data to many branches and disciplines of science, medicine, technology, and engineering has led to the development of several models to predict water solubility. Hence, it was deemed advantageous to develop a model to predict water solubility using only theoretically derived descriptors. 6-9) Comparing with the time-consuming experimental procedures to determine aqueous solubility directly, reliable computational methods to predict aqueous solubility are more popular in today's research. 10-12) There are some reports about the applications of QSPR approaches to predict the aqueous solubility of organic compounds. 13-19) In our previous papers, we reported on the application of QSPR techniques in the development of a new, simplified approach to prediction of compounds properties. 20-22) Several articles have published with MLR models for the prediction of aqueous solubility. 23-26) In a QSPR study, a mathematical model is developed which relates the structure of a set of compounds to a physical property such as aqueous solubility. In a QSPR study is that there is some sort of relationship between the physical property of interest and structural descriptors. These descriptors are numerical representations of structural features of molecules that attempt to encode important information that causes structurally different compounds to have different physical property values. Even though the descriptors used to build a QSPR model can be empirical, it is generally more useful to use descriptors derived mathematically from the 3D molecular structure, since this allow any relationship so derived to be extended to the prediction of the property for unavailable compounds. In this work a QSPR study is performed, to develop model that relate the structures of a heterogeneous group of 150 drug-like compounds to their aqueous solubility. The stepwise MLR was used to select the most informative descriptors from the calculated descriptors by Molecular Modeling Pro Plus software. The selected descriptors were used to develop a MLR model for predicting the solubility for 40 drug compounds in water at 25°C. The aim of this work was to investigate molecular descriptors important in determining aqueous solubility. Data and Methods The QSPR model for the estimation of the log S w 's of various drug organic compounds is established in the following six steps: the molecular structure input and generation of the files containing the chemical structures is stored in a computer-readable format; quantum mechanics geometry is optimized with a semi-empirical (AM1) method; structural descriptors are computed; structural descriptors are selected; and the structure-log S w model is generated by the multiple linear regression and statistical analysis. Data Set All solubility data for all 150 compounds was taken from the literature. 27) These values were converted from mole/liter to logarithm of drug solubility (log S w). These were measured at 25°C in aqueous solution. The data set was split into a training set (110 compounds) and a prediction set (40 compounds). The solubility's of these compounds are deposited in Journal log as supporting material (see Table 1). Computer Hardware and Software All calculations were run on a Pentium IV personal computer with windows XP operating system. The
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/86178940/QSPR_Prediction_of_Aqueous_Solubility_of_Drug_Like_Organic_Compounds)
+
+[Biopharmaceutic Classification System: A Scientific Framework for Pharmacokinetic Optimization in Drug Research](https://www.academia.edu/6319811/Biopharmaceutic_Classification_System_A_Scientific_Framework_for_Pharmacokinetic_Optimization_in_Drug_Research)
+
+[Amit Jain](https://independent.academia.edu/AmitJain47)
+
+Current Drug Metabolism, 2004
+
+The tenets of biopharmaceutics, solubility and permeability, are of pivotal importance in new drug discovery and lead optimization due to the dependence of drug absorption and pharmacokinetics on these two properties. A classification system for drugs based on these two fundamental parameters, Biopharmaceutic Classification System (BCS), provides drug designer an opportunity to manipulate structure or physicochemical properties of lead candidates so as to achieve better "deliverability". Considering the facts for failure of NCEs, drug research, once concentrating on optimizing the efficacy and safety of the leads, dramatically transformed in the past two decades. With the enormous number of molecules being synthesized using combinatorial and parallel synthesis, high throughput methodologies for screening solubility and permeability has gained significant interest in pharmaceutical industry. Ultimate aim of the drug discovery scientist in pharmacokinetic optimization is to tailor the molecules so that they show the features of BCS class I without compromising on pharmacodynamics. Considerations to optimize drug delivery and pharmacokinetics right from the initial stages of drug design propelled need for "High Throughput Pharmaceutics" (HTP). In silico predictions and development of theoretical profiles for solubility and lipophilicity provides structure based biopharmaceutical optimization, while in vitro experimental models (microtitre plate assays and cell cultures) validate the predictions. Thus, biopharmaceutical characterization during drug design and early development helps in early withdrawal of molecules with insurmountable developmental problems associated with pharmacokinetic optimization. from combinatorial chemistry using quantitative binding assays (HTS). Initial 'hits' generated from HTS are chemically modified with SBDD and MM strategies to synthesize 'lead' molecules with improved properties. Lead molecules are further optimized for solubility and permeability properties to improve deliverability of NCEs without loosing target binding affinity. Identification of these fundamental properties, solubility and permeability, that determines deliverability of the molecules lead to BCS, which classifies drugs into four groups. Drugs with high solubility and high permeability are grouped into class I, low solubility and high permeability into class II, high solubility and low permeability into class III, and low solubility and low permeability into class IV.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/6319811/Biopharmaceutic_Classification_System_A_Scientific_Framework_for_Pharmacokinetic_Optimization_in_Drug_Research)
+
+keyboard_arrow_down View more papers
+
+## Related topics
+
+*   [Drug Discovery](https://www.academia.edu/Documents/in/Drug_Discovery)add Follow
+*   [Quantitative Structure Activity ...](https://www.academia.edu/Documents/in/Quantitative_Structure_Activity_Relationship)add Follow
+
+*   [Caco-2 cells](https://www.academia.edu/Documents/in/Caco-2_cells)add Follow
+*   [Molecular Pharmaceutics](https://www.academia.edu/Documents/in/Molecular_Pharmaceutics)add Follow
+
+## Cited by
+
+[Novel hydroxamic acids incorporating 1-((1H-1,2,3-Triazol-4-yl)methyl)-3-hydroxyimino-indolin-2-ones: synthesis, biological evaluation, and SAR analysis](https://www.academia.edu/55457758/Novel_hydroxamic_acids_incorporating_1_1H_1_2_3_Triazol_4_yl_methyl_3_hydroxyimino_indolin_2_ones_synthesis_biological_evaluation_and_SAR_analysis)
+
+[Hai Pham-The](https://hupedu.academia.edu/HaiPhamThe)
+
+Journal of Chemical Sciences
+
+A series of seventeen novel hydroxamic acids incorporating 1-((1H-1,2,3-triazol-4-yl)methyl)-3-hydroxyimino-indolin-2-ones was designed and synthesized. Biological evaluation showed that these hydroxamic acids potently inhibited a class-I isoform of HDACs (HDAC2) with IC 50 values in low micromolar range. Several compounds also exhibited good cytotoxicity. Two compounds, 5e and 5f, emerged as the most potent HDAC2 inhibitors with cytotoxicity up to 8-fold more potent than SAHA in three human cancer cell lines, including SW620 (colon cancer), PC3 (prostate cancer) and AsPC-1 (pancreatic cancer). A molecular modeling approach has been carried out which revealed some structure-activity relationships. Further investigation on absorption, distribution, metabolism, excretion and toxicity (ADMET) suggested that compounds 5e and 5f, while showing potent HDAC2 inhibitory bioactivity, hold desirable characteristics for anticancer compounds.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/55457758/Novel_hydroxamic_acids_incorporating_1_1H_1_2_3_Triazol_4_yl_methyl_3_hydroxyimino_indolin_2_ones_synthesis_biological_evaluation_and_SAR_analysis)
+
+[The translational roadmap of the gut models, focusing on gut-on-chip](https://www.academia.edu/61022992/The_translational_roadmap_of_the_gut_models_focusing_on_gut_on_chip)
+
+[Antoni Homs Corbera](https://independent.academia.edu/AntoniHomsCorbera)
+
+Open Research Europe
+
+It is difficult to model in vitro the intestine when seeking to include crosstalk with the gut microbiota, immune and neuroendocrine systems. Here we present a roadmap of the current models to facilitate the choice in preclinical and translational research with a focus on gut-on-chip. These micro physiological systems (MPS) are microfluidic devices that recapitulate in vitro the physiology of the intestine. We reviewed the gut-on-chips that had been developed in academia and industries as single chip and that have three main purpose: replicate the intestinal physiology, the intestinal pathological features, and for pharmacological tests.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/61022992/The_translational_roadmap_of_the_gut_models_focusing_on_gut_on_chip)
+
+[Stability Constant and Potentiometric Sensitivity of Heavy Metal–Organic Fluorescent Compound Complexes: QSPR Models for Prediction and Design of Novel Coumarin-like Ligands](https://www.academia.edu/115359323/Stability_Constant_and_Potentiometric_Sensitivity_of_Heavy_Metal_Organic_Fluorescent_Compound_Complexes_QSPR_Models_for_Prediction_and_Design_of_Novel_Coumarin_like_Ligands)
+
+[Bakhtiyor Rasulev](https://ndsu.academia.edu/BakhtiyorRasulev)
+
+Toxics
+
+Industrial wastewater often consists of toxic chemicals and pollutants, which are extremely harmful to the environment. Heavy metals are toxic chemicals and considered one of the major hazards to the aquatic ecosystem. Analytical techniques, such as potentiometric methods, are some of the methods to detect heavy metals in wastewaters. In this work, the quantitative structure–property relationship (QSPR) was applied using a range of machine learning techniques to predict the stability constant (logβML) and potentiometric sensitivity (PSML) of 200 ligands in complexes with the heavy metal ions Cu2+, Cd2+, and Pb2+. In result, the logβML models developed for four ions showed good performance with square correlation coefficients (R2) ranging from 0.80 to 1.00 for the training and 0.72 to 0.85 for the test sets. Likewise, the PSML displayed acceptable performance with an R2 of 0.87 to 1.00 for the training and 0.73 to 0.95 for the test sets. By screening a virtual database of coumarin-li...
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/115359323/Stability_Constant_and_Potentiometric_Sensitivity_of_Heavy_Metal_Organic_Fluorescent_Compound_Complexes_QSPR_Models_for_Prediction_and_Design_of_Novel_Coumarin_like_Ligands)
+
+[Synthesis and biological activity, and molecular modelling studies of potent cytotoxic podophyllotoxin-naphthoquinone compounds](https://www.academia.edu/119528276/Synthesis_and_biological_activity_and_molecular_modelling_studies_of_potent_cytotoxic_podophyllotoxin_naphthoquinone_compounds)
+
+[Hai Pham-The](https://hupedu.academia.edu/HaiPhamThe)
+
+RSC Advances, 2022
+
+A new approach for the synthesis of podophyllotoxin-naphthoquinone compounds using microwaveassisted three-component reactions is reported in this study. Novel podophyllotoxin-naphthoquinone derivatives with modification on ring E were synthesized. All the synthetic compounds were assessed in terms of their cytotoxicity profile against four cancer cell lines (KB, HepG2, A549, and MCF7), and noncancerous Hek-293 cell lines. Notably, treatment of SK-LU-1 cells with compounds 5a and 5b resulted in G2/M phase arrest of the cell cycle, caspase-3/7 activation, and apoptosis. Additionally, molecular docking studies were performed and showed important interaction of two compounds against residues in the colchicine-binding-site of tubulin as well. Taken together, compounds 5a and 5b were identified as potent anticancer agents.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/119528276/Synthesis_and_biological_activity_and_molecular_modelling_studies_of_potent_cytotoxic_podophyllotoxin_naphthoquinone_compounds)
+
+[Comparingin silicoandin vitromethods for classification of BCS II and CYP3A4 and MDR-1 substrate specificity](https://www.academia.edu/150542259/Comparingin_silicoandin_vitromethods_for_classification_of_BCS_II_and_CYP3A4_and_MDR_1_substrate_specificity)
+bioRxiv (Cold Spring Harbor Laboratory), 2022
+
+ABSTRACT Background Previous work has shown considerable laboratory variability of Biopharmaceutics Classification System (BCS) classification, efflux ratio in intestinal cell lines and cytochrome P450 (CYP450)-metabolism pathways. Such variability and inconsistency create uncertainty in predictions of human clinical pharmacokinetics and the pharmacokinetic optimization process and is a problem when developing corresponding in silico methods. Objectives and Methodology One objective of the study was to quantify the degree of laboratory inconsistency for BCS II-classing, MDR-1 and CYP3A4 substrate specificity (substrate/non-substrate). Another objective was to predict BCS II-classing, MDR-1 and CYP3A4 substrate specificity using in silico methodology and compare results to laboratory data/classifications. Results and Discussion 27 BCS II-classified drugs (with non-contradictory BCS-classing in various sources) were found. 17 (63 %) had an in vivo fraction absorbed (f a ) of ≥90 % and belong to in vivo BCS I. With in silico methodology, 74 % correct BCS-classing was reached for the same set of compounds. The mean prediction error for f a was 1.2-fold. MDR-1 and CYP3A4 substrate specificities were collected for 346 and 808 compounds, respectively. For MDR-1, 143 of the compounds had reported data in at least two studies, and out of these, 49 (34 %) and 18 (13 %) had contradictory (reported as both substate and non-substrate) and uncertain substrate specificities, respectively. For CYP3A4, 42 (9.8 %) out of 427 compounds showed inconsistency between laboratories. With in silico methodology, MDR-1 and CYP3A4 classification predictions were incorrect for 13 and 15 % of compounds. Conclusion The results show considerable variability/inconsistency for BCS II-classing (63 % inconsistency between BCS II-classing and in vivo f a ) and MDR-1 (34 % inconsistency between sources) and CYP3A4 (10 % inconsistency between sources) substrate specificities. Corresponding estimates obtained with in silico methodology are 22, 13 and 15 %, respectively, demonstrating the power and applicability of such technology.
+
+[download Download free PDF](https://www.academia.edu/13407008/Provisional_Classification_and_in_Silico_Study_of_Biopharmaceutical_System_Based_on_Caco_2_Cell_Permeability_and_Dose_Number)[View PDF chevron_right](https://www.academia.edu/150542259/Comparingin_silicoandin_vitromethods_for_classification_of_BCS_II_and_CYP3A4_and_MDR_1_substrate_specificity)
+
+close
+
+Welcome to Academia
+
+Sign up to get access to over 65 million papers
+
+By clicking Continue, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+![Image 32](https://a.academia-assets.com/images/google/google-color-transparent-bg-2.svg)Continue with Google![Image 33](https://a.academia-assets.com/images/apple/apple-black.svg)Continue with Apple![Image 34](https://a.academia-assets.com/images/facebook/facebook-color-transparent-bg-2.svg)Continue with Facebook email Continue with Email
+
+arrow_back
+Continue with Email
+
+Sign up or log in to continue.
+
+Email 
+
+Next arrow_forward
+
+arrow_back
+Welcome to Academia
+
+Sign up to continue.
+
+By clicking Sign Up, you agree to our [Terms of Use](https://www.academia.edu/terms) and [Privacy Policy](https://www.academia.edu/privacy)
+
+First name 
+
+Last name 
+
+Password 
+
+Sign Up arrow_forward
+
+arrow_back
+Hi,
+
+Log in to continue.
+
+Password 
+
+Reset password
+
+Log in arrow_forward
+
+arrow_back
+Password reset
+
+Check your email for your reset link.
+
+Your link was sent to
+
+Done
+
+arrow_back
+Facebook login is no longer available
+
+Reset your password to access your account:
+
+[Reset Password](https://www.academia.edu/reset_password)
+
+Please hold while we log you in
+
+[![Image 35: Academia](https://a.academia-assets.com/images/design_system/academia_logo_short_white.svg)](https://www.academia.edu/)
+
+*   Explore
+*   [Papers](https://www.academia.edu/documents)
+*   [Topics](https://www.academia.edu/topics)
+
+*   Features
+*   [Mentions](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fmentions)
+*   [Analytics](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fanalytics)
+*   [PDF Packages](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fresearch)
+*   [Advanced Search](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fsearch%2Fadvanced)
+*   [Search Alerts](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fsaved_searches)
+
+*   Journals
+*   [Academia.edu Journals](https://www.academia.edu/journals)
+*   [My submissions](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fjournals%2Fsubmissions)
+*   [Reviewer Hub](https://www.academia.edu/login?post_login_redirect_url=https%3A%2F%2Fwww.academia.edu%2Fjournals%2Fsubmissions%23reviewer%2Finvitations)
+*   [Why publish with us](https://www.academia.edu/journals/about/why-publish-with-us)
+*   [Testimonials](https://www.academia.edu/journals/about/testimonials)
+
+*   Company
+*   [About](https://www.academia.edu/about)
+*   [Careers](https://www.academia.edu/hiring)
+*   [Press](https://www.academia.edu/press)
+*   [Help Center](https://support.academia.edu/hc/en-us)
+*   [Terms](https://www.academia.edu/terms)
+*   [Privacy](https://www.academia.edu/privacy)
+*   [Copyright](https://www.academia.edu/copyright)
+*   [Content Policy](https://www.academia.edu/content_policy)
+
+[![Image 36: Academia](https://a.academia-assets.com/images/design_system/academia_logo_white.svg)](https://www.academia.edu/)
+
+580 California St., Suite 400
+
+San Francisco, CA, 94104
+
+[© 2026 Academia. All rights reserved](https://www.academia.edu/copyright)

@@ -1,0 +1,2659 @@
+Short course on robust statistics
+September 2025
+Frejus, France
+
+1
+
+Overview
+
+Topics:
+• Huber’s theory: Minimax bias, minimax variance
+• Hampel’s theory: Influence functions
+• Extensions: Linear regression, hypothesis testing
+• Modern perspectives: Adversarial contamination, heavy-tailed data
+Books:
+• Huber & Ronchetti, “Robust Statistics”
+• Hampel, Ronchetti, Rousseeuw & Stahel, “Robust Statistics: The Approach Based on Influence Functions”
+
+2
+
+Intro to robustness
+• Deals with deviations from ideal models and their dangers for corresponding inference procedures
+• Goal is to develop procedures that are still reliable and reasonably
+efficient under small deviations from the model (e.g., an -neighborhood
+of the assumed model)
+Outlier rejection?
+• Might consider a two-step procedure which first “cleans” data, then
+applies classical estimation procedure
+• However, outliers may be difficult to recognize without an initial (somewhat) robust estimator
+
+1
+
+• Multiple outliers may “mask” each other so that none are rejected
+• False rejections/false retentions may cause cleaned data to deviate from
+normal assumptions, too
+Robustness desiderata
+• Efficiency: Should have nearly(?) optimal efficiency under uncontaminated distribution
+• Stability: Small deviations from uncontaminated distribution should
+only alter performance slightly
+• Breakdown: Larger deviations from model should not be catastrophic
+
+Hampel et al., Robust Statistics
+2
+
+3
+
+Huber’s perspective
+
+Reference: Huber, “Robust estimation of a location parameter,” 1964
+We will be interested in estimating the location parameter of a distribui.i.d.
+tion in one dimension. Assume x1 , . . . , xn ∼ F (t − ξ) = Fξ (t), where F (t)
+is a cdf defined over a probability space.
+Goal is to estimate ξ. If probability distribution corresponding to F
+is symmetric around 0 (F (−x) + F (x) = 1 in the continuous
+case), then
+Pn
+1
+EF0 [xi ] = 0 and EFξ [xi ] = ξ, so we could use the mean n i=1 xi .
+However, what if the model is contaminated?
+Definition. Consider the class of distributions with cdfs in the set
+P (F0 ) = {F : F = (1 − )F0 + H, H ∈ M},
+where M is the set of all possible cdfs. This is known as (Huber’s) contamination model.
+Note that for F ∈ P (F0 ), we have
+sup |F (t) − F0 (t)| = |(1 − )F0 (t) + H(t) − F0 (t)|
+t
+
+=  · sup |H(t) − F0 (t)| ≤ ,
+t
+
+so F also lies in the -neighborhood of F0 with respect to the Kolmogorov
+distance.
+If EF0 [xi ] = 0, we have
+EF [xi ] = (1 − )0 + EH [xi ].
+Hence, if the mean of H is not zero, the sample mean will not be consistent
+(and could be arbitrarily biased).
+What about using the median? Nice property of medians is that changing
+a single point cannot perturb the estimator too much.
+
+3.1
+
+Breakdown point
+
+Definition. Consider a data set X = {x1 , . . . , xn } and an estimator Tn (X).
+For m ≤ n, let
+b(m; X, Tn ) = sup |Tn (X 0 ) − Tn (X)|,
+X 0 ∈Xm
+
+3
+
+where Xm ⊆ Rn is the set of all data sets differing from X by at most m
+points. Then
+∗ (X, Tn ) :=
+
+1
+· max{m : b(m; X, Tn ) < ∞}
+n m≥0
+
+is the breakdown point of Tn at X.
+Example. The breakdown point of the mean is 0. The breakdown point of
+c.
+the median is n1 · b n−1
+2
+In fact, the median achieves the highest possible breakdown point:
+Exercise. Show that the median achieves the highest possible breakdown
+point among all translation-invariant estimators.
+Definition. An estimator is translation-invariant if
+Tn (x1 + a, . . . , xn + a) = Tn (x1 , . . . , xn ) + a,
+for all {x1 , . . . , xn } and a ∈ R.
+One can also define asymptotic notions of the breakdown point, for which
+the maximum breakdown point becomes 50%.
+But is this seems like a very rough notion. Also, breakdown point has
+nothing to do with a distribution.
+
+3.2
+
+Bias
+
+Going back to the -contamination model, suppose F0 is symmetric, so
+(at the population level) mean and median are equal. (Define median as
+inf m : F0 (m) ≥ 12 .) Suppose F0 = Φ (standard normal) for concreteness,
+and let P := P (Φ). What is a bound on the (asymptotic) bias of the median
+estimator?
+Clearly, worst case is when H concentrates all mass on one side of origin.
+Median of F ∈ P is then the solution to
+1
+(1 − )Φ(b) = ,
+2
+
+
+1
+so maximum bias is b0 = Φ−1 2(1−)
+.
+4
+
+Could we do better? Suppose {Tn } is a sequence of estimators for a
+parameter T (F0 ). Define the asymptotic bias of a family of estimators T =
+{Tn }:
+b(T, F ) = b({Tn }, F ) = lim EF (Tn ) − T (F0 ) .
+n→∞
+
+Then study the minimax problem:
+min max b({Tn }, F ),
+
+{Tn }⊆T F ∈P
+
+pNrNp.1O.
+
+(
+
+zϙϙ T
+ɰ
+ϙϙĖZ
+
+ T
+ϙPϙ
+ʻ  ϙҩ
+Ɋ s   ϙϙ
+where we restrict
+in the
+class
+of  $M ϙҩ÷
+translation-invariant
+estimators.
+n to be
+
+
+ϙ
+
+ϙ
++ҩ
+
+ϙ
++ҩ
+
+P=ϙ
+
+ϙ
+
+
+ϙϙ
+P
+ϙϙ
+ϙ
+ϙ
+Under appropriate distributional assumptions, we can show that
+when
+~ҩϙϙϙM ϙ ϙ& ϙSo ϙ;-Òϙ
+P
+{Tn } corresponds to the sample median, we have Tn → T (F ) and limn→∞ EF (Tn ) =
+  ˻˼ϙ nGҩ
+  !ȅҩ
+T (F ) when xi ∼ F . It~ ҩ
+then
+&;h"ϙ to the
+̥ follows easily that b0 is an upper bound
+ϙ ̥ nGҩ
+  !ȅ
+Rnҩ  estimator).
+optimality problem (achieved using
+themedian
+ ϙaãʻ lower
+4 ҩMϙbound,
+ϙ   consider
+ϙPϙ sϙ
+ϙ
+To prove
+the distribution
+F+ ∈ P constructed
+as follows (shifted and centered around b0 ):
+&;;Òϙ
+
+K[
+
+@[ORJRZ_+ _
+
+^ƹ×m#m! ƹ¡Īƹ mƹ<* #ƹ1!ƹ%"ƹ ƹ#ƹ
+
+. ϙ
+
+Also consider the version F− ∈ P centered around −b0 . Claim&;3Òϙ
+is that for
+ϙ, we
+ϙɣ
+any {Tn }ϙ
+⊆T
+have Mϙ   sϙ  ϙ Mϙϙ   ϙ  ϙ ϙ ϙ ϙ ϙ
+P ϙMϙPϙ ϙ+ҩ ϙ ҩ~ҩ ϙҩɊϙM P ϙ
+. Mϙ ϙ ϙ ϙ Mϙ Mϙ ϙP ϙoM ϙϙϙPϙ°
+max {b({T }, F− ), b({Tn },ϙϙ
+F+ )} ϙ
+≥ b0Msϙ
+. %!ҩ̥ ƪǇ!ҩ
+Mϙɣ M$ϙ  Pϙàn ϙϙ $MMϙϙ$Mϙ
+ϙ ϙ ϙ ϙ ϙ ϙPϙ ϙϙ ϙMoϙPϙϙMMMUMϙ
+Suppose not.
+Then
+b({Tn },
+F− ) < b0 , implying
+ϙoM
+ϙ
+ ϙϙ
+S  sϙ ϙ ϙ ϙ  ϙϙ$M ϙϙ ϙ ϙPϙ  Msϙ
+o ϙ ϙ ϙ 
+ϙϙ4Ǩ
+ϙϙ  ϙPϙ $ϙ   ϙ
+−b0 sϙ
+< limϙ E
+F− (Tn ) < b0 .
+ϙ ϙM   ϙ [ϙosϙ
+ϙϙ×ϙ   ϙ
+n→∞
+
+ƖȿҩĚ Cҩ zƏ Ϸҩ  !  Ó ΄΅ҩ Ƹƹҩҩ\ ! ˥ҩÓ Y Jҩ
+But EF+ (Tn ) = EF=Ķ
+− (Tn ) + 2b0 , so
+
+&;ŁÒϙ
+
+ϙoϙ&ϙ; m"ϙϙ % ҩϙ  ϙϙ
+
+b0 < lim EF+ (Tn ) < 3b0 ,
+n→∞
+
+&;BÒϙ
+
+ ϙ MϙPϙϙ   ϙ  ϙ ϙ
+. ϙ MMMUMϙ  ϙ oM ϙ ϙ5 ϙ ϙ ϙ  ϙ  Pϙ ȱϙ ϙ
+ ϙ  ϙ M Mϙ ϙ ϙ$ϙϙ ϙPϙ Mϙ
+
+implying b({Tn }, F+ ) > b0 , a contradiction. We can see that this proof only
+requires symmetry and unimodality of F0 for the construction to succeed.
+Conclusion is that
+min max b({Tn }, F ) = b0 ,
+{Tn }∈T F ∈P
+
+and the sample median is minimax optimal from the point of view of bias.
+
+3.3
+
+Variance
+
+Why do we use the sample mean as a location estimator anyway? Has
+to do with efficiency—minimum asymptotic variance, assuming a normal
+distribution.
+Theorem 1. Suppose xi ’s have density f (x; ξ). Under appropriate regularity
+conditions, the maximum likelihood estimator
+ξbM LE ∈ arg min
+ξ
+
+n
+X
+
+− log f (xi ; ξ)
+
+i=1
+
+is asymptotically normal:
+√
+
+d
+n(ξb − ξ) → N
+
+where
+
+"
+I(ξ) = Eξ
+
+
+
+1
+0,
+,
+I(ξ)
+
+∂ log f (xi ; ξ)
+∂ξ
+
+2 #
+
+1
+is the Fisher information. Furthermore, the ratio I(ξ)
+is the minimum possible variance among all asymptotically unbiased estimators of ξ.
+
+However, the situation may become more complicated when samples are
+from an -ball around some distribution. Another minimax problem: Suppose
+√
+d
+n(Tn − T (F )) → N (0, A(T, F )),
+so A(T, F ) is the asymptotic variance of the rescaled, recentered sequence of
+estimators. Consider the minimax problem
+min max A({Tn }, F ).
+{Tn } F ∈P
+
+(1)
+
+Motivated by nice results in MLE theory, we will restrict our attention to a
+particular class of estimators known as M -estimators.
+6
+
+Definition.
+Consider a (symmetric) function ρ. A minimizer Tn = Tn (x1 , . . . , xn )
+Pn
+of i=1 ρ(xi − Tn ) is an M -estimator with associated loss function ρ.
+
+3.4
+
+Asymptotic theory
+
+We will show that under fairly general conditions, the M -estimator Tn consistently estimates the population-level parameter and is also asymptotically
+normal. Then we can derive formulas for the asymptotic variance and attempt to solve the minimax problem (1). (Note that for the mean estimator,
+max A(T, F ) = ∞,
+F ∈P
+
+since we could just consider a mixing distribution H corresponding to N (0, σ 2 ),
+for arbitrarily large σ.)
+Throughout, suppose ψ = ρ0 is a nondecreasing function. For asymptotic
+normality, we will assume several conditions:
+Theorem 2. Suppose there exists t0 ∈ R such that EF [ψ(xi − t0 )] = 0.
+Assume the function λ(t) = EF [ψ(xi −t)] is differentiable at t0 and λ0 (t0 ) < 0.
+Also suppose σ 2 (t) := EF [ψ 2 (xi −t)]−λ2 (t) is finite, continuous, and nonzero
+at t0 . Then
+
+
+√
+σ 2 (t0 )
+d
+n(Tn − t0 ) → N 0, 0
+.
+(λ (t0 ))2
+The proof uses the Lindeberg CLT.
+
+3.5
+
+Symmetric losses
+
+Corollary 1. Suppose ρ is a symmetric, convex function and the xi ’s have
+a symmetric distribution. Suppose the derivative
+λ0 (t) =
+
+∂EF [ψ(xi − t)]
+= −EF [ψ 0 (xi − t)]
+∂t
+
+(2)
+
+exists and σ 2 (t) = EF [ψ 2 (xi − t)] is continuous in a neighborhood around 0.
+Also suppose EF [ψ 2 (xi )] < ∞ and E[ψ 0 (xi )] > 0. Then
+( n
+)
+X
+Tn ∈ arg min
+ρ(xi − ξ)
+ξ
+
+i=1
+
+7
+
+satisfies
+√
+d
+nTn → N
+
+
+
+EF [ψ 2 (xi )]
+0,
+EF [ψ 0 (xi )]2
+
+
+.
+
+Note that in Corollary 1, the assumption that ρ is symmetric and F
+has a symmetric distribution implies that EF [ψ(xi )] = 0, since ψ is an odd
+function. Thus, we can plug t0 = 0 into Theorem 2.
+In particular, we can apply the preceding results to derive asymptotic
+normality of the sample mean (ψ(t) = t) and sample median (ψ(t) = sign(t)).
+Due to non-differentiability, we have to use Theorem 2 in the case of the
+median.
+
+3.6
+
+Contaminated distributions
+2
+
+Now we will consider -neighborhoods. Suppose ρ(t) = t2 and F = (1−)Φ+
+H, where H is the cdf of a symmetric distribution satisfying conditions of
+Corollary 1 (from here on, assume we are restricting our attention to such
+nice distributions). Then
+A(T, F ) =
+
+EF [x2i ]
+= (1 − ) + EH [x2i ].
+EF [1]2
+
+Clearly, this can be arbitrarily large.
+On the other hand, suppose we have a function ψ such that ψ 0 ≥ 0 and
+kψk∞ < k for some constant k. Then
+(1 − )EΦ [ψ 2 (xi )] + EH [ψ 2 (xi )]
+EF [ψ 2 (xi )]
+=
+
+2
+EF [ψ 0 (xi )]2
+0
+0
+(1 − )EΦ [ψ (xi )] + EH [ψ (xi )]
+≤
+
+(1 − )EΦ [ψ 2 (xi )] + k 2
+,
+(1 − )2 EΦ [ψ 0 (xi )]2
+
+(3)
+
+which is bounded as H ranges over different cdfs. One example of such a
+function is ψ corresponding to the Huber loss:
+(2
+t
+,
+if |t| ≤ k,
+ρ(t) = 2
+k2
+k|t| − 2 , if |t| > k.
+Then ψ(t) = min{k, max(−k, t)}. For such a ψ, the upper bound in inequality (3) is achieved when H puts all mass outside the interval [−k, k], since
+ψ 0 (x) = 0 and ψ 2 (x) = k at such points.
+8
+
+We could in theory try to minimize the upper bound (3) with respect to
+k. In fact, the optimal value of k will correspond to the solution to
+2ϕ(k)
+
+− 2Φ(−k) =
+,
+k
+1−
+
+(4)
+
+and the asymptotic variance bound is achieved when (1 − )Φ + H has pdf
+1−
+√ exp(−ρ(x)).
+2π
+(The equation (4) is actually a little hard to show directly from taking derivatives of the right-hand expression in inequality (3), but fortunately we will
+derive the optimal value of k in another manner later on.)
+
+3.7
+
+Optimality of Huber loss
+
+We now prove that the Huber estimator is actually minimax over all possible ψ. The following result gives a constructive method for determining a
+saddlepoint solution to the minimax problem.
+In fact, a much more general result holds for the minimax variance problem:
+Theorem 3. Suppose G is the cdf of a symmetric distribution with twice
+continuously differentiable pdf g, such that − log g is convex (i.e., g is logconcave).
+(i) Then V (ψ, F ) has a saddlepoint: there exists F0 ∈ P (G) and ψ0 ∈ Ψ
+such that
+max V (ψ0 , F ) = V (ψ0 , F0 ) = min V (ψ, F0 ).
+
+F ∈P (G)
+
+ψ∈Ψ
+
+Hence,
+min max V (ψ, F ) = V (ψ0 , F0 ),
+ψ∈Ψ F ∈P (G)
+
+and ψ0 is minimax optimal.
+(ii) Furthermore, we have the explicit expressions
+f0
+ψ0 = − 0 ,
+f0
+9
+
+(5)
+
+and
+
+
+k(x−x0 )
+
+,
+if x ≤ x0 ,
+(1 − )g(x0 )e
+f0 (x) = (1 − )g(x),
+if x0 < x < x1 ,
+
+
+−k(x−x1 )
+(1 − )g(x1 )e
+, if x ≥ x1 ,
+
+(6)
+
+0
+
+where x0 < x1 are the endpoints of the interval where |gg | ≤ k (either
+or both endpoints may be infinity), and k is related to  by
+Z x1
+g(x0 ) + g(x1 )
+1
+g(x)dx +
+=
+.
+(7)
+1−
+k
+x0
+The proof essentially proceeds by giving a constructive solution to the
+saddlepoint problem.
+We have seen the special case when g(x) = ϕ(x). Then
+ 2
+√1 · −x exp − x
+0
+2
+g (x)
+2π
+
+= −x,
+=
+2
+√1 exp − x
+g(x)
+2
+2π
+implying that the x0 = −k and x1 = k. Then f0 (x) = (1 − )ϕ(x) for |x| ≤ k.
+We can check that the form of f0 agrees with the density provided earlier on
+(−∞, −k) and (k, ∞), as well:
+ 2
+1
+k
+f0 (x) = (1 − )ϕ(k) exp(−k(x − k)) = (1 − ) √ exp −
+exp(−kx + k 2 )
+2
+2π
+
+
+2
+k
+1
+= (1 − ) √ exp −kx +
+2
+2π
+2
+
+for x > k, and ρ0 (x) = kx − k2 for x > k.
+Furthermore, the equation relating k to  reduces to
+Z k
+1
+2ϕ(k)
+2ϕ(k)
+=
+ϕ(x)dx +
+= (1 − 2Φ(k)) +
+,
+1−
+k
+k
+−k
+which is again equation (4), which identifies the optimal parameter for Huber’s M -estimator.
+Exercise. What is the minimax optimal solution when G is the cdf of a
+N (0, σ 2 ) distribution?
+10
+
+ 2
+1
+x
+Solution: We need to substitute g(x) = √2πσ
+exp − 2σ
+2 . Then
+|x|
+|g 0 (x)|
+= 2,
+g(x)
+σ
+so x0 = −kσ 2 and x1 = kσ 2 . Then
+ 2 2
+1
+k σ
+(1 − )g(x0 ) exp(k(x − x0 )) = (1 − ) √
+exp −
+exp(k(x + kσ 2 ))
+2
+2πσ
+
+
+1
+k2σ2
+= (1 − ) √
+exp kx +
+,
+2
+2πσ
+so the form of the density is
+
+
+
+2 2
+
+√ 1 exp kx + k σ
+(1
+−
+)
+,
+if x ≤ −kσ 2 ,
+
+
+2πσ
+
+ 22
+1
+x
+,
+if |x| < kσ 2 ,
+f0 (x) = (1 − ) √2πσ
+exp − 2σ
+2
+
+
+
+
+
+(1 − ) √ 1 exp −kx + k2 σ2 , if x ≥ kσ 2 .
+2
+2πσ
+This means
+
+
+−k, if x ≤ −kσ 2 ,
+−f00 (x)  x
+ψ0 (x) =
+= σ2 , if |x| < kσ 2 ,
+
+f0 (x)
+
+k,
+if x ≥ kσ 2 .
+
+Furthermore, the value of k corresponds to the solution of the equation
+ 2
+
+
+Z kσ2
+√ 1 exp − x 2
+2
+·
+2
+2σ
+1
+1
+x
+2πσ
+√
+=
+exp − 2 dx +
+.
+1−
+2σ
+k
+2πσ
+−kσ 2
+We can easily see that when σ = 1, we obtain the same expressions for
+the Huber estimator derived earlier.
+Remark. How much further can we push this theory? Let us consider the
+minimax variance problem when PK (Φ) = {F : supt |F (t)−Φ(t)| < }. Recall
+that the -neighborhood we have been considering satisfies P (Φ) ⊆ PK (Φ).
+A rather sophisticated and ingenious construction due to Huber leads to a
+density of the form
+
+
+2 ωx
+
+if 0 ≤ x < x0 ,
+C0 cos 2 ,
+f0 (x) = f0 (−x) = ϕ(x),
+if x0 ≤ x ≤ x1 ,
+
+
+C1 exp(−λ(x − x1 )), if x > x1 ,
+11
+
+with corresponding ψ function
+
+
+ω tan
+ψ(x) = x,
+
+
+λ,
+
+ωx
+2
+
+
+
+, if 0 ≤ x < x0 ,
+if x0 ≤ x ≤ x1 ,
+if x > x1 .
+4
+
+(The shape of ρ is that it takes the form log(cos2 (x)) = x2 + x6 + O(x5 ) in
+an interval around 0, then becomes quadratic, then becomes linear.)
+
+4
+
+Hampel’s perspective
+
+What have we learned so far? Huber loss is minimax optimal in an neighborhood of Φ. However, derivation relied heavily on nice form of normal
+density and symmetric contamination assumption. How can we “robustify”
+other estimation procedures?
+We now discuss a second camp of robustness theory, developed by Hampel (1968) in his PhD thesis: “Contributions to the theory of robust estimation.” Basic concepts are qualitative robustness (continuity of limiting functional), influence function (effect of infinitesimal perturbations), and break1.
+INTRODUCTION AND MOTIVATION
+down point 42
+(distance to nearest
+singularity/asymptote).
+Estimate T
+
+Breakdown
+point
+
+Figure 2. Extrapolation of a functional (estimator), using the infinitesimal approach. (Symbolic, using the analogue of M ordinary onedimensional function.)
+
+distance from the model distribution beyond which the statistic becomes
+
+4.1
+
+totally unreliable and
+uninformative (cf. Subsection 2.2a for the formal
+Influence
+functions
+definition). For example, the arithmetic mean and the median have breakdown points 0 and +,and the a-trimmed mean, which first takes away the
+
+P
+
+We will again
+assume
+sequence
+of the
+estimators
+Tn (x3 1 , . . . , xn ) →
+an smallest
+and we
+the anhave
+largestavalues
+before taking
+mean (cf. Example
+of
+Subsection
+2.2b),
+has
+breakdown
+point
+a.
+In
+general,
+the
+breakdown
+T (F ) when xi ∼ F . In order to be robust, we want some stability: T should
+point can lie between 0 and 1; a positive breakdown point is closely related
+to, though not identical with, qualitative robustness. An empirical rule of
+thumb, at least for M-estimators in12
+simple location models, says that the
+linear extrapolation by means of the influence function tends to be quite
+accurate for distances up to onequarter of the breakdown point, and it still
+seems to be quite usable for distances up to one-half of the breakdown
+point. Apart from these helpful indications, the breakdown point measures
+directly the- global reliability of a statistic, one of its most important
+robustness aspects.
+Huber (1972) likened these three robustness concepts to the stability
+aspects of, say, a bridge: (1) qualitative robustness-a small perturbation
+should have small effects; (2) the influence function measures the effects of
+
+be continuous and the derivative should be well-behaved.
+Definition. The influence function IF (·; T, F ) : R → R of a functional T
+at F is given by
+T ((1 − t)F + t∆x ) − T (F )
+.
+t→0
+t
+
+IF (x; T, F ) := lim
+
+Influence function provides rate of change of T (F ) in direction of point
+mass ∆x . In particular, we will be interested in bounding quantities such as
+gross-error sensitivity
+γ ∗ (T, F ) := sup |IF (x; T, F )|
+x
+
+(analog of bounded derivative). Other quantities of interest include the rejection point
+ρ∗ (T, F ) := inf {r > 0 : IF (x; T, F ) = 0 when |x| > r} .
+Furthermore, the influence function is related to the asymptotic variance
+of Tn : It can be shown under appropriate regularity conditions that when
+i.i.d.
+xi ∼ F , we have
+n
+√
+1 X
+d
+n(Tn − T (F )) ≈ √
+IF (xi ; T, F ) → N (0, A(T, F )),
+n i=1
+
+where A(T, F ) =
+
+R
+
+IF (x; T, F )2 dF (x).
+
+Example.
+• (Mean) We have
+IF (x; T, F ) = lim
+t→0
+
+((1 − t)EF [xi ] + tx) − EF [xi ]
+= x − EF [xi ],
+t
+
+so when EF [xi ] = 0 (e.g., F corresponds to a symmetric distribution),
+IF (x; T, F ) = x. Recall that under the same condition EF [xi ] = 0 (i.e.,
+t0 = 0 in the earlier notation), we proved that
+√
+
+d
+
+n(Tn − T (F )) → N (0, EF [x2i ]),
+2
+
+E[ψ (xi )]
+2
+since ψ(t) = t and E[ψ
+0 (x )]2 = E[xi ].
+i
+
+13
+
+• (Median) We have
+Ft−1 (1/2) − F −1 (1/2)
+,
+t→0
+t
+
+IF (x; T, F ) = lim
+
+where Ft := (1−t)F +t∆x . It is easier to deal with an implicit equation.
+Note that
+
+ 
+1
+1
+−1
+Ft Ft
+= ,
+2
+2
+
+
+and the LHS can also be written as (1 − t)F Ft−1 12 + t∆x Ft−1 12 .
+Differentiating with respect to t, we have
+
+
+ 
+ 
+ 
+d −1 1
+1
+1
+0
+−1
+−1
++ (1 − t)F Ft
+F
+− F Ft
+2
+2
+dt t
+2
+
+ 
+ 
+
+ 
+1
+d −1 1
+1
+0
+−1
+−1
++ t∆x Ft
+F
+= 0.
++ ∆ x Ft
+2
+2
+dt t
+2
+Evaluating at t = 0 (and using the fact that ∆0x (y) = 0 for x 6= y), we
+have
+
+ 
+
+ 
+1
+1
+1
+0
+−1
+−1
+− +F F
+IF (x; T, F ) + ∆x F
+= 0,
+2
+2
+2
+so
+IF (x; T, F ) =
+
+1/2 − ∆x (F −1 (1/2))
+1/2 − 1{F −1 (1/2) > x}
+=
+.
+F 0 (F −1 (1/2))
+F 0 (F −1 (1/2))
+−1
+
+(1/2)}
+It is not hard to see that this is equal to sign{x−F
+. Recall that in
+2F 0 (F −1 (1/2))
+our earlier results on asymptotic normality, we had
+
+
+√
+1
+d
+n(Tn − T ) −→ N 0,
+4(F 0 (0))2
+
+for symmetric distributions (and in fact, we have the asymptotic vari1
+ance 4(F 0 (F −1
+for general distributions when we take t0 = F −1 (1/2)).
+(1/2))2
+R
+Thus, we again have the formula A(T, F ) = IF (x; T, F )2 dF (x) in the
+case of the median. Note that the influence function looks a lot like ψ. . .
+
+14
+
+3۩
+
+ş
+
+%½  9¥҂1҂ %½  9¥ Ƒ ɶ҂МW½  9 ƓǱ 1 \¹%½  9¥0҂
+ ²Nlº
+
+۩ ۩۩# ۩ (۩۩7۩s  ۩   ۩۩۩#  ۩B   ۩۩
+γ۩۩ ۩B۩۩# ۩۩
+
+۩۩۩ ۩   ۩ ۩۩ ۩>  ۩63; +۩ ۩7۩۩ ۩  Ï۩
+N ۩۩Õ7۩#  ۩7۩۩  ۩۩۩ ۩ ۩ ۩۩ ۩۩
+´º ۩ Ō۩ /۩´º ۩۩۩ B۩۩7۩Õ۩#  ۩7۩۩Õ۩#  ۩ ͼ۩۩´º
+۩۩۩ ۩ ۩۩# γ ۩ Ï۩ Ԓ۩۩ ۩۩۩۩ ۩ ۩ ۩
+ ۩۩۩   ۩۩´ / º @۩۩۩۩´º ۩۩Õ۩#  ۩۩۩
+ ۩ Ō۩
+oѮ
+
+ŴRŖȗ ėѮ RoTTѮ
+ Ûş
+
+ŖѮ RoTѮ
+
+~ UoѮ
+
+ŴR΂ ėѮ RoTTѮ
+
+:YWmgSr 
+
+) .¨ ɇ  ɇ ɇ ɇf ɇ- $ɇ
+
+(Note that the derivation above is not exactly rigorous, but these sorts
+of back-of-the-envelope derivations are often correct, and can be made
+rigorous under enough regularity assumptions.)
+• (General M -estimators) Recall that T (F ) is defined by
+EF [ψ(xi − T (F ))] = 0.
+Using an implicit approach, we can show that
+IF (x; T, F ) =
+
+ψ(x − T (F ))
+.
+EF [ψ 0 (xi − T (F ))]
+
+In particular, recall the formula for the asymptotic variance of “nice”
+M -estimators:
+EF [ψ(xi )2 ]
+A(T, F ) =
+,
+(EF [ψ 0 (xi )])2
+when
+F is the cdf of a symmetric random variable, which is exactly
+R
+IF (x, T, F )2 dF (x). Furthermore, these computations show that in
+order to obtain a bounded-influence estimator, we can use an M -estimator
+with ψ bounded.
+
+4.2
+
+Optimal B-robust estimators
+
+The formula stated above for the influence function of an M -estimator is actually somewhat more general. Consider a family of distributions parametrized
+by θ, and suppose the functional T (Fθ ) is defined implicitly by
+Z
+ψ(y, T (Fθ ))dFθ (y) = 0
+15
+
+(the special case of M -estimators is a family of distributions with location
+parameter θ, and ψ(y, θ) = ψ(y − θ)—we will also consider scale families
+later). One can show that
+IF (x; T, Fθ ) = R
+where
+
+ψ(x, T (Fθ ))
+,
+ψ(y, θ)s(y, θ)dFθ (y)
+
+∂
+f (y)
+∂
+∂θ θ
+s(y, θ) :=
+(log fθ (y)) =
+∂θ
+fθ (y)
+
+is the score function.
+4.2.1
+
+Main result
+
+The following result concerns optimality
+of estimators. We are interested in
+R
+the minimal asymptotic variance IF (x; T, F )2 dF (x), subject to an upper
+bound on the gross error sensitivity γ ∗ (T, F ) = supx |IF (x; T, F )|.
+Theorem 4. Suppose F = Fθ (for a fixed θ) and
+Z
+I(F ) = s(x, θ)2 dF (x) > 0
+(this is the Fisher information). Let b > 0 be a constant. Then there exists
+a real number a such that
+e
+ψ(y)
+:= [s(y, θ) − a]b−b
+(truncated function, which becomes constant outside of [−b, b]) satisfies
+R
+0 and d := e
+ψ(y)s(y, θ)dF (y) > 0. Furthermore, ψe minimizes
+Z
+IF (y; T, F )2 dF (y)
+among all mappings ψ satisfying
+R
+(i) ψ(y)dF (y) = 0,
+R
+(ii) ψ(y)s(y, θ)dF (y) 6= 0,
+(iii) and
+b
+γ ∗ (T, F ) ≤ c := .
+d
+16
+
+R
+
+e
+ψ(y)dF (y) =
+
+Any other solution to this optimization problem coincides with a nonzero
+e almost everywhere with respect to F .
+multiple of ψ,
+R
+Remark. The condition ψ(y)dF (y) = 0 is known as “Fisher consistency”:
+for location M -estimators, we have ψθ (y) = ψ(y − θ), so this is the familiar
+condition EFθ [ψ(xi − θ)] = 0.
+We call estimators that minimize the asymptotic variance subject to a
+bound on gross error sensitivity optimal B-robust estimators. (The B stands
+for “bias,” whereas there are also V -robust estimators.) We call any estimator
+such that γ ∗ (T, F ) < ∞ B-robust.
+4.2.2
+
+Location M -estimators
+
+Consider the family of M -estimators for location. Then
+s(y, θ) =
+
+∂
+f (y)
+∂θ θ
+
+fθ (y)
+
+=
+
+∂
+f (y − θ)
+∂θ
+
+=
+
+f (y − θ)
+
+−f 0 (y − θ)
+.
+f (y − θ)
+
+By Theorem 4, the optimal B-robust estimator at θ = 0 is given by
+b
+0
+−f
+(y)
+e
+ψ(y)
+=
+−a
+.
+f (y)
+−b
+
+
+Hence, the optimal (finite-sample) B-robust estimator is the solution to
+n 
+X
+−f 0 (xi − θ)
+i=1
+
+f (xi − θ)
+
+b
+−a
+
+=0
+−b
+
+(finite-sample version).
+0 (y)
+In particular, if the density f is symmetric around 0, then s(y, 0) = −f
+f
+(y)
+R
+is an odd function. It follows that [s(y, 0)]b−b dF (y) = 0, so a = 0, implying
+h 0 ib
+e
+that ψ(y)
+= −f (y) . If F = Φ, this reduces to the Huber estimator with
+f (y)
+
+−b
+
+parameter b: e
+ψ(y) = [y]b−b , which is the familiar Huber ψ function. Hence,
+the Huber estimator also emerges as the optimal M -estimator for the location
+of a normal family, this time with respect to B-robustness. (Different Huber
+parameters correspond to different bounds on the GES.)
+
+17
+
+4.2.3
+
+Scale M -estimators
+
+We can also consider a family of distributions parametrized by scale:
+1 x
+fθ (x) = f
+.
+θ
+θ
+2
+(For instance, consider
+ 2  the N (0, θ ) family, where θ is unknown. Then
+1
+.)
+fθ (x) = √2πθ
+exp −x
+2θ2
+R
+The M -estimator corresponds tosolving ψ(x, θ)dFθ (x) = 0, where ψ is
+a function such that ψ(x, θ) = ψ xθ . (We can easily check that if fθ takes
+the form above, the MLE will correspond0 to such an M -estimator for an
+(u)
+appropriately defined choice of ψ(u) = − uff (u)
+− 1.)
+What is an optimal B-robust estimator? We have
+ −y  1
+
+y
+1 0 y
+∂
+f
+−
+f
+f
+(y)
+2
+2
+θ
+θ
+θ
+θ
+θ
+.
+= θ
+s(y, θ) = ∂θ
+y
+1
+fθ (y)
+f
+θ
+θ
+0
+
+(y)
+If we substitute θ = 1, we obtain s(y, 1) = −yf
+− 1. Hence, the optimal
+f (y)
+B-robust estimator, according to the theorem, is
+
+b
+
+−yf 0 (y)
+e
+−1−a
+.
+ψ1 (y) =
+f (y)
+−b
+When F = Φ, this becomes
+ψe1 (y) = [y 2 − 1 − a]b−b ,
+for an appropriate value of a, which generally depends on b.
+The (finite-sample) optimal B-robust M -estimator then corresponds to
+n  2 
+X
+x
+i=1
+
+i
+θ2
+
+b
+−1−a
+
+=0
+−b
+
+(truncation of MLE expression, above or below, depending on the value of
+b).
+
+18
+
+5
+
+Robust linear regression
+
+Analysis of multidimensional estimators becomes a bit more complicated.
+However, the results from the univariate case translate conveniently (in some
+cases) into the context of linear regression.
+Model:
+p
+X
+xij θj + ui ,
+∀1 ≤ i ≤ n,
+yi =
+j=1
+i.i.d.
+
+i.i.d.
+
+or in matrix notation, y = Xθ + u. Assume xi ∼ K and ui ∼ Gσ , where
+ui ’s are independent of xi ’s and σ is scale parameter of error distribution.
+Then joint distribution is
+
+
+y − xT θ
+1
+fθ,σ (x, y) = f (x)f (y|x) = k(x) · g
+.
+σ
+σ
+MLE would correspond to maximizing
+
+
+n
+Y
+yi − xTi θ
+1
+k(xi ) · g
+,
+σ
+σ
+i=1
+or equivalently, maximizing
+n
+X
+
+
+log
+
+i=1
+
+1
+g
+σ
+
+
+
+yi − xTi θ
+σ
+
+
+.
+
+(8)
+
+ 2
+In the case when Gσ is cdf of N (0, σ 2 ), we have g(t) = √12π exp − t2 , so
+MLE (for parameter θ) is
+max
+θ
+
+n
+X
+i=1
+
+
+log
+
+1
+√
+exp
+2πσ
+
+or
+min
+θ
+
+n
+X
+
+
+
+−(yi − xTi θ)2
+2σ 2
+
+
+,
+
+(yi − xTi θ)2
+
+i=1
+
+(ordinary least squares).
+Not surprisingly, OLS is not robust to deviations from normality of the
+error distribution G. We can see this by computing an influence function
+19
+
+IF (x, y; T, F ) (see below). Inspired by the MLE formulation (8), consider
+an M -estimator with a general loss function ρ:
+min
+θ
+
+n
+X
+
+ρ(yi − xTi θ)
+
+(9)
+
+i=1
+
+(assume for now that σ is known, or is a nuisance parameter). Then we have
+the estimating equation
+n
+X
+
+ψ(yi − xTi θ)xi = 0.
+
+i=1
+
+5.1
+
+Influence functions
+
+Suppose F = Fθ . Functional T (F ) is a vector that solves
+Z
+T
+0 = E(xi ,yi )∼F [ψ(yi − xi T (F ))xi ] = ψ(y − xT T (F ))xdF (x, y).
+It can be shown that
+Z
+−1
+
+0
+T
+T
+IF (x0 , y0 ; T, F ) =
+ψ (y − x T (F ))xx dF (x, y)
+ψ(y0 − xT0 T (F ))x0
+:= M −1 ψ(y0 − xT0 T (F ))x0 .
+By independence, we have
+
+Z
+Z
+T
+0
+xx dK(x) .
+M = ψ (u)dG(u) ·
+If we write y0 = xT0 T (F ) + r0 , we can think of the influence function as being
+broken into two factors:
+
+
+
+ψ(r0 )
+T −1
+·
+E
+[xx
+]
+x
+:= IR(r0 ; T, G)·IP (x0 ; T, K),
+IF (x0 , y0 ; T, F ) =
+x∼K
+0
+Eu∼G [ψ 0 (u)]
+where IR is the influence of the residual and IP is the influence of the
+position. In particular, if we can guarantee boundedness of IF in response
+direction if ψ is bounded. (This is not the case for OLS.)
+
+20
+
+5.2
+
+Optimality
+
+Can we derive analogs of Huber’s and Hampel’s theories of optimality for
+robust regression estimators? Yes. The first step is to derive asymptotic
+normality results for solutions to estimating equations, and then minimize
+variance term (note that this is now a matrix).
+5.2.1
+
+Asymptotic normality
+
+Huber (1973) analyzed M -estimator (9), for convex ρ, in fixed design setting,
+and derived asymptotic normality under suitable regularity conditions, in
+3
+the regime pn → 0. What should the limiting variance be? When p → ∞,
+we have to be a bit careful, since the estimate θ is a vector of growing
+b
+dimensionality; so Huber showed asymptotic normality of projections aT θ,
+p
+where a ∈ R is a fixed vector of contrasts.
+Maronna & Yohai (1981) analyzed the setting we have described, with
+fixed p and where n → ∞, showing that asymptotic covariance matrix is
+Z
+V (T, F ) = IF (x, y; T, F )(IF (x, y; T, F ))T dF (x, y)
+Z
+
+−1
+2
+T
+T
+=M
+ψ (y − x T (F ))xx dF (x, y) M −1
+
+ Z
+Z
+T
+−1
+2
+xx dK(x) M −1
+=M
+ψ (u)dG(u)
+R 2
+Z
+−1
+ψ (u)dG(u)
+T
+.
+xx dK(x)
+= R
+2
+ψ 0 (u)dG(u)
+In particular, minimizing V (T, F ) over the class of ψ functions then reduces
+[ψ 2 (u)]
+to the familiar univariate problem of choosing ψ to minimize EEGG[ψ
+0 (u)]2 —in
+the case when G = Φ, we again recover the Huber M -estimator as being
+minimax optimal in terms of variance.
+5.2.2
+
+B-robustness
+
+Hampel’s theory is a bit more complicated, due to the fact that we have to
+extract real-valued measures from vectors and matrices. For instance, we can
+derive gross error sensitivity
+γ ∗ (T, F ) = sup kIF (x, y; T, F )k2 .
+x,y
+
+21
+
+Can show parallels of univariate location estimation theory for monotone ψ
+functions.
+However, for the family of M -estimators we have studied,
+
+γ ∗ (T, Fθ ) = sup |ψ(y − xT θ)| · kM −1 xk2 = ∞.
+x,y
+
+Hence, optimality theory focuses on slightly broader class of M -estimators
+defined by
+
+ 
+E(xi ,ui )∼F w(xi ) · ψ (yi − xTi T (F )) · v(xi ) xi = 0.
+(10)
+Using same IF calculation above, we can compute
+
+IF (x0 , y0 , T, F ) = w(x0 )ψ (y0 − xT0 T (F )) · v(x0 ) M −1 x0 ,
+where M is an appropriately defined population-level matrix. In particular,
+1
+if w(x)x is a bounded function of x (e.g., w(x) = kAxk
+) and ψ is bounded,
+2
+∗
+we can guarantee that γ (T, Fθ ) < ∞.
+In the radially symmetric case, the optimal B-robust estimator corresponds to the Hampel-Krasker estimator, given by equation (10) with v(x) =
+1
+, where ψ is equal to the Huber function.
+kAxk2 = w(x)
+
+5.3
+
+Unknown scale
+
+So far, we have ignored the question of estimating the scale parameter σ.
+i.i.d.
+i.i.d.
+Back to the MLE when xi ∼ K and ui ∼ Gσ , we want to maximize
+
+
+n 
+Y
+1
+yi − xTi θ
+k(xi ) · g
+,
+σ
+σ
+i=1
+or
+
+
+
+n  
+X
+yi − xTi θ
+min
+ρ
++ log σ ,
+θ
+σ
+i=1
+
+where ρ = − log g. If ρ is quadratic, we can ignore σ. However, if ρ is not
+quadratic, e.g., Huber loss, fixing a value of σ and minimizing only over θ
+could lead to different robustness properties (i.e., potentially large loss in
+efficiency) if the value of σ is chosen poorly. This is a much harder problem,
+and the theory is far from complete. We will mention a few different methods
+that have been proposed in robust statistics literature:
+22
+
+(a) Joint estimation: We could try to jointly optimize the objective with
+respect to (θ, σ). However, even if ρ is convex, the objective function
+is generally nonconvex.
+A clever idea (introduced by Huber) is to jointly optimize
+
+
+n  
+X
+yi − xTi θ
+min
+ρ
++ a σ,
+θ,σ
+σ
+i=1
+
+(11)
+
+where a ∈ R is an appropriately chosen constant to make the resulting
+estimators consistent. In particular, this function is jointly convex in
+(θ, σ) when ρ is convex.
+The estimating equations corresponding to equation (11) take the form (??),
+with
+ψ(t) = ρ0 (t),
+
+χ(t) = tρ0 (t) − ρ(t) − a.
+
+Note that if ρ is an even function and distribution of ui is symmetric,
+we have
+ 
+ 
+yi − xTi θ
+0
+xi = 0,
+E ρ
+σ
+but we need to include the constant a to ensure that
+u 
+i
+hu u 
+i
+i
+i 0
+ρ
+−ρ
+− a = 0.
+E
+σ
+σ
+σ
+In particular, the value of a should be set according to the distribution
+with which we want our method to be robust. (However, this depends
+on exact knowledge of G.)
+A drawback of this method is that using nonconvex ρ may lead to
+more desirable properties from the point of view of robustness (i.e.,
+high breakdown point, finite rejection point).
+(b) M M -estimators: Introduced by Yohai (1987). Procedure is as follows:
+1. Compute initial consistent estimate θb0 (e.g., using OLS or LAD).
+2. Compute robust scale estimate σ
+b based on {yi − xTi θb0 }ni=1 (e.g.,
+using M -estimator of scale).
+
+
+P
+y −xT θ
+3. Minimize ni=1 ρ i σb i
+with respect to θ.
+23
+
+Much of theory focuses on obtaining estimators with high BP and
+bounded IF. Asymptotic theory depends on assumption that σ
+b is sufficiently close to true scale parameter.
+(c) Least trimmed squares (LTS): Introduced by Rousseeuw (1984). Optimize
+bαnc
+X
+(r(θ))2(i) ,
+i=1
+
+yi − xTi θ.
+
+However, the objective function is highly
+where ri (θ) =
+nonconvex, and theoretical properties of optimum are largely unknown.
+Output can also be used to obtain initial scale estimate σ
+b for M M estimation algorithm.
+
+6
+
+Hypothesis testing
+
+6.1
+
+Huber theory
+
+Reference: Huber & Strassen (1973)
+i.i.d.
+Suppose P0 6= P1 are two distributions, and we have i.i.d. samples xi ∼
+P . Our goal is to test the hypotheses
+H0 : P ∈ P (P0 ) := P0
+6.1.1
+
+vs. H1 : P ∈ P (P1 ) := P1 .
+
+Optimality theory
+
+We wish to find the “maximin” test: For a fixed level α, maximize the
+minimum power subject to an upper bound on the level:
+sup inf EP [ϕ(X)] s.t.
+ϕ
+
+P ∈P1
+
+sup EP [ϕ(X)] ≤ α,
+
+P ∈P0
+
+where ϕ(X) ∈ {0, 1} defines the test.
+The main result is that for sufficiently small , the optimal test ϕ∗ is
+actually a likelihood ratio test between two “least favorable” distributions
+Q0 ∈ P0 and Q1 ∈ P1 . In particular, for j ∈ {0, 1}, we have
+PQ0j (ϕ∗ (X) 6= j) ≤ PQj (ϕ∗ (X) 6= j) for all Q0j ∈ Pj .
+Note that it is a non-asymptotic result, and provides the form of a maximin
+test for any value of n (and any value of ):
+24
+
+Theorem 5. Suppose P0 and P1 have densities p0 and p1 , respectively. Let
+(
+< b,
+(1 − )p0 (x) if pp10 (x)
+(x)
+q0 (x) = 1−
+p1 (x)
+p1 (x)
+if p0 (x) ≥ b,
+b
+q1 (x) =
+
+(
+(1 − )p1 (x)
+
+> a,
+if pp10 (x)
+(x)
+
+(x)
+a(1 − )p0 (x) if pp01 (x)
+≤ a.
+
+For any  ∈ (0, 1), there exist unique a < b such that q0 and q1 are valid pdfs.
+Furthermore, the respective distributions are in P0 and P1 . If  is sufficiently
+small, a maximin test is given by
+(
+Q
+(xi )
+1 if ni=1 qq01 (x
+≥ c,
+ϕ(x1 , . . . , xn ) =
+Qn q1 (xii ))
+0 if i=1 q0 (xi ) < c,
+for an appropriate value of c.
+, then
+Note that if we define r(x) = pp10 (x)
+(x)
+
+a,
+if r(x) ≤ a,
+q1 (x) 
+= r(x), if a < r(x) < b,
+q0 (x) 
+
+b,
+if r(x) ≥ b.
+Hence, the probability ratio test between P0 and P1 is replaced with a censored version.
+Example. Suppose P0 = N (θ0 , 1) and P1 = N P
+(θ1 , 1), with θ0 < θ1 . The
+n
+usual LRT would consist of rejecting
+H
+when
+0
+i=1 xi > c. Instead, the
+Pn
+b
+0
+censored LRT rejects H0 when i=1 [xi ]a > c .,
+6.1.2
+
+Connections to differential privacy
+
+Definition. A randomized algorithm T taking inputs in X ∗ and returning
+outputs in a space with events set S satisfies -DP if, for all neighboring data
+sets x, x0 ∈ X n , and all events S ∈ S, we have
+P(T (x) ∈ S) ≤ e P(T (x0 ) ∈ S).
+
+25
+
+Private hypothesis testing: Suppose x1 , . . . , xn are drawn i.i.d. from either
+P or Q. What is the minimum number of samples needed for an -DP test
+to reliably distinguish P from Q, and what are optimal private tests?
+Canonne et al., “The structure of optimal private tests for simple hypothesis testing,” STOC 2019, proposed a “clamped log-likelihood ratio test” and
+showed it is optimal up to constant factors:
+b
+
+
+n 
+X
+P (xi )
+1
+,
+T (X) =
+log
++ Lap
+Q(x
+)
+(b
+−
+a)
+i
+a
+i=1
+for an appropriate choice of (a, b), where we reject H0 : xi ∼ P if T (X) < 0.
+This result was derived entirely independently of the robust statistics
+literature, although those who work in this area may not be surprised that
+a robust estimator can be used to construct a private estimator, e.g.:
+• Dwork & Lei, STOC 2009
+• Georgiev & Hopkins, NeurIPS 2022
+• Asi, Ullman & Zakynthinou, ICML 2023
+
+6.2
+
+Hampel theory
+
+Suppose we are interested in performing a parametric hypothesis test of the
+form
+H0 : θ = θ0
+H1 : θ > θ0
+
+(or two-sided version),
+
+based on a test statistic Tn (x1 , . . . , xn ). We will suppose that
+P
+
+Tn (x1 , . . . , xn ) → T (F ),
+i.i.d.
+
+when xi ∼ F .
+6.2.1
+
+Influence function of test
+
+Recall that our discussion of Hampel’s optimality theory used the fact that
+our functionals were Fisher consistent: T (Fθ ) = θ. However, test statistics
+may not be Fisher consistent (e.g., test of variance for the N (0, σ 2 ) family is
+26
+
+a χ2 -test based on sample variance, but scale parameter is σ). Accordingly,
+we define a map ξ : Θ → R such that ξ(θ) = T (Fθ ), and define the functional
+U (F ) = ξ −1 (T (F )), so that
+U (Fθ ) = ξ −1 (T (Fθ )) = ξ −1 (ξ(θ)) = θ
+is a Fisher consistent functional. Also assume that ξ is strictly monotone
+with nonvanishing derivative, so ξ −1 is well-defined.
+Definition. The test influence function of T at F is defined by
+IFtest (x; T, F ) = IF (x; U, F ).
+Note that
+IFtest (x; T, Fθ ) =
+
+d
+d
+= ξ −1 (T (Ft ))
+,
+U (Ft )
+dt
+dt
+t=0
+t=0
+
+where Ft = (1 − t)Fθ + t∆x , so using the chain rule, we have
+IFtest (x; T, Fθ ) = (ξ −1 )0 (T (Fθ )) ·
+=
+
+1
+ξ 0 (θ)
+
+d
+1
+= 0 −1
+T (Ft )
+· IF (x; T, Fθ )
+dt
+ξ (ξ (T (Fθ )))
+t=0
+
+· IF (x; T, Fθ ).
+
+Also note that if we replace the statistic T (F ) by any other statistic
+T̃ (F ) = η(T (F )), where η is monotonic transformation, the functional U (F )
+will remain the same, since ˜
+ξ(θ) = T̃ (Fθ ) = η(T (Fθ )) = η(ξ(θ)), so ξ˜ = η ◦ ξ,
+and
+Ũ (F ) = ξ˜−1 (T̃ (F )) = ξ −1 (η −1 (T̃ (F )) = ξ −1 (T (F )) = U (F ).
+6.2.2
+
+Level and power
+
+We are interested in both:
+• Robustness of validity: Stability of level of test under small deviations
+from null hypothesis.
+• Robustness of efficiency: Stability of power of test under small deviations from alternative hypothesis.
+
+27
+
+We will study the influence of distributional deviations on the asymptotic
+level and power of tests. Accordingly, let θn = θ0 + √∆n , where ∆ > 0 is a
+constant. The asymptotic level of the test is
+α(U, F ) = lim Pθ0 (Un ≥ kn (α)),
+n→∞
+
+where kn (α) is the critical threshold. (Thus, α(U, F ) = α.) Here, Un :=
+ξ −1 (Tn ). Similarly, the asymptotic power is defined as
+β(U, F ) = lim Pθn (Un ≥ kn (α)).
+n→∞
+
+(12)
+
+We now introduce perturbations. Define
+P
+Fn,t,x
+:= (1 − tn )Fθn + tn ∆x ,
+L
+Fn,t,x
+:= (1 − tn )Fθ0 + tn ∆x ,
+
+where tn = √tn . (We require the fraction of contamination to be converging to 0, since otherwise the difference between Fθn and Fθ0 would become
+negligible, and the two cdfs would converge together.)
+We will study the level influence function
+d
+Ln,t,x
+,
+n→∞ dt
+t=0
+
+LIF (x; U, F ) := lim
+
+L
+(Un ≥ kn (α)), and the power influence function
+where Ln,t,x = Fn,t,x
+
+d
+Pn,t,x
+,
+n→∞ dt
+t=0
+
+P IF (x; U, F, ∆) := lim
+
+P
+where Pn,t,x = Fn,t,x
+(Un ≥ kn (α)). It turns out that these influence functions
+are both multiples of IFtest (x; T, F ):
+
+Theorem 6.
+LIF (x; U, F ) =
+
+p
+
+P IF (x; U, F, ∆) =
+
+p
+
+E(T, F )ϕ(λ1−α )IFtest (x; T, F ),
+
+
+p
+E(T, F )ϕ λ1−α − ∆ E(T, F ) IFtest (x; T, F ),
+
+where λ1−α is the lower-(1 − α) quantile of the standard normal distribution,
+−1
+R
+2
+Φ−1 (1 − α), and E(T, F ) :=
+IFtest
+(y; T, Fθ0 )dF
+(y)
+is the asymptotic
+θ
+0
+
+
+p
+efficacy of the test. (Note that β(U, F ) = 1 − Φ λ1−α − ∆ E(T, F ) , hence
+the terminology for asymptotic efficacy.)
+28
+
+Thus, ensuring robustness of validity corresponds to bounding the LIF ,
+whereas ensuring robustness of efficiency corresponds to bounding the P IF .
+Optimality theory concerns maximizing the asymptotic power of a test (12),
+subject to bounds on LIF and P IF . Can also be recast as minimizing
+asymptotic variance of T subject p
+to an upper bound on the absolute value
+of the self-standardized influence E(T, F )IFtest (x; T, F ).
+Gives rise to tests based on truncated test statistics, censored likelihood
+ratio tests, etc.
+
+7
+
+Adversarial contamination
+
+7.1
+
+Setup
+
+Huber’s contamination model (which is also the framework for Hampel’s
+theory on infinitesimal robustness) assumes that contaminated data come
+from an i.i.d. mixture (1 − )F + H. However, what if we instead draw n
+i.i.d. data points {xi }ni=1 from F , and then arbitrarily contaminate n data
+points to obtain the final set {e
+xi }ni=1 of observations?
+We will work in the (nonasymptotic) probably approximately correct
+(PAC) framework. For a given δ > 0, goal is to obtain an estimator µ
+b(e
+x1 , . . . , x
+en )
+of distribution mean µ = EF [xi ] satisfying
+P (kb
+µ − µk2 ≤ t(n, δ, )) ≥ 1 − δ,
+where t(n, δ, ) is as small as possible. Clearly, all of the asymptotic theory
+and theory of robustness based on IFs is no longer applicable, since adversary
+is more powerful than Huber contamination model. Of course, the sample
+mean fails catastrophically in this framework: Since the adversary is omniscient and allowed to base the corrupted data on the other data points, if
+en such that kb
+µ − µk2 is deterministically larger
+ ≥ n1 , can always choose x
+than any value.
+Are medians any better? Yes!—and optimal. We establish the following
+lower bound on the error in 1 dimension:
+Theorem 7. Let Fµ = N (µ, 1), and suppose δ < c. Any location estimator
+µ
+b must satisfy
+!!
+r
+log(1/δ)
+sup Pµ sup |b
+µ(e
+x1 , . . . , x
+en ) − µ| > C  +
+> δ,
+n
+µ∈R
+{e
+xi }
+29
+
+i.i.d.
+
+where the probability is taken with respect to xi ∼ Fµ and {e
+xi }ni=1 are an
+(adversarial) -perturbation of {e
+xi }ni=1 .
+q
+q
+log(1/δ)
+Proof. We consider two cases, where  <
+and  ≥ log(1/δ)
+. In the
+n
+n
+first case, the bound is implied by the fact that the empirical mean satisfies
+!
+r
+1 log(1/δ)
+>δ
+Pµ |b
+µ(x1 , . . . , xn ) − µ| >
+2
+n
+when δ is sufficiently small, which comes from a Gaussian tail bound and the
+fact that the empirical mean is the best possible estimator for clean data—
+the adversary can just do nothing. So suppose we are in the second case; we
+will show that
+!
+1
+µ(e
+x1 , . . . , x
+en ) − µ| > C ≥ .
+sup Pµ sup |b
+2
+µ∈R
+{e
+xi }
+In fact, we will show that a similar lower bound holds under Huber’s contamination model:
+1
+sup sup Px i.i.d.
+(|b
+µ
+(x
+,
+.
+.
+.
+,
+x
+)
+−
+µ|
+>
+C)
+≥
+.
+1
+n
+i ∼ F
+2
+µ∈R F ∈P (Fµ )
+This implies the result for the adversary, since adversarial contamination is
+stronger than Huber contamination (and the existence of a stochastic contamination model which probabilistically chooses n of the data points and
+incurs a certain error implies existence of an adversarial contamination model
+which incurs at least the same error, as well).
+The key idea is that if µ1 − µ2 = , then we can construct G ∈ P (Fµ1 ) ∩
+P (Fµ2 ). Assuming this construction, we can write
+
+
+sup sup Px i.i.d.
+|b
+µ(x1 , . . . , xn ) − µ| >
+i ∼ F
+2
+µ∈R F ∈P (Fµ )
+
+
+
+1
+
+1
+
+≥ Px i.i.d.
+|b
+µ
+(x
+,
+.
+.
+.
+,
+x
+)
+−
+µ
+|
+>
++
+P
+|b
+µ
+(x
+,
+.
+.
+.
+,
+x
+)
+−
+µ
+|
+>
+i.i.d.
+1
+n
+1
+1
+n
+2
+2 i ∼G
+2
+2 xi ∼ G
+2
+n
+o
+n
+[
+1
+
+ o
+≥ Px i.i.d.
+|b
+µ − µ2 | ≥
+|b
+µ − µ1 | ≥
+2 i ∼G
+2
+2
+1
+1
+≥ Px i.i.d.
+(|µ1 − µ2 | ≥ ) = ,
+2 i ∼G
+2
+completing the proof.
+30
+
+For an upper bound result, see the much more general result in Theorem 8
+below.
+
+7.2
+
+Higher dimensions
+
+What to do in d ≥ 1 dimensions? This is a bit subtle, due to a multiplicity of
+higher-dimensional versions of the median, of which several give suboptimal
+rates.
+The simplest idea is to use the coordinatewise median. However,
+ thisqcan
+
+√
+be shown to incur an O( d) error. In contrast, we can derive a O  + nd
+error using more complicated notions of medians.
+Definition. The Tukey median of a data set {xi }ni=1 is defined as µ
+b =
+arg maxµ∈Rd D(µ, {xi }ni=1 ), where
+n
+
+D(µ, {xi }ni=1 ) :=
+
+1X  T
+inf
+1 u (xi − µ) ≥ 0
+kuk2 =1 n
+i=1
+
+is the Tukey depth function.
+In other words, the Tukey depth at µ looks at all halfspaces cutting the
+recentered data set, and takes the one which cuts off the fewest points. The
+Tukey median then seeks to maximize this depth over all µ.
+We have the following upper bound:
+Theorem 8. Suppose F = N (µ, Id ), the contamination level satisfies  < 18 ,
+q
+and the sample size is large enough so 2C d+log(1/δ)
+≤ 41 . The Tukey median
+n
+satisfies
+!
+r
+1
+d
++
+log(1/δ)
+.
+t(n, δ, ) ≤ Φ−1
++ 2 + 2C
+2
+n
+(Here, C > 0 is a universal constant not necessarily agreeing with the
+one appearing in the earlier theorem.) This bound turns out to be minimax
+
+31
+
+optimal (up to constants) for small  and large n when F = N (µ, Id ):
+!
+r
+d + log(1/δ)
+1
+−1
++ 2 + 2C
+Φ
+2
+n
+!
+r
+ 
+1
+d + log(1/δ)
+1
+−1
+≈Φ
++
+2 + 2C
+2
+ϕ(Φ−1 (1/2))
+n
+!
+r
+d + log(1/δ)
+1
+2 + 2C
+=
+ϕ(0)
+n
+(compare with the lower bound rate in Theorem 7 in the 1D case).
+Sketch of proof. We begin with a statement about the clean data, which
+follows from standard uniform concentration results from empirical process
+theory (e.g., using arguments based on VC dimension):
+
+Px i.i.d.
+∼ N (µ,I )
+i
+
+d
+
+n
+
+1X  T
+sup
+1 u (xi − η) ≥ 0 − Pxi ∼N (µ,Id ) uT (xi − η) ≥ 0
+kuk2 =1,η∈Rd n i=1
+!
+r
+d + log(1/δ)
+≤ δ.
+≥C
+n
+
+For the remainder of the argument, suppose we are in the “good” event
+with probability 1 − δ, where all empirical depth measures are close to their
+population-level counterparts. Furthermore, note that
+
+
+Pxi ∼N (µ,Id ) uT (xi − η) ≥ 0 = Φ uT (µ − η) .
+We now argue that the true mean has Tukey depth at least (approximately) 12 − . Note that for any unit vector u ∈ Rd , we have
+n
+n
+X
+X
+ T
+
+1 u (e
+xi − µ) ≥ 0 ≥
+1 uT (xi − µ) ≥ 0 − n
+i=1
+
+i=1
+
+!
+d + log(1/δ)
+−
+≥ n Φ(0) − C
+n
+!
+r
+d + log(1/δ)
+1
+−−C
+n,
+=
+2
+n
+r
+
+32
+
+where the second inequality follows from the fact that we are in the good
+event.
+On the other hand, we can show that any point η ∈ Rd such that
+!
+!
+r
+r
+1
+d
++
+log(1/δ)
+1
+d
++
+log(1/δ)
+kη−µk2 > Φ−1
++ 2 + 2C
+= −Φ−1
+− 2 − 2C
+2
+n
+2
+n
+must have
+
+r
+
+d + log(1/δ)
+.
+2
+n
+Since the Tukey median maximizes the depth function, the result of the
+theorem will then hold. Indeed, suppose η is a far away point and let v =
+η−µ
+. Then
+kη−µk2
+1
+D(η, {e
+xi }ni=1 ) < −  − C
+
+n
+n
+X
+X
+ T
+
+1 v (e
+xi − η) ≥ 0 ≤
+1 v T (xi − η) ≥ 0 + n
+i=1
+
+i=1
+
+!
+d + log(1/δ)
+≤ n Φ(−kη − µk2 ) +  + C
+n
+!
+!
+r
+r
+1
+d + log(1/δ)
+d + log(1/δ)
+<n
+− 2 − 2C
+++C
+2
+n
+n
+!
+r
+1
+d + log(1/δ)
+−−C
+n.
+<
+2
+n
+r
+
+This proves the desired result.
+However, computing the Tukey median is also difficult in high dimensions,
+with computational complexity O(nd−1 ).
+
+7.3
+
+Spectral algorithms
+
+We now discuss algorithmic alternatives which can overcome the O(nd−1 )
+computational complexity of the Tukey median and are also provably (nearly)
+optimal.
+
+33
+
+7.3.1
+
+First algorithm
+
+The first algorithm, due to Diakonikolas et al. Its success is roughly based on
+the intuition that outliers (measured in terms of their impact on the sample
+mean) can be detected based on the sample covariance. Here is the algorithm:
+The algorithm proceeds by assigning weightsP{wi }ni=1 to the data points.
+The final output is the weighted mean µ(w) = ni=1 wi xi , for an iteratively
+determined vector of weights.
+(0)
+
+1. Define wi
+
+= n1 for all i.
+
+2. For t = 0, 1, 2, . . . , compute Σ(t) =
+
+(t)
+(t)
+(t) T
+i=1 wi (xi −µ(w ))(xi −µ(w )) .
+
+Pn
+
+(a) If kΣ(t) k2 ≤ C, output µ
+b = µ(w(t) ).
+(b) If kΣ(t) k2 > C, define scores
+(t)
+
+τi = hv (t) , xi − µ(w(t) )i2
+(t+1)
+
+where v (t) is the top eigenvector of Σ(t) . For each i, define wi
+
+(t)
+τi
+(t)
+(t)
+(t)
+wi , where τmax = maxi:w(t) >0 τi .
+1 − (t)
+τmax
+
+=
+
+i
+
+Thus, the second step effectively filters out one (or more) data points at a
+time.
+(t)
+The scores are defined as τi = hv (t) , Xi − µ(w(t) )i2 , where v (t) is the top
+eigenvector of the weighted sample covariance Σ(t) = Σ(w(t) ). The initial
+weights w(0) are uniform
+over S, and thePweighted mean and covariance are
+P
+defined as µ(w) = i wi xi and Σ(w) = i wi (xi − µ(w))(xi − µ(w))T . The
+1D filter algorithm takes as input
+two vectors (τ, w) and outputs the vector
+
+τi
+with component i equal to 1 − τmax
+wi , where τmax = maxi:wi >0 τi , and
+effectively truncates one (or more) components at a time.
+In
+p the contaminated Gaussian setting, error bounds are of the form
+O( log(1/)). Sample complexity is n = Ω(d log d).
+7.3.2
+
+Second algorithm
+
+We now introduce an algorithm due to Lai, Rao, and Vempala (2016). They
+consider an additive adversarial model (see Examples sheet for the difference
+between this and the strong adversarial contamination model considered earlier): (1 − )n points are drawn i.i.d., and then n are chosen adversarially.
+34
+
+The idea is that we only need to figure out which direction in d-dimensional
+space has been affected by contamination, and estimate this direction robustly (e.g., using a median). The algorithm is described in a recursive
+manner.
+
+7.3.3
+
+Linear regression with adversarial contamination
+
+Consider n i.i.d. observations from the linear model
+yi = xTi β ∗ + zi ,
+where xi ’s are zero-mean, identity covariance, and zi ’s are independent, zeromean noise. We observe a contaminated dataset, where up to n points are
+arbitrarily corrupted, in covariates and/or responses.
+Previous/concurrent approaches: Methods based on sum-of-squares
+algorithms or iterative robust gradient descent.
+Pensia, Jog & Loh, 2020: Apply filtering step to the covariates. Then
+apply Huber regression.
+
+35
+
+8
+
+Heavy-tailed distributions
+
+Interestingly enough, the same types of estimators described earlier for adversarial contamination can also be used for optimal estimation, with high
+probability, when we have i.i.d. data drawn from heavy-tailed distributions.
+Going back to our PAC framework, we want to find an estimator which
+achieves the minimal function t(n, δ) in the bound
+P (kb
+µ − µk2 ≤ t(n, δ)) ≥ 1 − δ,
+where the probability holds for i.i.d. data {xi }ni=1 drawn from an appropriate class of distributions. (Here, we no longer have  since there is no
+contamination—though of course, one could introduce contamination on top
+2
+of the more general
+q distributional assumptions.) If xi ∼ N (µ, σ ), we can
+take t(n, δ) = Cσ log(1/δ)
+, and the bound is tight.
+n
+What if we consider classes of distributions which only satisfy the condition that the variance is bounded by σ 2 ? How can we estimate µ with
+optimal rates? In 1 dimension, note that Chebyshev’s inequality guarantees
+that the mean satisfies
+r !
+n
+1X
+1
+xi − µ ≤ σ
+≥1−δ
+P
+n i=1
+nδ
+(and the bound can also be shown to be tight, e.g., when xi is drawn from
+a distribution which is supported on {−a, 0, a}). But this rate (n, δ) is far
+worse than the rate of Gaussian variables when δ is small.
+To provide a flavor of existing results in this area, we state results for two
+estimators, and provide proof details for the bounds in 1 dimension. Similar
+types of results hold for estimators based on filtering and trimmed mean
+techniques, with subtle differences between the assumptions needed for the
+bounds to hold (and be optimal).
+
+8.1
+
+MOM estimator
+
+Suppose for simplicity that n = mk for some integer m. We have the following result:
+
+36
+
+Theorem 9. Suppose {xi }ni=1 are drawn i.i.d. from a distribution with mean
+µ and variance σ 2 . Then the MOM estimator with k = d8 log(1/δ)e satisfies
+!
+r
+4d8 log(1/δ)e
+≥ 1 − δ.
+P |b
+µ − µ| ≤ σ
+n
+Proof. We will show that
+r
+P |b
+µ − µ| ≤ σ
+
+4
+m
+
+!
+≥ 1 − exp(−k/8),
+
+from which the result follows by taking k = d8 log(1/δ)e.
+Let {zj }kj=1 denote the means within individual blocks. Applying Chebyshev’s inequality shows that for each j, with probability at least 34 , we have
+r
+4
+|zj − µ| ≤ σ
+.
+m
+q
+q
+4
+k
+If |b
+µ − µ| > σ m , then at least 2 of the zj ’s must satisfy |zj − µ| > σ m4 ,
+
+so denoting Y ∼ Binomial k, 14 , we have
+r !
+
+
+k
+4
+≤P Y ≥
+P |b
+µ − µ| > σ
+m
+2
+
+
+k
+= P Y − E(Y ) ≥
+4
+≤ exp(−k/8),
+by standard tail bounds (i.e., Hoeffding’s inequality).
+In fact, analysis of MOM estimator can be generalized to settings when
+variance might not be finite, but 1+α moments exist for some α ∈ (0, 1), etc.
+Note that k only depends on the error probability and not any properties of
+the distribution.
+A bound on a multivariate version of the MOM estimator using the geometric median can be derived in a somewhat analogous manner. However,
+the simple geometric median does not yield optimal error rates. MOM-based
+procedures have also been derived for settings such as linear regression and,
+more generally, empirical risk minimization.
+37
+
+

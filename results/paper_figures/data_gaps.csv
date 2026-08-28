@@ -1,0 +1,34 @@
+model,rep,strategy,status,n_iterations,n_sigmas,missing_sigmas,problems
+dnn,mol2vec,threshold,WARNING,9,11,,
+dnn,mol2vec,valprop,WARNING,8,11,,
+dnn_bnn_full,mhggnn,threshold,WARNING,9,11,,
+dnn_bnn_full,mol2vec,hetero,WARNING,9,11,,
+dnn_bnn_full,mol2vec,outlier,WARNING,9,11,,
+dnn_bnn_full,mol2vec,threshold,WARNING,8,11,,
+dnn_vbll,mhggnn,hetero,WARNING,6,11,,
+dnn_vbll,mhggnn,legacy,UNUSABLE,2,11,,only 2 iterations (need >= 5)
+dnn_vbll,mhggnn,outlier,WARNING,5,11,,
+dnn_vbll,mhggnn,quantile,WARNING,5,11,,
+dnn_vbll,mhggnn,threshold,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+dnn_vbll,mhggnn,valprop,WARNING,6,11,,
+dnn_vbll,mol2vec,hetero,WARNING,7,11,,
+dnn_vbll,mol2vec,legacy,WARNING,6,11,,
+dnn_vbll,mol2vec,outlier,WARNING,5,11,,
+dnn_vbll,mol2vec,quantile,UNUSABLE,4,11,,only 4 iterations (need >= 5)
+dnn_vbll,mol2vec,threshold,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+dnn_vbll,mol2vec,valprop,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+mlp,continuous_pdv,valprop,WARNING,9,11,,
+mlp_bnn_full,mol2vec,outlier,WARNING,9,11,,
+mlp_bnn_full,mol2vec,threshold,WARNING,8,11,,
+mlp_vbll,mhggnn,hetero,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+mlp_vbll,mhggnn,legacy,UNUSABLE,2,11,,only 2 iterations (need >= 5)
+mlp_vbll,mhggnn,outlier,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+mlp_vbll,mhggnn,quantile,WARNING,5,11,,
+mlp_vbll,mhggnn,threshold,UNUSABLE,4,11,,only 4 iterations (need >= 5)
+mlp_vbll,mhggnn,valprop,WARNING,5,11,,
+mlp_vbll,mol2vec,hetero,UNUSABLE,3,11,,only 3 iterations (need >= 5)
+mlp_vbll,mol2vec,legacy,UNUSABLE,1,11,,only 1 iterations (need >= 5)
+mlp_vbll,mol2vec,outlier,UNUSABLE,2,11,,only 2 iterations (need >= 5)
+mlp_vbll,mol2vec,quantile,UNUSABLE,1,11,,only 1 iterations (need >= 5)
+mlp_vbll,mol2vec,threshold,WARNING,7,11,,
+mlp_vbll,mol2vec,valprop,UNUSABLE,3,11,,only 3 iterations (need >= 5)

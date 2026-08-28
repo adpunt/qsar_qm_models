@@ -75,6 +75,12 @@ QM9_MODELS = {
     "conformal_dnn": ("torchcp", None),
     "dnn_bnn_variational": ("torchbnn", None),
     "mlp_bnn_variational": ("torchbnn", None),
+    # The three decomposition models, added 2026-08-28. They are the only ones
+    # in the roster that report BOTH uncertainty components per molecule
+    # (RERUN_PLAN.md 5.5e, 5.5f).
+    "heteroscedastic_gp": ("gpytorch", None),
+    "dnn_bnn_full_variational_hetero": ("torch", None),
+    "mlp_bnn_full_variational_hetero": ("torch", None),
 }
 
 # The validation and uncertainty rosters, as KIRBy's --models flag spells them.

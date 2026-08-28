@@ -1,0 +1,272 @@
+# paper.tex — Structured Extraction
+File: `/Users/apunt/repos/qsar_qm_models/paper.tex` (699 lines). Not edited.
+
+## 1. RESEARCH QUESTIONS (verbatim)
+
+### 1a. Abstract (L164, L167)
+- L164: "While the impact of noisy labels on QSAR modeling has been studied, the relative contributions of the choice of molecular representation and machine learning model architecture remains unclear."
+- L164: "While noise is typically modeled as Gaussian, we developed six noise injection strategies to investigate other patterns of noise."
+- L167 (Scientific contribution): "We demonstrate that the choice of model, rather than molecular representation, is the primary determinant of QSAR-model noise robustness, a conclusion we reached by comparing a model's relative ranking across different types of label noise."
+
+### 1b. Introduction — the three questions, all in L188
+- L188: "This research addresses three main aspects of the robustness of QSAR models under label noise."
+- Q1, L188: "First, we investigate the contributions of molecular representation and model architecture on both overall predictive performance and, more specifically, noise robustness."
+- Q2, L188: "Second, we compare how noise-robust probabilistic models are versus their deterministic counterparts, and whether their per-sample uncertainty estimates track which individual labels have been corrupted, once the population-level rise in average uncertainty at each noise level is controlled for."
+- Q3, L188: "Third, we assess the generalizability of noise-robustness patterns across different noise-injection mechanisms and molecular properties."
+- L188: "Together, these questions aim to identify what, if anything, makes a QSAR model robust to noise."
+- L188: "Finally, we introduce NoiseInject, an open-source Python package for benchmarking noise robustness and uncertainty quantification in machine learning models."
+
+### 1c. Conclusion (§Conclusion, L569–577) — restated as findings, not questions
+- L571: "We investigated how a wide variety of molecular representations and model architectures perform under a regime of increasing label noise in QSAR modeling."
+- L577: "When working with noisy experimental data in QSAR settings, it is important to keep in mind that noise robustness and noise-aware uncertainty estimation are primarily driven by the model's mechanism of training, and to a certain extent the choice of molecular representation, usually with respect to the model."
+
+### 1d. Also stated in Results (interim "conclusions", L562, L564)
+- L562: "These results lead to two main conclusions. The first is that noise robustness, defined as the rate at which predictive performance degrades with increasing label noise, is primarily determined by the model's training mechanism."
+- L564: "The second conclusion concerns whether a model's uncertainty estimates track per-sample label noise."
+
+---
+
+## 2. FLOATS: label / caption / graphic
+
+### TABLES (5 total — no `\includegraphics`)
+
+**T1 — `tab:metrics_summary`** — env L266–310, caption L305–308, label L309. Body: hand-built `tabular` (rows: RMSE, R², AUC_norm, Wilcoxon signed-rank, Kendall's W, ANOVA η², ICC(1,1), Spearman's ρ, Coverage, ECE).
+> "Summary of metrics used in this study, their definitions, and their intended interpretation. $\hat{y}_i$ and $\hat{u}_i$ denote the predicted value and predicted uncertainty for sample $i$; $\sigma$ is the noise scaling factor (Table~\ref{tab:regression_noise})."
+
+**T2 — `tab:regression_noise`** — env L318–350, caption L344–348, label L349. Body: 6 noise-strategy rows (Gaussian, Outlier, Quantile, Threshold, Valprop, Hetero).
+> "Regression noise injection strategies. For each point $i$, noise $\varepsilon_i \sim \mathcal{N}(0, s_i^2)$ is added to the target $y_i$, where the scale $s_i$ is defined per row. Here $z_i = (y_i - \bar{y})/\sigma_y$ is the standardised target and $Q_{10}, Q_{90}$ are the $10$th and $90$th percentiles of the target distribution."
+
+**T3 — `tab:anova_decomposition`** — env L385–404, caption L387, label L388. Body L396–401: 6 strategy rows × (Model/Rep/Inter./Resid.) for Performance and Robustness.
+> "ANOVA variance decomposition by noise strategy on the QM9 HOMO--LUMO gap. Each cell reports $\eta^2$ (\%), the share of variance explained by that factor. Columns: \textbf{Model} = model architecture effect; \textbf{Rep} = molecular representation effect; \textbf{Inter.}\ = model$\times$representation interaction; \textbf{Resid.}\ = residual unexplained variance. ``Performance'' uses R$^2$ at $\sigma = 0.3$ as the outcome; ``Robustness'' uses the noise degradation slope (NDS). Bold entries highlight the dominant factor in each row."
+- NOTE (recorded, not evaluated): caption says Robustness outcome is "the noise degradation slope (NDS)"; L380 and Fig `fig:anova_decomposition` caption (L409) say AUC$_\text{norm}$.
+- NOTE: table body Outlier Robustness Resid. = 79.3 (L401); prose L380 says 83.6\%. Hetero Resid. = 41.0 (L399); prose L380 says 77.4\%. Prose L380 says model 36.8–54.7\%; table Robustness Model column = 48.7/47.9/48.0/37.0/52.8/12.7.
+
+**T4 — `tab:auc_ranking`** — env L435–457, caption L437, label L438. Body L444–454: 11 models × 6 strategies + Mean.
+> "Normalised retention area (AUC$_{norm}$) by model on PDV (QM9 HOMO--LUMO gap), ranked by mean across six strategies. Higher AUC$_{norm}$ (closer to 1) indicates greater robustness. Strategy abbreviations: \textbf{Gauss.}\ = Gaussian, \textbf{Quant.}\ = Quantile, \textbf{Thresh.}\ = Threshold, \textbf{Hetero.}\ = Heteroscedastic, \textbf{Val.-P.}\ = Value-Proportional. Bold rows mark the two most robust models overall; bold cell entries mark each strategy's most robust configuration."
+
+**T5 — `tab:wilcoxon_bnn`** — env L468–484, caption L470, label L471. Body L477–481: 5 base→variant rows.
+> "Wilcoxon signed-rank tests for Bayesian and probabilistic transformations on the QM9 HOMO--LUMO gap. \textbf{Base} is the deterministic reference model; \textbf{Variant} is the probabilistic/Bayesian transformation tested against it. \textbf{$\Delta$ NDS} = mean change in noise degradation slope (NDS) from base to variant; positive values mean the variant is more robust (slope closer to zero). \textbf{Sig.}\ marks pairs that are statistically significant at $p < 0.05$ (asterisk)."
+
+**T6 — `tab:top_unc_noise`** — env L501–529, caption L503, label L504. Body L510–526: 10 top rows + 4 "lowest correlations" contrast rows.
+> "Strongest and weakest model--representation combinations for uncertainty--noise correlation on the QM9 HOMO--LUMO gap (Gaussian noise strategy). Columns: \textbf{Unc-Noise $\rho$} = Spearman correlation between predicted uncertainty and injected noise magnitude $|\epsilon|$ (higher = better noise detection); \textbf{Unc-Error $\rho$} = Spearman correlation between predicted uncertainty and absolute prediction error; \textbf{ECE} = expected calibration error (lower = better-calibrated); \textbf{Cov.\ $1\sigma$} / \textbf{$2\sigma$} = empirical coverage at the $1\sigma$ (68\% target) and $2\sigma$ (95\% target) intervals."
+
+(Table count = 6, not 5.)
+
+### FIGURES (7 total)
+
+**F1 — `fig:noise_strategies`** — env L356–362; graphic L358 `fig_methods_noise_strategies.png` (`width=\textwidth`); caption L359; label L361.
+> "Effect of each noise injection strategy on the QM9 HOMO–LUMO gap label distribution (blue) at $\sigma = 0.5$. The RMSE annotated in each panel is computed between the clean and the noisy labels for that strategy (i.e.\ the magnitude of perturbation). a) Gaussian (red); b) Outlier (brown); c) Quantile (green); d) Threshold (purple); e) Value-Proportional (orange); and f) Heteroscedastic (pink)."
+
+**F2 — `fig:anova_decomposition`** — env L406–411; graphic L408 `fig2_anova_decomposition.png`; caption L409; label L410.
+> "ANOVA variance decomposition ($\eta^2$, \%) for a) predictive performance (R$^2$ at $\sigma=0.3$) and b) noise robustness, quantified by the normalised area under the R$^2$ retention curve (AUC$_\text{norm}$; higher values indicate greater robustness), by noise strategy."
+
+**F3 — `fig:interaction`** — env L415–420; graphic L417 `fig_interaction.png`; caption L418; label L419.
+> "Representation--model interaction effects on the QM9 HOMO--LUMO gap. a) AUC$_\text{norm}$ heatmap showing model robustness across representations under Gaussian noise; higher values indicate more performance retained under noise. ``N/A'' indicates configurations excluded due to baseline $R^2 < 0.3$ or kernel incompatibility (GP uses a Tanimoto kernel defined on binary vectors, which is incompatible with PDV). b) AUC$_\text{norm}$ on PDV versus ECFP4 fingerprint for each model under Gaussian noise, with Spearman correlation."
+
+**F4 — `fig:global_overview`** — env L424–429; graphic L426 `fig1_global_overview.png`; caption L427; label L428.
+> "Global overview of noise robustness on the QM9 HOMO--LUMO gap. a) Performance degradation curves (PDV, Gaussian noise) showing R$^2$ versus noise level $\sigma$ for representative models. b) AUC$_\text{norm}$ heatmap across all model architectures and noise strategies on PDV; higher values indicate more performance retained under noise. The Tanimoto GP is absent because its kernel is incompatible with PDV (see Section~\ref{sec2}); a separate GP with an RBF kernel is included for PDV-specific analyses."
+
+**F5 — `fig:nn_family_comparison`** — env L486–491; graphic L488 `fig_nn_family_comparison.png`; caption L489; label L490.
+> "Neural network family comparison on the QM9 HOMO--LUMO gap with N=10k: R$^2$ versus $\sigma$ under Gaussian noise on the physicochemical descriptor vector (PDV) representation for a) NN-$\alpha$ family, b) NN-$\beta$ family, and c) RF versus QRF. Heteroscedastic results (not shown) are qualitatively consistent."
+
+**F6 — `fig:uncertainty_combined`** — env L533–538; graphic L535 `fig_uncertainty_combined.png`; caption L536; label L537.
+> "Uncertainty estimates under label noise on the QM9 HOMO--LUMO gap. a) Mean predicted uncertainty versus $\sigma$ for probabilistic models (PDV, Gaussian strategy). b) Aleatoric and epistemic uncertainty components versus $\sigma$ for VBLL models."
+
+**F7 — `fig:validation_overview`** — `figure*` env L544–549; graphic L546 `fig_validation_overview.png`; caption L547; label L548.
+> "AUC$_\text{norm}$ heatmaps for three external validation datasets: a) LogD, b) Caco-2 Efflux, and c) hERG K$_i$. Lower AUC$_\text{norm}$ indicates faster degradation under noise. Black cells indicate baseline R$^2 < 0.3$ for that (model, strategy) pair. Models whose baseline R$^2$ fell below 0.3 across all strategies are omitted entirely, accounting for the smaller set of rows on hERG K$_i$."
+
+**F8 — `fig:validation_combined`** — `figure*` env L553–558; graphic L555 `fig_validation_combined.png`; caption L556; label L557.
+> "Comparison of noise robustness on QM9 (HOMO--LUMO gap, $N = 10{,}000$) and three external validation datasets: LogD ($N = 5{,}039$), Caco-2 Efflux ($N = 2{,}161$), and hERG K$_i$ ($N = 1{,}482$). a) Model robustness measured by the noise degradation slope (NDS) across all four datasets; lower (more negative) NDS indicates faster degradation under noise. b) QM9 vs external robustness: models with inherent robustness mechanisms (NGBoost, SVM) maintain their relative standing, while ensemble-dependent models (XGBoost) degrade on the external datasets."
+
+(Figure count = 8, not 7.)
+
+---
+
+## 3. EVERY `\ref` TO EACH FLOAT LABEL + surrounding claim
+
+`\autoref` — DOES NOT EXIST in the file. All cross-refs use `Table~\ref{}` / `Figure~\ref{}` / `Section~\ref{}`.
+
+**`tab:metrics_summary`** — NEVER REFERENCED (0 `\ref`s).
+
+**`tab:regression_noise`** — 2 refs
+- L222: "$\sigma$ is the noise scaling factor shared by all strategies (Table~\ref{tab:regression_noise}): each strategy uses $\sigma$ to control the magnitude of injected noise, so that $\sigma = 0$ corresponds to clean labels and increasing $\sigma$ produces progressively noisier labels, regardless of how the noise is distributed across samples."
+- L308 (inside `tab:metrics_summary` caption): "$\sigma$ is the noise scaling factor (Table~\ref{tab:regression_noise})."
+
+**`tab:anova_decomposition`** — 1 ref
+- L380: "ANOVA decomposition across six noise strategies on models to predict HOMO--LUMO gap from QM9 demonstrates that for predictive performance (R$^2$ at $\sigma = 0.3$), the model--representation interaction term is the  largest source of variance across all six strategies, followed by model architecture and representation (Table~\ref{tab:anova_decomposition}; Figure~\ref{fig:anova_decomposition}a)."
+
+**`fig:anova_decomposition`** — 2 refs
+- L380 (panel a): same sentence as above.
+- L383 (panel b): "The impact varied by type of noise, represented by noise strategy (Figure~\ref{fig:anova_decomposition}b)."
+
+**`fig:noise_strategies`** — 1 ref
+- L354: "The detailed progression of label corruption across noise levels is seen in Figure~\ref{fig:noise_strategies}."
+
+**`fig:interaction`** — 1 ref
+- L413: "The interaction between model architecture and representation is seen in Figure~\ref{fig:interaction}. While some model architectures, like SVM and full BNNs maintain consistent noise robustness scores across all representations, others like NN-$\beta$ display greater variation. Model robustness on one representation strongly predicts robustness on another (Spearman $\rho = 0.82$, $p = 0.002$ for ECFP4 vs PDV; 11 models). However, the scatter around the diagonal reflects the interaction term identified by the ANOVA."
+
+**`fig:global_overview`** — 1 ref
+- L422: "We observe that AUC$_\text{norm}$ varies substantially across architectures and noise strategies, as seen in Figure~\ref{fig:global_overview}."
+
+**`tab:auc_ranking`** — 2 refs
+- L433: "NGBoost and random forests retained the most predictive performance across all strategies, while NN-$\beta$ retained the least (Table~\ref{tab:auc_ranking})."
+- L460: "As seen in Table~\ref{tab:auc_ranking}, NGBoost was the most resistant to noise across strategies, leading five of the six strategies."
+
+**`tab:wilcoxon_bnn`** — 2 refs (same line)
+- L466: "Both full BNN and VBLL transformations significantly improved robustness for both NN-$\alpha$ and NN-$\beta$ (Table~\ref{tab:wilcoxon_bnn})."
+- L466: "QRF was significantly less robust than RF (Table~\ref{tab:wilcoxon_bnn}), suggesting that quantile regression adds complexity and flexibility which may result in overfitting."
+
+**`fig:nn_family_comparison`** — 1 ref
+- L466: "In general, the full Bayesian transformations reduced the degradation in performance with Gaussian noise the most, as seen in Figure~\ref{fig:nn_family_comparison}."
+
+**`tab:top_unc_noise`** — 3 refs
+- L499: "One key sign that a model is able to handle noise is its ability to track it, represented by the per-sample Spearman correlation between predicted uncertainty and noise magnitude (Table~\ref{tab:top_unc_noise}). While GPs and NGBoost gave the strongest correlations, BNNs were moderate."
+- L531: "As seen in Table~\ref{tab:top_unc_noise} and Additional file~9, both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations."
+- L540: "However, learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations (Table~\ref{tab:top_unc_noise})."
+
+**`fig:uncertainty_combined`** — 1 ref (panel b only; panel a never cited)
+- L531: "Although we expect to see aleatoric uncertainty increase with injected noise, for VBLL both the aleatoric and epistemic components increased (Figure~\ref{fig:uncertainty_combined}b)."
+
+**`fig:validation_overview`** — 1 ref
+- L551: "Per-dataset NDS heatmaps across all model architectures and noise strategies are shown in Figure~\ref{fig:validation_overview}." (NOTE: text says NDS heatmaps; caption L547 says AUC$_\text{norm}$ heatmaps.)
+
+**`fig:validation_combined`** — 1 ref (panel a only)
+- L551: "XGBoost and BNN variants suffer the most here, as seen in Figure~\ref{fig:validation_combined}a."
+
+**Section labels**
+- `sec1` (L178) — never referenced.
+- `sec2` (L190) — referenced at L427 (fig:global_overview caption: "see Section~\ref{sec2}") and L633 ("following the curation protocol described in Section~\ref{sec2}").
+- `sec13` (L569, Conclusion) — never referenced.
+
+---
+
+## 4. ADDITIONAL FILES
+
+### 4a. Declared contents (L659–670)
+| # | Line | Declared title / contents (verbatim) |
+|---|---|---|
+| 1 | 659 | "*Default hyperparameters for all models evaluated in this study.* Default hyperparameter settings used for every model architecture on the QM9 HOMO--LUMO gap experiments." |
+| 2 | 660 | "*Pairwise Spearman rank correlations between model NDS profiles.* Model--model NDS correlations ($\rho \geq 0.95$) on QM9; flags pairs excluded from the ANOVA for near-redundancy." |
+| 3 | 661 | "*Pairwise Spearman rank correlations between representation NDS profiles.* Representation--representation NDS correlations on QM9; flags pairs excluded from the ANOVA." |
+| 4 | 662 | "*Intraclass correlation coefficients (ICC(1,1)) for model pairs.* ICC(1,1) on QM9 NDS profiles for pairs with ICC $\geq 0.5$, with Family-grouping (Tree, $\alpha$/$\beta$, $\alpha$, Cross)." |
+| 5 | 663 | "*Configurations excluded from robustness analysis.* Model$\times$representation cells removed because baseline R$^2 \leq 0.6$ on QM9, summarized by number of strategies excluded." |
+| 6 | 664 | "*Global overview of noise robustness on the ECFP4 representation.* Performance degradation curves and the NDS heatmap across all model architectures and noise strategies, for ECFP4 on QM9." |
+| 7 | 665 | "*Baseline R$^2$ versus NDS scatter (PDV, Gaussian).* Per-model scatter of baseline predictive performance against NDS on QM9 (PDV, Gaussian noise)." |
+| 8 | 666 | "*Neural-network Bayesian transformation effects by representation.* Wilcoxon signed-rank tests on QM9 showing how BNN and VBLL transformations change NDS for each representation." |
+| 9 | 667 | "*Uncertainty quantification metrics for probabilistic models on the ECFP4 representation.* Unc-Noise $\rho$, Unc-Error $\rho$, ECE, and coverage at $1\sigma$/$2\sigma$ for probabilistic models under Gaussian noise on QM9." |
+| 10 | 668 | "*ANOVA variance decomposition on external validation datasets.* $\eta^2$ contributions from model, representation, and interaction for LogD, Caco-2 Efflux, and hERG K$_i$." |
+| 11 | 669 | "*RF vs QRF on validation datasets.* NDS comparison of random forest and quantile regression forest on the three external validation datasets." |
+| 12 | 670 | "*Default hyperparameters used for external validation experiments.* Hyperparameter settings for LogD, Caco-2 Efflux, and hERG K$_i$, including representation-specific SVM kernels." |
+
+### 4b. In-text citations of each additional file
+- AF1 — L197 ("Models used the hyperparameters listed in Additional file~1"), L208 ("All hyperparameters for the models below are included in Additional file~1.")
+- AF2–4 — L264 ("The full redundancy and ICC tables are reported in Additional files~2--4.")
+- AF5 — L247 ("Configurations with baseline R$^2 < 0.3$ were excluded from the robustness analysis (Additional file~5)"), L422 ("excluding 48 configurations for which a near-zero clean-data denominator would make the retention ratio unstable (Additional file~5)"). NOTE: in-text threshold is R² < 0.3; AF5's own description (L663) says "baseline R$^2 \leq 0.6$".
+- AF6 — L433 ("The same ranking pattern holds on the ECFP4 fingerprint (Additional file~6).")
+- AF7 — L433 ("a high clean-data R$^2$ does not inflate it (Additional file~7)")
+- AF8 — L466 ("The choice of transformation varies by representation, as seen in Additional file~8, with SMILES receiving the largest benefits from Bayesian transformations.")
+- AF9 — L531 ("As seen in Table~\ref{tab:top_unc_noise} and Additional file~9…")
+- AF10 — L551 ("The ANOVA on these additional datasets confirms that model architecture dominates robustness variance on all three datasets, as seen in Additional file~10")
+- AF11 — L560 ("QRF was consistently less robust than RF on every external data set (Additional file~11).")
+- AF12 — L197 ("with representation-specific SVM kernels detailed in Additional file~12")
+- Ordering note (L656 claims files "are referenced in the text in the order listed below"): first in-text mentions run 1, 12 (both L197), 1 (L208), 5 (L247), 2–4 (L264), 5 (L422), 6, 7 (L433), 8 (L466), 9 (L531), 10 (L551), 11 (L560).
+
+---
+
+## 5. RESULTS-SECTION CLAIMS (§Results, L375–567), one line each, with backing float
+
+### §5.1 Variance decomposition (L377–422)
+| Line | Claim (quoted) | Backed by |
+|---|---|---|
+| 380 | "for predictive performance (R$^2$ at $\sigma = 0.3$), the model--representation interaction term is the  largest source of variance across all six strategies, followed by model architecture and representation" | T3 `tab:anova_decomposition` + F2a |
+| 380 | "For four of the six strategies (Gaussian, quantile, threshold and value-proportional) the choice of model architecture becomes the largest structured source of variance (36.8--54.7\%)" | T3 + F2 (numbers do not match T3 body; see §2 note) |
+| 380 | "under outlier and heteroscedastic noise, however, the differences between models shrink relative to the run-to-run variance, and the residual term dominates (83.6\% and 77.4\%)" | T3 + F2 (T3 body shows 79.3 and 41.0) |
+| 381 | "The choice of model architecture is instead the largest source of variance, while the interaction term drops to second and representation third." | T3 (duplicate/leftover of L380) |
+| 381 | "This observed inversion makes sense because the molecular representation dictates the chemical information the model receives, while the architecture determines how efficiently that information is used." | NONE (interpretive) |
+| 381 | "In the context of label noise robustness, representation has less of an impact since the features are not corrupted by noise." | NONE (interpretive) |
+| 383 | "The strategies which degraded in performance the most, threshold and value-proportional, both corrupted label regions, forcing models to rely on their inductive biases." | F2b (degradation severity itself not shown in F2) |
+| 383 | "For outlier noise, model and interaction effects were both smaller." | T3 + F2b |
+| 413 | "While some model architectures, like SVM and full BNNs maintain consistent noise robustness scores across all representations, others like NN-$\beta$ display greater variation." | F3a `fig:interaction` |
+| 413 | "Model robustness on one representation strongly predicts robustness on another (Spearman $\rho = 0.82$, $p = 0.002$ for ECFP4 vs PDV; 11 models)." | F3b |
+| 422 | "We filtered out model--representation configurations with baseline predictive performance R$^2 < 0.3$, excluding 48 configurations" | Additional file 5 (no float) |
+| 422 | "We observe that AUC$_\text{norm}$ varies substantially across architectures and noise strategies" | F4 `fig:global_overview` |
+
+### §5.2 Robustness across noise strategies (L431–496)
+| Line | Claim (quoted) | Backed by |
+|---|---|---|
+| 433 | "NGBoost and random forests retained the most predictive performance across all strategies, while NN-$\beta$ retained the least" | T4 `tab:auc_ranking` |
+| 433 | "their ranks across noise strategies were consistent: Kendall's $W = 0.9121$ ($p = 3.55 \times 10^{-8}$; 11 models, 6 strategies), indicating that a model's relative robustness is largely strategy-independent" | NONE (no float; W value in prose only) |
+| 433 | "The same ranking pattern holds on the ECFP4 fingerprint" | Additional file 6 |
+| 433 | "Robustness is also decoupled from baseline predictive performance… a high clean-data R$^2$ does not inflate it" | Additional file 7 |
+| 460 | "The spread of AUC$_{norm}$ across models differed by noise strategy, with outlier noise having a spread of 0.02 and threshold noise having 0.13" | T4 |
+| 460 | "This is consistent with the variance decomposition: outlier and heteroscedastic noise leave most of the AUC$_{norm}$ variance in the residual term, precisely where the spread is narrowest." | T3 + T4 |
+| 460 | "NGBoost was the most resistant to noise across strategies, leading five of the six strategies" | T4 |
+| 460 | "VBLL-$\alpha$ ranked below every tree-based ensemble on all six strategies (mean AUC$_{norm}$ = 0.781, versus 0.814--0.824 for the trees)" | T4 |
+| 460 | "Predictive performance on clean data is not well-correlated with noise robustness. In fact, some of the most noise-robust models across strategies, such as NGBoost and SVM, did not perform particularly well on clean data." | NONE in main text (Additional file 7 cited earlier at L433) |
+| 462 | "As established by the ANOVA, model architecture and the model--representation interaction term dominate NDS variance." | T3 / F2 (uses "NDS"; T3 caption says NDS, F2 says AUC_norm) |
+| 462 | "A handful of models stood out as being noise-robust regardless of representation, namely SVM and full BNNs." | F3a |
+| 462 | "However, other models like RF and NN-$\beta$ show the opposite pattern… PDV stood out as having particularly strong robustness to noise. This suggests that PDVs are preferable when dealing with noisy data." | F3a (interpretive extension) |
+| 464 | "with full Bayesian transformations, representation explains less than $11\%$ of NDS variance ($p > 0.25$) while variational Bayesian inference on the same NNs is representation-dependent" | NONE (no float or additional file cited) |
+| 464 | "all 24 VBLL $\times$ \{MHG-GNN, mol2vec\} configurations were excluded due to baseline R$^2 < 0.6$" | NONE inline (Additional file 5 covers exclusions; not cited here). NOTE threshold 0.6 vs 0.3 at L247/L422. |
+| 466 | "In general, the full Bayesian transformations reduced the degradation in performance with Gaussian noise the most" | F5 `fig:nn_family_comparison` |
+| 466 | "Both full BNN and VBLL transformations significantly improved robustness for both NN-$\alpha$ and NN-$\beta$" | T5 `tab:wilcoxon_bnn` |
+| 466 | "Full transformations are more computationally expensive, making VBLL a potentially stronger approach to handling noise with NNs when working with larger data sets" | NONE (no timing data reported) |
+| 466 | "The choice of transformation varies by representation… with SMILES receiving the largest benefits from Bayesian transformations." | Additional file 8 |
+| 466 | "QRF was significantly less robust than RF… suggesting that quantile regression adds complexity and flexibility which may result in overfitting." | T5 (+ F5c) |
+| 493 | "For SMILES, model choice explains over 91\% of robustness variance, while on PDV, model choice explains 72\%." | NONE |
+| 493 | "Across all six noise strategies, PDV configurations produced the shallowest mean NDSs across representations, with its best performance coming with models with strong inductive biases like SVM and full BNN." | NONE inline (F3a shows PDV column) |
+| 493 | "It appears that PDV's compact feature space complements margin-based and Bayesian regularization." | NONE (interpretive) |
+| 493 | "Embeddings struggled, particularly when paired with NNs." | NONE inline (F3a) |
+| 495 | "we ranked all model--representation configurations on QM9 by their Gaussian NDS. Tree-based ensembles dominate the top 10: NGBoost appears five times, XGBoost and RF twice each, and LightGBM once." | NONE (no float or additional file) |
+| 495 | "No neural-network configuration appears the top 10." | NONE |
+| 495 | "Rankings are consistent across strategies and the top QM9 configurations maintain their advantage on ADME datasets, though SVM configurations rank higher on these ADME datasets than NGBoost." | NONE |
+
+### §5.3 Uncertainty estimation under label noise (L498–540)
+| Line | Claim (quoted) | Backed by |
+|---|---|---|
+| 499 | "While GPs and NGBoost gave the strongest correlations, BNNs were moderate." | T6 `tab:top_unc_noise` |
+| 499 | "Learned embeddings (MHG-GNN and mol2vec) struggled, so much so that their correlations dropped to near zero or below on every model tested." | T6 (contrast block, 4 rows only) |
+| 531 | "NGBoost contains predicted scales that increase to absorb residual" | NONE (citation \citep{Duan2020}, mechanistic) |
+| 531 | "The GP contains has a single global observation noise term. It does not absorb individual residuals, so its per-sample uncertainty derives primarily from the posterior variance rather than label noise" | NONE (literature-based) |
+| 531 | "BNNs treat these large residuals differently; they broaden their weight posteriors, increasing predicted uncertainty without explicitly modeling observation noise" | NONE (literature-based) |
+| 531 | "VBLL adds a learned noise variance to the BNN loss, but this value is a global scalar, independent of the input." | NONE (literature-based) |
+| 531 | "both BNNs and VBLLs achieve moderate correlations which improve when paired with fingerprint or descriptor-based representations" | T6 + Additional file 9 |
+| 531 | "Among models that learn separate distributional parameters during training, GP and NGBoost produced the strongest correlations between uncertainty and label noise, though QRF… produced both poor label predictions and uncertainty-noise correlations." | T6 (QRF does not appear in T6) |
+| 531 | "At the population level, mean predicted uncertainty increases with artificial noise." | F6a `fig:uncertainty_combined` (panel a never explicitly cited) |
+| 531 | "Although we expect to see aleatoric uncertainty increase with injected noise, for VBLL both the aleatoric and epistemic components increased" | F6b |
+| 540 | "The choice of representation has a much stronger impact on per-sample uncertainty tracking than on noise robustness." | T6 (comparison to robustness not shown in one float) |
+| 540 | "Fingerprints and physicochemical descriptors provided a clear signal with which models such as GP and NGBoost could separate noise-induced residuals from structural variation." | T6 |
+| 540 | "learned embeddings such as MHG-GNN and mol2vec did not produce viable uncertainty-noise correlations" | T6 |
+| 540 | "there is room for further investigation, as only two embeddings were tested" | NONE (limitation) |
+
+### §5.4 Validation on experimental datasets (L542–567)
+| Line | Claim (quoted) | Backed by |
+|---|---|---|
+| 551 | "Unlike QM9, where $\sigma = 0$ corresponds to a noise-free baseline, the experimental endpoints carry their own measurement noise in both training and test labels; the injected $\sigma$ therefore stacks on top of an unknown noise floor." | NONE (framing) |
+| 551 | "The ANOVA on these additional datasets confirms that model architecture dominates robustness variance on all three datasets… and that the trends with respect to noise robustness generalize." | Additional file 10 (not a main float) |
+| 551 | "NGBoost ranks first on both QM9 and external datasets, SVM also transfer quite well." | F8b `fig:validation_combined` (+T4 for QM9) |
+| 551 | "Some models' predictive capabilities are limited on these external datasets, likely due to a combination of smaller training sets, narrower chemical coverage, and the unknown experimental noise in the labels." | NONE (speculative; no dataset-size analysis shown) |
+| 551 | "XGBoost and BNN variants suffer the most here" | F8a |
+| 560 | "QRF was consistently less robust than RF on every external data set" | Additional file 11 |
+| 560 | "As seen with QM9, choice of molecular representation has a minimal effect on noise robustness across all three external datasets, reinforcing the finding that model architecture, not representation, is the main driver of noise robustness." | Additional file 10 (F7 shows model×strategy, not representation) |
+| 562 | "noise robustness… is primarily determined by the model's training mechanism" | T3/F2 (summary) |
+| 562 | "The margin maximization of SVM, the weight priors of BNNs, and the ensembling in tree methods all appear to keep those models from fitting to noise." | NONE (mechanistic interpretation) |
+| 562 | "The choice of representation has a stronger influence on predictive performance than noise robustness, accounting for less than \~10\% of the variance in robustness." | T3 (Rep robustness column 3.2–10.1) |
+| 562 | "some models like SVM and full BNNs remain robust across all representations, while RF and NNs are robust only with certain ones" | F3a |
+| 562 | "While the pattern of noise has a strong impact on predictive performance, it does not influence noise robustness rankings between models or representations much." | T4 (Kendall's W, prose only) |
+| 564 | "Some models struggle, particularly those like BNNs whose uncertainty comes from a posterior over weights or QRF which does produce a full quantile, but is unable to successfully track noise." | T6 (QRF absent from T6) |
+| 565 | "Models that fit a separate, per-sample scale or observation-noise parameter during training are able to track that label noise more effectively." | T6 |
+| 565 | "Similarly, the GP absorbs these larger residuals with a per-sample posterior variance." | NONE (contradicts L531's "single global observation noise term… does not absorb individual residuals") |
+| 565 | "Among representations, uncertainty tracking collapses with the learned embeddings MHG-GNN and mol2vec, while fingerprints and descriptors produce a viable signal." | T6 |
+| 565 | "Neither strong predictive performance nor noise robustness implies noise tracking" | NONE |
+| 567 | "PDVs produce the strongest predictive performance on clean data, but are the least noise-resistant." | NONE (contradicts L462 "PDV stood out as having particularly strong robustness to noise" and L493 "PDV configurations produced the shallowest mean NDSs") |
+| 567 | "Embeddings, particularly mol2vec, are the most robust to noise yet perform the worst noise tracking." | NONE for robustness half (contradicts L573 "embeddings (MHG-GNN, mol2vec) struggled with regards to noise robustness"); T6 for tracking half |
+| 567 | "At the end of the day, the choice of both model and representation comes down to your problem, including the amount of noise in your data, your objectives, and your compute limits." | NONE (advice) |
+
+---
+
+## 6. TERMINOLOGY / METRIC INCONSISTENCIES RECORDED (not evaluated)
+- Both "AUC$_\text{norm}$" and "NDS (noise degradation slope)" are used as the robustness metric. AUC_norm is defined at L240–247 and in T1 (L279–281); NDS is never defined in Methods but is used in T3 caption (L387), T5 caption/column (L470, L475), F8 caption (L556), L462, L464, L493, L495, L551, L571, L573, and Additional files 2–11 descriptions (L660–669), plus Declarations L620.
+- ECE is defined (L234–238), listed in T1 (L300–302), reported in T6 (L508–526), and named in Declarations (L620) and Abbreviations (L587).
+- Baseline exclusion threshold appears as R² < 0.3 (L247, L422, F3 caption L418, F7 caption L547) and as R² ≤ 0.6 / R² < 0.6 (L464, AF5 at L663).
+- Editorial TODO markers left in file: L249 "% CLean this whole fucking thing", L379 "% TODO: review", L459 "% TODO: review".

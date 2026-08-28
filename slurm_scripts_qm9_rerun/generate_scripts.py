@@ -234,6 +234,33 @@ MODELS = {
                    'Tanimoto GP. Only defined on BINARY fingerprints, so ecfp4/sns only. '
                    'This is the RBF-vs-Tanimoto head-to-head; the figure script gives it its '
                    'own colour and marker and labels it GP', FP_REPS),
+    # ---------------------------------------------------------------------
+    # THE DECOMPOSITION MODELS, added 2026-08-28.
+    #
+    # Not one model above reports BOTH components per molecule: the forests do
+    # now, but every other one has a data-noise term that is either absent or a
+    # single number broadcast onto every row, and a constant correlates with
+    # per-molecule injected noise at exactly zero however good the model is
+    # (RERUN_PLAN.md 5.5a point 5). These two are the ones that can answer the
+    # question at all. Both were written and neither had ever been in a job
+    # script, so neither has run under a real job -- which is itself worth
+    # knowing before the grid is committed.
+    # ---------------------------------------------------------------------
+    'heteroscedastic_gp': ('-m het_gp --kernel rbf -u True', 3, 47,
+                   'Gaussian process whose observation noise is predicted per molecule by a '
+                   'second network. Measured locally at R2 0.5315 against 0.5318 for the '
+                   'ordinary one on identical data, so it is free, and its data-noise term '
+                   'tracks the true noise size at rho +0.73 while its model term sits at '
+                   '-0.16 (RERUN_PLAN.md 5.5e)', ALL_REPS),
+    'dnn_bnn_full_variational_hetero': (
+                   '-m dnn --bayesian-transformation full_variational '
+                   '--heteroscedastic-vbll -u True', 3, 47,
+                   'VBLL-alpha with a noise head, so its data-noise term varies per molecule '
+                   'instead of being one number per fit (RERUN_PLAN.md 5.5f)', ALL_REPS),
+    'mlp_bnn_full_variational_hetero': (
+                   '-m mlp --bayesian-transformation full_variational '
+                   '--heteroscedastic-vbll -u True', 3, 47,
+                   'VBLL-beta with a noise head', ALL_REPS),
 }
 
 # Excluded from EVERY figure by GLOBAL_MODELS_EXCLUDE, so re-running them

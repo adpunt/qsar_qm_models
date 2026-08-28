@@ -395,6 +395,27 @@ def parse_arguments():
     #                 choices=['rf', 'xgboost', 'dnn', 'qrf', 'gauche', 'gin', 'gcn'],
     #                 help='Base model for conformal prediction')
     parser.add_argument('--use-best-params', action='store_true')
+    # The variational layer's observation noise, per molecule instead of one
+    # number for the whole fit.
+    #
+    # Without this the layer holds a single learned noise, so its data-noise term
+    # is identical for every molecule and its correlation with per-molecule
+    # injected noise is ZERO however good the model is -- a mechanism, not a
+    # result, and one that plausibly explains the coverage anomaly open since
+    # June (RERUN_PLAN.md 5.5, 5.5f). The layer has been able to do this since
+    # 2026-08-28 and nothing could reach it: there was no flag and no roster
+    # entry. The row name gains `_hetero`, because the two models report
+    # different KINDS of term and one name over both would make a per-molecule
+    # column and a broadcast constant indistinguishable in the output.
+    #
+    # Only meaningful with --bayesian-transformation variational or
+    # full_variational; refused otherwise rather than silently ignored.
+    parser.add_argument(
+        '--heteroscedastic-vbll', action='store_true',
+        help=("Give the variational last layer a noise head that predicts the "
+              "observation noise from the molecule, following HetRegression in "
+              "research_archive/f692d614/vbll_regression.py. Requires "
+              "--bayesian-transformation variational or full_variational."))
     parser.add_argument(
         "--bayesian-transformation",
         type=str,
@@ -505,6 +526,20 @@ def parse_arguments():
             f"EXCLUDED_MODELS, the figure script drops its rows when it loads them, "
             f"and no table reads one. The training code is still in models.py if it "
             f"is ever wanted back; the dispatch in this file is what was removed."
+        )
+
+    # A flag that is silently ignored is a flag that produced a whole run of the
+    # WRONG model under the right name. --heteroscedastic-vbll only means
+    # anything to a variational layer, so asking for it anywhere else stops the
+    # job rather than writing rows labelled `_hetero` that carry a broadcast
+    # constant (RERUN_PLAN.md 5.5f).
+    if getattr(args, 'heteroscedastic_vbll', False) and \
+            args.bayesian_transformation not in ('variational', 'full_variational'):
+        parser.error(
+            "--heteroscedastic-vbll needs a variational last layer to attach its "
+            "noise head to. Pass --bayesian-transformation full_variational (or "
+            "variational), or drop the flag. It was "
+            f"{args.bayesian_transformation!r}."
         )
 
     # One fold cannot score anything out of fold: the single "held-out" part is

@@ -1,0 +1,147 @@
+## 1. `write_data` noise applied to val/test — **FIXED (uncommitted, binary not rebuilt)**
+
+- `apply_noise: bool` param added: `rust/src/main.rs:623`
+- Guard: `rust/src/main.rs:750` — `if config.noise && apply_noise {`
+- Call sites in `preprocess_data`: train `rust/src/main.rs:1028` `true`; val `rust/src/main.rs:1055` `false`; test `rust/src/main.rs:1082` `false`
+- Comment documenting the old bug: `rust/src/main.rs:742-748`
+
+Caveats:
+- **Uncommitted.** `git diff --stat rust/src/main.rs` → 12 insertions / 2 deletions; last commit touching the file is `8bcda92` (2026-02-27). The fix exists only in the working tree.
+- **No release binary exists locally**: `rust/target/release/` — DOES NOT EXIST (only `rust/target/debug/`). `scripts/process_and_train.py:1849` invokes `../rust/target/release/rust_processor`. Any ARC binary predates the fix unless `cargo build --release` is re-run there.
+- Consequence not yet handled downstream: `y_true_noisy` passed to `save_uncertainty_values` is the test split's processed target (`models/models.py:1406-1407`, `models/models.py:1559-1560`). Post-fix that equals `(raw-mean)/std` exactly, so the `injected_noise` column (`scripts/utils.py:213-222`, linregress residual) becomes ≡0 for every σ. Anything keyed on `injected_noise` is now a zero column, not a fix.
+
+## 2. Threshold compares the **RAW** label — NOT FIXED
+
+`rust/src/main.rs:364-373`:
+```rust
+for &idx in indices {
+    if idx < target_values.len() {
+        let value = target_values[idx];
+        let sigma = if value >= high_threshold { high_sigma }
+                    else if value <= low_threshold { low_sigma }
+                    else { mid_sigma };
+```
+`target_values` comes from `read_all_target_values` → `smiles_data.target_value`, the raw f32 read at `rust/src/main.rs:542`. Normalisation happens later and separately, at `rust/src/main.rs:759-761`, inside `write_data`. So the cut-points are compared in raw target units (eV for QM9 gap), with defaults ±1.0 (`rust/src/main.rs:1195-1196`). Same for Quantile (`:342-348`), Outlier z-score (`:387-396`), Heteroscedastic (`:413`), ValueProportional (`:313`) — all raw.
+
+## 3. LeftTailed / RightTailed / UShaped — **still present, still broken (NOT FIXED)**
+
+Duplicated in two places: `rust/src/main.rs:211-264` (`generate_noise_by_indices`, legacy path) and `rust/src/main.rs:461-496` (`sample_from_distribution`, all adaptive strategies).
+
+**LeftTailed** (`rust/src/main.rs:465-471`):
+```rust
+let skewed = if sample >= 0.0 { let compressed = sample.powf(0.5); -compressed.min(10.0) }
+             else { let stretched = sample * 1.5; stretched.max(-10.0) };
+```
+Both branches produce ≤ 0. Support is (-∞, 0]. This is a systematic negative label shift, not zero-mean noise. `powf(0.5)` on a σ-scaled sample is also not scale-equivariant, so realised magnitude does not scale linearly with the requested σ.
+
+**RightTailed** (`rust/src/main.rs:480-486`): sign is preserved, but `sample.powf(1.5)` on the positive side and `-(-sample).powf(0.5)` on the negative side give different magnitude transforms; realised SD ≠ σ and again not linear in σ.
+
+**UShaped** (`rust/src/main.rs:491-496`):
+```rust
+let beta = Beta::new(0.5, 0.5).unwrap();
+let sample = beta.sample(rng);
+let k = sigma * 2.0 * 3_f32.sqrt();
+((sample - 0.5) * 2.0 * k as f64) as f32
+```
+Var(Beta(0.5,0.5)) = 0.125. Output variance = 4k²·0.125 = 0.5k²; k² = 12σ² → variance = 6σ², SD = √6·σ ≈ **2.449σ**. The comment at `rust/src/main.rs:260-262` claims variance = σ². Off by √6.
+
+**Uniform** (`rust/src/main.rs:498-502`) is the only non-Gaussian one that is correct: a = σ√3 → Var = a²/3 = σ².
+
+Reachability: only via `--noise_distribution left-tailed|right-tailed|u-shaped` (`rust/src/main.rs:1128-1130`), fed from `--distribution`, whose default is `gaussian` (`scripts/process_and_train.py:241`). Inert for gaussian runs, live landmine for anything else.
+
+## 4. `--strategy_params` — **NOT PASSED. NOT FIXED.**
+
+`scripts/process_and_train.py:1628-1641`:
+```python
+proc_a = subprocess.Popen(
+    [
+        rust_executable_path,
+        '--seed', str(iteration_seed),
+        '--model', "rf",
+        '--sigma', str(s),
+        '--noise_distribution', args.distribution,
+        '--noise_strategy', args.noise_strategy,
+    ],
+```
+No `--strategy_params`. The Python flag `--strategy-params` is declared at `scripts/process_and_train.py:260` and referenced **nowhere else** in the repo (grep over `models/ scripts/ slurm_scripts_analysis/` returns only line 260). Note the naming mismatch too: rust's flag is `--strategy_params` (underscore, `rust/src/main.rs:1112-1115`).
+
+Consequence: `strategy_params` is an empty JSON object (`rust/src/main.rs:1157`), every `.get(...).unwrap_or(default)` falls through, and **`scripts/noise_strategy_params.json` is dead** — including its `base_sigma: 0.1` / `proportionality_factor: 0.05`.
+
+## 5. Built-in defaults actually applied (σ = `--sigma`, v = raw target value of that molecule)
+
+Parsed at `rust/src/main.rs:1161-1239`; applied in `generate_adaptive_noise` / `generate_noise_by_indices`. All noise ~ N(0, σ_i²) since distribution defaults to Gaussian.
+
+| strategy | rust arg | σ_i per molecule | evidence |
+|---|---|---|---|
+| gaussian (legacy) | `legacy` | σ_i = **σ** | `:1163-1166`, `:207-208` |
+| value-proportional | `value_proportional` | base_sigma = σ (`unwrap_or(sigma)`), factor = 0.1 → σ_i = **σ·(1 + 0.1·\|v\|)** | `:1176-1177`, `:313` |
+| quantile | `quantile` | q_hi = 90th pct, q_lo = 10th pct of **all train raw targets**; σ_i = **2σ** if v ≥ q_hi, **2σ** if v ≤ q_lo, else **0.1σ** | `:1184-1188`, `:328-348` |
+| threshold | `threshold` | σ_i = **2σ** if v ≥ **+1.0**, **2σ** if v ≤ **−1.0**, else **0.1σ** | `:1195-1199`, `:364-373` |
+| outlier | `outlier` | μ, s = mean and **population** SD (÷N) of train raw targets; z = \|v−μ\|/s; σ_i = **3σ** if z > **2.0**, else **0.1σ** | `:1206-1208`, `:387-401` |
+| heteroscedastic | `heteroscedastic` | α = σ²·0.1, β = σ²·0.05 → σ_i = **sqrt(0.1σ² + 0.05σ²·\|v\|) = σ·sqrt(0.1 + 0.05·\|v\|)** | `:1215-1216`, `:413` |
+| (scaffold, not one of the 6) | `scaffold` | σ_i = 0.1σ for all indices; test/val sigmas parsed but never used; prints per-index noise to stdout | `:1223-1225`, `:420-439` |
+
+Notes: high and low multipliers are both 2.0 for quantile and threshold, so the "high/low" split is cosmetic. `sample_from_distribution` returns **0.0** (not NaN) whenever σ_i ≤ 0 (`rust/src/main.rs:450-453`), so σ=0 silently means no noise.
+
+## 6. Truncation risks
+
+**(a) `continue` in the ECFP4 block — REAL, NOT FIXED.**
+Two sites: `rust/src/main.rs:831` (`u64_vec.len() != 32`) and `rust/src/main.rs:848` (`smiles_to_mol` Err). Both are inside `for index in 0..data_count` (`:625`), and the ECFP4 write at `:839` is the **last** field of the record — everything before it (`:637`–`:815`: iso SMILES, canonical SMILES, raw target, all rep buffers, processed target, domain flag, SMILES OHE) has already been written. So `continue` leaves a record short by exactly its 256-byte ECFP4 block. `parse_mmap` reads a fixed 256 bytes at that offset (`scripts/process_and_train.py:1206`), so one hit desynchronises **every subsequent record in the file**, and the misparse is swallowed by the bare `except: continue` at `scripts/process_and_train.py:1224-1227`. Silent, unbounded corruption.
+
+Related, same loop: if `read_smiles_data` returns `None` (`:626` `if let Some`), no record is written at all — output has fewer records than `data_count`, while `parse_mmap` is called with `len(train_idx)` (`scripts/process_and_train.py:1785-1796`).
+
+**(b) Index drift in `read_all_target_values` — REAL mechanism, but does NOT fire for QM9. NOT FIXED.**
+`rust/src/main.rs:180-188`:
+```rust
+for _index in 0..config.train_count {
+    if let Some(smiles_data) = read_smiles_data(...) {
+        target_values.push(smiles_data.target_value);
+    }
+}
+```
+Position in `target_values` is the push counter, not the record index. Noise indices are `0..train_count` (`:1144-1147`) and are used as direct subscripts (`:311`, `:340`, `:365`, `:394`, `:411`). Any skip shifts every later target by one and silently drops noise for indices ≥ `target_values.len()` (the `if idx < target_values.len()` guards). Worse: the skip at `rust/src/main.rs:531-534` returns after consuming only the isomeric-SMILES field, leaving the reader mid-record — a full stream desync, not a shift. Same untracked pattern in `generate_aggregate_stats` (`:951-967`).
+
+Verified the trigger does not fire for QM9: the reject condition is `len < 5 || len > 300 || contains ['\u{FFFD}','\0','\'','�']`. PyG's `data.smiles` for QM9 retains explicit hydrogens — first records of `data/QM9/raw/gdb9.sdf` are `[H]C([H])([H])[H]`, `[H]N([H])[H]`, `[H]O[H]`, `[H]C#N`; over the first 3000 molecules the minimum SMILES length is **6**. So `len < 5` never trips for QM9. It is live for ADME/MoleculeNet (`scripts/process_and_train.py:412-593`), where short SMILES (`CCO`, `CC`) are plausible.
+
+## 7. What rust emits — mean/sd, ε, molecule id, split, strategy: **NONE of them**
+
+`main.rs` writes exactly one kind of output: the rewritten `train_/val_/test_{file_no}.mmap` binary (`rust/src/main.rs:1006-1085`). No CSV, no JSON, no log file.
+
+- **normalisation mean/sd**: computed at `rust/src/main.rs:973-978`, returned in-process to `main` (`:1249-1250`), passed to `preprocess_data`. Never written anywhere. NOT EMITTED.
+- **per-molecule injected ε**: `noise_map` is an in-memory `HashMap<usize,f32>` (`:1242-1247`), added to the label at `:751` and discarded. NOT EMITTED. (Only the `scaffold` branch prints per-index noise to stdout, `rust/src/main.rs:432`, and scaffold is not one of the 6 strategies.)
+- **molecule identifier**: the mmap record does carry isomeric + canonical SMILES (`:637-656`), and `parse_mmap` decodes both (`scripts/process_and_train.py:1072`, `:1080`) — then discards them; they are appended to no output array. NOT EMITTED to any CSV.
+- **split name**: NOT EMITTED (implicit in filename only, and the mmaps are deleted at `scripts/process_and_train.py:1832`).
+- **strategy name**: NOT EMITTED. `--noise_strategy` is consumed at `rust/src/main.rs:1161` and never recorded; the results CSVs have no strategy column — strategy is encoded only in the output *filename* chosen by the SLURM caller.
+
+Rust stdout (sigma echo at `rust/src/main.rs:1136`) is captured and reprinted by `scripts/process_and_train.py:1642-1645` → job log only.
+
+The mmap record itself contains, in order: iso-SMILES (len-prefixed), canonical SMILES (len-prefixed), **raw** target f32, [randomized SMILES], [rep buffers], **processed** target f32 (noisy+normalised for train, clean+normalised for val/test), [domain byte], [SMILES OHE], [ECFP4 256B].
+
+**Prediction/metric output** — `save_results`, `scripts/utils.py:23-38`, columns:
+`sigma, iteration, model, rep, sample_size, mae, mse, rmse, r2, pearson_corr, params_source, loss_function`
+(no per-sample predictions, no molecule id, no strategy).
+
+**Uncertainty output** — `save_uncertainty_values`, `scripts/utils.py:200-268`, one row per test sample, columns:
+`model, representation, sigma, iteration, file_no, sample_idx, y_pred_mean, y_pred_std_uncalibrated, y_true_original, y_true_noisy, injected_noise, y_pred_std_calibrated, temperature, epistemic_uncertainty, aleatoric_uncertainty`
+`sample_idx` is a positional counter, not a molecule id. `injected_noise` is **reconstructed** by linear regression of `y_true_noisy` on `y_true_original` (`scripts/utils.py:216-224`), not read from rust — and post-fix it is identically ~0 on test.
+
+**Conformal output** — `save_conformal_intervals`, `scripts/utils.py:271-299`: `y_true, y_pred, y_lower, y_upper, interval_width, coverage, alpha, model_name, rep, sigma_noise, iteration, file_no, empirical_coverage`.
+
+## 8. `cargo check` — **PASSES**
+
+`cd /Users/apunt/repos/qsar_qm_models/rust && cargo check` → **exit status 0**, `Finished dev profile`. 0 errors, 19 warnings, all dead-code/unused:
+- `struct PlotPoint` never constructed (`src/main.rs:79`)
+- `fn tanimoto_distance` never used (`src/main.rs:866`)
+- `fn mean_absolute_error` (`:885`), `fn mean_squared_error` (`:891`), `fn root_mean_squared_error` (`:897`), `fn r2_score` (`:901`) never used
+- `Config` fields flagged by dead-code analysis
+
+Note this is the **debug** profile. `rust/target/release/` DOES NOT EXIST — a `cargo build --release` has not been run in this working tree since the `apply_noise` edit.
+
+## Code work required before spending compute
+
+1. Commit the `apply_noise` fix and rebuild the release binary on ARC — nothing in the current tree can produce corrected runs.
+2. Pass `--strategy_params` from `scripts/process_and_train.py:1628` (or delete `--strategy-params` at `:260` and document the built-in defaults as the real ones). Decide which — the paper's stated ValProp factor depends on it.
+3. Decide whether Threshold's ±1.0 raw cut-points are intended; on QM9 gap they make Threshold identical to Gaussian at 2σ.
+4. Fix or remove LeftTailed/RightTailed/UShaped, and de-duplicate the two copies (`:211-264` vs `:461-496`).
+5. Restructure `write_data` so ECFP4 failure skips the whole record (buffer the record, write atomically) instead of emitting a truncated one; make `read_all_target_values`/`generate_aggregate_stats` track the record index explicitly rather than the push counter.
+6. Emit mean/sd, per-molecule ε, canonical SMILES, split and strategy from rust (or thread the SMILES through `parse_mmap` into the uncertainty CSV) — otherwise no per-sample uncertainty claim can be grounded, and `injected_noise` is now a zero column.

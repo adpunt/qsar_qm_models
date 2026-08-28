@@ -1,0 +1,402 @@
+{
+ "artifacts": [
+  {
+   "name": "data_gaps.csv",
+   "kind": "table",
+   "producer": "audit_data_completeness() @ scripts/generate_paper_figures_v2.py:731-732 (called main:4032)",
+   "dims_shown": "model x rep x strategy rows, plus status/n_iterations/n_sigmas/missing_sigmas/problems",
+   "dims_collapsed": "sigma collapsed to a count+missing-set; replicate collapsed to nunique('iteration') (L681); no metric value at all",
+   "metric": "none (completeness audit: n_iterations, n_sigmas, status)",
+   "hardcoded_params": "EXPECTED_SIGMAS = {0.0..1.0 step .1} @660; EXPECTED_REPS = {'ecfp4','continuous_pdv','smiles','mhggnn','mol2vec'} @660; EXPECTED_STRATEGIES = set(STRATEGY_ORDER) @661; min_iterations=5 default @653; UNUSABLE if n_iters<5, WARNING if missing sigmas or n_iters<10 @688-697; ANOVA_MODELS_EXCLUDE + ANOVA_REPS_EXCLUDE applied @664-667; prints only first 30 rows per status @744"
+  },
+  {
+   "name": "uncertainty_gaps.csv",
+   "kind": "table",
+   "producer": "audit_uncertainty_completeness() @814-815 (called main:4034)",
+   "dims_shown": "model x rep x strategy rows with n_sigmas, n_rows, problems",
+   "dims_collapsed": "sigma -> count; per-sample rows -> count; no metric",
+   "metric": "none (completeness audit)",
+   "hardcoded_params": "EXPECTED_SIGMAS @754; unc col picked in priority order y_pred_std_calibrated > y_pred_std > uncertainty > std @757-761; near-zero gate mean|unc|<1e-3 @786; small-data gate n_samples<100 @795"
+  },
+  {
+   "name": "filtered_catastrophic_iterations.csv",
+   "kind": "table",
+   "producer": "filter_catastrophic_iterations() builds log @819-864; written in main() @4023",
+   "dims_shown": "model, rep, strategy, sigma, iteration, r2 \u2014 one row per catastrophic R2",
+   "dims_collapsed": "nothing (fully long)",
+   "metric": "raw per-iteration r2",
+   "hardcoded_params": "CATASTROPHIC_R2_THRESHOLD = -0.5 @437 used as default r2_threshold @819; whole iteration dropped if ANY sigma is below @843-856"
+  },
+  {
+   "name": "data_inventory.csv",
+   "kind": "table",
+   "producer": "main() @4048-4056",
+   "dims_shown": "model x rep x strategy with n_iterations, n_sigmas",
+   "dims_collapsed": "sigma and replicate -> nunique counts; no metric",
+   "metric": "none (counts)",
+   "hardcoded_params": "restricted to ANOVA_MODELS_EXCLUDE/ANOVA_REPS_EXCLUDE complement @4043-4046; console pivot uses MIN over strategies @4060"
+  },
+  {
+   "name": "fig_methods_noise_strategies.png",
+   "kind": "figure",
+   "producer": "create_methods_figure() @2529-2639 (savefig @2636)",
+   "dims_shown": "6 panels = 6 strategies (3x2 grid), each showing clean vs noisy label histogram",
+   "dims_collapsed": "no model/rep/dataset at all \u2014 SYNTHETIC data, not experimental results; single sigma; single RNG draw",
+   "metric": "label-distribution density + RMSE(y_noisy, y_clean) annotation @2622",
+   "hardcoded_params": "np.random.seed(42) @2538; n_samples=2000 @2541; synthetic 3-component Gaussian mixture means/SDs -0.5/0.3, 0.2/0.4, 0.8/0.25 @2542-2546; sigma=0.5 @2578; valprop factor 0.1 @2557; quantile cut 0.1/0.9 with multipliers 2.0/0.1 @2559-2561; threshold median split multipliers 2.0/0.1 @2563-2565; outlier |z|>2.0 multipliers 3.0/0.1 @2567-2569; hetero alpha=0.1 beta=0.05 @2571-2573; 51 bins @2597; strategies = STRATEGY_ORDER @2577. NOTE these formulas are re-implemented in Python here and are NOT the Rust injector."
+  },
+  {
+   "name": "fig1_global_overview.png",
+   "kind": "figure",
+   "producer": "create_figure1() @2650-2726 (savefig @2721)",
+   "dims_shown": "Panel a: R2 vs sigma for 7 models (lines). Panel b: heatmap model (rows) x strategy (cols)",
+   "dims_collapsed": "Panel a: rep FIXED to PRIMARY_REP, strategy FIXED to 'legacy', replicate averaged via groupby('sigma')['r2'].mean() @2668. Panel b: sigma collapsed into auc_norm, rep FIXED to PRIMARY_REP @2685, replicate collapsed by pivot_table aggfunc='mean' @2694",
+   "metric": "a) mean R2 per sigma; b) auc_norm",
+   "hardcoded_params": "key_models = ['rf','qrf','dnn','mlp','ngboost','xgboost','gauche_rbf'] @2657; strategy=='legacy' @2658; rep==PRIMARY_REP @2658; ylim (0.3,1.0) @2676; heatmap vmin/vmax = 0.4, 1.0 @2711; 'gauche' dropped from the PDV heatmap row list @2690; strategy column order = STRATEGY_ORDER @2691"
+  },
+  {
+   "name": "fig1_supp_ecfp4_overview.png",
+   "kind": "figure",
+   "producer": "create_figure1() ECFP4 variant @2728-2781 (savefig @2779)",
+   "dims_shown": "same two panels as fig1 but rep = ecfp4",
+   "dims_collapsed": "strategy FIXED to 'legacy' in panel a @2733; replicate averaged @2741; sigma -> auc_norm in panel b; PDV_ONLY_MODELS dropped @2763",
+   "metric": "a) mean R2 per sigma; b) auc_norm",
+   "hardcoded_params": "rep=='ecfp4' literal @2733 and @2761; same key_models list @2657; ylim (0.3,1.0) @2746; vmn_e,vmx_e = 0.4,1.0 @2769"
+  },
+  {
+   "name": "fig2_anova_decomposition.png",
+   "kind": "figure",
+   "producer": "create_figure2() @2790-2870 (savefig @2867); panels via _plot_anova_panel @2822-2857",
+   "dims_shown": "x-axis = 6 strategies; grouped bars = Model / Representation / Interaction / Residual eta2; panel a = performance, panel b = robustness",
+   "dims_collapsed": "Panel a: ONE sigma only (0.3) and model/rep pooled into SS; replicate = within-cell residual. Panel b: sigma collapsed into per-iteration auc_norm (run_robustness_anova @2059-2074); rep is a factor not a filter; datasets = QM9 only",
+   "metric": "eta2 (%) from Type-I / balanced two-way SS on r2 (a) and auc_norm (b)",
+   "hardcoded_params": "run_anova_decomposition sigma_value=0.3 default @1935 with tolerance |sigma-0.3|<0.05 @1940; r2 > -10 gate @1946; ANOVA_REPS_EXCLUDE/ANOVA_MODELS_EXCLUDE @1947-1948; balanced-design drop of models missing any rep @1954-1957; robustness gate ROBUSTNESS_BASELINE_THRESHOLD=0.3 @2059; MIN_CELL_ITERS=5 balance gate @2026; bar order strat_order = ['legacy','valprop','quantile','threshold','hetero','outlier'] @2820 (DIFFERENT from STRATEGY_ORDER @85); ylim 0..100 @2856"
+  },
+  {
+   "name": "table1_anova_summary.csv",
+   "kind": "table",
+   "producer": "create_figure2() @2872-2888",
+   "dims_shown": "one row per strategy; columns Perf_/Robust_ x Model/Rep/Interaction/Residual eta2",
+   "dims_collapsed": "same as fig2 \u2014 model, rep, replicate all collapsed into variance shares; performance row is sigma=0.3 only; robustness row integrates all sigma",
+   "metric": "eta2 % (performance on r2 @ sigma=0.3; robustness on per-iteration auc_norm)",
+   "hardcoded_params": "inherits sigma_value=0.3 @1935, ROBUSTNESS_BASELINE_THRESHOLD=0.3 @2059, MIN_CELL_ITERS=5 @2026, ANOVA exclusions @128-143; row order comes from set() iteration @2873 (non-deterministic ordering)"
+  },
+  {
+   "name": "table1_supp_simple_effects.csv",
+   "kind": "table",
+   "producer": "run_simple_effects_analysis() @2132-2231 (to_csv @2230; called from create_figure2 @2903)",
+   "dims_shown": "Strategy x Analysis(Performance|Robustness) x Type(Model effect|Rep effect) x Within(level) with eta2, F, p, n",
+   "dims_collapsed": "Performance rows: single sigma 0.3. Robustness rows: sigma -> auc_norm per iteration. Replicate becomes the within-group n. Datasets: QM9 only",
+   "metric": "one-way eta2 + F + p",
+   "hardcoded_params": "sigma window |sigma-0.3|<0.05 @2146; r2>-10 @2147; ANOVA_REPS_EXCLUDE/ANOVA_MODELS_EXCLUDE @2148-2149 and @2196-2197; BASELINE_THRESHOLD=0.6 used for the robustness auc gate here @2189 (NOT the 0.3 robustness gate used elsewhere \u2014 inconsistent with run_robustness_anova); min 10 rows to run @2151/@2194; groups need >=2 members @2098"
+  },
+  {
+   "name": "table1_supp_simple_effects_all_reps.csv",
+   "kind": "table",
+   "producer": "run_simple_effects_analysis() supplementary block @2246-2312 (to_csv @2308)",
+   "dims_shown": "same shape as table1_supp_simple_effects but with NO ANOVA model/rep exclusions (adds sns, randomized_smiles, qrf, gauche etc.)",
+   "dims_collapsed": "same collapses; PDV_ONLY_MODELS still removed @2249",
+   "metric": "one-way eta2 + F + p",
+   "hardcoded_params": "PDV_ONLY_MODELS exclusion @2249; sigma 0.3 window @2259; r2>-10 @2260; BASELINE_THRESHOLD=0.6 @2285; min 10 rows @2262/@2290"
+  },
+  {
+   "name": "fig3_ranking_consistency.png",
+   "kind": "figure",
+   "producer": "create_figure3() @2911-2957 (savefig @2955)",
+   "dims_shown": "single scatter: baseline_r2 (x) vs auc_norm (y), one point per model (marker/color by model)",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP @2915, strategy FIXED to 'legacy' @2916, sigma collapsed into auc_norm, replicate already collapsed inside calculate_robustness; validation_df and val_auc_df are ACCEPTED AS ARGS BUT UNUSED in the body",
+   "metric": "baseline_r2 vs auc_norm + Spearman rho of the model-level cloud",
+   "hardcoded_params": "rep==PRIMARY_REP @2915; strategy=='legacy' @2916; y-pad max((yhi-ylo)*0.25, 0.02) @2933; p>=0.05 -> 'n.s.' @2947; requires >=3 points @2944. Docstring says 'heatmaps, cross-dataset' \u2014 stale; the ECFP4 supplementary variant was cut @2959"
+  },
+  {
+   "name": "fig_interaction.png",
+   "kind": "figure",
+   "producer": "create_interaction_figure() @3768-3873 (savefig @3870)",
+   "dims_shown": "Panel a: heatmap model x rep. Panel b: scatter auc_norm(ECFP4) vs auc_norm(PDV) per model",
+   "dims_collapsed": "strategy FIXED to 'legacy' @3781; sigma -> auc_norm; replicate collapsed by pivot_table/groupby mean @3790, @3826-3827; ANOVA_REPS_EXCLUDE applied @3783; PDV_ONLY_MODELS dropped @3785",
+   "metric": "auc_norm",
+   "hardcoded_params": "strategy=='legacy' @3781; rep_order = ['ecfp4','continuous_pdv','smiles','mol2vec','mhggnn'] @3795; rep kept only if >=3 non-NaN models @3794; heatmap vmin/vmax = data min/max (NOT fixed) @3808-3809; scatter needs >=3 shared models @3823; extra_filters={'strategy':'legacy'} for annotations @3801"
+  },
+  {
+   "name": "fig_nn_family_comparison.png",
+   "kind": "figure",
+   "producer": "create_nn_family_comparison() @2966-3040 (savefig @3037)",
+   "dims_shown": "3 stacked panels: NN-alpha family, NN-beta family, RF vs QRF \u2014 R2 vs sigma lines",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP, strategy FIXED to PRIMARY_STRATEGY ('legacy') @2990; replicate averaged groupby('sigma')['r2'].mean() @2999",
+   "metric": "mean R2 per sigma",
+   "hardcoded_params": "dnn_variants = ['dnn','dnn_bnn_full','dnn_vbll'] @2975; mlp_variants = ['mlp','mlp_bnn_full','mlp_vbll'] @2976; rf_models = ['rf','qrf'] @2977; strategy = PRIMARY_STRATEGY @2988; rep = PRIMARY_REP @2990; ylim (0.3,1.0) @3012; legend column lists alpha_col/beta_col @3027-3028"
+  },
+  {
+   "name": "table_nn_family_auc.csv",
+   "kind": "table",
+   "producer": "create_nn_family_comparison() @3042-3050",
+   "dims_shown": "rows = the 8 family models, columns = strategies (ALL strategies present)",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP @3044; sigma -> auc_norm; replicate collapsed via aggfunc='mean' @3046",
+   "metric": "auc_norm",
+   "hardcoded_params": "all_family_models = dnn_variants + mlp_variants + rf_models @3043; rep==PRIMARY_REP @3044; column order = whatever pivot_table produced (NOT STRATEGY_ORDER) @3046-3048"
+  },
+  {
+   "name": "fig_uncertainty_combined.png",
+   "kind": "figure",
+   "producer": "_create_combined_uncertainty_figure() @3061-3220 (savefig @3217); invoked by create_uncertainty_figure() @3223-3239",
+   "dims_shown": "Panel a: mean predicted uncertainty vs sigma, one line per model. Panel b (only if aleatoric/epistemic columns are populated): aleatoric (solid) vs epistemic (dashed) vs sigma",
+   "dims_collapsed": "strategy FIXED to PRIMARY_STRATEGY ('legacy') @3230; rep FIXED to PRIMARY_REP @3231; all test samples averaged per sigma @3128-3134; replicate/iteration pooled into the same mean",
+   "metric": "mean predicted uncertainty (column chosen from y_pred_std_calibrated > y_pred_std > uncertainty > std @3080-3084)",
+   "hardcoded_params": "model kept only if >100 finite unc values AND mean unc > 1e-3 @3087-3093 and again @3125; aleatoric/epistemic validity gates >10 finite and mean > 1e-6 @3100-3103, >1e-6 @3155-3156; legend ncol 4/5 @3195,@3204"
+  },
+  {
+   "name": "table2_auc_by_strategy_pdv.csv",
+   "kind": "table",
+   "producer": "create_tables() @3266-3277",
+   "dims_shown": "rows = model, columns = 6 strategies + MEAN + STD; sorted by MEAN desc",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP @3268; sigma -> auc_norm; replicate collapsed aggfunc='mean' @3271; MEAN column AVERAGES ACROSS ALL 6 STRATEGIES @3272 (violates the disaggregation rule if quoted alone)",
+   "metric": "auc_norm",
+   "hardcoded_params": "ANOVA_MODELS_EXCLUDE filter @3264; rep==PRIMARY_REP @3268; MEAN/STD added @3272-3273"
+  },
+  {
+   "name": "table2_auc_by_gaussian_pdv.csv",
+   "kind": "table",
+   "producer": "create_tables() @3279-3284",
+   "dims_shown": "same matrix as table2_auc_by_strategy_pdv, re-sorted by the Gaussian column",
+   "dims_collapsed": "identical collapses (rep=PRIMARY_REP, sigma->auc_norm, replicate mean); still carries the cross-strategy MEAN/STD columns",
+   "metric": "auc_norm",
+   "hardcoded_params": "gauss_col = STRATEGY_LABELS['legacy'] = 'Gaussian' @3281; ANOVA_MODELS_EXCLUDE @3264"
+  },
+  {
+   "name": "table2_auc_ranks_pdv.csv",
+   "kind": "table",
+   "producer": "create_tables() @3286-3293",
+   "dims_shown": "rows = model, columns = per-strategy rank + Mean_Rank",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP; sigma -> auc_norm; replicate mean; Mean_Rank AVERAGES RANKS ACROSS THE 6 STRATEGIES @3290",
+   "metric": "rank of auc_norm (1 = most robust)",
+   "hardcoded_params": "rank ascending=False @3288; ANOVA_MODELS_EXCLUDE @3264"
+  },
+  {
+   "name": "table2_supp_auc_all_reps.csv",
+   "kind": "table",
+   "producer": "create_tables() @3295-3302",
+   "dims_shown": "rows = (model, rep) pairs, columns = strategies + MEAN + STD",
+   "dims_collapsed": "sigma -> auc_norm; replicate mean; MEAN averages across strategies @3297",
+   "metric": "auc_norm",
+   "hardcoded_params": "ANOVA_MODELS_EXCLUDE only (reps NOT excluded) @3264; sorted by MEAN desc @3299"
+  },
+  {
+   "name": "table3_probabilistic_comparison.csv",
+   "kind": "table",
+   "producer": "create_tables() @3305-3355",
+   "dims_shown": "one row per model in 3 families, with Type (Deterministic/Probabilistic), AUC_norm, Baseline R2, Wilcoxon p",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP AND strategy FIXED to 'legacy' for the AUC column @3315; but the Wilcoxon p is computed on data PAIRED ACROSS ALL rep x strategy cells @3339 / wilcoxon_paired_test @1892-1930 \u2014 the reported p does NOT correspond to the reported PDV/Gaussian numbers",
+   "metric": "auc_norm, baseline_r2, Wilcoxon signed-rank p",
+   "hardcoded_params": "prob_comparisons dict {NN-alpha: dnn vs [dnn_bnn_full,dnn_vbll]; NN-beta: mlp vs [mlp_bnn_full,mlp_vbll]; RF: rf vs [qrf]} @3305-3309; rep==PRIMARY_REP & strategy=='legacy' @3315; wilcoxon_paired_test rep/strategy args are ACCEPTED BUT IGNORED (rep only used as a default @1904; strategy never used) @1892-1913; n<5 -> NaN @1917; significance alpha 0.05 @1925"
+  },
+  {
+   "name": "table3_wilcoxon_tests.csv",
+   "kind": "table",
+   "producer": "create_tables() @3357-3358 (stats from wilcoxon_paired_test @1892-1930)",
+   "dims_shown": "one row per family comparison with statistic, p_value, n, base_mean, var_mean, improvement",
+   "dims_collapsed": "pairs across ALL shared (rep, strategy) cells \u2014 rep and strategy both collapsed into the pairing index @1908-1913; sigma -> auc_norm; replicate already collapsed",
+   "metric": "Wilcoxon signed-rank statistic/p on paired auc_norm",
+   "hardcoded_params": "same prob_comparisons roster @3305; two-sided @1921; n<5 abort @1917; alpha 0.05 @1925"
+  },
+  {
+   "name": "table4_uncertainty_metrics_<rep>.csv (one per rep present; suffix '' only if data has no rep column)",
+   "kind": "table",
+   "producer": "create_tables() Table-4 block @3361-3506 (to_csv @3505)",
+   "dims_shown": "rows = model; columns = Unc-Error rho, Unc-Noise rho (pooled), Coverage 1sigma/2sigma, Mean Uncertainty, Mean Aleatoric, Mean Epistemic, plus per-sigma Unc-Noise rho and n at sigma 0.0/0.3/0.6",
+   "dims_collapsed": "strategy FIXED to 'legacy' @3363; all sigma POOLED for Unc-Error rho, pooled Unc-Noise rho, coverage and mean uncertainty (only the Unc-Noise sigma= columns are disaggregated); replicate/iteration pooled; rep is the file split so not collapsed",
+   "metric": "Spearman rho (unc vs |error|), Spearman rho (unc vs |injected_noise|), empirical coverage at k=1,2, mean uncertainty/aleatoric/epistemic",
+   "hardcoded_params": "strategy=='legacy' @3363; unc column priority y_pred_std_calibrated > y_pred_std > uncertainty @3366-3370; mask.sum()<100 skip @3411; mean unc < 1e-3 skip @3417; pooled unc-noise needs >100 points @3428; WITHIN_SIGMA_LEVELS = [0.0,0.3,0.6] @1028 with min_points=100 @1032; error/coverage column preference y_true_noisy+y_pred_mean > y_true_original+y_pred_mean > y_true+y_pred @3398-3405 and @3441-3452; conformal branch multiplies unc by 1.645 @3456-3462 (dead in practice \u2014 conformal models are in GLOBAL_MODELS_EXCLUDE @118-119); aleatoric/epistemic need >10 valid @3480,@3486; sorted by Unc-Error rho desc @3499"
+  },
+  {
+   "name": "table4_supp_uncertainty_by_strategy_rep.csv",
+   "kind": "table",
+   "producer": "create_tables() Table-4b block @3508-3616 (to_csv @3615)",
+   "dims_shown": "one row per Strategy x Rep x Model with the same metric columns as table4",
+   "dims_collapsed": "sigma POOLED for Unc-Error rho / pooled Unc-Noise rho / coverage / mean uncertainty; per-sigma columns kept only for sigma in WITHIN_SIGMA_LEVELS; replicate pooled",
+   "metric": "same as table4 (Spearman rhos, coverage 1/2 sigma, mean unc/alea/epis)",
+   "hardcoded_params": "unc col priority @3510-3514; mask<100 or mean unc<1e-3 skip @3536; valid<100 skip @3549; pooled noise >100 @3559; WITHIN_SIGMA_LEVELS @1028; alea/epis >10 valid @3586,@3592; no conformal branch here (unlike table4)"
+  },
+  {
+   "name": "table4c_top_unc_noise_correlations.csv",
+   "kind": "table",
+   "producer": "create_tables() @3628-3652 (reads back table4_supp_uncertainty_by_strategy_rep.csv @3641)",
+   "dims_shown": "top 15 Model x Rep rows by within-sigma rho at sigma=0.3, with all Unc-Noise columns + Unc-Error rho + coverage",
+   "dims_collapsed": "strategy FIXED to 'Gaussian' @3643; sigma appears only as the named columns; ranking uses ONE sigma (0.3)",
+   "metric": "within-sigma Spearman rho (unc vs |injected noise|)",
+   "hardcoded_params": "Strategy=='Gaussian' @3643; rank_col = 'Unc-Noise rho sigma=0.3' @3644 (comment @3634 flags the sort key as provisional); nlargest(15) @3648"
+  },
+  {
+   "name": "table4c_bottom_unc_noise_correlations.csv",
+   "kind": "table",
+   "producer": "create_tables() @3654-3658",
+   "dims_shown": "bottom 10 Model x Rep rows by the same sigma=0.3 rho",
+   "dims_collapsed": "strategy FIXED to 'Gaussian'; ranking on a single sigma",
+   "metric": "within-sigma Spearman rho (unc vs |injected noise|)",
+   "hardcoded_params": "nsmallest(10) @3655; same Gaussian filter @3643 and rank_col @3644"
+  },
+  {
+   "name": "table5_sigma_rankings.csv",
+   "kind": "table",
+   "producer": "create_tables() @3660-3697 (to_csv @3696)",
+   "dims_shown": "rows = model, columns = rank at sigma 0.0/0.3/0.5/0.7/1.0 + Mean Rank",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP and strategy FIXED to 'legacy' @3663; replicate averaged @3675; Mean Rank averages across the 5 sigmas @3691",
+   "metric": "rank of mean R2 (1 = best)",
+   "hardcoded_params": "sigma_levels = [0.0,0.3,0.5,0.7,1.0] @3666; sigma match tolerance 0.05 @3669; BASELINE_THRESHOLD=0.6 gate applied at sigma=0 only @3679; rank ascending=False @3682; `if 'valid_models' in dir()` @3688 is an always-true no-op guard on a local"
+  },
+  {
+   "name": "table6_kendalls_w.txt",
+   "kind": "text",
+   "producer": "create_tables() @3699-3760 (open/write @3743)",
+   "dims_shown": "single scalar W across strategies as raters and models as items, plus chi2, p, model list",
+   "dims_collapsed": "rep COLLAPSED (groupby('model') mean across ALL reps @3711); sigma -> auc_norm; replicate collapsed; strategies are the rater axis so retained",
+   "metric": "Kendall's W concordance + chi-squared p",
+   "hardcoded_params": "ANOVA_MODELS_EXCLUDE filter @3701; needs >2 models present in ALL strategies @3713-3717; W = 12S/(k^2(n^3-n)) @3730-3733; chi2 df = n_items-1 @3736-3737; interpretation cut-points 0.7 / 0.5 written into the text @3755-3757"
+  },
+  {
+   "name": "table_supp_model_redundancy.csv",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() @2337-2375 (to_csv @2374)",
+   "dims_shown": "one row per model pair with n_shared_points, spearman_rho, p, excluded_from_anova flag",
+   "dims_collapsed": "profile vector is over (rep, strategy) cells @2344-2348 \u2014 sigma already collapsed into auc_norm, replicate collapsed by groupby mean @2331",
+   "metric": "Spearman rho between two models' auc_norm profiles",
+   "hardcoded_params": "pairs need >=3 shared (rep,strategy) cells @2357; ANOVA_MODELS_EXCLUDE used only for the flag column @2365-2368; strategies list built from ALL_STRATEGIES @2328 but never used afterwards (dead)"
+  },
+  {
+   "name": "table_supp_model_redundancy.tex",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() @2377-2396 (write_text @2395)",
+   "dims_shown": "LaTeX tabular of only high-correlation model pairs",
+   "dims_collapsed": "same as the CSV; rows below the rho cut are dropped entirely",
+   "metric": "Spearman rho",
+   "hardcoded_params": "rho >= 0.85 cut @2378; 3-dp formatting @2386"
+  },
+  {
+   "name": "table_supp_rep_redundancy.csv",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() @2398-2430 (to_csv @2429)",
+   "dims_shown": "one row per representation pair with rho, p, exclusion flag",
+   "dims_collapsed": "profile over (model, strategy) cells @2402-2406; sigma -> auc_norm; replicate mean",
+   "metric": "Spearman rho between two reps' auc_norm profiles",
+   "hardcoded_params": ">=3 shared cells @2412; ANOVA_REPS_EXCLUDE used for the flag @2420-2423"
+  },
+  {
+   "name": "table_supp_rep_redundancy.tex",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() @2432-2450 (write_text @2448)",
+   "dims_shown": "LaTeX tabular of ALL rep pairs (no cut, unlike the model version)",
+   "dims_collapsed": "same as CSV",
+   "metric": "Spearman rho",
+   "hardcoded_params": "none beyond formatting; no rho gate @2438"
+  },
+  {
+   "name": "table_supp_icc.csv",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() ICC block @2450-2494 (to_csv @2493)",
+   "dims_shown": "one row per model pair: n_shared_reps, icc_1_1, mean_abs_auc_diff, mean auc per model",
+   "dims_collapsed": "STRATEGY COLLAPSED \u2014 overall_auc averages auc_norm over all strategies @2452; reps are the 'subject' axis; sigma -> auc_norm; replicate collapsed",
+   "metric": "ICC(1,1) on auc_norm across reps; mean |delta auc_norm|",
+   "hardcoded_params": "k=2 raters hardcoded @2465; requires >=2 shared reps @2461"
+  },
+  {
+   "name": "table_supp_icc.tex",
+   "kind": "table",
+   "producer": "compute_icc_and_redundancy() @2496-2515 (write_text @2514)",
+   "dims_shown": "LaTeX tabular of high-ICC pairs only",
+   "dims_collapsed": "same as CSV",
+   "metric": "ICC(1,1), mean |delta auc_norm|",
+   "hardcoded_params": "ICC >= 0.7 cut @2497; separate console print uses ICC > 0.9 head(10) @2517"
+  },
+  {
+   "name": "excluded_configs.csv",
+   "kind": "table",
+   "producer": "generate_report() @3902-3904 (excluded_df built in calculate_robustness @1848)",
+   "dims_shown": "model, rep, strategy, baseline for every config dropped by the robustness baseline gate",
+   "dims_collapsed": "sigma collapsed (only baseline R2 at sigma=0 is kept); replicate averaged before the gate @1817",
+   "metric": "baseline_r2 at sigma=0",
+   "hardcoded_params": "ROBUSTNESS_BASELINE_THRESHOLD = 0.3 @429 (default arg @1804); configs with <3 sigma points or no sigma=0 are silently dropped, NOT logged @1820-1827"
+  },
+  {
+   "name": "table_supp_excluded_configs.tex",
+   "kind": "table",
+   "producer": "generate_report() @3906-3930 (write_text @3929)",
+   "dims_shown": "LaTeX tabular, rows = model, columns = rep, cells = count of excluded configs + Total",
+   "dims_collapsed": "strategy collapsed into a COUNT @3907; the baseline values themselves are dropped",
+   "metric": "count of excluded (model, rep, strategy) configs",
+   "hardcoded_params": "zero shown as '--' @3924; sorted by Total desc @3913"
+  },
+  {
+   "name": "paper_figures_report.txt",
+   "kind": "text",
+   "producer": "generate_report() @3888-3961 (open/write @3959)",
+   "dims_shown": "free text: catastrophic-filter log, robustness config counts, most/least robust model, NN-alpha vs BNN-alpha auc_norm",
+   "dims_collapsed": "'KEY FINDINGS' section fixes rep=PRIMARY_REP and strategy='legacy' @3938; sigma -> auc_norm; models ranked by groupby mean @3943 (a single value per model since rep+strategy are already fixed)",
+   "metric": "auc_norm, plus counts",
+   "hardcoded_params": "rep==PRIMARY_REP & strategy=='legacy' with silent fallback to the FULL auc_df if empty @3938-3940; hardcoded model pair 'dnn' vs 'dnn_bnn_full' @3946-3947 using .values[0] (first row, not a mean) @3950-3951; thresholds quoted from CATASTROPHIC_R2_THRESHOLD @3892, ROBUSTNESS_BASELINE_THRESHOLD/BASELINE_THRESHOLD @3898"
+  },
+  {
+   "name": "table_validation_auc_full.csv",
+   "kind": "table",
+   "producer": "create_validation_figures() @1481-1499 (to_csv @1487, fallback @1498)",
+   "dims_shown": "fully disaggregated dataset x model x rep x strategy with auc_norm and baseline_r2",
+   "dims_collapsed": "sigma -> auc_norm; CV folds/replicates averaged inside calculate_validation_auc @1379",
+   "metric": "auc_norm, baseline_r2",
+   "hardcoded_params": "VALIDATION_BASELINE_THRESHOLD = 0.3 gate @1387 (and @1354 on the summary path); artifact band VALIDATION_AUC_LOW/HIGH = -0.5/1.1 set to NaN @1465-1476; needs >=3 sigma points @1380; low-retention console flag at auc_norm < 0.3 @1491; dataset dir exclusions {'herg_fluid','openadmet_caco2','openadmet_logd'} @1118"
+  },
+  {
+   "name": "fig_validation_overview.png",
+   "kind": "figure",
+   "producer": "create_validation_figures() @1501-1586 (savefig @1584)",
+   "dims_shown": "one stacked heatmap panel per external dataset: model (rows) x strategy (cols)",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP @1512; sigma -> auc_norm; folds averaged via aggfunc='mean' @1540",
+   "metric": "auc_norm",
+   "hardcoded_params": "rep==PRIMARY_REP @1512 and for annotations @1568; AUC_VMIN/VMAX = VALIDATION_AUC_LOW/HIGH = -0.5/1.1 @1531; column order = STRATEGY_ORDER @1541; row_h=0.26 / chrome_h=1.1 layout @1521-1522; dataset order = VALIDATION_DATASET_ORDER @405; N/A cell background grey #808080 @1560"
+  },
+  {
+   "name": "fig_validation_anova.png",
+   "kind": "figure",
+   "producer": "create_validation_figures() @1588-1638 (savefig @1635); eta2 from _two_way_eta2_unbalanced @1394-1437",
+   "dims_shown": "one bar panel per dataset with Model / Rep / Interaction eta2",
+   "dims_collapsed": "strategy FIXED to 'legacy' @1595-1596; sigma -> auc_norm; folds averaged; RESIDUAL eta2 is computed @1430 but NOT plotted (only 3 of 4 bars shown @1642-1643)",
+   "metric": "eta2 (%) Type-I sequential SS on auc_norm",
+   "hardcoded_params": "strategy=='legacy' @1596; ANOVA_REPS_EXCLUDE @1593; needs >=10 rows @1598; ylim 0..100 @1650; ANOVA_MODELS_EXCLUDE is NOT applied here (unlike QM9 fig2)"
+  },
+  {
+   "name": "table_validation_anova.csv",
+   "kind": "table",
+   "producer": "create_validation_figures() @1640-1654 (to_csv @1653)",
+   "dims_shown": "one row per dataset with Model/Rep/Interaction/Residual eta2, n_models, n_reps, n",
+   "dims_collapsed": "strategy FIXED to 'legacy'; sigma -> auc_norm; folds averaged",
+   "metric": "eta2 (%) Type-I sequential",
+   "hardcoded_params": "same as fig_validation_anova; rounded to 1 dp @1645-1650"
+  },
+  {
+   "name": "table_validation_probabilistic.csv",
+   "kind": "table",
+   "producer": "create_validation_figures() @1656-1702 (to_csv @1701)",
+   "dims_shown": "one row per Dataset x Comparison x Strategy with Base/Variant AUC_norm and delta",
+   "dims_collapsed": "rep FIXED to PRIMARY_REP @1676-1677; sigma -> auc_norm; folds averaged (the .mean() @1687-1688 is over a single cell)",
+   "metric": "auc_norm and delta auc_norm",
+   "hardcoded_params": "prob_pairs seeded with ('rf','qrf','RF vs QRF') @1664-1666; auto-added dnn/mlp pairs use suffixes '_bnn_full' and '_bnn_variational' @1669 \u2014 but '*_bnn_variational' is in GLOBAL_MODELS_EXCLUDE @120-121 so that branch is dead, and '*_vbll' is never checked; strategy list ordered by STRATEGY_ORDER @1679-1680"
+  },
+  {
+   "name": "fig_validation_combined.png",
+   "kind": "figure",
+   "producer": "create_validation_figures() @1704-1784 (savefig @1782)",
+   "dims_shown": "Panel a: grouped bars, model x dataset (QM9 + 3 external). Panel b: scatter QM9 mean auc_norm vs external mean auc_norm per model",
+   "dims_collapsed": "STRATEGY AVERAGED \u2014 pivot_table aggfunc='mean' over all strategies @1710 and groupby('model').mean() @1725,@1728; REP AVERAGED for both panels (no rep filter); DATASETS AVERAGED TOGETHER for panel b's external axis @1728; sigma -> auc_norm",
+   "metric": "mean auc_norm",
+   "hardcoded_params": "needs >=2 models @1709, >=3 merged models and >=2 rows @1733; dataset colors ['#6BAED6','#FC8D59','#66C2A5','#B39DDB'] @1745; ylim (0, 1.28) @1753; QM9 column inserted at position 0 @1718; dataset order VALIDATION_DATASET_ORDER @405"
+  },
+  {
+   "name": "table_validation_uncertainty.csv",
+   "kind": "table",
+   "producer": "create_validation_uncertainty_table() @1234-1316 (to_csv @1313; input from load_validation_uncertainty @1179-1232)",
+   "dims_shown": "one row per Dataset x Model x Representation with Unc-Error rho, Unc-Error rho at sigma=0, Coverage 1/2 sigma, Mean Uncertainty, Mean |Error|, N",
+   "dims_collapsed": "STRATEGY FIXED to Gaussian by data availability (KIRBy saves legacy only \u2014 docstring @1245); sigma POOLED for the main rho and both coverages @1259-1289 (only the sigma=0 rho column is disaggregated); folds/replicates pooled",
+   "metric": "Spearman rho (unc vs |error|), empirical coverage at k=1,2, mean uncertainty, mean |error|",
+   "hardcoded_params": "mask requires >=100 finite points with unc>0 @1271-1273; sigma=0 sub-rho requires >=50 points @1286; exclude_dataset_dirs = {'herg_fluid'} @1200; required columns {y_true,y_pred,uncertainty,sigma} @1219; sorted by Dataset then rho desc @1310"
+  }
+ ],
+ "globals": "PRIMARY_STRATEGY = 'legacy' @76\nCONTRAST_STRATEGY = 'hetero' @77 \u2014 DEFINED BUT NEVER USED anywhere in the file\nPRIMARY_REP = 'continuous_pdv' @78\nSUPPLEMENTARY_REP = 'ecfp4' @79 \u2014 DEFINED BUT NEVER USED (the ECFP4 figures hardcode the literal 'ecfp4' @2733, @2761, @3826)\nSTRATEGY_ORDER = ['legacy','outlier','quantile','threshold','valprop','hetero'] @85\nALL_STRATEGIES = STRATEGY_ORDER @88 (alias; only referenced @2328, where the result is unused)\nGENERATE_SUPPLEMENTARY = True @91 \u2014 DEFINED BUT NEVER READ\nGLOBAL_MODELS_EXCLUDE = {'conformal_rf','conformal_qrf','conformal_dnn','conformal_rf_split','conformal_qrf_split','conformal_dnn_split','dnn_bnn_variational','mlp_bnn_variational','dnn_bnn_last','mlp_bnn_last','flexible_dnn','flexible_dnn_256_128_64','flexible_dnn_512_256'} @116-126 \u2014 applied at LOAD time to both anova (@621) and uncertainty (@951) data, so these models are absent from every artifact\nANOVA_MODELS_EXCLUDE = {'qrf','gauche','gauche_rbf'} | GLOBAL_MODELS_EXCLUDE @128-132\nPDV_ONLY_MODELS = {'gauche_rbf'} @135\nANOVA_REPS_EXCLUDE = {'sns','randomized_smiles','random_smiles','pdv','morgan'} @137-143\nTEXTWIDTH_IN = 6.5 @168; HALFWIDTH_IN = 3.25 @169 (HALFWIDTH_IN never used)\nCLEAN_COLOR = '#0072B2' @186\nSTRATEGY_COLORS (6 entries) @187-194\nSTRATEGY_LABELS = {legacy:'Gaussian', valprop:'Value-Prop.', quantile:'Quantile', threshold:'Threshold', outlier:'Outlier', hetero:'Heteroscedastic'} @196-203\nANOVA_FACTOR_COLORS = {Model, Representation, Strategy, Interaction} @206-211 (the 'Strategy' entry is never used; Residual bar uses literal '#bdbdbd' @2847)\nMODEL_COLORS (16 entries incl. dnn_bnn_last / mlp_bnn_last which are globally excluded) @215-239\nDNN_FAMILY_COLORS = {dnn, dnn_bnn_full, dnn_vbll} @241-245\nMLP_FAMILY_COLORS = {mlp, mlp_bnn_full, mlp_vbll} @246-250\nRF_FAMILY_COLORS = {rf, qrf} @251-254\nUNCERTAINTY_COLORS (9 models: qrf, ngboost, gauche, dnn_bnn_full, dnn_bnn_last, dnn_vbll, mlp_bnn_full, mlp_bnn_last, mlp_vbll) @257-267 \u2014 includes 2 globally-excluded *_bnn_last models\nMODEL_MARKERS (15 entries) @271-281\nMODEL_ORDER = ['rf','qrf','xgboost','lgb','ngboost','svm','gauche','gauche_rbf','dnn','dnn_bnn_full','dnn_vbll','mlp','mlp_bnn_full','mlp_vbll'] @283-289 \u2014 14 models, the effective figure roster\nMODEL_LABELS @349-369 (dnn->'NN-\u03b1', mlp->'NN-\u03b2', gauche->'GP', gauche_rbf->'GP (RBF)')\nREP_LABELS = {continuous_pdv:'PDV', ecfp4, sns, smiles, randomized_smiles, mhggnn, mol2vec} @371-379\nDATASET_MARKERS @394-399 \u2014 DEFINED BUT NEVER USED\nVALIDATION_DATASET_ORDER = ['OpenADMET-LogD','OpenADMET-Caco2_Efflux','ChEMBL-hERG-Ki'] @405-409\nVALIDATION_DATASET_LABELS = {LogD, Caco-2 Efflux, hERG K_i} @410-414\nBASELINE_THRESHOLD = 0.6 @423 \u2014 performance gate; used @2189, @2285 (simple-effects robustness auc gate) and @3679 (table5)\nROBUSTNESS_BASELINE_THRESHOLD = 0.3 @429 \u2014 used by calculate_robustness @1804 and run_robustness_anova @2057\nMIN_CELL_ITERS = 5 @434 \u2014 balanced-design gate in _metric_two_way_anova @2026\nVALIDATION_BASELINE_THRESHOLD = 0.3 @435 \u2014 used @1354, @1387\nCATASTROPHIC_R2_THRESHOLD = -0.5 @437\nVALIDATION_AUC_LOW, VALIDATION_AUC_HIGH = -0.5, 1.1 @439\nWITHIN_SIGMA_LEVELS = [0.0, 0.3, 0.6] @1028 (module-level, declared mid-file)\n\nFunction-local rosters/exclusions that behave like globals:\nEXCLUDED_MODELS = {'graph_gp','gcn','gin','ginct','gin2d'} @4009 (main, applied to qm9_df and unc_df)\nEXPECTED_SIGMAS = {0.0,0.1,...,1.0} @659 and @754\nEXPECTED_REPS = {'ecfp4','continuous_pdv','smiles','mhggnn','mol2vec'} @660\nVALID_STRATEGIES (filename parsing) @558-561 and @882-885; STRATEGY_NORMALIZE {'heteroscedastic'->'hetero','value_proportional'->'valprop'} @562, @886\nBNN_NAME_MAP @606-613 (anova loader) and @939-946 (uncertainty loader) \u2014 'bnn_full_variational'/'dnn_bnn_full_variational'->'dnn_vbll', 'mlp_bnn_full_variational'->'mlp_vbll'\nvalidation exclude_dirs = {'herg_fluid','openadmet_caco2','openadmet_logd'} @1118; VALIDATION_EXCLUDE_DIRS = {'herg_fluid'} @1090 (assigned but never used); exclude_dataset_dirs = {'herg_fluid'} @1200\nval_model_map / val_rep_map / val_dataset_map @1062-1089 \u2014 note 'GP' -> 'gauche_rbf' @1069\nkey_models = ['rf','qrf','dnn','mlp','ngboost','xgboost','gauche_rbf'] @2657 (fig1 panel a, both PDV and ECFP4 variants)\nstrat_order = ['legacy','valprop','quantile','threshold','hetero','outlier'] @2820 (fig2 bar order \u2014 differs from STRATEGY_ORDER @85)\nrep_order = ['ecfp4','continuous_pdv','smiles','mol2vec','mhggnn'] @3795 (interaction heatmap)\nsigma_levels = [0.0,0.3,0.5,0.7,1.0] @3666 (table5)\nprob_comparisons @3305-3309, prob_pairs @1664-1666",
+ "notes": "Coverage: read all 4150 lines of /Users/apunt/repos/qsar_qm_models/scripts/generate_paper_figures_v2.py. Artifact list is complete \u2014 grep for to_csv/savefig/write_text/open(...,'w') returns 46 write sites, all accounted for (table4_uncertainty_metrics is one file per rep, and _create_combined_uncertainty_figure's savefig @3217 is reached only once, for fig_uncertainty_combined.png).\n\nOutput directory: --output-dir default '../results/paper_figures' @3973-3974; --qm9-dir default '../results' @3969; --validation-dir default None @3971 (so ALL validation artifacts are skipped unless the flag is passed).\n\nCall graph / execution order in main(): create_methods_figure @4084 -> calculate_validation_auc @4087 -> create_figure1 @4092 -> create_figure2 @4093 (which internally calls run_simple_effects_analysis @2903) -> create_figure3 @4094 -> create_interaction_figure @4095 -> create_nn_family_comparison @4098 -> create_uncertainty_figure @4099 -> create_tables @4102 -> create_validation_figures @4105 -> load_validation_uncertainty + create_validation_uncertainty_table @4106-4107 -> compute_icc_and_redundancy @4110 -> generate_report @4113.\n\nDiscrepancies found while reading (verified in code, not asserted from docs):\n\n1. Module docstring @20-33 lists outputs that NO LONGER MATCH the code: it names 'table2_auc_by_strategy.csv' (actual files are table2_auc_by_strategy_pdv.csv @3276, table2_auc_by_gaussian_pdv.csv @3283, table2_auc_ranks_pdv.csv @3292), 'table4_uncertainty_metrics.csv' (actual is per-rep suffixed @3505), and 'fig3_ranking_consistency.png' described as \"heatmaps, cross-dataset\" when the function @2911 draws a single scatter. It omits ~20 files the script actually writes.\n\n2. Inconsistent baseline gate for the SAME metric: run_robustness_anova uses ROBUSTNESS_BASELINE_THRESHOLD=0.3 @2057, but run_simple_effects_analysis computes auc_norm with BASELINE_THRESHOLD=0.6 @2189 and @2285. table1_anova_summary.csv and table1_supp_simple_effects.csv therefore rest on different config sets.\n\n3. wilcoxon_paired_test @1892 ignores its `strategy` parameter entirely and uses `rep` only as a default value @1904 \u2014 it pairs across ALL rep x strategy cells @1908-1913. table3_probabilistic_comparison.csv reports PDV+Gaussian AUC values @3315 next to a p-value computed over every rep and strategy. The two columns are not from the same data.\n\n4. fig_validation_combined.png @1704-1784 averages auc_norm across all 6 strategies AND all reps AND (panel b) all three external datasets \u2014 the single most aggregated artifact in the script, and the one most exposed to the no-averaging rule.\n\n5. table2_* MEAN/STD columns @3272-3273, @3290, @3297 and table_supp_icc.csv @2452 average across the 6 strategies.\n\n6. create_figure3 accepts validation_df and val_auc_df @2911 but never references them in the body.\n\n7. fig_validation_anova.png computes eta2_residual @1430 and writes it to the CSV @1648 but does not plot it @1642-1643, unlike the QM9 fig2 which does plot the residual bar @2846-2847.\n\n8. create_validation_figures applies ANOVA_REPS_EXCLUDE @1593 but never ANOVA_MODELS_EXCLUDE \u2014 the validation ANOVA and QM9 ANOVA run on different model rosters.\n\n9. table_validation_probabilistic.csv's auto-generated NN pairs @1667-1671 look for '_bnn_variational', which GLOBAL_MODELS_EXCLUDE @120-121 removes at load time; '_vbll' variants are never tested. Only the hardcoded RF-vs-QRF pair @1665 can ever appear.\n\n10. The conformal coverage branch in table4 @3455-3462 is unreachable: all conformal_* models are dropped at load @621.\n\n11. fig_methods_noise_strategies.png @2529 uses a Python re-implementation of the six strategies on synthetic data with its own constants (valprop 0.1 @2557, hetero alpha=0.1/beta=0.05 @2571, quantile/threshold/outlier multipliers @2559-2569). Whether these match rust/src/main.rs was NOT verified in this task \u2014 treat the figure's implied dose ordering as UNVERIFIED against the actual injector.\n\n12. Silent-fallback hazards that can make an artifact secretly mean something else: fig1 panel b falls back to ALL reps if the PDV subset is empty @2686-2688; generate_report's KEY FINDINGS falls back to the full auc_df if PDV+legacy is empty @3938-3940; generate_report reads dnn/dnn_bnn_full auc via .values[0] (first row) rather than a mean @3950-3951.\n\n13. calculate_robustness silently drops configs with <3 sigma points or no sigma=0 row @1820-1827 \u2014 these never appear in excluded_configs.csv, only baseline-gate failures do."
+}

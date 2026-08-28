@@ -1,0 +1,76 @@
+{
+ "findings": [
+  {
+   "severity": "CRITICAL",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_qrf.sh",
+   "line": "31 and 35 (identical in all 7 unc_*.sh; preflight.sh:28 and 32; emitted from generate_scripts.py:83 and 87)",
+   "problem": "`set -uo pipefail` was added at line 31, but line 35 is still the inherited-from-reference line `export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH` with both variables unguarded. At that point in the script the env has NOT been activated \u2014 `eval \"$(micromamba shell hook --shell bash)\"` (line 34) only installs the shell function; it sets neither CONDA_PREFIX nor LD_LIBRARY_PATH. Under `set -u` the reference to an unset variable aborts the shell immediately. The working reference scripts carry the byte-identical line (slurm_scripts_validation_rerun/val_qrf_pdv_logd.sh:15) and only survive it because they have no `set -u`. Note the line is also redundant: setup.sh:62 sets LD_LIBRARY_PATH correctly (`\"$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}\"`) after activation.",
+   "why_it_matters": "Every task of every array dies at line 35 in under a second with a one-line `CONDA_PREFIX: unbound variable`, exit 1, before python is ever reached. All 504 tasks come back FAILED. It only survives if the submitting login shell happens to have BOTH variables exported (sbatch defaults to --export=ALL), which is a coin flip \u2014 micromamba activate sets CONDA_PREFIX but not LD_LIBRARY_PATH. preflight.sh has the same line so it dies the same way, with a message that points at the environment rather than at the script.",
+   "fix": "Delete line 35 from all 7 unc_*.sh and from preflight.sh (setup.sh already does it properly post-activation), or guard it: `export LD_LIBRARY_PATH=\"${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}\"`. Fix the template at generate_scripts.py:87 and regenerate.",
+   "repro": "$ env -i SLURM_ARRAY_TASK_ID=0 HOME=$HOME PATH=/usr/local/bin:/usr/bin:/bin /bin/bash slurm_scripts_uncertainty_rerun/unc_qrf.sh; echo \"### JOB EXIT = $?\"\nunc_qrf.sh: line 34: /data/stat-cadd/scat9264/bin/micromamba: No such file or directory\nunc_qrf.sh: line 35: CONDA_PREFIX: unbound variable\n### JOB EXIT = 1\n\nConfirmed with a real micromamba that the hook leaves both unset:\n$ env -i /bin/bash -c 'export MAMBA_EXE=$(command -v micromamba); PATH=/usr/local/bin:/usr/bin:/bin; eval \"$(\"$MAMBA_EXE\" shell hook --shell bash)\"; echo \"CONDA_PREFIX=[${CONDA_PREFIX:-UNSET}] LD_LIBRARY_PATH=[${LD_LIBRARY_PATH:-UNSET}]\"'\nCONDA_PREFIX=[UNSET] LD_LIBRARY_PATH=[UNSET]"
+  },
+  {
+   "severity": "HIGH",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/merge_results.py",
+   "line": "26-48 (_read_all), 62, 71",
+   "problem": "`_read_all` builds a Python list of every per-task frame and then `pd.concat`s them all in memory, and main() then re-reads the written uncertainty.csv at line 71. With `--unc-strategies all --oof-folds 5` each task now writes 11 sigmas x 5 outer folds x (n_test + n_train) rows, both splits \u2014 roughly 233k rows per task for logd, times 504 tasks. RUNBOOK.md:214 tells you to run this on the login node with no sbatch/srun. The coverage loop (lines 74-94) then runs 504 sequential boolean masks over that same ~117M-row frame.",
+   "why_it_matters": "~23.5 GB of CSV on disk and ~48 GB resident in pandas (deep, with the object columns), doubled at the concat. It will be OOM-killed on an ARC login node after the 504 jobs have already burned days of queue, and the coverage scan would take hours even if it fit. You lose the merge, not the jobs \u2014 but you find out only at the end.",
+   "fix": "Stream the uncertainty merge instead of concatenating: append each task file to the output CSV with `df.to_csv(out_path, mode='a', header=not first, index=False)` and build coverage.csv incrementally from each per-task frame (you already know model/dataset/rep/strategy from the directory name, so no global scan is needed). Keep all_results/summary as-is \u2014 those are small. Run merge under `srun --mem=64G` regardless.",
+   "repro": "$ python3 -c \"\nimport pandas as pd, numpy as np, io\nn_test,n_train=1008,3226   # measured from results/validation_full/openadmet_logd/QRF_PDV_uncertainty_values.csv: 11088 rows = 11 sigma x 1008 test\nrows=11*5*(n_test+n_train); k=20000; rng=np.random.default_rng(0)\ndf=pd.DataFrame({'split':['train_oof']*k,'strategy':['quantile']*k,'sigma':rng.random(k),'fold':rng.integers(0,5,k),'sample_idx':np.arange(k),'y_true':rng.normal(size=k),'y_pred':rng.normal(size=k),'uncertainty':rng.random(k),'noise_scale':rng.random(k),'noise_pattern':rng.random(k),'injected_noise':rng.normal(size=k),'dataset':['OpenADMET-LogD']*k,'model':['QRF']*k,'rep':['MHG-GNN-pretrained']*k})\nbuf=io.StringIO(); df.to_csv(buf,index=False); bpr=len(buf.getvalue())/k\nprint('rows/task',rows,'| total rows',round(504*rows/1e6,1),'M | CSV',round(504*rows*bpr/1e9,1),'GB | RAM',round(504*rows*df.memory_usage(deep=True).sum()/k/1e9,1),'GB')\"\nrows/task 232870 | total rows 117.4 M | CSV 23.5 GB | RAM 48.0 GB"
+  },
+  {
+   "severity": "HIGH",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_gp.sh",
+   "line": "27 (`#SBATCH --time=36:00:00`); generate_scripts.py:39",
+   "problem": "The GP task's fit count is identical to the reference GP job's, but it is given 25% less wall. Reference slurm_scripts_validation_rerun/val_gp_pdv_logd.sh runs 1 dataset x GP x PDV with no --strategies filter = 6 strategies x 11 sigmas x 5 folds x 1 fit = 330 GP fits, and asks for 47:59:00 on partition=long (line 9). One new unc_gp.sh task is 1 strategy x 11 sigmas x 5 folds x (1 + 5 oof) fits = 330 GP fits (confirmed: alternative_data_noise_robustness.py:890-897 puts the oof refit inside the sigma loop, inside the outer fold loop), and asks 36:00:00. Worse, the new run is not PDV-only: unc_gp.sh:42 puts GP on ECFP4 (2048-dim), SNS and MHG-GNN too, and the GP_MAX_N=2000 cap (line 1150) applies to sample count, not dimensionality \u2014 an RBF ExactGP on 2000x2048 is materially slower per fit than on PDV.",
+   "why_it_matters": "A GP task that times out at 36 h loses everything except the per-fold all_results_partial.csv; there is no uncertainty output until run_dataset completes. GP is one of the three tier-1 models the paper's uncertainty argument rests on, so a full 72-task resubmit at 48 h is days you cannot get back.",
+   "fix": "Raise GP to `--time=47:59:00` (still inside medium's 2-00:00:00 wall \u2014 see KIRBy tests/slurm_scripts/migrate_short_to_medium.sh:22) by setting hours=47 for GP in generate_scripts.py:39, or submit unc_gp.sh to `--partition=long`. Alternatively drop GP to `--oof-folds 3` for GP only.",
+   "repro": "Reference: $ sed -n '7,9p;21,26p' slurm_scripts_validation_rerun/val_gp_pdv_logd.sh\n#SBATCH --mem=128G\n#SBATCH --partition=long\n#SBATCH --time=47:59:00\npython alternative_data_noise_robustness.py --datasets logd --models GP --reps PDV --results-root ... (no --strategies -> all 6)\nNew: $ sed -n '27p;70,78p' slurm_scripts_uncertainty_rerun/unc_gp.sh\n#SBATCH --time=36:00:00\n... --strategies \"$st\" --oof-folds 5 ...   (1 strategy x 6 fits = same 330 fits)"
+  },
+  {
+   "severity": "MEDIUM",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_qrf.sh",
+   "line": "66 (identical in all 7; generate_scripts.py:118)",
+   "problem": "Lines 49-57 add a deliberate guard so a non-array invocation runs task 0 and says so \u2014 it uses `${SLURM_ARRAY_TASK_ID:-0}` correctly. Line 66 then interpolates the raw `$SLURM_ARRAY_TASK_ID`, which under `set -u` is an unbound variable when the script is run outside an array. The guard prints its warning and the script dies on the very next echo.",
+   "why_it_matters": "The one documented escape hatch for a manual smoke run (`bash unc_qrf.sh`) is broken: it exits before python with an unbound-variable message, which is exactly the cryptic failure the guard was written to prevent. Under time pressure that reads as an environment problem and sends you looking in the wrong place.",
+   "fix": "Use the already-defaulted variable: `echo \"=== task $i: model=... \"`. Fix generate_scripts.py:118 and regenerate.",
+   "repro": "$ cd <stub dir with ./tests and a stub python on PATH>\n$ env -u SLURM_ARRAY_TASK_ID bash slurm_scripts_uncertainty_rerun/unc_qrf.sh 2>&1 | grep -v 'No such file'\nWARNING: not an array job \u2014 running task 0 only. Submit with --array=0-71%N\nunc_qrf.sh: line 66: SLURM_ARRAY_TASK_ID: unbound variable\n(python never runs)"
+  },
+  {
+   "severity": "MEDIUM",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_qrf.sh",
+   "line": "22 (`#SBATCH --output=logs/unc_qrf_%A_%a.out`, all 7 + preflight.sh:21)",
+   "problem": "The log path is relative to the submit directory and the directory must already exist \u2014 SLURM does not create it. generate_scripts.py:148 makes `logs/` locally, but it is empty, so git will not carry it to the server. Confirmed: `git add -n slurm_scripts_uncertainty_rerun` lists the 11 files and no `logs/`. The only thing that creates it on the cluster is the `mkdir -p logs` buried in RUNBOOK.md:136 under step 3. The reference scripts sidestep this entirely by writing `slurm-%j.out` into the CWD (val_qrf_pdv_logd.sh:3).",
+   "why_it_matters": "If step 3 is skipped, or the scripts are resubmitted later from a fresh clone, every task in every array is marked FAILED at launch (slurmstepd cannot open the output file) and nothing runs \u2014 with no log written to tell you why, since the log is the thing that failed.",
+   "fix": "Either add `mkdir -p logs` to the submit path and commit a `logs/.gitkeep`, or change the directive to `#SBATCH --output=unc_%x_%A_%a.out` to match the reference scripts' CWD-relative behaviour.",
+   "repro": "$ cd /Users/apunt/repos/qsar_qm_models && git add -n slurm_scripts_uncertainty_rerun\nadd 'slurm_scripts_uncertainty_rerun/RUNBOOK.md'\nadd 'slurm_scripts_uncertainty_rerun/generate_scripts.py'\n... (11 files, none under logs/)\n$ ls slurm_scripts_uncertainty_rerun/logs   # empty -> untrackable by git"
+  },
+  {
+   "severity": "MEDIUM",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/generate_scripts.py",
+   "line": "37-43 (MODELS table; emitted as `#SBATCH --mem=64G` at unc_qrf.sh:26 etc.)",
+   "problem": "Memory is halved relative to the reference for every model except GP. Every script in slurm_scripts_validation_rerun requests `--mem=128G` (val_qrf_pdv_logd.sh:7, and the template at slurm_scripts_validation_rerun/generate_scripts.py:34) for the same models on the same three datasets and the same four representations. The new run asks 64G for QRF, NGBoost and the four Bayesian nets, and additionally holds more in memory than the reference did: extras now carries per-sigma train/test noise-scale arrays plus oof_mean/oof_unc (alternative_data_noise_robustness.py:848, 896-897), and all_uncertainties accumulates a DataFrame per fold per split for the whole run before being written (line 1354).",
+   "why_it_matters": "An OOM kill lands after hours of a 24-36 h task and takes the whole task with it; QRF in particular (quantile_forest retains all leaf values, 2048-dim ECFP4) is the model the reference author gave 128G. There is no evidence in either directory that 64G was measured.",
+   "fix": "Set mem to '128G' for all entries in generate_scripts.py:37-43 and regenerate, matching the reference. If queue pressure makes that costly, run one QRF-ECFP4-herg_ki task first and read MaxRSS from `sacct -j <id> --format=MaxRSS` before committing the rest.",
+   "repro": "$ grep -h 'mem=' slurm_scripts_validation_rerun/val_*.sh | sort -u\n#SBATCH --mem=128G\n$ grep -h 'mem=' slurm_scripts_uncertainty_rerun/unc_*.sh | sort -u\n#SBATCH --mem=128G      (unc_gp.sh only)\n#SBATCH --mem=64G       (the other six)"
+  },
+  {
+   "severity": "LOW",
+   "file": "/Users/apunt/repos/qsar_qm_models/slurm_scripts_uncertainty_rerun/unc_qrf.sh",
+   "line": "21-29 (no `#SBATCH --partition` / `--account` in any of the 7)",
+   "problem": "The reference scripts hard-code `#SBATCH --partition=long` (val_qrf_pdv_logd.sh:8). The new scripts deliberately leave partition and account to submit time (documented at lines 9-12). If either flag is omitted from the sbatch line, the job goes to the cluster default partition.",
+   "why_it_matters": "A 24-36 h request against ARC's default short partition (12 h wall) is rejected at submit with 'Requested time limit is invalid', so this is loud rather than silent \u2014 but if the default partition happens to accept it, the array runs on the wrong account/partition and can be killed mid-run. Only a concern if RUNBOOK step 4 is skipped.",
+   "fix": "Either bake `#SBATCH --partition=medium` in as a default that the submit-time flag overrides, or add a guard at the top of the script body: `[ -n \"${SLURM_JOB_PARTITION:-}\" ] || { echo 'ERROR: submit with --partition'; exit 2; }`.",
+   "repro": "$ grep -c 'SBATCH --partition' slurm_scripts_uncertainty_rerun/unc_*.sh   # 0 for all 7\n$ grep -n 'SBATCH --partition' slurm_scripts_validation_rerun/val_qrf_pdv_logd.sh\n8:#SBATCH --partition=long"
+  },
+  {
+   "severity": "LOW",
+   "file": "/Users/apunt/repos/KIRBy/tests/alternative_data_noise_robustness.py",
+   "line": "973-1004 (generate_representations, called at line 1042)",
+   "problem": "Representations are regenerated from SMILES inside every process and never cached to disk (unlike the dataset CSVs, which are cached at CACHE_DIR). The new design splits work by model AND by strategy, so a given (dataset, representation) pair is recomputed 7 models x 6 strategies = 42 times, against 8 times in the reference layout (one job per model, all six strategies inside it).",
+   "why_it_matters": "PDV, SNS and especially MHG-GNN-pretrained (create_mhg_gnn on ~5k molecules, batch_size=32) are minutes-to-tens-of-minutes each. Across the 378 non-ECFP4 tasks this is pure repeated setup cost charged to the same allocation, and for the cheap models (QRF) it can be a noticeable fraction of the task.",
+   "fix": "Cache each representation to `data_cache/<dataset>_<rep>.npy` keyed on a hash of the SMILES list, and load it if present. One-line guard in generate_representations. Beware the write race if you add it: 6-18 tasks start concurrently, so write to a temp file and os.replace.",
+   "repro": "$ grep -n 'def generate_representations' -A6 tests/alternative_data_noise_robustness.py\n973:def generate_representations(smiles_list, rep_filter=None):\n974:    \"\"\"Generate all representations for a SMILES list. Returns dict of arrays.\"\"\"\n...  (no cache lookup; create_ecfp4/create_pdv/create_sns/create_mhg_gnn called unconditionally)\n$ ls slurm_scripts_uncertainty_rerun/unc_*.sh | wc -l   # 7 scripts x 6 strategies = 42 recomputes per (dataset, rep)"
+  }
+ ]
+}

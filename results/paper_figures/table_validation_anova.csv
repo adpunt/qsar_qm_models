@@ -1,0 +1,4 @@
+Dataset,Model_η²,Rep_η²,Interaction_η²,Residual_η²,n_models,n_reps,n
+OpenADMET-LogD,90.9,0.7,8.3,0.0,7,3,19
+OpenADMET-Caco2_Efflux,95.4,1.8,5.6,-2.8,7,3,19
+ChEMBL-hERG-Ki,91.6,1.2,6.6,0.5,7,3,18

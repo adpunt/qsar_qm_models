@@ -1,0 +1,7 @@
+strategy,n_rows_flagged,n_iterations_dropped
+hetero,39,22
+legacy,37,29
+outlier,48,27
+quantile,43,26
+threshold,42,29
+valprop,36,26

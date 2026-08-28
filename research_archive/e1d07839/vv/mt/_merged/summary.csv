@@ -1,0 +1,4 @@
+model,auc,task_model,task_dataset,task_rep,task_strategy
+GP,1.0,gp,caco2,pdv,outlier
+MLP-VBLL-Full,1.0,mlp_vbll_full,herg_ki,mhggnnpretrained,valprop
+QRF,1.0,qrf,logd,ecfp4,legacy

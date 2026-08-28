@@ -1,0 +1,957 @@
+{
+ "area": "PAPER_REVISION_GUIDE.md (80KB, 646 lines) + paper_edits_supervisor.md (357 lines) \u2014 full salvage, LIVE/DEAD marked against the fact that all QM9 results are being regenerated",
+ "items": [
+  {
+   "kind": "research-finding",
+   "headline": "The uncertainty\u2013noise correlation in the submitted paper was computed by pooling all sigma levels, which measures the population trend, not per-sample detection.",
+   "verbatim": "> **MAJOR UPDATE (uncertainty section fully overhauled).** The uncertainty\u2013noise metric in the\n> submitted paper (Table 7, the abstract sentence, the \"individual sample level\" Kolmar extension)\n> was computed by **pooling all \u03c3 levels together**, which measures the population-level (Kolmar)\n> trend, NOT per-sample detection. A corrected **within-\u03c3** re-analysis (verified against the\n> regenerated CSVs, run 2026-07) changes the uncertainty story substantially.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:7-12",
+   "verification": "verified (guide states: verified against the regenerated CSVs, run 2026-07)",
+   "why_it_matters": "STILL LIVE as a METHODOLOGICAL rule \u2014 the within-\u03c3 vs pooled distinction is a property of the metric, not of the data, so it survives regeneration and must be enforced in whatever script computes the uncertainty metric next. The specific 2026-07 numbers derived from it are DEAD (QM9 run invalid)."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "One-line statement of the corrected uncertainty finding, including the GP reversal.",
+   "verbatim": "> **The corrected uncertainty finding in one line:** per-sample uncertainty tracks injected noise\n> only under noise types that corrupt an *identifiable subset* (outlier strongly, quantile\n> moderately; NOT Gaussian), only on *non-embedding* representations, and best with a *distributional\n> BNN* \u2014 the strongest genuine detector is **BNN-\u03b1 on the PDV descriptor under outlier noise\n> (within-\u03c3 \u03c1 = 0.49)**, not GP/NGBoost. GP does **not** detect per-sample at all (its high pooled\n> rank \u2014 0.56 in the submitted table, 0.54 on the regenerated data \u2014 was pure population trend).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:19-24",
+   "verification": "verified (against 2026-07 regenerated CSVs per the guide)",
+   "why_it_matters": "HYPOTHESIS STILL LIVE, NUMBERS DEAD. The three-way gate (noise type \u00d7 representation \u00d7 distributional model) is the shape of the finding to re-test after regeneration. \u03c1 = 0.49 / 0.56 / 0.54 are QM9 numbers and must not be quoted until re-derived."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Robustness metric changed from NDS (OLS slope of R2 vs sigma) to AUC-norm as the sole robustness metric; Weibull beta trialled and dropped.",
+   "verbatim": "> **MAJOR UPDATE 2 (robustness metric replaced \u2014 2026-07).** The robustness scalar is being\n> changed from **NDS** (the OLS slope of R\u00b2(\u03c3), a straight-line fit) to **AUC-norm** as the sole\n> robustness metric. This SUPERSEDES the note above\n> that \"the robustness content (\u2026NDS\u2026) is unchanged\" \u2014 all robustness numbers (ANOVA \u03b7\u00b2, Kendall's\n> W, the NDS-ranking table, Wilcoxon \u0394NDS, the baseline-vs-robustness scatter) must be re-derived\n> from the new v2 CSVs (`results/paper_figures_v2/`, produced by `scripts/generate_paper_figures_v2.py`).\n> (Weibull \u03b2 was trialled as a supplementary shape descriptor and DROPPED 2026-07 \u2014 weak\n> discriminator, 63\u201392% ANOVA residual; removed from the figure script entirely.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:26-33",
+   "verification": "n-a (author decision, recorded)",
+   "why_it_matters": "STILL LIVE \u2014 this is a standing author decision independent of the data. Matches the MEMORY rule 'Robustness metric \u2192 auc_norm'. The Weibull-drop decision is also live and must not be silently reversed during the rebuild."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The written justification for replacing a slope with an area \u2014 three reasons, to be stated explicitly in the paper.",
+   "verbatim": "> **>>> WRITE-UP TODO (motivation for the metric change \u2014 must be explained in the expanded paper):**\n> Explain *why* AUC-norm is used instead of a slope. The point: we needed a metric\n> **separate from raw predictive performance** that describes the **nature of the degradation curve\n> itself**. A best-fit line (NDS) does not cut it:\n>   - The R\u00b2(\u03c3) degradation curves are **nonlinear** \u2014 they plateau, then fall off a cliff, or decay\n>     early then flatten. A single linear slope mischaracterizes that shape and its linearity\n>     diagnostic (old `r2_fit`) confirmed the straight-line assumption was often poor.\n>   - NDS was also **coupled to baseline performance** (a high-baseline model has \"more to lose,\" so\n>     a steeper slope) \u2014 so it partly re-measured performance rather than isolating robustness.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:35-43",
+   "verification": "n-a (author decision / write-up instruction)",
+   "why_it_matters": "STILL LIVE and un-actioned \u2014 this is an explicit WRITE-UP TODO. It is the argument that makes auc_norm a contribution rather than an arbitrary swap, and it survives regeneration entirely."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "AUC-norm definition as recorded in the motivation block, with its baseline-decoupling evidence.",
+   "verbatim": ">   - **AUC-norm** = normalised area under the *retention* curve R\u00b2(\u03c3)/R\u00b2(0): baseline-decoupled\n>     (baseline coupling weak/n.s.: config-level \u03c1\u2248+0.06, Gaussian +0.13 n.s., vs NDS coupled \u22120.36 p=5e-4), makes no shape assumption, higher = more robust. It answers\n>     \"what fraction of skill is retained across the noise range.\"\n>   - Frame it as a **curve-descriptive** metric decoupled from the performance axis \u2014 the whole\n>     reason for introducing it is that robustness is a property of the *curve*, not of any one\n>     point on it, and a line through the points throws that away.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:44-49",
+   "verification": "verified (coupling statistics stated as verified against v2 CSVs)",
+   "why_it_matters": "DEFINITION STILL LIVE (it is a formula, not a result). The coupling statistics \u03c1\u2248+0.06 / +0.13 / \u22120.36 are QM9-derived and DEAD until re-computed \u2014 but the *comparison* must be re-run, because the whole justification for auc_norm rests on it."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Degradation curves are only shown for key models, PDV/ECFP4, Gaussian \u2014 a reviewer can call the auc_norm motivation unsubstantiated.",
+   "verbatim": "> **Related gap for the expansion:** actual R\u00b2-vs-\u03c3 degradation curves currently appear only for\n> **key models, on PDV/ECFP4, under Gaussian noise** (fig1 Panel A, fig1_supp Panel A,\n> fig_nn_family). Per-dataset validation degradation curves were cut from v2. If the expansion wants\n> to *show* the nonlinear/cliff behaviour that motivates AUC-norm+\u03b2, we likely need broader curve\n> panels (more reps, more strategies, validation datasets) \u2014 easy to add back.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:51-55",
+   "verification": "n-a (open item)",
+   "why_it_matters": "STILL LIVE and directly actionable in the regeneration: add broader curve panels to generate_paper_figures_v2.py NOW, while the runs are being redone, rather than discovering the gap after. Repeated at line 607-609 as 'Still open (your call)'."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The paper's spine: two properties with two different drivers.",
+   "verbatim": "**Two properties, two different drivers. That is the whole paper.**\n\n1. **Noise robustness** \u2014 how much accuracy a model keeps as its labels get corrupted \u2014 is set mainly by the\n   **model**, barely by the representation. Under auc_norm the model explains **10\u201355%** of the variance\n   (depending on noise type) and the representation **under ~8%**. Rankings are stable across all six noise types\n   (**Kendall's W = 0.9121**). NGBoost and the tree ensembles (RF, LightGBM, XGBoost), with SVM alongside, form\n   the robust cluster; the plain neural networks are worst.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:61-67",
+   "verification": "verified (\u03b7\u00b2, W stated as verified against v2 CSVs)",
+   "why_it_matters": "FRAMING STILL LIVE \u2014 'two properties, two drivers' is the argument the whole paper is built on and it is independent of the exact \u03b7\u00b2. Every number here (10\u201355%, ~8%, W=0.9121, the ranking) is QM9 and DEAD pending regeneration."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Second half of the spine: per-sample uncertainty detection is a separate, narrower capability driven by noise type and representation, not model.",
+   "verbatim": "2. **Per-sample uncertainty detection** \u2014 whether a model's uncertainty can flag *which individual labels* were\n   corrupted \u2014 is a **separate, much narrower** capability, driven first by the **noise type** and the\n   **representation**, not the model. It appears only under subset-targeting noise (outlier/quantile, **not**\n   Gaussian), only on non-embedding representations, and best from a Bayesian neural network on the PDV\n   descriptor (within-\u03c3 \u03c1 up to **0.49**). The GP does not do it at all.\n\nThe two do **not** travel together \u2014 that is the sharpest version of the argument. This spine belongs in the\nabstract, the intro close, the head of each results subsection, and the conclusion.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:68-75",
+   "verification": "verified (per guide, against 2026-07 regenerated CSVs)",
+   "why_it_matters": "FRAMING AND PLACEMENT INSTRUCTION STILL LIVE ('abstract, intro close, head of each results subsection, conclusion'). \u03c1=0.49 is DEAD until regenerated."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Explicit instruction on how to use the guide's own drafts: structure and voice only, numbers from the AUC_norm cross-examination section.",
+   "verbatim": "> **How to read the rest of this guide.** The full-draft rewrites below (\u00a71 abstract, \u00a75 two-mechanism, \u00a76\n> conclusion) were written in the **NDS era**. Use them for *structure and voice*, but take every robustness\n> number and the specifics below from the **AUC_norm cross-examination section** further down, which supersedes\n> them:\n> - Robustness metric is **auc_norm** (retention area, higher = more robust), not the NDS slope. All robustness\n>   \u03b7\u00b2, rankings, and Wilcoxon numbers come from `results/paper_figures_v2/`.\n> - **\"NGBoost and SVM are the most robust\" is a false pairing** \u2014 SVM is 5th by mean auc_norm; it leads only\n>   under outlier noise and on the external ADME sets.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:77-85",
+   "verification": "verified (SVM 5th stated as verified against v2 CSVs)",
+   "why_it_matters": "THE INSTRUCTION IS STILL LIVE (use drafts for voice, never for numbers) \u2014 and now doubly so, since even the v2 numbers are invalid. 'NGBoost and SVM are the most robust' being a false pairing is a claim-level correction that must be re-tested, not re-imported."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The PDV 'highest baseline \u2192 most to lose \u2192 degrades fastest' argument is DELETED and must not be re-fitted.",
+   "verbatim": "> - **The PDV \"highest baseline \u2192 most to lose \u2192 degrades fastest\" argument is DELETED** \u2014 an NDS artifact\n>   auc_norm removes. Do not re-fit it.\n> - Kendall's **W = 0.9121** (not 0.92); robustness ANOVA is on **7 models**, the ranking/Kendall set is **11**.\n> - **Weibull is dropped**; auc_norm is the sole robustness metric.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:86-88",
+   "verification": "verified",
+   "why_it_matters": "STILL LIVE as a standing prohibition \u2014 the headroom argument is a metric artifact, so it stays deleted regardless of what the regenerated data say. The 7-vs-11 model roster split is a live design fact about the ANOVA balance requirement."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Full statement of the spine, including that the unifying message is NOT 'the model decides everything'.",
+   "verbatim": "The unifying message is not \"the model decides everything,\" but \"robustness is the model's job, per-sample detection is a conditional property that depends on the noise and the representation\" \u2014 and the two do not travel together. This should be visible in the abstract, at the end of the intro, at the head of each results subsection, and in the conclusion. Right now the spine appears in only one place, the final paragraph.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:94",
+   "verification": "n-a (framing decision)",
+   "why_it_matters": "STILL LIVE. This is the single sentence that distinguishes the paper's argument from 'model matters most', and the diagnosis that the spine currently appears only in the final paragraph is a structural defect independent of data."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Definitions of the two properties, with the mechanisms attributed to each.",
+   "verbatim": "- **Robustness**: resistance to performance loss as labels are corrupted. It comes from the model's inductive bias, regularization, and ensembling, the mechanisms that limit how much it fits corrupted labels. Across the model set it depends little on the representation, though RF and NN-beta are representation-dependent while SVM, BNN-alpha, and BNN-beta are not.\n- **Uncertainty tracking (per-sample)**: whether a model's uncertainty rises on the *individual* labels that were actually corrupted. This is narrow and *conditional*: it needs (i) a noise type that corrupts an identifiable subset of samples (outlier/quantile \u2014 NOT Gaussian), (ii) a non-embedding representation, and (iii) a model that learns a distribution over outputs (a distributional BNN, NGBoost, QRF).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:98-99",
+   "verification": "verified (derived from corrected within-\u03c3 data)",
+   "why_it_matters": "DEFINITIONS STILL LIVE. The three-part conditional gate (i)(ii)(iii) is the testable structure to re-verify on clean data. The specific model attributions (RF/NN-beta rep-dependent, SVM/BNN not) are QM9 findings and DEAD pending regeneration."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The robustness-vs-per-sample-detection cross-table, per model, with the GP reversal and the VBLL caveat.",
+   "verbatim": "| Model | Robust? | Per-sample uncertainty tracks noise? |\n|---|---|---|\n| SVM | Yes (margin, works across reps) | No uncertainty output at all |\n| BNN-\u03b1 (dnn_bnn_full) | Yes (weight priors, works across reps) | **Strongest genuine detector** \u2014 PDV/outlier \u03c1=0.49 (clean \u03c3=0 control); \u22480 on Gaussian and on embeddings |\n| BNN-\u03b2 (mlp_bnn_full) | Yes | Strong \u2014 PDV/outlier \u03c1=0.36; \u22480 on Gaussian |\n| NGBoost | Yes | Moderate \u2014 only under outlier/quantile (\u03c1\u22480.21\u20130.25); \u22480 on Gaussian |\n| QRF | Less than RF | Moderate under outlier/quantile (PDV \u03c1\u22480.29); \u22480 on Gaussian |\n| GP | Yes | **No** \u2014 \u22480 within-\u03c3 everywhere (\u22120.06 to +0.07), including under outlier/quantile; its pooled rank was a population artifact |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:103-110",
+   "verification": "verified (within-\u03c3 \u03c1 at \u03c3=0.6 on regenerated CSVs)",
+   "why_it_matters": "TABLE STRUCTURE STILL LIVE (it is the clearest exhibit of 'the two do not travel together'). ALL \u03c1 VALUES DEAD \u2014 QM9. The qualitative claim 'SVM has no uncertainty output at all' is code-level, not data-level, and stays live."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "VBLL-alpha row of the same table carries a dirty sigma=0 control \u2014 a magnitude confound, flagged pending a subset test.",
+   "verbatim": "| VBLL-\u03b1/\u03b2 | Yes (improve NN robustness) | Apparent signal under outlier, but VBLL-\u03b1 has a dirty \u03c3=0 control (\u22480.22) \u2192 partly a \\|y\\|-magnitude confound (pending subset test) |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:111",
+   "verification": "unverified \u2014 the guide marks the subset test as PENDING",
+   "why_it_matters": "STILL LIVE AS A TEST DESIGN: the \u03c3=0 control is the diagnostic that separates genuine noise detection from |y|-magnitude tracking, and it must be built into the regenerated uncertainty analysis for EVERY model, not just VBLL. Carried through as unverified."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "BNNs are reversed from the submitted paper: they are the lead per-sample detectors, not the laggards.",
+   "verbatim": "**One note on the BNN point (now reversed and strengthened).** The submitted paper *demoted* BNNs (\"track noise weakly / do not\"). The corrected within-\u03c3 data reverse this: the single strongest genuine per-sample detector is **BNN-\u03b1 on continuous_pdv under outlier (\u03c1=0.49, clean \u03c3=0 control \u22120.035, rising 0.35\u21920.49 with \u03c3)**, with BNN-\u03b2 close behind (0.36). BNNs are the *lead* detectors, not the laggards \u2014 but only under subset-targeting noise (outlier/quantile) and only on non-embedding reps; on Gaussian they, like everyone, sit at \u22480. Use \"non-embedding\" (fingerprints *and* the PDV descriptor) throughout \u2014 PDV is the single best detector representation.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:137",
+   "verification": "verified (within-\u03c3, regenerated CSVs)",
+   "why_it_matters": "THE TERMINOLOGY DECISION IS LIVE \u2014 'non-embedding' replaces 'fingerprints' throughout the paper, permanently. The BNN reversal is a QM9 finding and DEAD pending regeneration, but the monotone-in-\u03c3-from-a-clean-baseline evidence pattern is the template for re-establishing it."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The seven whole units that must be rebuilt rather than patched.",
+   "verbatim": "1. **Abstract**: a flat list of findings. It never states the spine or the inversion.\n2. **Scientific Contribution**: broken mid-edit, and built on the wrong organizing idea (\"aleatoric\").\n3. **Introduction close**: the research questions do not match the findings, and there is no \"what we find\" preview.\n4. **Uncertainty Results section**: it meanders, states the mechanism loosely, and buries its own novelty.\n5. **Two-mechanism synthesis passage**: does not exist. It is the piece that turns the paper into one argument.\n6. **Conclusion**: a list, not a spine.\n7. **Limitations paragraph**: does not exist. Reviewers will expect one.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:143-149",
+   "verification": "n-a (structural diagnosis)",
+   "why_it_matters": "FULLY STILL LIVE \u2014 this is a structural diagnosis of the manuscript, entirely independent of the numbers. It is the work plan for the rewrite and survives regeneration untouched."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Full abstract draft, part 1 of 3 (problem \u2192 tool \u2192 datasets).",
+   "verbatim": "> Quantitative structure-activity relationship (QSAR) models are widely used to screen compounds in drug discovery by predicting their molecular properties. The experimental labels used to train them carry noise from assay variability, measurement error, and mixed data sources. It is not yet clear how much of a model's resistance to that noise comes from the molecular representation and how much comes from the model architecture. We present NoiseInject, an open-source framework that adds controlled label noise under six different noise patterns and measures both predictive robustness and uncertainty calibration. We apply it to a wide range of representations and architectures on the QM9 dataset, using the HOMO-LUMO gap as the main task, and on three experimental ADME datasets: LogD, Caco-2 efflux, and hERG Ki.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:159",
+   "verification": "n-a (draft prose)",
+   "why_it_matters": "STILL LIVE \u2014 this half of the abstract contains no results and needs no regeneration. Note the guide's own warning (line 639-645) that the \u00a71 draft is NDS-era; that warning applies to the results half, not this setup half."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Full abstract draft, part 2 of 3 (the results sentences) \u2014 flagged stale by the guide itself.",
+   "verbatim": "We find that the main driver depends on the question being asked. On clean labels, the interaction between model and representation explains the most variance in predictive performance. Under noise, model architecture becomes the dominant factor in the rate of performance loss, and representation explains under 10% of the variance. Robustness rankings are stable across noise types (Kendall's W = 0.92) and are not closely tied to clean-data accuracy. NGBoost and SVM are the most robust, and converting the feed-forward networks NN-alpha and NN-beta into their BNN and VBLL variants improves their robustness.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:159",
+   "verification": "FAILED VERIFICATION \u2014 the guide's own cross-examination (lines 425-436, 502-509) breaks three of these claims: 'NGBoost and SVM most robust' is a false pairing, 'Bayesian transformations improve robustness' is over-general (VBLL-\u03b1 NS), and W=0.92 should be 0.9121",
+   "why_it_matters": "DEAD AS WRITTEN. Preserved verbatim because it is the sentence-level structure to re-voice, and because the record of exactly which claims were falsified is itself the salvage. Do not paste."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Full abstract draft, part 3 of 3 (the uncertainty sentence \u2014 the corrected version).",
+   "verbatim": "Finally, we find that whether a model's uncertainty can flag which individual labels are noisy is a narrow, conditional capability: it holds only under noise that corrupts an identifiable subset of samples (not Gaussian), only on non-embedding representations, and best for Bayesian neural networks on the PDV descriptor, while the previously reported link between average uncertainty and average noise holds broadly at the population level. Noise type, which barely affects robustness rankings, is decisive here.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:159",
+   "verification": "verified (this sentence already incorporates the within-\u03c3 correction)",
+   "why_it_matters": "STRUCTURE STILL LIVE, CONTINGENT ON REGENERATION. This is the sentence the entire uncertainty rebuild was aimed at producing; it names no numbers, so it survives if the qualitative pattern reproduces on clean data."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Scientific Contribution full rewrite, and the explicit instruction to drop 'aleatoric' as an organizing idea.",
+   "verbatim": "> This study introduces NoiseInject, an open-source benchmarking framework that adds controlled artificial label noise under several noise patterns and measures its effect on both predictive performance and uncertainty calibration. Using it, we show that the choice of model, not the molecular representation, is the main determinant of QSAR noise robustness. We reached this by comparing each model's relative ranking across different noise types, representations, and datasets. This is not true of clean-data accuracy, which is instead governed by the interaction between model and representation.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:167",
+   "verification": "n-a (draft prose; the guide flags the submitted version as 'broken mid-edit')",
+   "why_it_matters": "STILL LIVE as prose structure. Note the cross-examination (line 504) requires 'NGBoost and SVMs strongest' \u2192 'NGBoost and the tree ensembles (RF/LightGBM/XGBoost)' anywhere this is instantiated with model names."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Explicit ban on organizing anything around 'aleatoric' \u2014 the corrected data make that framing backwards.",
+   "verbatim": "*(Do NOT organize this around \"aleatoric\": the corrected data show the GP's global aleatoric term does not produce per-sample detection, so the aleatoric-vs-epistemic framing that the submitted version used is backwards \u2014 the strongest per-sample detector is an epistemic Bayesian NN. Drop \"aleatoric\" as an organizing idea entirely.)*",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:169",
+   "verification": "verified (follows from the GP within-\u03c3 collapse)",
+   "why_it_matters": "STILL LIVE as a framing prohibition. NOTE THE TENSION: supervisor item \u00a79 (paper_edits_supervisor.md:321-339) asks for an epistemic/aleatoric GLOSS in the uncertainty-decomposition paragraph. Both can coexist \u2014 gloss the terms on first use, but do not use them as the section's organizing spine. Flag this to the author explicitly."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Recut research-question paragraph for the introduction close.",
+   "verbatim": "> This research addresses three questions about how QSAR models behave under label noise. First, how do molecular representation and model architecture split the variance in predictive performance on clean data, compared with noise robustness? Second, which architectures are most robust to noise, is robustness tied to clean-data accuracy, and is it stable across noise types and molecular properties? Third, when and why do per-sample uncertainty estimates track injected label noise? Finally, we introduce NoiseInject, an open-source Python package for benchmarking noise robustness and uncertainty quantification in machine learning models.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:178",
+   "verification": "n-a (draft prose)",
+   "why_it_matters": "FULLY STILL LIVE \u2014 contains no results. The diagnosis behind it is also live: 'the current RQ2 ties a robustness sub-finding (probabilistic versus deterministic) to the uncertainty result. RQ3 dissolves into two robustness sub-claims. The decoupling of robustness from clean accuracy is never asked.'"
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "New introduction preview paragraph \u2014 the missing 'what we find' piece that states the spine up front.",
+   "verbatim": "> We find that the roles of model and representation come apart. On clean labels, the interaction between model and representation explains the most variance in performance. Under noise, model architecture takes over and representation explains under 10% of the variance. NGBoost and SVM, the most robust models, are not the best clean-data predictors, and their advantage is stable across all six noise types and carries over to the experimental datasets. Uncertainty behaves differently again: whether a model's uncertainty can flag which individual labels are noisy is a narrow capability, present only under noise that hits an identifiable subset of samples, only on non-embedding representations, and best for Bayesian neural networks \u2014 and here, unusually, the type of noise is decisive rather than the model.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:181",
+   "verification": "FAILED VERIFICATION in part \u2014 'NGBoost and SVM, the most robust models' is broken by the cross-examination (SVM is 5th); the cross-examination at line 514 says explicitly 'Do **not** re-import \"SVM among most robust\" or the headroom logic'",
+   "why_it_matters": "STRUCTURE LIVE, NAMED MODELS DEAD. The paragraph slot (a preview after the RQs) does not exist in the paper at all and must be written; the model names in it must come from regenerated data."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The pooled-vs-within-sigma collapse, stated plainly \u2014 the correction to put in the text and in Methods.",
+   "verbatim": "**The correction, stated plainly (put a version of this in the text, and in Methods at the metric definition):** the per-sample uncertainty\u2013noise correlation must be computed *within each noise level \u03c3*. Pooling \u03c3 levels makes both predicted uncertainty and injected-noise magnitude rise together with \u03c3, so the pooled Spearman reports that shared \u03c3 ramp \u2014 the population trend \u2014 as a strong correlation even when there is no within-\u03c3 signal. The submitted Table 7 reported these as strong (GP/SNS 0.56, NGBoost/PDV 0.47, BNN-\u03b1/SNS 0.42; \"PDV\" = the continuous descriptor). Re-computing the pooled correlation on the regenerated data reproduces that ranking almost exactly (GP/SNS 0.54, NGBoost/PDV 0.47, BNN-\u03b1/SNS 0.42), but within each \u03c3 level it collapses to \u22480 (GP/SNS \u22120.04, NGBoost/PDV 0.02, BNN-\u03b1/SNS 0.00).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:197",
+   "verification": "verified (pooled reproduction on regenerated data explicitly checked apples-to-apples)",
+   "why_it_matters": "THE MECHANISM IS STILL LIVE and is a genuine methodological contribution \u2014 it is a statistical artifact argument that holds for any dataset. The paired pooled/within-\u03c3 demonstration is the right way to present it; re-run it on clean data and the demonstration reappears."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Uncertainty section rebuild, opening paragraph: Kolmar population result, then the sharper per-sample question.",
+   "verbatim": "> Kolmar et al. showed that, at the population level, a Gaussian Process's mean predicted uncertainty rises with the amount of label noise in the training data. Most of the probabilistic models we benchmark behave the same way: mean predicted uncertainty increases as more noise is added (Figure~\\ref{fig:uncertainty_combined}a). We ask a sharper question: within a fixed amount of noise, can a model's uncertainty point to *which individual labels* were the ones corrupted? We measured this as the Spearman correlation between predicted per-sample uncertainty and injected per-sample noise magnitude, computed *within each noise level* (pooling levels conflates the population trend with per-sample detection). The answer depends on three things at once \u2014 the noise type, the representation, and the model \u2014 and it is narrow.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:199",
+   "verification": "n-a (draft prose incorporating the verified correction)",
+   "why_it_matters": "STILL LIVE \u2014 the Kolmar framing (population established, per-sample is the new question) is the paper's positioning against prior work and needs no data. Reusable verbatim."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Noise type is the dominant factor for per-sample detection, plus the mechanistic explanation and the threshold degeneracy.",
+   "verbatim": "> The dominant factor is the **noise type**. Per-sample tracking appears only when the noise corrupts an identifiable subset of samples: under outlier noise (which amplifies the noise on statistical outliers) the correlation is strong (within-\u03c3 \u03c1 up to 0.49), and under quantile noise (which hits the label tails) it is moderate (up to 0.24). Under Gaussian noise, and under the strategies that spread noise smoothly across all samples (heteroscedastic and value-proportional), it is indistinguishable from zero for every model and representation (all \u2264 0.10). Threshold noise also collapses to zero, because on the eV-scale HOMO\u2013LUMO gap its fixed \u00b11.0 cutoffs place essentially every sample in one bin, degenerating it to uniform noise.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:201",
+   "verification": "verified for the \u03c1 values; the threshold degeneracy is flagged elsewhere (line 383) as needing a raw target-range confirmation",
+   "why_it_matters": "MECHANISM LIVE, NUMBERS DEAD. Critical interaction with NOISE_DESIGN.md: this paragraph is direct evidence for the 'six strategies are one strategy at six doses' problem \u2014 threshold degenerates to uniform 2\u03c3 noise on this target, so it is not testing a distinct pattern at all."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The mechanistic sentence for why subset-targeting noise is the only detectable kind.",
+   "verbatim": "Mechanistically this is expected: a model can only flag which labels are noisy when \"noisy\" corresponds to a coherent, structure-linked region of samples \u2014 as it does for outliers and label tails, but not for noise sprinkled independently on every label.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:201",
+   "verification": "n-a (mechanistic argument)",
+   "why_it_matters": "FULLY STILL LIVE \u2014 a first-principles argument, not a measurement. It also predicts what the redesigned noise scheme in NOISE_DESIGN.md should show, so it is a pre-registered expectation for the regenerated runs."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The representation gate: learned embeddings collapse even under the one noise type where everything else works.",
+   "verbatim": "> The **representation** gates whether even that is possible. Under outlier noise, the physicochemical descriptor PDV and the fingerprints carry the signal (BNN-\u03b1 on PDV reaches \u03c1=0.49), while the learned embeddings mol2vec and MHG-GNN stay at \u22480 for every model \u2014 they fail even under the one noise type where everything else lights up (Figure~\\ref{fig:within_sigma}b). So the divide is between learned embeddings and everything else, and PDV is the single best detector representation, not a fingerprint at all.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:205",
+   "verification": "verified (within-\u03c3 under outlier, regenerated CSVs)",
+   "why_it_matters": "CLAIM SHAPE LIVE ('learned embeddings vs everything else' is the correct axis, not 'fingerprints vs descriptors'), NUMBERS DEAD. This is why the guide mandates the word 'non-embedding' throughout."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The model paragraph with the GP reversal \u2014 the clearest illustration of why the pooled metric misled.",
+   "verbatim": "> The **model** matters least of the three, and here the picture inverts relative to the population trend. The strongest genuine per-sample detectors are the Bayesian neural networks: BNN-\u03b1 on PDV under outlier reaches \u03c1=0.49, rising monotonically with \u03c3 (0.35 at \u03c3=0.3, 0.49 at \u03c3=0.6) from a clean zero baseline, with BNN-\u03b2 close behind (0.36). NGBoost and QRF detect moderately (\u03c1\u22480.21\u20130.29) under the same conditions. The Gaussian Process, which topped the pooled ranking, does *not* detect per-sample at all: its within-\u03c3 correlation is between \u22120.06 and +0.08 everywhere, including under outlier and quantile noise. Its high pooled value came entirely from its mean uncertainty rising with \u03c3 \u2014 a population effect \u2014 not from resolving individual noisy labels.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:209",
+   "verification": "verified (within-\u03c3, regenerated CSVs)",
+   "why_it_matters": "NUMBERS DEAD, ARGUMENT LIVE. The 'rising monotonically with \u03c3 from a clean zero baseline' evidence pattern is the standard of proof the author set for calling detection genuine \u2014 carry that standard into the regenerated analysis."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The scoped-novelty closing paragraph for the uncertainty section \u2014 the Kolmar extension, correctly scoped.",
+   "verbatim": "> Where Kolmar et al. established that *average* uncertainty rises with *average* noise, we find that this population-level link holds broadly across our models and representations, but that it extends to the *individual-sample* level only under narrow conditions: a noise process that targets an identifiable subset of samples, a non-embedding representation, and a model that learns a distribution over outputs. Under those conditions \u2014 most cleanly a Bayesian neural network on the PDV descriptor under outlier noise \u2014 a model's uncertainty does point to which specific labels are corrupted. This is also the only place in our study where the *type* of label noise changes the qualitative result rather than merely its magnitude.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:211",
+   "verification": "n-a (draft prose)",
+   "why_it_matters": "STILL LIVE \u2014 this is the paper's novelty claim relative to Kolmar, stated at the right scope. It carries no numbers except the W=0.92 clause that was trimmed here (guide requires 0.9121, and that number is itself now DEAD)."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Caveat 1: VBLL-alpha's apparent detection is partly a |y|-magnitude confound, with a dirty sigma=0 control.",
+   "verbatim": "1. **VBLL-\u03b1 magnitude confound (pending a subset test).** VBLL-\u03b1 shows apparent outlier detection (\u03c1=0.34 on PDV) but has a *dirty \u03c3=0 control* (\u03c1\u22480.22 where it should be ~0): its uncertainty tracks label magnitude |y|, and outlier noise targets |y|-extreme samples, so part of its \"detection\" is flagging extreme molecules rather than responding to noise. BNN-\u03b1 is clean here (\u03c3=0 control \u22120.035), so anchor the strong claim on BNN-\u03b1. **[PENDING] A direct subset test** (does uncertainty on the corrupted subset *rise* from \u03c3=0 to \u03c3=0.6, or was it already high at \u03c3=0?) will confirm BNN-\u03b1 genuine vs VBLL-\u03b1 confounded \u2014 awaiting the raw per-sample CSVs from the server.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:214",
+   "verification": "unverified \u2014 marked [PENDING] in the original, awaiting raw per-sample CSVs from the server",
+   "why_it_matters": "THE TEST DESIGN IS LIVE AND NOW CHEAP TO SATISFY: the regeneration should emit the \u03c3=0 control and the corrupted-subset uncertainty trajectory as first-class outputs, so this confound check is built in rather than retro-fitted. Carried through as PENDING/unverified."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Caveat 2: the NGBoost/quantile/PDV cell rests on a single sigma slice.",
+   "verbatim": "2. **NGBoost/quantile/PDV thin slice.** That cell's \u03c3=0.3 point is missing (n=0), so its 0.24 rests on the \u03c3=0.6 slice alone. Report it with that caveat or drop it; it is not load-bearing (the headline is BNN-\u03b1/outlier).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:215",
+   "verification": "verified (n=0 confirmed in the CSVs)",
+   "why_it_matters": "DEAD as a specific number, LIVE as a coverage-gap warning: the regeneration must check for empty \u03c3 slices before any cell is reported, or the same thin-cell problem recurs."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Table 7 spec: within-sigma rho at sigma=0.6, models x six noise strategies, on continuous_pdv.",
+   "verbatim": "**New Table 7 content (within-\u03c3 \u03c1 at \u03c3=0.6, representation = continuous_pdv; models \u00d7 noise strategies).** Source: `table4_supp_uncertainty_by_strategy_rep.csv`, columns `Unc-Noise \u03c1 \u03c3=0.6`. Keep the Unc-Error \u03c1 / ECE / coverage columns from the old table (unaffected by the \u03c3-pooling bug) as secondary columns if you like, but the headline column is the within-\u03c3 noise \u03c1. State in the caption that \u03c1 is computed within a fixed \u03c3 and that \u03c3=0.6 is shown (\u03c3=0.3 mirrors it, lower).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:219",
+   "verification": "verified (source CSV and column names named explicitly)",
+   "why_it_matters": "TABLE SPEC STILL LIVE \u2014 the shape (models \u00d7 strategies, within-\u03c3, one representation) is what the regenerated script must emit. NOTE: ECE was fully removed 2026-08-19 per MEMORY, so the 'keep ECE' clause is DEAD; coverage at 1\u03c3/2\u03c3 now carries calibration alone."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The rebuilt Table 7 values as computed in 2026-07 \u2014 only Outlier and Quantile columns are non-zero.",
+   "verbatim": "| Model | Gaussian | Threshold | Hetero. | Value-Prop. | Quantile | Outlier |\n|---|---|---|---|---|---|---|\n| BNN-\u03b1 | \u22120.07 | 0.03 | \u22120.01 | n/a | 0.13 | **0.48** |\n| BNN-\u03b2 | \u22120.04 | 0.01 | \u22120.02 | \u22120.01 | 0.21 | **0.36** |\n| VBLL-\u03b1\u2020 | 0.02 | 0.02 | 0.06 | 0.01 | 0.19 | 0.34 |\n| VBLL-\u03b2 | 0.03 | \u22120.01 | 0.06 | 0.01 | 0.16 | 0.22 |\n| QRF | 0.02 | \u22120.01 | 0.02 | 0.03 | 0.18 | 0.29 |\n| NGBoost | 0.02 | 0.02 | 0.05 | 0.03 | 0.24\u2021 | 0.21 |\n| GP | \u2014 | \u2014 | \u2014 | \u2014 | \u2014 | \u2014 |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:221-229",
+   "verification": "verified against table4_supp_uncertainty_by_strategy_rep.csv (2026-07 run)",
+   "why_it_matters": "DEAD \u2014 every value is from the contaminated QM9 pipeline. Preserved verbatim as the PRIOR: if regeneration reproduces this pattern (two hot columns, four at zero) the finding stands; if not, the finding was an artifact. Keeping it makes that comparison possible."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "GP has no continuous_pdv uncertainty run \u2014 a data gap that must not be left as a silent blank row.",
+   "verbatim": "- **GP** has no continuous_pdv uncertainty run (a data gap, `gauche_rbf` was never run in the main pipeline). On the reps where GP *does* run (pdv, ecfp4, sns, morgan), its within-\u03c3 \u03c1 is between \u22120.06 and +0.08 under *every* strategy including outlier/quantile \u2014 so add a GP row from `pdv` (Outlier 0.07, Quantile 0.07, Gaussian \u22120.04) or state the GP-does-not-detect result in the caption/text. Do not leave GP silently absent, since \"GP does not detect per-sample\" is a key point.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:234",
+   "verification": "verified (data gap confirmed; matches the [[gp_gauche_data_gap]] memory topic)",
+   "why_it_matters": "THE DATA GAP IS LIVE AND FIXABLE NOW \u2014 the regeneration is the moment to actually run gauche_rbf in the main pipeline and close it, rather than shipping a caption workaround. Flag to the author as a re-run scope item."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Companion figure/table carrying the representation gate.",
+   "verbatim": "- **Companion (representation gate):** a second small table or the Panel b heatmap \u2014 within-\u03c3 \u03c1 under Outlier, models \u00d7 representations \u2014 carries \"embeddings collapse even under outlier\" (mol2vec/MHG-GNN \u2264 0.08 for every model vs PDV 0.49).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:235",
+   "verification": "verified",
+   "why_it_matters": "SPEC LIVE, NUMBERS DEAD. A models \u00d7 representations panel under a single subset-targeting strategy is the minimal exhibit for the representation gate; add it to generate_paper_figures_v2.py before the re-run."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "The two-mechanism keystone passage \u2014 the piece that turns the paper from a list into one argument (does not currently exist).",
+   "verbatim": "> The two properties do not always go together, and they are driven by different factors. SVM is among the most robust models but gives no uncertainty at all. The Gaussian Process is robust and its mean uncertainty tracks the overall noise level, but it cannot point to individual noisy labels. The Bayesian neural networks are robust *and* the best per-sample detectors, but only under the right noise type and representation. A practitioner choosing a model that survives noisy labels, and one that can also flag which labels are noisy, is choosing against two different criteria \u2014 and where robustness is set by the model's training mechanism almost regardless of representation or noise type, per-sample detection is the opposite: it is a narrow, conditional capability that depends first on the kind of noise and the representation.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:247",
+   "verification": "n-a (draft prose; guide flags \u00a75 as NDS-era at line 639-645)",
+   "why_it_matters": "STILL LIVE \u2014 the closing third of the keystone carries no NDS numbers and is the paper's practitioner takeaway. The FIRST two paragraphs of \u00a75 (lines 243, 245) DO carry the deleted PDV headroom argument and must not be reused as written."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The \u00a75 keystone's first paragraph contains the deleted PDV headroom argument \u2014 recorded here so it is not accidentally reintroduced.",
+   "verbatim": "The representations trade off across the three properties rather than one dominating: PDV gives the strongest clean-data performance and tracks per-sample noise as well as the best fingerprint, but by raw NDS it degrades among the *fastest* of all representations, because its high baseline R\u00b2 leaves the most performance to lose; the embeddings that degrade *slowest* by NDS (mol2vec, MHG-GNN) \u2014 partly a low-baseline headroom effect \u2014 collapse completely on uncertainty tracking.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:243",
+   "verification": "FAILED VERIFICATION \u2014 superseded at lines 86-87 and 429-432: 'a pure NDS baseline-coupling artifact \u2014 exactly what auc_norm removes\u2026 Do not re-fit it'",
+   "why_it_matters": "DEAD \u2014 explicitly retracted by the author. Preserved verbatim ONLY so that the retraction is legible and this text is recognized on sight if it resurfaces in a draft. The three-way tradeoff framing minus the headroom mechanism may still be usable."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Conclusion restructure \u2014 the closing generalization-plus-practitioner paragraph.",
+   "verbatim": "> These conclusions held on experimental data. Model architecture again dominated robustness on all three ADME datasets, though the smaller and noisier external sets reordered some rankings, and XGBoost in particular degraded. In practice, resistance to noise and the ability to detect which labels are noisy are governed differently: robustness is set mainly by the model's training mechanism, and the most robust choices (NGBoost, SVM) hold across representations, whereas per-sample noise detection is a narrow, conditional property \u2014 available only under noise that targets an identifiable subset of samples, only on non-embedding representations, and best from a Bayesian neural network on a physicochemical descriptor. A practitioner who needs both a model that survives noisy labels and one that can flag which labels are noisy is optimizing two different, only partly overlapping criteria.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:261",
+   "verification": "partly FAILED VERIFICATION \u2014 '(NGBoost, SVM)' is the false pairing broken at line 426-428",
+   "why_it_matters": "STRUCTURE LIVE. The validation-dataset conclusions are on the LogD/Caco-2/hERG pipeline, which MEMORY confirms never had the held-out-noise bug \u2014 so this paragraph's external-data claims rest on the only clean data in the project and are the most likely to survive."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "New Limitations paragraph \u2014 full draft; the guide notes JCI reviewers expect one consolidated paragraph.",
+   "verbatim": "> This study has several limitations. The uncertainty experiments were run once per configuration, so the uncertainty-noise correlations are indicative rather than precisely estimated. Replication would allow confidence intervals on the per-sample rankings. The robustness differences among the top models (NGBoost, SVM, RF, LightGBM, XGBoost) are small compared with the gap to NN-alpha and NN-beta, and our claims rest on the stability of their relative ranking rather than on large pairwise gaps. QM9 served as a clean baseline with negligible measurement noise, while the experimental datasets carry an unknown noise floor on top of the injected noise and are small enough that several models, including XGBoost and the BNN variants, fell below usable performance. Finally, we limited the analysis to regression on a single quantum-mechanical target and three ADME endpoints. Classification, which NoiseInject supports, was not tested.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:269",
+   "verification": "n-a (draft prose; each caveat individually confirmed elsewhere in the guide)",
+   "why_it_matters": "STILL LIVE and the section still does not exist. The journal-convention rationale is explicit: 'JCI reviewers expect one consolidated paragraph, and it pre-empts the three main objections (single-seed uncertainty runs, the tight top ranking, the small external sets)'. The single-seed limitation may be fixable during regeneration."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Structural move: split the overloaded robustness subsection into three.",
+   "verbatim": "- **Split the overloaded robustness subsection (around lines 443 to 504).** It crams five findings into one block. Break it into three: (i) which models are robust, and the decoupling from clean performance; (ii) representation modulates robustness (the interaction, SVM and full BNN being representation-agnostic versus RF and NN-beta being representation-dependent, and PDV); (iii) the within-family probes (Bayesian transforms, QRF), which are your cleanest mechanism-isolating evidence.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:275",
+   "verification": "n-a (structural decision)",
+   "why_it_matters": "STILL LIVE \u2014 a pure reorganization instruction. Note the naming caveat: 'the decoupling from clean performance' must now be stated only as the narrow metric-level claim (see the fig3 correction), not as an empirical finding."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Figure-ordering complaint is OBSOLETE \u2014 verified against the current paper.tex, figures are in numerical order.",
+   "verbatim": "- ~~**Fix the figure ordering.**~~ **OBSOLETE \u2014 no longer applies.** Verified against the current `paper.tex`: figures are referenced in strict numerical order. The \"global overview\" is **Figure 4** (`fig1_global_overview.png` despite the filename), correctly referenced *after* the ANOVA (Fig 2) and interaction (Fig 3) figures. This item described an older draft; no change needed.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:276",
+   "verification": "verified against the current paper.tex",
+   "why_it_matters": "LIVE as a closed item \u2014 records that this was checked and dismissed, so nobody re-opens it. Also documents the filename/number mismatch (fig1_global_overview.png IS Figure 4), which matters when regenerating and re-uploading figures."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Credibility issue 1: the top robustness ranking is a tight cluster and singling out one model needs per-seed spread.",
+   "verbatim": "1. **The top NDS ranking is a tight cluster.** Confirmed in the data: on PDV under Gaussian noise, RF, SVM, LightGBM, XGBoost, and QRF all fall within 0.013 of each other (-0.359 to -0.372), with NGBoost marginally ahead (-0.331). The plain NNs are clearly worse (DNN -0.407, MLP -0.488). So the defensible claim is a tight top cluster of tree and SVM models, with the NNs separated below. Singling out SVM over RF, LightGBM, and XGBoost needs a per-seed spread, which is not in the local data and would have to come from the server. Kendall W = 0.92 is about rank agreement across strategies, not a test that models differ from each other.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:289",
+   "verification": "verified in the data (NDS-era); the guide's own note at line 282-287 says the tight-cluster point still holds under auc_norm (NGBoost 0.824 / RF 0.818 / LGB 0.817 / XGB 0.814 / SVM 0.814 within ~0.01)",
+   "why_it_matters": "THE STATISTICAL CAUTION IS LIVE AND STRENGTHENED. Numbers DEAD. The key reusable insight: Kendall's W tests rank AGREEMENT ACROSS STRATEGIES, not whether models differ from each other \u2014 do not let W do work it cannot do."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Credibility issue 2: uncertainty results are single-seed; present as a gradient, not a precise ranking.",
+   "verbatim": "2. **The uncertainty results are single-seed.** Confirmed: each uncertainty configuration was run once. The corrected within-\u03c3 correlations are each computed over many samples per \u03c3 slice (n = 1,000\u201310,000), so within a run they are well-powered, but there is still only **one training seed per cell** \u2014 so the *ranking* among detectors (e.g. BNN-\u03b1 0.49 vs BNN-\u03b2 0.36 vs QRF 0.29 under outlier) has no error bars across seeds. Present the finding as a gradient (strong / moderate / absent) and as a qualitative noise-type \u00d7 representation pattern rather than a precise per-cell ranking; a few extra seeds on the headline cells (BNN-\u03b1/PDV/outlier especially) would let you put a CI on the lead.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:290",
+   "verification": "verified (n=1 confirmed; also re-stated as 'resolved' at line 376)",
+   "why_it_matters": "LIVE AND ACTIONABLE DURING REGENERATION \u2014 'a few extra seeds on the headline cells' is a concrete re-run scope decision the author can take now. The 'present as a gradient, not a ranking' rule is a live presentation decision."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Credibility issue 3: the inversion may be partly range restriction \u2014 largely resolved by the gate change.",
+   "verbatim": "3. **The inversion may be partly range restriction.** \"NDS clusters near -0.38 regardless of baseline R2\" is computed after dropping 66 configurations with R2 below 0.6. Restricting the R2 range can mechanically lower the correlation with NDS. Defend it (show the relationship with the filter relaxed) or argue that the filtered range is the relevant one.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:291",
+   "verification": "verified as raised; guide notes at line 286-287: 'the range-restriction worry is largely **resolved**: auc_norm is baseline-decoupled, and the gate is now R\u00b2<0.3 (48 configs excluded), not R\u00b2<0.6 (66)'",
+   "why_it_matters": "MOSTLY CLOSED, but the underlying methodological point \u2014 a baseline filter can mechanically create the appearance of decoupling \u2014 is LIVE and must be re-checked whenever the exclusion gate is set on regenerated data."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Credibility issues 4, 5, 6: 'comprehensive' over-promises; external confirmation overstated; classification and conformal prediction advertised but never shown.",
+   "verbatim": "4. **The word \"comprehensive\" over-promises.** This is a controlled benchmark, not a survey. \"Comprehensive\" invites \"you did not test X\". Consider softening. Minor.\n5. **External \"confirmation\" is overstated.** The external sets are small, XGBoost and the BNN variants drop below R2 of 0.3 on the hardest set (hERG), and rankings reorder (SVM overtakes NGBoost when all six strategies are pooled). Soften to \"broadly consistent, with notable exceptions\", which is close to what you already say.\n6. **The framework advertises classification and conformal prediction, which never appear in the results.** Either show a small example or state clearly that they are framework features, not benchmarked here.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:292-294",
+   "verification": "verified as raised (guide notes items 2,4,5,6 are unaffected by the metric change)",
+   "why_it_matters": "ALL THREE STILL LIVE \u2014 wording/scoping decisions independent of data. Item 6 connects directly to supervisor \u00a73, which asks for the classification-noise mention; satisfying the supervisor's request partly answers this reviewer objection too."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Mechanical fixes: the metric-definition edits that are the root of the pooled-sigma error.",
+   "verbatim": "| **Line 240** | **Metric definition** \u2014 \"Spearman between uncertainty and injected noise magnitude\" is computed POOLED over \u03c3 (the root of the error) | **State it is computed *within each \u03c3 level*; the pooled version measures the population trend, not per-sample detection.** Fix here or every downstream number stays self-contradicting |\n| **Lines 306\u2013308, 380, 624** | Restatements of the same metric (Table 1 metrics box; NoiseInject framework description) | Same within-\u03c3 clarification, or label pooled versions \"population-level\" |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:304-305",
+   "verification": "verified (locations enumerated against the submitted paper.tex)",
+   "why_it_matters": "STILL LIVE \u2014 five separate locations in paper.tex restate the same metric, and all five must change together or the paper self-contradicts. Line numbers are from the submitted paper.tex and will have drifted; anchor on the quoted text."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Mechanical fixes: the BNN reversal, the fingerprints/PDV wording, and the ADME lens conflict.",
+   "verbatim": "| Line 169 / 547 / 581 | \"Bayesian Neural Networks... do not [track noise]\" / \"track noise weakly\" | **REVERSED by the data \u2014 do NOT soften to \"weakly\"; BNNs are the strongest genuine per-sample detectors (BNN-\u03b1/PDV/outlier \u03c1=0.49). Rewrite per \u00a74.** |\n| Line 469 | \"more prone to picking up on noise\" contradicts robustness | State the decoupling instead |\n| Lines 508, 549, 579 | \"fingerprints\" undersells PDV (a descriptor) | \"non-embedding representations\" |\n| Lines 504 vs 562 | SVM vs NGBoost on ADME: the two sentences use different noise slices | State one lens, or report both (NGBoost under Gaussian, SVM across all six strategies) |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:306-309",
+   "verification": "verified (each location checked against paper.tex)",
+   "why_it_matters": "WORDING FIXES LIVE (the 'non-embedding' substitution and the ADME single-lens rule need no data). The BNN reversal itself is DEAD pending regeneration but the instruction 'do NOT soften to weakly' records the author's position."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Mechanical fixes: the small textual errors \u2014 R2 threshold inconsistency and a grammar bug.",
+   "verbatim": "| Lines 260 vs 432 | \"R2 <= 0.6\" vs \"R2 < 0.6\" | Pick one |\n| Line 274 | \"observations... are independence\" | \"are independent\" |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:312-313",
+   "verification": "verified",
+   "why_it_matters": "STILL LIVE \u2014 trivially fixable and easy to lose. Note the R\u00b2 threshold question is now moot in one direction: the gate moved to R\u00b2 < 0.3 (line 453), so both variants of the 0.6 wording go."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Table 7 and Additional file 9 in the submitted paper are pooled-sigma artifacts and must be regenerated within-sigma.",
+   "verbatim": "| **Table 7 (lines 517\u2013537) whole table** | Every Unc-Noise \u03c1 value is a pooled-\u03c3 (population) artifact; the table is Gaussian-only, where per-sample \u03c1\u22480 | **Regenerate as within-\u03c3, models \u00d7 noise strategies (see \u00a74 Table spec). Unc-Error \u03c1 / ECE / coverage columns are unaffected and can stay.** The Morgan/ECFP4 naming and \"PDV (binary)\" issues are subsumed by the regeneration |\n| **Additional file 9 (line 671)** | Gaussian, pooled Unc-Noise \u03c1 \u2014 same artifact | Regenerate within-\u03c3, or relabel its Unc-Noise \u03c1 as population-level |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:310-311",
+   "verification": "verified",
+   "why_it_matters": "STILL LIVE \u2014 the submitted Table 7 and Additional file 9 are both invalid for two independent reasons now (pooled-\u03c3 AND contaminated QM9). Also records latent naming bugs: 'Morgan/ECFP4 naming' and 'PDV (binary)' were wrong in the submitted table."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Figure 2 ANOVA decomposition: v2 adds the Residual bar, and the panel rosters differ (11 models performance / 7 models robustness).",
+   "verbatim": "- **Fig 2 \u2014 ANOVA decomposition** (`fig2_anova_decomposition.png`): \u2705 **RESOLVED by v2.** The v2 figure now\n  plots a fourth grey **Residual** bar, so the old \"Residual is dropped / Outlier bars misread\" problem is gone \u2014\n  the residual-dominated panels are now visible directly (Outlier Residual \u224884%, Heteroscedastic \u224877%). Panel\n  titles now state the roster: **panel a \"11 models\" (performance), panel b \"7 models\" (robustness)** \u2014 use these,\n  and note in the caption that the robustness panel is the 7-model balanced set.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:326-330",
+   "verification": "verified (pixel-level check of the regenerated figure)",
+   "why_it_matters": "THE CODE FIX IS LIVE (the Residual bar and roster disclosure are already in generate_paper_figures_v2.py and survive regeneration). The 84%/77% residual values are QM9 and DEAD \u2014 but MEMORY's [[anova_residual_dominance_confirmed]] says the residual dominance was independently confirmed on ARC 2026-08-14, so re-check that confirmation's provenance."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Figure 5 NN family: Panel a does not support 'both NN families improve' \u2014 VBLL-alpha is the lowest curve at every sigma.",
+   "verbatim": "**Panel a\n  (NN-\u03b1) still does not**: in absolute R\u00b2, BNN-\u03b1 sits on top of plain NN-\u03b1 and **VBLL-\u03b1 is the lowest curve at\n  every \u03c3**. This now aligns with the cross-examination finding that **VBLL-\u03b1 does not significantly improve NN-\u03b1\n  (\u0394+0.011, p=0.25, NS)** \u2014 only the full BNNs (both families) and VBLL-\u03b2 do. So temper \"both NN-\u03b1 and NN-\u03b2\n  improve\" to \"the full BNNs improve both families; VBLL improves NN-\u03b2 but not NN-\u03b1,\" and state that robustness\n  here means **auc_norm / the Wilcoxon test**, not absolute R\u00b2 (paper.tex:~475).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:344-347",
+   "verification": "verified twice \u2014 figure audit and independent Wilcoxon cross-examination agree",
+   "why_it_matters": "CLAIM CORRECTION LIVE, NUMBERS DEAD. Two independent lines of evidence (visual and statistical) agreed, which is the strongest-supported of the three broken claims. The instruction to state which metric 'robustness' refers to at that sentence is a permanent clarity fix."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Figure 6 uncertainty combined: caption must say population-level, and two panel claims are still wrong in paper.tex.",
+   "verbatim": "Shows only the **population-level** story (mean uncertainty\n  vs \u03c3, panels a/b) \u2014 which SURVIVES the correction and is fine, but it must be explicitly captioned as\n  population-level and NOT read as per-sample detection. Two panel-caption claims still need the earlier wording\n  fixes (panel a: not *every* model rises steadily \u2014 QRF spikes to \u22480 at \u03c3=0.3, VBLL-\u03b1 erratic, GP absent; panel\n  b: epistemic does **not** stay flat \u2014 both aleatoric and epistemic rise; paper.tex:547 still says \"epistemic\n  remains nearly flat\", fix there too).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:348-354",
+   "verification": "verified (figure audited against the rendered PNG)",
+   "why_it_matters": "CAPTION RULE LIVE ('population-level' labelling is permanent). The specific counterexamples (QRF spike, VBLL-\u03b1 erratic, epistemic rising) are QM9 observations, DEAD pending regeneration \u2014 but paper.tex:547's 'epistemic remains nearly flat' should be treated as unsupported until re-checked."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Spec for the new within-sigma per-sample uncertainty figure \u2014 the figure that carries the corrected finding.",
+   "verbatim": "**NEW \u2014 add the per-sample figure.** The corrected per-sample result needs its own figure: `results/paper_figures/within_sigma_uncertainty.png` (generated from the data, script `build_within_sigma.py`, panel data in `within_sigma_panel{A,B}_*.csv`). Panel a = within-\u03c3 \u03c1 at \u03c3=0.6, models \u00d7 the six noise strategies on PDV (outlier/quantile hot, the other four \u22480 \u2014 the noise-type dependence); panel b = within-\u03c3 \u03c1 under outlier, models \u00d7 representations (PDV/fingerprints carry it, mol2vec/MHG-GNN \u22480 \u2014 the representation gate). This is the figure that carries the corrected finding; pair it with the rebuilt Table 7.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:355",
+   "verification": "verified (figure and panel CSVs named)",
+   "why_it_matters": "FIGURE SPEC LIVE \u2014 two panels, one for the noise-type dependence and one for the representation gate. CRITICAL CAVEAT: it was written to results/paper_figures/ (the v1/NDS output directory, which MEMORY marks stale) by a standalone build_within_sigma.py, NOT by generate_paper_figures_v2.py. Per the MEMORY rule 'numbers come from the figure script', this panel must be folded into generate_paper_figures_v2.py before the re-run."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Figure 7 validation overview caption must be fully rewritten for auc_norm \u2014 the old NDS caption language is moot.",
+   "verbatim": "The v2 figure is now titled *\"Robustness (AUC$_{norm}$) on PDV\nrepresentation\"*, three panels (LogD / Caco-2 Efflux / hERG K$_i$), the **same 5 models** (RF, QRF, XGBoost,\nLightGBM, NGBoost) in each. The old NDS caption language (black cells for R\u00b2<0.3, \"N/A\" for |NDS|>2, fewer hERG\nrows) is now **moot**: the figure uses the auc_norm colour scale (\u22120.5\u21921.1), shows **negative auc_norm directly\nin purple** (e.g. XGBoost/Caco-2/Gaussian \u22120.40, XGBoost/hERG/Threshold \u22120.16), and has exactly **one grey N/A\ncell** (XGBoost \u00d7 Value-Prop on Caco-2, a missing config). Rewrite the caption to: 5 models \u00d7 6 strategies \u00d7\n3 datasets, auc_norm (higher = more robust), negative = worse-than-baseline, one N/A cell.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:356-363",
+   "verification": "verified (pixel-level audit against the regenerated figure)",
+   "why_it_matters": "MOST LIKELY TO SURVIVE OF ALL FIGURE ITEMS \u2014 this is the VALIDATION pipeline (LogD/Caco-2/hERG), which MEMORY confirms never had the held-out-noise bug. The caption spec and the one known missing config (XGBoost \u00d7 Value-Prop on Caco-2) are live."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Figure 8: the body text cites BNN variants that do not appear in the figure at all.",
+   "verbatim": "But body\n  line 562 cites panel a for \"XGBoost **and BNN variants** suffer the most\" \u2014 **no BNN models appear in this\n  figure** (none exist in the external data). Drop \"and BNN variants\" from that sentence.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:366-368",
+   "verification": "verified (no BNN models exist in the external data)",
+   "why_it_matters": "STILL LIVE \u2014 a factual error in the paper about which models were even run, independent of any number. Note it contradicts the Limitations draft (line 269), which also says 'XGBoost and the BNN variants, fell below usable performance' \u2014 that clause needs the same fix."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Threshold noise degenerates to uniform 2-sigma noise on the eV-scale HOMO-LUMO gap \u2014 its fixed cutoffs put ~100% of samples in one bin.",
+   "verbatim": "- **Threshold degeneracy \u2014 reconcile, and verify the raw target range.** The code analysis found `threshold`'s fixed \u00b11.0 cutoffs sit below the eV-scale HOMO\u2013LUMO gap, so ~100% of samples land in the single `2\u03c3` bin \u2192 it degenerates to *uniform 2\u03c3 noise*, not region-corrupting. This is consistent with the data on both sides (threshold's within-\u03c3 uncertainty \u03c1 \u2248 0 like Gaussian, AND threshold degrading performance the most \u2014 2\u03c3 everywhere). But it means line 393's \"threshold... corrupted label regions\" is imprecise, and that `threshold` is not really testing a distinct noise *pattern* on this target.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:383",
+   "verification": "unverified in part \u2014 the guide asks to 'confirm the raw (pre-normalization) HOMO\u2013LUMO gap range is > 1.0 eV (agent reported \u22480.67\u201316.9 eV, only 1/133,885 below 1.0)' before leaning on it in text",
+   "why_it_matters": "HIGHLY LIVE AND DIRECTLY FEEDS NOISE_DESIGN.md \u2014 this is independent corroboration of the 'six strategies are one strategy at six doses' diagnosis. Threshold is not a distinct pattern on this target. Carried through with its unverified marking on the raw range."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Value-proportional noise may use a fixed base_sigma of 0.1 that does not scale with the sigma sweep.",
+   "verbatim": "- **[SEPARATE, robustness-side] valprop noise may not scale with the \u03c3-sweep.** The code sets `value_proportional`'s `base_sigma` to a fixed 0.1 (read from `noise_strategy_params.json`), independent of the \u03c3 level being swept. If confirmed, the value-proportional NDS/degradation results are computed at an effectively constant noise level rather than increasing \u03c3 \u2014 which would affect the robustness (not uncertainty) analysis. Worth checking against the raw valprop injected-noise magnitudes per \u03c3. Not addressed in this guide's uncertainty rewrite; flag for the robustness pass.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:384",
+   "verification": "unverified \u2014 the guide says 'may', 'if confirmed', 'worth checking'",
+   "why_it_matters": "LIVE AND UNRESOLVED. MEMORY adds a crucial correction to the premise: noise_strategy_params.json is NEVER passed to the Rust binary (process_and_train.py:1635 omits --strategy_params), so Rust defaults apply and 'the paper's valprop factor 0.1 is correct by accident'. The scaling question itself is still open and must be settled before the re-run."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "NN-beta architecture in Methods does not match what the code builds.",
+   "verbatim": "- **[SEPARATE, methods] NN-\u03b2 architecture mismatch.** Methods states NN-\u03b2 is [128,128], but the code builds a uniform-width Optuna-tuned MLP (default 32\u00d72), not a hard-coded [128,128]. Reconcile the Methods description with what the code builds (the \u03b1\u2194dnn / \u03b2\u2194mlp identity is correct; only the layer sizes are off).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:385",
+   "verification": "verified (code-checked)",
+   "why_it_matters": "STILL LIVE AND UNFIXED \u2014 a factual Methods error about the model actually trained. DIRECT CONFLICT with supervisor \u00a78, whose replacement BNN paragraph states 'NN-$\\beta$ uses two hidden layers of size [128, 128]' \u2014 i.e. the supervisor's draft would enshrine the wrong architecture. Must be reconciled before either edit lands."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Cross-section link: the Variance-decomposition section already establishes that outlier noise hits an identifiable subset \u2014 connect it to the uncertainty result.",
+   "verbatim": "- **Cross-section link \u2014 leverage it (paper line 393).** The Variance-decomposition section *already* characterizes the noise strategies mechanistically: \"outlier noise only affects statistical outliers,\" while threshold/value-proportional \"corrupted label regions.\" The first half is a gift \u2014 the paper already establishes that outlier noise hits an identifiable subset, which is *exactly* the property that makes it per-sample detectable. Connect the uncertainty result back to this sentence so the two sections reinforce each other (subset-targeting noise \u2192 both a distinct ANOVA signature *and* the only regime where uncertainty localizes noise).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:382",
+   "verification": "verified (the sentence exists at paper.tex line 393)",
+   "why_it_matters": "STILL LIVE \u2014 a free structural connection between two sections that currently do not talk to each other, and it needs no new data. One of the highest value-per-effort items in the guide."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "PDV is the single best per-sample detector representation once computed within-sigma \u2014 the old pooled comparison was an artifact.",
+   "verbatim": "- PDV versus fingerprints: **resolved (within-\u03c3).** The old \"PDV 0.358 \u2248 SNS 0.360\" comparison was pooled-Gaussian (population artifact). Within-\u03c3 under outlier noise, **PDV is the single best detector representation** \u2014 BNN-\u03b1/PDV/outlier \u03c1=0.49 vs ~0.12\u20130.28 for the same models on fingerprints (e.g. BNN-\u03b1/SNS 0.23, BNN-\u03b1/topological 0.18, BNN-\u03b1/Morgan 0.12) \u2014 and the learned embeddings (mol2vec, MHG-GNN) collapse to \u22480 even under outlier. Use \"non-embedding\", and note PDV leads.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:377",
+   "verification": "verified (marked 'resolved' in the guide)",
+   "why_it_matters": "NUMBERS DEAD (QM9), TERMINOLOGY RULE LIVE. Records that a specific published-adjacent comparison ('PDV 0.358 \u2248 SNS 0.360') was an artifact \u2014 worth keeping so it is recognized if it reappears."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The 'PDV is the most robust representation' claim was CONTRADICTED on QM9 and removed from paper.tex.",
+   "verbatim": "- PDV as \"most robust representation\": **resolved \u2014 CONTRADICTED (QM9).** Holding the model fixed, continuous_pdv (\"PDV\") degrades *faster* (steeper NDS) than mol2vec/morgan for every model \u2014 e.g. NGBoost mol2vec \u22120.292 / morgan \u22120.288 / PDV \u22120.357; SVM \u22120.355 / \u22120.342 / \u22120.385; RF \u22120.306 / \u22120.330 / \u22120.386 (`table2_supp_auc_all_reps.csv`). Cause: PDV has the highest baseline R\u00b2 (~0.84\u20130.89 vs mol2vec ~0.69\u20130.82, `table_all_configurations.csv`), so it has the most performance to lose \u2192 steepest slope. The \"PDV most robust\" claim was **removed** from `paper.tex` (lines 471, 502) and this guide, replaced with the three-way tradeoff framing.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:378",
+   "verification": "verified against table2_supp_auc_all_reps.csv and table_all_configurations.csv \u2014 but subsequently reclassified at lines 429-432 as an NDS baseline-coupling artifact that auc_norm removes",
+   "why_it_matters": "DEAD TWICE OVER \u2014 an NDS artifact AND from contaminated QM9. Preserved because the record of the edit already made to paper.tex (lines 471, 502) is needed to avoid re-adding the claim, and because the causal mechanism is the textbook example of why the metric was changed."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Per-seed spread of the top models is still not available locally \u2014 needed for any pairwise significance claim.",
+   "verbatim": "- Per-seed NDS spread of the top models: **still open**. Not in the local repo. Pull from the server if you want a pairwise significance claim.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:379",
+   "verification": "unverified \u2014 'still open'",
+   "why_it_matters": "STILL LIVE AND ACTIONABLE NOW: the regeneration should write per-seed values, not just cell means, so the tight-cluster claim (credibility issue 1) becomes testable rather than permanently open."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "The Gauche GP likelihood question is now moot for every per-sample claim.",
+   "verbatim": "- Gauche GP likelihood (homoscedastic or not): **now MOOT.** The corrected within-\u03c3 analysis shows GP does not detect per-sample at all (\u03c1 between \u22120.06 and +0.08 everywhere, including under outlier/quantile), so there is no strong GP per-sample mechanism to defend. Whether its likelihood is homo- or heteroscedastic no longer bears on any claim.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:380",
+   "verification": "verified (as moot)",
+   "why_it_matters": "CLOSED \u2014 recorded so the question is not re-opened as a supposed weakness. CAVEAT: it is moot only IF the regenerated data reproduce the GP non-detection. If GP shows per-sample signal on clean data, this question reopens immediately."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "The one open data task: the BNN-vs-VBLL subset test, with the exact CSV filenames needed.",
+   "verbatim": "- **[PENDING] BNN-vs-VBLL subset test (the one open data task).** Confirm that BNN-\u03b1's outlier signal is genuine noise detection (uncertainty on the corrupted \\|z\\|>2 subset *rises* from \u03c3=0 to \u03c3=0.6) rather than a \\|y\\|-magnitude confound, and quantify how much of VBLL-\u03b1's apparent signal is confound (its \u03c3=0 control is a dirty \u22480.22). Needs four raw per-sample CSVs from the server (`uncertainty_{outlier,legacy}_continuous_pdv_{dnn_bnn_full,mlp_bnn_full,dnn_bnn_full_variational}_uncertainty_values.csv`). Until then, the guide credits **BNN-\u03b1** (clean \u03c3=0 control) as the genuine detector and flags VBLL-\u03b1 as \"possibly magnitude-linked.\"",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:381",
+   "verification": "unverified \u2014 marked [PENDING], never completed",
+   "why_it_matters": "LIVE AND NEVER DONE. The exact filenames are the salvage value here. The regeneration must preserve raw per-sample uncertainty CSVs (not just aggregates) or this test becomes impossible again."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Suggested priority order for the whole revision, with the load-bearing data fix first.",
+   "verbatim": "0. **Load-bearing data fix first: regenerate Table 7 and Additional file 9 within-\u03c3, add the within-\u03c3 figure, and correct the metric definition (line 240).** Everything else in the uncertainty story depends on this \u2014 if the prose is fixed but the pooled numbers stay, the section contradicts itself.\n1. Rebuild the uncertainty section (#4) around the noise-type-dependent finding, and align the abstract and Scientific Contribution (#1, #2) \u2014 this is now the largest change and the one that most affects the paper's claims. Drop the reversed \"GP/NGBoost strongest per-sample / BNNs weak\" framing everywhere.\n2. Drop in the two-mechanism synthesis (#5) and lead with the inversion. Biggest narrative payoff on the robustness side.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:391-393",
+   "verification": "n-a (work-plan decision)",
+   "why_it_matters": "STILL LIVE as sequencing, with one change: step 0's premise ('the regenerated numbers and figure already exist') is now FALSE, since everything must be re-run. The dependency logic \u2014 data fix before prose, or the section self-contradicts \u2014 is exactly right and applies with more force now."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Priority steps 3 and 4 \u2014 the remaining structural work.",
+   "verbatim": "3. Recut the research questions and add the preview (#3), restructure the conclusion (#6), and add the Limitations paragraph (#7).\n4. Do the structural splits, the mechanical fixes, and the credibility decisions last.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:394-395",
+   "verification": "n-a",
+   "why_it_matters": "STILL LIVE \u2014 and note that steps 3 and 4 are almost entirely data-independent, so they can proceed IN PARALLEL with the regeneration rather than waiting for it."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "AUC_norm cross-examination verdict: the spine survives and is strengthened, but three claims break.",
+   "verbatim": "The two-mechanism spine (**robustness is the model's job; per-sample uncertainty detection is a separate\nconditional capability**) holds under auc_norm and is cleaner than before:\n- **Model dominates robustness, representation is negligible** \u2014 auc_norm ANOVA Model \u03b7\u00b2 = 10\u201355%, Rep \u03b7\u00b2 =\n  **0.2\u20137.9%** (even smaller than under NDS). Rankings stay concordant across the 6 strategies: **Kendall's W =\n  0.9121** (n=11, \u03c7\u00b2=54.73, p=3.55\u00d710\u207b\u2078).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:411-415",
+   "verification": "verified \u2014 'Produced by a multi-agent cross-examination of the submitted paper.tex against the regenerated results/paper_figures_v2/ CSVs\u2026 Verified against the CSVs, not memory.'",
+   "why_it_matters": "SPINE LIVE, STATISTICS DEAD. The full Kendall's W reporting format (W, n, \u03c7\u00b2, p) is worth preserving as the template for re-reporting. All values are QM9-derived."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The corrected, honest statement of what auc_norm decouples \u2014 a config-level metric property, NOT 'robustness and accuracy are unrelated'.",
+   "verbatim": "- **auc_norm removes NDS's baseline coupling (metric/config level)** \u2014 \u26a0 CORRECTED after the real-data figure\n  audit. The honest, verified claim is a *relative, config-level* one: across all model\u00d7rep configs under Gaussian\n  noise, **NDS was significantly coupled to baseline (\u03c1 = \u22120.36, p = 5\u00d710\u207b\u2074)** \u2014 the \"more to lose\" artifact \u2014\n  whereas **auc_norm is not (\u03c1 = +0.13, p = 0.26, n.s.;** all-config \u03c1 \u2248 +0.06). So the metric no longer\n  mechanically re-measures clean performance. **This is NOT the same as \"robustness and accuracy are unrelated.\"**",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:416-420",
+   "verification": "verified \u2014 and explicitly recorded as a correction of the guide's own earlier wrong claim",
+   "why_it_matters": "THE DISTINCTION IS LIVE AND CRITICAL: a metric-level decoupling claim is defensible; an empirical 'robustness is unrelated to accuracy' claim is not, and the guide caught itself making the latter. This is the single most important guardrail against over-claiming in the rewrite."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Broken claim 1: 'NGBoost and SVM are the most robust' is a false pairing.",
+   "verbatim": "1. **\"NGBoost and SVM are the most robust\" \u2192 false pairing.** By mean auc_norm on PDV, SVM is **5th**\n   (0.814), behind RF (0.818), LightGBM (0.817) and level with XGBoost (0.814). The robust cluster is NGBoost +\n   the three tree ensembles; SVM is a member, and leads *only* under outlier noise and on the external ADME sets.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:426-428",
+   "verification": "verified against v2 CSVs",
+   "why_it_matters": "NUMBERS DEAD (QM9), but the STRUCTURAL LESSON IS LIVE: the pairing arose from mixing lenses (SVM leads on external ADME and under outlier; NGBoost leads on QM9/Gaussian). The external-ADME half rests on clean data and likely survives."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "Broken claim 3: 'Model dominant' and 'Bayesian transforms help' are both over-general.",
+   "verbatim": "3. **\"Model dominant\" and \"Bayesian transforms help\" are over-general.** Model \u03b7\u00b2 dominates only 4/6\n   strategies; **Heteroscedastic joins Outlier as residual-dominated** (\u03b7\u00b2 Model 14% / 10%, Residual 77% / 84%).\n   And **VBLL-\u03b1 no longer significantly improves NN-\u03b1** (\u0394+0.011, p=0.25, NS) \u2014 only full-BNN (both families)\n   and VBLL-\u03b2 do.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:433-436",
+   "verification": "verified against v2 CSVs; residual dominance independently re-confirmed on ARC 2026-08-14 per MEMORY [[anova_residual_dominance_confirmed]]",
+   "why_it_matters": "THE QUALIFICATION RULE IS LIVE ('model dominant in 4 of 6 strategies', not universally). The residual-dominance finding has an independent ARC confirmation and is the most likely QM9 finding to survive regeneration \u2014 but it must still be re-derived, not quoted."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The metric definition rewrite for Methods \u2014 the load-bearing edit, with the full auc_norm specification.",
+   "verbatim": "- **AUC_norm** (sole robustness metric) = normalised area under the retention curve R\u00b2(\u03c3)/R\u00b2(0), trapezoidally integrated over\n  \u03c3\u2208{0\u20261.0}; range \u2248[0,1], **higher = more robust**, no shape assumption, weakly/non-significantly coupled to baseline (config-level \u03c1\u2248+0.06; NDS was \u22120.36 under Gaussian).\n- **Motivation to state explicitly** (this is what makes the decoupling headline coherent, and is a genuine\n  *third contribution*): (i) R\u00b2(\u03c3) curves are nonlinear (plateau-then-cliff / early-collapse), so a single OLS\n  slope mischaracterises shape \u2014 cite the old `r2_fit` linearity diagnostic showing the straight line was often\n  poor; (ii) a slope is baseline-coupled, so NDS partly re-measured clean performance; (iii) auc_norm fixes both.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:445-450",
+   "verification": "verified",
+   "why_it_matters": "FULLY LIVE \u2014 the mathematical definition (trapezoidal integration of the retention curve over \u03c3\u2208{0\u20261.0}) is what the regenerated script must implement, and 'a genuine third contribution' is an author decision about how to position the metric."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Exclusion gate and metric-table edits: baseline R2 < 0.3 plus at least 5 valid iterations per cell.",
+   "verbatim": "- Rewrite line 260's \"values near zero / negative = sensitive / positive slopes\" language entirely (auc_norm\n  near 1 = robust; well below 1 = degraded).\n- Update the **exclusion rationale**: gate relaxed to **baseline R\u00b2 < 0.3** (`ROBUSTNESS_BASELINE_THRESHOLD`,\n  justified because auc_norm is baseline-decoupled) **+ \u22655 valid iterations/cell**; the old \"misleadingly shallow\n  slopes\" wording is slope-specific and now wrong.\n- **Metrics-summary table (tab:metrics_summary, 291\u2013293):** delete the NDS row; add an AUC_norm row.\n- **ANOVA metric line 262:** \"either R\u00b2 at fixed noise or NDS\" \u2192 \"\u2026or AUC_norm\".",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:451-457",
+   "verification": "verified (constant name ROBUSTNESS_BASELINE_THRESHOLD given)",
+   "why_it_matters": "FULLY LIVE \u2014 gate values and the constant name are code specification that survives regeneration. NOTE THE COLLISION: tab:metrics_summary is exactly the table supervisor \u00a72 supplies in LaTeX, and the supervisor's version still contains the NDS row. The two must be merged."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The 7-vs-11 model roster caveat and why the Bayesian NN variants drop out of the cross-rep ANOVA.",
+   "verbatim": "- **7-vs-11 model caveat** (state wherever the metric/roster is introduced): the robustness ANOVA runs on **7\n  models** (cells need \u22655 valid iters on every rep for balance; the four Bayesian/VBLL NN variants \u2014 dnn_bnn_full,\n  mlp_bnn_full, dnn_vbll, mlp_vbll \u2014 drop out on the embedding reps mhggnn/mol2vec) while the ranking table and\n  **Kendall's W use 11 models**. Excluded configs **66 \u2192 48**. (Confirmed against fig2: panel a \"11 models\",\n  panel b \"7 models\".)",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:458-462",
+   "verification": "verified (confirmed against the regenerated fig2 panel titles)",
+   "why_it_matters": "DESIGN FACT, LIVE \u2014 it is a consequence of the balance requirement, not of the data values, so it will recur after regeneration. The exact model names that drop out (dnn_bnn_full, mlp_bnn_full, dnn_vbll, mlp_vbll) are the salvage. Excluded-config count 66\u219248 is data-dependent and DEAD."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The full auc_norm robustness ranking, all 11 models, from the 2026-07 v2 run.",
+   "verbatim": "The `tab:nds_ranking` table must be **rebuilt entirely**. Model order flips from NDS to:\n`ngboost 0.824 > rf 0.818 > lgb 0.817 > xgboost 0.814 > svm 0.814 > BNN-\u03b2 0.802 > BNN-\u03b1 0.801 > VBLL-\u03b2 0.792 >\nNN-\u03b1(dnn) 0.789 > VBLL-\u03b1 0.781 > NN-\u03b2(mlp) 0.756`. Bold NGBoost **and RF** (not SVM). NGBoost mean auc_norm 0.824.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:467-469",
+   "verification": "verified against v2 CSVs (2026-07)",
+   "why_it_matters": "DEAD \u2014 every value is from the contaminated QM9 pipeline. Preserved as the PRIOR ordering to compare against after regeneration, and because 'the table is named tab:nds_ranking and must be renamed as well as rebuilt' is a live LaTeX label issue."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The Wilcoxon table converted from delta-NDS to delta-auc_norm \u2014 one significance result flips.",
+   "verbatim": "| Comparison | paper \u0394NDS (p) | v2 \u0394auc_norm (p) | note |\n|---|---|---|---|\n| NN-\u03b1 \u2192 BNN-\u03b1 | +0.056 (2.9e-10) * | **+0.031 (2.9e-11) *** | holds |\n| NN-\u03b1 \u2192 VBLL-\u03b1 | +0.061 (1.2e-6) * | **+0.011 (0.252) NS** | **significance FLIPS** |\n| NN-\u03b2 \u2192 BNN-\u03b2 | +0.096 (2.9e-11) * | **+0.053 (2.9e-11) *** | holds |\n| NN-\u03b2 \u2192 VBLL-\u03b2 | +0.124 (1.2e-7) * | **+0.062 (1.2e-7) *** | still largest |\n| RF \u2192 QRF | \u22120.022 (1.6e-10) * | **\u22120.012 (2.9e-11) *** | QRF still worse |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:473-479",
+   "verification": "verified against v2 CSVs",
+   "why_it_matters": "NUMBERS DEAD, but this table is the exact template for the paired comparison the paper needs (five within-family probes, the cleanest mechanism-isolating evidence). The five comparisons themselves are a live experimental design and must be re-run as a set."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "The full ANOVA eta-squared shift table, paper (NDS) vs v2 (auc_norm), all six strategies.",
+   "verbatim": "| Strategy | paper (NDS) | v2 (auc_norm) | shift |\n|---|---|---|---|\n| Gaussian | 48.7/8.2/11.9/31.2 | 43.8/5.2/16.9/34.2 | model still dominant |\n| Quantile | 47.9/6.8/14.9/30.4 | 36.8/4.4/15.1/**43.7** | residual now leads |\n| Threshold | 48.0/10.1/28.0/13.9 | **54.7**/7.9/22.6/14.8 | model dominant |\n| Heteroscedastic | 37.0/4.5/17.5/41.0 | 14.0/0.7/8.0/**77.4** | **bold moves Model\u2192Resid** |\n| Value-Prop. | 52.8/6.9/22.2/18.2 | 52.5/6.0/19.9/21.6 | model dominant |\n| Outlier | 12.7/3.2/4.7/79.3 | 10.3/0.2/5.9/**83.6** | residual dominant |",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:489-496",
+   "verification": "verified against table1_anova_summary.csv (v2)",
+   "why_it_matters": "DEAD (QM9 contaminated), but preserved as the complete prior for both metrics side by side \u2014 this is the only place both the submitted and the v2 decomposition are recorded together, and it is the reference point for judging whether regeneration changes the story. Column order is Model/Rep/Interaction/Residual."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "ANOVA section rewrite instructions, including a stale claim about interaction dominance.",
+   "verbatim": "Line 391 \"interaction dominates NDS variance\" \u2192 model is the largest *explained* factor (Model>Interaction>Rep),\nbut for diffuse noise (outlier/hetero, +now quantile-ish) most variance is residual. Cross-rep Spearman (423,\n\"\u03c1=0.73, 12 models\") must be recomputed on auc_norm with the corrected model count (9 ANOVA / 11 ranking, not 12).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:498-500",
+   "verification": "partly FAILED VERIFICATION \u2014 the '9 ANOVA' figure here is corrected to 7 at lines 589-594 ('My guide's earlier \"9\" was a wrong synthetic estimate'), and the figure audit at line 334 says the scatter plots 12 points, not 11",
+   "why_it_matters": "LIVE AS AN EDIT INSTRUCTION but internally inconsistent on model counts \u2014 the authoritative numbers are 7 (ANOVA) / 11 (ranking+Kendall) / 12 (fig3 scatter points, all models except GP). Flagged so the contradiction is not carried into the paper."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Abstract and Scientific Contribution change list under auc_norm, including adding a third contribution.",
+   "verbatim": "- 164 metric sentence \u2192 retention-AUC definition with the nonlinear+decoupled motivation (see big-picture edits).\n- \"NGBoost and SVMs strongest\" \u2192 \"NGBoost and the tree ensembles (RF/LightGBM/XGBoost)\".\n- \"Bayesian transformations improve robustness\" \u2192 \"full-BNN improves both families; VBLL improves one (NN-\u03b2)\".\n- Add a **third contribution**: the pair of curve-descriptive, baseline-decoupled robustness metrics.\n- The \"NGBoost & GP strongest per-sample\" clause is already dead from the uncertainty correction \u2014 remove.\n- Fix the mid-sentence break at 167\u2013169; drop the \"aleatoric\" organizing frame.\n- Numbers: W=0.9121; interaction explains most on clean data (46\u201349%); rep <8% under noise.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:503-509",
+   "verification": "verified",
+   "why_it_matters": "MOSTLY LIVE as edit instructions. ONE ITEM IS STALE: 'the pair of curve-descriptive metrics' assumes auc_norm AND Weibull \u03b2 \u2014 \u03b2 was dropped, so the third contribution is a SINGLE metric, not a pair. Fix before use."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "Validation section: direction holds everywhere, only the framing inverts.",
+   "verbatim": "Direction HOLDS everywhere; only the framing inverts. \"pooled mean NDS \u22120.16 (SVM) vs \u22120.19 (NGBoost)\" \u2192\n\"pooled mean auc_norm **0.877 (SVM) vs 0.857 (NGBoost)**\"; SVM leads on hERG/Caco-2, NGBoost on LogD (marginal).\nExternal ANOVA Model \u03b7\u00b2 = **91.8/92.4/95.2%** (LogD/Caco-2/hERG), Rep 4.2/0.9/0.2%, Residual 0.0 (Type-I sequential SS), n_models=7, n_reps=3.\nRF\u2192QRF \u0394auc_norm: hERG \u22120.132, Caco-2 \u22120.124, LogD \u22120.042 (QRF worse, holds). XGBoost worst (holds).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:522-525",
+   "verification": "verified against v2 CSVs; the Rep \u03b7\u00b2 values were themselves corrected at line 596-598 from 4.8/7.9/5.5 to 4.2/0.9/0.2",
+   "why_it_matters": "MOST LIKELY LIVE OF ALL NUMBERS IN THE GUIDE \u2014 this is the validation pipeline (LogD/Caco-2/hERG), which MEMORY confirms never had the held-out-noise bug. These may be the only quotable figures in the entire document. Still re-derive from the regenerated run to be safe."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "The validation ANOVA is a saturated design with no replication \u2014 residual ~0, and that must be stated.",
+   "verbatim": "**NB:** the validation\n  ANOVA uses one auc_norm value per model\u00d7rep cell (no replication), so residual is ~0 and the three effects partition\n  100% \u2014 legitimate for a saturated design, but state it as such (it is not the same 10-replicate error term as QM9).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:558-560",
+   "verification": "verified",
+   "why_it_matters": "FULLY LIVE \u2014 a design fact about the external ANOVA that a reviewer will catch. It also means the external Model \u03b7\u00b2 of 91.8\u201395.2% cannot be compared like-for-like with the QM9 \u03b7\u00b2, and the paper must say so."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Negative-residual bug in the validation ANOVA, fixed via a dependency-free Type-I sequential sums-of-squares helper.",
+   "verbatim": "- **fig_validation_anova negative residuals** \u2014 the unbalanced design (7 models \u00d7 3 reps, missing cells) previously\n  made Model+Rep+Interaction sum >100%, giving a **negative Residual \u03b7\u00b2** (\u22121.9/\u221211.7/\u22129.3). Now computed via a\n  dependency-free **Type-I sequential SS** helper (`_two_way_eta2_unbalanced`, nested OLS via numpy) that guarantees\n  residual \u2265 0 and shares summing to 100%. Method-consistent with the paper's stated Type-I SS.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:555-558",
+   "verification": "verified (fix applied to generate_paper_figures_v2.py)",
+   "why_it_matters": "FULLY LIVE \u2014 a real code bug and its fix, already applied. The function name `_two_way_eta2_unbalanced` is the salvage; verify it is still present in generate_paper_figures_v2.py before the re-run, since the script has been modified since."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "Output CSV filenames were renamed from nds to auc \u2014 paper Additional-file references must follow.",
+   "verbatim": "- **`nds` \u2192 `auc_norm` cleanup** \u2014 all metric-carrying variables, stale comments, and the mislabeled output CSVs were\n  renamed. Output filenames changed: `table2_nds_*` \u2192 `table2_auc_*`, `table_validation_nds*` \u2192 `table_validation_auc*`,\n  `table_nn_family_nds` \u2192 `table_nn_family_auc`. **Paper Additional-file references and captions must use the new names.**\n  (Legacy input-column handling `NDS_r2`/`NSI` and the intentional \"old NDS slope\" explanations were deliberately kept.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:561-564",
+   "verification": "verified (applied, commit 373ca34)",
+   "why_it_matters": "FULLY LIVE \u2014 filename mapping needed for every Additional-file citation in paper.tex. Note the deliberate exception: legacy input columns NDS_r2/NSI were intentionally kept, so seeing 'NDS' in the code is not automatically a bug."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "The fig3 framing decision \u2014 RESOLVED by reverting the title; the metric-decoupling argument moves to text.",
+   "verbatim": "**RESOLVED (no new figures):** fig3's title was reverted from the (wrong) \"Robustness is decoupled from baseline\naccuracy\" back to the neutral **\"Baseline accuracy vs. robustness (PDV, Gaussian)\"**; the \u03c1 annotation stays and\nhonestly shows the model-level tilt. The figure now simply shows what it shows. **The metric-decoupling argument\nmoves to TEXT** (Methods, where auc_norm is defined)\u2026 **Abstract/intro/conclusion:** do NOT claim \"robustness is decoupled from clean accuracy\"\nas an empirical finding \u2014 at the model level they are moderately *related* (more robust models tend to be more\naccurate). Keep only the narrow, correct statement that the *metric* isn't a proxy for baseline the way NDS was.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:580-587",
+   "verification": "verified \u2014 the figure was audited pixel-level and the guide's own claim was found wrong ('In every case the figure is right and the guide's number was the error')",
+   "why_it_matters": "FULLY LIVE AND THE SHARPEST GUARDRAIL IN THE DOCUMENT \u2014 an explicit prohibition on a claim the author was about to make in the abstract. The distinction between metric-level and empirical decoupling survives any regeneration."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "fig3 plots 11 model means and prints rho = +0.49 \u2014 a visible positive tilt, not a flat cloud.",
+   "verbatim": "1. **\ud83d\udd34 fig3 / the decoupling claim \u2014 FRAMING DECISION NEEDED (do not paste the old claim).** fig3 plots **11\n   PDV/Gaussian model *means***, and prints **\u03c1 = +0.49** \u2014 a *visible positive tilt*, NOT a flat cloud. So the\n   figure's own \"decoupled\" title contradicts its data. The real, defensible decoupling is a **metric/config-level**\n   statement (NDS vs auc_norm coupling to baseline):\n   - Within Gaussian, all configs: **NDS \u03c1 = \u22120.36 (p = 5\u00d710\u207b\u2074, coupled)** vs **auc_norm \u03c1 = +0.13 (n.s.)**.\n   - All configs: NDS \u22120.08 vs auc_norm +0.06.\n   - fig3's n=11 model means: **+0.43** (better models are both more accurate *and* more robust \u2014 a genuine\n     empirical pattern, not a metric artifact).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:572-579",
+   "verification": "verified by a 6-agent pixel-level check of the regenerated figures; note the internal inconsistency (+0.49 printed on the figure vs +0.43 quoted for the same n=11 model means)",
+   "why_it_matters": "NUMBERS DEAD, LESSON LIVE. Also carries an unresolved internal discrepancy: \u03c1 = +0.49 and \u03c1 = +0.43 are both stated for the same quantity in the same block. Do not quote either without recomputing."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "fig2 robustness ANOVA uses 7 models, and the exclusion of the four NN Bayesian variants is intentional and correct.",
+   "verbatim": "2. **fig2 robustness ANOVA = 7 models, not 9.** Correct number: **7**. The 4 NN Bayesian/VBLL variants\n   (BNN-\u03b1, BNN-\u03b2, VBLL-\u03b1, VBLL-\u03b2) are **intentionally excluded from the cross-rep ANOVA** \u2014 they don't produce\n   usable results on the embedding fingerprints (mol2vec, MHG-GNN), so they can't enter a design that requires all\n   five reps. This is expected and correct; no action. (My guide's earlier \"9\" was a wrong synthetic estimate \u2014 the\n   only fix was updating the number to 7.) Their robustness is reported, as intended, in the ranking + Wilcoxon +\n   nn-family analyses.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:589-594",
+   "verification": "verified \u2014 and explicitly corrects an earlier WRONG SYNTHETIC ESTIMATE of 9 in the guide itself",
+   "why_it_matters": "FULLY LIVE \u2014 a design fact plus an explicit record that a number in this guide was hallucinated and caught. Given the author's stated fury about hallucination, this self-correction is itself important salvage: it shows which numbers in the guide were synthetic rather than measured."
+  },
+  {
+   "kind": "open-thread",
+   "headline": "Still-open figure questions after the real-data audit.",
+   "verbatim": "- **fig_interaction NN-\u03b2\u00d7mol2vec = 0.846** \u2014 CONFIRMED real data (not a thin-cell artifact); mlp is genuinely ~+0.06\n  more robust on mol2vec than its other reps. Faithful render; keep, but worth a sentence if it draws a reviewer's eye.\n- **fig_interaction Panel B** now prints Spearman \u03c1 = 0.86 (was NDS \u03c1=0.73) \u2014 update any text citing 0.73.\n- **fig_uncertainty_combined QRF \u03c3=0.3 spike** \u2014 near-zero-mean artifact, unrelated to the metric.\n- **QRF/GP rows** appear in fig1/fig_interaction heatmaps but not in the `table2_auc*` ranking CSVs (they're computed\n  but excluded from the 11-model ranking set) \u2014 confirm their heatmap source is intended.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:601-606",
+   "verification": "mixed \u2014 NN-\u03b2\u00d7mol2vec marked CONFIRMED real data; the QRF/GP heatmap-source question marked 'confirm'",
+   "why_it_matters": "THE QRF/GP INCONSISTENCY IS LIVE AND UNRESOLVED \u2014 models appearing in heatmaps but not in the ranking CSV is a reproducibility hazard a reviewer could find. Resolve it in the regenerated script. The 0.73\u21920.86 update is DEAD (QM9)."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Hendrycks & Dietterich ICLR 2019 is the canonical citation for aggregating error over severity levels with the clean-accuracy confound removed.",
+   "verbatim": "- **Hendrycks & Dietterich, ICLR 2019** (arXiv:1903.12261) \u2014 mCE / Relative mCE: error aggregated over severity\n  levels, normalised to a reference; Relative mCE explicitly removes the clean-accuracy confound. *The canonical\n  citation.* (Cite 1903.12261, not the earlier 1807.01697.)",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:617-619",
+   "verification": "verified \u2014 part of the '18/28 candidates survived adversarial checking' set",
+   "why_it_matters": "FULLY LIVE \u2014 literature does not regenerate. This is the primary precedent that makes auc_norm defensible as established practice rather than an invented metric, and it includes a specific arXiv-ID disambiguation that is easy to get wrong."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Wang et al. 2025 relative AUC (rAUC) \u2014 the closest exact match to auc_norm.",
+   "verbatim": "- **Wang et al., 2025** (arXiv:2503.16183) \u2014 defines **relative AUC (rAUC) = AUC(method)/AUC(upper-bound)** over\n  the noise range. Closest exact match to auc_norm.\n- **Rajhans & Khawarey, ICAART 2026** (arXiv:2602.06395) \u2014 \"Robustness Index = area under the accuracy-perturbation curve.\"",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:619-621",
+   "verification": "verified (survived adversarial checking)",
+   "why_it_matters": "FULLY LIVE. rAUC is the nearest published relative of auc_norm and must be cited and distinguished, or a reviewer will ask why the metric is presented as new."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Kolmar & Grulke 2021 \u2014 same domain, same journal; frame auc_norm as the shape-agnostic evolution of their normalised-degradation approach.",
+   "verbatim": "- **Kolmar & Grulke, *J. Cheminform.* 13:92, 2021** \u2014 **same domain, same journal**: normalised RMSE/RMSE\u2080 vs\n  \u03c3/RMSE\u2080, ratio m_noise/m_true as a single scalar decoupled from absolute error. *Frame auc_norm as the natural,\n  shape-agnostic evolution of Kolmar's normalised-degradation approach* (this is also the Kolmar work the uncertainty\n  section already builds on). NB: it uses linear slopes, not an AUC \u2014 cite as precedent for *normalised, decoupled*\n  robustness scalars in QSAR, not for the area itself.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:622-626",
+   "verification": "verified (survived adversarial checking), with an explicit scope limit on what it may be cited for",
+   "why_it_matters": "THE MOST VALUABLE CITATION IN THE DOCUMENT AND FULLY LIVE \u2014 same journal (J. Cheminform.), same domain, and it is already the paper's uncertainty anchor, so it links the metric contribution and the uncertainty contribution to one lineage. The 'cite for normalised/decoupled, NOT for the area' scope limit prevents an overclaim."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Supporting citations for the decoupling principle and for mCE/rCE as standard practice.",
+   "verbatim": "- **Ben Braiek & Khomh, 2024** (arXiv:2404.00897, ML Robustness primer) \u2014 surveys mCE/rCE as standard practice.\n- Supporting the *decoupling principle*: **Taori et al., NeurIPS 2020** (\"effective/relative robustness\");\n  **G\u00f6pfert et al., ECML-PKDD 2019** (\"adversarial robustness curves\"); **Wang et al., ACL 2023** ReCode (\"Robust Drop\").",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:627-629",
+   "verification": "verified (survived adversarial checking)",
+   "why_it_matters": "FULLY LIVE \u2014 days of literature work. Taori et al.'s 'effective robustness' is the standard term for exactly the property auc_norm is claimed to have, and G\u00f6pfert's 'robustness curves' supports the 'robustness is a property of the curve' framing."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Weibull-beta references, kept for reference only since the metric was dropped.",
+   "verbatim": "**weibull_beta references \u2014 NO LONGER NEEDED (metric dropped 2026-07).** Kept for reference only in case the\nshape descriptor is ever revisited: Klakattawi *PLoS ONE* 17(2):e0264229 2022; Safari/Masseran/Majid et al.\n*Sci. Rep.* 15:11516 2025; Huang & Ferrell *PNAS* 93:10078 1996 (Hill-coefficient steepness analogy).",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:631-633",
+   "verification": "verified as references; marked NO LONGER NEEDED",
+   "why_it_matters": "DEAD FOR THE CURRENT PAPER but explicitly retained by the author 'in case the shape descriptor is ever revisited'. Preserving them costs nothing and re-finding them costs hours."
+  },
+  {
+   "kind": "literature-citation",
+   "headline": "Blocklist: papers that must NOT be cited as metric support, and one that fabricated its claim.",
+   "verbatim": "**Do NOT cite as metric support** (real papers, but the match was overstated): Rolnick 2017, Jiang ICML 2020,\nSong survey 2022, Northcutt 2021, NoiseMol 2023, Fooladi 2025 \u2014 these only sweep a noise axis / report point-wise\nmetrics. And **ContextShift (arXiv:2606.09495) fabricated its rAUC claim** \u2014 exclude entirely.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:635-637",
+   "verification": "FAILED VERIFICATION for all listed \u2014 10 of 28 candidates were rejected by adversarial checking; ContextShift arXiv:2606.09495 is marked as having FABRICATED its rAUC claim",
+   "why_it_matters": "CRITICAL AND FULLY LIVE \u2014 this is a negative-result blocklist that took adversarial checking to produce, and it is exactly the kind of work that gets silently lost and then redone wrong. The ContextShift fabrication finding in particular must never be lost: citing it would put a fabricated claim in the paper."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "Explicit warning that the guide's own full drafts are stale and must not be pasted.",
+   "verbatim": "The full-draft rewrites above (abstract \u00a71, two-mechanism keystone \u00a75, conclusion \u00a76, preview line 149) predate\nthis metric change. They still say \"rate of performance loss / slope,\" cite \"Kendall's W = 0.92,\" lean on the PDV\n**headroom argument**, and assert blanket \"BNN+VBLL improve robustness.\" **Pasting them verbatim re-imports exactly\nthe NDS framing and the self-contradiction this change removes.** Re-derive them against auc_norm before use \u2014 the\nper-section fixes above are the authority where they conflict.",
+   "source": "/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md:641-645",
+   "verification": "n-a (warning)",
+   "why_it_matters": "FULLY LIVE AND NOW STRONGER \u2014 the drafts are stale for a second reason (contaminated QM9) on top of the metric change. The precedence rule is explicit: the per-section fixes are the authority where they conflict with the drafts."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "SUPERVISOR ITEM 1 \u2014 GP kernel confusion: the paper does say it, but buries it.",
+   "verbatim": "## 1. GP kernel situation\n\nThe supervisor's confusion (\"I thought we were using a RBF kernel for GP/PDV?\")\ncomes from the fact that the current paragraph buries the answer in the middle\nof a long block. The paper *does* say it: Tanimoto for binary fingerprints, RBF\nfor PDV. But because the paragraph opens with \"we used the Tanimoto kernel,\"\nthat's what sticks.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:8-14",
+   "verification": "n-a (supervisor feedback + diagnosis)",
+   "why_it_matters": "SUPERVISOR FEEDBACK \u2014 FULLY LIVE, entirely independent of data. Preserved verbatim per instruction. The supervisor's actual words are the quoted question: 'I thought we were using a RBF kernel for GP/PDV?'"
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 1 \u2014 the drafted replacement GP paragraph, leading with the two-kernel setup.",
+   "verbatim": "> We implemented GP models using the \\texttt{Gauche} framework\n> \\citep{gauche}, which provides kernels optimised for molecular\n> representations. Because no single kernel is appropriate for both binary\n> fingerprints and continuous descriptors, we used two GP variants throughout\n> this study. For the binary fingerprint representations (ECFP4, SNS), we used\n> the Tanimoto kernel \\citep{Ralaivola2005, moss2020, gauche}, which measures\n> similarity between binary feature vectors. For continuous-valued\n> representations (PDV, mol2vec, MHG-GNN), the Tanimoto kernel is\n> ill-defined, so we used a radial basis function (RBF) kernel implemented via\n> \\texttt{GPyTorch} \\citep{gpytorch}; we refer to this variant as GP~(RBF) in\n> PDV-specific analyses. To avoid confounding kernel choice with representation\n> in the cross-representation ANOVA, the GP is excluded from that comparison\n> and reported separately in the PDV case study (Section~\\ref{...}).",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:19-31",
+   "verification": "n-a (drafted prose, LaTeX-ready)",
+   "why_it_matters": "FULLY LIVE \u2014 LaTeX-ready with citation keys (gauche, Ralaivola2005, moss2020, gpytorch). It also documents the DESIGN JUSTIFICATION for excluding GP from the cross-representation ANOVA, which is the same exclusion the revision guide discusses at line 543. The Section~\\ref{...} is an unfilled placeholder."
+  },
+  {
+   "kind": "research-finding",
+   "headline": "SUPERVISOR ITEM 1b \u2014 the paper's SVM kernel statement is factually wrong; Tanimoto is not used for SVM anywhere in the codebase.",
+   "verbatim": "Code-checked against `models/models.py:1427-1469` and\n`KIRBy/tests/alternative_data_noise_robustness.py:630-635`.\n\n- **QM9 SVM** (`train_svm_model`): always `kernel='rbf'`, `C=1.0`,\n  `gamma='scale'`. No representation switch, no Tanimoto branch. The\n  Models-section line in the paper is correct *for QM9*.\n- **Validation-dataset SVM** (KIRBy): hyperparameters were tuned per\n  representation, giving:\n  - `ECFP4` \u2192 `kernel='rbf'`\n  - `SNS` \u2192 `kernel='poly'` (degree 2)\n  - `PDV` \u2192 `kernel='poly'` (degree 2)\n  - default \u2192 `rbf`\n\n  Tanimoto is **not used for SVM anywhere in the codebase.**",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:36-48",
+   "verification": "verified \u2014 code-checked against two named files with line numbers",
+   "why_it_matters": "FULLY LIVE AND CRITICAL. Confirms MEMORY's flag that 'paper.tex L197 SVM/Tanimoto claim is factually wrong'. This is a code fact, immune to regeneration. The per-representation kernel table for the validation SVM is exactly the content the supervisor's requested Supplementary Table S1 needs."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 1b \u2014 the replacement sentence for the incorrect SVM kernel claim, plus the de-duplication instruction.",
+   "verbatim": "> For the validation-dataset SVM, kernel and other hyperparameters were\n> selected per representation by Bayesian optimisation\n> (Supplementary Table~S1); the chosen kernels were RBF for ECFP4 and\n> polynomial (degree 2) for SNS and PDV. For QM9, the SVM used a fixed RBF\n> kernel ($C = 1.0$, $\\gamma = \\texttt{scale}$) as described in the\n> Models subsection.\n\nAlso remove the duplicate / partially-redundant \"A radial basis function\n(RBF) with $C = 1.0$ and $\\gamma = \\texttt{scale}$ was used as the kernel\"\nline from the Models paragraph if you keep the QM9 detail above, or leave\nthat line and trim the Dataset version \u2014 pick one home for it.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:56-66",
+   "verification": "n-a (drafted prose)",
+   "why_it_matters": "FULLY LIVE. Note the dependency: this sentence cites 'Supplementary Table~S1', which does not yet exist \u2014 the per-representation SVM hyperparameters must be tabulated as a new supplementary table before this text can go in."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 2 \u2014 the requested metrics-summary table, part 1 (RMSE through Kendall's W).",
+   "verbatim": "New table to add at the end of the Performance Metrics subsection (or\nimmediately after the introductory sentence). Caption can be tightened.\n[\u2026]\nRMSE\n  & $\\sqrt{\\frac{1}{N}\\sum_i (y_i - \\hat{y}_i)^2}$\n  & Predictive accuracy (lower is better) \\\\\n$R^2$\n  & $1 - \\frac{\\sum_i (y_i - \\hat{y}_i)^2}{\\sum_i (y_i - \\bar{y})^2}$\n  & Variance explained by the model; comparable across datasets and noise levels \\\\\nNDS\n  & $dR^2 / d\\sigma$ (slope of $R^2$ vs $\\sigma$)\n  & Robustness to label noise; values near zero indicate stability, more negative values indicate sensitivity \\\\\nWilcoxon signed-rank\n  & Paired non-parametric test, $\\alpha=0.05$ (two-sided)\n  & Pairwise comparison of probabilistic vs deterministic counterparts (e.g.\\ NN-$\\alpha$ vs BNN-$\\alpha$) \\\\",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:72-94",
+   "verification": "n-a (supervisor request, LaTeX drafted)",
+   "why_it_matters": "SUPERVISOR REQUEST \u2014 LIVE, but the NDS ROW IS DEAD: the revision guide (line 456) says explicitly 'Metrics-summary table (tab:metrics_summary, 291\u2013293): delete the NDS row; add an AUC_norm row'. The two documents conflict on this exact table and must be merged before the table is inserted."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 2 \u2014 metrics-summary table, part 2 (Kendall's W through ECE) and the caption.",
+   "verbatim": "Kendall's $W$\n  & Coefficient of concordance, $[0, 1]$\n  & Stability of model rankings across noise strategies; $W > 0.7$ indicates strong agreement \\\\\nANOVA $\\eta^2$\n  & $SS_{\\text{factor}} / SS_{\\text{total}}$ (Type~I)\n  & Variance attribution to model architecture vs molecular representation \\\\\nICC(1,1)\n  & Intraclass correlation, $[0, 1]$\n  & Profile-level redundancy between models prior to ANOVA \\\\\nSpearman's $\\rho$\n  & Rank correlation, $[-1, 1]$\n  & Calibration of predicted uncertainty against (i) absolute error and (ii) injected noise magnitude \\\\\nCoverage\n  & $\\frac{1}{N}\\sum_i \\mathbb{1}[|y_i - \\hat{y}_i| \\le k\\hat{u}_i]$\n  & Fraction of test points whose true value lies within $\\hat{y}\\pm k\\hat{u}$; targets 68\\% at $k=1$, 95\\% at $k=2$ \\\\",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:95-109",
+   "verification": "n-a (supervisor request, LaTeX drafted)",
+   "why_it_matters": "LIVE. Two required edits before insertion: (a) the Spearman row must state 'computed WITHIN each noise level \u03c3' per the pooling correction; (b) the ECE row (next item) must be deleted \u2014 MEMORY records ECE fully removed 2026-08-19. The Coverage row's 68%/95% targets are the surviving calibration metric."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 2 \u2014 the ECE row and table caption, both needing changes before insertion.",
+   "verbatim": "ECE\n  & $\\sum_b \\frac{|B_b|}{N}\\,|\\bar{u}_b - \\bar{e}_b|$\n  & Calibration of predicted uncertainty: deviation between binned predicted uncertainty and mean error (lower is better) \\\\\n\\bottomrule\n\\end{tabular}\n\\caption{Summary of metrics used in this study, their definitions, and their\nintended interpretation. $\\hat{y}_i$ and $\\hat{u}_i$ denote the predicted\nvalue and predicted uncertainty for sample $i$; $\\sigma$ is the noise scaling\nfactor (Table~\\ref{tab:regression_noise}).}\n\\label{tab:metrics_summary}\n\\end{table}",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:110-120",
+   "verification": "n-a (supervisor request, LaTeX drafted)",
+   "why_it_matters": "CAPTION AND LABEL LIVE; ECE ROW DEAD (removed from v1, v2 and deep_analysis.py on 2026-08-19 per MEMORY). The label tab:metrics_summary matches the one the revision guide targets at line 456, confirming these are the same table."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 3 \u2014 classification noise must be mentioned in the Noise Strategies subsection.",
+   "verbatim": "The supervisor wants this in the Noise Strategies subsection (it currently\nopens with \"The following strategies were implemented for regression\u2026\" with\nnothing said about classification). Suggested addition immediately *before*\nthe regression table, replacing line 285's lead-in:\n\n> The following strategies were implemented for regression\n> (Table~\\ref{tab:regression_noise}, Figure~\\ref{fig:noise_strategies}). For\n> classification tasks, label noise is injected by stochastic class flipping\n> rather than additive perturbation: each label is flipped with a strategy-\n> dependent probability $p$, where $p$ replaces $\\sigma$ as the noise scaling\n> factor.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:128-137",
+   "verification": "n-a (supervisor request, drafted prose)",
+   "why_it_matters": "SUPERVISOR REQUEST \u2014 FULLY LIVE and data-independent. It also answers revision-guide credibility issue 6 ('the framework advertises classification\u2026 which never appears in the results'), so one edit closes two objections."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 3 \u2014 the six classification strategies NoiseInject implements, named from the source.",
+   "verbatim": "> NoiseInject implements six classification strategies that mirror\n> the regression set in spirit (uniform, class-imbalance, binary-asymmetric,\n> instance, class-dependent, and confusion-directed flipping); these are\n> documented in the NoiseInject framework and used in the supplementary\n> classification benchmarks rather than in the QM9 regression experiments\n> reported here.\n\n[From `noiseInject/core.py`: the six classification strategies are uniform,\nclass_imbalance, binary_asymmetric, instance_noise, class_dependent,\nconfusion_directed. The interface uses `flip_probability` instead of `sigma`.]",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:138-146",
+   "verification": "verified \u2014 read directly from noiseInject/core.py",
+   "why_it_matters": "FULLY LIVE \u2014 exact strategy identifiers from source (uniform, class_imbalance, binary_asymmetric, instance_noise, class_dependent, confusion_directed) and the API difference (flip_probability, not sigma). Code facts, immune to regeneration. NOTE: the draft claims 'supplementary classification benchmarks' exist \u2014 verify that before asserting it in print."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 4 \u2014 the 'clean and noisy' comment: make the figure caption say what the RMSE is computed between.",
+   "verbatim": "## 4. \"Clean and noisy\" wording (the comment \"That's between the clean and noisy data \u2014 should we say it explicitly?\")\n\nThis refers to RMSE annotation in the noise-strategies figure caption. Make\nthe caption explicit:\n\n> Effect of each noise injection strategy on the HOMO\u2013LUMO gap label\n> distribution at $\\sigma = 0.5$. Blue outline: clean label distribution;\n> coloured fill: distribution after noise injection. **The RMSE annotated in\n> each panel is computed between the clean and the noisy labels for that\n> strategy** (i.e.\\ the magnitude of perturbation, not a model error).",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:150-159",
+   "verification": "n-a (supervisor comment quoted verbatim + drafted caption)",
+   "why_it_matters": "SUPERVISOR COMMENT PRESERVED VERBATIM: 'That's between the clean and noisy data \u2014 should we say it explicitly?' FULLY LIVE \u2014 a caption clarification for Figure 1 (noise strategies), which is a methods illustration and does not depend on any result."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "SUPERVISOR ITEM 5 \u2014 reorder the regression-noise table rows so Hetero is last, matching the explanatory paragraph.",
+   "verbatim": "The supervisor's point: in the explanatory paragraph below the table, the\nstrategies are described in the order Gaussian \u2192 outlier \u2192 quantile \u2192\nthreshold \u2192 value-proportional \u2192 heteroscedastic, with Hetero last. The\ntable currently has Hetero in row 4. Reorder the table rows to match:",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:165-168",
+   "verification": "n-a (supervisor request)",
+   "why_it_matters": "SUPERVISOR REQUEST \u2014 FULLY LIVE. Trivially actionable, and it sets the canonical strategy order for the whole paper (see item 6)."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 5 \u2014 the reordered noise table, which also records each strategy's exact scaling formula.",
+   "verbatim": "Gaussian   & $\\sigma$ (fixed)              & Random measurement error \\\\\nOutlier    & $3\\sigma$ / $0.1\\sigma$       & Transcription errors, batch effects \\\\\nQuantile   & $2\\sigma$ / $0.1\\sigma$       & Systematic error in hard-to-predict domains \\\\\nThreshold  & $2\\sigma$ / $0.1\\sigma$       & Regime-dependent assay errors \\\\\nValprop    & $\\sigma(1 + 0.1|y|)$          & Percentage-based measurement uncertainty \\\\\nHetero     & $\\sigma\\sqrt{0.1 + 0.05|y|}$  & Heteroscedastic measurement precision \\\\",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:175-180",
+   "verification": "n-a (transcribed from the paper's existing table, reordered)",
+   "why_it_matters": "HIGH VALUE AND LIVE \u2014 this is the paper's own statement of every noise formula in one place, which is exactly what NOISE_DESIGN.md needs to argue 'the six strategies are one strategy at six doses'. Note valprop's $\\sigma(1+0.1|y|)$ DOES scale with \u03c3 as written here, which is in tension with the revision guide's fixed-base_sigma worry (guide line 384) \u2014 resolve that contradiction."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 6 \u2014 four different noise-strategy orderings currently exist across text, table and code.",
+   "verbatim": "Current orderings:\n- **Table**: Gaussian, Outlier, Quantile, Hetero, Threshold, Valprop\n- **Text paragraph**: Gaussian, Outlier, Quantile, Threshold, Valprop, Hetero\n- **Figure code** (`generate_paper_figures.py:2582` etc.):\n  legacy, valprop, quantile, threshold, outlier, hetero\n- **Figure code (one place at 3983)**: legacy, outlier, threshold, quantile, hetero, valprop\n\nRecommendation \u2014 adopt **Gaussian, Outlier, Quantile, Threshold, Valprop,\nHetero** (matches the text paragraph and the supervisor's \"Hetero last\"\npreference).",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:189-198",
+   "verification": "verified \u2014 orderings enumerated with file and line numbers",
+   "why_it_matters": "FULLY LIVE AND UNRESOLVED. Four inconsistent orderings, one of them internally inconsistent within the same script. Fixing this during regeneration is essentially free; fixing it after means re-running figures again."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 6 \u2014 the STRATEGY_ORDER constant fix, with every hard-coded line number listed.",
+   "verbatim": "- In `generate_paper_figures.py`, change every occurrence of\n  `['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']`\n  (lines 83, 572, 1467, 2582, 2681, 2742) and the variant at line 3983 to\n  `['legacy', 'outlier', 'quantile', 'threshold', 'valprop', 'hetero']`.\n  Define one constant `STRATEGY_ORDER` near the top and import it everywhere\n  so this never drifts again.\n- Re-run figure generation on the server.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:201-207",
+   "verification": "verified \u2014 seven exact locations enumerated",
+   "why_it_matters": "CODE SPEC LIVE, TARGET FILE WRONG. It names generate_paper_figures.py, which MEMORY marks as the DEAD v1/NDS script. The STRATEGY_ORDER constant must be added to generate_paper_figures_v2.py instead, and the line numbers will not transfer \u2014 the list-literal search string will."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "SUPERVISOR ITEM 6 \u2014 the author's note weighing the cheap option against re-running figures.",
+   "verbatim": "[If you really don't want to change the figures, the cheapest option is to\nreorder *only* the table (which the supervisor explicitly asked for) and the\ntext paragraph to match the figure order. But that flips Hetero away from\nlast, which is the opposite of what he wants. So I think you do need to\nre-run.]",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:209-213",
+   "verification": "n-a (author's own bracketed note)",
+   "why_it_matters": "LIVE AND NOW MOOT IN THE AUTHOR'S FAVOUR \u2014 the figures are being re-run anyway, so the ordering fix is free. The trade-off no longer needs deciding; just apply the ordering."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 7 \u2014 a real plotting bug: the clean (blue) histogram outline differs across panels because bins are recomputed per panel.",
+   "verbatim": "This is a real plotting artefact, not different data. In\n`generate_paper_figures.py:2543\u20132599`:\n\n```python\nnp.random.seed(42)               # set once\ny_clean = ...                    # same for every panel \u2014 good\nfor i, strategy in enumerate(strategies):\n    y_noisy = apply_noise(y_clean, sigma, strategy)\n    all_vals = np.concatenate([y_clean, y_noisy])\n    bins = np.linspace(all_vals.min(), all_vals.max(), 51)   # \u2190 per-panel bins\n    ax.hist(y_clean, bins=bins, ...)                         # \u2190 clean re-binned\n```\n\nBecause `bins` are recomputed from `y_clean \u222a y_noisy`, and `y_noisy` has a\nwider range under heavy-tailed strategies (outlier, hetero), the bin edges\nshift between panels. Re-binning the same `y_clean` array against shifted\nedges produces visibly different \"clean\" histograms in each panel, even\nthough the underlying data is identical. Reviewers would flag this.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:219-236",
+   "verification": "verified \u2014 root cause traced in code with line range",
+   "why_it_matters": "REAL BUG, FULLY LIVE, AND EXPLICITLY FLAGGED AS SOMETHING REVIEWERS WOULD CATCH. It affects Figure 1, the methods illustration, which is not regenerated from experimental data \u2014 so this bug survives the entire QM9 re-run untouched unless fixed. Must be ported to the v2 script."
+  },
+  {
+   "kind": "code-spec",
+   "headline": "SUPERVISOR ITEM 7 \u2014 the drafted fix: one pre-computed bin grid shared by all panels.",
+   "verbatim": "**Fix:** compute one fixed bin grid before the loop, large enough to contain\nall noisy distributions, and use it for both histograms in every panel.\nConcretely, replace the per-panel `bins = np.linspace(...)` with something\nlike:\n\n```python\n# Pre-compute a single bin grid that accommodates all strategies.\n# Run each strategy once on a copy of the RNG to get the worst-case range,\n# then use that range for every panel's histogram.\nall_y = [y_clean]\nrng_state = np.random.get_state()\nfor strategy in strategies:\n    np.random.set_state(rng_state)            # reproducible per strategy\n    all_y.append(apply_noise(y_clean, sigma, strategy))\nnp.random.set_state(rng_state)                # restore for the real plotting loop\nlo = min(arr.min() for arr in all_y)\nhi = max(arr.max() for arr in all_y)\nbins = np.linspace(lo, hi, 51)\n```",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:238-256",
+   "verification": "n-a (drafted fix, not yet applied \u2014 'I can do this edit and regenerate the figure when you're ready \u2014 say the word.')",
+   "why_it_matters": "FULLY LIVE AND UNAPPLIED. Working code, ready to paste. The author's offer at line 262-263 was never taken up, so this is exactly the kind of finished work that would be lost with the file."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 8 \u2014 reorganise the BNN paragraph to lead with what was done, and delete a duplicated architecture paragraph.",
+   "verbatim": "Current structure:\n1. General BNN intro and how priors/posteriors work.\n2. Generic taxonomy of approximations (MC dropout, VI, ensembles).\n3. The two specific approaches we used (full-BNN, VBLL).\n4. NN-\u03b1 / NN-\u03b2 architecture details (these are then *repeated* in the\n   following paragraph \u2014 that's a bug independently of the supervisor's note).\n\nSupervisor wants: lead with what we did, then give context. Drafted\nreplacement (also de-duplicates the architecture description):",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:270-278",
+   "verification": "verified \u2014 the duplication is identified as an independent bug",
+   "why_it_matters": "SUPERVISOR REQUEST \u2014 FULLY LIVE. Also records an independently-found defect: the NN-\u03b1/NN-\u03b2 architecture description appears twice in the current draft. Both fixes land in one edit."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 8 \u2014 drafted architecture paragraph (contains the NN-beta [128,128] figure the revision guide says is wrong).",
+   "verbatim": "> We used two standard feed-forward neural network architectures throughout\n> this study, NN-$\\alpha$ and NN-$\\beta$, each available as a deterministic\n> baseline and as two Bayesian variants. The NN-$\\alpha$ architecture has two\n> hidden layers of size [128, 64] with dropout ($p=0.2$) after each hidden\n> layer; NN-$\\beta$ uses two hidden layers of size [128, 128] with dropout\n> applied before the output layer. Both architectures use ReLU activations,\n> are implemented in \\texttt{PyTorch} \\citep{pytorchGeometric}, and are\n> trained with the Adam optimiser using early stopping on validation loss.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:281-287",
+   "verification": "CONFLICT \u2014 PAPER_REVISION_GUIDE.md:385 states, code-checked: 'Methods states NN-\u03b2 is [128,128], but the code builds a uniform-width Optuna-tuned MLP (default 32\u00d72), not a hard-coded [128,128]'",
+   "why_it_matters": "LIVE BUT MUST NOT BE INSERTED AS WRITTEN. This is the single most important cross-document conflict in the salvage: the supervisor-facing draft would enshrine an architecture the code does not build. Resolve against the code before this paragraph goes into paper.tex."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 8 \u2014 drafted BNN context paragraph and the two approximations actually implemented.",
+   "verbatim": "> The Bayesian variants convert these networks into BNNs, which place priors\n> on the weights and learn an approximate posterior distribution over them\n> rather than a single point estimate, providing a principled source of\n> predictive uncertainty. Exact posterior inference for deep networks is\n> intractable, so practical BNNs rely on one of several approximations,\n> including Monte Carlo dropout, variational inference, and ensembling\n> \\citep{gal2016}. We implemented two such approximations:\n>\n> \\begin{itemize}\n>   \\item \\textbf{Full BNN.} All linear layers are replaced with Bayesian\n>   layers, with Gaussian priors $\\mathcal{N}(0, 0.1^2)$ on the weights and\n>   posteriors learned by variational inference. This is the most expressive\n>   variant but also the most computationally costly.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:290-302",
+   "verification": "n-a (drafted prose)",
+   "why_it_matters": "FULLY LIVE \u2014 data-independent Methods prose, LaTeX-ready, with the exact prior N(0, 0.1\u00b2) specified. Worth code-checking that prior value against the implementation given the NN-\u03b2 precedent."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 8 \u2014 the VBLL description, including the ELBO formulation and the learned observation-noise term.",
+   "verbatim": ">   \\item \\textbf{Variational Bayesian Last Layer (VBLL).} Only the final\n>   layer is made Bayesian. We maintain a mean-field variational posterior\n>   $q(\\mathbf{W}) = \\mathcal{N}(\\boldsymbol{\\mu}_W, \\text{diag}(\\boldsymbol{\\sigma}_W^2))$\n>   on the last-layer weights, trained by maximising the evidence lower\n>   bound \u2014 equivalently, minimising the reconstruction loss plus\n>   $D_{\\text{KL}}(q(\\mathbf{W}) \\| p(\\mathbf{W}))$ from a standard normal\n>   prior, scaled by $1/N$ \\citep{Harrison2024}. The VBLL also learns a\n>   scalar observation-noise variance, which provides a direct estimate of\n>   aleatoric uncertainty.\n> \\end{itemize}\n>\n> All BNN variants estimate predictive distributions with 100 Monte Carlo\n> forward passes at inference.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:303-314",
+   "verification": "n-a (drafted prose)",
+   "why_it_matters": "FULLY LIVE. Note the direct relevance to the VBLL-\u03b1 magnitude confound: 'The VBLL also learns a scalar observation-noise variance' \u2014 a SCALAR (global) noise term is a plausible mechanism for why VBLL-\u03b1's uncertainty tracks |y| rather than per-sample noise. This Methods sentence may be the explanation for that finding."
+  },
+  {
+   "kind": "paper-edit",
+   "headline": "SUPERVISOR ITEM 9 \u2014 mini-explanation of epistemic vs aleatoric on first use.",
+   "verbatim": "> We decomposed the uncertainty values derived from probabilistic methods\n> into **epistemic (knowledge-driven, reducible by collecting more or\n> higher-quality training data) and aleatoric (data-driven, reflecting\n> intrinsic noise in the labels and therefore irreducible)** components when\n> applicable. For GP and VBLL models, we derive epistemic uncertainty from\n> the posterior variance or weight sampling, and aleatoric uncertainty from\n> a learned observation-noise term \\citep{Rasmussen2005, Harrison2024}. We\n> did not decompose uncertainty from other models such as BNN variants, in\n> which the variance across Monte Carlo weight samples primarily reflects\n> epistemic uncertainty \\citep{kendall2017, gal2016}, or NGBoost and QRF, in\n> which there is no straightforward mechanism to separate the two\n> components from learned distributional parameters or quantiles\n> \\citep{Duan2020, Meinshausen2006}.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:328-339",
+   "verification": "n-a (supervisor request, drafted prose with citation keys)",
+   "why_it_matters": "SUPERVISOR REQUEST \u2014 FULLY LIVE, and it directly supports the revision guide's argument: it states in the paper's own voice that NGBoost and QRF cannot be decomposed, which is exactly why 'aleatoric' fails as an organizing frame (guide line 165, 169). Gloss the terms here; do not organize the section around them."
+  },
+  {
+   "kind": "author-decision",
+   "headline": "SUPERVISOR \u2014 the complete file-change checklist if all nine items are accepted.",
+   "verbatim": "- **paper.tex**:\n  - Rewrite GP paragraph (\u00a71).\n  - Insert metrics-summary table (\u00a72).\n  - Add classification-noise sentence to Noise Strategies (\u00a73).\n  - Update noise-strategies figure caption (\u00a74).\n  - Reorder rows in `tab:regression_noise` (\u00a75).\n  - Rewrite BNN paragraph and delete duplicate architecture paragraph (\u00a78).\n  - Add epistemic/aleatoric gloss (\u00a79).\n- **scripts/generate_paper_figures.py**:\n  - Define a single `STRATEGY_ORDER` constant and replace 7 hard-coded\n    lists (\u00a76).\n  - Fix the per-panel bins bug in the noise-strategies figure (\u00a77).\n- Re-run figures on the server and pull the updated PNGs.",
+   "source": "/Users/apunt/repos/qsar_qm_models/paper_edits_supervisor.md:345-357",
+   "verification": "n-a (work checklist)",
+   "why_it_matters": "FULLY LIVE \u2014 the complete actionable checklist for the supervisor round, and NONE of the nine items depends on a regenerated result. All of it can proceed in parallel with the QM9 re-run. Only correction needed: the script target is generate_paper_figures_v2.py, not the dead v1 script. Missing from the list: \u00a71b, the incorrect SVM kernel sentence, which also needs a paper.tex edit."
+  }
+ ],
+ "gaps": [
+  "The paper.tex line numbers cited throughout PAPER_REVISION_GUIDE.md (e.g. 'Line 240', 'Lines 306\u2013308, 380, 624', 'Table 7 (lines 517\u2013537)', 'lines 443 to 504') refer to the SUBMITTED paper.tex. paper.tex is untracked and has been edited since. I did not open paper.tex to re-anchor them. The guide itself says 'Line numbers drift as you edit, so anchor on the quoted text' (line 5) \u2014 anchor on quotes, not numbers.",
+  "The guide's Table 7 spec (line 219) and the metrics table both retain ECE columns. MEMORY records 'ECE fully removed (2026-08-19) from v1, v2 and deep_analysis.py'. Every ECE reference in both documents is therefore stale, but I did not verify the removal in the scripts myself.",
+  "INTERNAL CONTRADICTION, unresolved: fig3's model-mean Spearman is given as '+0.49' at line 573 and '+0.43' at lines 578 and 423 for what appears to be the same quantity (n=11 PDV/Gaussian model means). Neither can be trusted without recomputation.",
+  "INTERNAL CONTRADICTION, unresolved: the ANOVA model count is stated as 9 at line 500 ('9 ANOVA / 11 ranking, not 12'), corrected to 7 at lines 458-462 and 589-594, while line 334 says fig3's scatter plots 12 points. The guide explicitly admits the '9' was 'a wrong synthetic estimate'. Authoritative set appears to be 7 (ANOVA) / 11 (ranking + Kendall) / 12 (fig3 scatter points).",
+  "CROSS-DOCUMENT CONFLICT, unresolved: supervisor \u00a78 states NN-\u03b2 is [128,128]; the revision guide (line 385, code-checked) says the code builds a uniform-width Optuna-tuned MLP (default 32\u00d72). I did not open models/models.py to adjudicate.",
+  "CROSS-DOCUMENT CONFLICT, unresolved: supervisor \u00a72's metrics table contains an NDS row; the revision guide (line 456) orders 'delete the NDS row; add an AUC_norm row' in that same table (tab:metrics_summary). The supervisor's table must be merged with the metric change before insertion.",
+  "CROSS-DOCUMENT CONFLICT, unresolved: supervisor \u00a75's table gives valprop as $\\sigma(1 + 0.1|y|)$ \u2014 i.e. \u03c3-scaling; the revision guide (line 384) suspects the code uses a fixed base_sigma of 0.1 independent of the swept \u03c3; MEMORY says noise_strategy_params.json is never passed to the Rust binary at all so Rust defaults apply. Three accounts, none reconciled. I did not open the Rust source.",
+  "CROSS-DOCUMENT TENSION: the guide (line 169) bans 'aleatoric' as an organizing idea; supervisor \u00a79 requests an epistemic/aleatoric gloss. Both are preserved above; the author must decide. My reading is they are compatible (gloss on first use, do not organize around it), but that is my inference, not a recorded decision.",
+  "UNVERIFIED FILE EXISTENCE: I did not confirm that `scripts/build_within_sigma.py`, `results/paper_figures/within_sigma_uncertainty.png`, `within_sigma_panel{A,B}_*.csv`, or `table4_supp_uncertainty_by_strategy_rep.csv` exist on disk. The within-\u03c3 figure was written into results/paper_figures/, which MEMORY marks as the stale v1/NDS output directory.",
+  "UNVERIFIED FILE EXISTENCE: `_two_way_eta2_unbalanced` and the STRATEGY_ORDER constant \u2014 I did not grep generate_paper_figures_v2.py to confirm the described fixes are still present after the script's recent modifications (it shows as modified in git status).",
+  "PENDING WORK NEVER COMPLETED, carried through as unverified: the BNN-vs-VBLL subset test (four named raw per-sample CSVs required from the server); the per-seed spread of the top models (not in the local repo); confirmation of the raw pre-normalisation HOMO\u2013LUMO gap range for the threshold-degeneracy argument.",
+  "DOES NOT YET EXIST: 'Supplementary Table~S1' (per-representation validation SVM hyperparameters) is cited by supervisor \u00a71b's replacement sentence but has not been created. Likewise the 'supplementary classification benchmarks' asserted in supervisor \u00a73 \u2014 I could not confirm those exist.",
+  "UNFILLED PLACEHOLDER: supervisor \u00a71's GP paragraph ends with 'Section~\\ref{...}' \u2014 the PDV case study section label was never supplied.",
+  "NOT COVERED BY EITHER FILE: neither document addresses the held-out-label noise contamination bug (fixed in 9d7db67) or the raw-vs-normalised standardisation confound. Both documents predate that discovery, which is why nearly every QM9 number in them is marked DEAD above. Any claim in these files that rests on QM9 must be re-derived, not quoted."
+ ]
+}

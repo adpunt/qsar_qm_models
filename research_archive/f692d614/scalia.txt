@@ -1,0 +1,1935 @@
+                                             Evaluating Scalable Uncertainty Estimation
+                                            Methods for DNN-Based Molecular Property
+                                                                            Prediction
+
+
+
+
+arXiv:1910.03127v1 [cs.LG] 7 Oct 2019
+                                            Gabriele Scalia,†,‡ Colin A. Grambow,† Barbara Pernici,‡ Yi-Pei Li,∗,¶ and
+
+                                                                          William H. Green∗,†
+
+                                        †Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge,
+                                                                            MA, 02139, USA
+                                        ‡Department of Electronics, Information and Bioengineering, Politecnico di Milano, 20133
+                                                                               Milano, Italy
+                                        ¶Department of Chemical Engineering, National Taiwan University, Taipei 10617, Taiwan
+
+                                                                E-mail: yipeili@ntu.edu.tw; whgreen@mit.edu
+
+
+
+                                        Abstract
+
+                                        Advances in deep neural network (DNN) based molecular property prediction have recently
+                                        led to the development of models of remarkable accuracy and generalization ability, with
+                                        graph convolution neural networks (GCNNs) reporting state-of-the-art performance for this
+                                        task. However, some challenges remain and one of the most important that needs to be fully
+                                        addressed concerns uncertainty quantification. DNN performance is affected by the volume
+                                        and the quality of the training samples. Therefore, establishing when and to what extent
+                                        a prediction can be considered reliable is just as important as outputting accurate predic-
+                                        tions, especially when out-of-domain molecules are targeted. Recently, several methods to
+
+                                                                                    1
+account for uncertainty in DNNs have been proposed, most of which are based on approx-
+imate Bayesian inference. Among these, only a few scale to the large datasets required in
+applications. Evaluating and comparing these methods has recently attracted great interest,
+but results are generally fragmented and absent for molecular property prediction. In this
+paper, we aim to quantitatively compare scalable techniques for uncertainty estimation in
+GCNNs. We introduce a set of quantitative criteria to capture different uncertainty aspects,
+and then use these criteria to compare MC-Dropout, deep ensembles, and bootstrapping,
+both theoretically in a unified framework that separates aleatoric/epistemic uncertainty and
+experimentally on the QM9 dataset. Our experiments quantify the performance of the
+different uncertainty estimation methods and their impact on uncertainty-related error re-
+duction. Our findings indicate that ensembling and bootstrapping consistently outperform
+MC-Dropout, with different context-specific pros and cons. Our analysis also leads to a bet-
+ter understanding of the role of aleatoric/epistemic uncertainty and highlights the challenge
+posed by out-of-domain uncertainty.
+
+
+
+Introduction
+
+Deep Neural Network (DNN) based molecular property prediction has received new atten-
+tion recently with the development of models capable of promising performance on large
+and heterogeneous datasets. 1–3 In particular, recent progresses in graph convolution neural
+network 4 (GCNN) — also known as message passing neural network (MPNN) — have led to
+state-of-the-art performance for property prediction across a range of public and proprietary
+datasets, 1 demonstrating both accuracy and generalization gains. However, some limita-
+tions still hold, and uncertainty quantification has recently been highlighted as an important
+direction to be investigated. 1
+   The need for an effective uncertainty quantification is driven by both intrinsic character-
+istics of DNN models and by peculiar features of chemical space. In general, standard DNN
+
+
+
+                                              2
+models do not output confidence estimates, since regression models only output a mean,
+while classification outputs cannot be reliably interpreted as confidence scores. 5
+   DNN performance strongly depend on the volume and the quality of training data, hence
+the need to assess when and to what extent a prediction can be considered reliable. While
+this has emerged in the context of DNN in several heterogeneous applications, most of which
+are based on computer vision, 6 DNN for chemistry is characterized by additional challenges.
+First of all, chemical training data are intrinsically biased, 7 since the chemical space has
+an extremely large variability and therefore a training dataset cannot represent the whole
+space. Moreover, chemical training data are often limited in volume and quality, directly
+reflected in DNN outputs. Additionally, doing predictions on molecules rather different to
+those seen during training is often the actual goal in the field, for example in drug discovery
+applications. This demands good generalization performance on one side, but also being able
+to identify the model’s knowledge boundary, i.e. assessing to what extent the model knows
+what it knows.
+   While uncertainty estimation in this domain has been investigated in the context of
+shallow models in the last few years, 8 uncertainty in DNN and GCNN models for molecular
+property prediction has been addressed only recently and is still limited and fragmented.
+   Bayesian Neural Networks (BNNs) have long been studied as an effective and princi-
+pled way to take into account model uncertainty in the predictions of a DNN, 9 but the
+intractability of exact Bayesian inference together with the limited practicality of the ap-
+proaches proposed until the last few years has prevented the widespread diffusion of these
+solutions in applications until recently. 5 The recent work from Gal and Ghahramani 10 gave
+a decisive contribution to the spread of approximate BNNs in applications, proposing Monte
+Carlo Dropout (MC-Dropout), a practical method based on the widely used dropout regular-
+ization technique, to account for model uncertainty. Moreover, Kendall and Gal 6 proposed
+a framework to separate epistemic uncertainty, which refers to uncertainty in the model
+predictions, from the aleatoric uncertainty, which captures noise inherent in the data. MC-
+
+
+                                               3
+Dropout has been used in various applications, including, very recently, molecular property
+prediction. 7,11
+   Other techniques to efficiently approximate BNNs have been proposed since then, high-
+lighting how finding a good trade-off between effective approximation and scalability remains
+an important open challenge. Notably, the ensemble-based approach proposed by Lakshmi-
+narayanan et al. 12 constitutes a simple and scalable technique to obtain well-calibrated
+uncertainty estimates and has been already used in several applications across different
+fields (e.g., Fauw et al. 13 , Tomašev et al. 14 ). Moreover, even if originally proposed as a
+non-Bayesian alternative to estimate uncertainty in DNNs, 12 recent work highlighted how
+ensembling in DNN can be traced back to Bayesian inference. 15–17
+   In parallel to the development of methods to efficiently approximate BNNs, their evalu-
+ation, and in particular their comparative assessment, has recently attracted great interest
+given the challenges it poses. 17–20 Indeed, we usually do not have “ground truth uncertain-
+ties”, which prevents using traditional benchmarks. Furthermore, evaluating uncertainty
+involves measuring the model’s unknowns and taking into account domain-specific features.
+First comparative assessments have been conducted for computer vision tasks. 17,19,20 How-
+ever, results are still fragmented and no comparisons have been carried out for GCNN in
+the chemistry domain, which poses specific challenges such as uncertainty generalization in
+the chemical space. Moreover, many metrics traditionally used to evaluate uncertain fore-
+casts, like calibration, have been defined in a classification setting, while their extension for
+regression — needed for scalar molecular properties — has been discussed only recently. 21,22
+   Comparative analysis of different methods calls for multiple metrics and quantitative
+indices. By contrast, recent works targeting uncertainty estimation for DNN-based molecular
+property prediction only employ a single technique, such as confidence-error diagrams, and
+qualitative evaluations. 7,11
+   The goals of this work are as follows. First of all, we review existing methods for un-
+certainty estimation in DNN/GCNN, focusing on scalable techniques that can be used in
+
+
+                                               4
+applications. We contextualize them in a unique framework to estimate aleatoric and epis-
+temic uncertainty, also in light of their recent interpretations, and we draw a theoretical
+comparison. Secondly, we introduce a set of uncertainty evaluation criteria, based both
+on existing benchmarks used in other fields and on chemistry-specific features. Finally, we
+implement the presented uncertainty estimation methods using as base model a recently
+published state-of-the-art GCNN for molecular property prediction (chemprop 1 ) and we ex-
+perimentally compare them through the introduced evaluation criteria on the QM9 dataset
+for the regression task. In doing so, we highlight the behaviors characterizing all the methods
+in the context of GCNN-based molecular property prediction and their differences due to
+different approximation schemes. Furthermore, we discuss and quantify the positive impact
+of modelling uncertainty in the network on the prediction error.
+
+
+
+Methods
+
+This section is organized as follows. We first summarize GCNNs, which constitute the
+state-of-the-art for DNN-based molecular property prediction. We then review Bayesian
+Uncertainty Estimation in DNNs, detailing the methods that will be tested. Finally, we
+discuss uncertainty evaluation and related metrics. An overview of a GCNN extended as a
+DNN is shown in Figure 1.
+
+
+Graph Convolutional Neural Networks
+
+In general, a GCNN used for property prediction takes as input a molecular graph G, where
+the nodes are atoms and the edges are bonds, with each atom vi initialized with the feature
+vector h0i and each bond vi − vj with the feature vector ei,j and then operates in two phases
+(see Figure 1). During the first phase — message passing — each atom’s feature vector is
+updated based on the neighbors’ features and related bond representations. This phase is
+executed K times, iteratively, so that in the steps following the first one each atom’s feature
+
+
+                                              5
+                                                    Message passing phase                                                                                       Readout phase
+
+
+           Initial atoms and                                                                              Learned atoms
+           bonds representations                                                                          representation
+           ℎ((                                       ℎ)(                                                       ℎ(5
+
+            .            ℎ#( , 𝑒(,#                   .               ℎ#54) , 𝑒(,#                             .
+                                             MPNN                                                  MPNN
+                        {𝑖 ∈ 𝑁 𝑣( } …                                                          …
+            .
+                 𝑣#    𝑒(,# 𝑒(,8
+                                                      .     … 𝑣 𝑒      {𝑖 ∈ 𝑁 𝑣( }
+                                                                               𝑒(,8
+                                                                                                               .
+            .                          𝑣8             .          #      (,#
+                                                                                          𝑣8                   .
+                         𝑣(                                                 𝑣(                                                 Learned molecular
+                                                                                                                                                                                Output properties
+                          𝑒(,… 𝑣
+                                   …
+                                                                             𝑒(,… 𝑣
+                                                                                      …
+                                                                                                                               representation
+           ℎ)(                                       ℎ))                                                      ℎ)5                     ℎ                                                              𝑦
+
+
+
+
+                                                                                                                                              Fully connected                      Fully connected
+            .            ℎ#( , 𝑒),#                   .               ℎ#54) , 𝑒),#                             .                      .                          .                                   .
+                                             MPNN           …                                      MPNN                                                                   …
+                        {𝑖 ∈ 𝑁 𝑣) } …                                  {𝑖 ∈ 𝑁 𝑣) }             …
+    HO
+            .                                         .                                                        .           +          .                          .                                   .
+            .          𝑣#   𝑒),#                      .                𝑣#     𝑒),#                             .                      .                          .                                   .
+                                𝑣) 𝑒),…                                         𝑣) 𝑒),…
+                      𝑣8 𝑒),8                                        𝑣8 𝑒),8
+                                        𝑣…                                                 𝑣…
+N
+           …                                 …       …                                             …          …
+           ℎ3(                                       ℎ)3                                                      ℎ35
+
+                         ℎ#( , 𝑒3,#                   .               ℎ#54) , 𝑒3,#                             .
+            .
+                                             MPNN            …                                     MPNN
+                        {𝑖 ∈ 𝑁 𝑣3 } …
+                                                      .
+                                                                       {𝑖 ∈ 𝑁 𝑣3 }             …               .
+            .
+            .                  𝑒3,8 𝑣8                .                         𝑒3,8 𝑣8                        .
+                                                                        𝑒3,#
+                  𝑣#
+                        𝑒3,#
+                             𝑣3                                   𝑣#           𝑣3                                                                                        𝑝
+                            𝑒3,…                                              𝑒3,…
+                                   𝑣…                                                 𝑣…
+
+
+
+                                                                                                                                                                                                     𝑦#
+
+                                                                                           𝑝
+
+
+
+
+                                                                                                                    𝑊#
+
+
+
+Figure 1: Illustrative overview of a GCNN for molecular property prediction extended as a
+BNN.
+Message passing phase. Starting from a molecular graph, the model extracts an initial rep-
+resentation h0i for each atom vi and a bond representation ei,j for each bond between vi and
+vj . At each step, the atom representation is updated based on the representation of the
+atom’s neighbors and the related bonds. hji refers to the representation for the i-th atom
+at the j-th update step, N (vi ) are the atom’s neighbors. At the end (K update steps) the
+molecule representation h results from the sum of the learned atoms features.
+Readout phase. The molecular representation is updated through a series of fully connected
+layers obtaining the output vector y.
+The peculiarity of a BNN is to model network weights and outputs as probability distribu-
+tions (e.g., Gaussians), instead of point estimates. This allows taking into account uncer-
+tainty — epistemic and aleatoric, respectively — in the model.
+
+
+
+
+                                                                                                          6
+htv is updated based on already updated neighbors features. This allows the interaction of
+distant atoms in the resulting representations. At the end, the molecule representation is
+given by the sum of its atoms representations. The second phase — readout — is based on
+a feedforward neural network that uses the final representation of the molecule to predict
+some properties of interest. Intuitively, the message passing phase allows the model to learn
+its own feature representations directly from data, while the readout phase allows learning
+the relationship between such representations and output properties. The model is trained
+as a whole to maximize the likelihood.
+       Starting from this general description, several specific networks improvements have been
+recently proposed. 1–3,11,23 Given the goal of this paper of evaluating large-scale uncertainty
+estimation, we start from a well-tested network, chemprop, 1 that recently reported state-
+of-the-art performance on multiple datasets. One of the peculiar features of this network
+is the usage of messages associated with directed edges (bonds) instead of vertices (atoms),
+improving the effectiveness of the messages exchanged. Interested readers can refer to the
+original work by Yang et al. 1 for the details.
+       The techniques explored in this paper do not depend on a specific network, and the
+resulting comparative performance should hold for any GCNN model. We extended the
+chemprop model for this work to include the uncertainty estimation and evaluation methods
+presented next. The software developed has been made availablei .
+
+
+Bayesian Uncertainty Estimation
+
+Uncertainty can be the result of inherent data noise or could be related to what the model
+does not yet know. These two kind of uncertainties — aleatoric and epistemic — are reviewed
+in the next two sections, together with scalable techniques which have been proposed for their
+approximate computation. At the end, we discuss how these two kinds of uncertainty can
+be combined to obtain the total uncertainty of a prediction.
+   i
+       https://github.com/gscalia/chemprop
+
+
+
+                                                  7
+Aleatoric Uncertainty
+
+When not explicitly modeled, the inherent observation noise is assumed constant for every
+observed molecule. This defines a homoscedastic aleatoric uncertainty, i.e. an uncertainty
+which does not vary over the data distribution and is essentially only task-dependent. 24
+However, this assumption does not hold in many realistic settings, where input-dependent
+noise needs to be modeled. For chemistry applications, it is usually difficult to derive a large
+number of high-quality data; therefore, one often needs to use multiple data sources to com-
+pose a large enough dataset to train a model. Data derived from different sources are often
+measured or calculated with different methods, and thus are associated with different levels
+of intrinsic noise. Data-dependent aleatoric uncertainty is referred to as heteroscedastic 25
+and its importance for DNNs has been recently highlighted, 6 also for molecular property
+prediction. 11
+
+                      Initial atoms and                             Learned molecular
+                      bonds representation                          representation
+                        ℎ"" ℎ*"       ℎ+"       𝑒-.                        ℎ
+
+     Input molecule                                                                               𝜇(𝑥)     Output means
+                         .   .         .
+                                                          Message          .
+
+                                                                                        Readout
+                                                 .
+          𝑥              .   .    …    .    …    .    …                    .
+                         .   .         .         .        Passing          .
+                                                                                                  𝜎() (𝑥) Output variances
+
+Figure 2: Aleatoric uncertainty estimation assuming an underlying Gaussian error. The last
+layer of the DNN is split to predict both the mean µ and the variance σ for each output
+property and the network is trained minimizing the loss (Equation (2)). The predicted means
+correspond to the output properties, the predicted variances correspond to the aleatoric
+uncertainties (one for each property).
+
+
+   Since aleatoric uncertainty is a property of data, it can be learned directly from data
+adapting the model and the loss function. Assuming an underlying Gaussian error, the
+model (parameters θ) can estimate both the mean µ and the variance σ 2 of the output
+distribution y given an input x:
+
+
+                                                 p (y | x, θ) = N µθ (x) , σθ2 (x)
+                                                                                  
+                                                                                                                             (1)
+
+
+                                                                      8
+   This does not require “noise labels” but only changing the loss function. Indeed, by
+performing maximum a posteriori estimation (MAP) inference we obtain: 26
+
+                                    N
+                               1 X      1                         1
+                       L (θ) ∝         2
+                                               kyi − µθ (xi )k22 + log σθ2 (xi )             (2)
+                               N i=1 2σθ (xi )                    2
+
+with an additional weight decay term. Notice that, assuming a homoscedastic uncertainty,
+minimizing Eq. (2) coincides with the usual MSE. In practice, the last layer of the DNN is
+split to predict both µθ and σθ2 , and the network is trained using Eq. (2), with σθ2 implicitly
+learned. The output σθ2 corresponds to the heteroscedastic aleatoric uncertainty: σa2 = σθ2 .
+This is shown in Figure 2.
+   Interestingly, σθ2 in Eq. (2) can be interpreted as a learned loss attenuation. 6 Intuitively,
+the network can learn to increase σθ2 to reduce the impact of uncertain predictions on the
+overall loss. The second term prevents outputting an infinite uncertainty for every point.
+   This approach is very practical, requiring minimal modifications to the original network,
+and can be used independently of the technique chosen to model weight uncertainty (epis-
+temic uncertainty). Indeed, it has been used in conjunction with both MC-Dropout 6 and
+ensembling. 12
+   The output distribution does not need to be necessarily Gaussian (see Figure 1 for a
+general case). In some cases, a Gaussian distribution might not be enough to model the out-
+put properties, and more complex models could be used, such as Mixture Density Networks
+(MDN), 27 which have been recently employed to model aleatoric uncertainty in DNN, 28 or
+Compound Density Networks, 29 which represent a continuous extension of MDN. These so-
+lutions allow more flexible output distributions at the cost of more complex loss functions
+that may translate into less optimized and stable training. These extensions are beyond the
+scope of this paper.
+   Being predicted as a data variance, aleatoric uncertainty cannot account for uncertainty in
+the model’s parameters θ or for other data-independent factors. Moreover, the MAP estimate
+
+
+
+                                                  9
+does not take into account multiple plausible values for θ but only the most probable one.
+This can be overcome by performing Bayesian inference, as discussed next.
+
+
+Epistemic uncertainty
+
+In a BNN the weights θ are modeled as distributions learned from training data D, instead
+of point estimates, and therefore it is possible to predict the output distribution y of some
+new input x through the predictive posterior distribution, Eq. (3).
+
+                                             Z
+                            p (y | x, D) =       p (y | x, θ) p (θ | D) dθ                 (3)
+
+
+Equation (3) allows taking into account the epistemic uncertainty because a prediction is
+the “weighted sum” of each outcome for each possible θ configuration of the model, with
+more probable θ configurations having a higher weight. The probability of a θ configuration
+depends on training data D.
+   Monte Carlo integration over M samples θ(i) of the posterior distribution p (θ | D) can
+approximate the intractable integral, however obtaining samples directly from the posterior
+distribution is virtually impossible for neural networks. Therefore, an approximate distribu-
+tion q (θ) ≈ p (θ | D) is introduced.
+   Several methods to sample from q (θ) have been introduced. The pioneering work by
+Neal, 9 employing the MCMC variant Hamiltonian Monte Carlo (HMC), is currently con-
+sidered the gold standard, but its applicability is limited to small networks and datasets.
+Stochastic and optimized variations have since been explored to enhance scalability at the
+expense of approximation performance. 30,31
+   Variational Inference (VI) is an alternative paradigm to derive q (θ). In this case, a class
+of approximating distributions qφ (θ) parameterized by φ is explicitly chosen, so that poste-
+rior approximation becomes an optimization problem of finding φ miniziming the Kullback-
+Leibler (KL) divergence with respect to p (θ | D). The set of approximating distributions is
+
+
+
+                                                  10
+pre-defined and performance will depend on the search space and the employed optimization
+procedure.
+   VI methods constitute a standard technique in Bayesian modelling. However, scalability
+requirements and NN-specific features have led to the design of new methods for this class of
+models in the last few years. 10,15,32–34 Nonetheless, some of these approaches — such as Stein
+Variational Gradient Descent 34 — do not actually scale up to training-intensive applications
+such as active learning based molecular property prediction. 7
+   MC-Dropout and ensembling-based methods are currently the most popular approaches
+for large-scale uncertainty estimation in NNs 17 and, within chemistry, both have been very
+recently introduced. 7,11,35–37 In addition to their scalability, these methods owe their popu-
+larity to the relative ease of implementation, since both leverage well-known techniques for
+regularization and accuracy improvement. For this reason, in the following we will focus
+on MC-Dropout and ensembling, describing both the original methods, main variations (in
+particular, bootstrapping), recent improvements and interpretations.
+
+
+Monte Carlo Dropout MC-Dropout 6,10 is a simple and scalable VI approach. The al-
+gorithm consists in training a network with dropout before every layer and then, at testing
+time, keeping dropout to sample M outputs y(i) with different random masks. Each different
+random dropout mask corresponds to a sample from the approximate posterior qφ (θ). The
+model prediction ỹ is the mean of the different outputs, while the epistemic uncertainty
+σe2 can be captured by the variance of the different outputs. If the aleatoric uncertainty is
+also computed (as in Figure 2), the output aleatoric uncertainty is the mean of the different
+aleatoric uncertainty estimates (and, in this case, the y(i) are substituted by the µ(i) ):
+
+                            1 X (i)                                 1 X (i)
+                                       σe2 = var y(i)       σa2 =
+                                                        
+                     ỹ =      y                                       σa                     (4)
+                            M                                       M
+
+   Formally, the MC-Dropout algorithm approximates the posterior with a product of
+Bernoulli distributions. Indeed, given a dropout probability p, each unit of the network
+
+                                               11
+with parameters θi has probability p of being dropped and set to zero. Equivalently, the
+approximation distribution can be seen as a mixture of two Gaussians with small variances
+and the mean of one of the Gaussians is fixed at zero. 6,10
+   A drawback of the MC-Dropout approach is the introduction of the dropout rate p as
+hyper-parameter. Such a choice has an important impact both on the model’s accuracy
+and the uncertainty estimation. Indeed, p contributes to determine the magnitude of the
+epistemic uncertainty. Moreover, this hinders model hyper-parametrization, especially if p
+is chosen to be layer-dependent.
+   Among the methods proposed in the literature to automatically tune the dropout prob-
+ability, Concrete Dropout 38 represents a practical gradient-based solution which follows
+dropout’s variational interpretation. This approach has demonstrated comparable perfor-
+mance with respect to grid-searched p 38 and an improvement in model calibration with
+respect to standard MC-Dropout. 20 Therefore, we will compare this non-parametric version
+of MC-Dropout to the intrinsically non-parametric ensembling approach.
+
+
+Ensembling Ensembling has been introduced as a practical non-Bayesian alternative to
+estimate uncertainty in Lakshminarayanan et al. 12 . The algorithm consists in training the
+same network multiple times with a random initialization, minimizing the MLE objective
+− log p (y | x, θ) each time. The output of the ensemble is given by the mean of the pre-
+dictions, while the variance corresponds to the ensemble uncertainty, as in Equation (4) for
+MC-Dropout.
+   It is possible to draw a parallel between ensembling and MC-Dropout, since the latter can
+also be interpreted as a form of ensembling 12,39 with weight sharing between the models. Even
+if ensembling has been originally proposed as a non-Bayesian solution, 12 recent literature
+has proved how, with minor modifications to the original ensembling methodology, it is
+possible to interpret it as a Bayesian inference technique. 15,16 Nonetheless, even without the
+modifications, ensembling can be interpreted as Bayesian approximation with an implicit
+
+
+
+                                              12
+distribution q (θ). 17
+   Ensemble methods have long been recognized as very effective to improve predictive
+performance of machine learning 40 and deep learning models, 41 and their effectiveness for this
+purpose has been assessed even recently in chemistry for QSPR. 1 The reason why ensembling
+allows reducing the overall error with respect to each of components resides in the diversity of
+their errors. Indeed, perfectly correlated errors do not bring any advantage to the ensemble
+error, while perfectly uncorrelated errors reduce the expected ensemble error proportionally
+to the number of employed instances. 41 Different solutions can be easily reached by deep
+models given their nonconvexity and the sub-optimal optimization strategies employed.
+   The intuition behind the interpretation of the ensemble variance as model uncertainty
+is simple. Different instances of the ensemble of models will tend to output similar values
+when the inputs are similar to the observed training data, because each instance’s weights,
+even if different, are optimized for those data. In contrast, as inputs become less similar to
+the training data, the outputs of each instance tend to be more affected by the specificities
+of the sub-optimal solution reached, thus the higher variance. Given this, it seems clear
+that diversity in the ensembled models should be promoted both for error reduction and
+uncertainty improvement.
+   Traditional regularization techniques, such as weight decay and early stopping, affect the
+solutions reached by NNs. Recently, the usage of these techniques has been proposed not
+only as a practical strategy to increase ensemble diversity, but also as a formal evidence for
+a Bayesian interpretation of ensembling. 15,16 This is discussed in the next paragraph.
+
+
+Anchored Ensembles and early stopping Anchored ensembling 16 modifies traditional
+ensembling leveraging the randomised MAP sampling technique. This technique exploits the
+fact that injecting some noise in the loss function of a MAP estimate allows sampling from
+the true posterior. Therefore, an ensemble of such models is a simple and scalable approach
+for approximate Bayesian inference.
+
+
+
+                                              13
+       It is known that the commonly used L2 regularization for NN (weight decay) corresponds
+to the MAP estimate with Gaussian priors, 41 which can be interpreted as pulling the weights
+for which the network does not express a strong preference close to zero. The anchored
+ensembling algorithm proposes to add noise to this loss function by changing the priors’
+means. For regression, this leads to the following loss for the i-th model in the ensemble:
+
+                                       1                 1          (i)
+                                 L=      ky − ỹ(i) k22 + λkθ(i) − θ0 k22                       (5)
+                                       N                 N
+
+                                            (i)
+where y are the target outputs and θ0 , which equals to zero for standard L2 regularization,
+is the prior’s mean of the i-th model.
+       Following this approach, each model in the ensemble has its parameters anchored to a
+different θ0,i , and this promotes the diversity of the solutions reached by the different models.
+       An important limitation of this approach is the need for additional hyper-parameters
+that must be tuned. They include at least the regularization coefficient λ — that expresses
+the ratio between data variance and weights’ prior variance — and the noise distribution
+θ0,i ∼ N (0, Σ0 ). As originally described, 16 the algorithm also employs a regularization
+matrix Γ instead of the scalar λ, to allow specifying per-layer regularization.
+       The work presented in Duvenaud et al. 15 gives an interesting interpretation to a com-
+monly exploited regularization method — early stopping — as approximate nonparamet-
+ric Bayesian VI. In particular, they show how training a model to minimize the negative
+log-likelihood with stochastic gradient descent (SGD)ii can be interpreted as obtaining the
+approximate posterior qt (θ) parametrized by the number t of SGD steps, and demonstrate
+how early stopping leads to an optimal t̃. Within this context, the initial distribution of the
+model p (θ0 ) is interpreted as the prior.
+       In practice, qt̃ (θ) allows sampling from the variational posterior, and therefore ensembling
+different random restarts allows obtaining independent samples from the posterior, that can
+then be used as in traditional ensembling (Eq. (4)). Even if the approach, as originally
+  ii
+       The approach is compatible also with minibatches.
+
+
+                                                     14
+described, does not take into consideration SGD with momentum, recent work also shows
+how SGD with momentum can be interpreted as Bayesian inference. 42
+   Not only is this approach practical, but ensembling with early stopping is usually already
+exploited for property prediction in state-of-the-art systems. 1 In this work we use it as a
+Bayesian alternative for uncertainty estimation.
+   We can draw a parallelism between the two approaches described above. It has been
+shown that early stopping for NNs is conceptually similar to L2 regularization, while an ex-
+act equivalence holds in the simpler case of a linear model with a quadratic loss function. 41
+Intuitively, both approaches restrict the optimization procedure to the vicinity of a pre-
+defined value — θ0 for L2 regularization, the initial configuration for early stopping. In our
+case, we notice that these two values have the same role of prior in the two approaches, 15,16
+highlighting an interesting similarity. Even though they are based on different theoretical
+foundations, in practice both the approaches increase the diversity in the ensembled instaces
+by injecting some randomness into their regularization. An intrinsic advantage of early stop-
+ping over weight decay is that early stopping automatically determines the correct amount
+of regularization, instead of requiring external hyper-parameter optimization. 41 Therefore,
+given the objective of this paper of evaluating scalable and practical uncertainty quantifi-
+cation techniques, in the following we will focus on early stopping for our extensive tests.
+Anchored ensembling and the impact of different priors for uncertainty estimation will be
+the subject of future work.
+
+
+Bootstrapping Also referred to as bagging, bootstrapping is a popular technique where
+ensemble members, instead of being trained on the whole dataset, are trained on different
+bootstrap samples of the original training set. Each bootstrap sample Di is obtained by
+sampling K samples with replacement from the dataset D and therefore will include a fraction
+of the elements in D and duplicates. If the original dataset is a good approximator of the
+underlying distribution, each Di will also be.
+
+
+
+                                             15
+   Bootstrapping allows increasing the diversity in the trained instances, which, as previ-
+ously discussed, is a key factor for ensembling performance. However, instead of relying on
+diversity in the models, bootstrapping relies on diversity in the datasets.
+   This approach has been successfully employed to increase the diversity in shallow ensem-
+bles, but its use within NNs might be less beneficial, since, given the dependence on a large
+amount of training data, each individual instance will be less powerful, thus affecting the
+whole ensemble performance. 12 Moreover, recent progresses in NN understanding suggest
+these models are characterized by an extremely large amount of equivalent local minima, 41
+and the inherent stochasticity of SGD should already provide some degree of diversity even
+when trained on the same dataset.
+   Nonetheless, since bootstrapping has been recently described in the literature as an ef-
+fective approach for NNs, 35,37 we aim to compare it to full-dataset ensemble in different
+operating conditions to assess the differences with respect to the various evaluation metrics
+introduced.
+
+   A comparative overview of MC-Dropout, ensembling and bootstrapping is presented in
+Figure 3. As shown, each method relies on a set of predictions (explicit or implicit models),
+which diversity is driven by different factors. The different predictions are used to estimate
+epistemic uncertainty as shown in Figure 4.
+
+
+Total uncertainty
+
+Aleatoric and epistemic uncertainty can be added to approximate the total uncertainty of
+a prediction. 5,6 The total uncertainty captures all the variability of the output y, which
+includes both the variability coming from our ignorance about the model (epistemic un-
+certainty) and variability coming from inherent randomness of the output (aleatoric uncer-
+tainty). We will evaluate both the separate contributions and the total uncertainty.
+
+
+
+
+                                              16
+                                        GCNN1
+
+                                                                                                   GCNN1
+          Random          Dropout
+          prior           mask
+    𝒟              GCNN                 GCNN2                                           Random
+                                                                                        prior
+                                                                                𝒟                  GCNN2
+                                         …
+                                                                                                    …
+                                        GCNNN
+
+                                                                                                   GCNNN
+
+(a) MC-Dropout.           Only a network is
+trained to minimize the loss on the train-                                  (b) Ensembling. Different
+ing dataset. Then, at testing time, multiple                                models are trained to min-
+models are “generated” applying a stochas-                                  imize the loss on the same
+tic dropout mask to the initial network. All                                training dataset. Diversity
+the models GCNN1 ,. . . GCNNN share (part                                   in the models results from
+of) the same weights. Diversity in the mod-                                 different initial configurations
+els is the result of dropout masks.                                         (random priors).
+                                                           Random
+                                                           prior
+                                                      𝒟"            GCNN1
+
+
+                                                           Random
+                                          Bootstrap        prior
+                                    𝒟                 𝒟#            GCNN2
+
+                                                      …              …
+                                                           Random
+                                                           prior
+                                                      𝒟$            GCNNN
+
+
+
+                            (c) Bootstrapping. Each model is trained
+                            to minimize the loss on a bootstrap sample of
+                            the training dataset. This, together with dif-
+                            ferent initial configurations (random priors)
+                            ensures diversity in the models.
+
+Figure 3: Overview and comparison of MC-Dropout, ensembling and bootstrapping. D is
+the training dataset.
+
+
+
+
+                                                      17
+                                 GCNN1      𝑦 (") (𝑥)
+
+                       𝑥         GCNN2      𝑦 (#) (𝑥)   𝜎*# 𝑥 = 𝑣𝑎𝑟(𝑦 (/) )
+                                  …
+                                GCNNN      𝑦 ($) (𝑥)
+
+
+Figure 4: Epistemic uncertainty computation. Independently from the method used to
+obtain multiple models (see Figure 3), the epistemic uncertainty is estimated as the variance
+of the different outputs (ref. Eq. 4). If the aleatoric uncertainty is also computed (as in
+Figure 2), the output aleatoric uncertainty would be the mean of the different aleatoric
+uncertainty estimates (and, in this case, y(i) would be substituted by µ(i) ).
+
+
+Uncertainty Evaluation
+
+In the following, several methods to evaluate the accuracy of uncertainty estimates are
+discussed. We start from existing techniques described in the literature, merging the contri-
+butions of different fields, and we extend them to account for specific features of chemical
+space. We aim at identifying a set of quantitative and complementary evaluation criteria.
+First, we introduce ranking based methods, i.e. evaluation criteria based on the uncertainty’s
+capability of ordering predictions based on their confidence. Secondly, we discuss calibration,
+i.e. “the property of predicting probability estimates representative of the true correctness
+likelihood”. 18 Then, dispersion is introduced to complement calibration evaluation. Finally,
+we discuss uncertainty domain shift, i.e. the property of predicting reliable uncertainty
+estimates for molecules different with respect to those seen during training.
+
+
+Ranking based methods
+
+A first class of evaluation indexes is based on the ranking defined by uncertainty estimates.
+This allows defining a confidence curve, which, in turn, allows defining several quantitative
+indices.
+
+
+
+
+                                               18
+Confidence curve One way to evaluate the uncertainty is by considering how the error
+varies as we remove molecules with the highest uncertainty in the test dataset. Indeed, a
+meaningful uncertainty should lead to a lower error on a subset of high-confident predictions.
+This concept is captured by the confidence curve, that highlights how the error varies (with
+respect to a given metric, e.g. MAE or RMSE) as a function of confidence percentile (or, in
+general, confidence q-quantile), i.e. the error on the subset of n% molecules (n-th q-quantile)
+with the lower uncertainty.
+   Ideally, we would expect a decreasing confidence curve for a meaningful uncertainty. The
+error corresponding to the left-most point is simply the error on the complete test dataset; the
+following points correspond to the error on the subset of testing molecules belonging to the
+n-th q-quantile. Other than being decreasing, another important feature of the confidence
+curve is its shape: a better uncertainty corresponds to a higher slope, because it allows
+decreasing the error faster for the same amount of removed molecules. For comparison,
+randomly sampling the molecules to be removed should lead to a more or less constant
+function.
+   What this kind of evaluation really assesses is the ordering of the predictions by their
+confidence. From this perspective, the best possible ordering is the one imposed by the
+true error, which has been named oracle ordering 19 in the literature. We can interpret the
+oracle ordering as an uncertainty lower bound, and the oracle confidence curve is the best
+confidence curve obtainable for a given model and test data.
+
+
+Confidence-Oracle error and AUCO Since the oracle ordering corresponds to the lower
+bound, we can define the Confidence-Oracle error as the difference between the confidence
+                                                                      
+                                                      (i)  (i)     (i)
+curve for a given uncertainty estimation, h(i) = h1 , h2 , . . . hq−1 and oracle confidence
+                                  
+                (o) (o)        (o)
+curve, h(o) = h1 , h2 , . . . hq−1 . In general, we want this error to be as small as possible,
+therefore we introduce the Area Under the Confidence-Oracle error, AUCO, to quantify it
+
+
+
+
+                                              19
+in a single number iii :
+                                                            q−1            
+                                                            X      (i)  (o)
+                                                (i)
+                                                      
+                                    AUCO h                =       hj − hj                                    (6)
+                                                            j=1
+
+
+This value allows an easy comparison between two uncertainty estimations h(i) and h(j) with
+respect to the oracle, where the smaller is better.
+    For this kind of comparison, it is important to highlight that every confidence curve
+depends not only on the uncertainty estimation, but also on the predictive model. Indeed,
+while the first defines the q-quantiles, the second provides the data for which each quantile
+error is calculated. It follows that it is not possible to directly compare two confidence curves
+obtained through different models to establish which uncertainty estimation is better. This
+is particularly relevant because often the uncertainty estimation and the predictive model
+are strongly tied: for example, ensembling is an uncertainty technique that also affects the
+predictive model.
+    With this regard, an added benefit of the confidence-oracle error is that, since it marginal-
+izes out the oracle, it enables a fair comparison of uncertainty estimates based on different
+methods. 19 Therefore, the confidence-oracle error and the AUCO will be used in the following
+for this purpose.
+    Notice that, using q-quantiles, each uncertainty-imposed ranking that does not change
+the specific quantile each prediction belongs to, even if it does change the relative position of
+the q predictions inside each quantile, is equivalent from the point of view of the confidence
+curve, the confidence-oracle error and the AUCO. Hence it follows that these are all affected
+by the choice of q. In the following, we will use percentiles as commonly reported in the
+literature.
+
+
+Error Drop As an additional quantitative measure of confidence curve quality that does
+not depend on the oracle, we introduce the Error Drop. This is defined as the error ratio
+   iii
+       The Confidence-Oracle error has been called Sparsification Error in the context of optical flow estimation
+in computer vision. 19 The AUCO has been called Area Under the Sparsification Error curve in the same
+context. 19
+
+
+                                                           20
+between the first and last quantiles, which should correspond to the curve’s maximum and
+minimum, respectively, if the confidence curve behaves correctly:
+
+                                                    (i)
+                                                   h1
+                                 Error Drop h(i) = (i)
+                                                
+                                                                                          (7)
+                                                  hq−1
+
+   This index measures the relative performance improvement of the model obtainable by
+considering only the most confident predictions instead of the entire dataset. Being a ratio,
+we can use it to directly compare different methods.
+
+
+Decreasing coefficient A limitation of the AUCO and Error Drop indices is that they
+do not take into account the monotonicity of the confidence curve. We observe that in
+existing evaluations this property is usually qualitatively considered but not quantitatively
+measured, and therefore we introduce a Decrease Ratio to capture it. Given a confidence
+                                 
+              (i)  (i)        (i)
+curve h(i) = h1 , h2 , . . . hq−1 :
+
+                                     n               o
+                                       (i)  (i)  (i)
+                                      hj | hj ≥ hj+1
+               Decr. Ratio h(i) =
+                               
+                                                            ∀j ∈ 1, . . . , q − 1         (8)
+                                            q−1
+
+where Decr. Ratio = 1 corresponds to a perfectly non-increasing curve.
+   Rather than being a measure of uncertainty quality by its own, this coefficient captures
+the noise in the confidence curve and should be used in combination with the other metrics
+for a more comprehensive analysis.
+
+
+Uncertainty Calibration
+
+One limitation of the evaluation methods introduced up to now is that they are all order-
+based, and therefore they only take into account the ranking imposed by uncertainty esti-
+mates and true errors. While this is crucial to distinguish among various degrees of model
+confidence, it does not take into consideration the actual values expressed by uncertainty.
+   Indeed, another important aspect of uncertainty is more strictly related to the actual
+
+                                             21
+values it expresses, and referred to as calibration. In general, calibration of a model refers
+to the property of outputting probability distributions which are consistent with observed
+empirical frequencies.
+       Calibration evaluation of neural networks gained interest in the last two years, since
+it has been shown that modern neural networks, while being more accurate on one side,
+are less calibrated on the other, 18 thus encouraging more research on the topic. 6,12 Indeed,
+model calibration is orthogonal with respect to model accuracy. 12 Calibrated confidence is
+important for model interpretability and to establish trustworthiness with the user, 18 since
+it allows providing uncertainty estimates which are informative not only relatively to other
+estimates, but also on their own with respect to model’s predictions.
+       Model calibration can be easily defined in the classification setting, since, given an input
+x, an output H (x) and a vector confidence h over the set of classes C, the model is considered
+perfectly calibrated when the following holds:
+
+
+                                  p (H (x) = c | hc = p̃) = p̃,   ∀p̃ ∈ [0, 1]                 (9)
+
+
+where hc is the confidence associated to the class c ∈ C. This means that the confidence
+assigned to each class is consistent with the probability of a prediction of belonging to that
+specific class.
+       In practice, over a finite number of samples, calibration can be captured by a Calibration
+Plot, 6 also called Reliability Diagram. 18 To obtain such a plot the model predictions for all
+samples and classes in the test set are split into K bins iv in the range [0, 1] and the frequency
+of correctly predicted labels for each bin is plotted. 43 Perfect calibration corresponds to a
+diagonal line.
+       Calibration can vary within the same uncertainty estimator when considering different
+uncertainty intervals. This could happen, for example, if a model has well-calibrated low
+uncertainty but ill-calibrated high uncertainty, or vice-versa. Such cases are highlighted by
+  iv
+       Each bin is a subset of predictions.
+
+
+                                                      22
+a Calibration Plot which diverges from the diagonal line in some specific confidence intervals
+but not in others.
+
+
+Calibration in regression Uncertainty calibration is a well-studied topic in the context
+of classification, both in its traditional domain of weather forecasting 44 and, more recently,
+in deep learning. 18 However, calibration for regression appears to be less investigated, and
+different solutions to evaluate it have been employed and discussed only recently. 6,17,21,22
+Focusing on molecular property prediction, calibration for regression becomes crucial to
+account for scalar properties like formation enthalpies or energies. In the following, we will
+consider two different definitions which extend calibration in a regression setting: confidence-
+intervals based and error based calibration.
+
+
+   • Confidence-based calibration (also called interval-based calibration) 17,21 interprets
+      each prediction and its uncertainty as the mean and the variance of a Gaussian distri-
+      bution p (y | x) = N (µ (x) , σ 2 (x)), respectively, and we are interested in evaluating
+      the confidence intervals thus defined. To do so, we consider symmetric intervals of
+      varying confidence around the mean and compare them to the empirical probabilities
+      of belonging to each interval. In a well-calibrated model, the x% of the predictions
+      should fall in the x% confidence interval. In practice, we discretize the confidence
+      intervals and calculate the fraction of predictions falling in each interval. This allows
+      obtaining a Calibration Plot in the [0, 1] range, as in the classification case, where
+      perfect calibration corresponds to a diagonal line.
+
+   • Error-based calibration, originally described by Levi et al. 22 , proposes to directly
+      compare the uncertainty to the empirical error, as in Eq. (10).
+
+
+
+                              E (µ (x) − y)2 | σ 2 (x) = σ̃ = σ̃,
+                                                          
+                                                                    ∀σ̃                    (10)
+
+
+      This defines a perfectly calibrated model as one outputting an uncertainty matching
+
+                                               23
+         the expected error. As in the classification case, in practice, to assess calibration it is
+         necessary to split the test data ordered by estimated uncertainty in K bins and average
+         uncertainties and errors for each bin. It is then possible to define the Calibration
+         Curve by plotting the MSE of the i-th bin as a function of its average uncertainty v .
+         Notice that, unlike classification and confidence-interval calibration cases, here the
+         Calibration Plot is not bound in the [0, 1] interval but ranges between 0 and the
+         maximum uncertainty. As in the other cases, perfect calibration corresponds to a
+         diagonal line.
+
+
+       Each of these two approaches has its pros and cons. Confidence-based calibration has
+the advantage of considering all the predictions to compute each point of the plot, thus
+resulting in more robust empirical calculations. However, as recently highlighted, 22 one can
+re-calibrate practically any output distribution using this evaluation method — even an en-
+tirely uncorrelated uncertainty. While this is not a limitation for the present work, since we
+do not address uncertainty re-calibration, it is something to be taken into consideration in
+general. The main advantage of error-based calibration is that it directly ties computed un-
+certainty to expected error, thus reflecting what the user would expect. The main limitation
+is represented by the fact that, since only a fraction of uncertainty estimates contributes
+to each computed point, and the uncertainty estimates are not uniformly distributed, the
+subsets used to compute the different points are not homogeneous.
+       Independently from which method is used to form a Calibration Plot, it is then possible
+to define some metrics over it to quantify calibration performance, as discussed in the next
+paragraphs.
+
+
+Calibration Error Curve and AUCE We can evaluate uncertainty calibration by com-
+puting the absolute difference of the Calibration Plot with respect to perfect calibration,
+thus obtaining the Calibration Error Curve. This difference can be quantified by considering
+   v
+    In the original definition proposed in Levi et al. 22 , the RMSE and the predicted standard deviations are
+used instead of MSE and variances. We use the latter for consistency with the other measures introduced.
+
+
+                                                     24
+the area under this curve, which has been referred to as the Area Under the Calibration Er-
+ror Curve, AUCE metric. 17 This is a cumulative metric accounting for the total calibration
+error.
+
+
+ECE, MCE and ENCE Rather than considering the total error, it is possible to define
+the Expected Calibration Error (ECE) and the Maximum Calibration Error (MCE) as follows
+(for the simpler binary classification case): 18,45
+
+                                        K
+                                        X
+                               ECE =             p (i) · kacc (bi ) − conf (bi )k
+                                           i=1                                            (11)
+                                       K
+                           M CE = max (p (i) · kacc (bi ) − conf (bi )k)
+                                      i=1
+
+
+where bi is the i-th bin, p (i) is the fraction of predictions that fall into the bin, acc and
+conf are the accuracy (i.e., the fraction of times a class is correctly predicted) and the
+average confidence for the bin. ECE and MCE correspond to the average and the maximum
+over the Calibration Error Curve, respectively, weighted by the fraction of predictions which
+contribute to each bin. MCE is especially important in high-risk applications, since it models
+the worst-case scenario. 18
+   This definition can be extended for regression. For confidence-intervals based calibration
+we can compare the prediction accuracy (i.e. the fraction of times a prediction falls into
+the confidence interval) to the confidence. In this case p (i) = K1 since all the predictions
+contribute to all the bins. For error-based calibration acc and conf are substituted by the
+RMSE and the root mean uncertainty, respectively, and this discrepancy is further normal-
+ized by the uncertainty over the bin, since the error is expected to be naturally higher as the
+uncertainty increases, 22 thus defining the Expected Normalized Calibration Error (ENCE).
+
+
+
+
+                                                     25
+Sharpness and dispersion
+
+Calibration by itself could be insufficient to fully evaluate an uncertainty estimator. Indeed,
+if the model always outputs the same constant uncertainty which matches the empirical
+accuracy over the entire distribution, we obtain a perfectly calibrated uncertainty but not a
+very useful one, since it does not depend on the input data at all. This concept is captured
+by sharpness, an uncertainty’s property orthogonal and complementary to calibration. 46
+Originally defined in the classification settings, it intuitively refers to outputting probabilities
+which are as much as possible concentrated around specific classes (for example, in a binary
+setting, probabilities close to zero or to one). From another perspective, it rewards input-
+dependent uncertainty estimates.
+   This notion has been recently extended for regression. 21,22 Following the definition in-
+troduced in Levi et al. 22 , in the following the dispersion of an uncertainty estimator is
+defined as the coefficient of variation cv of its uncertainty estimates (interpreted as standard
+deviations). A higher cv corresponds to more heterogeneous estimates for different inputs.
+   It should be noted that, for different reasons, dispersion cannot be used as an absolute
+measure to quantify the performance of a given uncertainty estimator on a given dataset.
+First of all, a higher cv by itself does not necessary reflect into more accurate confidence
+estimates. Secondly, the “true” dispersion depends on the dataset and could also be nat-
+urally low for homogeneous datasets. Moreover, being a normalized measure, cv does not
+take into consideration the absolute uncertainty values but only their dispersion around the
+mean. Nonetheless, dispersion represents a useful metric to be taken into account along with
+calibration when comparing different methods. In particular, we are interested in verifying
+that an improvement in calibration of an uncertainty estimator with respect to another one
+does not originate from a reduction in dispersion.
+   To the best of our knowledge dispersion has not been taken into account before in com-
+parative evaluations of deep learning uncertainty estimation frameworks 17–19,47 or in the
+context of deep molecular property prediction, 7,11 thus further motivating its experimental
+
+
+                                                26
+evaluation in the following.
+
+
+Domain shift
+
+An important feature that should characterize a well-behaving uncertainty estimate is its
+ability to correctly manage domain shifts, i.e., its performance in an out-of-domain context,
+which corresponds to a test set that is markedly different to the one seen during training.
+While this behavior — which implies a low variance of the model — is of first importance
+for every model’s output, it becomes even more crucial for uncertainty estimates. Indeed,
+it is well known that every learned model will degrade at some point on unseen samples
+as they become more and more different with respect to those seen during training, but a
+well-calibrated uncertainty should be able to correctly identify this “knowledge boundary”
+and to assess if and to what extent the model predictions can be considered reliable. This
+property is orthogonal to the other uncertainty evaluation metrics and therefore needs to be
+separately evaluated.
+   The importance of calibration with respect to domain shifts has been highlighted in
+other contexts, 12 but its role in the chemical domain is even more prominent. Indeed,
+generalization power is a requirement in key applications such as drug discovery, and the
+intrinsic high variability of chemical space makes it challenging to fulfill this requirement.
+Despite this prominent role, the evaluation of out-of-domain uncertainty performance in the
+chemistry field appears to be absent 7 or very limited, 11 thus demanding a more extensive
+analysis.
+   To achieve this goal, we employ the recently introduced scaffold splitting technique. 1,2
+Molecules are split into bins based on their Murcko scaffold, with each bin belonging to
+only one among training, validation and test set. 1 Scaffold splitting has been successfully
+used to evaluate models under the more realistic assumption of significantly diverse training
+and testing distributions, thus overcoming the traditional random splitting. It has been
+demonstrated to be more challenging for a model and capable of simulating the chronological
+
+
+                                             27
+split which characterizes real scenarios of molecular property prediction. 1 To the best of our
+knowledge, scaffold splitting has never been used to evaluate out-of-domain uncertainty
+estimation procedures before.
+   More specifically, we are interested in re-evaluating all the already introduced metrics —
+AUCO, AUCE, etc. — also in the out-of-domain context obtained through scaffold-splitting.
+We will pay particular attention to out-of-domain calibration, since it can measure to what
+extent a model knows what it does not know. We are interested in quantifying domain shift
+uncertainty performance, i.e., the ratio between in-domain and out-of-domain metrics, also in
+relation to domain shift error (the ratio between in-domain and out-of-domain error) to assess
+if and to what extent error generalization and uncertainty generalization are characterized
+by the same behavior.
+
+
+
+Experiments
+
+We first describe the target dataset, followed by a description of the experimental procedure.
+
+
+Data
+
+The formation enthalpies of 131,722 stable organic molecules composed of C, H, O, and
+N atoms were used to train and test the model. These reference data were derived from
+the QM9 dataset, which was calculated at the B3LYP/6-31G(2df,p) level of theory with
+the rigid rotor-harmonic oscillator approximation (RRHO). 48 As discussed in previous work,
+these calculated enthalpies are themselves associated with significant errors, primarily due
+to weaknesses of B3LYP such as the absence of long-range dispersion interaction but also
+the lack of rotor or conformer corrections in the calculations. 49–52 We note that it is possible
+to use a small amount of high-accuracy coupled cluster training data via a transfer learning
+approach to minimize the influence of DFT errors. Interested readers are referred to the
+recent work of Grambow et al. 53 In this work, we use the QM9 data as is without any
+
+
+                                               28
+attempt to correct its errors in order to investigate the effects of aleatoric uncertainties. The
+enthalpy values used for training and testing can be found in the Supporting Information.
+       We used a 80:10:10 split for training, validation, and test sets, both in the in-domain
+and out-of-domain settings. Random splitting has been used for in-domain analysis, while,
+as previously discussed, scaffold splitting has been used for out-of-domain analysis. In both
+cases, the same split has been employed to test all the methods.
+
+
+Experimental Procedure
+
+We evaluated the uncertainty estimation techniques previously reviewed using the methods
+previously introduced. Other than including diagrams, we evaluated the considered methods
+quantitatively, as follows:
+
+   • For ranking-based evaluation we use the Area Under the Confidence-Oracle error
+         (AUCO) as a measure of total discrepancy with respect to the best possible rank-
+         ing, the Error Drop as a measure of total error reduction for high-confident predictions
+         and the Decrease Ratio to assess the monotonicity of confidence curves.
+
+   • For confidence-based calibration we use the Area Under the Calibration Error Curve
+         (AUCE ) as a measure of total discrepancy with respect to perfect calibration and the
+         Maximum Calibration Error (MCE ) to account for the worst-case scenariovi .
+
+   • For error-based calibration we use the Expected Normalized Calibration Error (ENCE )
+         as a measure of the (normalized) total discrepancy with respect to perfect calibration.
+
+   • For dispersion evaluation we use the coefficient of variation cv .
+
+   • For domain-shift performance we evaluated and compared all the above metrics also
+         in an out-of-domain setting obtained using scaffold-splitting, as previously detailed.
+  vi
+    We did not use Expected Calibration Error (ECE) in our tests because it does not add significant
+information to AUCE for confidence-based calibration.
+
+
+
+
+                                                29
+        We focused on the evaluation of complete and scalable uncertainty frameworks, therefore
+we compared MC-Dropout (with Concrete Dropout, as previously discussed), ensembling and
+bootstrapping. As previously mentioned, these approaches have been designed to model NN-
+weight uncertainties, therefore they are directly related to epistemic uncertainty estimation.
+However, they have been used and described in the literature in conjunction with aleatoric
+uncertainty estimation to form complete frameworks, 10,12 and this is the way we tested them
+in this work. In addition to evaluating total uncertainty, we have also separately evaluated
+aleatoric and epistemic uncertainty for each methodology. All the different methods use the
+same aleatoric approximation scheme but the way epistemic uncertainty is modeled affects
+also aleatoric uncertainty results, thus resulting in different outputs (ref. Eq. (4)). This
+also allows drawing conclusions about aleatoric uncertainty which do not depend on the
+uncertainty model used for the NN-weights.
+
+
+Implementation and experimental setting
+
+We implemented the tested uncertainty estimation methods starting from the base model
+made available in Yang et al. 1 , based on the PyTorch framework.
+        We performed hyperparameter optimization using the hyperopt packagevii on the base
+model and we used the same hyperparameters for all the uncertainty methods tested. The
+hyperparameters are: depth size for the convolutional layer = 6, depth size for the fully
+connected layer = 2, hidden size = 1000. The number of instances is 15 for ensembling and
+bootstrapping and 150 for MC-Dropoutviii .
+        All the results obtained are inevitably a function of the number of instances used, since
+the approximation performance of all the tested methods depends on it. The number of in-
+stances chosen for the experiments is in line with what has been described in the literature;
+additionally, preliminary experiments varying the number of instances did not report signif-
+ vii
+    https://github.com/hyperopt/hyperopt
+ viii
+    MC-Dropout employs weight sharing between different instances and it does not require a separate
+training for each one, allowing the usage of more instances in practice. Therefore, this difference in the
+number of instances reflects realistic condition of use.
+
+
+                                                   30
+icant variations in the outcomes, except for an asymptotically smaller general improvement
+in all the metrics for all the tested methods.
+
+
+
+Results
+
+We first detail error performance for the considered models. Next, we present results for
+uncertainty estimation evaluation.
+
+
+Error
+
+Table 1 lists the mean absolute error (MAE) for the considered models both in the in-domain
+and out-of-domain settings.
+
+Table 1: Mean absolute error (MAE) on the test dataset (kcal/mol). Results are shown
+for the base model without any uncertainty estimation and for the model extended with
+each of the evaluated uncertainty estimation methods. Both in-domain and out-of-domain
+performance are reported for each case.
+
+                                        In domain      Out domain
+                          Base model    1.04           1.77
+                          MC-Dropout    0.97           1.49
+                          Ensembling    0.74           1.21
+                          Bootstrapping 0.89           1.43
+
+
+   The baseline is the chemprop model 1 without any uncertainty estimation. We notice
+how extending it to include uncertainty always leads to reductions in MAE, regardless of
+the approximation method used (MC-Dropout, ensembling and bootstrapping). These im-
+provements, often underestimated, are due to both aleatoric and epistemic estimation in
+the model. Indeed, modelling aleatoric uncertainty implicitly reduces the impact of noisy
+training samples, thus improving predictive performance. Modelling epistemic uncertainty
+allows averaging multiple weight configurations, avoiding overfitting, and overconfident esti-
+mations, with a positive impact on predictions. These two contributions can independently
+reduce the overall MAE but act synergistically when both are modeled. We can notice that,
+
+
+                                                 31
+independently from the model, the reduction in out-of-domain error is higher than in-domain
+error.
+   The analysis of improvements in MAE is not the main goal of the present paper, but its
+assessment is useful for the following discussion and should be kept in consideration as an
+important by-product of Bayesian uncertainty modelling.
+
+
+Uncertainty estimation
+
+Ranking-based evaluation
+
+The confidence curves for the different methods and the related Confidence-Oracle errors are
+shown in Fig. 5 and Fig. 6, respectively. The derived AUCO and Decrease Ratio metrics
+for each case are reported in the first two lines of Table 2.
+   We can observe that all the curves are mostly decreasing, therefore each method can
+establish a qualitatively meaningful ranking of the predictions by their uncertainty. However,
+as also highlighted by the Decrease Ratio, MC-Dropout does not lead to perfectly non-
+increasing curves, especially for epistemic uncertainty and at high percentiles.
+   In absolute terms, ensembling allows reaching the lowest MAE in the highest percentiles
+in both the components and the total uncertainty. Interestingly, the epistemic uncertainty
+estimated by bootstrapping allows reaching a MAE comparable to ensembling in the highest
+percentiles (0.21 versus 0.19 kcal/mol in the top 5%), even if the initial MAE on the whole
+dataset is significantly worse (0.89 versus 0.74 kcal/mol). This is quantitatively measured
+by a higher or similar error drop of bootstrapping, despite the overall higher MAE.
+   To compare the relative performance of the different approaches we need to consider
+the Confidence-Oracle errors and the AUCO. Globally, ensembling results in the lowest
+errors, even if the epistemic uncertainty estimated by bootstrapping leads to comparable
+performance. In contrast, the aleatoric component of bootstrapping leads to a significantly
+worse performance than ensembling. MC-Dropout results in larger errors with respect to
+the other considered approaches, in particular for epistemic uncertainty.
+
+                                              32
+        The total uncertainty does not always result in a lower (i.e., better) AUCO than the two
+separate contributions. While this is true for ensembling, it is not true in the other cases.
+In general, in ranking-based evaluation, if σa  σe or vice-versa, the total uncertainty curve
+will approximate the dominant contribution. Anyway, as we can observe, in these cases the
+total uncertainty appears to approximate the best performing one in terms of AUCO.
+
+                          MC-Dropout                                                                     Ensembling                                            Bootstrapping
+      1.0
+
+      0.8
+
+      0.6
+MAE                                                                                 MAE                                                       MAE
+      0.4
+                Epistemic
+      0.2       Aleatoric
+                Total
+                Best (oracle)
+      0.0
+            0   20         40       60                                   80   100     0        20        40        60         80        100     0        20     40      60     80   100
+                            Percentile                                                                   Percentile                                             Percentile
+
+       Figure 5: Confidence curves for the different methods (in-domain). MAE in kcal/mol.
+
+
+                                                                   0.6
+                                                                                                                                   MC Dropout (epistemic)
+                                                                                                                                   MC Dropout (aleatoric)
+                                                                   0.5                                                             Ensembling (epistemic)
+                                                                                                                                   Ensembling (aleatoric)
+
+
+
+
+                                         Confidence-oracle error
+                                                                   0.4                                                             Bootstrapping (epistemic)
+                                                                                                                                   Bootstrapping (aleatoric)
+                                                                   0.3
+
+                                                                   0.2
+
+                                                                   0.1
+
+                                                                   0.0
+                                                                         0    20          40        60        80        100
+                                                                                          Percentile
+
+Figure 6: Confidence-Oracle errors for the different methods (in-domain). Error in kcal/mol.
+
+
+
+Calibration and dispersion
+
+Confidence-based calibration The confidence-based calibration plots are shown in Fig.
+7. The derived AUCE and MCE metrics are reported in lines three and four of Table 2,
+respectively.
+
+
+                                                                                                          33
+   Results for epistemic uncertainty vary. Ensembling is characterized by calibrated em-
+pirical coverages in the low probability range (p < 50%), but increasingly underestimated
+coverages in the high probability range. Bootstrapping has a similar pattern but is better
+calibrated overall, with a broader interval of calibrated empirical coverages (p < 75%) and
+less underestimated coverages for higher values. This is quantified by the AUCE, which
+captures the overall behavior and is halved for bootstrapping with respect to ensembling.
+MC-Dropout epistemic uncertainty is largely underestimated.
+   In general, aleatoric uncertainty appears to be underestimated, independently from the
+underlying uncertainty model of the NN weights. The possible reasons for a miscalibrated
+aleatoric uncertainty are discussed in the last section.
+   Total uncertainty does not result in significant improvements to AUCE compared to
+considering epistemic uncertainty only in any of the cases, leading instead to slightly worse
+performance for ensembling and bootstrapping. By contrast, MCE is improved in those cases
+due to the combination of an underestimated aleatoric uncertainty and an overestimated
+epistemic uncertainty, which results in more stable curves. This also highlights the need of
+multiple metrics to quantify calibration.
+
+
+Error-based calibration The error-based calibration plots are shown in Fig. 8. The
+derived ENCE is also reported in line five of Table 2.
+   These plots offer a complementary view of uncertainty performance with respect to the
+confidence-based plots already shown. Indeed, rather than considering all the predictions at
+the same time, each dot only represents a subset of predictions in direct relation with the
+average error.
+   Aleatoric uncertainty on its own significantly underestimates the error in all the cases.
+Epistemic uncertainty appears to be a better error approximator for ensembling and boot-
+strapping, with a lead of the latter (64.7 vs 30.5 AUCE), but not for MC-Dropout. Total
+uncertainty always reports a better AUCE than the two individual contributions. Uncer-
+
+
+
+                                              34
+tainty tends to be underestimated in all of the considered cases.
+                       Compared to confidence-based calibration, this kind of plot is less stable, especially for
+high values of σ. This is due to i) the fact that the error is expected to be naturally higher
+as uncertainty increases (a property already taken into account in the ENCE computation)
+and ii) the fact that high uncertainty values are more sparse. Overall, error-based calibration
+confirms the main results of confidence-based calibration: bootstrapping estimates appear
+to be better calibrated and the total uncertainty is a better error approximator.
+                       Interestingly, we notice that all the plots, independently from their distance to the di-
+agonal line, are characterized by strongly correlated patterns (correlation ≈ 0.90 ∼ 0.93 for
+ensembling and bootstrapping, ≈ 0.66 ∼ 0.87 for MC-Dropout).
+
+
+Dispersion The dispersion coefficient is reported in the last line of Table 2. Results show
+no significant variations between the different methods, except for a slightly higher cv for
+MC-Dropout epistemic estimates. In general, epistemic uncertainty appears to be more
+disperse than aleatoric uncertainty for all the considered methods.
+
+                                         MC-Dropout                                              Ensembling                                             Bootstrapping
+                     1.0
+                              Epistemic
+                              Aleatoric
+                     0.8      Total
+                              Perfect calibration
+
+
+
+
+Empirical coverage                                                    Empirical coverage                                     Empirical coverage
+                     0.6
+
+                     0.4
+
+                     0.2
+
+                     0.0
+                        0.0   0.2        0.4        0.6   0.8   1.0              0.0       0.2   0.4       0.6   0.8   1.0              0.0       0.2   0.4       0.6   0.8   1.0
+                                               p                                                       p                                                      p
+
+Figure 7: Confidence-based calibration for the different methods (in-domain).
+The empirical coverage is reported for each symmetric confidence interval of probability p
+defined by the uncertainty. The empirical coverage is the fraction of times the true value
+actually falls in a confidence interval.
+
+
+
+
+                                                                                                  35
+                                            Epistemic               Aleatoric                Total
+                                    4
+                                    3
+               MC-Dropout     MSE   2                         MSE                    MSE
+                                    1
+                                            ENCE=4001.6             ENCE=416.5             ENCE=394.7
+                                    0
+                                               ( 2)                    ( 2)                   ( 2)
+                                    4
+                                    3
+                Ensembling    MSE   2                         MSE                    MSE
+                                    1
+                                            ENCE=64.7               ENCE=291.4             ENCE=34.0
+                                    0
+                                               ( 2)                    ( 2)                   ( 2)
+                                    4
+                                    3
+              Bootstrapping   MSE   2                         MSE                    MSE
+                                    1
+                                            ENCE=30.5               ENCE=554.6             ENCE=24.8
+                                    0
+                                        0       2         4     0       2        4     0       2        4
+                                               ( 2)                    ( 2)                   ( 2)
+
+Figure 8: Error-based calibration for the different methods (in-domain). MSE in (kcal/mol)2 .
+
+
+
+
+             Table 2: Summary metrics for the different methods (in-domain).
+
+                       MC-Dropout          Ensembling       Bootstrapping
+                    Epi.   Ale. Tot. Epi. Ale. Tot. Epi. Ale. Tot.
+       AUCO        46.72 31.55 31.72 18.79 20.83 17.03 19.18 25.08 19.05
+     Error drop     1.67  2.55 2.62 6.72 4.93 7.40 6.85 5.23 6.85
+     Decr. Ratio    0.95  0.98 0.96    1.0    0.99    1.0 1.0    1.0    1.0
+       AUCE        44.79 29.44 28.74 2.62 19.90 3.62 1.36 31.31 1.69
+       MCE          0.85  0.50 0.48 0.087 0.33 0.061 0.051 0.53 0.044
+       ENCE        4001.6 416.5 394.7 64.7 291.4 34.0 30.5 554.6 24.8
+         cv         0.97  0.50 0.49 0.74 0.51 0.67 0.74 0.45 0.71
+
+
+
+
+                                                              36
+Out-of-domain uncertainty
+
+The same plots already discussed for random splitting are shown for the out-of-domain case.
+The derived metrics are summarized in Table 3. In the following, the main differences with
+respect to random splitting are highlighted.
+   Confidence curves and Confidence-Oracle errors for the out-of-domain case are reported
+in Fig. 9 and Fig. 10, respectively. In absolute terms, as expected all the related out-of-
+domain indices (AUCO, error drop and decrease ratio) have deteriorated with respect to
+in-domain indices for all the considered methods. The relative performance of MC-Dropout
+with respect to ensembling and bootstrapping are comparable, with these last two outper-
+forming the first. The relative comparison between ensembling and bootstrapping results
+in qualitatively similar trends but quantitative differences which turn out to be strongly
+reduced. Ensembling has the lowest AUCO for both epistemic and aleatoric uncertainty,
+bootstrapping has comparably low scores and it also has comparably or higher error drops.
+The results for these two methods turn out to be more similar than in the in-domain setting.
+In general, the ranking-based evaluation in the out-of-domain setting does not highlight
+drastic changes other than an expected worsening of all the indices for all the methods.
+   The calibration-confidence analysis (Fig. 11 and Fig. 12) highlights a drastic change with
+respect to in-domain results for epistemic estimates using ensembling and bootstrapping. In
+particular, while in-domain empirical coverages tend to be calibrated or slightly overesti-
+mated, except for high p, out-of-domain empirical coverages tend to be always underesti-
+mated. This means that, on average, uncertainty estimates in an out-of-domain setting are
+lower than they should, while in-domain uncertainty estimates appear to be more calibrated
+or slightly higher than they should. Aleatoric estimates are less affected than epistemic ones
+in terms of AUCE and MCE for all the considered methods. Calibration-error analysis con-
+firms the underestimation trend of out-of-domain epistemic estimates, particulary affecting
+high-error predictions. The impact of out-of-domain uncertainty underestimation is further
+discussed in the next section.
+
+
+                                               37
+        Overall, bootstrapping has a slight advantage over ensembling in terms of AUCE, MCE
+and ENCE driven both by better epistemic uncertainty estimates (even if the magnitude
+of the difference is less than in-domain) and also better aleatoric uncertainty estimates (in
+contrast to in-domain results). This highlights another difference with respect to in-domain
+analysis, that is further discussed in the next section.
+        An additional difference pointed out by calibration analysis concerns the total uncer-
+tainty. While in-domain total uncertainty turns out to be similar or slightly worse than the
+two individual components, out-of-domain total calibration appears to be better than the
+two individual components for all the considered metrics.
+        In terms of dispersion, we observe a global increase for all the methods and uncertainty
+types.
+
+                             MC-Dropout                           Ensembling                         Bootstrapping
+      1.6
+      1.4
+      1.2
+      1.0
+
+MAE   0.8                                              MAE                                MAE
+      0.6
+      0.4          Epistemic
+                   Aleatoric
+      0.2          Total
+                   Best (oracle)
+      0.0
+            0      20         40       60   80   100     0   20   40      60   80   100     0   20    40      60     80   100
+                               Percentile                         Percentile                          Percentile
+
+Figure 9: Confidence curves for the different methods (out-of-domain). MAE in kcal/mol.
+
+
+                        Table 3: Summary metrics for the different methods (out-of-domain).
+
+                                           MC-Dropout         Ensembling      Bootstrapping
+                                       Epi.    Ale. Tot. Epi. Ale. Tot. Epi. Ale. Tot.
+                  AUCO                 73.35 52.29 52.93 34.12 38.68 33.38 36.27 40.05 35.81
+                Error drop             1.64    1.67 1.75 3.02 2.02 2.88 2.91 3.18 2.86
+                Decr. Ratio            0.86    0.90 0.91 0.99 0.95 0.98 0.98 0.99         1.0
+                  AUCE                 47.36 37.13 36.70 10.18 32.81 8.10 9.62 32.57 7.50
+                  MCE                  0.92    0.65 0.64 0.16 0.56 0.13 0.14 0.55 0.11
+                  ENCE                13936.2 707.5 687.2 78.2 480.4 61.2 65.1 429.9 50.9
+                    cv                 1.63    0.76 0.75 0.65 0.84 0.65 0.81 0.71 0.79
+
+
+
+                                                                   38
+                                                                                    1.2
+                                                                                                                                                                        MC Dropout (epistemic)
+                                                                                                                                                                        MC Dropout (aleatoric)
+                                                                                    1.0                                                                                 Ensembling (epistemic)
+                                                                                                                                                                        Ensembling (aleatoric)
+
+
+
+
+                                                          Confidence-oracle error
+                                                                                    0.8                                                                                 Bootstrapping (epistemic)
+                                                                                                                                                                        Bootstrapping (aleatoric)
+                                                                                    0.6
+
+                                                                                    0.4
+
+                                                                                    0.2
+
+                                                                                    0.0
+                                                                                          0     20                         40         60         80         100
+                                                                                                                           Percentile
+
+Figure 10: Confidence-Oracle errors for the different methods (out-of-domain). Error in
+kcal/mol.
+
+
+
+
+                                         MC-Dropout                                                                                        Ensembling                                                         Bootstrapping
+                     1.0
+                              Epistemic
+                              Aleatoric
+                     0.8      Total
+                              Perfect calibration
+
+
+
+
+Empirical coverage                                                                                    Empirical coverage                                                           Empirical coverage
+                     0.6
+
+                     0.4
+
+                     0.2
+
+                     0.0
+                        0.0   0.2        0.4        0.6                                   0.8   1.0              0.0            0.2        0.4        0.6         0.8        1.0              0.0       0.2   0.4       0.6   0.8   1.0
+                                               p                                                                                                  p                                                                 p
+
+Figure 11: Confidence-based calibration for the different methods (out-of-domain).
+The empirical coverage is reported for each symmetric confidence interval of probability p
+defined by the uncertainty. The empirical coverage is the fraction of times the true value
+actually falls in a confidence interval.
+
+
+
+
+                                                                                                                                            39
+                                            Epistemic                Aleatoric                Total
+                                   6
+
+                                   4
+              MC-Dropout     MSE                              MSE                    MSE
+                                   2
+
+                                   0       ENCE=13936.9             ENCE=707.5             ENCE=687.2
+                                                 ( 2)                     ( 2)                   ( 2)
+                                   6
+
+                                   4
+              Ensembling     MSE                              MSE                    MSE
+                                   2
+
+                                   0       ENCE=78.2                ENCE=480.4             ENCE=61.2
+                                                 ( 2)                     ( 2)                   ( 2)
+                                   6
+
+                                   4
+             Bootstrapping   MSE                              MSE                    MSE
+                                   2
+
+                                   0       ENCE=65.1                ENCE=429.9             ENCE=50.9
+                                       0     2      4     6     0     2      4   6     0     2      4   6
+                                                 ( 2)                     ( 2)                   ( 2)
+
+Figure 12: Error-based calibration for the different methods (out-of-domain). MSE in
+(kcal/mol)2 .
+
+
+
+
+                                                              40
+Discussion
+
+The goal of this section is to analyze and discuss the results presented in previous section,
+focusing on conclusions that can be drawn by comparing and integrating outcomes related
+to different uncertainty models and evaluation metrics.
+   Results show that ensembling and bootstrapping consistently outperform MC-Dropout
+both in the in-domain and out-of-domain scenarios for all the considered metrics. This is
+in line with results already presented for image classification/regression 12,47 and optical flow
+estimation, 17,19 confirming this trend also for GCNN-based molecular property prediction.
+In contrast to previous comparisons, that used the “base” version of MC-Dropout, 12,17,19 we
+employed Concrete MC-Dropout that was independently proven superior to standard MC-
+Dropout 20,38 but has not been directly compared to ensembling and bootstrapping before.
+   The comparison between ensembling and bootstrapping requires a deeper analysis and
+raises multiple interesting observations. On the one side, ensembling has an advantage for
+total MAE, AUCO and aleatoric calibration, especially in the in-domain setting. On the
+other, bootstrapping often leads to higher error drops (i.e. it allows reducing the MAE more
+in proportion when we consider small percentages of high-confidence predictions), has an
+advantage for better epistemic calibration in the in-domain setting and is characterized by
+an overall better calibration in the out-of-domain setting. This behavior can be explained
+by considering the effects of substituting each training dataset with a bootstrap sample.
+Each network only sees a fraction of the starting training dataset, thus increasing individual
+and ensembled MAE. Since aleatoric uncertainty is estimated from data, it follows a trend
+similar to MAE and it degrades. However, bootstrapping promotes diversity in ensembled
+models, which is key for epistemic uncertainty estimation, thus improving its calibration.
+We can argue that as training size increases — as long as the target molecular space is kept
+unchanged — bootstrapping becomes more advantageous, because each bootstrap sample
+becomes a better approximator of the underlying distribution, thus avoiding losses in MAE
+and aleatoric calibration in each single instance and in the ensembled model, but keeping
+
+                                               41
+an advantage as for epistemic calibration. Moreover, as we have observed, bootstrapping
+becomes globally more calibrated than ensembling in the out-of-domain setting. This can be
+explained by a gain of generalization power given by the additional diversity of bootstrapping.
+Interestingly, this generalization power especially translates in calibration performance, and
+only to a lesser extent in ranking-based indices and total MAE, which turn out to be relatively
+improved in the out-of-domain setting with respect to ensembling, but not better than the
+latter in absolute terms. Dispersion analysis allows checking that improvements in calibration
+are not the result of losses in uncertainty heterogeneity.
+   In previous studies for CNN-based image regression/classification, bootstrapping did not
+report significant improvements over ensembling. 12 We can speculate that this difference is
+due to i) the peculiarities of the chemical space, characterized by a larger intrinsic vari-
+ability that can be exploited by bootstrapping, and ii) by variations in the training size, as
+previously discussed. Results obtained for bootstrapping justify its recent use in active learn-
+ing methodologies for molecular property prediction, 35 where model uncertainty (epistemic
+uncertainty) and generalization power are required.
+   Even if the methods investigated in this work jointly model aleatoric and epistemic un-
+certainties, their separate evaluation carried out in the previous section allows directly com-
+paring the two. Both appear to be effective for ranking-based evaluation, with a potential
+complementary improvement of total uncertainty. From a calibration point of view, good
+performance has been reached using epistemic uncertainty alone, while aleatoric uncertainty
+individually turns out to always be largely underestimated, even if it is characterized by a
+high correlation with error. In any case, total uncertainty is as calibrated as the individual
+components, and even more calibrated in the out-of-domain setting. We can explain this
+behavior of calibration as follows.
+   Aleatoric uncertainty should correlate with the noise in the observed variable, while
+epistemic uncertainty with the error in the trained function. However, the only observable
+error (MSE) includes both these contributions. Therefore, we can speculate that in this
+
+
+                                              42
+specific case epistemic uncertainty appears to be more calibrated than aleatoric uncertainty
+individually because the total error is primarily due to the model’s approximating function
+rather than the noise in the data. In other contexts, the individual contributions to total
+error could vary, and the situation could be reversed, but MSE should always be better
+approximated by total uncertainty. Evaluating the individual contributions can be helpful
+in pinpointing their relative importance in different settings. Moreover, even if MSE is better
+approximated by total uncertainty, applications could require taking into account only one
+of the two components for its specific meaning or to maximize some specific metric. This
+kind of analysis is not the main goal of this work and deserves further investigation.
+   Domain shift analysis is characterized by mixed results. On the one side, ranking-based
+performance does not appear to be particularly affected by out-of-domain molecules: the
+AUCO decreases proportionally to the (inevitable) decrease in total MAE, while the error
+drop is even larger than in the in-domain setting. On the other side, calibration performance
+drastically changes and out-of-domain calibration appears to be consistently underestimated.
+The latter result is in line with what has been recently observed in Li et al. 35 , but the analysis
+carried out in this work has allowed the quantification of this behavior and its confirmation
+in a more general setting with multiple uncertainty methods being employed. As the model
+is tested on molecules different with respect to those seen during training, the error increases
+without the uncertainty being able to totally capture this rise, thus leading to lower than
+expected estimates in this case. Out-of-domain uncertainty calibration should be a major
+focus of future development in uncertainty estimation methodologies for molecular property
+prediction.
+   Up to now, we mainly compared uncertainty models. However, the obtained results
+also allow for the comparison of different evaluation methods in terms of what they capture
+about uncertainty to discuss if and to what degree they are all necessary and complemen-
+tary. Taking into consideration calibration allows identifying several patterns that do not
+emerge from confidence curves only, such as the discrepancy in ensembling epistemic and
+
+
+                                                43
+aleatoric uncertainties or some differences between ensembling and bootstrapping, thus high-
+lighting its important role in comparisons. By contrast, even recent work that seeks to obtain
+“uncertainty-calibrated prediction of molecular properties” 7 do not take into consideration
+calibration evaluation in the results. The discrepancy between results obtained based on the
+two different definitions of calibration is more subtle. Qualitatively, the main conclusions
+derived by confidence-based calibration, such as the largely underestimated aleatoric uncer-
+tainty in all the experiments, are also reflected in error-based calibration. Quantitatively,
+the ratios of the indices obtained through these two methods do not always overlap, but
+they always rank models in the same order. Based on the obtained results, it is not possible
+to state if and when quantitative indices based on one of the two definitions outperform the
+other. The results obtained for these two different definitions of calibration also confirm their
+previous comparative discussion. In particular, even if error-based calibration directly relates
+error and uncertainty according to the definition, the inherent non-uniformity of uncertainty
+estimates makes it difficult to obtain reliable statistics in some uncertainty ranges (high un-
+certainty ranges in our experiments), with less stable results. This also prevents assessing if
+the error in these ranges is due to uncertainty estimates themselves or to insufficient data
+for computing reliable statistics. Therefore, we can conclude that the choice between these
+two evaluation techniques depends on the context. If the dataset is large enough to enable
+meaningful estimates for all the bins, error-based calibration should be preferred because it
+allows for a more direct comparison and it avoids issues when re-calibration techniques are
+employed. 22 Instead, if the uncertainty distribution is highly skewed and few samples are
+available in some ranges, as it turns out in our experiments, confidence-based calibration
+can overcome this and results in less noisy plots.
+
+
+
+
+                                               44
+Conclusion and Future Work
+
+In this paper we compared three state-of-the-art approaches for uncertainty estimation in
+neural networks in the context of GCNNs for molecular property prediction: MC-Dropout
+with Concrete Dropout, ensembling, and bootstrapping. We selected those approximate
+Bayesian inference techniques satisfying some specific application-oriented criteria: scalabil-
+ity, lack of hyper-parameters, and independence from the underlying network architecture.
+These techniques have been first reviewed in a unified framework that separates aleatoric
+and epistemic uncertainty, also in the light of recent interpretations given to ensembling,
+and then experimentally compared on the QM9 dataset based on a set of introduced crite-
+ria. Those criteria have been selected to evaluate uncertainty from different perspectives:
+based on its ability to define a ranking of most confident predictions, based on uncertainty
+calibration (two different recent definitions for regression have been employed), based on
+dispersion that measures estimated heterogeneity, and based on robustness to domain shift
+in the test set with respect to the training set, with scaffold splitting being employed.
+   The obtained results lead to multiple interesting conclusions. First of all, ensembling
+and bootstrapping appear to consistently outperform MC-Dropout, confirming the results
+recently presented for other domains and different network types also for GCNN-based molec-
+ular property prediction. The comparison between ensembling and bootstrapping leads to
+more mixed results. Even though ensembling is better with respect to most of the con-
+sidered metrics, including overall MAE, bootstrapping appears to outperform ensembling
+for others, notably epistemic uncertainty calibration and overall out-of-domain calibration.
+This is not in line with what has been previously described in the context of image re-
+gression/classification, highlighting an interesting property of the chemical space and/or the
+chemical dataset analyzed. Furthermore, the results presented have led to a better under-
+standing about the role of aleatoric/epistemic uncertainty with an interesting method based
+on calibration plots to pinpoint the relative contribution of the two kinds of uncertainty to
+the total error.
+
+                                              45
+   The latter is one of the directions that should be further investigated in the future, with
+a deeper analysis of the uncertainty components, also in relation to the specific features of
+the datasets. In addition, taking into consideration how approximate methods interfere with
+their independent calculation would be of crucial importance in applications. Another impor-
+tant direction concerns the improvement of uncertainty estimation methods. To accomplish
+this, a promising direction — especially for epistemic and out-of-domain uncertainty — is
+represented by the increase of diversity in the ensembled networks. This might not be the
+result of diversity in the data, as in bootstrapping, but instead come from the model it-
+self. 54,55 Balancing diversity, training data size and number of hyper-parameters appears
+to be a challenging tradeoff. One of the main limitations of all the uncertainty estimation
+methods is out-of-domain uncertainty calibration, and overcoming this weakness should be
+a major goal of future developments in uncertainty-aware molecular property prediction.
+
+
+
+References
+
+ (1) Yang, K.; Swanson, K.; Jin, W.; Coley, C.; Eiden, P.; Gao, H.; Guzman-Perez, A.;
+     Hopper, T.; Kelley, B.; Mathea, M.; Palmer, A.; Settels, V.; Jaakkola, T.; Jensen, K.;
+     Barzilay, R. Analyzing Learned Molecular Representations for Property Prediction.
+     Journal of Chemical Information and Modeling 2019, 59, 3370–3388.
+
+ (2) Wu, Z.; Ramsundar, B.; Feinberg, E.; Gomes, J.; Geniesse, C.; Pappu, A. S.;
+     Leswing, K.; Pande, V. MoleculeNet: a benchmark for molecular machine learning.
+     Chem. Sci. 2018, 9, 513–530.
+
+ (3) Mayr, A.; Klambauer, G.; Unterthiner, T.; Steijaert, M.; Wegner, J. K.; Ceulemans, H.;
+     Clevert, D.-A.; Hochreiter, S. Large-scale comparison of machine learning methods for
+     drug target prediction on ChEMBL. Chemical science 2018, 9, 5441–5451.
+
+ (4) Duvenaud, D.; Maclaurin, D.; Aguilera-Iparraguirre, J.; Gómez-Bombarelli, R.;
+
+
+                                             46
+     Hirzel, T.; Aspuru-Guzik, A.; Adams, R. P. Convolutional Networks on Graphs for
+     Learning Molecular Fingerprints. Proceedings of the 28th International Conference on
+     Neural Information Processing Systems - Volume 2. 2015; pp 2224–2232.
+
+ (5) Gal, Y. Uncertainty in deep learning. Ph.D. thesis, University of Cambridge, 2016.
+
+ (6) Kendall, A.; Gal, Y. What Uncertainties Do We Need in Bayesian Deep Learning
+     for Computer Vision? Proceedings of the 31st International Conference on Neural
+     Information Processing Systems. 2017; pp 5580–5590.
+
+ (7) Zhang, Y.; Lee, A. A. Bayesian semi-supervised learning for uncertainty-calibrated
+     prediction of molecular properties and active learning. Chem. Sci. 2019, 10, 8154–
+     8163.
+
+ (8) Proppe, J.; Reiher, M. Reliable Estimation of Prediction Uncertainty for Physicochemi-
+     cal Property Models. Journal of chemical theory and computation 2017, 13, 3297–3317.
+
+ (9) Neal, R. M. Bayesian Learning for Neural Networks; Springer-Verlag, 1996.
+
+(10) Gal, Y.; Ghahramani, Z. Dropout As a Bayesian Approximation: Representing Model
+     Uncertainty in Deep Learning. Proceedings of the 33rd International Conference on
+     International Conference on Machine Learning - Volume 48. 2016; pp 1050–1059.
+
+(11) Ryu, S.; Kwon, Y.; Kim, W. Y. Uncertainty quantification of molecular property pre-
+     diction using Bayesian neural network models. arXiv preprint arXiv:1905.06945 2018,
+
+(12) Lakshminarayanan, B.; Pritzel, A.; Blundell, C. Simple and Scalable Predictive Uncer-
+     tainty Estimation Using Deep Ensembles. Proceedings of the 31st International Con-
+     ference on Neural Information Processing Systems. 2017; pp 6405–6416.
+
+(13) Fauw, J. D. et al. Clinically applicable deep learning for diagnosis and referral in retinal
+     disease. Nature Medicine 2018, 24, 1342–1350.
+
+
+
+                                               47
+(14) Tomašev, N. et al. A clinically applicable approach to continuous prediction of future
+     acute kidney injury. Nature 2019, 572, 116–119.
+
+(15) Duvenaud, D.; Maclaurin, D.; Adams, R. P. Early Stopping as Nonparametric Varia-
+     tional Inference. Proceedings of the 19th International Conference on Artificial Intelli-
+     gence and Statistics, AISTATS 2016. 2016; pp 1070–1077.
+
+(16) Pearce, T.; Zaki, M.; Brintrup, A.; Neel, A. Uncertainty in neural networks: Bayesian
+     ensembling. arXiv preprint arXiv:1810.05546 2018,
+
+(17) Gustafsson, F. K.; Danelljan, M.; Schön, T. B. Evaluating Scalable Bayesian Deep
+     Learning Methods for Robust Computer Vision. arXiv preprint arXiv:1906.01620
+     2019,
+
+(18) Guo, C.; Pleiss, G.; Sun, Y.; Weinberger, K. Q. On Calibration of Modern Neural
+     Networks. Proceedings of the 34th International Conference on Machine Learning -
+     Volume 70. 2017; pp 1321–1330.
+
+(19) Ilg, E.; Cicek, O.; Galesso, S.; Klein, A.; Makansi, O.; Hutter, F.; Brox, T. Uncertainty
+     estimates and multi-hypotheses networks for optical flow. Proceedings of the European
+     Conference on Computer Vision (ECCV). 2018; pp 652–667.
+
+(20) Mukhoti, J.; Gal, Y. Evaluating Bayesian Deep Learning Methods for Semantic Seg-
+     mentation. arXiv preprint arXiv:1811.12709 2018,
+
+(21) Kuleshov, V.; Fenner, N.; Ermon, S. Accurate Uncertainties for Deep Learning Using
+     Calibrated Regression. Proceedings of the 35th International Conference on Machine
+     Learning. 2018; pp 2796–2804.
+
+(22) Levi, D.; Gispan, L.; Giladi, N.; Fetaya, E. Evaluating and Calibrating Uncertainty
+     Prediction in Regression Tasks. arXiv preprint arXiv:1905.11659 2019,
+
+
+
+
+                                             48
+(23) Coley, C. W.; Barzilay, R.; Green, W. H.; Jaakkola, T. S.; Jensen, K. F. Convolutional
+     embedding of attributed molecular graphs for physical property prediction. Journal of
+     chemical information and modeling 2017, 57, 1757–1772.
+
+(24) Kendall, A.; Gal, Y.; Cipolla, R. Multi-task learning using uncertainty to weigh losses
+     for scene geometry and semantics. Proceedings of the IEEE Conference on Computer
+     Vision and Pattern Recognition. 2018; pp 7482–7491.
+
+(25) Le, Q. V.; Smola, A. J.; Canu, S. Heteroscedastic Gaussian process regression. Pro-
+     ceedings of the 22nd international conference on Machine learning. 2005; pp 489–496.
+
+(26) Nix, D. A.; Weigend, A. S. Estimating the mean and variance of the target probability
+     distribution. Proceedings of 1994 IEEE International Conference on Neural Networks
+     (ICNN’94). 1994; pp 55–60.
+
+(27) Bishop, C. M. Mixture density networks. 1994,
+
+(28) Choi, S.; Lee, K.; Lim, S.; Oh, S. Uncertainty-aware learning from demonstration using
+     mixture density networks with sampling-free variance modeling. 2018 IEEE Interna-
+     tional Conference on Robotics and Automation (ICRA). 2018; pp 6915–6922.
+
+(29) Kristiadi, A.; Fischer, A. Predictive Uncertainty Quantification with Compound Den-
+     sity Networks. arXiv preprint arXiv:1902.01080 2019,
+
+(30) Ma, Y.-A.; Chen, T.; Fox, E. B. A Complete Recipe for Stochastic Gradient MCMC.
+     Proceedings of the 28th International Conference on Neural Information Processing
+     Systems - Volume 2. 2015; pp 2917–2925.
+
+(31) Zhang, R.; Li, C.; Zhang, J.; Chen, C.; Wilson, A. G. Cyclical stochastic gradient
+     MCMC for Bayesian deep learning. arXiv preprint arXiv:1902.03932 2019,
+
+(32) Graves, A. Practical Variational Inference for Neural Networks. Proceedings of the 24th
+
+
+
+                                            49
+     International Conference on Neural Information Processing Systems. 2011; pp 2348–
+     2356.
+
+(33) Hernández-Lobato, J. M.; Adams, R. P. Probabilistic Backpropagation for Scalable
+     Learning of Bayesian Neural Networks. Proceedings of the 32Nd International Confer-
+     ence on International Conference on Machine Learning - Volume 37. 2015; pp 1861–
+     1869.
+
+(34) Liu, Q.; Wang, D. Stein Variational Gradient Descent: A General Purpose Bayesian
+     Inference Algorithm. Proceedings of the 30th International Conference on Neural In-
+     formation Processing Systems. 2016; pp 2378–2386.
+
+(35) Li, Y.-P.; Han, K.; Grambow, C. A.; Green, W. H. Self-Evolving Machine: A Con-
+     tinuously Improving Model for Molecular Thermochemistry. The Journal of Physical
+     Chemistry A 2019, 123, 2142–2152.
+
+(36) Smith, J. S.; Nebgen, B.; Lubbers, N.; Isayev, O.; Roitberg, A. E. Less is more: Sam-
+     pling chemical space with active learning. The Journal of chemical physics 2018, 148,
+     241733.
+
+(37) Peterson, A. A.; Christensen, R.; Khorshidi, A. Addressing uncertainty in atomistic
+     machine learning. Physical Chemistry Chemical Physics 2017, 19, 10978–10985.
+
+(38) Gal, Y.; Hron, J.; Kendall, A. Concrete dropout. Proceedings of the 31st International
+     Conference on Neural Information Processing Systems. 2017; pp 3584–3593.
+
+(39) Srivastava, N.; Hinton, G.; Krizhevsky, A.; Sutskever, I.; Salakhutdinov, R. Dropout:
+     a simple way to prevent neural networks from overfitting. The Journal of Machine
+     Learning Research 2014, 15, 1929–1958.
+
+(40) Dietterich, T. G. Ensemble Methods in Machine Learning. Proceedings of the First
+     International Workshop on Multiple Classifier Systems. 2000; pp 1–15.
+
+
+                                            50
+(41) Goodfellow, I.; Bengio, Y.; Courville, A. Deep Learning; MIT Press, 2016.
+
+(42) Mandt, S.; Hoffman, M. D.; Blei, D. M. Stochastic gradient descent as approximate
+     bayesian inference. The Journal of Machine Learning Research 2017, 18, 4873–4907.
+
+(43) Niculescu-Mizil, A.; Caruana, R. Predicting good probabilities with supervised learning.
+     Proceedings of the 22nd international conference on Machine learning. 2005; pp 625–
+     632.
+
+(44) DeGroot, M. H.; Fienberg, S. E. The comparison and evaluation of forecasters. Journal
+     of the Royal Statistical Society: Series D (The Statistician) 1983, 32, 12–22.
+
+(45) Naeini, M. P.; Cooper, G. F.; Hauskrecht, M. Obtaining Well Calibrated Probabili-
+     ties Using Bayesian Binning. Proceedings of the Twenty-Ninth AAAI Conference on
+     Artificial Intelligence. 2015; pp 2901–2907.
+
+(46) Gneiting, T.; Balabdaoui, F.; Raftery, A. E. Probabilistic forecasts, calibration and
+     sharpness. Journal of the Royal Statistical Society: Series B (Statistical Methodology)
+     2007, 69, 243–268.
+
+(47) Beluch, W. H.; Genewein, T.; Nurnberger, A.; Kohler, J. M. The Power of Ensembles
+     for Active Learning in Image Classification. 2018 IEEE/CVF Conference on Computer
+     Vision and Pattern Recognition. 2018; pp 9368–9377.
+
+(48) Ramakrishnan, R.; Dral, P. O.; Rupp, M.; von Lilienfeld, O. A. Quantum chemistry
+     structures and properties of 134 kilo molecules. Scientific Data 2014, 1, 140022.
+
+(49) Cohen, A. J.; Mori-Sánchez, P.; Yang, W. Challenges for Density Functional Theory.
+     Chemical Reviews 2012, 112, 289–320.
+
+(50) Simm, G. N.; Reiher, M. Systematic Error Estimation for Chemical Reaction Energies.
+     Journal of Chemical Theory and Computation 2016, 12, 2762–2773.
+
+
+
+                                             51
+(51) Proppe, J.; Husch, T.; Simm, G. N.; Reiher, M. Uncertainty quantification for quantum
+     chemical models of complex reaction networks. Faraday Discussions 2017, 195, 497–
+     520.
+
+(52) Li, Y.-P.; Bell, A. T.; Head-Gordon, M. Thermodynamics of Anharmonic Systems: Un-
+     coupled Mode Approximations for Molecules. Journal of Chemical Theory and Com-
+     putation 2016, 12, 2861–2870.
+
+(53) Grambow, C. A.; Li, Y.-P.; Green, W. H. Accurate Thermochemistry with Small Data
+     Sets: A Bond Additivity Correction and Transfer Learning Approach. The Journal of
+     Physical Chemistry. A 2019, 123, 5826–5835.
+
+(54) Lee, S.; Purushwalkam, S.; Cogswell, M.; Crandall, D.; Batra, D. Why M heads
+     are better than one: Training a diverse ensemble of deep networks. arXiv preprint
+     arXiv:1511.06314 2015,
+
+(55) Pearce, T.; Anastassacos, N.; Zaki, M.; Neely, A. Bayesian Inference with Anchored En-
+     sembles of Neural Networks, and Application to Reinforcement Learning. arXiv preprint
+     arXiv:1805.11324 2018,
+
+
+
+
+                                            52
+

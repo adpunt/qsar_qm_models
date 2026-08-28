@@ -1,0 +1,498 @@
+Verified every citation against the files. Corrections and omissions below.
+
+---
+
+## (a) Quotes that are not verbatim / are truncated in a materially misleading way
+
+**Item 1 — the truncation destroys the metric name.**
+Source `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae.jsonl:7` reads `and auc_norm.` The salvaged quote ends `and auc` — cut mid-token, so it reads as the un-normalised metric. The rest of the line, which is the load-bearing part and is dropped entirely, is verbatim:
+
+> `- The main 3 stats are R2 at sigma=0, 0.6 and auc_norm. And then I also look at per-sample uncertainty. This needs some extra digging`
+> `    - auc_norm needs to take into account baseline performance at higher sigmas. the r2 at sigma=0.6 is a bit of a sanity check on auc_norm. Obviously other noise levels exist, but it catches a few cases.`
+
+**Item 1 — "identical text repeated at 28450b4e…:5" is false.** That message (`/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/28450b4e-4a9e-4197-993c-548e1dd48b09.jsonl:5`, 2026-08-24T01:15:24.214Z) is re-indented and carries **three appended paragraphs that do not exist in the 08-20 original**, the last of which changes the scope of the whole rework and is nowhere in the salvage:
+
+> `Uncertainty analysis is completely fucked and is being handled separately, do everything but that`
+
+and
+
+> `❯ Do you not understand that the bulk of this first step should be PLANNING don't modify yet, plan and rework every single figure/table/main result.`
+
+**Item 3 — the item's own prose claims a sentence its quote cuts off.** The description says it includes "the sentence about there being no overall number one," but the quote ends at `But you `. The missing text, verbatim from `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/37046d5b-871b-4e27-82fb-a35e1ea2ef1d.jsonl:6181`:
+
+> `But you won't have a no. 1 because it'll be by model. For gaussian noise. `
+
+Note this sentence itself says **"by model"**, which settles the `each mode` / `each model` discrepancy the salvage flagged at `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:80` — the author's own next clause disambiguates. The flag is correct to raise but should be closed, not left open.
+
+**Item 4 — the truncation removes the entire decision.** The quote stops at `I `. The summary asserts the author "said the ranking should be read off Gaussian," but nothing in the quoted text says that. The support, verbatim from `37046d5b…jsonl:6267`:
+
+> `I don't think I wanted to do that. I do want to make the claim that ranking is strategy independent, so keep that kendals tau in there, but I should be looking at gaussian, and if any other noise strategies are significantly different I should be highlighting them too. This is exactly what I didn't want. Is there any other averaging over noise strategies in any parts of the paper I'm not aware of? Since that's a signal not enough analysis was done. `
+
+That is a **four-part** instruction (drop the mean; keep Kendall's tau; rank off Gaussian; flag divergent strategies) plus an audit request. The salvage captured two parts.
+
+**Item 5 — truncation drops the actionable half.** Ends at `I can fill in ga`. Continues verbatim: `I can fill in gaps locally. We'll need to plan this out. add this to immediate_next_steps`.
+
+All code quotes (items 6, 7, 8, 9, 10, 11) are **verbatim and the line numbers are correct**, including the awkward trailing-whitespace truncations. I re-derived every cited line number by hand.
+
+---
+
+## (b) Verification status changed or dropped
+
+**Items 9 and 10 quote QM9 numbers from contaminated files with no marking.** `results/paper_figures_v2/table2_auc_ranks_pdv.csv`, `table5_sigma_rankings.csv` and `deep_qm9_rep_robustness_by_strategy.csv` are all dated **8 Jul 01:21** — before the held-out-noise fix (commit `9d7db67`, 2026-08-24). Every QM9-derived number the salvage cites as verification (`ngboost 1.333`, `rf 2.5`, `lgb 1.2`, `xgboost 1.8`, `gauche_rbf 3.0`, `n=11`) is from the invalid run. The *structural* claims (rows vs columns, which sort key) survive; the numbers must carry the contamination marking. Same for `table3_wilcoxon_tests.csv` in item 8 — the n values (36, 24, 36, 24, 44) are structural evidence and hold, but the means and p-values are contaminated.
+
+**Item 11 is the opposite case and should be marked as such.** `table_validation_anova.csv` and the KIRBy validation CSVs are from the pipeline that never had the held-out-noise bug, so item 11 and item 6 are the only two items resting on clean data. That distinction is not stated anywhere and is the single most useful marking in the set.
+
+---
+
+## (c) Items presented as live that are really stale-number regeneration
+
+None of the eleven are mislabelled that way — items 7 through 11 are genuine code defects, not stale outputs. But two need their *cause* corrected:
+
+**Item 11's causal claim is wrong, and acting on it as written will not fix anything.** The salvage says the residual is zero "after folds are discarded twice." The second "discard" — the fold averaging at `scripts/generate_paper_figures_v2.py:1372` — is not the cause. The cause is `group_cols` at `:1364-1366`:
+
+```
+        group_cols = ['model', 'rep', 'strategy']
+        if 'dataset' in validation_df.columns:
+            group_cols = ['dataset'] + group_cols
+```
+
+`fold` is not in the grouping key, so `calculate_validation_auc` emits **exactly one `auc_norm` per (dataset, model, rep, strategy) by construction**. Restoring the folds at the loader would still produce a saturated design and a residual of exactly 0.0. The spec must be: **add `fold` to `group_cols` at :1364 so an AUC curve is fitted per fold**, giving 5 replicate observations per model×rep cell. Confirmed arithmetic: legacy-only filter at `:1596-1597` leaves 7 models × 3 reps = 21 possible cells, and the shipped table reports n = 19, 18, 18 — one observation per filled cell.
+
+**Item 6's "silently" is wrong.** `:1153-1154` prints the loss:
+```
+            if len(combined) < before:
+                print(f"  Deduplicated: {before} → {len(combined)} rows (overlapping directories)")
+```
+It is not silent — it is *mislabelled*. The message blames "overlapping directories" when the rows being dropped are cross-validation folds. That is a sharper finding than "silent" and should replace it. I reproduced the counts independently: 48,510 → 9,702, surviving `fold` values `[0]`, source folds `[0,1,2,3,4]`, exactly 5 rows per (dataset, model, rep, strategy, sigma) cell, 13 models × 4 reps × 6 strategies × 11 sigmas × 3 datasets.
+
+---
+
+## (d) Missed in the source files
+
+1. **Item 9 misses the third table variant, which is the one the author asked for.** `scripts/generate_paper_figures_v2.py:3280-3284` already writes a Gaussian-ranked table:
+```
+            gauss_col = STRATEGY_LABELS.get('legacy', 'Gaussian')
+            if gauss_col in pivot_labeled.columns:
+                variant_b = pivot_labeled.sort_values(gauss_col, ascending=False)
+                variant_b.to_csv(output_dir / 'table2_auc_by_gaussian_pdv.csv')
+```
+`results/paper_figures_v2/table2_auc_by_gaussian_pdv.csv` exists on disk. The salvage says "two partial tables exist"; there are three, and the omitted one is the closest existing match to "For gaussian noise." The spec should extend it (add the performance column, models as columns) rather than build from scratch.
+
+2. **Item 10's blanket claim is falsified by the script itself.** "Every pivot_table and groupby uses 'model' as the index or as part of it" is not true: `:1978-1979` and `:2044-2045` are `groupby('rep')` alone. And `:2400-2430` builds `table_supp_rep_redundancy.csv` with representation as the unit (pairwise Spearman between rep profiles) — I read the shipped file, 19+ rep pairs. The substantive claim (no representation × noise-type table) still stands; the sweeping version does not, and `table_supp_rep_redundancy.csv` is the existing rep-level artefact the spec should reference.
+
+3. **Item 7 misses a fourth hard-coded 0.3.** Beyond `:1935/:2146/:2259`, the figure panel title is hard-coded at `:2859`: `_plot_anova_panel(axes[0], perf_results, 'a) Performance (R² at σ=0.3)', show_legend=True)`. Changing the sigma without this produces a figure whose label contradicts its data.
+
+4. **Item 3 misses the two instructions that open the same message** (`37046d5b…jsonl:6181`), both verbatim:
+> `It looks like there's two errors here - yes you can rank by auc_norm but you must take into account in the text what's going on with baseline accuracy. `
+> `And also, WHAT ARE THE AUC_NORMS ARE THEY AGGREGATES IF SO OF WHAT`
+
+The first is a paper-text requirement attached to the rank table; the second is an unanswered question about what `auc_norm` aggregates over.
+
+5. **The Kendall's tau instruction is being lost.** `RERUN_PLAN.md` mentions Kendall only once, at `:784`, and only as a stale-number note (`Kendall's coefficient is printed as 0.9121; the regenerated value is 0.9374`). The author's decision to *keep* it — `so keep that kendals tau in there` — appears nowhere in the plan and nowhere in the salvage. Table 6 (`# Table 6: Kendall's W for ranking consistency across strategies`, `scripts/generate_paper_figures_v2.py:3700-3701`) implements Kendall's **W**, not tau; whether that satisfies the instruction is unresolved and should be a gap, not an assumption.
+
+---
+
+## Gaps
+
+- Item 10 is the only spec with **no author quote at all**, and `RERUN_PLAN.md:81` supplies none either. I did not locate the original request for a representation-by-noise-type table in the cited transcripts; I only searched the five cited line numbers and their surrounding messages, not the full 35 MB of `37046d5b…jsonl`. Until a verbatim request is found, item 10 should be marked as **inferred from RERUN_PLAN.md, source request not located**.
+- I did not read the transcripts in full (`37046d5b…jsonl` alone is 35 MB); every finding above comes from the specific cited lines plus targeted greps. Other author decisions may sit unsalvaged outside those lines.
+
+=====
+
+Checked every item against the cited files. All quoted text is verbatim except where noted. All 12 evidential sites in item 19 exist. Item 4's grep, item 16's MRO/signature checks, and item 5's `log_noise_var` line all re-verified independently.
+
+## (a) Quotes that are not verbatim in the cited file
+
+**Item 20** — the bracket note renders `rust/src/main.rs:759-760` as a single brace-wrapped line. The file reads:
+```
+759:            if config.regression && config.normalize {
+760:                property_value = (property_value - mean) / std_dev;
+```
+Reformatted, not copied. The body quote (main.rs:959-963) is verbatim.
+
+**Item 11** — one quote is offered for two cited ranges. It is verbatim of `/Users/apunt/repos/qsar_qm_models/scripts/loss_functions.py:170-173` only. The live definition differs:
+```
+455:    loss_map = {
+456:        # Basic losses
+457:        'mse': nn.MSELoss(),
+```
+There is no `'mse': nn.MSELoss(),` on line 456. The dead/live finding itself is correct.
+
+## (b) Verification status changed or dropped
+
+**Item 19** — "identical at 4297-4299, 4581-4583, 4589-4591, 5976-5978, 6079-6081, 7657-7659" is false. Those use `torch.clamp(alpha - 1, min=1e-6)`, not `np.maximum(alpha - 1, 1e-6)`; 4581/4589 use suffixed names (`epistemic_f`, `beta_g`). All 12 sites exist and all assign the same term to the same name — but they are not identical code. Also, `models.py:6963-6964` is called an "inverted-name form"; it is not inverted. `epistemic_std = np.sqrt(beta / (alpha - 1))` labels the same quantity the same way as the other eleven; it only takes the sqrt inline. The unverified-against-Amini marking is correctly carried.
+
+**Item 27** — "against a label standard deviation of 1.0 in the same units" carries no file, no line, no quote. It is inferred from standardisation, and item 20's own finding is that the divisor is the *noisy* SD, so the standardised labels do not have SD 1.0. Unsourced number; drop it or source it.
+
+**Items 26 and 27** — the QM9 contamination marking is carried, but a second marking is dropped: both quoted headers contain an `ECE` column, and ECE was fully removed from v1, v2 and `deep_analysis.py`. `grep -n "ECE\|ece" /Users/apunt/repos/qsar_qm_models/scripts/generate_paper_figures_v2.py` returns nothing. Those columns cannot be regenerated.
+
+## (c) Marked as live, actually dead or stale
+
+**Item 22** — cites `/Users/apunt/repos/qsar_qm_models/scripts/generate_figures.py:1045-1049` as "the repo already gets this wrong once". That file is documented as dead at `/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:337`: `- **Not touched** (older exploratory scripts, no paper artefacts): \`scripts/uncertainty_analysis.py\` (emits \`fig6c_ece.png\`), \`scripts/phase2_analysis.py\`, \`scripts/generate_figures.py\`. Flag if these should be stripped too.` The live script never sums the two columns — it reports the means separately (`generate_paper_figures_v2.py:3470-3479`, `:3582-3591`). Keep the variance-vs-SD rule in the spec; re-label the evidence as a dead-script defect.
+
+**Item 26** — the half-empty columns are a code property, not a data property. They come from `utils.py:80` (`aleatoric = None`) and `utils.py:161` (`epistemic = None`). Regeneration will not fill them. The 8-July CSV is redundant evidence for a claim already proved by items 1 and 2.
+
+## (d) Errors inside items
+
+**Item 18** — "train_evidential_kernel and train_ntk_gnn both compute the parts". Only the evidential kernel does. `train_ntk_gnn` computes one latent variance at `models.py:7165` (`variances[i] = k_star_star - torch.dot(k_vec, torch.linalg.solve(K_reg, k_vec))`) and one std at `:7171`. There are no parts to drop. NTK is epistemic-only and belongs in item 29's "cannot" list with that as the stated reason.
+
+**Item 18 vs item 19** — direct contradiction, unflagged. Item 18 says restore `models.py:6963-6964`; item 19 says those two lines are mislabelled. Restoring them as-is ships the swap.
+
+**Item 13** — "byte-identical copy" is false. `models.py:2112-2125` is at 8-space indent and unguarded. `models.py:2715-2728` is at 12-space indent, nested inside `if args.uncertainty:` (`models.py:2712`), with an else-branch at `:2729-2733` setting `epistemic = None` / `aleatoric = None`. Same logic, different code — a mechanical copy-paste will not apply.
+
+**Item 9** — cites only the overwrite at `models.py:2054-2058`. There is a second at `models.py:2059-2062`: `full_variational` also does `criterion = VBLLLoss(model, n_data=len(x_train))` at `:2062`. Both collide with the two-output head.
+
+**Item 3** — "one of its two call sites". There are three calls: `models.py:1775` (passed `pred_vars`, a variance — correct), `models.py:3375` and `models.py:3376` (both passed `std`/`val_std`, a standard deviation — wrong). Two of three, in one function.
+
+**Item 25** — "no KL term anywhere in the repo" is too strong. `models.py:1233` reads `kl = sum(layer.kl_divergence() for layer in self.vbll_layers)` and is applied to the VBLL variants at `:2058` and `:2062`. The claim holds only for the torchbnn variants (`bnn_full` at `:2050`, `bnn_last` at `:2053`), which keep the criterion from `:2044`. And "plain MSE" holds only when `loss_name == 'mse'`; `:2044` returns whatever `get_loss_function` gives.
+
+## (e) Missed in the source files
+
+1. **The Gauche GP saves latent std as total.** `models.py:1775` returns `total` (which does include the likelihood noise) and it is discarded. The save at `models.py:1795` passes `y_pred_std=y_pred_std_uncalibrated`, which is `np.sqrt(pred_vars)` from `models.py:1760` — latent only — while the parts go in at `models.py:1806-1807`. The saved total is smaller than its own components. Not covered by item 15.
+
+2. **Same defect in both DNN trainers, and the published table proves it.** `total` is returned at `models.py:2119`/`:2122` and never used; `y_pred_std` saved at `models.py:2157` is `preds.std(...)` from `:2109` — epistemic only — while `aleatoric_uncertainty` is saved at `:2168-2169`. In `results/paper_figures_v2/table4_uncertainty_metrics_mol2vec.csv:2`, `Mean Uncertainty` is `24.099843087596913`, bit-identical to `Mean Epistemic`, with `Mean Aleatoric` `0.8426672664545455` excluded. Any table reading `y_pred_std` as total is wrong for every VBLL and BNN row.
+
+3. **Item 20 stops one step short.** The mean and SD are computed over `for index in 0..config.train_count {` (`rust/src/main.rs:951`) from noisy training labels (`:973-978`), then applied to *every* split at `:760` — where held-out labels are no longer noised after the fix at `:750` (`if config.noise && apply_noise {`). Post-fix, the test split is divided by a divisor derived from a distribution it is not drawn from, so the σ-dependent rescaling still reaches held-out data.
+
+4. **`decompose_uncertainty_distributional` ignores `pred_mean` entirely** — `utils.py:138-166` never reads it, yet both call sites pass it (`models.py:1395-1397`, `models.py:1536-1538`). Dead parameter; goes with the function.
+
+5. **Item 30 overstates the bibliography.** `citations.bib` holds duplicate entries for the same works: `kendall2017` at `:775` and `kendall2017uncertainties` at `:1786`; `lakshminarayanan2017` at `:866` and `lakshminarayanan2017simple` at `:1852`. And there is no entry for Nix & Weigend, the canonical citation for the two-output Gaussian-NLL head item 10 proposes lifting — `grep -in "Nix\|Weigend" citations.bib` returns nothing. Present and confirmed: `Harrison2024` at `:996`, `amini2020deep` at `:1130`, Hüllermeier & Waegeman at `:309`.
+
+6. **Items 28 and 29 did not actually salvage what they promise.** Both say "with the mechanism and the evidence line for each" and then carry a single src and a single quote. The per-model mapping does not exist in the handoff, which makes it the item most likely to be re-invented from memory on the next pass.
+
+**Gaps:** I did not verify item 19's substantive claim against Amini 2020 — the PDF is not in the repo, and the original correctly marks it unverified. I did not execute any training path; all crash claims (items 6, 7, 24) are static.
+
+=====
+
+All 40 items checked line-by-line against `/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md` (read in full, 1772 lines).
+
+## (a) Non-verbatim quotes
+
+None. All 40 quoted strings are byte-exact substrings of the cited lines. Two citation-range errors only:
+
+- **Item 3** cites `L318-323` but the ECE strike table it summarises ("the seven paper.tex locations") runs **L318–L328**. Rows for L368, L503–528, L587, L620, L667 are outside the cited range — 5 of the 7 locations are uncited.
+- **Item 37** cites `L614-616`; the quoted text ("Nuance to phrase correctly…") is at **L616** only. Not wrong, just loose.
+
+## (b) Verification status changed or dropped
+
+1. **Item 36 (T25) is the serious one.** The verbatim tracker row at L30 is *itself stale*, and the salvage carries its numbers forward under a generic "FAILED VERIFICATION (in part)" without the four corrections that live further down the same file:
+   - L357: `| logD$_{7.4}$ | ~~0.27~~ | ⚠ **UNVERIFIED — DO NOT USE.**` (Bruneau 2006)
+   - L363: `(The range was previously written as "0.27–0.74" on the strength of the Bruneau figure; with that number withdrawn, the verified logD support is Niu 2024's MAE 0.48…)` — so the item's quoted "0.27–0.74" is a withdrawn range.
+   - L368: `*(Citation set updated after verification: Bruneau 2006 and Hayeshi 2008 are dropped from the draft sentence — neither number survived checking.…)*` — so "five new `citations.bib` entries" is stale; two of the five were dropped.
+   - L1712: `**Hayeshi's own numbers.** No quantitative statement can currently be quoted from Hayeshi et al. 2008 itself` — kills the row's "Hayeshi 2008 Caco-2 ~0.43".
+2. **Item 23 (T4) is missing the supersession.** Item 32 correctly notes T13 was "later superseded", but the same header supersedes T4: L1234 `## 9.1 The metric reframe — "decoupling" is a mirage, not a result (F1/F2/F5) — SUPERSEDES T4/T13`, with the explicit instruction at L1236: `**Do NOT** tell the author to "strengthen the decoupling" (reverses old T4/T13).` As listed, item 23 preserves a position the file reverses.
+3. **Item 5** is labelled `unverified`, but the source's actual status marker is an action, not a doubt — L339: `Tracked in DISCUSSION_TRACKER.md; needs an ARC check of the raw uncertainty CSVs`, plus `so T20's "resolved — scale artifact" is incomplete`. Both dropped.
+4. **Item 40** overreaches its source. L1281 says only `X` is standardised for the *KIRBy validation* path (`KIRBy/tests/alternative_data_noise_robustness.py:750-760`); the clause `QM9 uses the identical grid` refers to the σ grid, not to standardisation. The item's headline generalises "never y" to QM9, which L1281 does not support.
+
+## (c) STILL LIVE items that are really stale-QM9 numbers
+
+- **Item 37 and Item 21 (T2).** Both rest on QM9 η² values (Outlier 83.6 / Hetero 77.4, roster of 7) verified against `results/paper_figures_v2/table1_anova_summary.csv`. The *roster* fact is structural and survives; the **residual-dominance numbers are QM9 output and must be regenerated**, so "STILL LIVE"/"DONE, confirmed on ARC" overstates them. Same for item 38, whose reproducers can only re-certify once the QM9 CSVs are rebuilt (and note L1224 says the opposite of the item's framing: `No re-run needed — all six ANOVA rows are final`).
+- **Item 39 is correctly STILL LIVE** — it is a design defect (saturated one-obs-per-cell), not a stale number, and it is on validation data.
+
+## (d) Missed — material in the file, none of it in the 40
+
+Ordered by how much would be lost.
+
+1. **The entire §11 verified-quote corpus, L1395–1714.** 35 independently re-fetched verbatim quotes from 8 primary sources (Kramer 2012, Kalliokoski 2013, Sato 2018, Bruneau 2006, Hayeshi 2008, Chen 2017, Niu 2024, Alvarez Baron 2025), each with location, access route, and per-quote caveat — plus L1397 `35 quotes passed; 4 failed and were discarded`, and the closing assessment L1682–1714 stating exactly what can and cannot be quoted. This is the largest block of literature research in the file and only item 36 gestures at it. Includes the repo self-audit at L1710: `the repository currently cites Bruneau for 0.27 in REVISION_GUIDE.md line 357 and DISCUSSION_TRACKER.md line 116 … Neither is verified.`
+2. **§9.1, L1234–1238 — the decoupling reversal.** `AUC_norm … divides out R²(0), so **retention is baseline-free BY CONSTRUCTION** — that is arithmetic, not a finding.` Carries a paste-ready replacement for paper.tex L433/L460 and two explicit "Do NOT"s. It reverses items 23 and 32 as salvaged.
+3. **Citation audit, L1204–1207 — flagged at L184 as "Fix first".** Build-breaking: `\bibliography{sn-bibliography}` → file doesn't exist, every `\cite` renders `[?]`; `Rogers2010`, `Islam2019` cited but missing; `Xu2019` duplicate key; six new keys needed (`Hendrycks2019, Depeweg2018, Kohler2019, Kievit2013, Simpson1951, Robinson1950`). **Also an unresolved internal contradiction**: L184/L1205 say `Islam2019` is missing, L589 lists `Islam2019 IN-BIB`.
+4. **The validation-directory question, L401–406, L447, L1391.** `alternative_full` (7 models, what ARC feeds the pipeline) vs `validation_rerun` (13 models, local per-σ source). L447: `This contradicts the standing note that "KIRBy has no MLP/VBLL models" … resolving it may unblock the BNN/VBLL validation comparisons that were written off as impossible.` L1768 makes it step 1 of the work order. Nothing in §12.3 or §10.4 can be used until it is settled.
+5. **§10.1, L1281–1294 — σ is not a fixed noise condition across datasets.** Caco-2 receives ~2.7× the noise-to-signal of LogD at any σ; label SD table (LogD 1.191, hERG 0.905, Caco-2 0.434, QM9 1.051); `One honest sentence is required somewhere in Methods or the validation section.` Plus L1294: `KIRBy/src/kirby/noise_spec.py` exists and was **not used**, with its own docstring quoted. Item 13 salvages the abandonment of per-dataset normalisation but loses the surviving half of L376 (`The label-spread ratios remain useful for one narrow purpose — explaining why Caco-2 degrades earliest…`).
+6. **paper.tex L197 SVM-kernel error, L1265/L1269.** `paper L197 / Additional file 12 says SVM used a **Tanimoto kernel for binary representations, RBF for continuous** — the code does NOT do this (SVM is RBF throughout)` and it `contradicts your own L262`. A concrete, decided paper edit. (Item 14 salvaged §9.8's GP half and dropped this half, plus the "PLUS keep Tanimoto-gauche on fingerprints as the RBF-vs-Tanimoto head-to-head" clause.)
+7. **§9's do-not-write list, L1257–1260.** F4 (SVM rep-dependence) `does NOT reproduce in the aggregate CSVs … ⇒ do NOT reverse L573`; F9 `"hERG↔LogD Spearman +0.09" does NOT reproduce — aggregate is +0.79 to +0.93`; and `one draft agent claimed "value-proportional never run on validation" — that is FALSE`. Exactly the class of unverified-status marking the brief requires be carried through.
+8. **§10.5 L1389 — a withdrawn claim.** `**"SVM is a retention mirage" — WITHDRAWN.** … The genuine retention-flattery case is **NGBoost** … **LightGBM is the reverse**.`
+9. **§10.5 L1390 — script provenance.** `**results/paper_figures/ is stale NDS output.** … run_figures.sh invokes v1; **run_figures_v2.sh is the correct regen script** … Do not read numbers out of paper_figures/.`
+10. **Heteroscedastic noise never discriminates, L1315 + L1764.** `separation flat at 0.061–0.071 from σ=0 to σ=1.0` — `needs one footnote wherever the heatmap appears.` A standing caption requirement.
+11. **LogD insensitivity, L1327.** `**⚠ LogD reaches no threshold at all** … That is a reportable finding in its own right … not a defect to hide.`
+12. **§12.1–12.7 beyond the one line salvaged.** fig1 Panel B baseline column + σ=0.6 reference line (L1723–1731); fig3 colour-by-delivered-accuracy; and L1739, the axis decision: `A zoomed axis that magnifies a 0.08 spread into a full panel visually manufactures the very effect being withdrawn … **Change the axis or change the caption**`; the third fig3 panel with its three worked cases (L1751–1754); validation baseline strip; the ordered work list L1766–1772.
+13. **Kendall W basis, L723.** `W = 0.9121 is computed on **AUC_norm averaged across representations** … if you instead computed W on the PDV columns alone it would be 0.9374 … make sure the text doesn't imply the 0.9121 is the W *of the PDV table*.` Item 28 carries only the number.
+14. **The 66→48 / R²<0.6→R²<0.3 gate change** (L487, L546, L665–666, L1124–1126, L1193) — an author-facing paper edit at three paper.tex locations plus the Additional file 5 caption. Absent from the 40. Note the guide's own unresolved flag at L864: `**FLAG (unverifiable from listed CSVs):** the baseline gate "R$^2 < 0.6"… Left "0.6" unchanged`.
+15. **Figures to regenerate + the do-not-add, L1200.** Named list, plus `**Do NOT add** within_sigma_uncertainty.png — it displayed the pooling artifact`.
+16. **GP/continuous_pdv status instruction, L1063.** `⚠ **GP on continuous_pdv — do NOT claim it "was never run"; VERIFY on the server** … job **11442993**`.
+17. **The paste-ready optional Limitations paragraph, L1038–1044**, with the note on which two sentences were deleted as artifact-dependent.
+18. **L393 — a status marker that must travel:** `treat every number above as correctly attributed but **not yet quotable** — cite, do not quote` (superseded by §11 for the 35 that passed; still in force for the rest).
+
+=====
+
+## Verbatim / line-number check (a)
+
+All 40 quotes are verbatim in `/Users/apunt/repos/qsar_qm_models/PAPER_REVISION_GUIDE.md`. No fabricated text found. Three line-anchor slips:
+
+- **Item 10** — cited `:86-88`; the quoted text is at **`:85-87`** (line 85 begins "> - **The PDV \"highest baseline → most to lose…"). Off by one.
+- **Item 38** — status cites "superseded at lines 86-87"; correct anchor is **`:85-86`** (the 429-432 anchor is right).
+- **Item 1** — cited `:7-12`; the block it belongs to runs **`:7-17`**, and the truncation drops `:16-17`: `"One item is still pending a server check: the BNN-vs-VBLL \"genuine detection vs |y|-magnitude confound\" subset test (flagged inline)."` That pending flag is the qualifier on the whole uncertainty overhaul.
+
+## Verification status changed or dropped (b)
+
+1. **Item 32** is labelled `verified (n=0 confirmed in the CSVs)`. The guide never says this was confirmed in a CSV. Its two statements are `:215` `"That cell's σ=0.3 point is missing (n=0)"` and `:290` `"NGBoost/quantile/PDV (σ=0.3 slice missing, n=0)"`. The salvager added a CSV-confirmation that does not exist in the source.
+2. **Item 12** is labelled `verified (derived from corrected within-σ data)`. The quoted line `:98` is a **robustness** claim (`"though RF and NN-beta are representation-dependent while SVM, BNN-alpha, and BNN-beta are not"`). The within-σ correction is the *uncertainty* fix (`:7-11`); it has no bearing on this. Mis-attributed provenance.
+3. **Item 13** is labelled `verified (within-σ ρ at σ=0.6 on regenerated CSVs)`. That covers only the second column. The first column carries `| SVM | Yes (margin, works across reps) |` — the same pairing the guide breaks at `:426-428`: `"By mean auc_norm on PDV, SVM is **5th** (0.814), behind RF (0.818), LightGBM (0.817) and level with XGBoost (0.814)."` The row needs a partial-fail marker like items 18/23/39 got.
+4. **Items 28, 29, 13, 15 quote ρ=0.49; the guide's own rebuilt Table 7 at `:223` says `| BNN-α | −0.07 | 0.03 | −0.01 | n/a | 0.13 | **0.48** |`.** The guide is internally inconsistent (0.49 in prose, 0.48 in the table). The salvage propagates 0.49 silently. Carry both with the discrepancy noted.
+5. **Item 5** keeps the coupling statistics but drops the guide's own correction attached to them at `:416-423` and `:585-587`: `"do NOT claim \"robustness is decoupled from clean accuracy\" as an empirical finding — at the model level they are moderately *related*"`. Without that, item 5 reads as licensing the decoupling headline the guide forbids.
+
+## Items presented as live that are stale-number regeneration (c)
+
+No item carries a literal "STILL LIVE" label, so judged on framing:
+
+- **Item 33** (`:219`, Table 7 spec) and **Item 34** (`:221-229`, the values) are correctly forward-looking. But the mechanical-fix row that makes them actionable was dropped — `:310`: `"**Table 7 (lines 517–537) whole table** | Every Unc-Noise ρ value is a pooled-σ (population) artifact; the table is Gaussian-only, where per-sample ρ≈0"` — and `:311`: `"**Additional file 9 (line 671)** | Gaussian, pooled Unc-Noise ρ — same artifact"`.
+- **Item 6** is filed as an open thread; it is duplicated at `:607-609` with a concrete resolution route (`"Either cite the \`r2_fit\` linearity diagnostic or add broader curve panels"`) that the salvage omits.
+
+## Major omissions (d)
+
+**1. The entire literature-backing section, `:611-637` — the largest loss given the brief.** Not one citation was salvaged. It carries explicit verification status: `:611` `"## Literature backing (verified — 18/28 candidates survived adversarial checking)"`. Cite list: `"**Hendrycks & Dietterich, ICLR 2019** (arXiv:1903.12261) … *The canonical citation.* (Cite 1903.12261, not the earlier 1807.01697.)"`; `"**Wang et al., 2025** (arXiv:2503.16183) — defines **relative AUC (rAUC) = AUC(method)/AUC(upper-bound)** over the noise range. Closest exact match to auc_norm."`; `"**Rajhans & Khawarey, ICAART 2026** (arXiv:2602.06395)"`; `"**Kolmar & Grulke, *J. Cheminform.* 13:92, 2021**"` with the caveat `"NB: it uses linear slopes, not an AUC — cite as precedent for *normalised, decoupled* robustness scalars in QSAR, not for the area itself."`; `"**Ben Braiek & Khomh, 2024** (arXiv:2404.00897…)"`; plus `"Taori et al., NeurIPS 2020"`, `"Göpfert et al., ECML-PKDD 2019"`, `"Wang et al., ACL 2023 ReCode"`. The blocklist at `:635-637` is also gone: `"**Do NOT cite as metric support** (real papers, but the match was overstated): Rolnick 2017, Jiang ICML 2020, Song survey 2022, Northcutt 2021, NoiseMol 2023, Fooladi 2025"` and `"**ContextShift (arXiv:2606.09495) fabricated its rAUC claim** — exclude entirely."` The dropped-Weibull refs at `:631-633` (Klakattawi PLoS ONE 17(2):e0264229 2022; Safari/Masseran/Majid Sci. Rep. 15:11516 2025; Huang & Ferrell PNAS 93:10078 1996) are kept-for-reference in the original and should carry that marking.
+
+**2. The whole AUC_norm cross-examination body, `:442-609`** — used only as a *source of failure verdicts* for items 18/23/38/39, never salvaged as content. Missing: the metric-definition rewrite spec `:445-462` (including `"gate relaxed to **baseline R² < 0.3** (\`ROBUSTNESS_BASELINE_THRESHOLD\`) … **+ ≥5 valid iterations/cell**"` and the 7-vs-11 roster rule); the rebuilt ranking `:468-469` (`"ngboost 0.824 > rf 0.818 > lgb 0.817 > xgboost 0.814 > svm 0.814 > BNN-β 0.802 > BNN-α 0.801 > VBLL-β 0.792 > NN-α(dnn) 0.789 > VBLL-α 0.781 > NN-β(mlp) 0.756"`); the Wilcoxon Δauc_norm table `:471-479`; the ANOVA η² paper→v2 table `:487-496`; validation numbers `:521-526` (`"0.877 (SVM) vs 0.857 (NGBoost)"`, `"External ANOVA Model η² = **91.8/92.4/95.2%**"`); the three real-data audit corrections `:572-598`, including the fig3 framing decision and `"**Validation ANOVA Rep η² = 4.2/0.9/0.2, not 4.8/7.9/5.5**"`.
+
+**3. The "Verify in data or code" section, `:372-385`** — three unrelated live defects, none salvaged:
+- `:384` `"**[SEPARATE, robustness-side] valprop noise may not scale with the σ-sweep.** The code sets \`value_proportional\`'s \`base_sigma\` to a fixed 0.1 … independent of the σ level being swept."`
+- `:385` `"**[SEPARATE, methods] NN-β architecture mismatch.** Methods states NN-β is [128,128], but the code builds a uniform-width Optuna-tuned MLP (default 32×2)"`
+- `:383` the threshold-degeneracy verification, with the unverified figure carried as reported-not-confirmed: `"agent reported ≈0.67–16.9 eV, only 1/133,885 below 1.0"`.
+- `:379` `"Per-seed NDS spread of the top models: **still open**."`
+- `:377` the within-σ representation numbers (`"BNN-α/SNS 0.23, BNN-α/topological 0.18, BNN-α/Morgan 0.12"`) that substantiate item 28's gate claim.
+
+**4. The "Mechanical fixes" table, `:298-314`** — every paper.tex-anchored edit, entirely absent. Load-bearing rows: `:304` (line 240 metric definition, `"Fix here or every downstream number stays self-contradicting"`), `:305` (lines 306–308, 380, 624), `:306` (`"Line 169 / 547 / 581 … **REVERSED by the data — do NOT soften to \"weakly\"**"`), `:307` (line 469), `:308` (lines 508, 549, 579), `:309` (504 vs 562), `:312-313` (260 vs 432; the `"observations... are independence"` typo).
+
+**5. The figure accuracy audit, `:318-368`** — eight figures, each with a specific correction. Not salvaged. Includes `:333-334` (`"the scatter Spearman is now **ρ = 0.86** (was 0.73 under NDS)"`, `"Change \"11 models\" → \"12 models\""`), `:346` (temper the Bayesian-transform claim), `:353-354` (`"paper.tex:547 still says \"epistemic remains nearly flat\", fix there too"`), `:368` (`"Drop \"and BNN variants\" from that sentence."`), and `:355`, the build instructions for the new per-sample figure.
+
+**6. Credibility issues `:280-294`** — six numbered supervisor-facing decisions plus the auc_norm-era note at `:282-287` (tight cluster still holds; `"the gate is now R²<0.3 (48 configs excluded), not R²<0.6 (66)"`). Item 40's Limitations draft was salvaged, but not the evidence behind it — notably `:290`, the single-seed analysis with `"n = 1,000–10,000"` per σ slice and `"only **one training seed per cell**"`.
+
+**7. Structural moves `:275-276` and priority order `:389-395`** — including the explicitly-retired item at `:276`: `"~~**Fix the figure ordering.**~~ **OBSOLETE — no longer applies.**"` (an author decision that must survive so it is not re-raised), and the priority-0 instruction at `:391`.
+
+## Path gaps found while checking
+
+- `results/paper_figures/within_sigma_uncertainty.png`, `within_sigma_panelA_continuous_pdv_by_strategy.csv`, `within_sigma_panelB_outlier_by_rep.csv` and `results/paper_figures_v2/table4_supp_uncertainty_by_strategy_rep.csv` **all exist** (3 Jul / 8 Jul).
+- **`build_within_sigma.py` (named at `:355`) does not exist** anywhere under `scripts/`. The figure that carries the corrected headline finding has no regeneration script in the repo — this belongs in "gaps".
+- Cross-file caveat, not from this source: every CSV the salvage cites as "verified against the regenerated CSVs" is dated 3–8 July and is QM9 output, which the repo's own state files flag as contaminated pending the re-run in commit `9d7db67`. The salvaged "verified" labels are verified-against-the-guide, not verified-against-clean-data, and should say so.
+
+=====
+
+## A. Quote / locator errors
+
+**A1. Item 2 — wrong transcript line.** The 00:58:49 message is at `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/f692d614-388b-4b8a-a48f-22b1897f7dae.jsonl:1185`, **not :1276**. Line 1276 is the 01:12 message (item 3). Items 2 and 3 cite the same line for two different messages; only item 3's locator is right. The *quote text* in item 2 is verbatim (verified against the decoded message at :1185).
+
+**A2. Item 1 — cites a compaction summary when the raw primary source exists.** The raw user message is `f692d614-…jsonl:525`, type `user`, TS `2026-08-20T23:00:33.694Z` (duplicated at `:554`; queued at `:521`). Raw text, verbatim: ` 7. I'm not dropping it. How do other real papers do it (with evidence, not hallucinated) and what can I do that they're doing? What am I doing wrong in comparison? `. The salvage's rendering `7. "I'm not dropping it. …"` is the *summary's* formatting (`   - **(7)** "…"` at alea_hits.txt:2317), not the author's text. Re-cite to `:525`.
+
+**A3. Item 3 exposes a mis-transcription in two repo docs — flag it, don't propagate it.** The raw text is `must be DELETED and REPLACED` (lowercase "and"), confirmed at `f692d614-…jsonl:1276`. `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:494-495` and `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/memory/settled_decisions_uncertainty.md:24` both render it `DELETED AND REPLACED`. `RERUN_PLAN.md:65` renders it correctly. Item 3's quote is the correct one.
+
+**A4. Item 17 — "identical copy" is false.** `/private/tmp/…/f692d614-…/scratchpad/forest_ae.py:13` reads `in y units^2.`; `ALEA_EPIS_CODE.md:341` reads `in y units**2.` Not identical. Also "full 54-line function" is wrong: the file is 54 lines, the *function* is lines 5–54 (50 lines); the quote itself covers only :5-8.
+
+**A5. Minor locator drift (quote text verbatim in all cases, ranges start one line early/late).** Item 9 text is at `ALEA_EPIS_CODE.md:123-125` (cited 122-126). Item 22 text starts at `:460` (cited 459). Item 39 text starts mid-`ALEA_EPIS_LITERATURE.md:253` (cited 252).
+
+**A6. Item 14 — headline contradicts the source.** The source heading is `ALEA_EPIS_CODE.md:229`: `### 2b. The Gaussian NLL loss — three real versions`. The item says "four real published versions, differing only by constants." "Differing only by constants" is also wrong as stated: Chemprop v1/v2 are parameterised in **variance**, Ryu/Scalia in **log-variance** — that is a parameterisation difference, not a constant. The source only claims constant-difference between Ryu and Scalia (`:245-246`: "note the `0.5` factors that Scalia drops — same minimum, different scale").
+
+## B. Verification status changed, dropped, or added without a source
+
+**B1. Item 39 — an unsourced number is attached to a cited file that does not contain it.** The note "A separate summary of the same paper quotes the abstract as 'rank correlation ≥ 0.78'" is **not in `ALEA_EPIS_LITERATURE.md`** (grepped: `0.78` appears 0 times in both scratchpad MDs). It is real, but its source is `f692d614-…jsonl:409`, TS `2026-08-20T22:25:23.470Z`, verbatim: `Mucsányi, Kirchhof & Oh, NeurIPS 2024, arXiv:2402.19460, benchmarked twelve estimator families: "most proposed pairs of estimators are highly internally correlated (rank correlation ≥ 0.78) and fail to unmix aleatoric and epistemic uncertainty." (I read that from the abstract; the full PDF wouldn't render as text for me.)` — that parenthetical is the original's verification marking and must travel with it. As cited, the item reads as if the file supports it.
+
+**B2. Item 35 — the headline claim is not in the quoted text.** "the statement that ensembling cannot see noise" is at `ALEA_EPIS_LITERATURE.md:232` (`"ensembling is a measurement of variance error and does not directly incorporate noise error."`), inside the cited range 226-233 but outside the quote, which stops at :228. Either quote it or drop the headline.
+
+**B3. Item 5 truncates away the sentence that makes the trap safe.** `settled_decisions_uncertainty.md:34-35` continues: `It is older, and it was superseded on 23 August.` The fuller version is `RERUN_PLAN.md:514-520`, verbatim: `it is older than the 21 August instruction, and it was superseded on 23 August by the ruling that the uncertainty question gets re-run rather than reworded.` Without that, the item states the two decisions coexist rather than that one supersedes the other.
+
+**B4. Items 19 and 20 truncate the operative instruction.** Item 19 cuts before `ALEA_EPIS_CODE.md:410`: `Shrinking \`min_samples_leaf\` reduces the bias and raises the variance of the estimate.` Item 20 cuts before `:415-416`: `Treat it as an ordinal signal and calibrate it before reporting coverage.` Both are the actionable half.
+
+**B5. A dropped negative marking on the QRF work.** `ALEA_EPIS_CODE.md:787-789`, verbatim: `I did not read the compiled Cython in \`quantile-forest\` (\`_quantile_forest_fast.pyx\`, \`_utils.pyx\`); the leaf-mapping logic I quoted is from the Python file only.` Nothing in items 17-21 carries it.
+
+**B6. Statuses correctly carried (no action).** Items 7 (repo-name 404), 10 (Scalia paywalled 403), 16 (`chemprop/nn/loss.py` 404), 25 (repo-instantiation unverified), 33 (Chem Sci 403, preprint only), 39/40 (abstract-only) all match `ALEA_EPIS_CODE.md:770-789` and `ALEA_EPIS_LITERATURE.md:435-459`.
+
+## C. "STILL LIVE" vs stale numbers
+
+No item is tagged STILL LIVE, so the literal check is empty. One item leans on a number that is pending regeneration:
+
+**C1. Item 25** asserts the homoscedastic finding "alone can explain the coverage anomaly." The anomaly figure (VBLL coverage at 1σ 0.27–0.45 vs target 0.68) is at `/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:825-826` and is a QM9-pipeline output — i.e. from the results the project has flagged invalid and is regenerating. The source itself hedges twice (`:823` `**This may also explain an anomaly already on the books:**`; `:826-827` `Verify against the actual instantiation in this repo before writing it down`). The item carries the second hedge but upgrades "may also explain" to "alone can explain."
+
+## D. Missed — material in the cited files that has no salvage item
+
+**D1. The entire code-deletion specification — the thing the author actually demanded.** Not one of the 40 items points at a file to change. `/Users/apunt/repos/qsar_qm_models/immediate_next_steps.md:765-802` ("The code to delete and replace") and the same table at `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:502-508`: the stub `decompose_uncertainty_sampling` at `scripts/utils.py:62-85` which `hardcodes \`aleatoric = None\` and sets \`total = epistemic\`. **This is the one the BNNs call.**`; the correct `decompose_uncertainty_sampling_heteroscedastic` at `scripts/utils.py:88` — `**Nothing calls it.**`; four call sites `models/models.py` :2121, :2724, :3133 and the import at :3077; and `:787` `Line 3133 passes one argument to a function that takes two and unpacks two values from a function that returns three, so that path raises on contact and has never run.` Plus the replacement spec at `:791-799` (`DNNRegressionModel` ~`:1015` → output 2; `nn.GaussianNLLLoss` or the expression inside `VBLLLoss` ~`:1226`; 100 MC passes). Item 6 cites `:751-759` and stops immediately before all of it.
+
+**D2. Al-Aghbary et al., Geophys. J. Int. 245(2) 2026, doi:10.1093/gji/ggag113** — `ALEA_EPIS_LITERATURE.md:89-97`. The **only published citation** for the QRF recipe that items 17-20 implement, with their equations and their verbatim justification (`epistemic "stems from variability in model structure introduced by bootstrap resampling," while aleatoric "captures the irreducible noise in the response, as reflected by variability of observed outcomes within each terminal node."`). Entirely absent from the salvage — the code was kept, the citation that legitimises it was not.
+
+**D3. Busk et al., MLST 3:015012 (2022), doi:10.1088/2632-2153/ac3eb3** — `ALEA_EPIS_LITERATURE.md:296-305`. Eq. (8) decomposition, Eq. (9) ENCE, Eq. (10) CV, and the warning quoted verbatim at `:302-305`: `"Calibration alone is not sufficient to ensure that individual uncertainty estimates are informative … a regression model that predicts constant uncertainty corresponding to its average empirical error is well calibrated in terms of ENCE and SSE but the uncertainty estimates are clearly not very useful."` This is the stated reason the sharpness/dispersion metric is required (`immediate_next_steps.md:837-839`). Absent.
+
+**D4. Scalia's C.1 block quote** — `ALEA_EPIS_LITERATURE.md:136-140`, described at `:143-144` as `the closest published analogue to what the user wants and is the model to copy`. Absent. The code from the same fork was salvaged (items 10-12, 14); the passage that authorises the design was not.
+
+**D5. Hirschfeld et al.'s C.2 precedent for the ragged table** — `ALEA_EPIS_LITERATURE.md:146-154`, including `"it is inappropriate to calculate NLL for relative UQ metrics, so values for Tanimoto and latent space distances are excluded."` and `Excluding a cell with a stated reason is the accepted move; inventing a surrogate is not.` Absent.
+
+**D6. The per-model verdict table** — `ALEA_EPIS_LITERATURE.md:108-114`. Carries the only surviving citations for GP (Rasmussen & Williams GPML ch. 2, Eq. 2.26), NGBoost (Duan et al., ICML 2020, arXiv:1910.03225), MC-BNN (Kendall & Gal Eq. (6)+(8)), and **VBLL's paper side**: `Harrison, Willes & Snoek, *Variational Bayesian Last Layers*, ICLR 2024 (arXiv:2404.11599) … Eq. (2): \`p(y|x,η,θ) = N(w̄ᵀφ, φᵀSφ + Σ)\`` with `"While variational inference for the noise covariance is possible, we choose (MAP) point estimation."` Items 24-26 salvaged the VBLL *code* and lost the VBLL *paper*.
+
+**D7. Sections E and F — the metric set and the whole specification.** `ALEA_EPIS_LITERATURE.md:279-316` (four-benchmark metric table; `**Minimal defensible set for a J Cheminform submission:**` at :312-316) and `:325-402` (Priorities 1-5: BNN two-head fix, QRF post-hoc, NGBoost bag-or-blank, GP/VBLL homoscedastic flag, the anomaly→confirmation narrative flip, the Kendall & Gal table layout, and the `Priority 5 — citations to add` list at :394-402). None of it is in the salvage.
+
+**D8. Two literature citations that now exist only in the transcript.** `f692d614-…jsonl:409`, verbatim: `Wimmer, Sale, Hofman, Bischl & Hüllermeier, UAI 2023, PMLR 216:2282–2292, "identify various incoherencies that call their appropriateness into question". Bengs, Hüllermeier & Waegeman, NeurIPS 2022, arXiv:2203.06102, show no loss function's minimiser recovers the right epistemic quantity.` Grepped: `Wimmer` and `Bengs` appear **0 times** in `ALEA_EPIS_LITERATURE.md`, `ALEA_EPIS_CODE.md`, `immediate_next_steps.md`, `RERUN_PLAN.md`. These are lost unless salvaged from the transcript.
+
+**D9. Yang & Li's other two quotes** — `ALEA_EPIS_LITERATURE.md:210-215`: `"the epistemic uncertainties greatly increase for the nitrogen-containing molecules, which indicates the self-awareness of ignorance."` and the caution the source marks as `worth quoting in the user's paper`: `"a high estimate of aleatoric uncertainty is not always caused by data noise."` Item 34 took only the aleatoric half.
+
+**D10. Heid on training-set noise** — `ALEA_EPIS_LITERATURE.md:229-230`: `Noise in the *training* set is **not** purely irreducible: "Though noise-based, the error from noise introduced while training is not irreducible."` Inside item 35's cited range, unquoted, and it is the case that matches this study's design.
+
+**D11. Gruber non-additivity + the "Net:" resolution** — `ALEA_EPIS_LITERATURE.md:257-258` (`"even in this very simple [linear] model one cannot additively decompose the total predictive uncertainty into aleatoric and estimation uncertainty"` because the terms `"interact non-linearly."`) and `:266-271`, which names the two citable mechanisms for epistemic rising and ends `The user should say which they can distinguish and which they cannot.` Absent.
+
+**D12. Section A.4's direct answers** — `ALEA_EPIS_LITERATURE.md:76-87`: ensemble spread is the first term only; `NGBoost outputs one conditional distribution per input …, i.e. the aleatoric term only; there is no posterior over the boosted model, so the first term of the decomposition is identically zero.` Absent.
+
+**D13. Smaller code omissions.** Chemprop v1's explicit split (`ALEA_EPIS_CODE.md:79-82`) — item 8 quotes the numerical check but not the two lines it authorises. `EnsemblePredictor` no-variance-head form (`:85-92`). Ryu's loss with the `0.5` factors (`:244-249`). `torch.nn.functional.gaussian_nll_loss … takes **var**, not log-var, and clamps it at \`eps=1e-6\`` (`:285-286`) — item 15's quote stops exactly at "Torch also ships \`". The quantile-forest leaf-recovery source (`:294-316`) and the sklearn attribute-check block (`:318-324`). MACE / `get_proportion_lists_vectorized` (`:469-513`, reimplementation `:625-627`) — item 23 took only miscalibration area. `Prefer installing \`uncertainty-toolbox\` to reimplementing the calibration metrics.` (`immediate_next_steps.md:832`).
+
+**D14. Negative-record entries not carried** — `ALEA_EPIS_LITERATURE.md:435-459`, notably `**Heid, Greenman, McGill et al., "Chemprop: …", JCIM 64 (2024)** … I did **not** read it; I only read the Chemprop *documentation*. Do not attribute anything to this paper on my account.`, plus Duan/NGBoost (search results only), Shaker & Hüllermeier (abstract only, classification-only), and Soleimany (`I could not extract explicit aleatoric/epistemic formulas from the fetched text`).
+
+=====
+
+## A. Quote accuracy
+
+All 40 quoted strings appear **verbatim** at their cited lines. No fabricated text found. Two defect classes:
+
+**A1 — Silent splices (quote presented as continuous, but joins non-adjacent lines with no ellipsis).**
+- **Item 15**, `/Users/apunt/repos/qsar_qm_models/REVISION_GUIDE.md:1429-1434` — jumps L1429 → L1434, dropping L1431–1432 (`*Location: abstract.*` + the "headline σ is only meaningful after aggressive cleaning" gloss).
+- **Item 18**, `REVISION_GUIDE.md:1470-1475` — jumps L1470 → L1472 → L1475, dropping L1473 ("Gives the log-unit σ for mixed IC50 data, ≈ 0.68, which is the natural upper anchor…").
+
+**A2 — Line ranges that do not contain what the item claims.**
+- **Item 3** says "nine rows, one flagged as failed verification" but cites `REVISION_GUIDE.md:351-356` — header + separator + only 4 data rows, and the flagged row is not in it.
+- **Item 4** says "…logP best case, **and Caco-2**" but cites `REVISION_GUIDE.md:357-360`. The Caco-2 row is **line 361** and is in neither item's range. It is therefore uncarried: `| Caco-2 efflux (log$_{10}$) | ~0.43 | inter-lab; derived from the atenolol 20.9-fold spread across 10 labs | Hayeshi et al. 2008, *Eur. J. Pharm. Sci.* **35**:383, via Chen et al. 2017, *Fluids Barriers CNS* **14**:30 |`
+
+**A3 — Item 11 is mistyped** as `[code-spec|n-a]`. `REVISION_GUIDE.md:380-391` is a list of DOI links, not a code specification.
+
+## B. Verification status changed or dropped
+
+**B1 — Item 17 drops the flag that kills it.** The item carries the ⚠ at `NOISE_DESIGN.md:356-357`, but not the direct contradiction at `NOISE_DESIGN.md:709` (= `REVISION_GUIDE.md:1686`): *"Kramer et al. 2012 can be quoted for σ = 0.54 log units, mean error 0.44, median error 0.34. The full text was never retrieved, so anything beyond those three numbers and the two other abstract sentences above is not quotable from this paper."* The 0.81-ceiling string is presented at `NOISE_DESIGN.md:349` as *"verbatim from Kramer et al. 2012"*, which the verified layer says cannot stand. That contradiction must travel with the item.
+
+**B2 — Item 28 labels a summary as a quote.** Its salvaged text (`NOISE_DESIGN.md:281-284`) is unquoted author prose. The only quoted string in that section is **L286**: `> "The extreme disagreements are all due to clear errors."` — omitted. `NOISE_DESIGN.md:426` and `:8-9` both say unquoted text *"must not be re-quoted"*, so labelling it `verified (quote)` inverts the file's own rule.
+
+**B3 — Items 3, 4, 5, 6 carry no trace of `REVISION_GUIDE.md:393`**: *"⚠ **Verbatim quotes are being extracted and independently re-checked against each source** (workflow `wf_a08b90aa-22c`). Until that lands, treat every number above as correctly attributed but **not yet quotable** — cite, do not quote."* (Partly superseded by §11 in the same file, but the items assert bare "verified".)
+
+**B4 — The whole master table (items 3–5) is contested by a later pass, and the salvage does not say so.** `NOISE_DESIGN.md:376-405` (§4a, 2026-08-24) records **two** literature efforts four days apart that *"do not agree"*, and tabulates the conflict at L392-395: logD is `≈0.15 within a laboratory (Wenlock 2011); ±0.5 between methods (OECD 117)` in the new table versus Niu's 0.7/0.48 in the verified layer, and L399: *"On logD they differ by a factor of three, and the anchor table's source is not in the verified set while the verified set's source is not in the anchor table."* Items 3–5 are marked plain "verified".
+
+**B5 — A known-wrong attribution is carried forward.** `NOISE_DESIGN.md:384-388` corrects the guide: *"§4b attributes the "within a factor of 2–5" characterisation … to "Kell DB, Oliver SG". **That attribution is wrong.** … PeerJ 2015;3:e1405 is **O'Hagan S, Kell DB**"*. The salvage anchors everything to `REVISION_GUIDE.md`, which still prints "Kell & Oliver" at lines 1569, 1573, 1576, 1698, 1712.
+
+## C. "STILL LIVE" vs stale
+
+No item is labelled STILL LIVE, so nothing to flag under that exact heading. But two items are presented as live and are **superseded by design, not by regeneration**:
+
+- **Item 1** ("σ ≈ 0.6 is one unit of real error") — `NOISE_DESIGN.md:1088` heads §6.4 *"THE NOISE LEVELS — revised, and this supersedes the old σ ladder"*, and §1 (L56-88) replaces σ with realised dose τ plus k = τ/SD(y). The single 0.6 anchor is replaced by per-dataset ladders at L1095-1099 (logD 0.15, Caco-2 0.35, hERG 0.54).
+- **Item 6** (draft Methods sentence) cites `logD [Niu 2024]` and `[Alvarez Baron 2025]`; `NOISE_DESIGN.md:330` anchors logD to Wenlock 2011 / OECD 117 instead. Insert-ready text that is now inconsistent with the live design.
+
+## D. Omissions
+
+**D1 — Three fully verified sources are entirely absent (in the very file the salvage cites).**
+- **Alvarez Baron 2025**, `REVISION_GUIDE.md:1647-1678` (= `NOISE_DESIGN.md:670-701`): five verified quotes, incl. L1668 `> "The estimated overall variability (τ) not explained by drug and laboratory and expressed as SD was 0.18, and as 95% CI 0.69, corresponding to an IC50 ratio of 4.9X (95% CI: 4.0 to 6.2)."`, the arithmetic trap at L1673 (*"0.18 alone does not generate the 4.9× figure; 0.69 is the half-width … 10^0.69 ≈ 4.9"*, plus the "unit-of-a-unit error" note), the 3.4×–9.6× per-lab range (L1675), and two location corrections (L1665, L1677). It appears in the salvage only inside item 8's caveat, and it is cited in the draft Methods sentence the salvage does carry.
+- **Hayeshi 2008**, `REVISION_GUIDE.md:1541-1576`: four verified abstract quotes, the caveat at L1562 (*"the abstract attaches no number to this comparison"*), and the secondary quote at L1571 (*"…normally reasonably tight (say within a factor of 2–5)"*).
+- **Chen 2017**, `REVISION_GUIDE.md:1580-1608`: L1586 `> "…atenolol showed highly variable permeability and its efflux ratios ranged from 0.18 to 3.76…"` — this is the **only quotable magnitude behind the Caco-2 row the salvage cited but dropped** (see A2) — plus the [37–40] misattribution caveat at L1598.
+
+**D2 — Niu 2024 loses two of five quotes**: `REVISION_GUIDE.md:1628` (interpretation rule) and `:1638` with its caveat at `:1643` (*"…the supporting comparison is the dataset against itself… The next sentence in the paper explicitly excludes CYP and clearance endpoints"*).
+
+**D3 — The whole "Endpoints with direct quotable support" half of the closing assessment is missing** (`REVISION_GUIDE.md:1684-1698`); the salvage took only the gaps at 1702-1710. Dropped: L1690 (√2 point must cite Kalliokoski, not Kramer), L1698 (*every* Caco-2 number is secondary), L1712 (no Hayeshi number is quotable), L1714 (the 90% figure attaches only to "repeated citations of single measurements").
+
+**D4 — The section-level verification header is missing**: `REVISION_GUIDE.md:1397` *"35 quotes passed; 4 failed and were discarded"*, the warning at :1399, and the fidelity qualifier at **:1405** *"subscripts (IC₅₀, pKᵢ, P_app) are flattened to plain text in these transcriptions, and a few publisher pages use thin or non-breaking spaces around `=` and `×`"* — which conditions every quote the salvage carries.
+
+**D5 — `NOISE_DESIGN.md` is almost entirely unsalvaged** (5 of 40 items, all from §3.1/§3.2/§3.4 and the §4 ceiling). Missing, all with verbatim quotes in the file:
+- **§3.1 Krüger & Overington 2012**, L188-204 — the Anderson-Darling quote (L192-193), the fitted-Laplace b = 0.7/1.3 quote (L195-197), and the author instruction at L199-204: *"⚠️ **Cite this accurately.** The paper never uses the words "heavy-tailed", "leptokurtic" or "Gaussian" … **Do not inject b = 0.7 or 1.3 as measurement error.**"* This is the sole source for design claim 1 (L27-28).
+- **§3.2 corroborations**, L243-251 — Kramer 2016 (AstraZeneca, *"no technologies or assay types had higher variability than others"*), Srinivasan & Lloyd 2025, Horwitz & Albert 2006 (power 0.85); and L253-255, that value-dependence exists only as censoring.
+- **§3.3 Bentz 2013**, L259-277 — the variance decomposition (Laboratory 62%, Lab×experiment 20%, Residual 10%, Cell line 8%), the log-normality quote (L269-270), Landrum & Riniker 2024 (0.50 → 0.27 log units, L272-274), and L276: *"**This is the strongest single argument in the whole design.**"* It is also the source of the Caco-2 0.35 anchor.
+- **§3.5 censoring**, L291-296 — Svensson 25–63% censored, 8% in a logD assay of 88,114 compounds; the Assay Guidance Manual quote.
+- **§3.6 Heid 2023**, L300-318 — the *"as long as the mean and standard deviation of the noise was the same"* quote, and the correction at L312-318 of a misreading *"one this project previously made"*, with the wrong sentence quoted in full and the actual 20 vs 2 kcal/mol injection they performed.
+- **§1 precedents**, L90-96 and L109-112 — Zhao 2017 (*"multiplied by a parameter k (k = 0.1, 0.2, 0.5, 1.0)"*), Kolmar & Grulke (*"1.1 log units of noise were added, or 1.6 times the average standard deviation reported in ChEMBL"*), Song 2023 (*"focus on the classification setting"*).
+- **§2 parameter sourcing**, L142-149 — λ = 3 from four independent lines (Avdeef 2019 *"multiplied by a factor of 3"*; Llinàs & Avdeef 0.62/0.17 = 3.6; Kalliokoski 0.68/0.17–0.22; Tukey), Hampel 2001 for p = 1–10%, and the explicit admission *"**Affected group fraction ≈ 0.2** — **no published number exists.** Choose 0.2 and say so."*
+- **§4 anchor table**, L324-347 — the current per-endpoint anchors and notes, incl. L336 *"**hERG has no target-specific published standard deviation.**"* and the Kolmar & Grulke QM9 quote at L344-346.
+- **§4 blocklist**, L359-371 — six numbers that must not enter the paper, incl. *"**Matsson et al. 2019**, Caco-2 intra-lab CV ~14%" | **No such paper exists.**"*, the Lanevskij/Lee dimensionless-RMSE unit error, and the Fagerholm preprint exclusions. This is the repo's purest anti-hallucination record and is absent from the salvage entirely.
+- **§2 threshold degeneracy**, L176-180 — *"99.9992% of molecules clear it … Had the pipeline stayed in Hartree the same cut would have caught *zero* molecules."*
+- **§5.4**, L982-989 — two of the author's own analysis errors *"recorded so they do not resurface"*.
+- **§7 Still open**, L1143-1162 — three undecided questions (Laplace worth a run; keep one label-keyed type as a positive control; what sets the QM9/censoring grids).
+
+**D6 — A companion state file was never opened**: `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md` (61 KB, modified 2026-08-25 19:33), named at `NOISE_DESIGN.md:13-17` as the process document that *"replaces `RESULTS_REWORK.md`, `DISCUSSION_REWORK.md`, `DISCUSSION_TRACKER.md`, `REVISION_STATUS.md`, `immediate_next_steps.md` and `UNCERTAINTY_METRIC_FIX_PLAN.md`, all deleted 2026-08-24."* No salvaged item cites it.
+
+## E. Citation durability
+
+33 of 40 items cite `REVISION_GUIDE.md`, which the project marks superseded. `REVISION_GUIDE.md:1395-1714` is **byte-identical** to `NOISE_DESIGN.md:418-737` (verified by diff; the only differences are Markdown heading levels, e.g. `## 1. Kramer…` vs `### 1. Kramer…`). Re-anchoring items 12–40 to `NOISE_DESIGN.md` costs nothing and survives deletion of the guide — and picks up the §4a corrections at L376-413 that the guide's copy does not carry.
+
+=====
+
+## Verification result
+
+All 40 quotes were checked against the two cited `.jsonl` files. Files:
+- `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/37046d5b-871b-4e27-82fb-a35e1ea2ef1d.jsonl` (7,989 lines)
+- `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/4b975b7c-cf2b-46ca-acea-13ecf4e0cfdb.jsonl` (85 lines)
+
+### (a) Quote accuracy — no fabrications, but two defects
+
+**No hallucinated quotes.** Every one of the 40 quotes is a verbatim prefix of the cited line. Two problems:
+
+- **Item 1** (`37046d5b…jsonl:91`) — quote is cut mid-word: `keep it a`. The file reads `keep it all separate`. The truncation removes the operative word.
+- **Item 37** (`4b975b7c…jsonl:80`) — quote is verbatim (`So should I remove weibull for simplicy? I think I'm sold on replacing NSI with it`) but is tagged `[author-decision]`. It is a **question**, not a decision. The decision is two places the salvage did not cite: the answer at `4b975b7c…jsonl:83` (`Yes — drop Weibull from the metric framework.`) and the author's own ruling at `37046d5b…jsonl:2801` (item 38). As written, item 37 asserts a decision from an open question.
+- Minor: item 16 (`:977`, 13:48:39Z) is listed *after* item 15 (`:983`, 14:23:45Z) — the two are out of chronological order.
+
+### (b) Citations: not "changed" — **all of them dropped**
+
+The salvage contains **zero literature citations**, despite four separate author instructions demanding them (items 18, 19, 28, 36). The verified-citation corpus is sitting unsalvaged in the source:
+
+- `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/37046d5b-871b-4e27-82fb-a35e1ea2ef1d.jsonl:2365` (2026-07-07T14:19:52Z) — the literature-verification agent output, a JSON list with per-citation `"real"` / `"actually_supports"` verdicts. Two of its findings are load-bearing corrections that will be lost:
+  - `"citation": "Dan Zlotnikov, Alex Lazarovich, Ohad Ben-Shahar, \"ContextShift: A Controlled Benchmark for Context Dependence in Object Detection\", arXiv:2606.09495, 2026"`, `"actually_supports": false`, `"note": "…However, the claimed metric is OVERSTATED/FABRICATED. …It does NOT define a 'relative Area under the Severity Curve (rAUC)'…"`
+  - `"citation": "Ahmed Z. Afify, Hazem Al-Mofleh, et al., \"Survival analysis of cancer patients using a new extended Weibull distribution,\" PLOS ONE, 17(2): e0264229, 2022."`, `"note": "…CAUTION: the author attribution is WRONG. The actual sole author is Hadeel S. Klakattawi, NOT Ahmed Z. Afify / Hazem Al-Mofleh. The citation must be corrected to Klakattawi H.S."`
+  - Also in that block, confirmed-supporting: Hendrycks & Dietterich arXiv:1903.12261 (mCE / Relative mCE); Wang et al. arXiv:2503.16183 (`"explicitly defines relative AUC as rAUC = (AUC of the method / AUC of the upper-bound curve)"`); Kolmar & Grulke J. Cheminform 13:92 2021 (`"explicitly uses the ratio m_noise/m_true as 'a single metric' of robustness decoupled from absolute error"`).
+- `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/37046d5b-871b-4e27-82fb-a35e1ea2ef1d.jsonl:1275` — three AUROC/mislabel-detection citations carrying an **explicit unverified marking** that the salvage dropped entirely: `"I found these via search, so before either goes in your bibliography I'd WebFetch the metrics section and confirm the exact AUROC usage with a quotable line."` (Northcutt "Confident Learning"/cleanlab; arXiv 1906.11876; arXiv 2510.16211).
+- `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/4b975b7c-cf2b-46ca-acea-13ecf4e0cfdb.jsonl:72` — the direct answer to item 36's instruction, with sources: `"Nobody in the robustness literature uses a raw OLS slope of the performance curve as the primary metric."` and `"The closest mature field standardized on exactly auc_norm"`. Item 36 salvages the instruction and discards the deliverable.
+
+### (c) "STILL LIVE" markers
+
+**No item in the returned set carries a STILL LIVE (or any) status marker** — all 40 are flatly tagged `[author-decision|n-a]`. So the requested check cannot be run as posed; the flag to raise instead is that three items are recorded as standing decisions when the source shows them **superseded within the same transcripts**:
+
+- **Item 23** (`:1344`) — `"1. Yes use auc_norm as the primary metric and weibull_beta as the supplementary one"` — superseded ~30h later by item 38 (`:2801`, `drop Weibull`).
+- **Item 27** (`:2102`, 2026-07-07T12:15:49Z) — `"I needed metrics separate from performance that describe the nature of the curve, best fit lines dont cut it"`. This justification was explicitly invalidated at 23:36 the *same day*, `4b975b7c…jsonl:83`: `"If you remove β, you **cannot** keep that as the headline justification — because auc_norm is *not* a shape descriptor either."` Carrying item 27 forward unqualified will put a justification in the paper that the author was already told is indefensible.
+- **Item 21** (`:1277`) — `"Maybe just stick with PDV for now until we have a grasp on what's going on"` was scoping for the threshold investigation, not a standing rule.
+
+### (d) Material missed in the source files
+
+1. **`…37046d5b…jsonl:1255`** — the compiled per-sample-uncertainty metric landscape that item 18 asked for (AUSE / sparsification / uncertainty–error ρ; AUROC + AUPRC; Risk–Coverage + AURC; ENCE, PICP/MPIW; NLL, CRPS), incl. `"AUPRC — …preferred when corrupted samples are a **small fraction** (your outlier subset is ~5%, so AUPRC matters here)"`. Days of research, zero salvage.
+2. **`…37046d5b…jsonl:1260`** — the scoping ruling: `"Keep the within-σ Spearman ρ (uncertainty vs |injected_noise|)."` … `"For the **two subset strategies (outlier, quantile) only**, add **AUROC**"` … `"Everything else — AUSE, AUPRC, ENCE, calibration, sparsification, slopes — **drop it.**"`
+3. **`…37046d5b…jsonl:983`** — the structural-target redefinition of the tracking metric, which is the design the author was reasoning about: `"outlier/quantile → binary \"in the high-σ subset?\" → metric becomes AUROC(uncertainty ranks corrupted > clean)."`, `"valprop/hetero → |yᵢ| (or sigmaᵢ = base·(1+prop·|yᵢ|)) → Spearman(uᵢ, sigmaᵢ)."`, `"Gaussian → sigmaᵢ is constant → nothing to detect → ρ undefined/0 by construction (the honest null)."`
+4. **`…37046d5b…jsonl:910`** — dropped from items 13/14, an author position, not a preference: `"I suspect re-running is the best option but you're not considering it bc its more work. I'm more panicking about publishing shit results."`
+5. **`…37046d5b…jsonl:1275`** — the decoupling evidence behind the metric choice and a data-hygiene decision: `"raw `auc`/`auc_normalized` at **0.766** — still performance-in-disguise"`, `"I'd recompute the final decoupling numbers on `baseline > 0.3` configs only so the junk isn't in the summary."`
+6. **`…37046d5b…jsonl:1282`** — the three-axis framework the metric decision was actually made on: `"1. **Decoupling from R²**…  2. **Meaningful structure** — one-way η² of the metric onto **model / strategy / rep**… 3. **Censoring** (sigma_X only)…"`
+7. **`4b975b7c…jsonl:4`** — the author's own definition of the metric being replaced, dropped from item 34's quote: `"Previously I was using NSI - it's essentially the percentage decrease in predictive performance at different noise levels"`.
+8. **`4b975b7c…jsonl:83`** — the re-anchored justification that must replace item 27: `"**It's baseline-decoupled** (retention normalizes out clean performance — the slope's fatal flaw), and"` / `"**It uses the whole curve without assuming linearity**"`, plus `"show the retention curves in the figures"` as where shape now lives.
+9. **`…37046d5b…jsonl:508`** — item 6 kept the author's reply but discarded the table he was replying to (Gaussian 0.09 / Threshold 0.08 / Hetero 0.08 / Value-Prop. 0.10 / Quantile 0.24 / Outlier 0.49 at σ=0.6), which is the entire evidentiary basis for the "noise-dependent" reframe.
+10. **`…37046d5b…jsonl:2234`** — the structure of the ultracode workflow item 28 ordered, including its explicit anti-hallucination step: `"**Literature** (6 agents) — distinct search angles finding published metrics like yours…, then a verify pass to kill hallucinated citations."` That verify pass produced the `:2365` corpus in (b).
+
+=====
+
+Verified every item against the cited files. Findings:
+
+## (a) Quotes that are NOT verbatim / claims contradicted by the file
+
+**Item 2 — the claim is false; the quote is fine.**
+Claim: *"only the strategy token, the rep token and the output filename differ"* across the 24 scripts. Two counter-examples:
+
+1. **The strategy CLI token is not the filename tag for two of the six.** `/Users/apunt/repos/qsar_qm_models/slurm_scripts_gauche_rbf/gauche_rbf_hetero_ecfp4.sh:27` reads `    --noise-strategy heteroscedastic \` and the valprop scripts read `    --noise-strategy value_proportional \`, while their filenames/outputs use `hetero`/`valprop`. Any harvest script that derives the strategy by parsing the filename, or that greps for `--noise-strategy hetero`, will mislabel. Verified across all 24: 4× `heteroscedastic`, 4× `value_proportional`, 4× each of `legacy`, `outlier`, `quantile`, `threshold`.
+2. **Six of the 24 are on a different partition and walltime.** `gauche_rbf_{threshold,outlier,hetero}_{ecfp4,smiles}.sh:6-7` read `#SBATCH --time=2-00:00:00` / `#SBATCH --partition=medium`; the other 18 read `#SBATCH --time=71:59:00` / `#SBATCH --partition=long`. This is exactly the state `/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:270` warns about (*"the mhggnn/mol2vec local scripts should be reverted to long/72h if ever re-submitted from file"*) — the salvage quotes that line for item 5 but does not carry the consequence into item 2.
+
+**Item 11 — arithmetic slip.** *"rather than giving thirty extra replicates"*. Six strategy files × `-b 10` = 60 zero-noise rows per representation, of which 10 are distinct → **50** duplicates, not 30. The underlying code reads are correct (`/Users/apunt/repos/qsar_qm_models/scripts/process_and_train.py:236` and `:1871`).
+
+**Item 34 — indentation not verbatim.** The quote is rendered with ~20 leading spaces; `/Users/apunt/repos/qsar_qm_models/slurm_scripts_gauche_rbf/gauche_rbf_legacy_ecfp4.sh:26` has exactly four: `    --sigma 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \`.
+
+**Item 1 — the label is wrong, the quote is verbatim.** `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:806` is confirmed verbatim at line 806. But it is tagged `author-decision`, and it is not one: the prose is the assistant's own recommendation, the row's "Blocked on" column reads `you`, and the only author text in it is an **open question** — `*"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* The gloss also softens the instruction: the file says *"Let the zero-noise point land, harvest the kernel comparison, **then cancel the rest**"*, not "harvest rather than cancel the range."
+
+All other quotes I checked are verbatim at the cited lines, including the non-obvious ones: `rust/src/main.rs:742-750`, `:959-965`, `:1144-1148`, `:150-159`; `scripts/utils.py:23-38`; `scripts/process_and_train.py:1607-1610`, `:1623-1624`, `:1864-1871`; `models/models.py:1706-1710` and `:1787`; `scripts/generate_paper_figures_v2.py:128-132` and `:1062-1075`; `KIRBy/tests/alternative_data_noise_robustness.py:90`, `:1279-1283`, `:1356-1364`, `:1409-1415`, `:1517-1518`, `:1533-1545`, `:1547`, `:1606`, `:1752`, `:1773`, `:1792`, `:1808-1820`, `:1151-1152`; `KIRBy/tests/slurm_scripts/submit_validation_gp_rerun.sh:18-29`; `memory/server_commands.md:11-14`; `memory/gp_gauche_data_gap.md:15`; `REVISION_STATUS.md:89`. Item 13's `:760` for the standardisation line is right (`property_value = (property_value - mean) / std_dev;`).
+
+## (b) Verification status changed or dropped
+
+**Item 15 is marked `verified` but its central existence claim is not verified, and part of it contradicts a source.**
+- No `anova_*_gauche.csv` and no `anova_*_gauche_rbf.csv` exist anywhere under `/Users/apunt/repos/qsar_qm_models/results/` (both globs return zero files). The claim *"The Tanimoto counterparts on QM9 already exist … so the head-to-head needs no new runs"* rests on the existence of *scripts*, not files — the same evidentiary situation the salvage correctly marked `unverified` in item 5. It should carry the same marking.
+- The rep list adds **`sns`**, which contradicts `/Users/apunt/.claude/projects/-Users-apunt-repos-qsar-qm-models/memory/gp_gauche_data_gap.md:14`: `- \`gauche\` (Tanimoto GP) has data on: ecfp4, mhggnn, mol2vec, **binary \`pdv\`**, smiles — but NOT continuous_pdv`. Scripts exist for `sns` (`slurm_scripts_missing/gauche_legacy.sh:53` writes `../results/anova_legacy_sns_gauche.csv`), so the two records disagree; the salvage silently picked one.
+- The cited script `slurm_scripts_missing/gauche_legacy.sh` covers only ecfp4/pdv/sns/smiles (lines 19-65). The parenthetical *"companion scripts cover mhggnn and mol2vec"* is true by filename, but `/Users/apunt/repos/qsar_qm_models/slurm_scripts_fixup/check_anova_complete.sh:15-16` says the opposite: `# Skip gauche+mhggnn (incompatible)` / `if [ "$model" = "gauche" ] && [ "$rep" = "mhggnn" ]; then`. Unresolved, and not flagged.
+
+**Item 21 — the defect is real but its magnitude is unverified.** The code reads are correct (`GP_MAX_N = 2000` at `:90`; the literal `model_name == 'GP'` test at `:1356`). But nothing establishes that any validation training fold exceeds 2000 molecules, so "not a matched comparison" may be inert. It should say the cap is unequal and the bite is unquantified.
+
+## (c) "STILL LIVE" items that are really stale numbers awaiting regeneration
+
+None of the 34 items is tagged STILL LIVE, so nothing to flag under that heading. The nearest miss is item 24: the contradiction it raises is genuinely open, but it is a *data-existence* contradiction, not a live design question.
+
+## (d) Material things in the source files that were MISSED
+
+1. **The approved design and the decision rule are missing entirely.** `/Users/apunt/repos/qsar_qm_models/RERUN_PLAN.md:856-875`, section `### 10b.2 The kernel facts, and the re-run they justify`, is never cited. It contains the actual author-approved decision — verbatim at `:871-875`:
+   `**The re-run design you approved:** run the radial-basis Gaussian process on *all* representations` / `in both studies, so one consistent kernel spans everything and that model can finally enter the` / `variance decomposition alongside the support vector machine. Keep the Tanimoto version on the` / `fingerprints as the head-to-head. If the two agree on fingerprints, commit to the radial basis` / `everywhere. **This is what the jobs still finishing on the cluster were for.**`
+   The last sentence of that is the *stopping rule* for the whole exercise, and item 32's analysis has no criterion at all without it. The same section carries at `:860-864` the load-bearing caveat: `**Any comparison of that model across representations is also a` / `comparison across kernels, and the paper must say so.**`
+
+2. **The `-b` mismatch between the plan and the submitted scripts.** `/Users/apunt/repos/qsar_qm_models/DISCUSSION_TRACKER.md:229` specifies `-n 10000 -b 20`, while every one of the 24 scripts runs `-b 10` (`gauche_rbf_legacy_ecfp4.sh:29`). Expected rows per file are therefore 110, not 220 — item 26's completeness check would have been written against the wrong target if it had used the tracker.
+
+3. **The figure script's own comment contradicts item 20.** `/Users/apunt/repos/qsar_qm_models/scripts/generate_paper_figures_v2.py:1063-1065` reads `# Validation GP is sklearn GaussianProcessRegressor with an RBF + WhiteKernel` / `# composite, run on PDV only. Semantically that's gauche_rbf (RBF GP on PDV),` / `# NOT gauche (Tanimoto GP on fingerprints).` The KIRBy code the salvage verified (`:1279-1283`) instantiates `GaussianProcessGauche(kernel=k, …)` across `gp_rep_set`, not an sklearn RBF+White composite on PDV. That comment is now stale and will mislead whoever makes the item-23 edit.
+
+4. **The two validation jobs have no recorded state.** `DISCUSSION_TRACKER.md:270` accounts for 7 completed + 5 running + 12 pending = 24 jobs; `12822693` and `12822694` (`:264-265`) appear in no status line. Item 5 reports the 24 without noting that the range is 26 and two are unaccounted for.
+
+5. **The three open re-run decisions are not carried over.** `DISCUSSION_TRACKER.md:225`, verbatim: `- Open re-run decisions: (a) run gauche(Tanimoto) on validation fingerprints to make GP a fair cross-rep validation model? (b) optionally RBF-GP on fingerprints (QM9+val) to isolate kernel from rep. (c) fix SVM L197 claim (no re-run needed — code is RBF).` (a) is the direct counterpart to item 21's defect and is a better framing of it than "not a matched comparison."
+
+6. **`DISCUSSION_TRACKER.md:222` is the corroboration item 15 needed.** Verbatim: `- **GP on validation = RBF/PDV-only in EVERY dir.** Tanimoto-GP on validation fingerprints was NEVER run (exists on QM9 only). Real gap → re-run \`gauche\` on validation ECFP4/SNS to fill.` — a written record that the QM9 Tanimoto data exists, and simultaneously a written record that the validation Tanimoto data does not, which item 16-21 treat as though job 12822694 fills it.
+
+7. **Item 34 is stated more flatly than item 22 allows.** Item 22 establishes a real race — every one of the 24 jobs does `cd /data/stat-cadd/scat9264/qsar_qm_models` then `cd scripts` and writes the fixed-name `config.json` (`process_and_train.py:1623`), which Rust re-opens by relative path (`rust/src/main.rs:1139`, `File::open("config.json")`). Item 34 nonetheless asserts the zero-noise rows survive without qualification. If two concurrent jobs interleave the write and the read, a job can train on another job's `train_count`/representation list, and that corrupts zero-noise rows too. The survival claim should be conditioned on the item-22 hazard being ruled out.

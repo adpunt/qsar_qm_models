@@ -1408,7 +1408,8 @@ def sample_network_split(model, x_tensor, num_samples, loss_name):
     return mean_passes.mean(axis=0), aleatoric_var, epistemic_var, total_var
 
 
-def apply_bayesian_transformation_last_layer_variational(model):
+def apply_bayesian_transformation_last_layer_variational(model,
+                                                          heteroscedastic=False):
     """
     Converts the last Linear layer of a PyTorch model to a VBLLLayer
     (Variational Bayesian Last Layer, Harrison 2024) while keeping the rest
@@ -1443,7 +1444,8 @@ def apply_bayesian_transformation_last_layer_variational(model):
     # Create VBLLLayer with same dimensions
     vbll_layer = VBLLLayer(
         in_features=last_linear_module.in_features,
-        out_features=last_linear_module.out_features
+        out_features=last_linear_module.out_features,
+        heteroscedastic=heteroscedastic
     )
 
     # Initialize weight_mu from pretrained weights
@@ -1464,7 +1466,7 @@ def apply_bayesian_transformation_last_layer_variational(model):
 
     return model
 
-def apply_bayesian_transformation_full_variational(model):
+def apply_bayesian_transformation_full_variational(model, heteroscedastic=False):
     """
     Converts ALL Linear layers in a PyTorch model to VBLLLayers.
 
@@ -1472,6 +1474,15 @@ def apply_bayesian_transformation_full_variational(model):
     every nn.Linear gets a variational posterior over its weights, trained with ELBO.
     Only the final (output) VBLLLayer retains the learned observation noise parameter;
     hidden layers contribute epistemic uncertainty only.
+
+    `heteroscedastic` makes that observation noise a function of the INPUT rather
+    than one number for the whole fit, following `HetRegression` in the reference
+    library the project already holds (research_archive/f692d614/
+    vbll_regression.py:277-370). Without it the model's data-noise term is
+    identical for every molecule, so its correlation with per-molecule injected
+    noise is zero however good the model is -- a mechanism, not a result
+    (RERUN_PLAN.md 5.5, 5.5f). Only the OUTPUT layer gets the noise head; the
+    hidden layers carry no observation noise to make heteroscedastic.
 
     Parameters
     ----------
@@ -1495,10 +1506,12 @@ def apply_bayesian_transformation_full_variational(model):
     if not linear_layers:
         raise ValueError("No nn.Linear layers found to replace.")
 
+    last_name = linear_layers[-1][0]
     for name, module in linear_layers:
         vbll_layer = VBLLLayer(
             in_features=module.in_features,
-            out_features=module.out_features
+            out_features=module.out_features,
+            heteroscedastic=(heteroscedastic and name == last_name)
         )
         with torch.no_grad():
             vbll_layer.weight_mu.copy_(module.weight.data)
@@ -2914,8 +2927,15 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         # Use ELBO loss (MSE + KL divergence) for VBLL
         criterion = VBLLLoss(model, n_data=len(x_train))
     elif args.bayesian_transformation == "full_variational":
-        model = apply_bayesian_transformation_full_variational(model)
-        model_name = "bnn_full_variational"
+        # --heteroscedastic-vbll makes the observation noise a function of the
+        # molecule instead of one number for the whole fit. The row name carries
+        # it, because the two models report different KINDS of data-noise term
+        # and putting them under one name would make a per-molecule column and a
+        # broadcast constant indistinguishable in the output (RERUN_PLAN.md 5.5f).
+        _het = bool(getattr(args, 'heteroscedastic_vbll', False))
+        model = apply_bayesian_transformation_full_variational(
+            model, heteroscedastic=_het)
+        model_name = "bnn_full_variational" + ("_hetero" if _het else "")
         criterion = VBLLLoss(model, n_data=len(x_train))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
@@ -3038,7 +3058,9 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
             m = apply_bayesian_transformation_last_layer_variational(m)
             crit = VBLLLoss(m, n_data=n_fit)
         elif args.bayesian_transformation == "full_variational":
-            m = apply_bayesian_transformation_full_variational(m)
+            m = apply_bayesian_transformation_full_variational(
+                m, heteroscedastic=bool(getattr(args, 'heteroscedastic_vbll',
+                                                False)))
             crit = VBLLLoss(m, n_data=n_fit)
         m.to(device)
         return m, crit
@@ -3392,7 +3414,9 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         model = apply_bayesian_transformation_last_layer_variational(model)
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_variational")
     elif args.bayesian_transformation == "full_variational":
-        model = apply_bayesian_transformation_full_variational(model)
+        model = apply_bayesian_transformation_full_variational(
+            model, heteroscedastic=bool(getattr(args, 'heteroscedastic_vbll',
+                                                False)))
         model_name = model_name.replace("flexible_dnn", "flexible_bnn_full_variational")
 
     from loss_functions import get_loss_function
@@ -3643,8 +3667,12 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         model_name = f"{model_type}_bnn_variational"
         criterion = VBLLLoss(model, n_data=len(x_train))
     elif args.bayesian_transformation == "full_variational":
-        model = apply_bayesian_transformation_full_variational(model)
-        model_name = f"{model_type}_bnn_full_variational"
+        # See the DNN trainer for why the row name carries the option.
+        _het = bool(getattr(args, 'heteroscedastic_vbll', False))
+        model = apply_bayesian_transformation_full_variational(
+            model, heteroscedastic=_het)
+        model_name = (f"{model_type}_bnn_full_variational"
+                      + ("_hetero" if _het else ""))
         criterion = VBLLLoss(model, n_data=len(x_train))
     else:
         model_name = model_type
@@ -3761,7 +3789,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         elif args.bayesian_transformation == "variational":
             m = apply_bayesian_transformation_last_layer_variational(m)
         elif args.bayesian_transformation == "full_variational":
-            m = apply_bayesian_transformation_full_variational(m)
+            m = apply_bayesian_transformation_full_variational(
+                m, heteroscedastic=bool(getattr(args, 'heteroscedastic_vbll',
+                                                False)))
         m.to(device)
 
         crit = get_loss_function(loss_name, **loss_kwargs)
