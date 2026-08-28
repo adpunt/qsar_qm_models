@@ -45,22 +45,27 @@ and level 0 is one seventh of the cost.
 |---|---|
 | Models | 11 ANOVA models, plus QRF and both Gaussian processes |
 | Representations | ECFP4, PDV (`continuous_pdv`), MHG-GNN, Avalon, ChemBERTa, Sort & Slice |
-| Noise conditions | 4 at full grid: gaussian, grouped-wider, grouped-shifted, censoring |
+| Noise conditions | **3 in the array**: gaussian, grouped-wider, grouped-shifted. Censoring is the fourth settled condition but runs on about five model-and-representation pairs, so it is generated and submitted separately — §5b |
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**The screen (`--stage 0`): 14 array scripts, 320 tasks**, each 7 training runs — 2,240
-training runs.
-**The main grid (`--stage 1`): the same 320 tasks**, each 63 training runs — 20,160.
-**22,400 in total.**
+**The screen (`--stage 0`): 14 array scripts, 240 tasks** — 1,680 training runs.
+**The main grid (`--stage 1`): the same 240 tasks** at replicates 1–9 — 15,120 training runs.
+**16,800 between them**, plus censoring's 300 (§5b).
 
-**The clean level runs once, under Gaussian, and is copied into the other three.**
+Every figure in this section is printed by the generator. Do not retype one: the numbers
+above are checked against its output by
+`python slurm_scripts_qm9_rerun/test_runbook_matches_generator.py`, which exists because
+this file spent a fortnight describing a run of four conditions and 320 tasks that the
+generator had stopped emitting (RERUN_PLAN.md §13.12 A7).
+
+**The clean level runs once, under Gaussian, and is copied into the other two.**
 At level 0 the pipeline does not add noise at all, and the replicate seed depends only
 on the replicate number, so the clean run is bit-identical whichever condition it is
 labelled with — measured on 400 QM9 molecules, random forest on ECFP4, all four
 conditions returning R² = 0.7579128047581825 and RMSE = 0.5176004014184159 to the last
-digit. Running it four times would spend 11% of the grid recomputing a number already
-on disk.
+digit. Running it once per condition would spend 11% of the grid recomputing a number
+already on disk.
 
 It cannot simply be left out, because `auc_norm` divides each condition's curve by that
 condition's own clean accuracy, so a condition with no clean row produces nothing. After
@@ -98,11 +103,14 @@ base), the pre-VBLL variational BNNs (identical to last-layer — a bug), and th
 flexible-DNN architecture variants. `GLOBAL_MODELS_EXCLUDE` drops all of these
 from **every** figure, so re-running them produces files nothing reads. They
 survive only in the no-exclusions supplementary table. Turning them on adds 8
-scripts and 240 tasks:
+scripts and 144 tasks:
 
 ```bash
-python generate_scripts.py --include-excluded     # 22 scripts, 720 tasks
+python generate_scripts.py --stage 0 --include-excluded   # 22 scripts, 384 tasks
 ```
+
+That is 2,688 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
+from every figure.
 
 **Out permanently:** binary `pdv` (superseded by PDV as continuous descriptors,
 after direct comparison), `morgan` (ρ = 0.995 with ECFP4), one-hot `smiles` and
@@ -260,6 +268,45 @@ tar czf ~/results_preRerun_$(date +%Y%m%d).tar.gz results/
 ls -lh ~/results_preRerun_*.tar.gz
 ```
 
+## 2b. Clear three caches, not one
+
+The standing instruction is that everything is re-run and the cache cleared, and the third
+of these has bitten before.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+
+# 1. The memory-mapped intermediates and any settings file left by a killed task.
+#    A task writes train_<file_no>.mmap and the binary rewrites it in place.
+rm -f train_*.mmap test_*.mmap val_*.mmap config_*.json
+rm -f noise_manifest_*.json noise_provenance_*.csv scaffold_groups_*.json
+
+# 2. The processed QM9 directory. ChemBERTa changed encoder on 2026-08-27 -- 768 wide to
+#    384 -- and the record layout moved with it, so anything cached before that decodes
+#    every field after it at the wrong offset.
+rm -rf data/QM9/processed
+
+# 3. The tuned hyperparameters. THIS IS THE ONE NOBODY EXPECTS.
+ls -l results/master_tuned_hyperparameters.json results/hyperparameter_decisions.json
+```
+
+`load_best_hyperparameters` (`models/models.py`) substitutes tuned hyperparameters whenever
+**both** of those files are present and the decisions file says `USE_TUNED`. The copies on
+the cluster are from February, months before any of this. Leaving them in place means the
+re-run does not use the hyperparameters anyone thinks it uses, and the results rows say
+nothing about it. Move them aside:
+
+```bash
+for f in master_tuned_hyperparameters hyperparameter_decisions; do
+    [ -f results/$f.json ] && mv results/$f.json results/$f.superseded_$(date +%Y%m%d).json
+done
+ls results/ | grep -i tuned          # nothing named exactly master_tuned_hyperparameters.json
+```
+
+Only the two-file pair fires that branch, so renaming either one is enough; renaming both
+leaves less to reason about. The local checkout already carries
+`master_tuned_hyperparameters.superseded_2026-02.json` for the same reason.
+
 ## 3. Account and partition
 
 ```bash
@@ -340,36 +387,70 @@ sacct -j <jobid> --format=JobID,JobName%22,State,Elapsed,MaxRSS
 
 ## 5. Submit
 
-Four conditions x six representations is 24 tasks per model; the Tanimoto Gaussian
-process runs on the two binary fingerprints only, so it is 8.
+Three conditions x six representations is 18 tasks per model, so `--array=0-17`; the
+Tanimoto Gaussian process runs on the two binary fingerprints only, so it is 6 and
+`--array=0-5`. An index past the end exits 2 on the generator's own guard, so a range
+that is too wide mis-submits and one that is too narrow drops cells silently.
 
 ```bash
 # Tier 1 — the ANOVA roster, tree and deterministic models
 for s in rf xgboost lgb svm ngboost dnn mlp; do
-    sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s0_$s.sh
+    sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_$s.sh
 done
 
 # Tier 2 — the Bayesian networks
 for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational; do
-    sbatch --account=$ACCT --partition=$PART --array=0-23%4 qm9_s0_$s.sh
+    sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 
 # Tier 3 — outside the ANOVA: uncertainty and both Gaussian processes
-sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s0_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-23%4 qm9_s0_gauche_rbf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-7%4  qm9_s0_gauche.sh   # fingerprints only
+sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-5%4  qm9_s0_gauche.sh   # fingerprints only
 ```
 
-The main grid is the same 320 tasks at replicates 1–9, appending to the same files, so it
+The main grid is the same 240 tasks at replicates 1–9, appending to the same files, so it
 is submitted the same way once the screen has landed and been checked:
 
 ```bash
 python generate_scripts.py --stage 1
 for s in rf xgboost lgb svm ngboost dnn mlp; do
-    sbatch --account=$ACCT --partition=$PART --array=0-23%5 qm9_s1_$s.sh
+    sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s1_$s.sh
 done
 # ...and the other two tiers as above, with qm9_s1_ in place of qm9_s0_
 ```
+
+## 5b. Censoring — separate, and it must be, twice over
+
+Censoring is the fourth settled condition, and it is **not in the array above**. It runs on
+about five model-and-representation pairs rather than all 80, because the question there is
+how big the effect is and not which model resists it best — 300 training runs instead of
+5,460 (`noise_conditions.json`, RERUN_PLAN.md §13.13). Which five comes out of the screen,
+the same way the deep run's selection does, so this is submitted **after** §5 has landed.
+
+Two things the generator refuses, both found by the close-out audit after they had already
+happened once:
+
+- **It will not generate censoring at full breadth.** Ask for it without `--models` and
+  `--reps` and it names the choice rather than making one.
+- **It will not write censoring into this directory.** Scripts are named by model and pass
+  index only, so `qm9_s0_rf.sh` for censoring would overwrite `qm9_s0_rf.sh` for the main
+  grid — exit 0, no warning, and the files are untracked so git could not restore them.
+  `--out-dir` is required.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
+python generate_scripts.py --stage 0 --conditions censoring \
+    --models <the chosen models> --reps <the chosen representations> \
+    --out-dir ../slurm_scripts_qm9_censoring
+```
+
+It runs 10 replicates numbered 0–9, not 9 numbered 1–9: the screen supplies replicate 0 for
+the other conditions and there is no screen for this one.
+
+Censoring has no clean row of its own — the generator strips level 0 from every condition
+but the reference — so `copy_zero_rows.py` supplies it from the Gaussian run for the same
+pairs. Run it after these land as well.
 
 ## 6. Monitor and resubmit
 
@@ -377,7 +458,7 @@ done
 squeue -u $USER -o "%.12i %.22j %.8T %.10M %.10L %R" | head -40
 sacct -X -S today --format=JobID%18,JobName%24,State,Elapsed,MaxRSS | grep qm9_
 grep -l "exit=[^0]" qm9_*.out            # failed tasks
-sbatch --account=$ACCT --partition=$PART --array=7,19 qm9_dnn.sh   # only those
+sbatch --account=$ACCT --partition=$PART --array=7,15 qm9_s0_dnn.sh   # only those
 ```
 
 Completeness check once things land. It reads the roster out of the generator
@@ -434,13 +515,18 @@ metric and writes to `results/paper_figures/`. The live one is `run_figures_v2.s
 
 ## Cost, and the levers
 
-`--bootstrapping 5` halves everything and still clears every gate in the analysis
-(which needs at least 5). It costs precision on the residual term, which is
-itself a reported result — so it is a real trade, not a free one.
+Halving the replicate count still clears every gate in the analysis (which needs at
+least 5). It costs precision on the residual term, which is itself a reported result —
+so it is a real trade, not a free one. The screen supplies replicate 0, so the main
+grid's four give five in total:
 
 ```bash
-python generate_scripts.py --bootstrapping 5
+python generate_scripts.py --stage 1 --replicates 4
 ```
+
+The generator's flag is `--replicates`. `--bootstrapping` was its old spelling, and
+although `process_and_train.py` still accepts it as an alias, the generator does not have
+it at all and `test_generate_scripts.py` refuses any script that carries it.
 
 **A large free saving that is NOT applied here.** For every noise level and every
 replicate the pipeline re-shuffles QM9, redoes the scaffold split, and recomputes
