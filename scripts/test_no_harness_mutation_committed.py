@@ -113,9 +113,21 @@ def harness_cases():
 
 
 def head_text(path):
-    """The committed version of `path`, or None if HEAD does not have the file."""
-    rel = os.path.relpath(path, ROOT)
-    done = subprocess.run(["git", "-C", ROOT, "show", f"HEAD:{rel}"],
+    """The committed version of `path`, or None if HEAD does not have the file.
+
+    Asked of the file's OWN repository, not this one. The harness mutates
+    KIRBy and NoiseInject as well, and those are separate checkouts -- a
+    `git -C .` here would report them as "not in HEAD" and check nothing,
+    which is the opposite of what this file is for.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
+                         capture_output=True, text=True)
+    if top.returncode != 0:
+        return None
+    repo = top.stdout.strip()
+    rel = os.path.relpath(os.path.abspath(path), repo)
+    done = subprocess.run(["git", "-C", repo, "show", f"HEAD:{rel}"],
                           capture_output=True, text=True)
     return done.stdout if done.returncode == 0 else None
 
