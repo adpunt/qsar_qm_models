@@ -55,8 +55,19 @@ Methods sentence, not a defect. Censoring and outlier are keyed to the label and
 to the draw, so neither is affected.
 
 Both questions come out of one set of jobs. Question B costs nothing extra; the
-only added compute is the out-of-fold folds, and only for the seven models that
-emit a per-molecule uncertainty.
+only added compute is the out-of-fold folds.
+
+**Four models, three representations, and one model narrowed to one
+representation** — measured by the screen of 2026-08-28, `RERUN_PLAN.md` chat N,
+not assumed. The quantile forest, NGBoost and the Gaussian process run on ECFP4,
+PDV and ChemBERTa; VBLL runs on ChemBERTa alone. BNN-Full, MLP-BNN-Full and
+MLP-VBLL-Full are not queued at all: their predicted uncertainty tracks their own
+error at between −0.10 and +0.19 on every representation, which is nothing, and
+they are overconfident everywhere. That is **210 tasks against the 588 the old
+lists would have queued**. The generator holds the lists and the reasons;
+`scripts/test_uncertainty_job_scripts.py` fails if a model appears here that the
+runner cannot cross-fit, or if a per-model narrowing tries to ADD a
+representation the run never checked.
 
 ### The confound in question B, and the control for it
 
