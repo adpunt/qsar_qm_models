@@ -1973,6 +1973,43 @@ They therefore go in separate columns, and **must not share an axis or a
 significance test**. QM9's per-replicate equivalent is computed in the figure
 script rather than the pipeline, so it waits for that rewrite.
 
+### 2.19 ✅ FIXED 2026-08-28 — the randomized-SMILES field is written the way it is read
+
+Audit entries 47 and 48(a). Nothing separates one molecule from the next in the
+record file. The reader consumes four bytes of length whenever
+`randomized_smiles` is among the representations, and copes with a length of
+zero; the writer emitted those four bytes only when the molecule actually had
+one. One molecule without it and every molecule after it decoded from the wrong
+offset. The writer's condition now mirrors the reader's exactly — the
+configuration, not whether this molecule happens to have one, because writing the
+field when the reader will not read it moves the file the other way.
+
+**Writing that check found a third fault on the same path.** A molecule with no
+randomized SMILES reached the one-hot encoder as `unwrap()` and killed the run
+with no message and no molecule name. It now says which molecule and why. The
+alternative — an all-zero row — would put a molecule with no features into the
+training column under its own name, which is the failure being refused.
+
+Nothing in the study takes either path. The representation is refused by name at
+`process_and_train.py:1434`, and QM9 drops molecules with no randomized SMILES
+before writing. The record stream is closed anyway because it is the one thing
+that cannot survive misalignment, whichever representations run.
+
+`rust/tests/writer_guards.rs` runs the real binary twice: with every randomized
+SMILES present, no record is short; with one missing, the run stops and names the
+molecule. Removing the refusal fails the second.
+
+**Not fixed, and deliberately.** Entry 47's other half: the token vocabulary and
+the maximum length are measured on canonical SMILES and then applied to
+randomized ones, which are longer 61.8% of the time on 4,000 QM9 molecules, so
+those molecules lose their tail tokens. That is only wrong if the representation
+is used, and it cannot be. Building it correctly would be building a
+representation the study refuses. Author's decision, 2026-08-28.
+
+The other half of entry 48 — a record rejected mid-read leaving the stream
+misaligned — was closed earlier: `read_smiles_data` panics rather than returning
+`None` part-way through a record.
+
 ### 2.18 ✅ FIXED 2026-08-28 — `rmse` and `mae` are in the label's own units on both sides
 
 Audit entry 78. Every QM9 label is standardised in the injector
@@ -2094,8 +2131,9 @@ each; `confirmed_35.json` and `refuted_5.json` each carry a
 
 | | count |
 |---|---|
-| real, fixed | 79 |
-| real, still open — yours to decide | 10 |
+| real, fixed | 80 |
+| real, still open — yours to decide | 8 |
+| real, but not worth fixing — decided | 1 |
 | duplicate of another entry | 14 |
 | partly fixed | 4 |
 | refuted | 2 |
@@ -2134,7 +2172,7 @@ first time and **two stayed green**, which is the point of running it:
 | `scripts/test_spec_is_live.py` | changing the spec changes what is built |
 | `scripts/test_generated_job_flags.py` | every flag the generator emits is one the program has |
 | `scripts/test_uncertainty_writer.py`, `test_record_alignment.py` | as before |
-| `rust/tests/` (33 — 28 injector gates, 5 writer guards) | the injector, and the record writer |
+| `rust/tests/` (34 — 28 injector gates, 6 writer guards) | the injector, and the record writer |
 | `scripts/test_noise_arms.py` | both injectors deliver the same amount on the shifted grouped condition, under all three shapes |
 | KIRBy `tests/smoke/smoke_kirby_splits.py` | scaffold key, acyclic groups, the validation carve |
 | KIRBy `tests/smoke/smoke_kirby_target_scaling.py` | what the models are fitted on, and the noise pattern |
@@ -2144,7 +2182,7 @@ first time and **two stayed green**, which is the point of running it:
 | `scripts/check_fixes_fail_when_removed.py` | that each check above fails when its fix is removed |
 | KIRBy `tests/smoke/smoke_kirby_uncertainty.py` (80) | as before |
 
-**Still yours.** Ten entries are real and unfixed because fixing them is a
+**Still yours.** Eight entries are real and unfixed because fixing them is a
 decision, not a repair:
 
 1. ~~Which auc_norm the paper reports~~ — **settled**: one shared grid in
@@ -2164,9 +2202,10 @@ decision, not a repair:
    the label's own units on both sides, with the conversion on every row (§2.18).
 7. **hERG N.** `paper.tex` says 1,482; the cached extract holds 1,415, and so does
    the module docstring. The loader reproduces 1,415 exactly.
-8. The remaining spec literals in models.py (batch size, the MC pass count, the
-   flexible/conformal hidden sizes), the retired-scheme methods figure, and the
-   latent `randomized_smiles` routes — all listed in `verdicts.json`.
+8. The remaining spec literals in models.py (the flexible/conformal hidden
+   sizes) and the retired-scheme methods figure — both listed in `verdicts.json`.
+   The `randomized_smiles` routes are settled: the record alignment is fixed and
+   the vocabulary is left alone (§2.19).
 
 `paper.tex` was not touched.
 

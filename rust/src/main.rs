@@ -2377,14 +2377,40 @@ fn write_data(
                 println!("property_value bytes: {:02X?}", target_bytes);
             }
 
-            // Write randomized_smiles if exists
-            if let Some(randomized) = &smiles_data.randomized_smiles {
-                let bytes = randomized.as_bytes();
+            // Write randomized_smiles. The LENGTH GOES OUT EITHER WAY.
+            //
+            // There is nothing between one molecule and the next in this file, so
+            // a field that is sometimes four bytes and sometimes nothing is not a
+            // missing field -- it moves every molecule after it. The reader
+            // consumes four bytes whenever this representation was asked for
+            // (read_smiles_data), and the Python writer has always emitted a zero
+            // for a molecule that has none (process_and_train.py). This used to
+            // write nothing at all, so one molecule without a randomized SMILES
+            // put the rest of the file out of step, silently.
+            //
+            // No molecule in the study takes this path -- QM9 drops molecules with
+            // no randomized SMILES before writing, and the representation is
+            // refused by name anyway -- so nothing that has been run changes.
+            // The condition MIRRORS the reader's exactly -- the config, not
+            // whether this molecule happens to have one. Writing the field when
+            // the reader will not read it moves the file the other way.
+            if config
+                .molecular_representations
+                .contains(&"randomized_smiles".to_string())
+            {
+                let bytes = smiles_data
+                    .randomized_smiles
+                    .as_ref()
+                    .map(|s| s.as_bytes())
+                    .unwrap_or(&[]);
                 let len_bytes = (bytes.len() as u32).to_le_bytes();
                 writer.write_all(&len_bytes)?;
                 writer.write_all(bytes)?;
                 if log_writes {
-                    println!("randomized_smiles: {}", randomized);
+                    println!(
+                        "randomized_smiles: {}",
+                        smiles_data.randomized_smiles.as_deref().unwrap_or("(none)")
+                    );
                     println!("randomized_smiles_len bytes: {:02X?}", len_bytes);
                     println!("randomized_smiles bytes: {:02X?}", bytes);
                 }
@@ -2533,7 +2559,25 @@ fn write_data(
                     let smiles_string = if smiles_type == "smiles" {
                         &smiles_data.canonical_smiles
                     } else {
-                        smiles_data.randomized_smiles.as_ref().unwrap()
+                        // A molecule with no randomized SMILES cannot be encoded
+                        // against the vocabulary, and an all-zero row would be a
+                        // silent lie in a column a model then trains on. The
+                        // record format allows the field to be empty -- the
+                        // Python writer emits a zero length for it and the reader
+                        // yields nothing -- so this says which molecule and stops,
+                        // rather than unwrapping and panicking with no name in the
+                        // message (RERUN_PLAN.md 2.19).
+                        match smiles_data.randomized_smiles.as_ref() {
+                            Some(s) => s,
+                            None => panic!(
+                                "molecule {:?} has no randomized SMILES, but \
+                                 `randomized_smiles` is among the representations. \
+                                 It cannot be one-hot encoded, and writing an \
+                                 all-zero row would put a molecule with no features \
+                                 into the training column under its own name.",
+                                smiles_data.canonical_smiles
+                            ),
+                        }
                     };
 
                     let smiles_ohe = smiles_to_ohe(

@@ -1310,8 +1310,8 @@
     "other_pipeline": "No equivalent in KIRBy \u2014 the experimental pipeline has no SMILES one-hot representation to compare against.",
     "source": "Feature / representation identity on the QM9 pipeline (rust/src/main.rs + scripts/process_and_train.py), cross-checked against the experimental pipeline (KIRBy) and against paper.tex",
     "orig_index": 47,
-    "verdict": "real-open",
-    "evidence": "Confirmed by reading: the one-hot vocabulary and maximum length are measured on CANONICAL SMILES even when the requested representation is randomized_smiles, and 61.8% of randomized SMILES are longer in tokens than their own canonical form. LATENT: randomized_smiles is in DROPPED_REPS and refused by name, so no run can reach it."
+    "verdict": "wont-fix",
+    "evidence": "Confirmed by reading: the one-hot vocabulary and maximum length are measured on CANONICAL SMILES even when the requested representation is randomized_smiles, and 61.8% of randomized SMILES are longer in tokens than their own canonical form. LATENT: randomized_smiles is in DROPPED_REPS and refused by name, so no run can reach it. | WONT FIX, author's decision 2026-08-28: randomized_smiles is not in the study and is refused by name at process_and_train.py:1434, so the vocabulary and maximum length measured on canonical SMILES can never be applied to a randomized one. Building it correctly would be building a representation the study refuses. The record-alignment half of the same path IS fixed (entry 48, RERUN_PLAN.md 2.19)."
   },
   {
     "title": "Two latent record-misalignment routes in the Rust writer, currently unreachable on QM9",
@@ -1323,8 +1323,8 @@
     "other_pipeline": "Not applicable \u2014 KIRBy holds features in memory as numpy arrays and has no packed record format to misalign.",
     "source": "Feature / representation identity on the QM9 pipeline (rust/src/main.rs + scripts/process_and_train.py), cross-checked against the experimental pipeline (KIRBy) and against paper.tex",
     "orig_index": 48,
-    "verdict": "real-open",
-    "evidence": "Confirmed by reading; both routes need randomized_smiles, which is now refused by name in DROPPED_REPS, so neither is reachable. Route (b) -- a record rejected mid-read -- is the same fault as #64 and IS fixed: read_smiles_data panics rather than returning None mid-record."
+    "verdict": "real-fixed",
+    "evidence": "Confirmed by reading; both routes need randomized_smiles, which is now refused by name in DROPPED_REPS, so neither is reachable. Route (b) -- a record rejected mid-read -- is the same fault as #64 and IS fixed: read_smiles_data panics rather than returning None mid-record. | FIXED 2026-08-28: route (a) closed -- the writer's condition for the randomized-SMILES length prefix now mirrors the reader's exactly (the configuration, not whether this molecule has one). Route (b) was closed earlier: read_smiles_data panics rather than returning None part-way through a record. Writing the check found a third fault on the same path: a molecule with no randomized SMILES reached the one-hot encoder as unwrap() and killed the run with no message; it now names the molecule. Executed: rust/tests/writer_guards.rs, two runs of the real binary; restoring the unwrap fails it. RERUN_PLAN.md 2.19."
   },
   {
     "title": "The Rust writer omits the randomized_smiles field entirely when it is empty, while both readers always consume 4 bytes for it",
