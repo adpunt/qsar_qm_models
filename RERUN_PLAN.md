@@ -4875,6 +4875,59 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7k 📚 WHAT THE LITERATURE ACTUALLY SETS FOR NGBOOST (2026-08-28)
+
+Read from the primary source, not from memory. **Duan, Avati, Ding, Thai, Basu, Ng and Schuler,
+"NGBoost: Natural Gradient Boosting for Probabilistic Prediction", ICML 2020, PMLR v119**, §4:
+
+> "For all experiments, NGBoost was configured with the Normal distribution, decision tree base
+> learner with a maximum depth of three levels, and log scoring rule. The Year MSD dataset, being
+> extremely large relative to the rest, was fit using a learning rate η of 0.1 while the rest of the
+> datasets were fit with a learning rate of 0.01. In general we recommend small learning rates,
+> subject to computational feasibility. For the Year MSD dataset we use a mini-batch size of 10%,
+> for all other datasets we use 100%."
+
+| | the paper | ngboost 0.3.12 default | our spec pins it? |
+|---|---|---|---|
+| distribution | Normal | Normal | ✅ `'Normal'` |
+| scoring rule | log score | `LogScore` | ✅ `'MLE'` — and `MLE is LogScore` is **True**, verified in the installed library, so the two names are one object |
+| learning rate | **0.01** (0.1 only for the largest set) | 0.01 | ✅ `0.01` |
+| natural gradient | yes | `True` | ✅ `True` |
+| base learner depth | **3** | `DecisionTreeRegressor(max_depth=3)` | 🔴 **NOT PINNED** |
+| mini-batch fraction | **1.0** | `minibatch_frac=1.0` | 🔴 **NOT PINNED** |
+| column sample | — | `col_sample=1.0` | 🔴 **NOT PINNED** |
+| number of stages M | **chosen on a validation set** | `n_estimators=500` | ⚠️ we pin 500 |
+
+**Our learning rate is the paper's, exactly.** That is worth knowing before anyone spends cluster
+time searching it: 0.01 is not a guess anyone made, it is the value the method's authors used on
+every dataset but their largest and the one they recommend in general.
+
+**Three values are library defaults we do not pin, and `models/model_defaults.py` rule 2 says pin a
+library default anyway** — "a library upgrade must not be able to move a result silently". All
+three match the paper today, so nothing has moved and no result is wrong; the exposure is an
+ngboost upgrade changing the base learner's depth underneath both pipelines with nothing recording
+it. Pinning them bumps `SPEC_VERSION` and therefore every row's `spec_hash`, so it is the author's
+call, not a silent edit.
+
+**🔴 THE STAGE COUNT IS THE INTERESTING ONE, AND IT IS WHERE THE 60 HOURS GOES.** The paper does not
+search for M. §4: a validation set selects the M giving the best log-likelihood, and the model is
+then retrained on the full training portion at that M. The library does this directly —
+`NGBRegressor.fit(X, Y, X_val=..., Y_val=..., early_stopping_rounds=...)`, with
+`validation_fraction` for the split. **That finds the stage count in ONE fit where a random search
+over `n_estimators` needs one fit per candidate.** NGBoost is the most expensive model on the
+roster by a wide margin — 177 of the first 265 measured minutes, and 91 minutes for its ChemBERTa
+fit alone — so this is not a small saving, and it is not a cut to the search: it is the procedure
+the method's own paper prescribes.
+
+**The cheminformatics guideline paper does not cover NGBoost.** Boldini, Ballabio, Consonni, Todeschini,
+Grisoni and Sieber, "Practical guidelines for the use of gradient boosting for molecular property
+prediction", *J Cheminform* 2023;15:73 — 16 datasets, 94 endpoints, about 1.4 million compounds — is
+XGBoost, LightGBM and CatBoost only. Two things in it still bear on this work: it ranks **learning
+rate first** among gradient-boosting hyperparameters by fANOVA importance, and it reports that
+tuning the seven most important hyperparameters over 30 iterations gave gains that **did not
+generalise to unseen datasets**. That is a caution about how much a small search buys, and an
+argument for the confirmation stages in §5.7i rather than against tuning.
+
 #### 5.7j ✅ SETTLED 2026-08-28 — the sweep runs on the cluster, and NGBoost stays whole
 
 The local timing pass settled the shape of this by measurement rather than argument. One fit of
