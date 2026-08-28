@@ -3176,13 +3176,14 @@ confirmed clean dataset. Make the change in QM9 that is non-negotiable."* All th
   0.760882 label units against training's 0.766289, both anchored on a training spread of 1.258461
   where validation's own is 1.331802. A gate compares the two and stops the run if they diverge.
 - **Held-out molecules stay clean**, and their recorded noise is exactly `0.0`, not a small number.
-- **A SECOND ROUTE to the same answer exists since 2026-08-28**, and which one the runs use is not
-  settled here. The validation molecules meet the same two requirements the cross-fitted training
-  molecules meet — no model fitted them, and the injector recorded each one's draw — so
-  `--score-validation` scores them with the model that already fitted, at one forward pass instead
-  of `--oof-folds` extra fits. The route is built, proven on all eight model paths, and **the choice
-  between the two is decided by the validation-versus-refitting section of §13.** Do not restate its
-  numbers here.
+- **A second route was built and then declined.** `--score-validation` scores the validation
+  molecules with the model that already fitted, at one forward pass instead of `--oof-folds` extra
+  fits. The author settled on 2026-08-28 that **the cross-fit is used on every model and the second
+  route is not used**: five of the nine uncertainty models choose when to stop training by watching
+  the validation set, and splitting the roster so that only the clean models use the cheap route
+  would confound the model with the route that produced its number. The code is kept and switched
+  off. Reasons and the gate are in the validation-versus-refitting section of §13; do not restate
+  them here.
 
 **Every result row now carries its condition's name.** Without it two noise types land in one column
 with nothing to separate them, and every statistic computed over the file pools across a dimension
@@ -5532,7 +5533,7 @@ section).** Seconds, no cluster, no trained model:
 
 ```
 # the validation split through the writer and the scorer, the wiring into every model
-# family that cross-fits, and the QM9 job scripts asking for it -- 23 gates
+# family that cross-fits, and the QM9 job scripts asking for ONE route -- 25 gates
 python scripts/test_validation_split_scoring.py
 ```
 
@@ -8630,26 +8631,73 @@ of the seventeen generated scripts. QM9 test labels are never corrupted, so **th
 nothing that could answer "does the uncertainty find the corrupted labels?"** — the question §3.1c
 says QM9 can now answer. The two statements contradicted each other and nothing connected them.
 
-`slurm_scripts_qm9_rerun/generate_scripts.py` now appends `--score-validation` to every model whose
-flags carry `-u True`, keyed on that string because it is the same test the censoring guard uses to
-decide which models emit an uncertainty — two different answers to "does this model emit one?" is
-how a roster and a guard drift apart. Result: **11 of 17 scripts ask for it, and the 6 that do not
-are exactly the models that emit no per-molecule uncertainty** (rf, xgboost, lgb, svm, dnn, mlp).
+`slurm_scripts_qm9_rerun/generate_scripts.py` now appends **`--oof-folds`** (new `--oof-folds`
+option, default 5, matching the laboratory jobs) to every model whose flags carry `-u True`, keyed
+on that string because it is the same test the censoring guard uses to decide which models emit an
+uncertainty — two different answers to "does this model emit one?" is how a roster and a guard drift
+apart. Result: **11 of 17 scripts are cross-fitted, and the 6 that are not are exactly the models
+that emit no per-molecule uncertainty** (rf, xgboost, lgb, svm, dnn, mlp).
 
-Gated: `scripts/test_validation_split_scoring.py` generates the real scripts and fails if a model
-emits an uncertainty without scoring validation, or asks for it without emitting one.
-`scripts/test_generated_job_flags.py` still passes and now counts 11 distinct flags, so the new one
-reaches the runner's own parser.
+**It is the cross-fit and not the cheaper validation scoring, by the author's decision above.** It
+multiplies those eleven models' fit count by six.
 
-⚠️ **This is the CHEAP floor, not necessarily the whole answer for QM9.** It costs one forward pass
-per model. If the verdict below says the cross-fit is needed, QM9 needs `--oof-folds` on top, which
-is a multiple of the fit count — that part waits.
+Gated by `scripts/test_validation_split_scoring.py`, which generates the real scripts and makes
+three separate claims fail separately: a model that emits an uncertainty and asks for no route at
+all; **a grid where the uncertainty models do not all ask for the SAME route**; and a route that is
+not the leak-free one. The middle one is the gate that stops the mixed-route design being
+reintroduced by accident. `scripts/test_generated_job_flags.py` still passes.
 
 ---
 
 #### Chat O — Do validation molecules replace the out-of-fold refitting?
 
-##### ⏳ STATE 2026-08-28: THE ROUTE IS BUILT AND PROVEN; THE VERDICT IS WAITING ON ONE RUN
+##### ✅ SETTLED 2026-08-28 BY THE AUTHOR — THE CROSS-FIT STAYS, ON EVERY MODEL
+
+**The decision, in the author's words:** *"I don't feel comfortable with leakage. I know it would
+cut compute but that's cheating."* And, on the proposal to use validation only for the models where
+it is clean: *"That is just inconsistent no?"*
+
+**It is settled on principle, not on the measurement, and that is the stronger ground.** The
+comparison run was stopped part-way with the decision made. You do not need to measure whether a
+leak matters if you can decline to have one.
+
+**The two reasons, in order.**
+
+1. **Five of the nine models would be scored on molecules they had already used.** The four neural
+   families choose when to stop training by watching the validation loss. NGBoost, as of
+   2026-08-28, chooses its number of boosting stages the same way (`models/models.py`, the
+   `early_stopping_rounds` branch). Those five have seen those labels through the stopping
+   criterion, so their error there is optimistic. Reporting it as evidence that uncertainty finds
+   corrupted labels would overstate the result.
+
+2. **Applying it only to the clean models breaks the model comparison, which is worse.** The
+   forests and both Gaussian processes genuinely never see a validation label while fitting, so for
+   them there is no leak. But splitting the roster by route means the forests' numbers would come
+   from 500 validation molecules scored by a model fitted on 80% of the data, and the networks'
+   from 4,000 training molecules scored by inner models fitted on about 53%. Different sample size,
+   different molecules, different training-set size for the scoring model. **Any difference between
+   two models would then confound the model with the route that produced its number** — which is
+   exactly the confound closed on 2026-08-27, when model families had different training-set sizes
+   and nothing on the results row recorded which regime produced it (§2.12).
+
+**One route, for every model, and the route with no leakage in it is the cross-fit.**
+
+**What the temperature has to do with it: nothing, and that was checked rather than assumed.** It
+is fitted on validation for several families, but it is a single multiplier applied to every
+molecule equally, so it cannot reorder anything, and every statistic in question is a rank
+correlation read off the uncalibrated column.
+
+##### What was built before the decision, and what happens to it
+
+The validation-scoring route is written, tested and **left in place, switched off**. It is reachable
+only through `--score-validation`, no job script passes it, and the gate below refuses a generated
+grid that mixes the two routes. It is not deleted: it is correct code, it is proven on all eight
+model paths, and if the roster ever holds only models that never touch validation while fitting, it
+becomes legitimate again. `scripts/compare_validation_vs_oof.py` is likewise kept — it applies a
+rule that was fixed before any number came back, and that record is worth more than the disk it
+uses.
+
+##### The state of the build, which is unchanged by the decision
 
 **What has landed, each with a check that fails if it is removed.**
 
@@ -8682,13 +8730,13 @@ cross-fitted row.
 leaves 40 in a validation cell, far below what the rule's interval needs. It proves the plumbing,
 nothing else. The verdict comes only from the 5,000-molecule run, where a validation cell holds 500.
 
-**🔴 Still open, and what each one waits on.**
+**🔴 Still open. The verdict is no longer one of them.**
 
-1. **The verdict.** Waiting on the comparison run: QM9, 5,000 molecules, one replicate, plain
-   Gaussian, levels 0.0 and 1.5, **five representations**, all seven uncertainty models,
-   `--oof-folds 3 --score-validation`. Relaunched 2026-08-28 04:39 from the pinned checkout
-   `/Volumes/seagate/chatO_run` into `/Volumes/seagate/chatO_screen`. Then
-   `python scripts/compare_validation_vs_oof.py --run-dir /Volumes/seagate/chatO_screen`.
+1. ~~**The verdict.**~~ **CLOSED by the author's decision above, 2026-08-28.** The comparison run
+   was stopped at 8 of 70 cells; its partial output in `/Volumes/seagate/chatO_screen` is not an
+   answer to anything and must not be quoted. What it did prove, at full size, is that both routes
+   are written correctly from one run — 500 held-out rows, 4,000 cross-fitted rows and 500
+   validation rows per cell, all reading through the analysis module unchanged.
 
    **ChemBERTa was dropped from this test on 2026-08-28, the author's call, and the reason is
    recorded because it narrows a configuration this section fixed in advance.** It cannot bias the
@@ -8709,8 +8757,12 @@ nothing else. The verdict comes only from the 5,000-molecule run, where a valida
    ⚠️ **The rebuild-per-level cost is not specific to this test and is not fixed.** Every QM9 job
    on the grid pays it for every representation it carries. Worth a look when the QM9 jobs are
    built (chat H).
-2. **The lab plumbing** (step 5 below), only if the verdict says validation is enough. **What it
-   actually is, read from the tree 2026-08-28** — the line numbers in the older table below have
+2. ~~**The lab plumbing**~~ **NOT NEEDED, and this is the compute the decision costs.** Step 5
+   below existed only to make the laboratory pipeline able to score validation molecules. The
+   author's decision means the laboratory jobs keep the cross-fit and nothing there changes: they
+   stay at **176,400 model fits, of which 147,000 are the cross-fit**. The table is kept because it
+   is a correct reading of the tree and because the preflight dependency in its last row is real
+   whatever route is used. **What it actually is, read from the tree 2026-08-28** — the line numbers in the older table below have
    moved, these have not:
 
    | | Where | What it needs |
@@ -8725,15 +8777,20 @@ nothing else. The verdict comes only from the 5,000-molecule run, where a valida
    the laboratory side too. That is the premise, and it holds.
 3. **The job-script edit**, which is the deliverable either way.
 
-**The fit count, before and after, from the generator's own output.**
+**What the decision costs, from the generator's own output.**
 `slurm_scripts_uncertainty_rerun/generate_scripts.py` prints 840 tasks at `oof-folds=5` over all five
 outer folds; the runner sweeps seven levels (`NOISE_LEVELS`) with `N_FOLDS = 5`.
 
-| | model fits |
+| laboratory jobs | model fits |
 |---|---|
-| as generated today | 176,400 |
-| of which are cross-fits | 147,000 — **83.3%, five in six** |
-| with the cross-fit dropped | 29,400 |
+| kept, as the author settled | **176,400** |
+| of which are the cross-fit | 147,000 — **83.3%, five in six** |
+| *(the saving declined, for the reasons above)* | *29,400* |
+
+**QM9 pays a new cost too, and it is a real increase, not a saving.** The QM9 uncertainty models had
+no route at all, so they were cheap and answered nothing. Adding `--oof-folds 5` multiplies those
+eleven models' fit count by six. That is the price of the question being answerable, and it is the
+author's decision to pay it rather than take the cheap route with a leak in it.
 
 ⚠️ **A separate finding, true whatever the verdict.** The QM9 job scripts pass **neither**
 `--oof-folds` nor `--score-validation` — checked in the generator and in all seventeen generated

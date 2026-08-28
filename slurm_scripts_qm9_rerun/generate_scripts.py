@@ -533,6 +533,16 @@ def main():
                     help='Leave out a model the author shortlisted for the deep run before the '
                          'screen was read. Without this the generator refuses, so a shortlisted '
                          'model cannot go missing by accident.')
+    ap.add_argument('--oof-folds', type=int, default=5,
+                    help="Inner folds used to score the TRAINING molecules with a model "
+                         "that never fitted them. Applied to every model that emits a "
+                         "per-molecule uncertainty. This is what makes the QM9 run able "
+                         "to answer whether uncertainty finds the corrupted labels at "
+                         "all: a QM9 test label is never corrupted, so a test row has no "
+                         "corruption to find. It multiplies those models' fit count by "
+                         "(1 + this), which is the price of having no leakage anywhere in "
+                         "the comparison (RERUN_PLAN.md 13, the validation-versus-"
+                         "refitting section). 5 matches the laboratory jobs.")
     ap.add_argument('--throttle', type=int, default=5)
     ap.add_argument('--models', nargs='+', default=None, help='Subset of model labels.')
     ap.add_argument('--reps', nargs='+', default=None, choices=ALL_REPS,
@@ -667,29 +677,41 @@ def main():
     written = []
     grand = 0
     for model, (flags, tier, hours_per_110, note, model_reps) in chosen.items():
-        # EVERY MODEL THAT EMITS A PER-MOLECULE UNCERTAINTY ALSO SCORES THE
-        # VALIDATION MOLECULES. Added 2026-08-28.
+        # EVERY MODEL THAT EMITS A PER-MOLECULE UNCERTAINTY IS CROSS-FITTED.
+        # Settled by the author 2026-08-28.
         #
-        # Without it the QM9 run answers nothing about whether uncertainty finds
-        # the corrupted labels, and that is not a small gap -- it is one of the
-        # questions the study exists to ask. A QM9 TEST label is never corrupted,
-        # by design, so a test row has no corruption for the uncertainty to find.
-        # The scripts passed neither this flag nor --oof-folds, so every
-        # uncertainty row the grid produced was a test row and the question had
-        # no data behind it at all (RERUN_PLAN.md 13, the validation-versus-
-        # refitting section).
+        # WHY THIS IS HERE AT ALL. A QM9 TEST label is never corrupted, by
+        # design. These scripts passed neither this flag nor --score-validation,
+        # so every uncertainty row the grid produced was a test row and the
+        # question "does the uncertainty find the corrupted labels?" had no data
+        # behind it -- while RERUN_PLAN.md 3.1c said QM9 could answer it.
         #
-        # A validation molecule meets the two conditions the question needs: no
-        # model fitted it, and the injector recorded the noise it received. This
-        # costs one forward pass per model -- not a multiple of the fit count,
-        # which is what --oof-folds costs.
+        # WHY CROSS-FITTING AND NOT THE CHEAPER VALIDATION SCORING. Scoring the
+        # validation molecules costs one forward pass instead of --oof-folds
+        # extra fits, and for the forests and the Gaussian processes it is
+        # legitimate: they fit on the training split alone and never see a
+        # validation label. It is NOT legitimate for the four neural families or
+        # for NGBoost, which choose when to stop by watching the validation loss,
+        # so their error there is optimistic.
         #
-        # The flag is keyed on `-u True` because that is the same test the
-        # censoring guard above uses to decide which models emit an uncertainty;
-        # two different answers to "does this model emit one?" is how the roster
-        # and the guard would drift apart.
-        if '-u True' in flags and '--score-validation' not in flags:
-            flags = f'{flags} --score-validation'
+        # Applying it only to the models where it is clean was considered and
+        # REFUSED, because it makes the model comparison meaningless: the
+        # forests' numbers would come from 500 validation molecules scored by a
+        # model fitted on 80% of the data, and the networks' from 4,000 training
+        # molecules scored by inner models fitted on ~53%. Any difference between
+        # two models would then confound the model with the route that produced
+        # its number -- the same confound closed on 2026-08-27, when model
+        # families had different training-set sizes and nothing on the row said
+        # which regime produced it (RERUN_PLAN.md 2.12).
+        #
+        # One route for every model. The route with no leakage in it is this one.
+        #
+        # Keyed on `-u True` because that is the same test the censoring guard
+        # above uses to decide which models emit an uncertainty; two different
+        # answers to "does this model emit one?" is how a roster and a guard
+        # drift apart.
+        if '-u True' in flags and '--oof-folds' not in flags:
+            flags = f'{flags} --oof-folds {args.oof_folds}'
 
         reps = [r for r in model_reps if not args.reps or r in args.reps]
         if not reps:

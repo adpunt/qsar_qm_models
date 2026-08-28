@@ -237,13 +237,26 @@ def main():
         check(f"{label} scores validation as well as cross-fitting",
               cross and val, f"cross-fit={cross} validation={val}")
 
-    # ---- the QM9 job scripts actually ask for it ---------------------------
-    # The code above is unreachable on the cluster unless a job script passes the
-    # flag, and until 2026-08-28 none did. A QM9 TEST label is never corrupted,
-    # so with neither this flag nor --oof-folds the whole grid answered nothing
-    # about whether uncertainty finds the corrupted labels. This generates the
-    # real scripts and reads what they would run.
-    print("\nthe QM9 job scripts ask for it")
+    # ---- the QM9 job scripts ask for ONE route, and it is the clean one -----
+    # Two things are checked here and they are different claims.
+    #
+    # (1) A model that emits an uncertainty must ask for SOMETHING. Until
+    #     2026-08-28 the QM9 scripts asked for neither route, and a QM9 test
+    #     label is never corrupted, so the whole grid answered nothing about
+    #     whether uncertainty finds the corrupted labels.
+    #
+    # (2) Every such model must ask for the SAME thing. Mixing the routes across
+    #     models is what this gate exists to stop: the forests would then be
+    #     scored on 500 validation molecules by a model fitted on 80% of the
+    #     data and the networks on 4,000 training molecules by inner models
+    #     fitted on ~53%, so a difference between two models would confound the
+    #     model with the route. That is the confound closed on 2026-08-27.
+    #
+    # The route is cross-fitting, settled by the author 2026-08-28 on the ground
+    # that the four neural families and NGBoost early-stop on validation, so
+    # scoring them there is optimistic and the comparison has to be leak-free
+    # everywhere rather than in places.
+    print("\nthe QM9 job scripts ask for one route, the same one, for every uncertainty model")
     import subprocess
     gen = os.path.join(REPO, 'slurm_scripts_qm9_rerun', 'generate_scripts.py')
     if not os.path.exists(gen):
@@ -255,28 +268,24 @@ def main():
             if r.returncode != 0:
                 check("the QM9 job generator runs", False, r.stderr[-200:])
             else:
-                scripts = sorted(f for f in os.listdir(gd) if f.endswith('.sh'))
-                asks, skips = [], []
-                for f in scripts:
-                    body = open(os.path.join(gd, f)).read()
-                    (asks if '--score-validation' in body else skips).append(f)
-                    # A model that emits an uncertainty and does NOT ask is the
-                    # failure; a model that emits none and does ask is also wrong,
-                    # because the flag would be refused or write nothing.
-                    if ('-u True' in body) != ('--score-validation' in body):
-                        check(f"{f}: emits uncertainty and scores validation, or neither",
-                              False,
-                              f"uncertainty={'-u True' in body} "
-                              f"score_validation={'--score-validation' in body}")
-                check("every QM9 script that emits an uncertainty scores validation",
-                      len(asks) > 0 and all(
-                          ('-u True' in open(os.path.join(gd, f)).read())
-                          for f in asks),
-                      f"{len(asks)} of {len(scripts)} scripts")
-                check("the models that emit no uncertainty do not ask for it",
-                      all('-u True' not in open(os.path.join(gd, f)).read()
-                          for f in skips),
-                      f"{len(skips)} scripts")
+                bodies = {f: open(os.path.join(gd, f)).read()
+                          for f in sorted(os.listdir(gd)) if f.endswith('.sh')}
+                unc = {f: b for f, b in bodies.items() if '-u True' in b}
+                plain = {f: b for f, b in bodies.items() if '-u True' not in b}
+                check("every model that emits an uncertainty asks for a route",
+                      bool(unc) and all('--oof-folds' in b or '--score-validation' in b
+                                        for b in unc.values()),
+                      f"{len(unc)} scripts")
+                routes = {('cross-fit' if '--oof-folds' in b else 'validation')
+                          for b in unc.values()}
+                check("they all ask for the SAME route -- never a mixture",
+                      len(routes) == 1, f"routes in use: {sorted(routes)}")
+                check("the route is the leak-free one (cross-fitting)",
+                      routes == {'cross-fit'}, f"{sorted(routes)}")
+                check("a model with no per-molecule uncertainty asks for neither",
+                      all('--oof-folds' not in b and '--score-validation' not in b
+                          for b in plain.values()),
+                      f"{len(plain)} scripts")
 
     print()
     if FAILURES:
