@@ -66,6 +66,8 @@ NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditio
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
 FULL_GRID = [c['name'] for c in _SETTLED['stage_1_full_grid']]
 DEPTH_ONLY = [c['name'] for c in _SETTLED['stage_2_depth_only']]
+# Membership test for the deep-run guard below, kept beside the list it derives from.
+DEEP_ONLY_SET = set(DEPTH_ONLY)
 RETIRED = [c['name'] for c in _SETTLED['not_run']]
 
 # Conditions that run on a NAMED SUBSET of model-and-representation pairs rather
@@ -309,12 +311,12 @@ def main():
                          f'The pair-subset conditions ({", ".join(PAIR_SUBSET) or "none"}) are '
                          f'not in the default and need --models and --reps.')
     ap.add_argument('--include-depth-conditions', action='store_true',
-                    help=f'Also run the depth-only conditions ({", ".join(DEPTH_ONLY)}). '
-                         f'Off by default: RERUN_PLAN.md 6.3 puts them in the depth run, so '
-                         f'they enter the experimental datasets only if that is run here too. '
-                         f'Adds {len(DEPTH_ONLY)} of {len(FULL_GRID) + len(DEPTH_ONLY)} '
-                         f'conditions, so roughly {100 * len(DEPTH_ONLY) // len(FULL_GRID)}% '
-                         f'more compute.')
+                    help=f'The DEEP RUN: also run the depth-only conditions '
+                         f'({", ".join(DEPTH_ONLY)}), on a named subset of pairs. Requires '
+                         f'--models and --reps, exactly as the QM9 deep run does -- the author '
+                         f'ruled on 2026-08-28 that the validation datasets get the same noise '
+                         f'as QM9, and QM9 runs these on a dozen pairs rather than the whole '
+                         f'grid. Which pairs comes from the screen (RERUN_PLAN.md 13.17 B).')
     args = ap.parse_args()
 
     if args.conditions:
@@ -332,6 +334,22 @@ def main():
     if unknown:
         ap.error(f"unknown condition(s) {', '.join(unknown)}; "
                  f"{NOISE_CONDITIONS_FILE.name} knows {', '.join(FULL_GRID + DEPTH_ONLY)}")
+
+    # The deep run is a SUBSET run, on both pipelines. Asking for the depth-only
+    # conditions across the whole grid is the accident this guards: on QM9 the deep
+    # run is about a dozen pairs and the generator refuses `--stage 2` without
+    # --models and --reps rather than inventing a default. The validation datasets
+    # now get the same noise as QM9 (author, 2026-08-28), which means the same
+    # conditions on the same shape of run -- not these three across 8 models x 6
+    # representations, which is 3 x the breadth grid's cost and was never the design.
+    deep = [c for c in conditions if c in DEEP_ONLY_SET]
+    if deep and not (args.models and args.reps):
+        ap.error(
+            f"the deep run ({', '.join(deep)}) goes on a named subset of "
+            f"model-and-representation pairs, not the full grid, so it needs --models and "
+            f"--reps -- the same rule the QM9 generator applies to its own deep run. Which "
+            f"pairs comes from the screen; see RERUN_PLAN.md 13.17 B. To run the breadth grid "
+            f"without them, take the default: {' '.join(BREADTH_GRID)}.")
 
     # A pair-subset condition across the whole grid is the accident this guards.
     restricted = [c for c in conditions if c in PAIR_SUBSET]
