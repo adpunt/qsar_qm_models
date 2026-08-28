@@ -129,6 +129,14 @@ CASES = [
   "",
   [sys.executable, f"{QSAR}/scripts/test_tuned_params_reach_the_cluster.py"]),
 
+ # Unpin the base learner's depth, which is where it was until 2026-08-28: the
+ # library's default, not ours, and free to move under an upgrade.
+ ("NGBoost's base learner is the spec's, not the library's",
+  f"{QSAR}/models/model_defaults.py",
+  "        'base_max_depth': 3,",
+  "        'base_max_depth': 7,",
+  [sys.executable, f"{QSAR}/scripts/test_ngboost_stage_selection.py"]),
+
  # Put the base loss back after the Bayesian transformation, which is where
  # NN-beta had it: the ELBO wrapper is discarded and the Bayesian variants train
  # on plain MSE with no KL term.
