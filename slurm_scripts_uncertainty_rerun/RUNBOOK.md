@@ -58,7 +58,7 @@ Both questions come out of one set of jobs. Question B costs nothing extra; the
 only added compute is the out-of-fold folds.
 
 **Four models, three representations, and one model narrowed to one
-representation** — measured by the screen of 2026-08-28, `RERUN_PLAN.md` chat N,
+representation** — the author's decision of 2026-08-28, `RERUN_PLAN.md` chat N,
 not assumed. The quantile forest, NGBoost and the Gaussian process run on ECFP4,
 PDV and ChemBERTa; VBLL runs on ChemBERTa alone. BNN-Full, MLP-BNN-Full and
 MLP-VBLL-Full are not queued at all: their predicted uncertainty tracks their own
@@ -299,18 +299,35 @@ pip install --no-deps -e /data/stat-cadd/scat9264/NoiseInject
 
 ## 3. Regenerate the scripts, then preflight — do not skip either
 
-The `.sh` files in this directory are generated. Regenerate them so they carry the settled
-conditions and the current command line; the checked-in copies are only a record of the last run.
+The `.sh` files in this directory are generated, and since 2026-08-28 they are not in git at
+all — a fresh checkout has none, and whatever is on the cluster was written by whoever ran the
+generator there last. **Delete before regenerating.** The generator overwrites the scripts it
+still emits and leaves the rest, so a model dropped from the roster keeps a runnable script:
+on 2026-08-29 this directory held six scripts for models the decision of 2026-08-28 had dropped,
+and `sbatch unc_gp_hetero.sh` would still have queued one.
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
+rm -f unc_*.sh
 python generate_scripts.py            # add --kirby-dir if stat-ecr is the live checkout
+python test_generated_scripts_match_generator.py
 ```
+
+That last line is the check, and it is worth more than it looks: `preflight.sh` section 4b
+takes the run's condition list off the first `unc_*.sh` it finds, and `merge_results.py` takes
+the expected condition list off them too. A stale script does not only run — it decides what
+the coverage report expects to see.
 
 On a laptop, prove they work before they are copied anywhere. The first runs each generated
 command line through the runner's own argument parser; the second **executes** a generated script
-84 times against a stubbed environment, checking that the happy path reaches the runner and that
-each of six guards stops the job it exists to stop. About a minute for both.
+once per array index against a stubbed environment, checking that the happy path reaches the
+runner and that each of six guards stops the job it exists to stop. About a minute for both.
+
+⚠️ The second one still works out the array length as 3 datasets × **4** representations ×
+conditions, which was right until the decision of 2026-08-28 narrowed the run to three. Against a
+63-task script it walks off the end and the script's own out-of-range refusal fires, so it
+reports failures that are the checker's arithmetic rather than the script's. That count lives in
+`scripts/smoke_uncertainty_job_scripts.sh` and has not been changed here.
 
 ```bash
 python ~/repos/qsar_qm_models/scripts/test_uncertainty_job_scripts.py --kirby-dir ~/repos/KIRBy
@@ -399,13 +416,17 @@ tail -40 logs/unc_ngboost_*_0.out
 ## 6. Submit tier 2
 
 ```bash
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_bnn_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_vbll_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_bnn_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_vbll_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_vbll_full_hetero.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%4 unc_mlp_vbll_full_hetero.sh
+sbatch --account=$ACCT --partition=$PART --array=0-20%4 unc_vbll_full.sh
 ```
+
+> `0-20` is 3 datasets × 1 representation × 7 conditions. VBLL runs on ChemBERTa alone, so its
+> array is a third the length of tier 1's — submitting it as `0-62` would ask for 42 indices
+> the script refuses, and submitting tier 1 as `0-20` would silently drop two datasets.
+>
+> Tier 2 was six scripts until the decision of 2026-08-28. BNN-Full, MLP-BNN-Full and
+> MLP-VBLL-Full are not queued at all, and the two heteroscedastic variants are not on this
+> roster; the generator no longer writes those files, so an `sbatch` naming one of them now
+> fails at the shell rather than queueing something the run does not include.
 
 ## 7. Monitor
 

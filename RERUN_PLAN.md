@@ -959,7 +959,7 @@ should be confirmed there rather than assumed: `scripts/server_audit.sh`.
 
 ### 2.8e-ter 2026-08-27 — the same conflict DEADLOCKS as well as segfaulting, and it hit a real run
 
-Found on the laptop while running the roster screen (`scripts/setting_selection_test.py`), not on the
+Found on the laptop while running the noise-setting test (`scripts/setting_selection_test.py`), not on the
 cluster. **One process fitting the neural models and the boosting models in turn stopped dead**: 40
 minutes of wall clock against 2 minutes 55 of CPU, 0% CPU, no error, no output, no crash. It had
 completed the clean fits — which is where torch first builds its thread pool — and hung on the first
@@ -1963,8 +1963,7 @@ censoring, which sweeps the clipped fraction instead.
 **What it runs now.** ⚠️ **Superseded twice since this was written, and the counts are deliberately
 gone.** The conditions are **all seven**, read from `noise_conditions.json` and never restated — the
 author's decision of 2026-08-28, which replaced the four-plus-`outlier_p10` set recorded here. The
-model and representation lists are **not settled**: they are exactly what the roster screen is
-running to decide (§13.17 B), so no task count is quoted here and none should be. `--include-deep-conditions` runs all three depth-only
+model and representation lists are **settled**: the **author's decision of 2026-08-28** (chat N): quantile forest, NGBoost, Gaussian process and VBLL, on ECFP4, PDV and ChemBERTa, with VBLL on ChemBERTa alone — **210 tasks**, 63 each for the first three and 21 for VBLL. `--include-deep-conditions` runs all three depth-only
 conditions instead of the one (588 tasks). Levels are not passed at all: the runner sweeps one shared grid in
 fractions of each dataset's own clean training label spread, the same seven QM9 runs (the author's
 decision of 2026-08-27, `KIRBy` `2df1a5c`), with censoring on its own clipped-fraction axis.
@@ -3861,8 +3860,7 @@ screen.** What is on disk now is not one set:
 | the laboratory uncertainty runs | **4 models × 3 representations**, VBLL restricted to ChemBERTa — 10 pairs (`slurm_scripts_uncertainty_rerun/generate_scripts.py`) |
 | QM9 | **every uncertainty-emitting model × every representation in the main grid** — 11 models × 6 representations, because QM9 has no uncertainty run of its own and its rows fall out of the grid |
 
-The laboratory cut is defensible on its face — it was made from the roster screen, which is what the
-author said the choice was pending on. **The problem is that it was applied to one side only.** The
+The laboratory cut is defensible on its face — its pairs are the author's decision of 2026-08-28. **The problem is that it was applied to one side only.** The
 two halves cannot be compared pair for pair, and the author's instruction was explicitly that they
 should be.
 
@@ -6043,10 +6041,12 @@ selections** (§13.17 B). Guard: `scripts/test_validation_job_scripts.py` assert
 
 #### The uncertainty runs
 
-⚠️ **No shape is quoted here on purpose.** The conditions are **all seven**, read from the settled
-file. The models and representations are **exactly what the roster screen is running to settle**
-(§13.17 B), so any count written here would be a typed-in default masquerading as a decision — which
-is what the previous version of this section did, at 7 models × 4 representations × 4 conditions.
+The conditions are **all seven**, read from the settled file. The models and representations are
+the **author's decision of 2026-08-28** (chat N): quantile forest, NGBoost, Gaussian process and VBLL, on ECFP4, PDV and ChemBERTa, with VBLL on ChemBERTa alone — **210 tasks**, 63 each for the first three and 21 for VBLL.
+
+An earlier version of this section quoted 7 models × 4 representations × 4 conditions, which was a
+typed-in default rather than a decision, and it was replaced by a refusal to quote any shape while
+the lists were open. Both are superseded: the lists are chosen, so the shape is stated.
 
 What is fixed about them: the out-of-fold pass over the training molecules is the only added cost,
 the five scaffold folds are trained regardless, and there is **one replicate plus a permutation
@@ -7636,10 +7636,11 @@ runs on logD, Caco-2 and hERG. **Inside the uncertainty runs censoring runs on t
 every other condition, on every dataset.** The author's words: *"just run 28 for all uncertainty
 including censor for all datasets."*
 
-⚠️ **The 28 is not a decision and must not be quoted as one.** It is 7 models × 4 representations,
-the two lists currently at the top of the uncertainty generator. **Those lists are exactly what the
-roster screen is running to settle** (chat N), and the author has said they are not comfortable with
-them until it reports. Write "the same pairs as every other condition", never a number.
+✅ **SETTLED — the 28 is gone.** It was 7 models × 4 representations, a typed-in default at the
+top of the uncertainty generator, written down while the lists were open. The lists were then
+chosen by the author on 2026-08-28 (chat N): quantile forest, NGBoost, Gaussian process and VBLL,
+on ECFP4, PDV and ChemBERTa, with VBLL on ChemBERTa alone. **10 model-and-representation pairs**,
+210 tasks.
 
 ##### ✅ CONFIRMED BY THE AUTHOR 2026-08-28 — one selection, used on every dataset
 
@@ -7935,8 +7936,7 @@ squeezed for time**, in which case say in the Methods that censoring carries a s
 #### The uncertainty runs, which are not on this grid at all
 
 Three validation datasets, on all seven settled conditions, one replicate plus a permutation null
-(§13.1 item 2). **The model and representation lists — and therefore the job count — are what the
-roster screen settles (§13.17 B), so no total is written here.**
+(§13.1 item 2). The model and representation lists are the **author's decision of 2026-08-28** (chat N): quantile forest, NGBoost, Gaussian process and VBLL, on ECFP4, PDV and ChemBERTa, with VBLL on ChemBERTa alone — **210 tasks**, 63 each for the first three and 21 for VBLL.
 
 **Why the training-run count is not given here.** Each job trains its model more than once. To ask
 "is the model unsure about the molecules whose labels were corrupted", every training molecule needs
@@ -8029,7 +8029,6 @@ sessions.
 | **Which models and representations go deep** | Take the widest spread of behaviour the screen shows — the most and least noise-tolerant model, plus one from each remaining family — and the representations that span fingerprint, descriptor and learned embedding. NGBoost is locked on by a check that refuses to build without it | the screen lands (§13.1 item 4) |
 | **Which model-and-representation pairs censoring runs on** | Chosen from the screen on interest and clean performance, at least two of them models that report a per-molecule uncertainty. One selection, used on QM9 and all three validation datasets | the screen lands (§13.13) |
 | **Which pairs the deep run uses — on QM9 and on the validation datasets** | The same selection rule, and the same pairs unless there is a reason to differ. Both generators refuse to build a deep run without being told which pairs, so nothing can run ahead of the choice | the screen lands (§13.1 item 4) |
-| **The uncertainty roster — which models and which representations the uncertainty runs use** | The decision rule is written out in full in chat N and was fixed before any number came back. The generator's current lists are a typed-in default, not a measurement; the screen tests every model against **all six** representations, so representations can join and models can leave. **No document may quote a pair count as settled** — say "the same pairs as every other condition" | the roster screen reports |
 | **hERG's reporting level, checked against a rank-flip table** | Its level rests on the assay anchor alone; confirm it against rank movement | the re-run lands (§13.16) |
 
 #### C. Work with an owner, not blocking anything

@@ -114,7 +114,9 @@ from pathlib import Path
 MODELS = {
     # name          : (tier, cpus, mem,  hours, note)
     #
-    # FOUR, not seven, by the screen of 2026-08-28 (RERUN_PLAN.md chat N). Every
+    # FOUR, not seven, by the AUTHOR'S DECISION of 2026-08-28 (RERUN_PLAN.md chat N).
+    # The list is chosen, not computed: quantile forest, NGBoost, Gaussian process
+    # and VBLL, with VBLL on ChemBERTa alone. Every
     # model here was measured on QM9 against all six representations: how well its
     # predicted uncertainty tracks its own error, and how often the truth falls
     # inside the range it states. The three that were dropped -- BNN-Full,
@@ -133,7 +135,8 @@ MODELS = {
     'VBLL-Full':      (2, 8,  '128G', 47, 'the one Bayesian network worth running, and only on ChemBERTa (see MODEL_REPS): 0.25 there against 0.01-0.15 elsewhere. Badly overconfident -- truth inside 1 sd 0.27-0.51 -- which is itself the finding'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
-# THREE, by the screen of 2026-08-28 (RERUN_PLAN.md chat N), measured rather than
+# THREE, by the author's decision of 2026-08-28 (RERUN_PLAN.md chat N): ECFP4,
+# PDV and ChemBERTa. Informed by measurement rather than
 # assumed. Sort & Slice is out because nothing distinguishes any model on it;
 # Avalon is out because it behaves like ECFP4 for the tree models and is the worst
 # of the six for the Bayesian networks; MHG-GNN is out on the author's call -- it
@@ -560,7 +563,7 @@ def main():
     print(f"  {len(DATASETS)} datasets x {len(conditions)} conditions, "
           f"representations per model:")
     for _, _, model, _, model_tasks, model_reps in written:
-        note = '' if model_reps == reps else '   (narrowed by the screen)'
+        note = '' if model_reps == reps else '   (narrowed by the author)'
         print(f"    {model:16s} {len(model_reps)} reps x {len(DATASETS)} x "
               f"{len(conditions)} = {model_tasks:3d} tasks   "
               f"{', '.join(model_reps)}{note}")

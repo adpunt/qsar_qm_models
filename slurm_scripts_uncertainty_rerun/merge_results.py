@@ -39,10 +39,23 @@ from pathlib import Path
 
 import pandas as pd
 
-EXPECTED_MODELS = ['QRF', 'NGBoost', 'GP',
-                   'BNN-Full', 'VBLL-Full', 'MLP-BNN-Full', 'MLP-VBLL-Full']
-EXPECTED_DATASETS = ['logd', 'caco2', 'herg_ki']
-EXPECTED_REPS = ['ecfp4', 'pdv', 'sns', 'mhggnnpretrained']
+# THE LAST RESORT, USED ONLY WHEN THERE ARE NO GENERATED SCRIPTS TO READ.
+#
+# These lists were the coverage grid until 2026-08-29, and by then they named
+# three models the author's decision of 2026-08-28 dropped and two representations the run
+# does not use, while missing the one it added. The report the runbook tells you
+# to read FIRST would then have invented 462 missing cells for jobs nobody
+# submitted and omitted all 84 ChemBERTa cells the run really produces --
+# neither listing them as present nor as missing. The whole point of coverage.csv
+# is to say what did not run, so a grid that cannot name the run is worse than
+# no grid.
+#
+# The generated scripts carry the answer, exactly as they already do for the
+# condition list, and they carry it PER MODEL because the representation set is
+# no longer shared (VBLL runs ChemBERTa alone).
+FALLBACK_MODELS = ['QRF', 'NGBoost', 'GP', 'VBLL-Full']
+FALLBACK_DATASETS = ['logd', 'caco2', 'herg_ki']
+FALLBACK_REPS = ['ecfp4', 'pdv', 'chemberta']
 
 # The dataset name the runner uses internally, which is the key its per-dataset
 # level grid is stored under.
