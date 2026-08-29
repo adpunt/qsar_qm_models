@@ -1259,6 +1259,33 @@ is uniform noise wearing a grouped name. So the grouped conditions cannot be com
 a real assignment — and the check now reports **PARTIAL and exits non-zero** rather than
 saying 15 of 17 conditions agree and calling it a pass.
 
+**6. 📏 MEASURED 2026-08-28, NOT A DEFECT HERE — grouped-shifted under-delivers when scaffold
+families are few and large.** Written down because it was measured and then existed nowhere, so the
+next person to see a shortfall re-derives it from scratch.
+
+The condition pushes whole scaffold families one way by a constant. The amount it delivers depends
+on how many families there are: with few, large families the constant per family is drawn a small
+number of times, so the realised amount scatters and lands low on average. Swept over 4,000 labels:
+
+| families | delivered vs asked |
+|---|---|
+| 1,600 | +0.03% |
+| 800 | −0.10% |
+| 400 | −0.30% |
+| 200 | −0.71% |
+| 100 | −0.62% |
+| 50 | −0.70% |
+
+**No dataset in this study is anywhere near that.** Measured on the real Murcko assignments: LogD
+2.44 molecules per family, Caco-2 2.34, hERG 1.89 — thousands of families each, where the error is
+under 0.3%. QM9 has more scaffolds still.
+
+Note the shape below 200: the bias persists and the injector's own self-test stops catching it,
+because its tolerance band widens with the small effective count faster than the bias grows. So the
+gate is not a guard against this — the guard is that the datasets are nowhere near it. **Do not fix
+before launch.** If a dataset with very few, very large scaffold families is ever added, re-measure
+first.
+
 **5. ✅ SETTLED 2026-08-28 — the wider-groups condition draws its own families for validation
 labels.** The condition chooses whole scaffold families and widens them. The choice used to be made
 on the training assignment and then looked up among the validation molecules — but the validation

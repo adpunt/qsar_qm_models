@@ -39,9 +39,7 @@ Both pipelines READ their defaults from models/model_defaults.py. This script:
      pin shows up here rather than as a changed result six months later.
   3. asserts the environment facts that are not estimator parameters -- that
      ngboost's MLE is still LogScore, that natural_gradient still defaults to
-     True, whether botorch's fitter accepts a plain gpytorch ExactGP, and that
-     no QM9 job script passes --use_best_params (which would silently take the
-     pipeline off the defaults this whole audit is about).
+     True, and whether botorch's fitter accepts a plain gpytorch ExactGP.
   4. reports every package version, because a run whose environment is missing
      a model family produces a subset of the intended experiments -- or, as
      happened on 2026-08-19, nothing at all with only a warning on page one.
@@ -505,21 +503,14 @@ def audit_assumptions():
           'GP results used. Check the gp_fit_method column before comparing new '
           'GP rows against old ones.', fatal=False)
 
-    def _no_tuned_params():
-        hits = []
-        for d in ('slurm_scripts_qm9_rerun', 'slurm_scripts_uncertainty_rerun'):
-            p = REPO / d
-            if not p.exists():
-                continue
-            for f in sorted(p.glob('*.sh')):
-                if 'use_best_params' in f.read_text():
-                    hits.append(f.name)
-        return not hits, (f'{len(hits)} job script(s) pass --use_best_params: '
-                          f'{hits}' if hits else 'no job script passes it')
-    check('no job script passes --use_best_params', _no_tuned_params,
-          'That flag loads hyperparameters from a JSON, which the experimental '
-          'pipeline cannot do at all. This whole audit compares the DEFAULT '
-          'path; a job on the tuned path is not audited by anything.')
+    # REMOVED 2026-08-29 (author's instruction). It searched job scripts for
+    # `use_best_params`; they are written `--use-best-params`, so it matched
+    # nothing, reported OK on every run and always would have. Correcting the
+    # spelling was not the fix either: the QM9 generator now passes that flag
+    # deliberately whenever the two tuned files are present, so a guard
+    # asserting that no job script passes it asserts the opposite of the design.
+    # What keeps the screen on shared defaults is the runbook's step of moving
+    # the tuned files aside, not a check here.
 
     def _gp_after_boosting():
         """Does a Gaussian process still fit once the boosting libraries are loaded?
