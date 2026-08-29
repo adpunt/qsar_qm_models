@@ -143,6 +143,7 @@ if 'torch' in sys.modules and os.environ.get('OMP_NUM_THREADS') != '1':
 
 import argparse
 import contextlib
+import copy
 import csv
 import io
 import json
@@ -252,6 +253,14 @@ SEARCH_SPACES = {
 
 # The Gaussian process is named by kernel on the experimental side and by flag
 # here; these are the two spellings train_gauche_model's kernel_map accepts.
+#
+# heteroscedastic_gp is deliberately absent. Its tuned-file key is 'gauche', so
+# it would take the pinned-kernel branch of sample_setting() below and look
+# itself up here -- but its builder never calls load_best_hyperparameters at all
+# (models.py:8186-8418, zero call sites), so no searched value can reach it and
+# there is nothing for a kernel pin to pin. It is refused by name in run()
+# instead, from models/tuning_rosters.py's READS_NO_TUNED_PARAMS, so the reason
+# is recorded once and read here rather than restated.
 GP_KERNEL_FOR = {'gauche_rbf': 'RBF', 'gauche': 'Tanimoto'}
 
 
@@ -274,6 +283,62 @@ def _import_pipeline():
     import process_and_train as pat
     import models as M
     return pat, M
+
+
+VALIDATION_DATASETS = ('logd', 'caco2', 'herg')
+
+
+def build_validation_split(dataset, sample_size, seed, openadmet_csv=None):
+    """One scaffold split of LogD, Caco-2 or hERG, through their own loaders.
+
+    Hyperparameters are dataset-specific. A setting chosen on 4,000 small
+    molecules with a computed label has no claim on 1,400 drug-like molecules
+    with real assay error, so each of the three is tuned on its own data rather
+    than inheriting QM9's answer.
+
+    The molecules, the representations and the scaffold grouping all come from
+    the experimental pipeline itself. Rebuilding any of them here would tune on
+    features that pipeline does not use.
+    """
+    import importlib.util
+
+    import tuning_rosters as rosters
+    from sklearn.model_selection import GroupShuffleSplit
+
+    spec = importlib.util.spec_from_file_location(
+        'kirby_validation_pipeline', rosters.KIRBY_PIPELINE_PATH)
+    K = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(K)
+
+    if dataset == 'herg':
+        smiles, labels = K.load_chembl_herg()
+    else:
+        df = K.download_openadmet(csv_path=openadmet_csv)
+        if dataset == 'logd':
+            col = next(c for c in df.columns if 'LogD' in c)
+            smiles, labels = K.load_openadmet_endpoint(df, col,
+                                                       log_transform=False)
+        else:
+            col = next(c for c in df.columns if 'Caco' in c and 'Efflux' in c)
+            smiles, labels = K.load_openadmet_endpoint(df, col,
+                                                       log_transform=True)
+
+    smiles = list(smiles)
+    y = np.asarray(labels, dtype=np.float64)
+    if sample_size and sample_size < len(smiles):
+        smiles, y = smiles[:sample_size], y[:sample_size]
+
+    # 80/10/10 by scaffold, the same shape as QM9's split. Grouped, so no
+    # scaffold appears in two parts.
+    groups, _ = K.assign_scaffold_groups(smiles)
+    idx = np.arange(len(smiles))
+    tr, rest = next(GroupShuffleSplit(n_splits=1, test_size=0.2,
+                                      random_state=seed).split(idx, y, groups))
+    sub = next(GroupShuffleSplit(n_splits=1, test_size=0.5,
+                                 random_state=seed).split(
+        rest, y[rest], groups[rest]))
+    val, test = rest[sub[0]], rest[sub[1]]
+    return smiles, y, list(tr), list(val), list(test), K
 
 
 def build_split(pat, sample_size, seed):
@@ -352,6 +417,29 @@ def featurise(pat, rep, smiles, train_idx):
     else:
         raise KeyError(f'no featuriser here for {rep!r}')
     return np.asarray(rows, dtype=np.float32)
+
+
+def validation_features(K, rep, smiles, cache_key):
+    """Representations for a validation dataset, built by that pipeline itself.
+
+    Cached on disk: the transformer and graph encoders are slow, and every model
+    tuned on the same dataset wants the same matrix.
+    """
+    import tuning_rosters as rosters
+
+    os.makedirs(FEATURE_CACHE, exist_ok=True)
+    path = os.path.join(FEATURE_CACHE, f'{cache_key}_{rep}.npy')
+    if os.path.exists(path):
+        return np.load(path)
+    exp_rep = rosters.REP_NAME_MAP[rep]
+    built = K.generate_representations(list(smiles), rep_filter=[exp_rep])
+    if exp_rep not in built:
+        raise RuntimeError(f'{exp_rep} could not be built for this dataset')
+    x = np.asarray(built[exp_rep], dtype=np.float32)
+    tmp = f'{path}.{os.getpid()}.tmp'
+    np.save(tmp, x)
+    os.replace(tmp if tmp.endswith('.npy') else tmp + '.npy', path)
+    return x
 
 
 def features_for(pat, rep, smiles, train_idx, sample_size, seed, cache=True):
@@ -515,13 +603,16 @@ BLOCKED = {
 
 
 def prepared_data(pat, rep, smiles, y, train_idx, val_idx, test_idx,
-                  sample_size, seed):
+                  sample_size, seed, K=None, cache_key=None):
     """All three splits, standardised on the training split alone.
 
     The test split is carried but NOT handed to the search. It is used by
     --confirm and by nothing else.
     """
-    x = features_for(pat, rep, smiles, train_idx, sample_size, seed)
+    if K is not None:
+        x = validation_features(K, rep, smiles, cache_key)
+    else:
+        x = features_for(pat, rep, smiles, train_idx, sample_size, seed)
     x_train, x_val, x_test = x[train_idx], x[val_idx], x[test_idx]
     x_train, x_val, x_test, scaled = standardise(x_train, x_val, x_test, rep)
     return ({'x_train': x_train, 'y_train': y[train_idx].astype(np.float32),
@@ -539,18 +630,88 @@ def run(args_cli):
     # error appears, and it is the same collision as the timing file.
     scratch_csv = os.path.join(OUT_DIR, f'scratch_rows{args_cli.tag}.csv')
 
-    print(f'loading QM9 and taking one scaffold split of '
-          f'{args_cli.sample_size} molecules...', flush=True)
-    smiles, y, train_idx, val_idx, test_idx = build_split(
-        pat, args_cli.sample_size, args_cli.seed)
-    print(f'  train {len(train_idx)}  validation {len(val_idx)}  '
-          f'test {len(test_idx)}  (test is not used by this script)', flush=True)
-
     pairings = rosters.qm9_pairings()
     if args_cli.models:
         pairings = [(m, r) for m, r in pairings if m in args_cli.models]
     if args_cli.reps:
         pairings = [(m, r) for m, r in pairings if r in args_cli.reps]
+
+    # EVERY NAME IS RESOLVED BEFORE ANYTHING IS FITTED.
+    #
+    # to_experimental() indexes two plain dicts with no default. When the job
+    # generator gained heteroscedastic_gp and the two heteroscedastic VBLL
+    # models on 2026-08-28 and the maps were not updated with them, the sweep
+    # fitted every other pairing first -- the three sit last in the generator's
+    # dict -- and then raised KeyError inside the loop. write_best() is called
+    # after the loop, so the run ended with hours of trial rows on disk and
+    # without best_by_pairing.json, which --confirm and --write-master both
+    # refuse to run without. (The rows are recoverable with --merge, but only
+    # if somebody notices.)
+    #
+    # Resolving the names up front costs nothing and turns that into a
+    # one-second failure that names the models. It runs before build_split,
+    # which reads QM9 off disk and takes minutes.
+    unmapped = sorted({m for m, _ in pairings
+                       if m not in rosters.MODEL_NAME_MAP
+                       or m not in rosters.TUNED_KEY})
+    if unmapped:
+        raise SystemExit(
+            f'these models are on the QM9 job generator\'s roster and missing '
+            f'from models/tuning_rosters.py: {unmapped}. Nothing is fitted '
+            f'until they are named there; add them and re-run '
+            f'scripts/test_tuning_rosters.py.')
+
+    # The same up-front resolution for the pinned Gaussian-process kernel, which
+    # is the THIRD table this run indexes by model label with no default. On
+    # 2026-08-28 it was the one still missing an entry after the other two were
+    # filled: the run got past the pairing loop's first two lookups and died at
+    # sample_setting() instead, one line later and just as far into the sweep.
+    # Models refused below never reach it, so they are not required to be here.
+    refused = set(getattr(rosters, 'READS_NO_TUNED_PARAMS', frozenset()))
+    unpinned = sorted({m for m, _ in pairings
+                       if rosters.TUNED_KEY[m] == 'gauche'
+                       and m not in GP_KERNEL_FOR and m not in refused})
+    if unpinned:
+        raise SystemExit(
+            f'these models read the shared \'gauche\' tuned entry and have no '
+            f'pinned kernel in GP_KERNEL_FOR: {unpinned}. Searching them would '
+            f'either raise here or force one kernel on both Gaussian '
+            f'processes; name the kernel, or list them in '
+            f'READS_NO_TUNED_PARAMS if their builder ignores tuned values.')
+
+    # A MODEL THAT CANNOT RECEIVE A SEARCHED VALUE IS NOT SEARCHED.
+    #
+    # models/tuning_rosters.py records which builders contain no call to
+    # load_best_hyperparameters at all. Fitting settings for one of those does
+    # not fail -- which is the danger. Every setting would deliver the same
+    # default model, so the twelve rows would differ only by fitting noise and
+    # one of them would still come out ahead of the 'default' row and read as a
+    # win. Recording the refusal keeps the pairing visible in the trials file
+    # with its reason, which a silent skip would not.
+    blocked = dict(BLOCKED)
+    for label in refused:
+        blocked.setdefault(
+            label,
+            f'{label} builds itself from the shared spec and the command line; '
+            f'its builder in models/models.py contains no call to '
+            f'load_best_hyperparameters, so no searched value can reach it and '
+            f'every setting would refit the same default model.')
+
+    K, cache_key = None, None
+    if args_cli.dataset != 'qm9':
+        print(f'loading {args_cli.dataset} and taking one scaffold split...',
+              flush=True)
+        smiles, y, train_idx, val_idx, test_idx, K = build_validation_split(
+            args_cli.dataset, args_cli.sample_size, args_cli.seed,
+            args_cli.openadmet_csv)
+        cache_key = f'{args_cli.dataset}_seed{args_cli.seed}'
+    else:
+        print(f'loading QM9 and taking one scaffold split of '
+              f'{args_cli.sample_size} molecules...', flush=True)
+        smiles, y, train_idx, val_idx, test_idx = build_split(
+            pat, args_cli.sample_size, args_cli.seed)
+    print(f'  train {len(train_idx)}  validation {len(val_idx)}  '
+          f'test {len(test_idx)}  (test is not used by this script)', flush=True)
 
     rng = random.Random(args_cli.seed)
     n_settings = 0 if args_cli.time else args_cli.settings
@@ -584,32 +745,32 @@ def run(args_cli):
         exp_model, exp_rep = rosters.to_experimental(model_label, rep)
         head = (f'[{i}/{len(pairings)}] {model_label} x {rep}  '
                 f'(experimental: {exp_model} x {exp_rep})')
-        if model_label in BLOCKED:
+        if model_label in blocked:
             print(f'{head}  BLOCKED LOCALLY', flush=True)
             record(dict(model=model_label, rep=rep, setting='blocked',
                         r2='', seconds='', status='blocked',
-                        detail=BLOCKED[model_label]))
+                        detail=blocked[model_label]))
             continue
 
         if rep not in cache:
             t0 = time.perf_counter()
             cache[rep] = prepared_data(pat, rep, smiles, y, train_idx, val_idx,
                                        test_idx, args_cli.sample_size,
-                                       args_cli.seed)
+                                       args_cli.seed, K=K, cache_key=cache_key)
             print(f'  featurised {rep} in {time.perf_counter() - t0:.1f}s '
                   f'(standardised: {cache[rep][1]})', flush=True)
         data, _ = cache[rep]
 
         key = rosters.TUNED_KEY[model_label]
-        settings = [None] + [sample_setting(key, rng, model_label)
-                             for _ in range(n_settings)]
-        for n, params in enumerate(settings):
-            label = 'default' if params is None else f'setting_{n}'
+        candidates = [sample_setting(key, rng, model_label)
+                      for _ in range(n_settings)]
+
+        def _fit(params, label, on):
+            """One fit, recorded. `on` is the data dict to train against."""
             try:
-                r2, secs = fit_once(pat, M, model_label, rep, data, params,
+                r2, secs = fit_once(pat, M, model_label, rep, on, params,
                                     args_cli.sample_size, scratch_csv, rosters)
-                status = 'ok'
-                detail = json.dumps(params) if params else ''
+                status, detail = 'ok', (json.dumps(params) if params else '')
             except Exception as exc:
                 r2, secs, status = '', '', 'error'
                 detail = f'{type(exc).__name__}: {exc}'
@@ -621,6 +782,48 @@ def run(args_cli):
                   flush=True)
             record(dict(model=model_label, rep=rep, setting=label,
                         r2=r2, seconds=secs, status=status, detail=detail))
+            return r2
+
+        # THE DEFAULT IS ALWAYS FITTED AT FULL SIZE. It is the baseline every
+        # winner is measured against, so it is never screened and never dropped.
+        _fit(None, 'default', data)
+
+        if args_cli.screen_at:
+            # SCREEN ON TRAINING-SET SIZE, VALIDATION HELD FIXED.
+            #
+            # Every candidate is fitted on the first `screen_at` training
+            # molecules and scored on the SAME validation molecules the full
+            # round uses. Only the training budget changes between the rounds,
+            # which is what makes the two sets of scores comparable and the
+            # promotion meaningful.
+            #
+            # Screening against a separate, smaller split instead would change
+            # the validation molecules too, and then a candidate could be
+            # promoted for having had an easier validation set rather than for
+            # being better.
+            n_screen = min(args_cli.screen_at, len(data['x_train']))
+            small = dict(data)
+            small['x_train'] = data['x_train'][:n_screen]
+            small['y_train'] = data['y_train'][:n_screen]
+            print(f'{head}  screening {len(candidates)} settings on '
+                  f'{n_screen} of {len(data["x_train"])} training molecules, '
+                  f'promoting {args_cli.promote}', flush=True)
+
+            scored = []
+            for n, params in enumerate(candidates, 1):
+                r2 = _fit(params, f'screen_{n}', small)
+                if r2 != '':
+                    scored.append((r2, n, params))
+            scored.sort(key=lambda t: -t[0])
+            survivors = scored[:args_cli.promote]
+            if not survivors:
+                print(f'{head}  no setting survived screening — every fit '
+                      f'errored, so there is nothing to promote', flush=True)
+            for r2_small, n, params in survivors:
+                _fit(params, f'final_{n}', data)
+        else:
+            for n, params in enumerate(candidates, 1):
+                _fit(params, f'setting_{n}', data)
 
     csv_fh.close()
     print(f'\nwrote {out}  ({len(rows)} rows)')
@@ -659,11 +862,20 @@ def write_best(rows, args_cli):
     """Best validation R-squared per pairing, plus what beating the default is
     worth. Nothing is written into results/ proper here; --write-master does
     that, once the adoption rule is settled."""
+    # A SCREENING SCORE IS NOT A RESULT. Where a pairing was screened, its
+    # screen_* rows were fitted on a fraction of the training molecules; a lucky
+    # one of those could easily beat a real score from the full round. So for any
+    # pairing that produced a final_* row, only the final_* rows count.
+    screened = {(r['model'], r['rep']) for r in rows
+                if r['status'] == 'ok' and r['setting'].startswith('final_')}
+
     best = {}
     for r in rows:
         if r['status'] != 'ok':
             continue
         pair = (r['model'], r['rep'])
+        if r['setting'].startswith('screen_') and pair in screened:
+            continue
         rec = best.setdefault(pair, {'default_r2': None, 'best_r2': None,
                                      'best_params': None})
         if r['setting'] == 'default':
@@ -672,7 +884,22 @@ def write_best(rows, args_cli):
             rec['best_r2'] = float(r['r2'])
             rec['best_params'] = json.loads(r['detail']) if r['detail'] else None
 
-    out = os.path.join(OUT_DIR, 'best_by_pairing.json')
+    # A TAGGED SWEEP WRITES ITS OWN FILE AND LEAVES THE SHARED ONE ALONE.
+    #
+    # This is the same collision the trials and timing CSVs were tagged for in
+    # main(), one file later. Five sweeps were running side by side on 2026-08-29
+    # under --tag cheap/vbll/gp/bnn/ngboost, and every one of them ends by
+    # calling this function; the path was fixed, so each finisher replaced the
+    # whole file with only its own pairings and the last one to end would have
+    # been the only search --confirm and --write-master ever saw. It was
+    # measured: a two-pairing probe run replaced a twelve-pairing file that the
+    # plain-network sweep had written three hours earlier.
+    #
+    # Tagged runs now write best_by_pairing<tag>.json. The shared, untagged
+    # best_by_pairing.json -- the one --confirm and --write-master read -- is
+    # written by an untagged sweep or by --merge, which is the mode that exists
+    # to combine tagged runs and is the only thing that can see all of them.
+    out = os.path.join(OUT_DIR, f'best_by_pairing{args_cli.tag}.json')
     payload = {
         'sample_size': args_cli.sample_size,
         'seed': args_cli.seed,
@@ -731,7 +958,14 @@ def merge(args_cli):
               f'best-of would be picked across two different experiments.')
         return 1
 
-    write_best(rows, args_cli)
+    # --merge is the mode that produces the SHARED file, whatever tag it was
+    # invoked with. write_best now suffixes the tag so that concurrent sweeps
+    # stop overwriting each other, and a merge run that inherited a tag would
+    # otherwise write best_by_pairing_<tag>.json and leave --confirm with
+    # nothing -- the one outcome this mode exists to prevent.
+    merged = copy.copy(args_cli)
+    merged.tag = ''
+    write_best(rows, merged)
 
     scored = {(r['model'], r['rep']) for r in rows if r['status'] == 'ok'}
     blocked = {(r['model'], r['rep']) for r in rows if r['status'] == 'blocked'}
@@ -769,7 +1003,17 @@ def confirm(args_cli):
 
     src = os.path.join(OUT_DIR, 'best_by_pairing.json')
     if not os.path.exists(src):
-        print(f'{src} does not exist -- run --sweep first.')
+        # Tagged sweeps write best_by_pairing<tag>.json and deliberately leave
+        # this path alone, so several of them finishing is not the same as this
+        # file existing. Say which mode makes it rather than sending the author
+        # back to re-run hours of search that are already on disk.
+        import glob
+        tagged = sorted(os.path.basename(f) for f in
+                        glob.glob(os.path.join(OUT_DIR, 'best_by_pairing_*.json')))
+        hint = (f' {len(tagged)} tagged sweep result(s) are already here '
+                f'({", ".join(tagged)}); run --merge to combine them into it.'
+                if tagged else ' Run --sweep first.')
+        print(f'{src} does not exist --{hint}')
         return 1
     with open(src) as fh:
         payload = json.load(fh)
@@ -869,7 +1113,17 @@ def write_master(args_cli):
 
     src = os.path.join(OUT_DIR, 'best_by_pairing.json')
     if not os.path.exists(src):
-        print(f'{src} does not exist -- run --sweep first.')
+        # Tagged sweeps write best_by_pairing<tag>.json and deliberately leave
+        # this path alone, so several of them finishing is not the same as this
+        # file existing. Say which mode makes it rather than sending the author
+        # back to re-run hours of search that are already on disk.
+        import glob
+        tagged = sorted(os.path.basename(f) for f in
+                        glob.glob(os.path.join(OUT_DIR, 'best_by_pairing_*.json')))
+        hint = (f' {len(tagged)} tagged sweep result(s) are already here '
+                f'({", ".join(tagged)}); run --merge to combine them into it.'
+                if tagged else ' Run --sweep first.')
+        print(f'{src} does not exist --{hint}')
         return 1
     with open(src) as fh:
         payload = json.load(fh)
@@ -959,6 +1213,22 @@ def main():
     ap.add_argument('--seed', type=int, default=RANDOM_SEED)
     ap.add_argument('--models', nargs='*', help='Subset of model labels.')
     ap.add_argument('--reps', nargs='*', help='Subset of representations.')
+    ap.add_argument('--dataset', default='qm9',
+                    choices=('qm9',) + VALIDATION_DATASETS,
+                    help='Which dataset to tune ON. Hyperparameters are '
+                         'dataset-specific: a setting chosen on QM9 has no '
+                         'claim on hERG, so each is tuned on its own data.')
+    ap.add_argument('--openadmet-csv', default=None,
+                    help='Local OpenADMET table for logd and caco2, if it is '
+                         'not to be downloaded.')
+    ap.add_argument('--screen-at', type=int, default=None,
+                    help='Fit every candidate on this many TRAINING molecules '
+                         'first, scored on the same validation split, then '
+                         'refit only the best --promote of them on the whole '
+                         'training set. The default setting is never screened.')
+    ap.add_argument('--promote', type=int, default=4,
+                    help='How many screened settings are refitted at full size '
+                         '(default 4; only used with --screen-at).')
     ap.add_argument('--margin', type=float, default=0.0,
                     help='Adopt a tuned setting only if it beats the shared '
                          'default by at least this much R-squared ON THE TEST '
@@ -984,6 +1254,8 @@ def main():
     # old offset -- carried on writing past a block of NULs. Only the log saved
     # it. So a run restricted to particular models or representations gets its
     # own filename whether or not anyone remembered to ask for one.
+    if args_cli.dataset != 'qm9' and not args_cli.tag:
+        args_cli.tag = '_' + args_cli.dataset
     if not args_cli.tag and (args_cli.models or args_cli.reps):
         parts = list(args_cli.models or []) + list(args_cli.reps or [])
         args_cli.tag = '_subset_' + '-'.join(parts)[:60]

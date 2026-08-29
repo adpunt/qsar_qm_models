@@ -5313,6 +5313,131 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7m 📄 THE METHOD, AS IT SHOULD BE WRITTEN UP (2026-08-29)
+
+**The split.** One scaffold split of 5,000 QM9 molecules at 80/10/10 — 4,000 training, 500
+validation, 500 test. No cross-validation and no repetitions: every setting is fitted once, from
+the same fixed seed. The test part is not touched by the search at any point.
+
+**The search.** For each model and representation pairing independently, twelve settings are drawn
+at random from that model's parameter ranges, plus the shared default from
+`models/model_defaults.py`. Every setting is fitted and scored by R² on the validation part. The
+winner is the highest of the thirteen.
+
+Random rather than grid: with three to ten parameters per model a grid over the same ranges is
+thousands of combinations, and a random draw covers each parameter's range better than a grid of
+the same size once more than two parameters matter (Bergstra and Bengio 2012).
+
+**Successive halving for the three expensive models.** NGBoost and the two Gaussian processes fit
+all twelve settings on 800 training molecules first, and only the best four are refitted on the
+full 4,000. The validation part is held FIXED between the two rounds, so only the training budget
+changes and the two sets of scores are comparable. The default is never screened — it is always
+fitted at full size, because it is the baseline the winner is measured against.
+
+**The acceptance rule, and this is the part worth stating in the paper.** A tuned setting is
+adopted only when both hold:
+
+1. it beats the shared default on the validation part; and
+2. **no tuned value sits at an end of the range the search could draw from.**
+
+The second is what stops the search reporting a number that the range chose rather than the data.
+A value at an end is evidence the optimum lies outside the range, so the result is a floor rather
+than an answer. Tested as: for a parameter drawn from a list, the value equals the smallest or
+largest entry; for one drawn from a continuous range, the value falls in the outer tenth of that
+range, measured in log space where the range was sampled in log space.
+
+That second test had to be added after the fact. The first version could only fire on the listed
+parameters, so a learning rate at 97% of its range was reported as comfortably interior
+(RERUN_PLAN.md 5.7n).
+
+#### 5.7p 📋 HOW THE RESULTS GET SORTED — the author's rule, settled 2026-08-29
+
+Every model-representation pairing goes into one of four groups, and nothing else is reported:
+
+| group | what it means | what happens |
+|---|---|---|
+| **no value at an end, beats the default** | the search chose it on the data | **RECORD** — used going forward |
+| **one value at an end, not depth** | probably fine | second pass over the alternatives |
+| **two or more values at an end** | the ranges are deciding | discuss alternatives before adopting |
+| **depth at an end** | the SHAPE is constrained | discuss alternatives, whatever else it looks like |
+
+**One value at an end is acceptable on its own.** It is only a warning when it is depth, or when
+there are two or more.
+
+**Depth is its own category because it is not interchangeable with the other parameters.** A
+network at its maximum layer count and a tree at its maximum depth are both saying the shape is
+constrained, not that a regularisation knob wants turning. Depth here means `num_hidden_layers`
+and `max_depth`.
+
+**Width and depth are read together, never width alone.** Reading one at a time made the network
+ranges look wrong at both ends when the search was finding two routes to the same capacity. Read as
+total hidden units, the result is one finding rather than two contradictory ones: the dense
+representations (PDV, ChemBERTa) want a few hundred units, and the sparse fingerprints (ECFP4,
+Avalon, SNS) want a thousand or more. That is a sensible answer, not a broken range.
+
+**Tuning is per dataset.** QM9 and each of LogD, Caco-2 and hERG get their own search, because a
+setting chosen on 4,000 small molecules with a computed label has no claim on 1,400 drug-like
+molecules with real assay error. `scripts/tune_hyperparameters.py --dataset {qm9,logd,caco2,herg}`,
+using the experimental pipeline's own loaders, representations and scaffold grouping for the three.
+
+**References for the Methods** (`citations.bib`): `Bergstra2012` for random search over grid
+search, `Jamieson2016` for successive halving. The screening is a multi-fidelity scheme with the
+number of training molecules as the budget. It is NOT Hyperband — that runs successive halving at
+several starting budgets and this runs one.
+
+#### 5.7n ⚠️ TWO CORRECTIONS TO WHAT I REPORTED ON 2026-08-29
+
+**The learning rate ceiling is NOT binding, and I said it was.** I reported the network learning
+rates sitting at "61 to 89% of the range" and recommended raising the ceiling. That figure was
+measured on a log scale, which makes 0.006 look close to a ceiling of 0.01. Higher rates were
+tried and lost: on Avalon 0.0093 scored +0.764 against the winner's +0.837 at 0.0054, and on PDV
+0.0099 scored +0.852 against the winner's +0.889 at 0.0060. **Do not widen the learning rate
+range.**
+
+**Results from a killed run were being read alongside the live one.** Four files from the aborted
+10,000-molecule runs sat in the same directory as the 5,000-molecule ones and were merged without
+warning, producing counts like "82 of 72 settings". The forest, boosting and support-vector numbers
+reported before this was found mixed two sample sizes. Moved to
+`results/tuning_local/aborted_10000/`, and `scripts/analyse_tuned_settings.py` now refuses to read
+files that disagree on the sample size.
+
+#### 5.7o ✅ CLEARED FOR QM9 — 17 pairings, no value at an end, all beating the default
+
+Written by `scripts/analyse_tuned_settings.py` to `results/tuning_local/recorded_for_qm9.json`.
+Validation R², 5,000 molecules, one scaffold split.
+
+| model | representation | default | tuned | setting |
+|---|---|---|---|---|
+| dnn | avalon | +0.8205 | +0.8504 | activation=tanh, hidden_size1=512, hidden_size2=256 |
+| dnn | chemberta | +0.8068 | +0.8497 | activation=tanh, hidden_size1=256, hidden_size2=256 |
+| dnn | mhggnn | +0.8403 | +0.8936 | activation=tanh, hidden_size1=256, hidden_size2=256 |
+| dnn | pdv | +0.8630 | +0.8991 | activation=tanh, hidden_size1=512, hidden_size2=256 |
+| dnn | sns | +0.8761 | +0.8831 | activation=tanh, hidden_size1=512, hidden_size2=128 |
+| dnn_bnn_full | avalon | +0.6487 | +0.7528 | activation=tanh, hidden_size1=512, hidden_size2=64 |
+| dnn_bnn_full | ecfp4 | +0.5777 | +0.6383 | activation=relu, hidden_size1=128, hidden_size2=64 |
+| dnn_bnn_full_variational | mhggnn | -0.0511 | +0.3683 | activation=tanh, hidden_size1=256, hidden_size2=256 |
+| ngboost | avalon | +0.7304 | +0.7570 | learning_rate=0.017793397723399943, n_estimators=500, natural_gradient=True |
+| ngboost | ecfp4 | +0.6316 | +0.6777 | learning_rate=0.009891941387821304, n_estimators=1200, natural_gradient=True |
+| ngboost | mhggnn | +0.8071 | +0.8136 | learning_rate=0.010675738928354528, n_estimators=1200, natural_gradient=True |
+| ngboost | pdv | +0.8381 | +0.8573 | learning_rate=0.007671108827553051, n_estimators=1200, natural_gradient=True |
+| rf | chemberta | +0.7209 | +0.7423 | bootstrap=False, max_depth=None, max_features=0.3, min_samples_leaf=1, min_samples_split=5, n_estimators=300 |
+| rf | ecfp4 | +0.7470 | +0.7924 | bootstrap=True, max_depth=20, max_features=0.5, min_samples_leaf=1, min_samples_split=2, n_estimators=200 |
+| rf | mhggnn | +0.8422 | +0.8733 | bootstrap=False, max_depth=80, max_features=0.5, min_samples_leaf=2, min_samples_split=10, n_estimators=200 |
+| rf | pdv | +0.8445 | +0.8570 | bootstrap=True, max_depth=80, max_features=0.5, min_samples_leaf=1, min_samples_split=10, n_estimators=200 |
+| rf | sns | +0.8168 | +0.8573 | bootstrap=False, max_depth=80, max_features=0.5, min_samples_leaf=2, min_samples_split=5, n_estimators=300 |
+
+**The rest are not cleared, and fall into three groups** — one value at an end and not depth
+(11 pairings, need a second pass over alternatives); two or more values at an end (5); and depth
+at an end (5). The depth cases are separated because depth is not interchangeable with the other
+parameters: a network at its maximum layer count and a tree at its maximum depth are both saying
+the shape itself is constrained, not a regularisation knob.
+
+⚠️ **Network α has no depth parameter at all.** Its shape is two widths, so it is always exactly
+two layers and cannot be tuned on depth. Network β can be, and reaches the maximum of 4 layers on
+all three sparse fingerprints. The two families therefore receive different amounts of tuning,
+which matters because the paper compares them directly (see also 5.7a: α's dropout and learning
+rate are not reachable from the tuned file either).
+
 #### 5.7k 📚 WHAT THE LITERATURE ACTUALLY SETS FOR NGBOOST (2026-08-28)
 
 > ✅ **CLOSED 2026-08-28 (author's decision): the laboratory side now stops early too.** It used to
@@ -5460,9 +5585,11 @@ from the cluster; `--medium-max-hours` corrects it.
 #### 5.7i 🔴 A WINNER IS NOT A RESULT — THE TWO CONFIRMATION STAGES
 
 **This is where Optuna failed, and it is not a detail.** The search picks the best of N candidates
-**on the validation split**. That winning score is the maximum of N noisy numbers on the very split
-that chose it, so it is biased upward by construction — and **the bias grows with N**, which means
-a bigger search looks better while being no better. The old path wrote that winner straight into
+**on the validation split**. Its score is therefore the best of thirteen scores measured on the very
+molecules that chose it, and picking the best of thirteen noisy numbers lands above what that
+setting would score on molecules it was not chosen on. Trying more settings makes this worse, not
+better: a longer search finds a higher number on the validation molecules without finding a better
+model. The old path wrote that winner straight into
 `results/master_tuned_hyperparameters.json`, and nothing ever compared it with the default on data
 neither had seen. `models/consolidate_tuned_params.py` has a paired t-test that would have done it,
 and it reads two results files that were never produced.
