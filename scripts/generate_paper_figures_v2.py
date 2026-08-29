@@ -294,12 +294,26 @@ UNCERTAINTY_COLORS = {
     'qrf':           '#E69F00',    # Amber
     'ngboost':       '#D55E00',    # Vermillion
     'gauche':        '#882255',    # Wine
+    # gauche_rbf emits an uncertainty and had no entry here, so it fell back to
+    # the family colour and drew in the same wine as the Tanimoto process on the
+    # one figure that compares the two. Pre-existing; found 2026-08-29.
+    'gauche_rbf':    '#117733',    # Green
     'dnn_bnn_full':  '#0072B2',    # Blue
     'dnn_bnn_last':  '#56B4E9',    # Sky blue
     'dnn_vbll':      '#009E73',    # Teal
     'mlp_bnn_full':  '#CC79A7',    # Pink
     'mlp_bnn_last':  '#AA4499',    # Purple
     'mlp_vbll':      '#332288',    # Indigo
+    # Added 2026-08-29. Without them the uncertainty figure fell back to the
+    # family colour, so the heteroscedastic Gaussian process drew in the same
+    # wine as both ordinary processes and each variational network drew in the
+    # same colour as the model it is a variant of -- three pairs of lines that
+    # cannot be told apart on the one figure that compares them. This palette is
+    # for distinctness, not family grouping, which is why it does not follow
+    # MODEL_COLORS here.
+    'het_gp_rbf':      '#661100',  # Dark red
+    'dnn_vbll_hetero': '#88CCEE',  # Light blue
+    'mlp_vbll_hetero': '#DDCC77',  # Sand
 }
 
 # Markers: variants of the same family get different shapes.

@@ -37,6 +37,12 @@ KIRBY = "/Users/apunt/repos/KIRBy"
 NOISE = "/Users/apunt/repos/NoiseInject"
 
 CASES = [
+ ("both pipelines run the uncertainty work on the same pairs",
+  f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
+  "        unc_reps = (UNCERTAINTY_PAIRS.get(model, []) if '-u True' in flags else [])",
+  "        unc_reps = ([r for r in model_reps] if '-u True' in flags else [])",
+  [sys.executable, f"{QSAR}/scripts/test_uncertainty_pairs.py"]),
+
  ("censoring runs its own clean level",
   f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
   "NEEDS_OWN_CLEAN_LEVEL = {'censoring'}",

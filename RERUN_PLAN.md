@@ -3341,9 +3341,10 @@ you are rewriting. Updated 2026-08-28:
    the five remaining `[128, 64]` sit in `flexible_dnn`, which is excluded, and in
    three models that appear in no generator table at all. The conformal widths
    went with conformal (§2.22). The `randomized_smiles` routes are settled: the
-   record alignment is fixed and the vocabulary is left alone (§2.19). What is
-   left under this number is the retired-scheme methods figure, which is figure
-   work.
+   record alignment is fixed and the vocabulary is left alone (§2.19). The retired-scheme
+   methods figure that was left under this number was fixed on 2026-08-28 and
+   now draws the settled conditions through the real injector. **Nothing is left
+   under this number.**
 
 `paper.tex` was not touched.
 
@@ -3930,31 +3931,66 @@ single-dataset analysis still works, but they carry `on_settled_scale = False` a
 literally: convert the laboratory rows, or refuse to put them in one table. `assert_one_scale` runs
 from `assert_single_cell`, so every correlation in the module is covered.
 
-#### 3.4e 🔴 OPEN — the two halves do not run the same model-and-representation pairs
+#### 3.4e ✅ SETTLED AND APPLIED 2026-08-29 — one set of pairs, both pipelines
 
-**The author's ruling, 2026-08-28 02:52, verbatim:** *"The same thing that happens on QM9 happens on
-the others. Pick 5 or so interesting/well-performing model/rep pairs and run them through the circus
-of uncertainty on all datasets."* Then, at 02:56: *"just run 28 for all uncertainty including censor
-for all datasets. But what 4 reps? What 7 models? I don't feel comfortable with this number yet.
-these need to be determined after my uncertainty checks."* And at 02:58: *"leave that as a flexible
-decision pending more uncertainty results in the rerun plan."*
+**The author settled the membership on 2026-08-29:** four models — the quantile forest, NGBoost,
+the Gaussian process and the variational network — on three representations — ECFP4, PDV and
+ChemBERTa — with the variational network on ChemBERTa alone. Ten pairs. That completes the ruling
+of 2026-08-28 (*"the same thing that happens on QM9 happens on the others"*), whose membership was
+left open pending the roster screen.
 
-**So: ONE set of pairs, used on all four datasets. The size was left flexible, pending the roster
-screen.** What is on disk now is not one set:
+`uncertainty_pairs.json` is the one place they are written down, on the model of
+`noise_conditions.json` and `model_names.json`. The laboratory generator already ran exactly this
+set; the file records it and the QM9 side now reads it.
 
-| | pairs that emit an uncertainty |
-|---|---|
-| the laboratory uncertainty runs | **4 models × 3 representations**, VBLL restricted to ChemBERTa — 10 pairs (`slurm_scripts_uncertainty_rerun/generate_scripts.py`) |
-| QM9 | **every uncertainty-emitting model × every representation in the main grid** — 11 models × 6 representations, because QM9 has no uncertainty run of its own and its rows fall out of the grid |
+**What changed on QM9.** `-u True` in the model roster still means "this model CAN emit a
+per-molecule uncertainty", and every generate-time guard still reads it that way. What the settled
+pairs decide is which (model, representation) combinations the out-of-fold pass is spent on — a
+property of the pair, not of the model. So the flags moved out of the literal command into a case
+statement on the representation the array task picks. A task on a pair that is not settled trains
+exactly as before, writes its accuracy row, and does no out-of-fold pass.
 
-The laboratory cut is defensible on its face — its pairs are the author's decision of 2026-08-28. **The problem is that it was applied to one side only.** The
-two halves cannot be compared pair for pair, and the author's instruction was explicitly that they
-should be.
+**This restricts only the uncertainty pass.** Every model still trains on every representation: the
+accuracy results, the retention curves and the variance decomposition all need the full grid and
+none of them reads an uncertainty column.
 
-**This is a decision, not a defect.** Either QM9's uncertainty analysis is restricted to the same
-pairs the laboratory runs, or the laboratory list is widened back. Restricting QM9 costs nothing —
-the rows are a by-product of a grid that runs anyway, and the restriction is a filter at analysis
-time. Widening the laboratory list costs queue time in proportion.
+**One trap, and it is the expensive kind.** The wall clock is one request per array, so it has to
+fit the worst task in the array — one that DOES run the pass. Sizing it from the flags, which no
+longer carry `--oof-folds`, would have requested one fit for every script and the settled models
+would have been killed after their queue wait. `fits_per_run` is keyed on whether any of the
+script's representations is a settled pair.
+
+**Guarded.** `scripts/test_uncertainty_pairs.py` — 47 checks. It generates the real QM9 scripts and
+reads what they emit, requires the pass on exactly the settled pairs and no others, requires the
+wall clock still to be sized for a task that runs it, and reads the laboratory generator's own
+roster out of its source (not imported, and not edited — another session holds that file) and
+requires it to agree. It is a case in `scripts/check_fixes_fail_when_removed.py` and goes RED when
+the restriction is removed.
+
+**Left open, and it is the author's:** the three models whose data-noise term varies per molecule —
+the heteroscedastic Gaussian process and the two variational networks with a noise head — are in
+neither pipeline's settled list. They are the only models that can separate the two halves of the
+uncertainty per molecule. On the settled pairs the split cannot be measured per molecule at all.
+
+**WHAT THE SMOKE TEST CHANGED, and it is the important part.** Nine agents exercised this against
+the real code on 2026-08-29; three of five reported passes were refuted. On this fix the refuter
+found that stripping `-u True` from the literal command turned uncertainty **off entirely** for the
+seven capable models that are not on the settled list, not merely off for the out-of-fold pass —
+every `save_uncertainty_values` call site is gated on that flag. That is a larger change than the
+pair decision asked for and it would have emptied the figures that read those test rows.
+
+**Only `--oof-folds` is restricted now.** `-u True` stays on every capable model: it is free, it
+writes the test rows the model has already produced, and a QM9 test label is never corrupted — so
+only the out-of-fold training rows can answer the question, and those are what the laboratory side
+produces for its ten pairs. The expensive half and the answering half are the same half, which is
+why restricting it is the whole of what was needed.
+
+Two more, both found the same way and both fixed: the test's "no literal flag" check looked at the
+text *before* the case block while the command comes after it, so on the four scripts it exists to
+protect it could not fire; and `unc_reps` was filtered by the model's full representation list
+rather than by the representations actually generated, so a run made with `--reps` that excluded
+every settled one still requested six times the wall clock. Measured after the fix: that run asks
+2:59 where it used to ask 11:59, and 11:59 when a settled representation is included.
 
 #### 3.4b ✅ FIXED 2026-08-28 — four models had no name in common, and nothing said so
 

@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Both pipelines run the uncertainty work on the same model-and-representation pairs.
+
+WHY THIS EXISTS
+---------------
+The author ruled on 2026-08-28 that one set of pairs is used on all four
+datasets -- "the same thing that happens on QM9 happens on the others" -- and
+settled the membership on 2026-08-29: four models, three representations, the
+variational network on ChemBERTa alone.
+
+That cut was applied to the laboratory job generator and to nothing else. QM9 has
+no uncertainty run of its own; its uncertainty rows fall out of the main grid, so
+every model that could emit one was cross-fitted on every representation. Eleven
+models by six representations against the laboratory's ten pairs, and no table
+could put the two halves side by side row for row.
+
+`uncertainty_pairs.json` is the one place the pairs are written down, on the model
+of `noise_conditions.json` and `model_names.json`. This checks that both
+generators agree with it.
+
+WHAT IT CHECKS
+--------------
+1. The settled file is self-consistent: every restriction names a model and
+   representations the file itself lists.
+2. Every settled name resolves through `model_names.json` to one canonical name,
+   from both pipelines' spellings. Two names that do not meet cannot be compared
+   however the runs are configured.
+3. The QM9 job generator emits the out-of-fold uncertainty pass for exactly the
+   settled pairs, and for no others.
+4. The QM9 wall clock is still sized for a task that DOES run the pass. One
+   request covers a whole array, and the pass costs `--oof-folds` extra fits, so
+   sizing it from the flags -- which no longer carry the pass -- would under-
+   request and the job would be killed after its queue wait.
+5. The laboratory job generator's own roster agrees with the settled file. Read
+   out of its source rather than imported, so this runs on a laptop, and read
+   rather than edited, because another session may hold that file.
+
+    python scripts/test_uncertainty_pairs.py
+"""
+import ast
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+QM9_GENERATOR = ROOT / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py'
+LAB_GENERATOR = ROOT / 'slurm_scripts_uncertainty_rerun' / 'generate_scripts.py'
+
+failures = []
+checked = [0]
+
+
+def check(ok, message):
+    checked[0] += 1
+    if not ok:
+        failures.append(message)
+    return ok
+
+
+def load(path):
+    return json.loads(path.read_text())
+
+
+# ---------------------------------------------------------------------------
+# 1 and 2 — the settled file, and that its names meet
+# ---------------------------------------------------------------------------
+def check_file_is_consistent(pairs):
+    canon_models = {m['canonical'] for m in pairs['models']}
+    canon_reps = {r['canonical'] for r in pairs['representations']}
+    for model, only in pairs.get('model_representations', {}).items():
+        if model.startswith('_'):
+            continue
+        check(model in canon_models,
+              f"model_representations restricts {model!r}, which is not in the "
+              f"settled model list {sorted(canon_models)}")
+        stray = sorted(set(only) - canon_reps)
+        check(not stray,
+              f"model_representations gives {model!r} the representation(s) "
+              f"{stray}, which the settled list does not contain")
+    print(f"  settled file: {len(canon_models)} models, {len(canon_reps)} "
+          f"representations, {len(pairs.get('model_representations', {})) - 1} "
+          f"restriction(s)")
+    return canon_models, canon_reps
+
+
+def check_names_meet(pairs):
+    """Every settled name resolves to one canonical name from both spellings."""
+    names = load(ROOT / 'model_names.json')
+    qm9, val = names['qm9'], names['validation']
+    for m in pairs['models']:
+        a = qm9.get(m['qm9'])
+        b = val.get(m['validation'])
+        check(a is not None,
+              f"the settled file names the QM9 model {m['qm9']!r} and "
+              f"model_names.json does not map it")
+        check(b is not None,
+              f"the settled file names the laboratory model {m['validation']!r} "
+              f"and model_names.json does not map it")
+        check(a == b == m['canonical'],
+              f"{m['qm9']!r} and {m['validation']!r} resolve to {a!r} and {b!r}, "
+              f"and the settled file calls the pair {m['canonical']!r} -- three "
+              f"names for one model means the two halves cannot be joined")
+    print(f"  names: all {len(pairs['models'])} settled models resolve to one "
+          f"canonical name from both spellings")
+
+
+# ---------------------------------------------------------------------------
+# 3 and 4 — the QM9 generator
+# ---------------------------------------------------------------------------
+def qm9_emitted_pairs(out_dir):
+    """(model -> representations that get the pass), read off the real scripts."""
+    subprocess.run(
+        [sys.executable, str(QM9_GENERATOR), '--stage', '0',
+         '--out-dir', str(out_dir), '--max-hours', '720'],
+        capture_output=True, text=True, check=True)
+    emitted = {}
+    hours = {}
+    for path in sorted(out_dir.glob('qm9_s0_*.sh')):
+        model = path.stem[len('qm9_s0_'):]
+        src = path.read_text()
+        # Every case line, not the first -- re.search would read one and miss a
+        # second if a script ever carried two.
+        cases = re.findall(r'^\s*([a-z0-9_ |]+)\)\s*OOF_FLAGS="--oof-folds (\d+)"',
+                           src, re.M)
+        emitted[model] = [r.strip() for line, _ in cases for r in line.split('|')]
+        h = re.search(r'#SBATCH --time=(\d+):', src)
+        hours[model] = int(h.group(1)) if h else 0
+        # The out-of-fold flag must never be baked into the literal command: that
+        # is what made the pass unconditional on the representation.
+        #
+        # The first version of this check looked at src.split('case "$rep"')[0]
+        # -- the text BEFORE the case block -- while the command line comes
+        # AFTER it, so on the four scripts it exists to protect it could not
+        # fire at all. Found by the smoke test of 2026-08-29. It now looks at
+        # the command line itself.
+        cmd = re.search(r'^python -u process_and_train\.py.*?(?=\n\n|\nif |\Z)',
+                        src, re.M | re.S)
+        check(cmd is not None,
+              f'{path.name}: could not find the training command to check')
+        if cmd is not None:
+            check('--oof-folds' not in cmd.group(0).replace('$OOF_FLAGS', ''),
+                  f'{path.name} passes --oof-folds literally in the command, so '
+                  f'every representation would pay for the pass')
+            # -u True is deliberately NOT restricted: it is free and it writes the
+            # test rows either way. A model that emits an uncertainty must still
+            # carry it, or seven models silently stop emitting anything.
+            if emitted[model]:
+                check('-u True' in cmd.group(0),
+                      f'{path.name} runs the out-of-fold pass but does not pass '
+                      f'-u True, so nothing is written')
+    return emitted, hours
+
+
+def check_qm9_matches(pairs, out_dir):
+    want = {}
+    canon_to_qm9_rep = {r['canonical']: r['qm9'] for r in pairs['representations']}
+    all_reps = [r['qm9'] for r in pairs['representations']]
+    for m in pairs['models']:
+        only = pairs.get('model_representations', {}).get(m['canonical'])
+        want[m['qm9']] = ([canon_to_qm9_rep[c] for c in only] if only else list(all_reps))
+
+    emitted, hours = qm9_emitted_pairs(out_dir)
+
+    for model, reps in want.items():
+        got = emitted.get(model)
+        check(got is not None,
+              f"the settled file names the QM9 model {model!r} and the job "
+              f"generator emits no script for it")
+        if got is not None:
+            check(sorted(got) == sorted(reps),
+                  f"{model} runs the uncertainty pass on {sorted(got)}; the "
+                  f"settled file says {sorted(reps)}")
+            # The wall clock covers the whole array, so it has to fit the worst
+            # task in it -- one that runs the pass.
+            check(hours.get(model, 0) >= 5,
+                  f"{model} runs the out-of-fold pass on {sorted(reps)} but asks "
+                  f"for only {hours.get(model)}h. One request covers the whole "
+                  f"array and the pass costs extra fits per training run, so this "
+                  f"is sized for a task that does not run it. The job would be "
+                  f"killed after its queue wait.")
+
+    stray = sorted(m for m, r in emitted.items() if r and m not in want)
+    check(not stray,
+          f"QM9 runs the uncertainty pass for {stray}, which the settled file "
+          f"does not list. Every pair costs extra fits per training run and "
+          f"produces rows the laboratory side has no counterpart for.")
+    n_pairs = sum(len(r) for r in want.values())
+    print(f"  QM9: the pass runs on {n_pairs} pairs across "
+          f"{len([m for m, r in emitted.items() if r])} scripts, and on no others")
+
+
+# ---------------------------------------------------------------------------
+# 5 — the laboratory generator, read rather than imported or edited
+# ---------------------------------------------------------------------------
+def lab_roster():
+    """MODELS, REPS and MODEL_REPS out of the laboratory generator's source."""
+    if not LAB_GENERATOR.is_file():
+        return None
+    tree = ast.parse(LAB_GENERATOR.read_text())
+    out = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            continue
+        name = node.targets[0].id
+        if name == 'MODELS' and isinstance(node.value, ast.Dict):
+            out['MODELS'] = [k.value for k in node.value.keys]
+        elif name == 'REPS' and isinstance(node.value, ast.List):
+            out['REPS'] = [e.value for e in node.value.elts]
+        elif name == 'MODEL_REPS' and isinstance(node.value, ast.Dict):
+            out['MODEL_REPS'] = {
+                k.value: [e.value for e in v.elts]
+                for k, v in zip(node.value.keys, node.value.values)}
+    return out
+
+
+def check_lab_matches(pairs):
+    roster = lab_roster()
+    if roster is None:
+        print('  NOTE  laboratory generator not found; its half is NOT checked')
+        return
+    want_models = sorted(m['validation'] for m in pairs['models'])
+    want_reps = sorted(r['validation'] for r in pairs['representations'])
+    check(sorted(roster.get('MODELS', [])) == want_models,
+          f"the laboratory generator runs models {sorted(roster.get('MODELS', []))}; "
+          f"the settled file says {want_models}")
+    check(sorted(roster.get('REPS', [])) == want_reps,
+          f"the laboratory generator runs representations "
+          f"{sorted(roster.get('REPS', []))}; the settled file says {want_reps}")
+
+    canon_to_val_rep = {r['canonical']: r['validation'] for r in pairs['representations']}
+    val_name = {m['canonical']: m['validation'] for m in pairs['models']}
+    want_only = {val_name[k]: sorted(canon_to_val_rep[c] for c in v)
+                 for k, v in pairs.get('model_representations', {}).items()
+                 if not k.startswith('_')}
+    got_only = {k: sorted(v) for k, v in roster.get('MODEL_REPS', {}).items()}
+    check(got_only == want_only,
+          f"the laboratory generator restricts {got_only}; the settled file "
+          f"says {want_only}")
+    print(f"  laboratory: {len(roster.get('MODELS', []))} models, "
+          f"{len(roster.get('REPS', []))} representations, agrees with the file")
+
+
+def main():
+    print('uncertainty_pairs.json — one set of pairs, both pipelines')
+    pairs = load(ROOT / 'uncertainty_pairs.json')
+    check_file_is_consistent(pairs)
+    check_names_meet(pairs)
+    with tempfile.TemporaryDirectory() as tmp:
+        check_qm9_matches(pairs, Path(tmp))
+    check_lab_matches(pairs)
+
+    if failures:
+        print(f'\nFAIL — {len(failures)} problem(s):')
+        for f in failures:
+            print(f'  * {f}')
+        return 1
+    print(f'\nPASS — {checked[0]} checks')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

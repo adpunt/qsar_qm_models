@@ -1,0 +1,37 @@
+{
+  "what_this_is": "The model-and-representation pairs the uncertainty work runs, and the ONLY place they are written down. Both pipelines answer the same uncertainty questions on the same pairs, so a table can put QM9 beside logD, Caco-2 and hERG row for row. A second list anywhere means the two halves stop being comparable, which is what happened between 2026-08-28 and 2026-08-29.",
+
+  "the_decision": "The author, 2026-08-28: 'The same thing that happens on QM9 happens on the others. Pick 5 or so interesting/well-performing model/rep pairs and run them through the circus of uncertainty on all datasets.' The membership was left open pending the roster screen ('leave that as a flexible decision pending more uncertainty results in the rerun plan') and was settled by the author on 2026-08-29: four models, three representations, and the variational network on ChemBERTa alone.",
+
+  "why_it_had_to_be_written_down": "The screen's cut was applied to the laboratory job generator and to nothing else. QM9 has no uncertainty run of its own -- its uncertainty rows fall out of the main grid -- so every model that emits one was cross-fitted on every representation, 11 models by 6 representations against the laboratory's 10 pairs. The two halves could not be compared pair for pair, which is exactly what the decision asked for.",
+
+  "settled": "2026-08-29. RERUN_PLAN.md section 3.4e.",
+
+  "models": [
+    {"canonical": "qrf",        "qm9": "qrf",                      "validation": "QRF",
+     "why": "first on both measures on all six representations in the screen, and the cheapest"},
+    {"canonical": "ngboost",    "qm9": "ngboost",                  "validation": "NGBoost",
+     "why": "second on four representations of six; kept because it is the noise-robust model the study highlights"},
+    {"canonical": "gauche_rbf", "qm9": "gauche_rbf",               "validation": "GP",
+     "why": "the only non-tree model that shows anything, and what it shows depends on the representation"},
+    {"canonical": "dnn_vbll",   "qm9": "dnn_bnn_full_variational", "validation": "VBLL-Full",
+     "why": "the one Bayesian network worth running, and badly overconfident, which is itself the finding"}
+  ],
+
+  "representations": [
+    {"canonical": "ecfp4",     "qm9": "ecfp4",     "validation": "ECFP4"},
+    {"canonical": "pdv",       "qm9": "pdv",       "validation": "PDV"},
+    {"canonical": "chemberta", "qm9": "chemberta", "validation": "ChemBERTa"}
+  ],
+
+  "model_representations": {
+    "_why": "A model that is only worth running on some of the three. The list is the CANONICAL representation names. A model absent from here runs on all three.",
+    "dnn_vbll": ["chemberta"]
+  },
+
+  "notes": {
+    "what_this_does_NOT_restrict": "The main QM9 grid still trains every model on every representation -- the accuracy results, the retention curves and the variance decomposition all need the full grid, and none of them reads an uncertainty column. This file decides only which pairs get the out-of-fold uncertainty pass and write per-molecule uncertainty rows.",
+    "cost": "The out-of-fold pass costs `--oof-folds` extra fits on top of each training run, so restricting it is a saving on QM9 rather than an expense.",
+    "the_decomposition_models": "heteroscedastic_gp, dnn_bnn_full_variational_hetero and mlp_bnn_full_variational_hetero are NOT in this list, because they are not in the laboratory run either. They are the only models that report a data-noise term that varies per molecule (RERUN_PLAN.md 5.5e, 5.5f), so the aleatoric/epistemic split cannot be measured per molecule on the pairs listed here. Raised with the author rather than resolved by this file."
+  }
+}

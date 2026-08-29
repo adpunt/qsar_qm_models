@@ -122,6 +122,33 @@ CENSOR_LEVELS = '0.0 0.10 0.20 0.25 0.30 0.40 0.50'
 # and eventually contradicting -- the defaults. The single-setting decisions
 # (nu, the outlier fraction, which end censoring clips) come from the settled
 # file, spelled out on the command line so the job log records them.
+# WHICH PAIRS THE UNCERTAINTY WORK RUNS, read and never restated.
+#
+# The author settled this on 2026-08-29: four models, three representations, the
+# variational network on ChemBERTa alone. The same pairs on all four datasets,
+# which was the ruling of 2026-08-28 -- "the same thing that happens on QM9
+# happens on the others".
+#
+# It had been applied to the laboratory job generator and to nothing else. QM9
+# has no uncertainty run of its own; its uncertainty rows fall out of this grid,
+# so every model that emits one was cross-fitted on every representation. That is
+# 11 models by 6 representations against the laboratory's 10 pairs, and the two
+# halves could not be compared pair for pair.
+#
+# This restricts ONLY the uncertainty pass. Every model still trains on every
+# representation for the accuracy results, the retention curves and the variance
+# decomposition, none of which read an uncertainty column.
+UNCERTAINTY_PAIRS_FILE = Path(__file__).resolve().parent.parent / 'uncertainty_pairs.json'
+_PAIRS = json.loads(UNCERTAINTY_PAIRS_FILE.read_text())
+# QM9 roster label -> the representations that model runs the uncertainty pass on.
+UNCERTAINTY_PAIRS = {}
+_pair_reps_all = [r['qm9'] for r in _PAIRS['representations']]
+_canon_to_qm9_rep = {r['canonical']: r['qm9'] for r in _PAIRS['representations']}
+for _m in _PAIRS['models']:
+    _only = _PAIRS.get('model_representations', {}).get(_m['canonical'])
+    UNCERTAINTY_PAIRS[_m['qm9']] = ([_canon_to_qm9_rep[c] for c in _only]
+                                    if _only else list(_pair_reps_all))
+
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
 _SETTINGS = _SETTLED['settings_that_follow']
@@ -191,6 +218,40 @@ REFERENCE_CONDITION = 'gaussian'
 # nulls as well would be about 5.3% of the screen and of the main grid, and buys
 # a measured zero where the design already predicts one.
 NEEDS_OWN_CLEAN_LEVEL = {'censoring'}
+
+
+def build_uncertainty_block(model, unc_reps, oof_folds):
+    """The shell that decides whether THIS array task runs the uncertainty pass.
+
+    The pass costs `oof_folds` extra fits on top of the training run, and it is
+    worth spending only on the settled pairs (`uncertainty_pairs.json`). Which
+    representation a task has is not known until the array dispatches, so the
+    choice is a case statement rather than a flag baked into the command.
+
+    A model that emits no per-molecule uncertainty at all gets an empty variable
+    and a line saying so, rather than nothing -- a silent absence and a decision
+    read the same in a job log.
+    """
+    if not unc_reps:
+        return ('OOF_FLAGS=""\n'
+                f'echo "=== out-of-fold pass: {model} is on no settled pair here, '
+                'so test rows only"')
+    cases = ' | '.join(unc_reps)
+    return (
+        '# The out-of-fold uncertainty pass, on the settled pairs only\n'
+        '# (uncertainty_pairs.json). It refits once per inner fold, so a run on a\n'
+        '# settled pair costs %d fits instead of one -- a task on any other\n'
+        '# representation must not pay for it. `-u True` is NOT restricted: it is\n'
+        '# free and it writes the test rows either way.\n'
+        'case "$rep" in\n'
+        '  %s) OOF_FLAGS="--oof-folds %d" ;;\n'
+        '  *) OOF_FLAGS="" ;;\n'
+        'esac\n'
+        'if [ -n "$OOF_FLAGS" ]; then\n'
+        '    echo "=== out-of-fold pass: settled pair %s/$rep -> $OOF_FLAGS"\n'
+        'else\n'
+        '    echo "=== out-of-fold pass: %s/$rep is not a settled pair, test rows only"\n'
+        'fi' % (1 + oof_folds, cases, oof_folds, model, model))
 
 
 def levels_for(name, levels):
@@ -568,8 +629,9 @@ else
     echo "=== tuned hyperparameters: ABSENT at task start -> shared defaults for this whole task"
 fi
 
+{unc_block}
 python -u process_and_train.py -d QM9 -t homo_lumo_gap \\
-    {flags} \\
+    {flags} $OOF_FLAGS \\
     -r "$rep" \\
     --noise-level $LEVELS \\
     --dose-units spread \\
@@ -834,14 +896,49 @@ def main():
         # above uses to decide which models emit an uncertainty; two different
         # answers to "does this model emit one?" is how a roster and a guard
         # drift apart.
-        if '-u True' in flags and '--oof-folds' not in flags:
-            flags = f'{flags} --oof-folds {args.oof_folds}'
-
+        # WHICH PAIRS ACTUALLY GET IT. `-u True` in the roster says the model
+        # CAN emit a per-molecule uncertainty, and every generate-time guard
+        # above reads it that way. What the settled pairs decide is which
+        # (model, representation) combinations the uncertainty pass is worth
+        # spending the extra fits on, and that is a property of the pair, not of
+        # the model -- the variational network is worth running on ChemBERTa and
+        # on neither of the other two.
+        #
+        # So the flags are moved out of the literal command and into a case
+        # statement on the representation the array task picked. A task on a pair
+        # that is not settled trains exactly as before, writes its accuracy row,
+        # and does no out-of-fold pass at all.
         reps = [r for r in model_reps if not args.reps or r in args.reps]
         if not reps:
             print(f"  skipping {model}: none of --reps {args.reps} is available to it "
                   f"(it runs on {model_reps})")
             continue
+
+        # WHAT IS RESTRICTED, AND WHAT IS NOT.
+        #
+        # `-u True` STAYS on every model that can emit a per-molecule
+        # uncertainty. It costs nothing -- it writes the test rows the model has
+        # already produced -- and taking it away would silently stop seven models
+        # emitting anything at all, which is a larger change than the pair
+        # decision asked for and would empty figures that read those rows.
+        #
+        # `--oof-folds` is what the settled pairs restrict. It is the expensive
+        # half: it refits the model once per inner fold, so a run costs
+        # (1 + folds) fits instead of one. It is also the half that matters for
+        # the question, because a QM9 TEST label is never corrupted -- only the
+        # out-of-fold training rows can answer "is the model less certain where
+        # the labels are unreliable", and those are the rows the laboratory side
+        # produces for its ten pairs.
+        #
+        # Which representation a task has is not known until the array
+        # dispatches, so the choice is a case statement rather than a flag baked
+        # into the command. Filtered by the representations actually GENERATED,
+        # not by the model's full list: a run made with --reps that excludes
+        # every settled one must not then request the wall clock for a pass it
+        # will never run.
+        unc_reps = (UNCERTAINTY_PAIRS.get(model, []) if '-u True' in flags else [])
+        unc_reps = [r for r in unc_reps if r in reps]
+        unc_block = build_uncertainty_block(model, unc_reps, args.oof_folds)
         n_tasks = len(conditions) * len(reps)
         grand += n_tasks
         # The hours column is quoted for 110 training runs at ONE fit per run.
@@ -861,7 +958,13 @@ def main():
         # (1 + folds * (folds-1)/folds), which is what the inner fits actually
         # cost on a smaller training set. Over-requesting delays a start;
         # under-requesting loses the whole job after the queue wait.
-        fits_per_run = 1 + args.oof_folds if '--oof-folds' in flags else 1
+        # Keyed on whether ANY of this script's representations is a settled
+        # pair, not on the flags -- since 2026-08-29 the pass is chosen per task
+        # by a case statement on the representation, so `--oof-folds` no longer
+        # appears in the literal command and reading the flags would size every
+        # script for one fit. One wall clock covers the whole array, so it has to
+        # be the worst task in it: a task on a settled pair.
+        fits_per_run = 1 + args.oof_folds if unc_reps else 1
         hours = max(1, math.ceil(
             hours_per_110 * runs_per_task * fits_per_run / 110 * 1.25))
         if hours > args.max_hours:
@@ -883,7 +986,7 @@ def main():
             cond_list=' '.join(conditions), cond_cases=build_case_block(conditions),
             reps=' '.join(reps),
             n_cond=len(conditions), n_rep=len(reps), n_tasks=n_tasks,
-            n_lev=n_lev, runs=runs_per_task,
+            n_lev=n_lev, runs=runs_per_task, unc_block=unc_block,
             last=n_tasks - 1, throttle=args.throttle, script_name=script_name))
         (out / script_name).chmod(0o755)
         written.append((tier, script_name, model, hours, n_tasks, len(reps)))

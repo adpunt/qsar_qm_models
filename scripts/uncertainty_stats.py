@@ -74,10 +74,21 @@ other, which `q5_mean_uncertainty` and `q6_error_ranking`'s
 experiment written into both schemas: every QM9 magnitude came out smaller than
 the identical laboratory magnitude by exactly 1.293, the QM9 label spread.
 
-``label_scale`` is the number that closes that gap: multiply a canonical value
-by it and you have the label's own units. It is the standardisation spread on
-QM9 and 1.0 on the experimental datasets, and it is 1.0 on a QM9 file that was
-written without standardisation, whose columns already are in label units. The
+``label_scale`` is the number that closes that gap: multiply a canonical SPREAD
+on this row -- an uncertainty, either of its two halves, or any of the noise
+columns -- and you have the label's own units. It is the standardisation spread
+on QM9, and since 2026-08-29 it is the clean training label spread on the
+experimental datasets too, because those rows are now divided by it on load. It
+is 1.0 only where no conversion happened: a QM9 file written without
+standardisation, or an experimental file written before its runner recorded the
+spread. Those last are marked ``on_settled_scale = False`` and cannot be pooled
+with converted rows.
+
+It does NOT put ``y_true_clean`` or ``y_pred`` back in label units on QM9, which
+are CENTRED as well as scaled -- a 6.0 eV label loads as -0.688 and multiplying
+by the spread does not undo the mean. ``standardisation_mean`` is not carried on
+the canonical row, so that direction is not recoverable here; take it from the
+results row. The
 two magnitude statistics apply it and say so in a ``*_units`` column; the
 settled convention for reported error is the label's own units on both sides
 (`RERUN_PLAN.md` 2.18), and this is the same convention for the uncertainty.
@@ -193,8 +204,10 @@ CANONICAL_COLS = [
     # (the two halves add as variances to the total) survives the read.
     'aleatoric_uncertainty', 'epistemic_uncertainty',
     'aleatoric_support', 'epistemic_support',
-    # Multiply any value column on this row by this to get the label's own
-    # units. See "The units" in the module docstring.
+    # Multiply a SPREAD on this row -- the uncertainty, either half of it, or
+    # any of the noise columns -- by this to get the label's own units. NOT
+    # y_true_clean or y_pred on QM9, which are centred as well as scaled. See
+    # "The units" in the module docstring.
     'label_scale',
     # Whether this row is on the SETTLED scale -- fractions of the clean
     # training label spread, the author's decision of 2026-08-27. QM9 is unless
@@ -559,8 +572,16 @@ _COMPONENT_COLS = ('aleatoric_uncertainty', 'epistemic_uncertainty')
 _SUPPORT_COLS = ('aleatoric_support', 'epistemic_support')
 
 
-def _copy_components(df, out):
+def _copy_components(df, out, div=1.0):
     """Carry the uncertainty split across, on the row's own scale.
+
+    `div` is what the caller divided `uncertainty` by to reach the settled scale.
+    The halves MUST be divided by the same number: they come from the same model
+    outputs, and the writers enforce an identity between them -- the two halves
+    add as variances to the square of the total. Dividing the total and not the
+    halves breaks that identity on exactly the rows the conversion touches, and
+    nothing downstream would see it, because the shipped fixtures set both halves
+    to NaN. Found by the smoke test of 2026-08-29, not by the test suite.
 
     The two numeric halves are left exactly as `uncertainty` is left: they come
     from the same model outputs, so they are standardised on QM9 and in label
@@ -573,7 +594,8 @@ def _copy_components(df, out):
     the numbers rather than being reconstructed from them.
     """
     for c in _COMPONENT_COLS:
-        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+        out[c] = (pd.to_numeric(df[c], errors='coerce') / div
+                  if c in df.columns else np.nan)
     for c in _SUPPORT_COLS:
         out[c] = df[c].astype(object) if c in df.columns else np.nan
     return out
@@ -798,7 +820,7 @@ def _normalise_kirby(df, path, strict, dataset_name):
     out['oof_folds_ok'] = (pd.to_numeric(df['oof_folds_ok'], errors='coerce')
                            if 'oof_folds_ok' in df.columns else np.nan)
     out['source_file'] = str(path)
-    _copy_components(df, out)
+    _copy_components(df, out, div=div)
 
     # What multiplies a value on this row back into the label's own units. The
     # runner writes in label units and the block above divides by the clean
@@ -815,9 +837,14 @@ def _normalise_kirby(df, path, strict, dataset_name):
     # indistinguishable from a checked one. Written as a lookup rather than a
     # QM9-only block so that the day the runner adds the column, the check
     # starts biting with no further change here.
+    # Divided by the same factor as `y_true_clean` and `injected_noise` above.
+    # The check adds the first two and compares against this one, so handing it
+    # the raw column while the other two are converted refuses a self-consistent
+    # file with a false scale error -- which is what it did until the smoke test
+    # of 2026-08-29 built a laboratory file that carried the corrupted label.
     noisy = _pick(df, ['y_true_noisy'])
     if noisy is not None:
-        noisy = pd.to_numeric(noisy, errors='coerce')
+        noisy = pd.to_numeric(noisy, errors='coerce') / div
     out.attrs['scale_checked'] = _check_label_noise_triple(out, noisy, path)
     return out
 

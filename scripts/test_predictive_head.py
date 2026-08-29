@@ -29,9 +29,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'models'))
 
-from utils import (split_predictive_head,                       # noqa: E402
-                   decompose_uncertainty_sampling,
-                   decompose_uncertainty_sampling_heteroscedastic)
+from utils import split_predictive_head                        # noqa: E402
+# The five decompose_uncertainty_* helpers were deleted from utils.py and
+# replaced by one shared module (scripts/utils.py records the rename table).
+# This file went on importing two of them, so it raised ImportError at the top
+# and could not run at all -- the guard for "the head's predicted variance
+# reaches the file" was neither passing nor failing. Found by the smoke test of
+# 2026-08-29, which is also where the fix harness reported it as a dead check.
+#
+# The replacement returns VARIANCES in the order (aleatoric, epistemic, total);
+# the deleted pair returned STANDARD DEVIATIONS as (epistemic, aleatoric,
+# total). Both differences are converted at the call sites below rather than
+# hidden in a shim, so the test reads in the units the module actually uses.
+from uncertainty_decomposition import decompose_sampling            # noqa: E402
 from loss_functions import HeteroscedasticLoss, EvidentialLoss  # noqa: E402
 
 
@@ -105,7 +115,12 @@ def the_aleatoric_term_differs_between_molecules():
     means = rng.normal(0.0, 0.1, (passes, n))
     variances = per_molecule_var[None, :] * np.exp(rng.normal(0.0, 0.05, (passes, n)))
 
-    epi, ale, total = decompose_uncertainty_sampling_heteroscedastic(means, variances)
+    _ale_v, _epi_v, _tot_v = decompose_sampling(means, variances)
+    # Variances in, spreads here -- the assertions below are about spreads, and
+    # the quadrature identity is what they check.
+    ale = np.sqrt(_ale_v)
+    epi = np.sqrt(_epi_v)
+    total = np.sqrt(_tot_v)
     assert ale is not None, "the head predicted a variance and it was not reported"
     assert ale.shape == (n,), f"aleatoric is not per molecule: shape {ale.shape}"
     spread = float(np.std(ale) / np.mean(ale))
@@ -119,7 +134,10 @@ def the_aleatoric_term_differs_between_molecules():
 
     # And the contrast: dropping the variance, which is what the code did, gives
     # no aleatoric term at all and a total equal to the model part.
-    epi_only, ale_only, total_only = decompose_uncertainty_sampling(means, passes)
+    _ale_only_v, _epi_only_v, _tot_only_v = decompose_sampling(means, None)
+    ale_only = None if _ale_only_v is None else np.sqrt(_ale_only_v)
+    epi_only = np.sqrt(_epi_only_v)
+    total_only = np.sqrt(_tot_only_v)
     assert ale_only is None and np.allclose(total_only, epi_only), (
         "the sampling-only decomposition is meant to report no observation term")
     assert not np.allclose(total_only, total), (

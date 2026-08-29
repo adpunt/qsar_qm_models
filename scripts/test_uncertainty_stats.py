@@ -915,8 +915,17 @@ def test_the_laboratory_uncertainty_is_converted_to_the_settled_scale():
              'split': 'test', 'mol_idx': range(n), 'sample_idx': range(n),
              'y_true': y, 'y_pred': y + rng.normal(0, 0.1, n),
              'uncertainty': np.full(n, 0.30),      # 0.30 LOG UNITS
-             'injected_noise': 0.0, 'noise_scale': 0.0,
+             # Populated, not NaN. Both shipped fixtures set these to NaN, which
+             # is why the suite passed with the halves left unconverted.
+             'aleatoric_uncertainty': np.full(n, 0.30 * 0.6),
+             'epistemic_uncertainty': np.full(n, 0.30 * (1 - 0.36) ** 0.5),
+             'injected_noise': rng.normal(0, 0.05, n),
+             'noise_scale': np.abs(rng.normal(0, 0.05, n)),
              'noise_pattern': rng.random(n), 'noise_pattern_pred': rng.random(n)}
+        # The corrupted label, so the clean-plus-noise check actually runs on
+        # this file. Handing it the raw column while the other two are converted
+        # refused a self-consistent file with a false scale error.
+        d['y_true_noisy'] = d['y_true'] + d['injected_noise']
         if scale is not None:
             d['label_scale'] = scale
         pd.DataFrame(d).to_csv(path, index=False)
@@ -935,6 +944,37 @@ def test_the_laboratory_uncertainty_is_converted_to_the_settled_scale():
         got = float(converted['uncertainty'].iloc[0])
         assert abs(got - 0.30 / SPREAD) < 1e-9, got
         assert float(raw['uncertainty'].iloc[0]) == 0.30
+        # EVERY column the conversion touches, not just the headline one. The
+        # first version of this test checked `uncertainty` alone, and dropping
+        # the division from y_pred, from y_true_clean, from the four noise
+        # columns or from the two uncertainty halves each left it passing --
+        # found by the smoke test of 2026-08-29, not by the suite.
+        for col, src in (('y_pred', 'y_pred'), ('y_true_clean', 'y_true'),
+                         ('injected_noise', 'injected_noise'),
+                         ('noise_scale', 'noise_scale'),
+                         ('noise_pattern', 'noise_pattern'),
+                         ('noise_pattern_pred', 'noise_pattern_pred'),
+                         ('aleatoric_uncertainty', 'aleatoric_uncertainty'),
+                         ('epistemic_uncertainty', 'epistemic_uncertainty')):
+            on_disk = pd.read_csv(new_file)[src].to_numpy(dtype=float)
+            loaded = converted[col].to_numpy(dtype=float)
+            assert np.allclose(loaded, on_disk / SPREAD, rtol=0, atol=1e-12), (
+                f"{col} was not divided by the label spread: on disk "
+                f"{on_disk[:3]}, loaded {loaded[:3]}")
+            assert np.allclose(raw[col].to_numpy(dtype=float), on_disk,
+                               rtol=0, atol=0), (
+                f"{col} was converted on a file that carries no label spread")
+        # The two halves add as variances to the square of the total, and that
+        # identity has to survive the conversion -- it is why they must be
+        # divided by the same number and not left alone.
+        tot = converted['uncertainty'].to_numpy(dtype=float)
+        a = converted['aleatoric_uncertainty'].to_numpy(dtype=float)
+        e = converted['epistemic_uncertainty'].to_numpy(dtype=float)
+        assert np.allclose(a ** 2 + e ** 2, tot ** 2, rtol=1e-9), (
+            'the two halves stopped adding to the total through the conversion')
+        _record('scale_every_column',
+                'every converted column divided, and the two halves still add '
+                'as variances to the square of the total')
         assert bool(converted['on_settled_scale'].iloc[0]) is True
         assert bool(raw['on_settled_scale'].iloc[0]) is False
         # label_scale still means "multiply by this to get label units", on both.

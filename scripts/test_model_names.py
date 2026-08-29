@@ -201,6 +201,65 @@ def check_canonical_closed(spec):
     print(f"  canonical list: {len(declared)} names, both maps closed over it")
 
 
+# The four that had no name in common before 2026-08-28, named rather than
+# implied. The first version of this test checked only that "at least 15" models
+# joined, against a real join of 17 -- so a map that pointed two models at
+# wrong-but-canonical names still passed, and the four pairs the change exists
+# for were nowhere asserted. Found by the smoke test of 2026-08-29.
+THE_FOUR = [
+    ('gauche', 'GP-Tanimoto', 'gauche'),
+    ('het_gp_rbf', 'GP-Hetero', 'het_gp_rbf'),
+    ('bnn_full_variational_hetero', 'VBLL-Full-Hetero', 'dnn_vbll_hetero'),
+    ('mlp_bnn_full_variational_hetero', 'MLP-VBLL-Full-Hetero', 'mlp_vbll_hetero'),
+]
+
+
+def check_the_four_pairs(spec):
+    """The four models the change exists for, by name and by target."""
+    qm9, val = spec['qm9'], spec['validation']
+    for q, v, want in THE_FOUR:
+        a, b = resolve(q, qm9), resolve(v, val)
+        check(a == want and b == want,
+              f"{q!r} (QM9) and {v!r} (laboratory) must both resolve to {want!r}; "
+              f"they resolve to {a!r} and {b!r}. These four are the models that "
+              f"had no name in common, so a table pooling the datasets drops them.")
+    print(f"  the four: {len(THE_FOUR)} formerly-mismatched pairs resolve to one "
+          f"name each")
+
+
+def check_the_consumers_actually_read_the_file(spec):
+    """The two modules that join on these names use the FILE, not inline dicts.
+
+    This test checked the file and never the wiring, and it passed with the fix
+    reverted in BOTH consumers -- stale inline dicts in the figure script and an
+    empty map in the statistics module. A guard that cannot see the code it
+    guards is not a guard. Found by the smoke test of 2026-08-29.
+    """
+    sys.path.insert(0, str(HERE))
+    for module_name, attrs in (
+            ('generate_paper_figures_v2', ('QM9_MODEL_MAP', 'VALIDATION_MODEL_MAP')),
+            ('uncertainty_stats', ('_QM9_MODEL_NAMES', '_VALIDATION_MODEL_NAMES'))):
+        try:
+            mod = __import__(module_name)
+        except Exception as exc:
+            notes.append(f'{module_name} NOT CHECKED: it does not import here '
+                         f'({type(exc).__name__}: {exc}). That is a skip, not a pass.')
+            continue
+        for attr, side in zip(attrs, ('qm9', 'validation')):
+            live = getattr(mod, attr, None)
+            check(isinstance(live, dict) and live,
+                  f"{module_name}.{attr} is {live!r}; the module is not reading "
+                  f"model_names.json, so nothing it loads is normalised")
+            if not isinstance(live, dict) or not live:
+                continue
+            for name, target in spec[side].items():
+                check(live.get(name) == target,
+                      f"{module_name}.{attr} maps {name!r} to {live.get(name)!r}; "
+                      f"model_names.json says {target!r}. The module is using its "
+                      f"own list, which is how the two drifted apart.")
+        print(f"  {module_name}: both maps match the file, key for key")
+
+
 def check_both_sides_agree(qm9_canon, val_canon):
     if not val_canon:
         return
@@ -230,6 +289,8 @@ def figure_registries():
                 out[name] = {k.value for k in node.value.keys}
             elif name == 'MODEL_ORDER' and isinstance(node.value, ast.List):
                 out[name] = {e.value for e in node.value.elts}
+            elif name == 'UNCERTAINTY_COLORS' and isinstance(node.value, ast.Dict):
+                out[name] = {k.value for k in node.value.keys}
     return out
 
 
@@ -238,6 +299,20 @@ def check_figure_registries(qm9_canon):
     # The excluded models never reach a figure, so they are not required to have
     # a colour. Everything the current QM9 roster emits does.
     wanted = set(qm9_canon.values())
+    # UNCERTAINTY_COLORS is checked against the models that EMIT one, not the
+    # whole roster: it is the palette for the figure that compares them, and it
+    # is chosen for distinctness rather than family. It was omitted from this
+    # list at first, so the three new models fell back to their family colour
+    # and drew indistinguishably from the model they are a variant of. Found by
+    # the smoke test of 2026-08-29.
+    emits = {'qrf', 'ngboost', 'gauche', 'gauche_rbf', 'het_gp_rbf',
+             'dnn_bnn_full', 'dnn_vbll', 'dnn_vbll_hetero',
+             'mlp_bnn_full', 'mlp_vbll', 'mlp_vbll_hetero'} & wanted
+    missing_unc = sorted(emits - reg.get('UNCERTAINTY_COLORS', set()))
+    check(not missing_unc,
+          f"UNCERTAINTY_COLORS has no entry for {missing_unc}; those models emit "
+          f"a per-molecule uncertainty and would be drawn in their family's "
+          f"colour, indistinguishable from the model they are a variant of")
     for key in ('MODEL_COLORS', 'MODEL_MARKERS', 'MODEL_ORDER'):
         have = reg.get(key, set())
         missing = sorted(wanted - have)
@@ -259,6 +334,8 @@ def main():
     print('model_names.json — the two pipelines join on one set of names')
     spec = load_spec()
     check_canonical_closed(spec)
+    check_the_four_pairs(spec)
+    check_the_consumers_actually_read_the_file(spec)
     qm9_canon = check_qm9(spec)
     val_canon = check_validation(spec, args.kirby_dir)
     check_both_sides_agree(qm9_canon, val_canon)
