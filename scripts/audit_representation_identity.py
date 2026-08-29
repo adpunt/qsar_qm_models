@@ -34,7 +34,12 @@ It does not read the pipeline's source and it does not trust any name.
      every row has the same minimum and maximum, the features are not
      comparable between molecules.
   4. CROSS-PIPELINE. Where both pipelines produce a representation under one
-     name, compare the two matrices directly.
+     name, compute BOTH on the same molecules in one process and diff the
+     matrices (--cross-pipeline). Promised here when the file was written on
+     2026-08-26 and implemented on 2026-08-29. In between, this text -- which
+     argparse prints to --help -- advertised a comparison no function performed,
+     and the only laboratory-side code shuffled three of the six representations
+     and compared them against themselves.
 
 USAGE
 -----
@@ -49,6 +54,9 @@ USAGE
 
     # reference checks alone, no pipeline run needed:
     python audit_representation_identity.py --references-only
+
+    # all six representations, both pipelines, same molecules, one process:
+    python audit_representation_identity.py --cross-pipeline --strict
 """
 from __future__ import annotations
 
@@ -343,6 +351,228 @@ def audit_dumps(prefix):
     return problems
 
 
+# ---------------------------------------------------------------------------
+# check 4: CROSS-PIPELINE — the same molecules through both code paths
+# ---------------------------------------------------------------------------
+
+# The docstring promised this check from the day the file was written and no
+# function implemented it: `audit_dumps` only ever read QM9 dumps and
+# `audit_experimental_alignment` only ever compared the laboratory pipeline to
+# itself, on three of the six representations. `--help` printed the promise, so
+# an operator was told a comparison was being made that was not. Worse, `main()`
+# returned early for the alignment check, so a QM9 matrix and a laboratory matrix
+# were never even in the same process.
+#
+# This is the check the promise described: build all six representations for ONE
+# list of molecules through BOTH featurisers, in one process, and diff the
+# matrices. Measured 2026-08-29 on 40 hERG molecules: ECFP4, Avalon, Sort & Slice
+# and the descriptor vector all agree on every molecule, max|difference| 0, and
+# MHG-GNN agrees too. ChemBERTa does NOT -- 18 of the 40 molecules differ, up to
+# 1.69, because the two sides load different tokenizers. That is the defect this
+# check was supposed to catch and, for three days, could not.
+#
+# The same strings go into both sides on purpose. The pipelines feed themselves
+# different strings -- QM9 strips stereochemistry and the laboratory does not --
+# and that is a separate, open difference; mixing it in here would hide a
+# featuriser difference behind an input difference.
+
+# (relative, absolute) difference that still counts as the same representation.
+#
+# An absolute tolerance alone is wrong for the descriptor vector: its columns run
+# from 0-2 fragment counts to an Ipc value in the billions, so float32 rounding
+# on one entry is larger than a real disagreement on another. Measured on 40 hERG
+# molecules, an absolute rule reported all 40 rows as differing at max|diff| 634,
+# which is float32 rounding of a number near 1e12. Both pipelines STORE float32,
+# so both sides are cast to the stored precision first and then compared
+# relatively.
+CROSS_TOLERANCE = {
+    'ECFP4': (0.0, 0.0),                 # bits: exact or it is a different thing
+    'Avalon': (0.0, 0.0),
+    'SNS': (0.0, 0.0),                   # integer counts
+    'PDV': (1e-5, 1e-6),
+    'ChemBERTa': (0.0, 1e-4),
+    'MHG-GNN-pretrained': (0.0, 1e-4),
+}
+
+# What the pipelines actually keep. Comparing a float64 in memory against the
+# float32 the record holds measures the storage, not the featuriser.
+CROSS_STORED_AS = {
+    'PDV': np.float32,
+    'ChemBERTa': np.float32,
+    'MHG-GNN-pretrained': np.float32,
+}
+
+
+def _default_cross_molecules(n):
+    """Real drug-like molecules if the laboratory cache is here, else a fixture.
+
+    The tokenizer and graph-encoder differences show up on drug-like SMILES, not
+    on the small QM9-style molecules -- so prefer the laboratory's own hERG
+    extract and say clearly which set was used.
+    """
+    import os
+    here = Path(os.environ.get('KIRBY_ROOT', REPO.parent / 'KIRBy'))
+    mod_path = here / 'tests' / 'alternative_data_noise_robustness.py'
+    if mod_path.exists():
+        import importlib.util
+        cwd = Path.cwd()
+        try:
+            os.chdir(mod_path.parent)
+            spec = importlib.util.spec_from_file_location('_exp_cross', mod_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            smiles, _ = mod.load_chembl_herg()
+            return list(smiles[:n]), 'the laboratory hERG extract'
+        except Exception as exc:
+            print(f'  (could not load the laboratory molecules: '
+                  f'{type(exc).__name__}: {exc})')
+        finally:
+            os.chdir(cwd)
+    fixture = ['CC(=O)Oc1ccccc1C(=O)O', 'CN1CCC[C@H]1c1cccnc1',
+               'CC(C)Cc1ccc(cc1)C(C)C(=O)O', 'Clc1ccccc1C(=O)Nc1ccccc1',
+               'CCN(CC)CCNC(=O)c1ccc(N)cc1', 'OC[C@H]1O[C@@H](O)[C@H](O)[C@@H](O)[C@@H]1O',
+               'c1ccc2[nH]ccc2c1', 'CC(=O)Nc1ccc(O)cc1', 'CCOC(=O)c1ccccc1',
+               'C1CN(CCN1)c1ccccn1']
+    return (fixture * (n // len(fixture) + 1))[:n], 'the built-in fixture'
+
+
+def _unpack_bits(packed, n_bits):
+    return np.unpackbits(np.frombuffer(bytes(packed), dtype=np.uint8),
+                         bitorder='little')[:n_bits].astype(np.int32)
+
+
+def audit_cross_pipeline(n=200, smiles=None):
+    """Compute every representation both ways and diff the matrices."""
+    import os
+    print('\n' + '=' * 78)
+    print('CROSS-PIPELINE — the same molecules through both featurisers')
+    print('=' * 78)
+
+    if smiles is None:
+        smiles, where = _default_cross_molecules(n)
+    else:
+        where = 'the molecules given on the command line'
+    smiles = [s for s in smiles if Chem.MolFromSmiles(s) is not None][:n]
+    mols = [Chem.MolFromSmiles(s) for s in smiles]
+    print(f'  {len(smiles)} molecules from {where}')
+    print('  the SAME strings go to both sides, so any difference below is the '
+          'featuriser')
+
+    sys.path.insert(0, str(REPO / 'scripts'))
+    kirby_src = Path(os.environ.get('KIRBY_ROOT', REPO.parent / 'KIRBy')) / 'src'
+    sys.path.insert(0, str(kirby_src))
+    try:
+        import process_and_train as qm9
+    except Exception as exc:
+        print(f'  CANNOT RUN — the QM9 featurisers do not import here: '
+              f'{type(exc).__name__}: {exc}')
+        return 1
+    try:
+        from kirby.representations import molecular as lab
+    except Exception as exc:
+        print(f'  CANNOT RUN — the laboratory featurisers do not import here: '
+              f'{type(exc).__name__}: {exc}')
+        print(f'              (looked in {kirby_src}; set KIRBY_ROOT)')
+        return 1
+
+    def qm9_ecfp4():
+        return np.array([_unpack_bits(qm9.ecfp4_fingerprint(s), 2048) for s in smiles])
+
+    def qm9_avalon():
+        return np.array([_unpack_bits(qm9.avalon_fingerprint(s), 2048) for s in smiles])
+
+    def qm9_pdv():
+        return np.array([qm9.rdkit_mol_descriptors_from_smiles(s) for s in smiles],
+                        dtype=float)
+
+    def qm9_sns():
+        feat = qm9.create_sort_and_slice_ecfp_featuriser(
+            mols_train=mols, max_radius=2, pharm_atom_invs=False, bond_invs=True,
+            chirality=False, sub_counts=True, vec_dimension=1024,
+            print_train_set_info=False)
+        return np.array([feat(m) for m in mols], dtype=float)
+
+    def qm9_chemberta():
+        return np.array([qm9.chemberta_fingerprint(s) for s in smiles], dtype=float)
+
+    def qm9_mhggnn():
+        return np.array([qm9.mhggnn_fingerprint(s) for s in smiles], dtype=float)
+
+    PAIRS = [
+        ('ECFP4', qm9_ecfp4, lambda: lab.create_ecfp4(smiles, n_bits=2048)),
+        ('Avalon', qm9_avalon, lambda: lab.create_avalon(smiles, n_bits=2048)),
+        ('PDV', qm9_pdv, lambda: lab.create_pdv(smiles)),
+        ('SNS', qm9_sns, lambda: lab.create_sns(smiles, return_featurizer=True)[0]),
+        ('ChemBERTa', qm9_chemberta, lambda: lab.create_chemberta(smiles)),
+        ('MHG-GNN-pretrained', qm9_mhggnn, lambda: lab.create_mhg_gnn(smiles)),
+    ]
+
+    problems, uncompared = 0, []
+    for name, build_qm9, build_lab in PAIRS:
+        print(f'\n  {name}')
+        try:
+            A = np.asarray(build_qm9(), dtype=float)
+        except Exception as exc:
+            print(f'    NOT COMPARED — the QM9 side would not build: '
+                  f'{type(exc).__name__}: {exc}')
+            uncompared.append(name)
+            continue
+        try:
+            B = np.asarray(build_lab(), dtype=float)
+        except Exception as exc:
+            print(f'    NOT COMPARED — the laboratory side would not build: '
+                  f'{type(exc).__name__}: {exc}')
+            uncompared.append(name)
+            continue
+        if A.shape != B.shape:
+            print(f'    ✗ DEFECT: different shapes — QM9 {A.shape}, '
+                  f'laboratory {B.shape}')
+            print('              One name, two widths: nothing downstream can pool '
+                  'these.')
+            problems += 1
+            continue
+        stored = CROSS_STORED_AS.get(name)
+        if stored is not None:
+            A, B = A.astype(stored).astype(float), B.astype(stored).astype(float)
+        A = np.nan_to_num(A, nan=0.0, posinf=0.0, neginf=0.0)
+        B = np.nan_to_num(B, nan=0.0, posinf=0.0, neginf=0.0)
+        rtol, atol = CROSS_TOLERANCE.get(name, (0.0, 0.0))
+        agrees = np.isclose(A, B, rtol=rtol, atol=atol)
+        diff = np.abs(A - B)
+        rows_differing = int((~agrees).any(axis=1).sum())
+        print(f'    {str(A.shape):14s} max|difference| {diff.max():.3g}   '
+              f'rows differing: {rows_differing}/{len(A)}   '
+              f'(tolerance rel {rtol:g}, abs {atol:g})')
+        if rows_differing:
+            # Report the worst DISAGREEING entry against its own column's spread,
+            # not against the spread of the whole matrix: one huge column would
+            # otherwise make every real difference look like nothing.
+            worst = np.where(agrees, 0.0, diff)
+            i, j = np.unravel_index(worst.argmax(), worst.shape)
+            col_sd = float(np.std(B[:, j])) or 1.0
+            print(f'    ✗ DEFECT: the two pipelines do not compute the same '
+                  f'{name}.')
+            print(f'              Worst entry: column {j}, QM9 {A[i, j]:.6g} vs '
+                  f'laboratory {B[i, j]:.6g}')
+            print(f'              — {worst[i, j] / col_sd:.2f} standard deviations '
+                  f'of that column.')
+            print('              A row from one pipeline and a row from the other '
+                  'are not the')
+            print('              same representation, whatever the column says.')
+            problems += 1
+        else:
+            print('    identical on every molecule')
+
+    if uncompared:
+        print(f'\n  NOT COMPARED: {", ".join(uncompared)}')
+        print('  This run did not prove those agree. The reasons are printed '
+              'above — usually')
+        print('  missing model weights. Re-run where the weights are present '
+              'before quoting')
+        print('  a cross-pipeline claim about them.')
+    return problems
+
+
 def audit_experimental_alignment(n=300):
     """Do the experimental datasets put row i's features with molecule i?
 
@@ -378,11 +608,33 @@ def audit_experimental_alignment(n=300):
 
     rng = np.random.RandomState(0)
     perm = rng.permutation(len(smiles))
-    reps = ['ECFP4', 'PDV', 'SNS']
+    # All six, not the three this used to check. Avalon, ChemBERTa and MHG-GNN
+    # were never touched by any check in this file, and Avalon costs seconds on
+    # a processor -- it was a plain omission, not a deliberate saving. The two
+    # learned ones need model weights, so if the full roster will not build, fall
+    # back to the four static ones and SAY which were left unproven rather than
+    # printing a clean report over a partial check.
+    reps = list(getattr(mod, 'ALL_REPS',
+                        ['ECFP4', 'PDV', 'SNS', 'MHG-GNN-pretrained',
+                         'Avalon', 'ChemBERTa']))
+    unproven = []
     try:
         os.chdir(mod_path.parent)
-        A = mod.generate_representations(smiles, rep_filter=reps)
-        B = mod.generate_representations([smiles[i] for i in perm], rep_filter=reps)
+        try:
+            A = mod.generate_representations(smiles, rep_filter=reps)
+            B = mod.generate_representations([smiles[i] for i in perm],
+                                             rep_filter=reps)
+        except Exception as exc:
+            print(f'  the full roster would not build ({type(exc).__name__}: '
+                  f'{exc});')
+            static = [r for r in reps
+                      if r in ('ECFP4', 'PDV', 'SNS', 'Avalon')]
+            unproven = [r for r in reps if r not in static]
+            print(f'  falling back to {static}; NOT PROVEN: {unproven}')
+            reps = static
+            A = mod.generate_representations(smiles, rep_filter=reps)
+            B = mod.generate_representations([smiles[i] for i in perm],
+                                             rep_filter=reps)
     finally:
         os.chdir(cwd)
 
@@ -397,6 +649,9 @@ def audit_experimental_alignment(n=300):
             problems += 1
     if not problems:
         print('  all aligned')
+    if unproven:
+        print(f'  NOT CHECKED: {unproven} — this run does not say those are '
+              f'aligned')
     return problems
 
 
@@ -411,8 +666,20 @@ def main():
                     help='check that the experimental datasets put each row with '
                          'its own molecule, by shuffling the input and seeing '
                          'whether the rows follow')
+    ap.add_argument('--cross-pipeline', action='store_true',
+                    help='build all six representations for the same molecules '
+                         'through BOTH pipelines, in one process, and diff the '
+                         'matrices')
+    ap.add_argument('--n-molecules', type=int, default=200,
+                    help='how many molecules the cross-pipeline check uses '
+                         '(default 200)')
     ap.add_argument('--strict', action='store_true')
     args = ap.parse_args()
+
+    if args.cross_pipeline:
+        n = audit_cross_pipeline(args.n_molecules)
+        print(f'\nSUMMARY: {n} problem(s)')
+        return 1 if (args.strict and n) else 0
 
     if args.experimental_alignment:
         n = audit_experimental_alignment()

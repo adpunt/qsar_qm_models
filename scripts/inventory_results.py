@@ -13,10 +13,33 @@ Outputs:
 
 import os
 import sys
+import json
 from pathlib import Path
 from collections import defaultdict
 import re
 from datetime import datetime
+
+# The settled noise conditions, READ not restated. The six names that used to be
+# written into this file -- legacy, value_proportional, quantile, threshold,
+# outlier, heteroscedastic -- were deleted in noiseInject 1.0.0, so the report's
+# coverage section marked all six NOT FOUND on every run and named none of the
+# conditions that actually ran. Longest first, so grouped_wider is matched before
+# any shorter name that prefixes it.
+_SETTLED_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
+_SETTLED = json.loads(_SETTLED_FILE.read_text())
+# Conditions the settled file restricts to a handful of model-and-representation
+# pairs (censoring today) are not expected on every pair, so they are listed
+# apart -- calling one MISSING because it is absent from most pairs would be the
+# same manufactured gap the retired names produced.
+_PAIR_SUBSET = {c['name'] for c in _SETTLED['stage_1_full_grid']
+                if c.get('scope', {}).get('mode') == 'pair_subset'}
+MAIN_GRID_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']
+                        if c['name'] not in _PAIR_SUBSET]
+DEPTH_CONDITIONS = ([c['name'] for c in _SETTLED['stage_2_depth_only']]
+                    + sorted(_PAIR_SUBSET))
+SETTLED_CONDITION_NAMES = sorted(MAIN_GRID_CONDITIONS + DEPTH_CONDITIONS,
+                                 key=len, reverse=True)
+
 
 def parse_filename(filename):
     """Parse a result filename to extract components."""
@@ -132,8 +155,30 @@ def parse_filename(filename):
                 info['model'] = match.group(2)
                 info['noise_strategy'] = match.group(3)
 
+    # The current QM9 grid: anova_<condition>_<rep>_<model>.csv, the name the
+    # job template writes (slurm_scripts_qm9_rerun/generate_scripts.py). Nothing
+    # here recognised it, so an inventory of a real run reported every file as
+    # 'other' and the noise-condition section of the report came out empty --
+    # which reads as "no noise runs exist" rather than "this parser is old".
+    #
+    # The condition is matched against the settled names, longest first, because
+    # several of them contain underscores (grouped_wider, student_t_nu5) and a
+    # split on '_' cuts them in half.
+    if not phase_match and base.startswith('anova_'):
+        rest = base[len('anova_'):]
+        for condition in SETTLED_CONDITION_NAMES:
+            if rest.startswith(condition + '_'):
+                tail = rest[len(condition) + 1:]
+                if '_' in tail:
+                    rep, model = tail.split('_', 1)
+                    info['file_type'] = 'noise_grid'
+                    info['noise_strategy'] = condition
+                    info['representation'] = rep
+                    info['model'] = model
+                break
+
     # Non-phase files
-    if not phase_match:
+    if not phase_match and info['file_type'] == 'unknown':
         # Check for common patterns
         if 'scaffold' in base.lower():
             info['file_type'] = 'scaffold'
@@ -294,14 +339,17 @@ def generate_report(all_files, subdirs, results_dir):
         calib_str = f"calib{calib}" if calib else "default"
         lines.append(f"  {model}/{rep}/{calib_str}: {len(files)} files ({uncertainty_count} with uncertainty)")
 
-    # Phase 4 breakdown (Generalization/Noise strategies)
-    lines.append(f"\n{'PHASE 4 - NOISE STRATEGIES & GENERALIZATION':=^80}")
-    phase4_files = [f for f in all_files if f['phase'] == 4]
-    lines.append(f"Total Phase 4 files: {len(phase4_files)}")
+    # Noise conditions: the current anova_<condition>_<rep>_<model> grid AND the
+    # old phase-4 files, counted together. Looking only at phase 4 meant a
+    # results directory holding nothing but a finished current run reported no
+    # noise runs at all.
+    lines.append(f"\n{'NOISE CONDITIONS & GENERALIZATION':=^80}")
+    phase4_files = [f for f in all_files
+                    if f['phase'] == 4 or f['file_type'] == 'noise_grid']
+    lines.append(f"Total noise-condition files: {len(phase4_files)}")
 
-    # Noise strategies found
     noise_strategies = set(f['noise_strategy'] for f in phase4_files if f['noise_strategy'])
-    lines.append(f"Noise strategies: {', '.join(sorted(noise_strategies)) if noise_strategies else 'None found'}")
+    lines.append(f"Noise conditions: {', '.join(sorted(noise_strategies)) if noise_strategies else 'None found'}")
 
     # Targets found
     targets = set(f['target'] for f in phase4_files if f['target'])
@@ -313,8 +361,8 @@ def generate_report(all_files, subdirs, results_dir):
     lines.append(f"Models: {', '.join(sorted(m for m in phase4_models if m))}")
     lines.append(f"Representations: {', '.join(sorted(r for r in phase4_reps if r))}")
 
-    # Detailed phase 4 matrix
-    lines.append("\nPhase 4 coverage matrix (noise strategy × model × rep):")
+    # Detailed coverage matrix
+    lines.append("\nCoverage matrix (noise condition x model x rep):")
     for strategy in sorted(noise_strategies):
         strategy_files = [f for f in phase4_files if f['noise_strategy'] == strategy]
         uncertainty_count = sum(1 for f in strategy_files if f['has_uncertainty'])
@@ -347,15 +395,28 @@ def generate_report(all_files, subdirs, results_dir):
     else:
         lines.append(f"   ✓ Found {len(mhggnn_files)} MHGGNN files")
 
-    # Check for sigma=0.0 baseline in phase 4
-    lines.append("\n2. Noise strategy coverage:")
-    expected_strategies = ['legacy', 'value_proportional', 'quantile', 'threshold', 'outlier', 'heteroscedastic']
-    for strategy in expected_strategies:
-        if strategy in noise_strategies:
-            count = len([f for f in phase4_files if f['noise_strategy'] == strategy])
-            lines.append(f"   ✓ {strategy}: {count} files")
+    # Coverage against the settled conditions, read from noise_conditions.json.
+    # The main grid is expected on every pair; the depth-only conditions run on a
+    # narrower selection, so they are listed apart and their absence is not a gap.
+    lines.append("\n2. Noise condition coverage (main grid):")
+    for condition in MAIN_GRID_CONDITIONS:
+        if condition in noise_strategies:
+            count = len([f for f in phase4_files if f['noise_strategy'] == condition])
+            lines.append(f"   FOUND    {condition}: {count} files")
         else:
-            lines.append(f"   ❌ {strategy}: NOT FOUND")
+            lines.append(f"   MISSING  {condition}")
+    lines.append("\n   run on a named subset of pairs, so absence is not a gap:")
+    for condition in DEPTH_CONDITIONS:
+        count = len([f for f in phase4_files if f['noise_strategy'] == condition])
+        lines.append(f"   {'FOUND   ' if count else 'absent  '} {condition}: {count} files")
+    unrecognised = sorted(noise_strategies - set(MAIN_GRID_CONDITIONS)
+                          - set(DEPTH_CONDITIONS))
+    if unrecognised:
+        lines.append("\n   conditions no settled list names (retired, or new and "
+                     "unrecorded):")
+        for condition in unrecognised:
+            count = len([f for f in phase4_files if f['noise_strategy'] == condition])
+            lines.append(f"   ?        {condition}: {count} files")
 
     # Check for BNN variants
     lines.append("\n3. Bayesian Neural Network variants:")

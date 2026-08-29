@@ -1500,3 +1500,81 @@ def check_noise_scale_redundancy(df, min_n=_DEFAULT_MIN_N):
                                     if np.isfinite(dev).any() else np.nan)
         rows.append(rec)
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Display names, the reporting level, and the per-cell interval.
+#
+# MOVED HERE 2026-08-29 from scripts/uncertainty_screen_tables.py, which was
+# deleted. Only these four pieces were shared; the rest of that file computed a
+# model and representation list, and that list is the author's decision of
+# 2026-08-28, not something a script decides.
+# ---------------------------------------------------------------------------
+
+#: The noise level the tables report at.
+REPORT_LEVEL = 1.5
+
+MODEL_LABELS = {
+    'qrf': 'QRF',
+    'ngboost': 'NGBoost',
+    'gauche': 'GP',
+    'gauche_rbf': 'GP',
+    # The pipeline writes the DNN Bayesian variants without the 'dnn_' prefix.
+    'bnn_full': 'BNN-Full',
+    'bnn_full_variational': 'VBLL-Full',
+    'dnn_bnn_full': 'BNN-Full',
+    'dnn_bnn_full_variational': 'VBLL-Full',
+    'mlp_bnn_full': 'MLP-BNN-Full',
+    'mlp_bnn_full_variational': 'MLP-VBLL-Full',
+}
+REP_LABELS = {
+    'ecfp4': 'ECFP4',
+    'pdv': 'PDV',
+    'sns': 'SNS',
+    'mhggnn': 'MHG-GNN-pretrained',
+    'avalon': 'Avalon',
+    'chemberta': 'ChemBERTa',
+}
+
+
+def bootstrap_cis(df, split='train_oof', n_boot=300, seed=20260827):
+    """A spread for each cell's two deciding statistics.
+
+    One replicate is run, so there is no replicate spread to quote and the
+    cells cannot be separated by eye. Resampling the molecules inside a cell
+    gives the interval that says whether one model is really ahead of another,
+    which is the difference between a decision and a ranking of noise. It is a
+    statement about these molecules, not a replicate spread, and is labelled so.
+    """
+    rng = np.random.default_rng(seed)
+    keys = ['dataset', 'model', 'rep', 'condition', 'sigma']
+    sub = df[df['split'] == split] if split else df
+    rows = []
+    for key, cell in sub.groupby(keys, dropna=False):
+        rec = dict(zip(keys, key))
+        eps = cell['injected_noise'].to_numpy(dtype=float)
+        y = cell['y_true_clean'].to_numpy(dtype=float)
+        p = cell['y_pred'].to_numpy(dtype=float)
+        u = cell['uncertainty'].to_numpy(dtype=float)
+        size = np.abs(eps)
+        err = np.abs(y + eps - p)
+        clean_err = np.abs(y - p)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = np.where(np.isfinite(u) & (u > 0), err / u, np.nan)
+        n = len(cell)
+        deltas, ranks = [], []
+        for _ in range(n_boot):
+            idx = rng.integers(0, n, n)
+            deltas.append(_spearman(ratio[idx], size[idx])
+                          - _spearman(err[idx], size[idx]))
+            ranks.append(_spearman(u[idx], clean_err[idx]))
+        for name, vals in (('rho_delta', deltas), ('rho_unc_vs_clean_error', ranks)):
+            arr = np.asarray(vals, dtype=float)
+            if np.isfinite(arr).sum() < 10:
+                rec[f'{name}_lo'] = rec[f'{name}_hi'] = np.nan
+                continue
+            rec[f'{name}_lo'] = float(np.nanpercentile(arr, 2.5))
+            rec[f'{name}_hi'] = float(np.nanpercentile(arr, 97.5))
+        rec['n_boot'] = n_boot
+        rows.append(rec)
+    return pd.DataFrame(rows)

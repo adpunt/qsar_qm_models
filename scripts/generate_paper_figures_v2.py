@@ -1123,19 +1123,43 @@ def audit_uncertainty_completeness(unc_df, output_dir):
                   f"{row.get('strategy','?'):10} / {row.get('split','?'):9} — {row['problems']}")
 
 
-def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
-    """Filter out catastrophic training iterations (R² below threshold).
+def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD,
+                                   where='QM9'):
+    """Filter out catastrophic training repeats (R² below threshold).
 
     NN-α training on certain representations (e.g. mol2vec) occasionally produces
     catastrophic failures with wildly negative R² (e.g. -63.6). These poison
     mean R² calculations and can distort the retention metric. This function removes
-    entire iterations where any sigma level has R² below the threshold.
+    the entire repeat wherever any noise level has R² below the threshold.
+
+    THE REPEAT AXIS HAS TWO NAMES. QM9 calls it `iteration` and the experimental
+    runner calls it `fold`, and this function used to return the frame untouched
+    the moment `iteration` was missing -- so it ran on QM9 and was a silent no-op
+    on the three experimental datasets, which never even reached it because
+    main() only called it on the QM9 frame. auc_norm was therefore NOT the same
+    statistic on the two sides: `calculate_validation_auc` averages the folds
+    first, so one diverged fit was baked into that level's mean R² and cost the
+    experimental side real retention, while the identical divergence cost QM9
+    nothing. fig_validation_combined panel B then scatters the two auc_norm
+    values against each other. Measured on one synthetic retention curve with a
+    single diverged repeat: QM9 path 0.7656, experimental path 0.5438; at larger
+    divergences the experimental value leaves the [-0.5, 1.1] sanity window and
+    the configuration is dropped from the scatter altogether. The 245 repeats the
+    filter removes on real QM9 data are 137 mlp_vbll, 95 dnn_vbll and 13 others
+    -- the neural families, which are exactly the ones that diverge on the
+    experimental side too (RERUN_PLAN.md 3.4c).
+
+    `dataset` is part of the key when it is present, so a bad fold 3 on LogD does
+    not delete fold 3 on hERG.
 
     Returns:
-        filtered_df: DataFrame with catastrophic iterations removed
+        filtered_df: DataFrame with catastrophic repeats removed
         filtered_log: DataFrame logging what was removed (for paper reporting)
     """
-    if 'iteration' not in df.columns or 'r2' not in df.columns:
+    if 'r2' not in df.columns or len(df) == 0:
+        return df, pd.DataFrame()
+    replicate_col = next((c for c in ('iteration', 'fold') if c in df.columns), None)
+    if replicate_col is None:
         return df, pd.DataFrame()
 
     # Identify iterations where ANY sigma level has R² below threshold
@@ -1148,32 +1172,113 @@ def filter_catastrophic_iterations(df, r2_threshold=CATASTROPHIC_R2_THRESHOLD):
     log_entries = []
     for _, row in catastrophic_rows.iterrows():
         log_entries.append({
+            'dataset': row.get('dataset', where),
             'model': row.get('model', ''),
             'rep': row.get('rep', ''),
             'strategy': row.get('strategy', ''),
             'sigma': row.get('sigma', np.nan),
-            'iteration': row.get('iteration', ''),
+            'repeat_axis': replicate_col,
+            'repeat': row.get(replicate_col, ''),
             'r2': row['r2'],
         })
     filtered_log = pd.DataFrame(log_entries)
 
-    # Remove entire iterations that contain catastrophic R² values
-    # (not just the single bad sigma — the whole iteration is suspect)
-    group_cols = ['model', 'rep', 'strategy', 'iteration']
+    # Remove the entire repeat wherever a catastrophic R² appears
+    # (not just the single bad level — the whole repeat is suspect)
+    group_cols = ['dataset', 'model', 'rep', 'strategy', replicate_col]
     available_cols = [c for c in group_cols if c in df.columns]
     catastrophic_iters = catastrophic_rows[available_cols].drop_duplicates()
+
+    # WHY EACH REPEAT WAS DROPPED — the author's instruction, 2026-08-29.
+    #
+    # Discarding these repeats is right: a fit that predicts nonsense has no
+    # retention to measure, and averaging it in corrupts every number computed over
+    # the cell. But the two reasons a repeat lands here are not the same finding and
+    # must not be reported as one.
+    #
+    #   never_worked   the fit was already below the threshold on the CLEAN labels.
+    #                  Nothing about noise; the model could not fit this
+    #                  representation at all. Discard and say nothing more.
+    #   collapsed      the fit was sound on the clean labels and fell past the
+    #                  threshold as the noise rose. That IS a robustness result, and
+    #                  the most extreme one the study can produce. The retention
+    #                  number is still not computable, so the repeat is still
+    #                  discarded -- but the collapse itself belongs in the paper, and
+    #                  a silent drop is how it would be lost.
+    #   no_clean_row   the repeat has no zero-noise row, so the two cannot be told
+    #                  apart. Reported as its own case rather than guessed at.
+    #
+    # `first_bad_sigma` is the lowest level at which the repeat went past the
+    # threshold, and `clean_r2` is what it scored with no noise, so a collapse can be
+    # read off the log without going back to the raw files.
+    if 'sigma' in df.columns:
+        clean_rows = df[np.isclose(df['sigma'].astype(float), 0.0)]
+        clean_lookup = (clean_rows.set_index(available_cols)['r2'].groupby(level=list(
+            range(len(available_cols)))).mean().to_dict()
+            if len(clean_rows) and available_cols else {})
+
+        def _classify(entry):
+            key = tuple(entry.get(c if c != replicate_col else 'repeat')
+                        if c != 'dataset' else entry['dataset']
+                        for c in available_cols)
+            key = key[0] if len(key) == 1 else key
+            clean = clean_lookup.get(key)
+            if clean is None:
+                return 'no_clean_row', np.nan
+            return ('never_worked' if clean < r2_threshold else 'collapsed'), clean
+
+        kinds, cleans = [], []
+        for _, e in filtered_log.iterrows():
+            k, c = _classify(e)
+            kinds.append(k)
+            cleans.append(c)
+        filtered_log['why'] = kinds
+        filtered_log['clean_r2'] = cleans
+        filtered_log['first_bad_sigma'] = filtered_log.groupby(
+            [c for c in ('dataset', 'model', 'rep', 'strategy', 'repeat')
+             if c in filtered_log.columns], dropna=False)['sigma'].transform('min')
+    else:
+        filtered_log['why'] = 'no_level_column'
+        filtered_log['clean_r2'] = np.nan
+        filtered_log['first_bad_sigma'] = np.nan
 
     pre_count = len(df)
     filtered_df = df.merge(catastrophic_iters, on=available_cols, how='left', indicator=True)
     filtered_df = filtered_df[filtered_df['_merge'] == 'left_only'].drop(columns='_merge')
     n_removed = pre_count - len(filtered_df)
 
-    print(f"\n  Catastrophic iteration filter (R² < {r2_threshold}):")
+    print(f"\n  Catastrophic {replicate_col} filter on {where} (R² < {r2_threshold}):")
     print(f"    Removed {n_removed} rows ({len(filtered_log)} catastrophic R² values across "
-          f"{len(catastrophic_iters)} iterations)")
+          f"{len(catastrophic_iters)} {replicate_col}s)")
     for _, entry in filtered_log.iterrows():
-        print(f"    {entry['model']}/{entry['rep']}/{entry['strategy']} "
-              f"σ={entry['sigma']:.1f} iter={entry['iteration']} R²={entry['r2']:.2f}")
+        print(f"    {entry['dataset']}/{entry['model']}/{entry['rep']}/{entry['strategy']} "
+              f"σ={entry['sigma']:.1f} {replicate_col}={entry['repeat']} R²={entry['r2']:.2f} "
+              f"[{entry.get('why', '?')}]")
+
+    # The collapses, called out separately. A model that was sound on clean labels
+    # and fell apart under noise is the strongest robustness result the study can
+    # produce, and it is being DISCARDED from the retention numbers -- correctly,
+    # because there is no retention to compute, but it must not leave the run
+    # silently. Printed here and carried in the `why` column of the saved log.
+    if 'why' in filtered_log.columns:
+        collapses = filtered_log[filtered_log['why'] == 'collapsed']
+        if len(collapses):
+            keys = [c for c in ('dataset', 'model', 'rep', 'strategy')
+                    if c in collapses.columns]
+            distinct = collapses[keys + ['clean_r2', 'first_bad_sigma']].drop_duplicates(
+                subset=keys)
+            print(f"\n    ⚠ {len(distinct)} configuration(s) were SOUND ON CLEAN LABELS and "
+                  f"collapsed under noise. Not a broken fit -- a robustness result, and it "
+                  f"is being dropped from retention because retention cannot be computed "
+                  f"for it. Report these:")
+            for _, c in distinct.iterrows():
+                where_str = "/".join(str(c[k]) for k in keys)
+                print(f"      {where_str}: clean R²={c['clean_r2']:.3f}, "
+                      f"first past the threshold at σ={c['first_bad_sigma']:.2f}")
+        n_never = int((filtered_log['why'] == 'never_worked').sum())
+        if n_never:
+            print(f"    {n_never} row(s) were already past the threshold on clean labels "
+                  f"-- a fit that never worked, not a noise effect.")
 
     return filtered_df, filtered_log
 
@@ -1348,11 +1453,30 @@ def filter_to_test_rows(df, what):
     return out
 
 
-# σ levels for the within-σ uncertainty–noise correlation (per-sample tracking).
-# Reported SEPARATELY, never averaged across σ or across noise strategies.
-# σ=0.0 is the clean control (expect ρ≈0/undefined — no noise injected); 0.3 (moderate)
-# and 0.6 (high) are the real per-sample tests.
-WITHIN_SIGMA_LEVELS = [0.0, 0.3, 0.6]
+# Noise levels for the within-level uncertainty–noise correlation (per-sample
+# tracking). Reported SEPARATELY, never averaged across level or across noise
+# conditions.
+#
+# THESE ARE TAKEN FROM THE DATA, NOT FROM A CONSTANT. The list used to be
+# [0.0, 0.3, 0.6], written for the 11-level grid retired on 2026-08-26, and 0.6
+# is on neither pipeline's grid since: the dosed conditions run
+# 0/0.2/0.3/0.5/0.75/1.0/1.5 and censoring runs 0/0.1/0.2/0.25/0.3/0.4/0.5, the
+# same two grids on both sides. So one of the three columns the table reserves
+# for its "high noise" answer could only ever be empty, and 1.5 -- where the
+# conditions actually separate -- had no column at all. Reading the levels off
+# the frame cannot go stale again when the grid changes (RERUN_PLAN.md 3.4c).
+def within_sigma_levels(frame):
+    """The noise levels actually present in a frame, ascending."""
+    if frame is None or 'sigma' not in getattr(frame, 'columns', []):
+        return []
+    vals = pd.to_numeric(frame['sigma'], errors='coerce').dropna().unique()
+    return sorted({round(float(v), 4) for v in vals})
+
+
+def within_sigma_cols(levels):
+    """The within-level column names for a level list, ρ first then the slice size."""
+    return ([f'Unc-Noise ρ σ={s}' for s in levels]
+            + [f'Unc-Noise n σ={s}' for s in levels])
 
 # The correlation between predicted uncertainty and |injected noise| computed
 # with every noise level stacked together. It is NOT a per-molecule quantity:
@@ -1365,9 +1489,12 @@ WITHIN_SIGMA_LEVELS = [0.0, 0.3, 0.6]
 # so that no prefix glob can sweep it in among the within-level columns.
 POPULATION_TREND_COL = 'Population ρ across σ (unc vs |noise|) — NOT per-molecule'
 
-# The within-level columns, named explicitly rather than globbed by prefix.
-WITHIN_SIGMA_COLS = ([f'Unc-Noise ρ σ={s}' for s in WITHIN_SIGMA_LEVELS]
-                     + [f'Unc-Noise n σ={s}' for s in WITHIN_SIGMA_LEVELS])
+# The within-level ρ columns of a table already written. Selected by prefix from
+# the frame's own columns, because the level list now depends on the data. The
+# population-trend column is picked up by name and is deliberately spelled so
+# that this prefix cannot sweep it in among the within-level values.
+def written_within_sigma_rho_cols(frame):
+    return [c for c in frame.columns if str(c).startswith('Unc-Noise ρ σ=')]
 
 
 def note_if_noise_columns_are_empty(frame, where):
@@ -1381,8 +1508,9 @@ def note_if_noise_columns_are_empty(frame, where):
     the corrupted labels — is answered on the out-of-fold TRAINING rows by
     `uncertainty_stats.q4_error_ratio`, written to unc_stats_*_q4_error_ratio.csv.
     """
-    cols = [c for c in [POPULATION_TREND_COL] + WITHIN_SIGMA_COLS
-            if c in frame.columns and c.startswith(('Unc-Noise ρ', 'Population'))]
+    cols = written_within_sigma_rho_cols(frame)
+    if POPULATION_TREND_COL in frame.columns:
+        cols = cols + [POPULATION_TREND_COL]
     if not cols:
         return
     if frame[cols].notna().to_numpy().any():
@@ -1394,8 +1522,13 @@ def note_if_noise_columns_are_empty(frame, where):
 
 
 def within_sigma_unc_noise_rho(model_data, unc_values, base_mask,
-                               sigma_levels=WITHIN_SIGMA_LEVELS, min_points=100):
+                               sigma_levels, min_points=100):
     """Per-σ Spearman ρ between predicted uncertainty and |injected_noise|.
+
+    `sigma_levels` has no default on purpose: it must come from the frame the
+    whole table is built from (`within_sigma_levels`), so that every row of one
+    table carries the same columns and no level is reserved that the run never
+    produced.
 
     The pooled correlation (all σ stacked together) measures the POPULATION-level trend:
     uncertainty AND |injected_noise| both rise with σ, so pooling makes the points a
@@ -1681,6 +1814,28 @@ def create_validation_uncertainty_table(val_unc_df, output_dir):
     (`q4_error_ratio`, `confound_controlled_effect`), which is where the
     noise-detection question is answered.
 
+    THE TWO HALVES OF THE UNCERTAINTY ARE REPORTED HERE TOO. The experimental
+    runner has written `aleatoric_uncertainty` and `epistemic_uncertainty` per
+    molecule since 2026-08-28, the loader carries them through and the merge
+    preserves them, but this table -- the only place the experimental
+    uncertainty frame becomes a table -- emitted neither, so the split was
+    reportable on QM9 (table4's `Mean Aleatoric` / `Mean Epistemic`) and silently
+    absent on LogD, Caco-2 and hERG. GP-Hetero, VBLL-Full-Hetero and
+    MLP-VBLL-Full-Hetero were added to the experimental roster on 2026-08-28
+    precisely because they separate the two halves, and nothing downstream would
+    have shown their result (RERUN_PLAN.md 3.4c).
+
+    UNITS. Every value column in this table is in RAW LABEL UNITS, because the
+    experimental runner inverse-transforms before writing. QM9's table4 is in
+    standardised units. The two mean-uncertainty numbers therefore must not be
+    put side by side or subtracted; the column headings say which units they are
+    in so that nobody has to know that to read the file.
+
+    `Aleatoric support` / `Epistemic support` say what KIND of term the model
+    produced -- per molecule, one number for the whole fit, or none at all. A
+    constant broadcast onto every row and a genuinely per-molecule column look
+    identical once averaged, so the mean alone is not interpretable without them.
+
     Writes `table_validation_uncertainty.csv`.
     """
     if val_unc_df is None or len(val_unc_df) == 0:
@@ -1728,6 +1883,26 @@ def create_validation_uncertainty_table(val_unc_df, output_dir):
         pred_m = unc[mask]
         actual_m = errors[mask]
 
+        # Aleatoric / epistemic decomposition, the same filter QM9's table4
+        # applies: finite, positive, and at least ten molecules behind the mean.
+        mean_alea = mean_epis = np.nan
+        if 'aleatoric_uncertainty' in grp.columns:
+            alea = pd.to_numeric(grp['aleatoric_uncertainty'], errors='coerce').values
+            alea_valid = alea[np.isfinite(alea) & (alea > 0)]
+            if len(alea_valid) > 10:
+                mean_alea = float(alea_valid.mean())
+        if 'epistemic_uncertainty' in grp.columns:
+            epis = pd.to_numeric(grp['epistemic_uncertainty'], errors='coerce').values
+            epis_valid = epis[np.isfinite(epis) & (epis > 0)]
+            if len(epis_valid) > 10:
+                mean_epis = float(epis_valid.mean())
+
+        def _support(col):
+            if col not in grp.columns:
+                return 'not recorded'
+            kinds = sorted(set(grp[col].dropna().astype(str)))
+            return '/'.join(kinds) if kinds else 'not recorded'
+
         rows.append({
             'Dataset': dataset,
             'Model': get_model_label(model),
@@ -1738,8 +1913,12 @@ def create_validation_uncertainty_table(val_unc_df, output_dir):
             'Unc-Error ρ (σ=0)': rho_sigma0,
             'Coverage 1σ': cov_1sigma,
             'Coverage 2σ': cov_2sigma,
-            'Mean Uncertainty': pred_m.mean(),
-            'Mean |Error|': actual_m.mean(),
+            'Mean Uncertainty (raw label units)': pred_m.mean(),
+            'Mean Aleatoric (raw label units)': mean_alea,
+            'Mean Epistemic (raw label units)': mean_epis,
+            'Aleatoric support': _support('aleatoric_support'),
+            'Epistemic support': _support('epistemic_support'),
+            'Mean |Error| (raw label units)': actual_m.mean(),
             'N': int(mask.sum()),
         })
 
@@ -3994,6 +4173,11 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
         unc_col = uncertainty_column(unc_legacy)
 
         if unc_col and len(unc_legacy) > 0:
+            # The level list is read off the frame ONCE, so every row of every
+            # per-representation table carries the same columns.
+            table4_levels = within_sigma_levels(unc_legacy)
+            print(f"  Within-level uncertainty–noise columns at σ = "
+                  f"{table4_levels} (read from the data)")
             # One table per representation. 'all' (the rep-pooled mean) is only
             # used when the data carries no rep column at all, in which case
             # nothing is being pooled across reps.
@@ -4053,7 +4237,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                             unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
 
                     # Within-σ per-sample correlation (the honest metric) — each σ separate.
-                    per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, mask)
+                    per_sigma_noise = within_sigma_unc_noise_rho(
+                        model_data, unc_values, mask, table4_levels)
 
                     # Coverage at 1σ and 2σ intervals
                     # IMPORTANT: Use y_true_noisy (normalized space) with y_pred_mean (normalized space)
@@ -4118,8 +4303,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                         'Mean Aleatoric': mean_alea,
                         'Mean Epistemic': mean_epis,
                     }
-                    # Per-σ within-slice ρ + slice size n, each σ kept separate.
-                    for s in WITHIN_SIGMA_LEVELS:
+                    # Per-level within-slice ρ + slice size n, each level kept separate.
+                    for s in table4_levels:
                         row[f'Unc-Noise ρ σ={s}'] = per_sigma_noise[s]['rho']
                         row[f'Unc-Noise n σ={s}'] = per_sigma_noise[s]['n']
                     unc_metrics.append(row)
@@ -4142,6 +4327,10 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
 
         if unc_col:
             all_unc_rows = []
+            # One level list for the whole supplementary table. It is the union
+            # over the conditions, because the dosed conditions and censoring run
+            # different grids and this table keeps every condition in one file.
+            supp_levels = within_sigma_levels(unc_df)
             strategies = unc_df['strategy'].unique() if 'strategy' in unc_df.columns else ['all']
             reps = unc_df['rep'].unique() if 'rep' in unc_df.columns else ['all']
 
@@ -4188,7 +4377,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                                 unc_noise_corr, _ = stats.spearmanr(unc_values[noise_mask], noise_mag[noise_mask])
 
                         # Within-σ per-sample correlation (honest metric) — each σ separate.
-                        per_sigma_noise = within_sigma_unc_noise_rho(model_data, unc_values, valid)
+                        per_sigma_noise = within_sigma_unc_noise_rho(
+                            model_data, unc_values, valid, supp_levels)
 
                         # Coverage
                         y_true_col = y_pred_col = None
@@ -4231,8 +4421,8 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
                             'Mean Aleatoric': mean_alea,
                             'Mean Epistemic': mean_epis,
                         }
-                        # Per-σ within-slice ρ + slice size n, each σ kept separate.
-                        for s in WITHIN_SIGMA_LEVELS:
+                        # Per-level within-slice ρ + slice size n, each level separate.
+                        for s in supp_levels:
                             strat_row[f'Unc-Noise ρ σ={s}'] = per_sigma_noise[s]['rho']
                             strat_row[f'Unc-Noise n σ={s}'] = per_sigma_noise[s]['n']
                         all_unc_rows.append(strat_row)
@@ -4270,13 +4460,22 @@ def create_tables(auc_df, unc_df, qm9_df, output_dir, val_auc_df=None):
             supp_unc = pd.read_csv(supp_path)
             gauss_unc = supp_unc[supp_unc['Strategy'] == 'Gaussian']
             rank_col = 'Unc-Noise ρ σ=0.3'
+            if len(gauss_unc) > 0 and rank_col not in gauss_unc.columns:
+                print(f"  ⚠ table4c not written: no '{rank_col}' column. The "
+                      f"within-level columns follow the levels in the data, and "
+                      f"0.3 is not among them "
+                      f"({', '.join(written_within_sigma_rho_cols(gauss_unc)) or 'none'}).")
             if len(gauss_unc) > 0 and rank_col in gauss_unc.columns:
-                # Named explicitly, not globbed by the prefix 'Unc-Noise '. The glob
-                # used to sweep in the stacked-across-σ population column as well,
-                # putting it beside the within-level values under a near-identical
-                # name. It is still carried — it is a real number — but as its own
-                # clearly-named column at the end, after the within-level ones.
-                per_sigma_cols = [c for c in WITHIN_SIGMA_COLS if c in gauss_unc.columns]
+                # Selected by the within-level prefix from the table that was
+                # actually written, ρ first then the slice sizes. The population
+                # column across levels is deliberately spelled so that this
+                # prefix cannot sweep it in beside the within-level values under
+                # a near-identical name; it is still carried, as its own clearly
+                # named column at the end.
+                rho_cols = written_within_sigma_rho_cols(gauss_unc)
+                n_cols = [c.replace('Unc-Noise ρ σ=', 'Unc-Noise n σ=')
+                          for c in rho_cols]
+                per_sigma_cols = rho_cols + [c for c in n_cols if c in gauss_unc.columns]
                 trend_cols = ([POPULATION_TREND_COL]
                               if POPULATION_TREND_COL in gauss_unc.columns else [])
                 table4c_cols = (['Model', 'Rep'] + per_sigma_cols
@@ -4937,11 +5136,28 @@ def main():
         if len(unc_df) < pre_filter_unc:
             print(f"  Filtered out {pre_filter_unc - len(unc_df)} uncertainty rows from excluded models")
 
-    # Filter catastrophic training iterations (e.g. NN-α/mol2vec with R² = -63)
-    qm9_df, catastrophic_log = filter_catastrophic_iterations(qm9_df)
+    # Filter catastrophic training repeats (e.g. NN-α/mol2vec with R² = -63).
+    # BOTH frames, under one rule. This ran on QM9 only, so a diverged fit was
+    # deleted on QM9 and averaged in on the three experimental datasets, and
+    # fig_validation_combined panel B then plotted the two auc_norm values
+    # against each other as though they were the same statistic. The experimental
+    # frame keys the repeat on `fold` and carries `dataset`; both are handled
+    # inside the filter (RERUN_PLAN.md 3.4c).
+    qm9_df, catastrophic_log = filter_catastrophic_iterations(qm9_df, where='QM9')
     if len(catastrophic_log) > 0:
         catastrophic_log.to_csv(output_dir / 'filtered_catastrophic_iterations.csv', index=False)
         print(f"    Saved filtered_catastrophic_iterations.csv")
+
+    if validation_df is not None and len(validation_df) > 0:
+        validation_df, val_catastrophic_log = filter_catastrophic_iterations(
+            validation_df, where='experimental datasets')
+        if len(val_catastrophic_log) > 0:
+            val_catastrophic_log.to_csv(
+                output_dir / 'filtered_catastrophic_folds_validation.csv', index=False)
+            print(f"    Saved filtered_catastrophic_folds_validation.csv")
+        else:
+            print(f"  Catastrophic repeat filter (R² < {CATASTROPHIC_R2_THRESHOLD}) "
+                  f"also ran on the experimental datasets: nothing removed")
 
     # Audit data completeness — flags missing sigmas/iterations, saves data_gaps.csv
     audit_data_completeness(qm9_df, output_dir)

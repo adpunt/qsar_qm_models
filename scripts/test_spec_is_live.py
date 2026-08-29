@@ -110,6 +110,18 @@ def the_training_constants_come_from_the_spec():
         'batch_size=32': len(re.findall(r'batch_size\s*=\s*32\b', source)),
         'lr=0.001': len(re.findall(r'Adam\([^)]*lr\s*=\s*0\.001\b', source)),
         'num_samples = 100': len(re.findall(r'\bnum_samples\s*=\s*100\b', source)),
+        # THE TWO KEYS THAT WERE ACTUALLY BEING IGNORED. Added 2026-08-29 on the
+        # author's instruction. `optimizer` and `weight_decay` sat in the shared
+        # spec while this side hard-coded Adam and a weight decay of its own, so
+        # editing either key changed the experimental half and left QM9 alone
+        # while the settings fingerprint on every row asserted the two matched.
+        # That is the exact failure this whole test was written for, and it was
+        # the one case it did not cover -- so the repair itself could have been
+        # silently removed again with nothing complaining. The experimental
+        # runner raises outright on an unbuilt value for both keys.
+        'weight_decay=5e-4': len(re.findall(r'weight_decay\s*=\s*5e-4\b', source)),
+        'weight_decay=0 literal': len(re.findall(
+            r'weight_decay\s*=\s*0(?:\.0)?\b', source)),
     }
     assert not any(stale.values()), (
         f"literals are back where the spec should be read: "
@@ -122,11 +134,20 @@ def the_training_constants_come_from_the_spec():
             r"lr=NEURAL_DEFAULTS\['training'\]\['lr'\]", source)),
         'mc_passes': len(re.findall(
             r"NEURAL_DEFAULTS\['training'\]\['mc_passes'\]", source)),
+        'weight_decay': len(re.findall(
+            r"weight_decay=NEURAL_DEFAULTS\['training'\]\['weight_decay'\]", source)),
+        # The optimiser name is a STRING the spec names, so the only way to read
+        # it is to check it and refuse anything else. A pipeline that builds Adam
+        # unconditionally while the spec says something else is not reading it.
+        'optimizer': len(re.findall(
+            r"NEURAL_DEFAULTS\['training'\]\['optimizer'\]", source)),
     }
-    assert all(v > 0 for v in live.values()), live
+    assert all(v > 0 for v in live.values()), (
+        f"a spec key nothing reads is a guard that cannot fire: {live}")
     print(f"    read from the spec: {live['batch_size']} batch-size sites, "
           f"{live['lr']} learning-rate sites, {live['mc_passes']} "
-          f"Monte-Carlo-pass sites; 0 literals left")
+          f"Monte-Carlo-pass sites, {live['weight_decay']} weight-decay sites, "
+          f"{live['optimizer']} optimiser-name sites; 0 literals left")
 
 
 def the_kl_weight_comes_from_the_spec():

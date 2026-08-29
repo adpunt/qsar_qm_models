@@ -110,6 +110,16 @@ SUPPORT = {
     'gauche':                    (CONSTANT, PER_MOLECULE),
     'gauche_rbf':                (CONSTANT, PER_MOLECULE),
     'heteroscedastic_gp':        (PER_MOLECULE, PER_MOLECULE),
+    # NGBoost under several seeds: the outer ensemble is the only
+    # model-uncertainty axis a single-fit distributional model has (Duan et al.,
+    # via ALEA_EPIS_LITERATURE.md). One fit per seed.
+    'ngboost_ensemble':          (PER_MOLECULE, PER_MOLECULE),
+    # A Bayesian network with a variance output head -- Kendall & Gal eq. 6, the
+    # case the literature actually holds up. Both halves per molecule, from two
+    # different mechanisms: the head predicts the noise, the weight samples give
+    # the model term.
+    'dnn_bnn_full_mve':          (PER_MOLECULE, PER_MOLECULE),
+    'mlp_bnn_full_mve':          (PER_MOLECULE, PER_MOLECULE),
     # The names the heteroscedastic Gaussian process actually WRITES, which
     # carry the kernel. The roster label above is what the job generator emits.
     'het_gp_rbf':                (PER_MOLECULE, PER_MOLECULE),

@@ -410,7 +410,25 @@ def parse_arguments():
                              "The four neural families early-stop on these molecules, "
                              "so their error here is optimistic; the temperature is "
                              "fitted on them too but is one multiplier and cannot "
-                             "change a rank.")
+                             "change a rank. IT CANNOT ANSWER THE 'DOES PREDICTED "
+                             "UNCERTAINTY FIND THE CORRUPTED LABELS' QUESTION FOR THE "
+                             "TWO GROUPED CONDITIONS. The split holds whole scaffold "
+                             "families out, so validation shares no family with "
+                             "training; the injector therefore draws validation its "
+                             "OWN affected families (rust/src/main.rs, scale_map, the "
+                             "GroupedWide fallback), and they are families no model "
+                             "ever fitted. A correlation between predicted uncertainty "
+                             "and the recorded shape on those rows is zero in "
+                             "expectation BY CONSTRUCTION, and a near-zero would read "
+                             "as 'uncertainty does not track the noise' when the "
+                             "honest statement is 'the noise was unlearnable there'. "
+                             "Read the grouped conditions off the out-of-fold TRAINING "
+                             "rows, whose affected families ARE ones the model saw "
+                             "(RERUN_PLAN.md 3.1d). The job generator passes cross-"
+                             "fitting instead of this flag, for a separate reason of "
+                             "its own -- scoring only the models that never see a "
+                             "validation label would confound the model comparison "
+                             "with the route that produced each number.")
     parser.add_argument("--shap", type=str2bool, default=False, help="Calculate SHAP values for relevant tree-based models (default is False)")
     parser.add_argument("--normalize", type=str2bool, default=True, help="Normalize the data before processing (default is True)")   
     parser.add_argument("--save-per-epoch-metrics", type=str2bool, default=False, help='Save training/validation loss for each epoch')
@@ -632,6 +650,22 @@ def scaffold_split_indices(smiles_list, frac_train=0.8, frac_valid=0.1,
     from the global numpy generator, which main() seeds per replicate, so each
     replicate is an independently reseeded split -- which is what a QM9
     replicate means.
+
+    An acyclic molecule is keyed on its stereochemistry-free canonical SMILES,
+    the same key `build_scaffold_groups` uses for the noise map. It used to be
+    keyed on the ROW INDEX here, so two rows holding the SAME acyclic molecule
+    were ONE noise group but TWO split groups, and nothing stopped the split
+    putting one copy in training and the other in a held-out part -- QM9 is
+    never deduplicated, so the copies do exist. MEASURED on 1,998 QM9 molecules
+    plus one duplicated acyclic pair, over 200 split seeds: the row-index key put
+    the two copies in DIFFERENT splits on 68 of them; the canonical key on 0.
+    On the same fixture the split partition and the noise partition now agree
+    exactly -- 0 of 1,058 noise groups spread over more than one split.
+
+    An identical molecule on both sides of a split is memorised, not predicted.
+    It is rare enough at today's sample size to move no reported number, but the
+    rate grows with the sample, and the two partitions now agree by construction
+    rather than by luck.
     """
     groups = {}
     for i, smiles in enumerate(smiles_list):
@@ -640,7 +674,13 @@ def scaffold_split_indices(smiles_list, frac_train=0.8, frac_valid=0.1,
         except Exception:
             scaffold = None
         if not scaffold:
-            scaffold = f"__acyclic__{i}"
+            # Canonicalise the way the writer does (`Chem.MolToSmiles(mol,
+            # isomericSmiles=False)`) so the key is character-for-character the
+            # one the noise map is built from. A SMILES RDKit cannot parse keeps
+            # its own string, which still makes it a singleton.
+            mol = Chem.MolFromSmiles(smiles)
+            key = smiles if mol is None else Chem.MolToSmiles(mol, isomericSmiles=False)
+            scaffold = f"__acyclic__{key}"
         groups.setdefault(scaffold, []).append(i)
 
     ordered = sorted(groups.values(), key=lambda idx: idx[0])
@@ -968,11 +1008,31 @@ def load_and_split_polaris(dataset_tuple, args, files):
         test_idx = list(range(val_end, n_valid))
     
     elif args.split == 'scaffold':
-        Xs = np.zeros(n_valid).reshape(-1, 1)
-        dc_dataset = dc.data.DiskDataset.from_numpy(X=Xs, ids=smiles_list)
-        splitter = dc.splits.ScaffoldSplitter()
-        train_idx, val_idx, test_idx = splitter.split(dc_dataset, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
-    
+        # This used to be `dc.splits.ScaffoldSplitter()`, the splitter the QM9
+        # branch of this same file abandoned and `scaffold_split_indices` was
+        # written to replace: DeepChem puts every acyclic molecule in ONE
+        # pseudo-group and fills training from the largest group first, so that
+        # whole group lands in training. Re-measured on the same 2,000 QM9
+        # molecules while making this change: against a population that is 42.5%
+        # acyclic, DeepChem gives 53.2% of training and 0.0% of validation and
+        # of test, while scaffold_split_indices gives 46.4 / 25.0 / 29.5. No job in the
+        # run design reaches this branch -- every generated script passes
+        # `-d QM9` and the three experimental datasets go through the other
+        # repository -- so nothing in results/ came from the old splitter. It
+        # was a second, defective splitter living beside its own replacement,
+        # reachable by one flag.
+        train_idx, val_idx, test_idx = scaffold_split_indices(
+            smiles_list, frac_train=0.8, frac_valid=0.1, frac_test=0.1)
+
+    else:
+        # `--split` takes a free-form string and only these two branches exist.
+        # Anything else used to fall through with train_idx unbound and die
+        # further down on a NameError that named nothing.
+        raise ValueError(
+            f"--split {args.split!r} is not a split this pipeline knows: "
+            f"use 'scaffold' or 'random'.")
+
+
     # Prepare SNS
     mols_train = deque()
     ecfp_featuriser = None

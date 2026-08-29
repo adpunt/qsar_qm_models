@@ -19,6 +19,13 @@ with their fix removed:
     a real row, so the dedup hid the second reading. The fixture now differs on
     the dedup key.
 
+Since 2026-08-29 every check is also run on the UNTOUCHED tree first, and a check
+that is already red there is reported as a DEAD CHECK rather than as a guard.
+Without that pass, a test that can never pass -- one importing a function that
+was deleted, say -- prints "RED (good)" and is counted as protecting its fix. It
+runs each distinct check once and reuses the result, so the cost is roughly one
+extra pass over the checks.
+
 Add a case here whenever a fix lands. The four fields after the name are the
 file, the text that must be present, what to replace it with, and the check to
 run.
@@ -162,8 +169,12 @@ CASES = [
  # on plain MSE with no KL term.
  ("NN-beta keeps the loss its transformation wrapped",
   f"{QSAR}/models/models.py",
-  "    model.to(device)\n\n    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])",
-  "    model.to(device)\n\n    criterion = get_loss_function(loss_name, **loss_kwargs)\n\n    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])",
+  # Anchor stops BEFORE the closing bracket on purpose: the optimizer call
+  # gained a weight_decay argument on 2026-08-29 and the longer anchor stopped
+  # matching the same day, which is a guard silently switching itself off. The
+  # short form is still unique in the file and survives arguments being added.
+  "    model.to(device)\n\n    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr']",
+  "    model.to(device)\n\n    criterion = get_loss_function(loss_name, **loss_kwargs)\n\n    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr']",
   [sys.executable, f"{QSAR}/scripts/test_bnn_criterion_order.py"]),
 
  # Put the target back where the solved scale goes, in the one condition that
@@ -314,6 +325,29 @@ def run(cmd):
     return p.returncode, (p.stdout + p.stderr)
 
 
+# RED with the fix removed only means something if the check was GREEN with the
+# fix present.
+#
+# scripts/test_predictive_head.py exits 1 on an untouched tree -- it imports
+# decompose_uncertainty_sampling from utils, which was deleted and folded into
+# scripts/uncertainty_decomposition.py. It is red with the fix and red without
+# it, so the moment its anchor was repaired this harness would have printed
+# "RED (good)" for a test that cannot pass: a false all-clear, which is the one
+# failure mode the harness exists to prevent. It was only visible on 2026-08-28
+# because the anchor happened to be rotten as well.
+#
+# So each check is run on the untouched tree first. Several cases share a check,
+# so the result is cached and each distinct command runs once.
+CLEAN_RESULTS = {}
+
+
+def run_clean(cmd):
+    key = tuple(cmd)
+    if key not in CLEAN_RESULTS:
+        CLEAN_RESULTS[key] = run(cmd)
+    return CLEAN_RESULTS[key]
+
+
 # A killed run leaves a broken file behind, and it is invisible.
 #
 # `finally` puts the file back when the check fails, raises or is interrupted. It
@@ -362,6 +396,14 @@ for name, path, present, broken, cmd in CASES:
     src = open(path).read()
     if src.count(present) != 1:
         print(f"{name:52} {'SETUP FAIL':>12}  (anchor appears {src.count(present)}x)")
+        ok = False
+        continue
+    clean_code, clean_out = run_clean(cmd)
+    if clean_code != 0:
+        print(f"{name:52} {'DEAD CHECK':>12}  (already red with the fix PRESENT)")
+        print("      this check cannot pass, so it cannot prove anything about the")
+        print("      fix. Last line of its output:")
+        print(f"      {clean_out.strip().splitlines()[-1][:150] if clean_out.strip() else '(no output)'}")
         ok = False
         continue
     backup = _backup_path(path)

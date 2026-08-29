@@ -76,6 +76,22 @@ BASELINE_FILE = REPO / 'scripts' / 'model_params_baseline.json'
 BENIGN = {'random_state', 'n_jobs', 'verbose', 'verbosity', 'nthread', 'seed',
           'silent', 'device', 'n_threads', 'importance_type'}
 
+
+def _is_benign(key):
+    """A nested key is benign when its LAST component is.
+
+    ngboost 0.3.12 inherits scikit-learn's deep get_params, so it hands back
+    `Base__random_state` as ONE flat key. `'Base__random_state' not in BENIGN`
+    is true, so the seed this script itself puts on the base tree was recorded
+    as a real parameter and reported DRIFTED against a baseline written on a
+    machine whose ngboost (0.5.5) does not expand nested keys. Measured
+    2026-08-29: two of the five problems blocking preflight check 0 here were
+    that seed and a scikit-learn version difference, neither of which changes a
+    fit. A benign parameter has to stay benign wherever it appears.
+    """
+    return key in BENIGN or key.rsplit('__', 1)[-1] in BENIGN
+
+
 # Every package a model family needs. 'bayesian_torch' used to be listed here
 # and is imported by NOTHING in either pipeline -- both use torchbnn+torchhk --
 # so it reported a missing package that no job has ever needed.
@@ -94,64 +110,156 @@ BUILDERS = [
     ('svm', 'sklearn.svm', 'SVR', {}),
 ]
 
-# Real differences that are not estimator parameters. Kept short and true: an
-# item leaves this list only when it is actually fixed in both pipelines.
+# Real differences that are not estimator parameters.
+#
+# WHY EVERY ENTRY NOW CARRIES A PROBE
+# -----------------------------------
+# This list used to be prose alone, and prose goes stale the moment a fix lands.
+# On 2026-08-29 four of its eight entries described defects that had been fixed
+# weeks earlier, and preflight check 0 prints this list on EVERY run, so the last
+# thing an operator read before submitting was four untrue statements:
+#
+#   * "ECFP4 is not a circular fingerprint". It is. scripts/process_and_train.py
+#     ecfp4_fingerprint() calls GetMorganGenerator(radius=2, fpSize=2048) in
+#     Python and the Rust record carries the 256 packed bytes untouched.
+#   * "the descriptor vector is binarised at (pdv > 0)". It is 200 float32
+#     values in an 800-byte slot; the binary form was DELETED on 2026-08-28.
+#   * "Sort & Slice counts are discarded by packbits, and a uint8 cast wraps".
+#     The counts are stored as uint16 and the writer refuses anything that will
+#     not fit.
+#   * "learned embeddings are per-molecule min-max scaled into uint8". They are
+#     float32, standardised per feature on the training split.
+#
+# Each one named the laboratory pipeline as the side that was right, so the
+# report told the reader the two pipelines still disagreed about four of the six
+# representations. They agree. Worse, the four false entries buried the ones that
+# are real.
+#
+# So an entry is a dict now, and `probe` is a function that reads TODAY'S source
+# and answers "is this still true?". It returns (True, evidence) if the
+# difference is still there, (False, evidence) if it has been fixed and the entry
+# should be deleted, or None if it cannot tell. An entry with no probe prints as
+# unchecked rather than as fact. Restating is what went stale; reading does not.
+QM9_SOURCE = REPO / 'scripts' / 'process_and_train.py'
+
+
+def _kirby_file(*parts):
+    """The laboratory checkout, or None. Probes must degrade, not crash."""
+    root = os.environ.get('KIRBY_ROOT')
+    for base in ([Path(root)] if root else []) + [REPO.parent / 'KIRBy']:
+        p = base.joinpath(*parts)
+        if p.exists():
+            return p
+    return None
+
+
+def _probe_chemberta_tokenizer():
+    """One encoder, two tokenizers — measured on the laboratory side, which
+    refuses a tokenizer that merges two molecules onto one vector."""
+    lab = _kirby_file('src', 'kirby', 'representations', 'molecular.py')
+    if lab is None:
+        return None, 'laboratory checkout not found'
+    qm9 = QM9_SOURCE.read_text()
+    lab_src = lab.read_text()
+    qm9_fast = 'AutoTokenizer.from_pretrained' in qm9
+    lab_slow = 'RobertaTokenizer.from_pretrained' in lab_src
+    if qm9_fast and lab_slow:
+        return True, ('QM9 loads AutoTokenizer (resolves to RobertaTokenizerFast), '
+                      'the laboratory loads RobertaTokenizer')
+    return False, (f'QM9 AutoTokenizer={qm9_fast}, laboratory '
+                   f'RobertaTokenizer={lab_slow} — the two now load the same '
+                   f'tokenizer class, so DELETE this entry')
+
+
+def _probe_stereochemistry():
+    """The strings the two pipelines featurise are not the same strings."""
+    lab = _kirby_file('tests', 'alternative_data_noise_robustness.py')
+    if lab is None:
+        return None, 'laboratory checkout not found'
+    qm9_strips = 'Chem.MolToSmiles(mol, isomericSmiles=False)' in QM9_SOURCE.read_text()
+    lab_keeps = 'return Chem.MolToSmiles(mol, canonical=True)' in lab.read_text()
+    if qm9_strips and lab_keeps:
+        return True, ('QM9 canonicalises with isomericSmiles=False, '
+                      'standardise_smiles keeps RDKit\'s default')
+    return False, (f'QM9 strips stereochemistry={qm9_strips}, laboratory keeps '
+                   f'it={lab_keeps} — DELETE this entry if both now agree')
+
+
 MANUAL = [
-    ('ECFP4 identity — THE WORST FINDING, still open',
-     'NOT a circular fingerprint. rdk_fingerprint_mol binds RDKFingerprintMol, '
-     'a Daylight-style topological PATH fingerprint',
-     'a genuine Morgan radius-2 fingerprint',
-     'rust/src/main.rs:22,:822  vs  KIRBy/src/kirby/representations/molecular.py',
-     'paper.tex:203 describes circular substructures at radius 2, which is false '
-     'for QM9. ~254 job invocations use it. The crate ships morgan_fingerprint_mol '
-     'but hard-coded at radius 3 (ECFP6), so it is not a drop-in fix. No parameter '
-     'diff could ever have caught this — it took reading the binding.'),
-    ('PDV identity — still open',
-     "the representation named pdv is BINARISED at (pdv > 0); pdv is "
-     "the real one",
-     'PDV is continuous and standardised',
-     'scripts/process_and_train.py:377 vs :385',
-     'The merge layer must map the experimental PDV to QM9 pdv. That '
-     'pair is the ONLY genuinely comparable representation across the two studies.'),
-    ('SNS identity — still open',
-     'counts computed then discarded by packbits; also casts to uint8 BEFORE '
-     'packing, so a count that is an exact multiple of 256 records as ABSENT',
-     'raw counts, then standardised',
-     'scripts/process_and_train.py:366-371',
-     'Binary presence versus standardised counts under one name, plus a silent '
-     'data-loss path. Measured on 20,000 QM9 molecules: 21.8% of information-'
-     'bearing entries wrong.'),
-    ('Learned-embedding storage — Chat C',
-     'per-molecule min-max to uint8, never standardised',
-     'n/a — representations built independently',
-     'scripts/process_and_train.py:971-975, :828-831',
-     'Destroys cross-molecule comparability. RERUN_PLAN.md 2.8c.'),
-    ('Validation split',
-     'merged into training for seven model families',
-     'kept separate throughout',
-     'models/models.py train_rf/svm/ngboost/xgboost/lgb/gauche/conformal',
-     'Roughly a 29% difference in effective training-set size between studies.'),
-    ('Repetitions',
-     '10 independent fits per cell, each with its own seed (-b/--repetitions)',
-     'ONE fit per cell, seed pinned to 42',
-     'scripts/process_and_train.py:247 vs KIRBy constructors',
-     "Author's decision 2026-08-26: keep one fit on the experimental side. The "
-     'experimental ANOVA therefore has no estimable residual term and no '
-     'run-to-run error bar. The paper must say so.'),
-    ('Label standardisation',
-     'all models, in Rust, using the CLEAN training mean and SD since 2026-08-26',
-     'neural models only, scaler fitted on the noisy training labels',
-     'rust/src/main.rs vs KIRBy train_neural_regression',
-     'Tree and kernel models on the experimental side see raw labels. Scale-'
-     'invariant for trees; NOT for the SVM or the GP.'),
-    ('Uncertainty calibration',
-     'a temperature fitted on a carve-out of validation',
-     'absent',
-     'scripts/utils.py:323 and the models.py call sites',
-     'Decided by scripts/parity_test_calibration.py; the column the analysis '
-     'reads is model_defaults.UNCERTAINTY_DEFAULTS["primary_column"]. Whatever '
-     'it is, the figure script must NAME it — today it silently prefers the '
-     'calibrated column wherever one exists (Chat J).'),
+    # Added 2026-08-29, replacing four entries that had been fixed. Both sides
+    # load DeepChem/ChemBERTa-77M-MTR at 384 dimensions -- that half was settled
+    # on 2026-08-27 -- but they do not load the same tokenizer, and the
+    # laboratory side's own _chemberta_tokenizer_report measures what that costs.
+    {'title': 'ChemBERTa tokenizer — the encoder matches, the tokenizer does not',
+     'qm9': 'AutoTokenizer, which resolves to the FAST RobertaTokenizerFast; its '
+            'tokenizer.json carries no unknown token, so a symbol outside the '
+            'vocabulary is DELETED rather than substituted',
+     'experimental': 'RobertaTokenizer (slow), which substitutes <unk>',
+     'see': 'scripts/process_and_train.py get_chemberta_model  vs  '
+            'KIRBy/src/kirby/representations/molecular.py _chemberta_tokenizer_report',
+     'matters': 'A ChemBERTa row from one pipeline and a ChemBERTa row from the '
+                'other are the same network reading two different token streams. '
+                'The laboratory side measured it on 400 hERG molecules: '
+                'embeddings differ by up to 3.03, 14.8x the mean spread of a '
+                'coordinate, and six pairs of DISTINCT molecules collapsed onto '
+                'one byte-identical vector under the QM9 tokenizer. Which side '
+                'changes is an author decision.',
+     'probe': _probe_chemberta_tokenizer},
+
+    # Added 2026-08-29. Also an author decision: the two candidate fixes change
+    # different halves of the study.
+    {'title': 'Stereochemistry — the two pipelines featurise different strings',
+     'qm9': "Chem.MolToSmiles(mol, isomericSmiles=False), so @/@@ and E/Z are "
+            "gone before anything is computed",
+     'experimental': "standardise_smiles canonicalises with RDKit's default, so "
+                     "stereochemistry survives into every representation",
+     'see': 'scripts/process_and_train.py  vs  '
+            'KIRBy/tests/alternative_data_noise_robustness.py standardise_smiles',
+     'matters': 'The four static representations do not care -- the laboratory '
+                'side measured ECFP4, Avalon, Sort & Slice and the descriptor '
+                'vector bit-identical either way on 100 stereo-bearing '
+                'molecules. MHG-GNN does: max|diff| 40.0 against a feature '
+                'spread of 11.6, every row changed. So a cross-pipeline sentence '
+                'about a learned embedding compares a stereo-aware '
+                'featurisation with a stereo-blind one. 24.8% of the laboratory '
+                'SMILES carry stereochemistry.',
+     'probe': _probe_stereochemistry},
+
+    # The four entries below predate the probe machinery and are carried
+    # unchanged. They are NOT machine-checked: the prose is the 2026-08-26/27
+    # reading and nothing here re-reads it, which is exactly the condition that
+    # let the representation entries rot. Give each one a probe when someone next
+    # verifies it by hand.
+    # REMOVED 2026-08-29 (author's instruction). 'Validation split -- merged into
+    # training for seven model families' was closed on 2026-08-27: no model stacks
+    # validation into its training set on either side now (models/models.py,
+    # `x_val_train = x_train` in both branches). Printing it as a live difference
+    # told every reader that a fixed defect was still open.
+    {'title': 'Repetitions',
+     'qm9': '10 independent fits per cell, each with its own seed (-b/--repetitions)',
+     'experimental': 'ONE fit per cell, seed pinned to 42',
+     'see': 'scripts/process_and_train.py:247 vs KIRBy constructors',
+     'matters': "Author's decision 2026-08-26: keep one fit on the experimental "
+                'side. The experimental ANOVA therefore has no estimable '
+                'residual term and no run-to-run error bar. The paper must say so.',
+     'probe': None},
+    {'title': 'Label standardisation',
+     'qm9': 'all models, in Rust, using the CLEAN training mean and SD since 2026-08-26',
+     'experimental': 'neural models only, scaler fitted on the noisy training labels',
+     'see': 'rust/src/main.rs vs KIRBy train_neural_regression',
+     'matters': 'Tree and kernel models on the experimental side see raw labels. '
+                'Scale-invariant for trees; NOT for the SVM or the GP.',
+     'probe': None},
+    {'title': 'Uncertainty calibration',
+     'qm9': 'a temperature fitted on a carve-out of validation',
+     'experimental': 'absent',
+     'see': 'scripts/utils.py:323 and the models.py call sites',
+     'matters': 'Decided by scripts/parity_test_calibration.py; the column the '
+                'analysis reads is '
+                'model_defaults.UNCERTAINTY_DEFAULTS["primary_column"]. Whatever '
+                'it is, the figure script must NAME it — today it silently '
+                'prefers the calibrated column wherever one exists (Chat J).',
+     'probe': None},
 ]
 
 
@@ -284,7 +392,7 @@ def _effective_params(mod_name, cls_name, kwargs, fit_time=None):
         params = _constructor_params(est) or dict(kwargs)
     except Exception as exc:
         return None, f'{type(exc).__name__}: {exc}'
-    out = {k: _jsonable(v) for k, v in params.items() if k not in BENIGN}
+    out = {k: _jsonable(v) for k, v in params.items() if not _is_benign(k)}
     # A nested estimator collapses to '<DecisionTreeRegressor>' under _jsonable,
     # which would hide exactly the drift the spec pins it against: ngboost's
     # get_params() is NOT sklearn-deep, so `Base__max_depth` is not in `params`
@@ -292,10 +400,10 @@ def _effective_params(mod_name, cls_name, kwargs, fit_time=None):
     # scalars, nothing prefixed). Expand one level by hand so a library upgrade
     # moving the base learner's depth still shows up as DRIFTED.
     for name, value in list(params.items()):
-        if name in BENIGN or not hasattr(value, 'get_params'):
+        if _is_benign(name) or not hasattr(value, 'get_params'):
             continue
         for sub, sub_value in value.get_params().items():
-            if sub in BENIGN:
+            if _is_benign(f'{name}__{sub}'):
                 continue
             out[f'{name}__{sub}'] = _jsonable(sub_value)
     # Settings the spec pins that are applied at fit()/predict() time rather
@@ -388,7 +496,7 @@ def audit_effective_params(write_baseline=False):
             problems += 1
             continue
         current[spec_key] = params
-        pinned = {k for k in kwargs if k not in BENIGN}
+        pinned = {k for k in kwargs if not _is_benign(k)}
         pinned |= {f'fit__{k}' for k in fit_time}
         print(f'  pinned by the spec: {len(pinned)}   '
               f'effective parameters: {len(params)}')
@@ -618,27 +726,106 @@ def audit_environment():
 
 
 def report_manual():
+    """Print the hand-written differences, each one re-checked against the source.
+
+    Returns the number of entries whose probe says the difference is GONE. They
+    are printed as out of date rather than as fact, because this section is the
+    last thing an operator reads before submitting and it spent weeks describing
+    four fixed representation defects as open.
+    """
     print('\n' + '=' * 78)
     print('NOT VISIBLE HERE — differences that are not estimator parameters')
     print('=' * 78)
-    for title, qm9, val, src, why in MANUAL:
-        print(f'\n{title}')
-        print(f'  QM9          {qm9}')
-        print(f'  experimental {val}')
-        print(f'  see          {src}')
-        print(f'  matters      {why}')
+    stale = []
+    for item in MANUAL:
+        probe = item.get('probe')
+        if probe is None:
+            status, evidence = 'NOT RE-CHECKED', 'no probe — verify by hand before trusting'
+        else:
+            try:
+                still, evidence = probe()
+            except Exception as exc:
+                still, evidence = None, f'probe raised {type(exc).__name__}: {exc}'
+            if still is True:
+                status = 'STILL OPEN'
+            elif still is False:
+                status = 'OUT OF DATE — FIXED, DELETE THIS ENTRY'
+                stale.append(item['title'])
+            else:
+                status = 'COULD NOT CHECK'
+        print(f"\n{item['title']}")
+        print(f"  status       {status}")
+        print(f"  checked      {evidence}")
+        print(f"  QM9          {item['qm9']}")
+        print(f"  experimental {item['experimental']}")
+        print(f"  see          {item['see']}")
+        print(f"  matters      {item['matters']}")
+    if stale:
+        print(f'\n  {len(stale)} entry(ies) above describe a difference that no '
+              f'longer exists:')
+        for t in stale:
+            print(f'    - {t}')
+        print('  Delete them from MANUAL. A checklist that restates a fixed defect '
+              'is worse')
+        print('  than no checklist: it sends the reader to correct code.')
+    return len(stale)
 
 
 # ---------------------------------------------------------------------------
 # self-test
 # ---------------------------------------------------------------------------
 
+def _signal_lines(out):
+    """The audit's own findings, one per line, independent of the exit code.
+
+    The self-test used to compare `returncode` alone. Whenever the audit was red
+    for ANY unrelated reason -- a stale baseline, a library that moved, the
+    Gaussian-process segfault -- every perturbation row also came back 1, which
+    is equally consistent with "the check bit" and "it was already red", and the
+    script then printed "SELF-TEST FAILED -- this audit would not catch a real
+    drift". Measured 2026-08-29: the audit DID catch the drift, adding a
+    `PINNED learning_rate baseline=0.1 now=0.3` line and moving the count from 4
+    problems to 5. The exit code could not see it. So compare findings, not codes.
+    """
+    keep = []
+    for line in out.splitlines():
+        st = ' '.join(line.strip().split())
+        if (st.startswith('PINNED') or st.startswith('DRIFTED')
+                or st.startswith('CANNOT BUILD') or st.startswith('FAIL')
+                or st.startswith('COULD NOT IMPORT') or 'DIFFERS' in st):
+            keep.append(st)
+    return keep
+
+
+def _spec_parity_output(exp_path):
+    """Run the cross-pipeline comparison in this process and capture it."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        problems = audit_spec_parity(exp_path=exp_path, skip_experimental=False)
+    return problems, buf.getvalue()
+
+
 def self_test():
     """Prove --strict actually bites. Perturbs the spec on disk, confirms the
-    audit fails, and restores it. This is the check that fails if the fix is
-    removed — the standing rule in RERUN_PLAN.md section 13.2."""
+    audit REPORTS the change, and restores it. This is the check that fails if
+    the fix is removed — the standing rule in RERUN_PLAN.md section 13.2.
+
+    Two things changed on 2026-08-29, both because the old version could not tell
+    a working check from a broken environment:
+
+      * it judges the perturbation rows on the FINDINGS the audit prints, not on
+        the exit code, so a pre-existing problem no longer makes them vacuous;
+      * it exercises the cross-pipeline comparison. Every run used to pass
+        --skip-experimental, so the one comparison this whole script exists for
+        -- both pipelines resolving the same spec -- was never tested, while
+        preflight.sh check 0, the gate that actually protects the laboratory run,
+        always runs WITH it.
+    """
     print('=' * 78)
-    print('SELF-TEST — does --strict fail when the spec is perturbed?')
+    print('SELF-TEST — does --strict report a perturbed spec, and does the')
+    print('            cross-pipeline comparison bite?')
     print('=' * 78)
     spec_file = REPO / 'models' / 'model_defaults.py'
 
@@ -670,30 +857,50 @@ def self_test():
             [sys.executable, str(Path(__file__).resolve()), '--strict',
              '--skip-experimental'],
             capture_output=True, text=True, cwd=str(REPO))
-        print(f'  {label:38s} exit {r.returncode}')
-        return r.returncode
+        lines = _signal_lines(r.stdout)
+        print(f'  {label:38s} exit {r.returncode}   {len(lines)} finding(s)')
+        return r.returncode, lines
+
+    def perturbation(label, before, after, must_mention, baseline):
+        """A perturbation passes when the audit reports something NEW that names
+        the parameter that moved."""
+        perturbed = original.replace(before, after, 1)
+        if perturbed == original:
+            failures.append(f'could not perturb the spec ({before!r} is not in '
+                            f'it) — the self-test is not testing anything')
+            return
+        spec_file.write_text(perturbed)
+        try:
+            rc, lines = run_strict(label)
+        finally:
+            spec_file.write_text(original)
+        new = [l for l in lines if l not in baseline]
+        named = [l for l in new if must_mention in l]
+        for l in named:
+            print(f'      reported: {l}')
+        if not named:
+            failures.append(f'{label}: the audit reported nothing new naming '
+                            f'{must_mention!r} — it did not notice the change')
+        elif rc == 0:
+            failures.append(f'{label}: the audit reported the change but still '
+                            f'exited 0')
 
     try:
-        rc_clean = run_strict('unmodified spec')
+        rc_clean, baseline = run_strict('unmodified spec')
         if rc_clean != 0:
-            failures.append('the unmodified spec does not pass --strict')
+            print('  NOTE  the unmodified spec does not pass --strict in this')
+            print('        environment. That is a fact about the environment, not')
+            print('        about this test: the rows below are judged on the')
+            print('        findings the audit ADDS, so they are still meaningful.')
+            for l in baseline:
+                print(f'        pre-existing: {l}')
 
-        perturbed = original.replace("'learning_rate': 0.1,", "'learning_rate': 0.3,", 1)
-        if perturbed == original:
-            failures.append('could not perturb the spec — the self-test is not '
-                            'testing anything')
-        else:
-            spec_file.write_text(perturbed)
-            if run_strict('XGBoost learning rate 0.1 -> 0.3') == 0:
-                failures.append('--strict PASSED with a changed learning rate')
-            spec_file.write_text(original)
-
-        perturbed = original.replace("'n_estimators': 300,", "'n_estimators': 100,", 1)
-        if perturbed != original:
-            spec_file.write_text(perturbed)
-            if run_strict('quantile forest 300 -> 100 trees') == 0:
-                failures.append('--strict PASSED with a changed tree count')
-            spec_file.write_text(original)
+        perturbation('XGBoost learning rate 0.1 -> 0.3',
+                     "'learning_rate': 0.1,", "'learning_rate': 0.3,",
+                     'learning_rate', baseline)
+        perturbation('quantile forest 300 -> 100 trees',
+                     "'n_estimators': 300,", "'n_estimators': 100,",
+                     'n_estimators', baseline)
     finally:
         spec_file.write_text(original)
         assert spec_file.read_text() == original, 'FAILED TO RESTORE THE SPEC'
@@ -701,14 +908,51 @@ def self_test():
         fcntl.flock(lock_handle, fcntl.LOCK_UN)
         lock_handle.close()
 
+    # ---- the cross-pipeline half, which nothing used to test ----------------
+    print('\n  cross-pipeline comparison (NOT --skip-experimental)')
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        stub = Path(tmp) / 'alternative_data_noise_robustness.py'
+        stub.write_text(
+            '# A stand-in experimental pipeline that resolved a DIFFERENT copy of\n'
+            '# model_defaults.py. This is the failure the comparison exists to\n'
+            '# catch: two checkouts on one host, one of them stale.\n'
+            'class _Spec:\n'
+            '    @staticmethod\n'
+            '    def spec_hash():\n'
+            "        return 'notthehash'\n"
+            'MODEL_SPEC = _Spec()\n')
+        problems, out = _spec_parity_output(str(stub))
+        bit = problems >= 1 and 'DIFFERS' in out
+        print(f'  {"a mismatched experimental spec is caught":38s} '
+              f'{problems} problem(s)  {"OK" if bit else "NOT CAUGHT"}')
+        if not bit:
+            failures.append('the cross-pipeline comparison did NOT flag an '
+                            'experimental pipeline holding a different spec')
+
+    mod, where = _load_experimental_module(None)
+    if mod is None:
+        print(f'  {"the real experimental pipeline":38s} NOT PRESENT — '
+              f'this run does not prove it matches')
+        print(f'        ({where})')
+    else:
+        problems, out = _spec_parity_output(None)
+        agrees = problems == 0 and 'MATCH' in out
+        print(f'  {"the real experimental pipeline agrees":38s} '
+              f'{problems} problem(s)  {"OK" if agrees else "MISMATCH"}')
+        if not agrees:
+            failures.append('the real experimental pipeline does not resolve the '
+                            'same spec as this one — see --strict for the detail')
+
     print()
     if failures:
         for f in failures:
             print(f'  FAIL  {f}')
-        print('\nSELF-TEST FAILED — this audit would not catch a real drift')
+        print('\nSELF-TEST FAILED — one of the checks above did not report a '
+              'change it should have')
         return 1
-    print('SELF-TEST PASSED — --strict fails on a changed parameter, '
-          'passes when clean')
+    print('SELF-TEST PASSED — the audit reports a perturbed parameter and a '
+          'mismatched pipeline')
     return 0
 
 
@@ -802,10 +1046,11 @@ def main():
     problems += audit_effective_params(write_baseline=args.write_baseline)
     problems += audit_assumptions()
     missing = audit_environment()
-    report_manual()
+    stale = report_manual()
 
     print('\n' + '=' * 78)
-    print(f'SUMMARY: {problems} problem(s), {missing} missing package(s)')
+    print(f'SUMMARY: {problems} problem(s), {missing} missing package(s)'
+          + (f', {stale} out-of-date manual entry(ies)' if stale else ''))
     print('=' * 78)
     if args.strict and (problems or missing):
         print('STRICT: refusing to pass. Do not submit jobs from this '

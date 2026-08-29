@@ -1346,6 +1346,34 @@ class VBLLLoss(nn.Module):
         return nn.MSELoss()(pred, target)
 
 
+def widen_output_head(model, n_outputs, loss_name):
+    """Widen a network's output layer, or STOP.
+
+    Two losses need more than one output: `heteroscedastic` needs the value and
+    its own log variance, `evidential` needs the four Normal-Inverse-Gamma
+    parameters. The layer is called `fc3` on the DNN, `fc_out` on some MLP
+    variants and `output_layer` on others.
+
+    This used to be `if hasattr(...) elif hasattr(...)` with NO else, so a class
+    with none of those names FELL THROUGH IN SILENCE. The network then kept a
+    one-column head while being fitted by a two-column loss: the subtraction
+    broadcasts instead of raising, both outputs get regressed onto the label,
+    and the variance column that reaches the file means nothing. Nothing in the
+    output says it happened (RERUN_PLAN.md 5.5a point 3). Found for real on
+    2026-08-28: `MLPRegressor` has `output_layer`, not `fc_out`.
+    """
+    for attr in ('fc3', 'fc_out', 'output_layer'):
+        head = getattr(model, attr, None)
+        if isinstance(head, nn.Linear):
+            setattr(model, attr, nn.Linear(head.in_features, n_outputs))
+            return model
+    raise RuntimeError(
+        f"--loss {loss_name} needs a {n_outputs}-output head and "
+        f"{type(model).__name__} has no output layer under any name this knows "
+        f"(fc3, fc_out, output_layer). Fitting it anyway would train every "
+        f"output onto the label and write a variance column that means nothing.")
+
+
 def sample_network_split(model, x_tensor, num_samples, loss_name):
     """The stochastic-pass split for a Bayesian or variational network.
 
@@ -2905,12 +2933,30 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
         tolerance = NEURAL_DEFAULTS['training']['improvement_tolerance']
     restore_best = NEURAL_DEFAULTS['training']['restore_best_weights']
 
+    # The shared spec names an optimiser and every caller here builds Adam
+    # regardless. The experimental runner refuses the mismatch by name
+    # (KIRBy alternative_data_noise_robustness.py, "A spec key nothing reads is
+    # a guard that cannot fire"), so naming a different optimiser in
+    # model_defaults.py would have changed that side alone while the spec_hash
+    # stamped on every QM9 row asserted both had moved. Checked once, here,
+    # because every neural trainer on this side goes through train_nn.
+    if NEURAL_DEFAULTS['training']['optimizer'] != 'adam':
+        raise ValueError(
+            f"the shared spec asks for "
+            f"optimizer={NEURAL_DEFAULTS['training']['optimizer']!r}; only "
+            f"'adam' is built on this side. A spec key nothing reads is a guard "
+            f"that cannot fire (RERUN_PLAN.md 2.13).")
+
     model.to(device)
     best_loss = float('inf')
     best_state = None
     best_epoch = -1
     epochs_no_improve = 0
-    
+    # Whether this fit ever had a validation molecule to stop on. `n_val_batches`
+    # is rebuilt every epoch and does not exist at all when args.epochs is 0, so
+    # the divergence guard below cannot be written in terms of it.
+    had_validation = False
+
     train_losses = []
     val_losses = []
     
@@ -2938,14 +2984,17 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
             
             loss.backward()
             optimizer.step()
-            train_loss += loss.item()
-            n_train_batches += 1
+            # Weighted by molecule, matching the validation loss below, so the
+            # two curves in save_per_epoch_metrics stay on one scale.
+            train_loss += loss.item() * len(X_batch)
+            n_train_batches += len(X_batch)
             batch_idx += len(X_batch)
 
-        # Both losses are reduced the same way. The validation loss became a
-        # mean so the early-stopping threshold would stop depending on the
-        # batch count; leaving the training loss as a sum would put the two
-        # curves in save_per_epoch_metrics on different scales.
+        # Both losses are reduced the same way, and both are now means over
+        # MOLECULES. The validation loss became a mean so the early-stopping
+        # threshold would stop depending on the batch count; leaving the training
+        # loss as a sum would put the two curves in save_per_epoch_metrics on
+        # different scales.
         if NEURAL_DEFAULTS['training']['val_loss_reduction'] == 'mean' and n_train_batches:
             train_loss /= n_train_batches
 
@@ -2966,23 +3015,47 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
                 else:
                     loss = criterion(val_outputs, y_val)
                 
-                val_loss += loss.item()
-                n_val_batches += 1
+                # WEIGHTED BY MOLECULE, not by batch. Settled by the author
+                # 2026-08-29, on both halves of the study at once.
+                #
+                # The loss inside a batch is already a mean over that batch, so
+                # adding the batches up and dividing by their COUNT gives every
+                # batch the same weight however many molecules it holds. The last
+                # batch is short whenever the validation count is not a multiple
+                # of the batch size, and its molecules then count for more than
+                # the others. At 32 to a batch and 1,000 validation molecules
+                # there are 31 full batches and one of 8, and those 8 molecules
+                # carry a thirty-second of the stopping decision rather than a
+                # hundred-and-twenty-fifth.
+                #
+                # The experimental runner carries the identical correction. It is
+                # both halves or neither.
+                val_loss += loss.item() * len(y_val)
+                n_val_batches += len(y_val)
                 batch_idx += len(X_val)
 
-        # Mean, not sum: a summed loss makes the improvement threshold depend on
-        # how many validation batches there happen to be.
+        # Mean over MOLECULES, not sum: a summed loss makes the improvement
+        # threshold depend on how many validation molecules there happen to be.
         if NEURAL_DEFAULTS['training']['val_loss_reduction'] == 'mean' and n_val_batches:
             val_loss /= n_val_batches
+        if n_val_batches:
+            had_validation = True
 
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
         # Early stopping check. With no validation set there is nothing to stop
         # on, so train the full epoch budget rather than stopping on a constant.
+        #
+        # The finiteness test is explicit because `nan < inf` is False and so is
+        # `nan < anything`: a fit that diverged simply never improved, best_state
+        # stayed None, the patience window ran out, and the caller went on to
+        # predict with the LAST epoch's weights. It reads as an ordinary early
+        # stop in the log. The experimental runner has guarded this since
+        # 2026-08-27; this side had not.
         if n_val_batches == 0:
             pass
-        elif val_loss < best_loss - tolerance:
+        elif np.isfinite(val_loss) and val_loss < best_loss - tolerance:
             best_loss = val_loss
             best_epoch = epoch
             epochs_no_improve = 0
@@ -3001,7 +3074,24 @@ def train_nn(model, train_loader, val_loader, criterion, optimizer, device, args
     if restore_best and best_state is not None:
         model.load_state_dict(best_state)
         print(f"Restored best weights from epoch {best_epoch} (val loss {best_loss:.6f})")
-    
+    elif restore_best and had_validation:
+        # There is no best epoch: the validation loss was never finite, so the
+        # fit diverged. Returning here left the LAST epoch's weights in the
+        # model and the caller carried on -- metrics, the results row and, for
+        # a Bayesian model, a hundred stochastic passes drawn from NaN weights.
+        # Cells that go missing this way are not missing at random: it is the
+        # widest representations that diverge, so any ANOVA or Wilcoxon over the
+        # model x representation grid would be computed on a biased subset.
+        # Stopping makes it a reported failed cell and a non-zero job exit
+        # (process_and_train.py records it in failed_pairs) instead of a row.
+        # Same failure, same treatment as the experimental runner, which raises
+        # RunIntegrityError here (RERUN_PLAN.md 2.13).
+        raise RuntimeError(
+            f"{model_name} / {rep} at noise level {s}: the validation loss was "
+            f"never finite and never improved in {len(val_losses)} epochs, so "
+            f"there is no epoch to restore. The fit diverged; it must not be "
+            f"recorded as a normal row.")
+
     if args.save_per_epoch_metrics:
         save_per_epoch_metrics(
             train_losses=train_losses,
@@ -3092,27 +3182,37 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     # STEP 1: Split validation data if Bayesian
     is_bayesian = args.bayesian_transformation is not None
     
+    # EVERY neural model early-stops on the WHOLE validation split.
+    #
+    # This used to hand the Bayesian and variational models `x_val[:len(x_val)//2]`
+    # and keep the other half for the temperature fit, while `dnn` and `mlp` --
+    # which carry neither --bayesian-transformation nor -u -- got all of it. At
+    # -n 10000 on the 80/10/10 scaffold split that is 500 early-stopping
+    # molecules against 1000, split exactly along the deterministic/Bayesian
+    # line, which is the line the paper's NN-vs-BNN comparison is drawn on: part
+    # of any robustness gap was how noisy the stopping decision was rather than
+    # a property of the model. It was also a POSITIONAL half of a block that
+    # scaffold_split_indices returns sorted by dataset index, so a systematic
+    # subsample, not a random one -- the same pathology the experimental runner
+    # found and fixed in its own validation carve. Every neural model on the
+    # experimental side has always used its whole carve, Bayesian or not.
+    #
+    # The calibration molecules are still the second half. They are not held out
+    # from early stopping any more, and that is a smaller thing than it looks:
+    # the whole of x_val is held out from the FIT either way, and the only
+    # column the temperature touches is y_pred_std_calibrated, which
+    # model_defaults.py's primary_column settles at 'raw' and no figure or
+    # statistic reads. Carving the calibration set out of the TRAINING block by
+    # scaffold group instead would restore disjointness; that is a design change
+    # and is left to the author.
     if is_bayesian and args.uncertainty:
         split_idx = len(x_val) // 2
-        x_val_train = x_val[:split_idx]
-        y_val_train = y_val[:split_idx]
         x_val_cal = x_val[split_idx:]
         y_val_cal = y_val[split_idx:]
-        
-        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
-        
-        # Split domain labels too if they exist
-        if domain_labels_val is not None:
-            domain_labels_val_train = domain_labels_val[:split_idx]
-            domain_labels_val_cal = domain_labels_val[split_idx:]
-        else:
-            domain_labels_val_train = None
-            domain_labels_val_cal = None
-    else:
-        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-        domain_labels_val_train = domain_labels_val
+
+    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    domain_labels_val_train = domain_labels_val
 
     val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
@@ -3191,7 +3291,16 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         model_name = "bnn_full_variational" + ("_hetero" if _het else "")
         criterion = VBLLLoss(model, n_data=len(x_train))
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    # weight_decay comes from the shared spec, like lr does. Every Adam in this
+    # file used to take lr from model_defaults.py and leave weight_decay at
+    # torch's 0, while the experimental runner passed the spec's value. Both
+    # keys sit inside the hashed `neural` block, so setting a non-zero decay
+    # would have moved the experimental side, left QM9 alone, and stamped a
+    # spec_hash on every QM9 row certifying a change that did not happen
+    # (RERUN_PLAN.md 2.13). Nothing moves today: the spec says 0.0. The matching
+    # `optimizer` key is checked once, in train_nn.
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
 
     # STEP 5: Train with appropriate domain labels
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
@@ -3206,18 +3315,19 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         
         num_samples = NEURAL_DEFAULTS['training']['mc_passes']
 
-        # Get calibration predictions
+        # THE TEMPERATURE IS FITTED AGAINST THE QUANTITY IT IS THEN MULTIPLIED
+        # ONTO. This loop kept only the predicted MEANS, so the spread it fitted
+        # against was `preds_cal.std(axis=0)` -- the epistemic term alone -- and
+        # three lines later the multiplier was applied to sqrt(alea + epis),
+        # which for a variational model is strictly larger. Measured on a fitted
+        # VBLL model in this file's probe: the applied spread was 2.55x the
+        # fitted one, so the calibrated column was not calibrated for anything.
+        # Using the shared routine puts the calibration split and the test split
+        # through the same code, which is why the routine exists.
         x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
-        preds_cal = []
-        with torch.no_grad():
-            for _ in range(num_samples):
-                output = model(x_val_cal_tensor).cpu().numpy()
-                output, _ = split_predictive_head(output, loss_name)
-                preds_cal.append(output)
-
-        preds_cal = np.stack(preds_cal, axis=0)
-        y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
-        y_cal_pred_std = preds_cal.std(axis=0).flatten()
+        y_cal_pred_mean, _a_cal, _e_cal, total_var_cal = sample_network_split(
+            model, x_val_cal_tensor, num_samples, loss_name)
+        y_cal_pred_std = np.sqrt(np.asarray(total_var_cal, dtype=float))
 
         # Find optimal temperature
         temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
@@ -3326,7 +3436,8 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
         ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
         loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
         es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
-        opt = torch.optim.Adam(m.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+        opt = torch.optim.Adam(m.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                               weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
         train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
                  file_no, 'oof_inner', rep)
         return m
@@ -3451,7 +3562,8 @@ def train_bnn_last_standalone(x_train, y_train, x_test, y_test, x_val, y_val,
                         prior_sigma=BAYESIAN_DEFAULTS['bnn_prior_sigma'])
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'],
+                                 weight_decay=_t['weight_decay'])
     criterion = bnn_elbo_criterion(nn.MSELoss(), model, len(x_train))
     
     # Tensors - Y is shape (N,) not (N, 1)
@@ -3634,27 +3746,18 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     
     is_bayesian = args.bayesian_transformation is not None
     
+    # The whole validation split, for every model. See train_dnn_model for what
+    # halving it cost and why the calibration molecules are no longer carved out
+    # of the early-stopping set.
     if is_bayesian and args.uncertainty:
         split_idx = len(x_val) // 2
-        x_val_train = x_val[:split_idx]
-        y_val_train = y_val[:split_idx]
         x_val_cal = x_val[split_idx:]
         y_val_cal = y_val[split_idx:]
-        
-        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
-        
-        if domain_labels_val is not None:
-            domain_labels_val_train = domain_labels_val[:split_idx]
-            domain_labels_val_cal = domain_labels_val[split_idx:]
-        else:
-            domain_labels_val_train = None
-            domain_labels_val_cal = None
-    else:
-        x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-        domain_labels_val_train = domain_labels_val
-    
+
+    x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+    domain_labels_val_train = domain_labels_val
+
     train_loader = TorchDataLoader(TensorDataset(x_train_tensor, y_train_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
     val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
     
@@ -3695,7 +3798,8 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
     criterion = get_loss_function(loss_name, **loss_kwargs)
     if args.bayesian_transformation in ("variational", "full_variational"):
         criterion = VBLLLoss(model, n_data=len(x_train))
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
              domain_labels_train=domain_labels_train if needs_domains else None,
@@ -3710,17 +3814,13 @@ def train_flexible_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, arg
         num_samples = NEURAL_DEFAULTS['training']['mc_passes']
         
         if args.uncertainty:
+            # Fitted against the same quantity it is multiplied onto below. See
+            # train_dnn_model: this loop kept the means only, so the temperature
+            # was fitted for the spread over passes and applied to the total.
             x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
-            preds_cal = []
-            with torch.no_grad():
-                for _ in range(num_samples):
-                    output = model(x_val_cal_tensor).cpu().numpy()
-                    output, _ = split_predictive_head(output, loss_name)
-                    preds_cal.append(output)
-
-            preds_cal = np.stack(preds_cal, axis=0)
-            y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
-            y_cal_pred_std = preds_cal.std(axis=0).flatten()
+            y_cal_pred_mean, _a_cal, _e_cal, total_var_cal = sample_network_split(
+                model, x_val_cal_tensor, num_samples, loss_name)
+            y_cal_pred_std = np.sqrt(np.asarray(total_var_cal, dtype=float))
 
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
 
@@ -3855,25 +3955,15 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     # STEP 1: Split validation data if Bayesian
     is_bayesian = args.bayesian_transformation is not None
     
+    # The whole validation split, for every model. See train_dnn_model for what
+    # halving it cost -- NN-beta got 1000 early-stopping molecules and VBLL-beta
+    # got 500, which is the pair the paper's Wilcoxon test compares.
     if is_bayesian and args.uncertainty and x_val is not None and y_val is not None:
         split_idx = len(x_val) // 2
-        x_val_train = x_val[:split_idx]
-        y_val_train = y_val[:split_idx]
         x_val_cal = x_val[split_idx:]
         y_val_cal = y_val[split_idx:]
-        
-        x_val_tensor = torch.tensor(x_val_train, dtype=torch.float32).to(device)
-        y_val_tensor = torch.tensor(y_val_train, dtype=torch.float32).view(-1, 1).to(device)
-        
-        if domain_labels_val is not None:
-            domain_labels_val_train = domain_labels_val[:split_idx]
-            domain_labels_val_cal = domain_labels_val[split_idx:]
-        else:
-            domain_labels_val_train = None
-            domain_labels_val_cal = None
-            
-        val_loader = TorchDataLoader(TensorDataset(x_val_tensor, y_val_tensor), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
-    elif x_val is not None and y_val is not None:
+
+    if x_val is not None and y_val is not None:
         x_val_tensor = torch.tensor(x_val, dtype=torch.float32).to(device)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
         domain_labels_val_train = domain_labels_val
@@ -3897,17 +3987,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     
     # Modify output layer for heteroscedastic or evidential losses if needed
     if loss_name == 'heteroscedastic':
-        # Need to modify the last layer to output 2 values (mean and variance)
-        if hasattr(model, 'fc_out'):
-            model.fc_out = nn.Linear(model.fc_out.in_features, 2)
-        elif hasattr(model, 'output_layer'):
-            model.output_layer = nn.Linear(model.output_layer.in_features, 2)
+        model = widen_output_head(model, 2, loss_name)
     elif loss_name == 'evidential':
-        # Need to modify the last layer to output 4 values
-        if hasattr(model, 'fc_out'):
-            model.fc_out = nn.Linear(model.fc_out.in_features, 4)
-        elif hasattr(model, 'output_layer'):
-            model.output_layer = nn.Linear(model.output_layer.in_features, 4)
+        model = widen_output_head(model, 4, loss_name)
 
     # The base loss is built HERE, before the Bayesian transformation, because
     # the transformation wraps it. It used to be built afterwards, which broke
@@ -3951,7 +4033,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
 
     model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
 
     # Train with domain labels if needed
     train_nn(model, train_loader, val_loader, criterion, optimizer, device, args, s, iteration, file_no, model_name, rep,
@@ -3968,18 +4051,13 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         num_samples = NEURAL_DEFAULTS['training']['mc_passes']
         
         if args.uncertainty:
-            # Get calibration predictions
+            # Fitted against the same quantity it is multiplied onto below. See
+            # train_dnn_model: this loop kept the means only, so the temperature
+            # was fitted for the spread over passes and applied to the total.
             x_val_cal_tensor = torch.tensor(x_val_cal, dtype=torch.float32).to(device)
-            preds_cal = []
-            with torch.no_grad():
-                for _ in range(num_samples):
-                    output = model(x_val_cal_tensor).cpu().numpy()
-                    output, _ = split_predictive_head(output, loss_name)
-                    preds_cal.append(output)
-
-            preds_cal = np.stack(preds_cal, axis=0)
-            y_cal_pred_mean = preds_cal.mean(axis=0).flatten()
-            y_cal_pred_std = preds_cal.std(axis=0).flatten()
+            y_cal_pred_mean, _a_cal, _e_cal, total_var_cal = sample_network_split(
+                model, x_val_cal_tensor, num_samples, loss_name)
+            y_cal_pred_std = np.sqrt(np.asarray(total_var_cal, dtype=float))
 
             temperature = calibrate_uncertainty_simple(y_cal_pred_mean, y_cal_pred_std, y_val_cal)
 
@@ -4044,15 +4122,9 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
             m = MTLRegressionModel(input_size=n_features, hidden_size=128, num_tasks=1)
 
         if loss_name == 'heteroscedastic':
-            if hasattr(m, 'fc_out'):
-                m.fc_out = nn.Linear(m.fc_out.in_features, 2)
-            elif hasattr(m, 'output_layer'):
-                m.output_layer = nn.Linear(m.output_layer.in_features, 2)
+            m = widen_output_head(m, 2, loss_name)
         elif loss_name == 'evidential':
-            if hasattr(m, 'fc_out'):
-                m.fc_out = nn.Linear(m.fc_out.in_features, 4)
-            elif hasattr(m, 'output_layer'):
-                m.output_layer = nn.Linear(m.output_layer.in_features, 4)
+            m = widen_output_head(m, 4, loss_name)
 
         if args.bayesian_transformation == "full":
             m = apply_bayesian_transformation(m)
@@ -4084,7 +4156,8 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
         ye = torch.tensor(np.asarray(y_es), dtype=torch.float32).view(-1, 1).to(device)
         loader = TorchDataLoader(TensorDataset(xt, yt), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
         es_loader = TorchDataLoader(TensorDataset(xe, ye), batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=False)
-        opt = torch.optim.Adam(m.parameters(), lr=params['lr'])
+        opt = torch.optim.Adam(m.parameters(), lr=params['lr'],
+                               weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
         train_nn(m, loader, es_loader, crit, opt, device, args, s, iteration,
                  file_no, 'oof_inner', rep)
         return m
@@ -4206,7 +4279,8 @@ def train_rnn_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     criterion = nn.MSELoss()
 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
 
     trainer = ModelTrainer(model, lr=params['lr'])
     trainer.train(train_loader, val_loader, args, s, iteration, file_no, 'rnn', rep)
@@ -4387,7 +4461,8 @@ def train_gnn(model_type, train_loader, test_loader, val_loader, args, s,
     _t = NEURAL_DEFAULTS['training']
 
     # Training
-    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=_t['lr'],
+                                 weight_decay=_t['weight_decay'])
     criterion = nn.MSELoss()
 
     def _batch_targets(batch):
@@ -5662,7 +5737,8 @@ def train_meta_weight_net(
     ).to(device)
     
     # Optimizers
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     meta_optimizer = torch.optim.Adam(meta_net.parameters(), lr=meta_lr)
     
     # Loss functions
@@ -6187,7 +6263,8 @@ def train_early_learning_regularization(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     
     # Loss functions
     criterion = get_loss_function(loss_name, **loss_kwargs)
@@ -6432,7 +6509,8 @@ def train_multistage_cleaning(
         ).to(device)
         model.fc3 = nn.Linear(hidden_size2, output_size)
         
-        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                     weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
         criterion = get_loss_function(loss_name, **loss_kwargs)
         
         # Train on current clean set
@@ -6600,7 +6678,8 @@ def train_uncertainty_curriculum(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # Prepare data
@@ -6814,7 +6893,8 @@ def train_confident_learning(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # Train initial model
@@ -7064,7 +7144,8 @@ def train_small_loss_trick(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     tracking_criterion = nn.MSELoss(reduction='none')  # For sample selection
     
@@ -7623,7 +7704,8 @@ def train_contrast_to_divide(
     if output_size > 1:
         model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     tracking_criterion = nn.MSELoss(reduction='none')
     
@@ -7947,7 +8029,8 @@ def train_distance_based_selection(
         if output_size > 1:
             model.fc3 = nn.Linear(hidden_size2, output_size)
         
-        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                     weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
         criterion = get_loss_function(loss_name, **loss_kwargs)
         tracking_criterion = nn.MSELoss(reduction='none')
         
@@ -8781,7 +8864,8 @@ def train_conformal_heteroscedastic(
     ).to(device)
     model.fc3 = nn.Linear(hidden_size2, 2)  # mean + log_var
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function('heteroscedastic')
     
     # Phase 1: Train heteroscedastic model
@@ -9091,7 +9175,8 @@ def train_mixup(
         if output_size > 1:
             model.fc3 = nn.Linear(hidden_size2, output_size)
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'])
+    optimizer = torch.optim.Adam(model.parameters(), lr=NEURAL_DEFAULTS['training']['lr'],
+                                 weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     criterion = get_loss_function(loss_name, **loss_kwargs)
     
     # For uncertainty-aware mixup, we need initial model

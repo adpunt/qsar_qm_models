@@ -528,9 +528,122 @@ def fit_ngboost(x_fit, y_fit, x_score, seed=0):
     return np.asarray(dist.loc, dtype=float), alea, epis
 
 
+def fit_ngboost_ensemble(x_fit, y_fit, x_score, seed=0, n_seeds=3):
+    """NGBoost under several seeds, which is the only model-uncertainty axis a
+    single-fit distributional model has.
+
+    Duan et al. give the per-input distribution, which is the aleatoric term.
+    The literature's route to an epistemic term is an OUTER ENSEMBLE: fit the
+    whole model again under a different seed and take the variance of the means
+    (`ALEA_EPIS_LITERATURE.md`, the NGBoost row). It costs one fit per seed,
+    which is why nothing had paid for it.
+    """
+    from ngboost import NGBRegressor
+    from ngboost.distns import Normal
+    from ngboost.scores import MLE
+    from model_defaults import SKLEARN_DEFAULTS
+    from uncertainty_decomposition import decompose_seed_ensemble
+
+    p = dict(SKLEARN_DEFAULTS['ngboost'])
+    means, variances = [], []
+    for k in range(n_seeds):
+        m = NGBRegressor(Dist=Normal, Score=MLE, verbose=False,
+                         random_state=seed * 100 + k,
+                         natural_gradient=p['natural_gradient'],
+                         n_estimators=p['n_estimators'],
+                         learning_rate=p['learning_rate'])
+        m.fit(x_fit, y_fit)
+        dist = m.pred_dist(x_score)
+        means.append(np.asarray(dist.loc, dtype=float))
+        variances.append(np.asarray(dist.scale, dtype=float) ** 2)
+    mean_by_seed = np.stack(means, axis=0)
+    var_by_seed = np.stack(variances, axis=0)
+    alea, epis, _ = decompose_seed_ensemble(mean_by_seed, var_by_seed)
+    return mean_by_seed.mean(axis=0), alea, epis
+
+
+def fit_bnn_mve(x_fit, y_fit, x_score, arch='dnn', seed=0, epochs=150,
+                passes=50):
+    """A Bayesian network with a VARIANCE OUTPUT HEAD -- Kendall & Gal.
+
+    This is the case the literature actually holds up: one network predicts both
+    the value and its own observation noise, trained with the heteroscedastic
+    likelihood, and the model term comes from sampling the weights. The two
+    halves come from two different mechanisms, which is why they can separate.
+
+    Every piece is already in models.py behind `--loss heteroscedastic`: the
+    head is widened to two outputs, the loss exists, and `split_predictive_head`
+    knows the transform that was fitted. Nothing here is new maths; it is the
+    configuration nobody had ever asked for.
+    """
+    import torch
+    from models import (DNNRegressionModel, MLPRegressor, sample_network_split,
+                        apply_bayesian_transformation, bnn_elbo_criterion)
+    from model_defaults import NEURAL_DEFAULTS, gp_fit_threads
+    from loss_functions import get_loss_function
+
+    torch.manual_seed(seed)
+    xf, xs = _standardise(x_fit, x_score)
+    xt = torch.tensor(xf, dtype=torch.float32)
+    yt = torch.tensor(y_fit, dtype=torch.float32).view(-1, 1)
+    xst = torch.tensor(xs, dtype=torch.float32)
+
+    if arch == 'mlp':
+        net = MLPRegressor(
+            input_size=xt.shape[1],
+            hidden_size=NEURAL_DEFAULTS['mlp']['hidden_size'],
+            num_hidden_layers=NEURAL_DEFAULTS['mlp']['num_hidden_layers'],
+            dropout_rate=NEURAL_DEFAULTS['mlp']['dropout_rate'])
+    else:
+        h1, h2 = NEURAL_DEFAULTS['dnn']['hidden_sizes']
+        net = DNNRegressionModel(input_size=xt.shape[1], hidden_size1=h1,
+                                 hidden_size2=h2)
+
+    # Widen the output to two: the value and its own log variance. The names
+    # differ by class -- the DNN calls it fc3, the MLP calls it output_layer --
+    # and models.py checks for `fc_out` then `output_layer`. It falls through
+    # SILENTLY when a class has neither, which leaves a one-column head being
+    # fitted by a two-column loss (RERUN_PLAN.md 5.5a point 3). Raise instead.
+    for attr in ('fc3', 'fc_out', 'output_layer'):
+        head = getattr(net, attr, None)
+        if isinstance(head, torch.nn.Linear):
+            setattr(net, attr, torch.nn.Linear(head.in_features, 2))
+            break
+    else:
+        raise DecompositionControlsError(
+            f"{type(net).__name__} has no output layer this recognises, so the "
+            f"variance head cannot be attached. A one-column head fitted by a "
+            f"two-column loss trains both outputs onto the label and the "
+            f"variance column means nothing.")
+
+    net = apply_bayesian_transformation(net)
+    crit = bnn_elbo_criterion(get_loss_function('heteroscedastic'), net,
+                              len(y_fit))
+    opt = torch.optim.Adam(net.parameters(),
+                           lr=NEURAL_DEFAULTS['training']['lr'])
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(xt, yt),
+        batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
+
+    with gp_fit_threads():
+        net.train()
+        for _ in range(epochs):
+            for bx, by in loader:
+                opt.zero_grad()
+                crit(net(bx), by).backward()
+                opt.step()
+        net.eval()
+        mean, alea, epis, _t = sample_network_split(net, xst, passes,
+                                                    'heteroscedastic')
+    return mean, alea, epis
+
+
 MODELS = {
     'rf':                   lambda a, b, c, s: fit_rf(a, b, c, 'rf', s),
     'ngboost':              lambda a, b, c, s: fit_ngboost(a, b, c, s),
+    'ngboost_ensemble':     lambda a, b, c, s: fit_ngboost_ensemble(a, b, c, s),
+    'dnn_bnn_full_mve':     lambda a, b, c, s: fit_bnn_mve(a, b, c, 'dnn', s),
+    'mlp_bnn_full_mve':     lambda a, b, c, s: fit_bnn_mve(a, b, c, 'mlp', s),
     'qrf':                  lambda a, b, c, s: fit_rf(a, b, c, 'qrf', s),
     'gauche_rbf':           lambda a, b, c, s: fit_gp(a, b, c, False, s),
     'heteroscedastic_gp':   lambda a, b, c, s: fit_gp(a, b, c, True, s),
@@ -838,6 +951,89 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
     return rows
 
 
+def level_response(models, reps, conditions, levels=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                   n_molecules=600, n_folds=3, seed=0, out_csv=None,
+                   verbose=True):
+    """CAN WE DECOMPOSE UNCERTAINTY UNDER ARTIFICIAL LABEL NOISE?
+
+    The whole question, and it needs no per-molecule ranking. Inject label noise
+    at rising levels. If the split is real, the aleatoric term RISES with the
+    level, because that is the observation noise and there is more of it, and
+    the epistemic term does NOT, because the amount of data and the model class
+    have not changed.
+
+    Both terms are reported as means over the out-of-fold training molecules, at
+    each level, per model and representation. A model whose two terms rise
+    together is reporting one signal twice.
+
+    Measured on real QM9 (RERUN_PLAN.md 5.5d found this for the forests on nine
+    descriptors; this runs it on the study's own representations and conditions).
+    """
+    import pandas as pd
+    from sklearn.metrics import r2_score
+    from uncertainty_decomposition import support
+
+    x_desc, y, groups = load_qm9(n_molecules, seed=seed)
+    smiles = _selected_smiles(n_molecules, seed)
+    spread = float(np.std(y))
+    if verbose:
+        print(f"  {len(y)} real QM9 molecules, label '{LABEL}', spread {spread:.4f}")
+        print(f"  building representations: {', '.join(reps)}", flush=True)
+    features = build_representations(smiles, reps)
+
+    rows = []
+
+    def _flush():
+        if out_csv and rows:
+            tmp = str(out_csv) + '.tmp'
+            pd.DataFrame(rows).to_csv(tmp, index=False)
+            os.replace(tmp, out_csv)
+
+    for condition in conditions:
+        for rep_name in reps:
+            x = np.asarray(features[rep_name], dtype=float)
+            for name in models:
+                fit = MODELS[name]
+                alea_kind, epis_kind = support(name)
+                if verbose:
+                    print(f"\n  {condition} / {rep_name} / {name}", flush=True)
+                    print(f"    {'level':>6}{'R2':>10}{'aleatoric':>14}{'epistemic':>14}",
+                          flush=True)
+                for lvl in levels:
+                    y_noisy = injector_noise(condition, y, lvl, groups, spread, seed)
+                    try:
+                        mean, alea, epis, fold = _oof(
+                            lambda a, b, c: fit(a, b, c, seed), x, y_noisy,
+                            groups, n_folds)
+                    except Exception as exc:
+                        if verbose:
+                            print(f"    {lvl:>6.1f}  BLOCKED {type(exc).__name__}",
+                                  flush=True)
+                        continue
+                    ok = np.isfinite(mean)
+                    r2 = float(r2_score(y[ok], mean[ok]))
+                    ma = (float(np.nanmean(alea[ok])) if alea is not None
+                          else float('nan'))
+                    me = (float(np.nanmean(epis[ok])) if epis is not None
+                          else float('nan'))
+                    rows.append({
+                        'model': name, 'representation': rep_name,
+                        'noise_condition': condition, 'level': lvl,
+                        'mean_aleatoric_var': ma, 'mean_epistemic_var': me,
+                        'aleatoric_support': alea_kind,
+                        'epistemic_support': epis_kind,
+                        'r2_oof': r2, 'n_molecules': int(ok.sum()),
+                        'n_folds': n_folds, 'seed': seed})
+                    _flush()
+                    if verbose:
+                        fa = 'absent' if np.isnan(ma) else f"{ma:.6g}"
+                        fe = 'absent' if np.isnan(me) else f"{me:.6g}"
+                        print(f"    {lvl:>6.1f}{r2:>10.4f}{fa:>14}{fe:>14}",
+                              flush=True)
+    _flush()
+    return rows
+
+
 def _row(model, rep, condition, level, term, support_kind, rho, constant, r2,
          n, n_folds, seed, pattern_varies, blocked):
     return {
@@ -899,8 +1095,19 @@ if __name__ == '__main__':
                          "study's own representations instead of the three "
                          "designs written for the checks.")
     ap.add_argument('--reps', nargs='*', default=['ECFP4', 'PDV', 'SNS'])
+    ap.add_argument('--level-response', action='store_true',
+                    help='Does the aleatoric term rise with the noise level '
+                         'while the epistemic term does not? The decomposition '
+                         'question itself.')
+    ap.add_argument('--levels', nargs='*', type=float,
+                    default=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     a = ap.parse_args()
-    if a.real_conditions:
+    if a.level_response:
+        level_response(models=a.models or list(MODELS), reps=a.reps,
+                       conditions=a.conditions, levels=a.levels,
+                       n_molecules=a.n_molecules, n_folds=a.n_folds,
+                       seed=a.seed, out_csv=a.out)
+    elif a.real_conditions:
         measure_real_conditions(
             models=a.models or list(MODELS), reps=a.reps,
             conditions=a.conditions, level=a.level,

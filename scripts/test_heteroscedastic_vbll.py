@@ -217,6 +217,43 @@ def test_the_switch_reaches_the_layer():
         assert label in gen, f"{label} is in no job script, so it never runs"
 
 
+def test_the_variance_head_attaches_or_stops():
+    """A network fitted by a two-output loss with a one-output head trains BOTH
+    outputs onto the label, and the variance column that reaches the file means
+    nothing. The old code tried `fc_out` then `output_layer` with no else, so a
+    class with neither fell through in silence. MLPRegressor has `output_layer`
+    and not `fc_out`, so this was live (RERUN_PLAN.md 5.5a point 3)."""
+    import torch.nn as nn
+    from models import widen_output_head, DNNRegressionModel, MLPRegressor
+    from model_defaults import NEURAL_DEFAULTS
+
+    h1, h2 = NEURAL_DEFAULTS['dnn']['hidden_sizes']
+    x = torch.randn(4, 9)
+    for net in (DNNRegressionModel(input_size=9, hidden_size1=h1,
+                                   hidden_size2=h2),
+                MLPRegressor(
+                    input_size=9,
+                    hidden_size=NEURAL_DEFAULTS['mlp']['hidden_size'],
+                    num_hidden_layers=NEURAL_DEFAULTS['mlp']['num_hidden_layers'],
+                    dropout_rate=NEURAL_DEFAULTS['mlp']['dropout_rate'])):
+        assert net(x).shape[1] == 1
+        assert widen_output_head(net, 2, 'heteroscedastic')(x).shape[1] == 2, (
+            f"{type(net).__name__}: the head was not widened")
+
+    class NoHead(nn.Module):
+        def forward(self, z):
+            return z
+
+    try:
+        widen_output_head(NoHead(), 2, 'heteroscedastic')
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError(
+            "a class with no recognised output layer fell through in silence, "
+            "which leaves a one-column head fitted by a two-column loss")
+
+
 def test_the_row_name_separates_the_two_models():
     """A per-molecule column and a broadcast constant under one model name are
     indistinguishable once they are in a file."""

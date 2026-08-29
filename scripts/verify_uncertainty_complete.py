@@ -1,63 +1,123 @@
 #!/usr/bin/env python3
 """
-Verify all uncertainty experiments completed.
-Run on server: python verify_uncertainty_complete.py /data/stat-cadd/scat9264/qsar_qm_models/results
+Verify the per-molecule uncertainty files are present and usable.
+
+Usage:
+  python verify_uncertainty_complete.py /data/stat-cadd/scat9264/qsar_qm_models/results
+
+WHAT THIS EXPECTS, AND WHERE IT GETS IT
+---------------------------------------
+Nothing about the design is written down here. The noise conditions, their level
+grids, the representations and which models emit an uncertainty at all are READ
+from the QM9 job generator, which in turn reads noise_conditions.json.
+
+Four literals used to sit at the top of this file and all four were retired
+between 2026-08-26 and 2026-08-27 without it noticing:
+
+  * six condition names -- legacy, valprop, quantile, threshold, outlier, hetero
+    -- deleted in noiseInject 1.0.0, so every filename this file looked for was
+    one no injector can produce
+  * an eleven-level grid 0.0..1.0 in steps of 0.1, against a settled grid of
+    0, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, so a complete file reported six missing
+    levels and a genuinely absent 0.75 or 1.5 could not be seen at all
+  * a filename, uncertainty_<condition>_<rep>_<model>.csv, that the pipeline has
+    never written: save_uncertainty_values (scripts/utils.py) writes the result
+    file's own path with '.csv' replaced by '_uncertainty_values.csv'
+  * a required column 'y_true', which does not exist either -- the writer emits
+    y_true_original (the clean label) and y_true_noisy (the one the model saw),
+    and the distinction is the whole point of the file
+
+Any one of those made every cell fail, so this audit could not have passed on
+correct data.
 """
 
 import sys
+import importlib.util
 from pathlib import Path
 from collections import defaultdict
 import pandas as pd
 
-# Expected setup (from generate_uncertainty_slurm_scripts.py)
-STRATEGIES = ['legacy', 'valprop', 'quantile', 'threshold', 'outlier', 'hetero']
-REPS = ['pdv', 'sns']  # Only 2 reps for uncertainty
-SIGMAS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+# =============================================================================
+# THE DESIGN, READ FROM THE JOB GENERATOR
+# =============================================================================
 
-# Uncertainty models
-NATIVE_MODELS = ['qrf', 'ngboost', 'gauche']
-BNN_MODELS = ['dnn_bnn_full', 'dnn_bnn_last', 'dnn_bnn_variational',
-              'mlp_bnn_full', 'mlp_bnn_last', 'mlp_bnn_variational']
-CONFORMAL_BASES = ['rf', 'qrf', 'dnn']
-
-# Required columns for uncertainty analysis
-REQUIRED_COLS = ['sigma', 'y_pred_mean', 'y_true', 'injected_noise']
-OPTIONAL_COLS = ['epistemic_uncertainty', 'aleatoric_uncertainty', 'y_pred_std_calibrated']
+_GENERATOR = (Path(__file__).resolve().parent.parent
+              / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py')
 
 
-def check_uncertainty_file(filepath):
-    """Check if uncertainty file has required columns and coverage."""
+def _load_generator():
+    """Import the QM9 job generator as a module, for its settled sets.
+
+    It raises SystemExit at import if its own condition list and
+    noise_conditions.json disagree, which is wanted here too: an audit against a
+    design nobody agreed on is worse than no audit.
+    """
+    spec = importlib.util.spec_from_file_location('qm9_job_generator', _GENERATOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_GEN = _load_generator()
+
+# Condition -> its FULL level grid, the clean level included. CONDITION_FLAGS
+# carries the full grid; CONDITIONS strips the clean level from every condition
+# but the reference one, because the array does not re-run it and
+# copy_zero_rows.py fills it in afterwards.
+LEVELS_BY_CONDITION = {
+    name: [float(v) for v in _GEN.CONDITION_FLAGS[name][1].split()]
+    for name in _GEN.CONDITIONS
+}
+# Conditions that run on a handful of pairs rather than the whole grid
+# (censoring today) would manufacture a gap for every pair never meant to run.
+FULL_GRID_CONDITIONS = [c for c in _GEN.STAGE1_CONDITIONS
+                        if c not in _GEN.PAIR_SUBSET_CONDITIONS]
+OTHER_CONDITIONS = [c for c in _GEN.CONDITIONS if c not in FULL_GRID_CONDITIONS]
+
+REPS = list(_GEN.ALL_REPS)
+
+# Which models were asked for an uncertainty, and on which representations --
+# read off the flags the generator passes, not listed again here. The Tanimoto
+# GP is only defined on binary fingerprints, so it is not missing on the rest.
+UNCERTAINTY_MODEL_REPS = {name: list(spec[4]) for name, spec in _GEN.MODELS.items()
+                          if '-u True' in spec[0]}
+
+# The columns the writer emits, scripts/utils.py save_uncertainty_values.
+# y_true_original is the CLEAN label; y_true_noisy is the label the model was
+# trained on. injected_noise is RECORDED by the injector, never reconstructed.
+REQUIRED_COLS = ['sigma', 'y_pred_mean', 'y_true_original', 'y_true_noisy',
+                 'injected_noise', 'split']
+OPTIONAL_COLS = ['epistemic_uncertainty', 'aleatoric_uncertainty',
+                 'y_pred_std_calibrated', 'noise_pattern', 'canonical_smiles']
+
+
+def uncertainty_filename(condition, rep, model):
+    """The file that sits beside anova_<condition>_<rep>_<model>.csv."""
+    return f"anova_{condition}_{rep}_{model}_uncertainty_values.csv"
+
+
+def check_uncertainty_file(filepath, expected_levels):
+    """Columns and level coverage for one uncertainty file."""
     try:
         df = pd.read_csv(filepath)
 
-        # Check sigmas
-        found_sigmas = set(df['sigma'].unique())
-        missing_sigmas = set(SIGMAS) - found_sigmas
-
-        # Check required columns
+        found = set(df['sigma'].unique()) if 'sigma' in df.columns else set()
+        missing_levels = sorted(set(expected_levels) - found)
         missing_cols = [c for c in REQUIRED_COLS if c not in df.columns]
-
-        # Check optional columns
-        has_epistemic = 'epistemic_uncertainty' in df.columns
-        has_aleatoric = 'aleatoric_uncertainty' in df.columns
-        has_injected_noise = 'injected_noise' in df.columns
 
         return {
             'exists': True,
             'rows': len(df),
-            'sigmas_found': len(found_sigmas),
-            'sigmas_missing': sorted(missing_sigmas),
+            'levels_found': len(found),
+            'levels_missing': missing_levels,
             'missing_required_cols': missing_cols,
-            'has_epistemic': has_epistemic,
-            'has_aleatoric': has_aleatoric,
-            'has_injected_noise': has_injected_noise,
-            'complete': len(missing_sigmas) == 0 and len(missing_cols) == 0
+            'has_epistemic': 'epistemic_uncertainty' in df.columns,
+            'has_aleatoric': 'aleatoric_uncertainty' in df.columns,
+            'has_injected_noise': 'injected_noise' in df.columns,
+            'complete': not missing_levels and not missing_cols,
         }
     except Exception as e:
-        return {
-            'exists': False,
-            'error': str(e)
-        }
+        return {'exists': False, 'error': str(e)}
 
 
 def main():
@@ -66,49 +126,32 @@ def main():
     print("=" * 70)
     print("UNCERTAINTY EXPERIMENT VERIFICATION")
     print("=" * 70)
+    print(f"\nDesign read from {_GENERATOR.name} (which reads noise_conditions.json)")
+    for c in FULL_GRID_CONDITIONS:
+        print(f"  {c}: levels {LEVELS_BY_CONDITION[c]}")
+    if OTHER_CONDITIONS:
+        print(f"  NOT audited, because they do not run on every pair: "
+              f"{OTHER_CONDITIONS}")
+    print(f"  models that emit an uncertainty: {sorted(UNCERTAINTY_MODEL_REPS)}")
 
     all_expected = []
+    for condition in FULL_GRID_CONDITIONS:
+        for model, model_reps in UNCERTAINTY_MODEL_REPS.items():
+            for rep in model_reps:
+                all_expected.append(
+                    (condition, model, rep,
+                     results_dir / uncertainty_filename(condition, rep, model)))
 
-    # 1. Native uncertainty models
-    for strategy in STRATEGIES:
-        for model in NATIVE_MODELS:
-            for rep in REPS:
-                filename = f"uncertainty_{strategy}_{rep}_{model}.csv"
-                filepath = results_dir / filename
-                all_expected.append(('native', strategy, model, rep, filepath))
-
-    # 2. BNN models
-    for strategy in STRATEGIES:
-        for model in BNN_MODELS:
-            for rep in REPS:
-                filename = f"uncertainty_{strategy}_{rep}_{model}.csv"
-                filepath = results_dir / filename
-                all_expected.append(('bnn', strategy, model, rep, filepath))
-
-    # 3. Conformal models
-    for strategy in STRATEGIES:
-        for base in CONFORMAL_BASES:
-            for rep in REPS:
-                filename = f"uncertainty_{strategy}_{rep}_conformal_{base}.csv"
-                filepath = results_dir / filename
-                all_expected.append(('conformal', strategy, f'conformal_{base}', rep, filepath))
-
-    # Check all files
-    complete = []
-    incomplete = []
-    missing = []
-
-    for category, strategy, model, rep, filepath in all_expected:
-        status = check_uncertainty_file(filepath)
-
+    complete, incomplete, missing = [], [], []
+    for condition, model, rep, filepath in all_expected:
+        status = check_uncertainty_file(filepath, LEVELS_BY_CONDITION[condition])
         if not status.get('exists'):
-            missing.append((category, strategy, model, rep, filepath.name))
+            missing.append((condition, model, rep, filepath.name))
         elif not status.get('complete'):
-            incomplete.append((category, strategy, model, rep, filepath.name, status))
+            incomplete.append((condition, model, rep, filepath.name, status))
         else:
-            complete.append((category, strategy, model, rep, filepath.name, status))
+            complete.append((condition, model, rep, filepath.name, status))
 
-    # Summary
     print("\n" + "=" * 70)
     print("SUMMARY")
     print("=" * 70)
@@ -119,25 +162,24 @@ def main():
     print(f"Incomplete: {len(incomplete)}")
     print(f"Missing: {len(missing)}")
 
-    # Check for epistemic/aleatoric coverage
-    has_decomp = sum(1 for _, _, _, _, _, s in complete if s.get('has_epistemic') and s.get('has_aleatoric'))
-    print(f"\nWith epistemic/aleatoric decomposition: {has_decomp}/{len(complete)}")
+    has_decomp = sum(1 for *_, s in complete
+                     if s.get('has_epistemic') and s.get('has_aleatoric'))
+    print(f"\nWith both halves of the uncertainty split: {has_decomp}/{len(complete)}")
 
-    has_noise = sum(1 for _, _, _, _, _, s in complete if s.get('has_injected_noise'))
-    print(f"With injected_noise column: {has_noise}/{len(complete)}")
+    has_noise = sum(1 for *_, s in complete if s.get('has_injected_noise'))
+    print(f"With the recorded injected noise: {has_noise}/{len(complete)}")
 
     if missing:
         print("\n" + "=" * 70)
         print("MISSING FILES")
         print("=" * 70)
-        by_category = defaultdict(list)
-        for cat, strat, model, rep, fname in missing:
-            by_category[cat].append((strat, model, rep))
-
-        for cat, items in sorted(by_category.items()):
-            print(f"\n{cat.upper()}: {len(items)} missing")
-            for strat, model, rep in items[:10]:
-                print(f"  {strat}/{model}/{rep}")
+        by_model = defaultdict(list)
+        for cond, model, rep, fname in missing:
+            by_model[model].append((cond, rep))
+        for model, items in sorted(by_model.items()):
+            print(f"\n{model}: {len(items)} missing")
+            for cond, rep in items[:10]:
+                print(f"  {cond}/{rep}")
             if len(items) > 10:
                 print(f"  ... and {len(items) - 10} more")
 
@@ -145,20 +187,20 @@ def main():
         print("\n" + "=" * 70)
         print("INCOMPLETE FILES")
         print("=" * 70)
-        for cat, strat, model, rep, fname, status in incomplete[:20]:
+        for cond, model, rep, fname, status in incomplete[:20]:
             print(f"  {fname}")
-            if status.get('sigmas_missing'):
-                print(f"    Sigmas missing: {status['sigmas_missing']}")
+            if status.get('levels_missing'):
+                print(f"    Levels missing: {status['levels_missing']}")
             if status.get('missing_required_cols'):
                 print(f"    Columns missing: {status['missing_required_cols']}")
+        if len(incomplete) > 20:
+            print(f"  ... and {len(incomplete) - 20} more")
 
-    # Return exit code
     if missing or incomplete:
-        print("\n❌ VERIFICATION FAILED - gaps remain")
+        print("\nVERIFICATION FAILED — gaps remain")
         return 1
-    else:
-        print("\n✓ ALL UNCERTAINTY EXPERIMENTS COMPLETE")
-        return 0
+    print("\nALL UNCERTAINTY FILES COMPLETE")
+    return 0
 
 
 if __name__ == "__main__":

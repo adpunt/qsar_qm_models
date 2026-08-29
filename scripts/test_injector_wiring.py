@@ -54,6 +54,99 @@ def load_helpers():
     return ns
 
 
+class _ParserStopped(Exception):
+    """argparse's error() exits; the stand-in raises so the test can look at it."""
+
+
+class _StandInParser:
+    """Just enough parser for the refusal loop: it records and stops."""
+
+    def __init__(self):
+        self.message = None
+
+    def error(self, message):
+        self.message = message
+        raise _ParserStopped(message)
+
+
+def load_retired_flag_guard():
+    """Lift the retired-flag refusal out of main() so it can be RUN.
+
+    This was three substring searches over the text of process_and_train.py
+    ("--sigma" appears, parser.error appears, startswith(flag + "=") appears).
+    A substring search is not a check. Measured 2026-08-29: with the real
+    refusal loop replaced by a dead string literal holding those same fragments,
+    every check in this section still printed ok and the file exited 0. The
+    guard the test is named after can be deleted and the test stays green.
+
+    process_and_train.py cannot be imported here -- torch_geometric, deepchem and
+    optuna are the reason this file exists at all -- so the two statements are
+    pulled out with ast and executed against a stand-in parser. That runs the
+    real loop over the real dict, and a deleted loop is a missing node, which
+    fails.
+    """
+    tree = ast.parse(open(SOURCE).read())
+    # Walk the whole module, not one named function: the refusal sits in
+    # parse_arguments(), and an earlier version of this search looked only inside
+    # main() and reported the guard as DELETED while it was there and working.
+    assign = loop = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and getattr(node.targets[0], 'id', None) == 'retired'
+                and isinstance(node.value, ast.Dict)):
+            assign = node
+        if (isinstance(node, ast.For) and isinstance(node.iter, ast.Call)
+                and isinstance(node.iter.func, ast.Attribute)
+                and node.iter.func.attr == 'items'
+                and getattr(node.iter.func.value, 'id', None) == 'retired'):
+            loop = node
+    return assign, loop
+
+
+def run_retired_flag_guard(assign, loop, argv):
+    """Execute the real refusal against this command line. Returns the message
+    it refused with, or None if it let the command through."""
+    parser = _StandInParser()
+    ns = {'parser': parser,
+          'sys': types.SimpleNamespace(argv=['process_and_train.py'] + argv)}
+    module = ast.Module(body=[assign, loop], type_ignores=[])
+    try:
+        exec(compile(ast.fix_missing_locations(module), SOURCE, 'exec'), ns)
+    except _ParserStopped:
+        return parser.message
+    return None
+
+
+def selection_seed_reaches_the_injector():
+    """Is the level-free seed actually on the command line the injector gets?
+
+    Structural, not textual: find the list assigned to `rust_cmd` and check that
+    the literal '--selection-seed' is followed by str(selection_seed) and
+    '--seed' by str(level_seed). A substring search passes on a commented-out
+    line, and would not notice the two seeds being swapped -- which is the whole
+    defect this rule exists to prevent.
+    """
+    tree = ast.parse(open(SOURCE).read())
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and getattr(node.targets[0], 'id', None) == 'rust_cmd'
+                and isinstance(node.value, ast.List)):
+            continue
+        pairs = {}
+        items = node.value.elts
+        for i, e in enumerate(items[:-1]):
+            if not (isinstance(e, ast.Constant) and isinstance(e.value, str)
+                    and e.value.startswith('--')):
+                continue
+            nxt = items[i + 1]
+            if (isinstance(nxt, ast.Call)
+                    and getattr(nxt.func, 'id', None) == 'str'
+                    and nxt.args and isinstance(nxt.args[0], ast.Name)):
+                pairs[e.value] = nxt.args[0].id
+        return pairs
+    return {}
+
+
 def check(name, condition, detail=''):
     print(f"  {'ok  ' if condition else 'FAIL'}  {name}" + (f" — {detail}" if detail else ''))
     return 0 if condition else 1
@@ -182,19 +275,66 @@ def main():
                       noise_seeds_for_level(42, 0.5)[0]
                       == [noise_seeds_for_level(42, v)[0] for v in [0.5, 1.0]][0]
                       == [noise_seeds_for_level(42, v)[0] for v in [0.0, 0.2, 0.5]][2])
-    failures += check("both seeds are passed to the injector on the command line",
-                      "'--selection-seed', str(selection_seed)" in open(SOURCE).read(),
-                      "the level-free seed is computed but never handed over"
-                      if "'--selection-seed'" not in open(SOURCE).read() else '')
+    pairs = selection_seed_reaches_the_injector()
+    failures += check("the level-free seed is handed to the injector as "
+                      "--selection-seed",
+                      pairs.get('--selection-seed') == 'selection_seed',
+                      f"--selection-seed carries {pairs.get('--selection-seed')!r}")
+    failures += check("the level-dependent seed is handed over as --seed",
+                      pairs.get('--seed') == 'level_seed',
+                      f"--seed carries {pairs.get('--seed')!r}")
 
     print("\nthe retired noise flags are refused")
-    source = open(SOURCE).read()
-    for flag in ('--sigma', '--distribution', '--noise-strategy', '--strategy-params'):
-        failures += check(f"{flag} is named in the refusal table", f'"{flag}"' in source)
-    failures += check("the refusal calls parser.error, so it exits non-zero",
-                      'parser.error(f"{flag} has been removed' in source)
-    failures += check("the refusal matches --flag=value as well as --flag",
-                      'a.startswith(flag + "=")' in source)
+    # RUN the refusal rather than search for its text. See load_retired_flag_guard.
+    assign, loop = load_retired_flag_guard()
+    failures += check("the refusal table is still there",
+                      assign is not None,
+                      "" if assign is not None
+                      else "no `retired = {...}` anywhere in the file")
+    failures += check("the refusal loop is still there, and still runs",
+                      loop is not None,
+                      "" if loop is not None
+                      else "no `for flag, replacement in retired.items()` "
+                           "anywhere in the file")
+    if assign is None or loop is None:
+        print("      the refusal has been deleted or moved; the checks below "
+              "cannot run")
+        failures += 1
+    else:
+        table = {}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[assign],
+                                                          type_ignores=[])),
+                     SOURCE, 'exec'), {}, table)
+        named = set(table['retired'])
+        expected = {'--sigma', '--distribution', '--noise-strategy',
+                    '--strategy-params'}
+        failures += check("all four retired flags are in the table",
+                          named == expected,
+                          "" if named == expected else
+                          f"missing {sorted(expected - named)}, "
+                          f"extra {sorted(named - expected)}")
+        for flag in sorted(expected & named):
+            msg = run_retired_flag_guard(assign, loop, [flag, '0.5'])
+            failures += check(f"{flag} is REFUSED when a job passes it",
+                              msg is not None and 'has been removed' in msg,
+                              "the run was allowed to continue" if msg is None
+                              else '')
+            eq = run_retired_flag_guard(assign, loop, [f'{flag}=0.5'])
+            failures += check(f"{flag}=value is refused too",
+                              eq is not None and 'has been removed' in eq,
+                              "the =value form slipped through" if eq is None
+                              else '')
+            failures += check(f"{flag}'s refusal names what to use instead",
+                              bool(msg) and 'Use ' in msg and msg.rstrip('.')
+                              .split('Use ')[-1].strip() not in ('', flag),
+                              '' if msg else 'nothing was refused')
+        allowed = run_retired_flag_guard(assign, loop,
+                                         ['--noise-level', '0.5', '--noise-shape',
+                                          'gaussian'])
+        failures += check("a current flag is NOT refused",
+                          allowed is None,
+                          "" if allowed is None
+                          else f"refused a live flag: {allowed}")
 
     print()
     if failures:

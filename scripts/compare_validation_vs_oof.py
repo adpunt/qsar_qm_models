@@ -61,7 +61,7 @@ verdict that keeps the cross-fit for those four alone.
 EVERY STATISTIC COMES FROM A MODULE THAT ALREADY EXISTED
 ---------------------------------------------------------
 `q4_error_ratio` and `q6_error_ranking` from `scripts/uncertainty_stats.py`, and
-`bootstrap_cis` from `scripts/uncertainty_screen_tables.py`, which is where the
+`bootstrap_cis` from `scripts/uncertainty_stats.py`, which is where the
 300-resample interval lives. Nothing is invented here.
 
 USAGE
@@ -82,7 +82,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import uncertainty_stats as us  # noqa: E402
-from uncertainty_screen_tables import (  # noqa: E402
+from uncertainty_stats import (  # noqa: E402
     MODEL_LABELS, REP_LABELS, REPORT_LEVEL, bootstrap_cis,
 )
 
