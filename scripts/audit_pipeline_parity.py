@@ -153,24 +153,6 @@ def _kirby_file(*parts):
     return None
 
 
-def _probe_chemberta_tokenizer():
-    """One encoder, two tokenizers — measured on the laboratory side, which
-    refuses a tokenizer that merges two molecules onto one vector."""
-    lab = _kirby_file('src', 'kirby', 'representations', 'molecular.py')
-    if lab is None:
-        return None, 'laboratory checkout not found'
-    qm9 = QM9_SOURCE.read_text()
-    lab_src = lab.read_text()
-    qm9_fast = 'AutoTokenizer.from_pretrained' in qm9
-    lab_slow = 'RobertaTokenizer.from_pretrained' in lab_src
-    if qm9_fast and lab_slow:
-        return True, ('QM9 loads AutoTokenizer (resolves to RobertaTokenizerFast), '
-                      'the laboratory loads RobertaTokenizer')
-    return False, (f'QM9 AutoTokenizer={qm9_fast}, laboratory '
-                   f'RobertaTokenizer={lab_slow} — the two now load the same '
-                   f'tokenizer class, so DELETE this entry')
-
-
 def _probe_stereochemistry():
     """The strings the two pipelines featurise are not the same strings."""
     lab = _kirby_file('tests', 'alternative_data_noise_robustness.py')
@@ -186,26 +168,6 @@ def _probe_stereochemistry():
 
 
 MANUAL = [
-    # Added 2026-08-29, replacing four entries that had been fixed. Both sides
-    # load DeepChem/ChemBERTa-77M-MTR at 384 dimensions -- that half was settled
-    # on 2026-08-27 -- but they do not load the same tokenizer, and the
-    # laboratory side's own _chemberta_tokenizer_report measures what that costs.
-    {'title': 'ChemBERTa tokenizer — the encoder matches, the tokenizer does not',
-     'qm9': 'AutoTokenizer, which resolves to the FAST RobertaTokenizerFast; its '
-            'tokenizer.json carries no unknown token, so a symbol outside the '
-            'vocabulary is DELETED rather than substituted',
-     'experimental': 'RobertaTokenizer (slow), which substitutes <unk>',
-     'see': 'scripts/process_and_train.py get_chemberta_model  vs  '
-            'KIRBy/src/kirby/representations/molecular.py _chemberta_tokenizer_report',
-     'matters': 'A ChemBERTa row from one pipeline and a ChemBERTa row from the '
-                'other are the same network reading two different token streams. '
-                'The laboratory side measured it on 400 hERG molecules: '
-                'embeddings differ by up to 3.03, 14.8x the mean spread of a '
-                'coordinate, and six pairs of DISTINCT molecules collapsed onto '
-                'one byte-identical vector under the QM9 tokenizer. Which side '
-                'changes is an author decision.',
-     'probe': _probe_chemberta_tokenizer},
-
     # Added 2026-08-29. Also an author decision: the two candidate fixes change
     # different halves of the study.
     {'title': 'Stereochemistry — the two pipelines featurise different strings',

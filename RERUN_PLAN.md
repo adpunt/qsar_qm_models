@@ -2018,6 +2018,93 @@ representations or all six is the same open question as which models and represe
 (§13.1 item 4). Four is what the generator has always used and what it still uses; `--reps` changes
 it without editing anything.
 
+### 2.8k ✅ FIXED 2026-08-30 — ChemBERTa read a different molecule from the one it was given, and the obvious fix was the wrong one
+
+**What was wrong.** Encode a molecule with `DeepChem/ChemBERTa-77M-MTR` and decode it back
+and a different molecule comes out. Chlorobenzene returns as toluene. Bromobenzene returns
+as the boron compound. Both alanine enantiomers return as the same achiral string. A
+quaternary ammonium returns neutral. Reproduced on both pipelines, 2026-08-29.
+
+**Why.** The checkpoint's `merges.txt` holds nothing but a version header, so its byte-pair
+reader never merges anything, and the 543 multi-character chemical entries that *do* sit in
+its 591-entry vocabulary — `Cl`, `Br`, `[C@H]`, `[C@@H]`, `[N+]`, `[O-]` — are unreachable.
+The reader falls back to single characters, and `l`, `r`, `[`, `]`, `+`, `@` and `H` have no
+vocabulary entry at all, so they are dropped.
+
+**The obvious fix is wrong, and that is the finding.** A vocabulary of whole chemical tokens
+with no single letters looks mispackaged, and it looks as though it wants the atom-level
+SMILES reader DeepChem ships for this model family. It does not. **The model was pretrained
+through the same character-level fallback**, and its own weights prove it. Rows
+`[unused1]`–`[unused10]` cannot have appeared in any training text, so they give an exact
+never-trained reference:
+
+| token | spread relative to never-trained | verdict |
+|---|---|---|
+| `C` `c` `O` `N` `1` `=` | 13.1× – 17.0× | trained |
+| `Cl` `Br` `[C@H]` `[C@@H]` `[N+]` `[O-]` `[nH]` | 0.98× – 1.14× | **never trained** |
+| `[UNK]` | 1.07× | **never trained** |
+
+**0 of 543** multi-character chemical tokens carry a trained embedding; exactly 28 single
+characters plus `[CLS]` and `[SEP]` do. Handing this model `Cl` as one token hands it a
+vector it has never seen. `ChemBERTa-77M-MLM` is the same, so switching sibling checkpoints
+is not a way out. The ChemBERTa-2 paper's own wording fits: a vocabulary of 591 tokens
+"based on a dictionary of common SMILES characters".
+
+**Measured, not argued.** The checkpoint carries its own regression head — 199 RDKit
+properties, with the normalisation constants in `config.json`, of which output 5 is
+molecular weight. Predicting molecular weight for 648 hERG molecules against RDKit:
+
+| reader | R² vs true molecular weight | mean error |
+|---|---|---|
+| byte-level, drops unknown characters — **what QM9 already did** | **0.9921** | 7.4 Da |
+| byte-level, substitutes `[UNK]` — **what the validation side did** | 0.0925 | 64.2 Da |
+| atom-level, DeepChem's SMILES regex — the hypothesised fix | 0.9738 | 13.3 Da |
+
+The QM9 side was already right. The validation side had the catastrophic reader: `[UNK]` is
+itself untrained, so substituting it injected a random vector at every halogen, bracket and
+charge. **An earlier audit recommended making QM9 match the validation side; that was
+backwards**, and the entry has been deleted from `scripts/audit_pipeline_parity.py`.
+
+**What changed.** `KIRBy/src/kirby/representations/molecular.py` `create_chemberta` now loads
+`AutoTokenizer` (resolving to `RobertaTokenizerFast`), the class
+`scripts/process_and_train.py` `get_chemberta_model` has always loaded. Both sides now refuse
+to run if the reader is not that class. `_chemberta_tokenizer_report` no longer *raises* on a
+collision — see below — it counts and prints.
+
+**What is NOT fixed, because it cannot be from here.** The encoder cannot tell chlorobenzene
+from toluene: they get identical token ids and therefore one identical vector. On hERG,
+**648 distinct molecules collapse onto 583 distinct token sequences — 130 molecules, 20.1%,
+share a vector with a different molecule.** The pairs are exactly enantiomers and
+protonation states, e.g.
+
+```
+C=C[C@H]1CN2CC[C@H]1C[C@@H]2[C@@H](O)c1ccnc2ccc(OC)cc12
+C=C[C@H]1C[NH+]2CC[C@H]1C[C@@H]2[C@@H](O)c1ccnc2ccc(OC)cc12
+```
+
+This is a property of the published checkpoint, not of our code. The validation side used to
+*refuse* to run on a collision; that guard would now stop every run, so it has become a
+printed count. **Whether a representation with a 20% collision rate stays in the study is the
+author's decision, not a script's.** The number is on the record so the paper can carry it.
+
+**This also settles the ChemBERTa half of the stereochemistry question (§ "Open, and it needs
+outside expertise").** ChemBERTa cannot see stereochemistry either way, so stripping it is
+nearly a no-op there: of 341 hERG molecules with an assigned stereocentre, **322 (94%) get
+byte-identical token ids whether stereochemistry is stripped or kept.** The 19 that differ do
+so because RDKit's canonical atom *ordering* changes, not because the model reads the
+stereochemistry — largest coordinate difference 0.462 against a mean coordinate spread of
+0.181. The recorded figure of "5.27 against 0.50 on ChemBERTa" predates this fix and was
+measured through the `[UNK]`-substituting reader; it should be re-measured before being used.
+The MHG-GNN half of that question is untouched and still open.
+
+**The gate.** `python scripts/crosscheck_chemberta.py` — four gates: the checkpoint's
+tokenizer files are what we think; the pretrained weights say the reader was character-level
+(this is what stops anyone "fixing" it to atom-level); both pipelines load one reader and
+split molecules into identical tokens; and the collision count is reported.
+
+**Every ChemBERTa result must be rebuilt** — QM9, LogD, Caco-2 and hERG. Nothing else moves:
+no other representation and no accuracy number.
+
 ### 2.9 The Methods figure does not show the experiment
 
 `paper.tex:359` captions it as the QM9 label distribution. The code that draws it
@@ -4480,6 +4567,13 @@ two-dimensional work**: the Fourches/Muratov/Tropsha curation protocol and the E
 QSAR-ready workflow both list stripping stereochemistry as a standard step before descriptor
 calculation. That supports QM9's behaviour as the standard and the experimental side as the
 one to change. Not yet applied — the author asked for the evidence first.
+
+⚠️ **The ChemBERTa half of this is now answered, and the number above is stale — see §2.8k.**
+ChemBERTa's reader drops `@`, `[`, `]` and `H` outright, so it cannot see stereochemistry
+whichever string it is given: 322 of 341 hERG molecules with an assigned stereocentre get
+byte-identical tokens either way. The "5.27 against 0.50" figure was measured through the
+`[UNK]`-substituting reader that was replaced on 2026-08-30 and should be re-measured before
+use. **MHG-GNN is untouched and is where this question still lives.**
 
 ##### Still open below that
 

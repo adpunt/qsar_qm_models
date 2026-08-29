@@ -1302,6 +1302,37 @@ def get_chemberta_model():
         _CHEMBERTA_TOKENIZER = AutoTokenizer.from_pretrained(model_name)
         _CHEMBERTA_MODEL = AutoModel.from_pretrained(model_name)
         _CHEMBERTA_MODEL.eval()
+
+        # `AutoTokenizer` must resolve to RobertaTokenizerFast, and this refuses
+        # the run if it ever stops doing so.
+        #
+        # WHY THIS READER AND NOT A BETTER-LOOKING ONE. The checkpoint's
+        # `merges.txt` is empty, so this reader never merges anything and falls
+        # back to single characters, dropping l, r, [, ], +, @ and H because they
+        # have no vocabulary entry. Chlorobenzene is therefore read as toluene and
+        # both alanine enantiomers as the same achiral string. The vocabulary
+        # meanwhile contains Cl, Br, [C@H] and [N+], which makes it look
+        # mispackaged and makes DeepChem's atom-level SMILES reader look like the
+        # fix. IT IS NOT. The model was pretrained through this same
+        # character-level fallback: of its 591 vocabulary entries only 28 single
+        # characters plus [CLS] and [SEP] carry trained embeddings, and all 543
+        # multi-character chemical tokens are still at random initialisation,
+        # indistinguishable from the [unused] rows. Measured 2026-08-29 on 648
+        # hERG molecules, predicting molecular weight through the checkpoint's own
+        # regression head: this reader scores R2 0.9921, the atom-level reader
+        # 0.9738, and RobertaTokenizer -- which substitutes an [UNK] that is
+        # itself untrained -- 0.0925.
+        #
+        # The validation pipeline (KIRBy molecular.py create_chemberta) loads the
+        # same class for the same reason. `scripts/crosscheck_chemberta.py` is the
+        # gate that proves both halves still agree.
+        actual = type(_CHEMBERTA_TOKENIZER).__name__
+        if actual != "RobertaTokenizerFast":
+            raise RuntimeError(
+                f"ChemBERTa reader is {actual}, expected RobertaTokenizerFast. "
+                "Changing it changes what every ChemBERTa feature MEANS and every "
+                "ChemBERTa result would have to be rebuilt; see the comment above "
+                "and scripts/crosscheck_chemberta.py before touching this.")
         
         if torch.cuda.is_available():
             _CHEMBERTA_MODEL = _CHEMBERTA_MODEL.cuda()
