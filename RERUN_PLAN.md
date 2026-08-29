@@ -4331,6 +4331,15 @@ python scripts/audit_pipeline_parity.py --strict      # preflight check 0
 python scripts/audit_pipeline_parity.py --self-test   # proves --strict bites
 ```
 
+> 🔴 **`--self-test` REWRITES `models/model_defaults.py` IN PLACE, and on 2026-08-29 two copies of
+> it ran at once and corrupted the spec.** It perturbs a parameter, checks that `--strict` fails,
+> and restores the file. With two runs interleaved, the second reads the PERTURBED file as its
+> "original" and restores to that; the quantile forest was left on 100 trees where the spec says
+> 300 — a silent change to every quantile-forest result, in the file whose whole purpose is to stop
+> silent changes. The `finally` restore cannot help: both runs restore faithfully, to different
+> text. **Fixed the same day**: it now takes an exclusive lock and refuses to start rather than
+> corrupt. The spec was restored from git and `--strict` re-run clean.
+
 1. Loads the spec **through both pipelines** — importing `models.py` the way QM9 does, and loading
    the experimental module from its own file the way `preflight.sh` does — and fails unless both
    report the same content hash.
@@ -4339,11 +4348,22 @@ python scripts/audit_pipeline_parity.py --self-test   # proves --strict bites
    upgrade that moves a default we do not pin appears here rather than as a changed result months
    later.
 3. Asserts the facts a parameter diff cannot see — that ngboost's `MLE` is still `LogScore`, that
-   `natural_gradient` still defaults to `True`, which optimiser will actually fit the Gaussian
-   process, and that **no job script passes `--use_best_params`** (that flag loads hyperparameters
-   from a JSON, which the experimental side cannot do at all, so a job on that path is audited by
-   nothing).
+   `natural_gradient` still defaults to `True`, and which optimiser will actually fit the Gaussian
+   process.
+
+   > **A fourth assertion was REMOVED 2026-08-29 on the author's instruction**: that no job script
+   > passes the tuned-settings flag. It searched for `use_best_params`; the job scripts write
+   > `--use-best-params`, so it matched nothing and reported OK on every run it ever made. Fixing
+   > the spelling was not the answer either — the QM9 generator now passes that flag deliberately
+   > whenever the two tuned files are present, so the assertion had become the opposite of the
+   > design. What keeps the screen on shared defaults is the runbook's step of moving the tuned
+   > files aside.
 4. Reports every package version, and closes with the manual checklist.
+
+   > **One checklist entry was REMOVED 2026-08-29 on the author's instruction**: "validation split —
+   > merged into training for seven model families". That was closed on 2026-08-27 (`x_val_train =
+   > x_train` in both branches of `models.py`), so the audit was printing a fixed defect as a live
+   > one on every run.
 
 **Executed 2026-08-26**, on this laptop, against both checkouts:
 
@@ -4693,7 +4713,7 @@ Line numbers below are against `generate_paper_figures_v2.py` as it stands.
 | every correlation site | Groups without stating the conditioning set | Carry the conditioning set into the output row; assert one cell per group | 1 |
 | the two gates, `:423` and `:429` | 0.6 governs the simple-effects table, 0.3 governs the variance decomposition — two thresholds under one headline | Pick one, state it once, apply everywhere | — |
 | `filter_catastrophic_iterations`, `:821`, threshold `:437`; plus extra drops at `:1946`, `:2147`, `:2260` | Two undeclared filters, one stacked on the other | Declare both. Emit the headline result with and without, and fail if they disagree in direction | 8 |
-| the methods figure, `:2541-2562` | Draws a synthetic three-component mixture and reimplements two noise types differently from the pipeline | Redraw from real labels through the real injector, at matched dose | 12 |
+| ~~the methods figure~~ | ✅ **FIXED 2026-08-28.** It reimplemented six noise types that had all been retired on 2026-08-26 and returned zeros for every condition the study runs, and it plotted thirteen condition names into a hard-coded six-panel grid — so it raised IndexError before any other figure or table in the script was reached. It now reads the settled conditions from `noise_conditions.json`, draws them with the real injector on a scaffold-like grouping, and sizes the grid from the count | — |
 | every table writer | Prints retention alone in several places | No ratio without its components in adjacent columns | 4 |
 | every caption | Metric names hard-coded, and two captions disagree about what the same numbers are | Generate the metric name from the same constant the column comes from | 12 |
 
@@ -5391,9 +5411,16 @@ ordinary Gaussian process's data term was reporting −0.013 and +0.26 before th
 have been read as the process localising noise. Constancy is judged **within each fit**, on both
 sides — the writer's guard and the measurement — and a gate fails if either stops doing it.
 
-**The quantile forest is BLOCKED locally, not failing.** It needs scikit-learn 1.6.1 with
-quantile-forest 1.4.1 and this laptop has 1.3.2 (§3.4.4d). It is written into the output as blocked,
-so its absence cannot be mistaken for a null. It runs on the cluster.
+~~**The quantile forest is BLOCKED locally, not failing.**~~ ✅ **NO LONGER BLOCKED, 2026-08-29.**
+`env_test` now has quantile-forest **1.4.0** with scikit-learn 1.6.1, and the forest builds, fits
+and predicts against the shared spec. `scripts/test_decomposition_controls.py` reports **12/12
+passed, 0 blocked** on this laptop.
+
+**The version pin was then tested rather than assumed.** `env.yml` and `pip-constraints.txt` pin
+**1.4.1**, which had never been run as written. Installed alongside and compared on the same
+fixture: 1.4.0 and 1.4.1 give **identical numbers to six decimal places** on the forest's quantiles
+and on both halves of the uncertainty split. Either satisfies the spec; the recipe gap is
+cosmetic.
 
 ---
 
@@ -6303,9 +6330,10 @@ python scripts/test_decomposition_controls.py
 python scripts/test_decomposition_controls.py --measured
 ```
 
-One gate in the first command reports as **BLOCKED** on any interpreter that is not scikit-learn
-1.6.1 with quantile-forest 1.4.1, and the quantile forest is recorded as blocked in the fifth for
-the same reason (§3.4.4d). A blocked gate is not a pass and both say so.
+One gate in the first command reports as **BLOCKED** on an interpreter whose quantile forest will
+not build, and the quantile forest is recorded as blocked in the fifth for the same reason
+(§3.4.4d). A blocked gate is not a pass and both say so. ✅ **Neither is blocked on `env_test` as of
+2026-08-29** — 12/12 passed, 0 blocked, on quantile-forest 1.4.0.
 
 **One gate added 2026-08-28 with the validation route (§13, the validation-versus-refitting
 section).** Seconds, no cluster, no trained model:
@@ -8017,6 +8045,7 @@ not be raised again until its trigger fires.
 | A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label spread |
 | A2 | **The experimental pipeline draws its noise per fold, not once per label column** (§3.3a). Recommendation unchanged: keep the per-fold draw and say so in the Methods in one sentence. It needs an answer because it changes what a *molecule* means across folds | **the author** |
 | A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
+| A4 | **The Gaussian process on PDV writes no uncertainty rows under `grouped_wider` when only the first fold is cross-fitted, and the run stops.** `run_dataset` raises "emit a per-molecule uncertainty but not one uncertainty row was written". Found 2026-08-29 while fixing an unrelated stub in `tests/smoke/smoke_kirby_uncertainty.py` — that stub had returned two values since the runner began returning four, so every check past its first section had been dead and this one had never run. **Reproduced at HEAD with no local changes**, so it predates the censoring, grouped-wider and NGBoost work of 2026-08-28/29 | **the uncertainty chat** — it is in the code that chat is working in |
 
 #### B. Deferred ON PURPOSE — decided, with the rule and what fires it
 
