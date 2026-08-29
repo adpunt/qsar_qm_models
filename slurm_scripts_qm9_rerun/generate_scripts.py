@@ -155,10 +155,54 @@ CONDITION_FLAGS = {
 # no clean row has nothing to divide by -- hence the copy.
 REFERENCE_CONDITION = 'gaussian'
 
+# CONDITIONS THAT RUN THEIR OWN CLEAN LEVEL, on top of the reference.
+#
+# The copy above is sound for ACCURACY and unsound for the uncertainty question,
+# and nobody joined the two facts up. copy_zero_rows.py refuses any file whose
+# name contains `_uncertainty_values` -- correctly, because it cannot invent
+# per-molecule numbers -- so a condition without its own clean level gets its
+# accuracy baseline and no uncertainty baseline.
+#
+# That baseline is not optional and it is not borrowable. "Is the model less
+# certain where the labels are unreliable" is answered by correlating the
+# predicted uncertainty against the level-free shape of the noise, then
+# SUBTRACTING the same correlation at level zero -- because a model can look
+# less certain about those molecules for a boring reason, such as their being
+# the large ones. The zero-level model saw the same labels and no corruption, so
+# its correlation is exactly that confound.
+#
+# Borrowing the reference condition's clean run does not work: the shape column
+# is what differs between conditions at level zero, and the reference condition
+# hits every molecule equally, so it has no shape to subtract. Without its own
+# clean row the effect comes out NaN -- an empty table, not a wrong one.
+#
+# WHY ONLY CENSORING. Author's decision, 2026-08-28, on the evidence in
+# RERUN_PLAN.md 3.1f. Of the seven conditions, four deliver the same amount to
+# every molecule, so their shape is flat and the correlation is undefined rather
+# than zero. Of the three with a shape, `grouped_wider` is keyed to the scaffold
+# group and the out-of-fold pass splits on that SAME array, so the group is
+# hidden from the fit being asked about; `outlier_p10` picks its victims at
+# random. Both are structural nulls whatever is measured. Censoring is keyed to
+# the label, so it is learnable on any split -- it is the only condition on which
+# the question has an answer, and the only one whose clean level buys something.
+#
+# Cost: censoring runs on about five model-and-representation pairs on QM9, so
+# this is roughly 45 extra training runs across the main grid. Adding the two
+# nulls as well would be about 5.3% of the screen and of the main grid, and buys
+# a measured zero where the design already predicts one.
+NEEDS_OWN_CLEAN_LEVEL = {'censoring'}
+
 
 def levels_for(name, levels):
-    """The levels a condition actually runs. Only the reference runs the clean one."""
-    if name == REFERENCE_CONDITION:
+    """The levels a condition actually runs.
+
+    The reference condition runs the clean one, and so does any condition that
+    needs its OWN clean level as the control for the uncertainty question. Every
+    other condition has its clean ACCURACY row filled in afterwards by
+    copy_zero_rows.py, which is sound because at level zero the fit is
+    bit-identical whichever condition labels it.
+    """
+    if name == REFERENCE_CONDITION or name in NEEDS_OWN_CLEAN_LEVEL:
         return levels
     return ' '.join(v for v in levels.split() if float(v) != 0.0)
 
@@ -406,6 +450,29 @@ trap 'rm -rf "$TMPDIR"' EXIT
 if [ ! -x rust/target/release/rust_processor ]; then
     echo "ERROR: rust/target/release/rust_processor missing. Run:"
     echo "  cd {qsar_dir}/rust && cargo build --release"
+    exit 2
+fi
+
+# QM9 MUST ALREADY BE PROCESSED. Do not let a job build it.
+#
+# torch_geometric's QM9 processes data/QM9/raw into processed/data_v3.pt on first
+# access, and it takes NO lock. The runbook deletes that directory (the ChemBERTa
+# encoder change moved the record layout, so anything cached before it decodes
+# every later field at the wrong offset) -- and if the array is then submitted
+# cold, all 294 tasks build the same file into the same path at once. The cheap
+# outcome is 294x the work; the expensive one is a task loading a .pt another task
+# is still writing.
+#
+# Same shape as the setup.sh extras guard: the warm-up belongs in the interactive
+# allocation, once, before any submission. This makes that ordering a property of
+# the job rather than of whoever remembered the runbook.
+if [ ! -f data/QM9/processed/data_v3.pt ]; then
+    echo "ERROR: data/QM9/processed/data_v3.pt is missing, so this task would"
+    echo "       process QM9 itself -- and so would every other task in the array,"
+    echo "       into the same file, with no lock between them."
+    echo "  Warm it ONCE in an interactive allocation before submitting, by running"
+    echo "  the smoke task in RUNBOOK section 6 -- it loads QM9 as a side effect."
+    echo "  Do NOT let the array build it."
     exit 2
 fi
 
@@ -724,9 +791,12 @@ def main():
     # The wall clock is requested for the longest, so no task is short of time.
     n_lev = max(len(CONDITIONS[c][1].split()) for c in conditions)
     runs_per_task = n_lev * n_reps_run
+    own_clean = [c for c in conditions if c in NEEDS_OWN_CLEAN_LEVEL]
     if REFERENCE_CONDITION not in conditions:
-        print(f"  note: {REFERENCE_CONDITION} is not in this set, so nothing here runs the clean "
-              f"level and copy_zero_rows.py will have no source to copy from.")
+        borrowers = [c for c in conditions if c not in NEEDS_OWN_CLEAN_LEVEL]
+        if borrowers:
+            print(f"  note: {REFERENCE_CONDITION} is not in this set, so copy_zero_rows.py will "
+                  f"have no source to copy the clean row from for {' '.join(borrowers)}.")
 
     written = []
     grand = 0
@@ -823,8 +893,14 @@ def main():
     print(f"  replicates: {n_reps_run}, numbered {first_iter}..{first_iter + n_reps_run - 1}")
     print(f"  each task: up to {n_lev} levels x {n_reps_run} replicate(s) = "
           f"{runs_per_task} training runs")
-    print(f"  the clean level runs under {REFERENCE_CONDITION} only; "
-          f"copy_zero_rows.py fills in the rest afterwards")
+    if own_clean:
+        print(f"  the clean level runs under {REFERENCE_CONDITION} and under "
+              f"{' '.join(own_clean)}, which needs its OWN clean row as the control for the "
+              f"uncertainty question (RERUN_PLAN.md 3.1f); copy_zero_rows.py fills in the rest "
+              f"and CHECKS the ones that ran")
+    else:
+        print(f"  the clean level runs under {REFERENCE_CONDITION} only; "
+              f"copy_zero_rows.py fills in the rest afterwards")
     print(f"  grid total: {grand * runs_per_task:,} training runs")
     if args.sample_size != 10000:
         print(f"  ⚠ sample size {args.sample_size}, NOT the production 10000")

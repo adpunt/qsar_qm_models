@@ -30,6 +30,13 @@ KIRBY = "/Users/apunt/repos/KIRBy"
 NOISE = "/Users/apunt/repos/NoiseInject"
 
 CASES = [
+ ("censoring runs its own clean level",
+  f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
+  "NEEDS_OWN_CLEAN_LEVEL = {'censoring'}",
+  "NEEDS_OWN_CLEAN_LEVEL = set()",
+  [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_generate_scripts.py",
+   "--skip-parser"]),
+
  ("the two pipelines join on one set of model names",
   f"{QSAR}/model_names.json",
   '"GP-Hetero": "het_gp_rbf",',

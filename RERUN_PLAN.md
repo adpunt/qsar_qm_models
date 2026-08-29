@@ -2635,7 +2635,58 @@ the shifted condition's families should also be pinned per replicate.**
 `scripts/crosscheck_pipeline_reference.py` on 4,000 real QM9 molecules with 1,703 scaffold groups —
 all 17 conditions agree; `scripts/test_injector_wiring.py`; `scripts/test_config_isolation.py`.
 
-#### 2.26b 🔴 OPEN — no condition but Gaussian ever runs level 0, so there is no zero-level control to subtract
+#### 2.26b ✅ SETTLED AND APPLIED 2026-08-28 — censoring runs its own clean level; the two nulls do not
+
+**The author's decision, put to them with the cost of each option: censoring only.** Applied in
+`levels_for` (`slurm_scripts_qm9_rerun/generate_scripts.py`), which now keeps the clean level for
+the reference condition **and** for anything in `NEEDS_OWN_CLEAN_LEVEL`, today `{'censoring'}`.
+
+**Why censoring and not the other two.** §3.1f: of the seven conditions, four deliver the same
+amount to every molecule so their shape is flat and the correlation is undefined; `grouped_wider` is
+keyed to the scaffold group and the out-of-fold pass splits on that same array, so the group is
+hidden from the fit being asked about; `outlier_p10` picks victims at random. Both are structural
+nulls whatever is measured. Censoring is keyed to the label, so it is learnable on any split — it
+is the only condition whose clean level buys an answer rather than a predictable zero.
+
+**Cost: 50 training runs, and no extra wall clock.** Censoring runs on about five
+model-and-representation pairs at ten replicates, one extra level each. The time request was
+already sized from the longest condition's seven levels, so nothing else moves: the generator's own
+summary for that invocation read 350 runs before this change and reads 350 after.
+
+**What it was, and the thing that made it hard to see.** `levels_for` stripped `0.0` from every
+condition except the reference, and `copy_zero_rows.py` refuses any file whose name contains
+`_uncertainty_values` — correctly, because it cannot invent per-molecule numbers. So a condition
+got its clean **accuracy** row and no clean **uncertainty** row, and nobody joined the two facts
+up. `_subtract_zero_level` matches a noisy row to its clean one on a key that includes the
+condition (`scripts/uncertainty_stats.py`), so `effect`, `effect_pred` and `is_detection` came out
+NaN: an empty table, not a wrong one. Borrowing the reference condition's clean run does not rescue
+it, because what differs at level zero is the shape column and the reference condition has no
+shape.
+
+**Two facts found while applying it, both worse than the entry said.**
+
+1. **Censoring is in neither the screen nor the main grid.** The screen and the main grid both
+   default to the conditions that run on all pairs, and censoring is excluded from that set by
+   design — it is asked for by name with its own models and representations. So before this change
+   the which-molecules question had no clean control **anywhere on QM9**, at any point in the run,
+   not only in the screen. The dedicated uncertainty runs cover `logd`, `caco2` and `herg_ki` only.
+2. **The generator over-reports its own size by 10.5%.** `n_lev` is the *maximum* level count
+   across the conditions and the grid total is `tasks x n_lev`, but `levels_for` strips the clean
+   level from every borrower. Counted from the scripts it actually emits: the screen is **1,862**
+   training runs, not the 2,058 it prints, and the main grid is **16,758**, not 18,522. The wall
+   clock is deliberately sized from the maximum and is correct. `RUNBOOK.md` carries both wrong
+   numbers and its test asserts they match the generator's printed line, so fixing one means
+   fixing all three. **Not applied here** — another session has uncommitted changes in both those
+   files, and swallowing them is the mistake §2.26 already records.
+
+**Guarded.** `check_clean_level_control` in `slurm_scripts_qm9_rerun/test_generate_scripts.py`:
+censoring emits `0.0`, the borrowers do not, and `copy_zero_rows.py` still refuses an uncertainty
+file — that refusal is *why* the level has to be run rather than copied, so if it ever stops
+refusing, the set can shrink. It is a case in `scripts/check_fixes_fail_when_removed.py` and goes
+RED when the set is emptied. ⚠️ It was written as a loop over `NEEDS_OWN_CLEAN_LEVEL` first and
+**passed vacuously** when that set was emptied; it is anchored on the condition name instead.
+
+#### 2.26b (history) 🔴 the original finding — no condition but Gaussian ever runs level 0
 
 `levels_for()` (`slurm_scripts_qm9_rerun/generate_scripts.py:151`) strips `0.0` from every
 condition except the reference, and `copy_zero_rows.py:66` refuses any file whose name contains

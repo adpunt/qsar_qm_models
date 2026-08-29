@@ -317,6 +317,59 @@ def check_guards(failures, checked):
         cache.write_text('stub')
 
 
+def check_clean_level_control(failures, checked):
+    """The condition that needs its own clean level must actually emit it.
+
+    copy_zero_rows.py refuses any `_uncertainty_values` file, so a condition
+    without its own level-zero run gets a clean ACCURACY row and no clean
+    uncertainty row -- and the uncertainty statistic subtracts the level-zero
+    correlation to remove the label-magnitude confound. Without it the effect is
+    NaN: an empty table, not a wrong one. The reference condition's clean run
+    cannot stand in, because what differs at level zero is the SHAPE column and
+    the reference condition has no shape (RERUN_PLAN.md 3.1f, 2.26b).
+
+    Censoring is the one that needs it: it is keyed to the label, so it is the
+    only condition on which the question is answerable at all. Author's decision,
+    2026-08-28.
+    """
+    import generate_scripts as gen
+
+    # Anchored on the CONDITION, not on the set. Written as a loop over
+    # NEEDS_OWN_CLEAN_LEVEL this passed vacuously when the set was emptied --
+    # which is the shape of guard the fix harness exists to catch.
+    for name in sorted({'censoring'} | set(gen.NEEDS_OWN_CLEAN_LEVEL)):
+        checked[0] += 1
+        levels = gen.CONDITIONS[name][1].split()
+        if '0.0' not in levels:
+            failures.append(
+                f'{name} needs its own clean level as the uncertainty control and '
+                f'levels_for gave it {levels}. It is the only condition on which '
+                f'"is the model less certain where the labels are unreliable" has '
+                f'an answer, and without a level-zero row of its own that answer '
+                f'is NaN.')
+
+    # And the ones that do NOT need it must still be stripped, or the saving the
+    # copy step exists for is gone.
+    checked[0] += 1
+    borrowers = [c for c in gen.CONDITIONS
+                 if c != gen.REFERENCE_CONDITION and c not in gen.NEEDS_OWN_CLEAN_LEVEL]
+    kept = [c for c in borrowers if '0.0' in gen.CONDITIONS[c][1].split()]
+    if kept:
+        failures.append(
+            f'{kept} run the clean level and do not need to; copy_zero_rows.py fills '
+            f'their accuracy row in for free')
+
+    # The copy step must still refuse to invent per-molecule numbers -- that
+    # refusal is WHY the level has to be run rather than copied.
+    checked[0] += 1
+    sys.path.insert(0, str(GENERATOR.parent))
+    import copy_zero_rows
+    if copy_zero_rows.parse_name(Path('anova_censoring_pdv_qrf_uncertainty_values.csv'),
+                                 ['censoring'], ['pdv']) is not None:
+        failures.append('copy_zero_rows.py no longer refuses an uncertainty file; if it '
+                        'has learned to carry them, NEEDS_OWN_CLEAN_LEVEL can shrink')
+
+
 def check_generator_refusals(failures, checked):
     """The generator's OWN refusals, which check_guards does not reach.
 
@@ -492,6 +545,9 @@ def main():
 
     print('guards...')
     check_guards(failures, checked)
+
+    print('the clean-level control...')
+    check_clean_level_control(failures, checked)
 
     print('the generator\'s own refusals...')
     check_generator_refusals(failures, checked)
