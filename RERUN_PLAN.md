@@ -4314,6 +4314,120 @@ the binding in the crate source. §3.4.1 is the manual half, it is printed at th
 run, and it has to be re-checked by hand whenever the featurisers change.
 
 
+#### 3.4.6 ✅ 2026-08-29 — the second cross-pipeline audit, and what it changed
+
+**Why it was run.** §3.4 was established 2026-08-25 by reading both codebases. Everything
+below it has changed since — the shared spec landed, the fingerprint was corrected, the
+embeddings were re-stored, validation stopped being merged into training, the noise scheme
+was redesigned twice. This audit re-derived parity from the code as it stands, by EXECUTION
+rather than reading, across eleven dimensions: the noise algebra, the seeding, the recorded
+provenance and its column names, the splits, the six representations, the model roster and
+its parameters, the neural training loops, the uncertainty machinery, the analysis that
+consumes both pipelines' rows, the job generators, and the guards themselves. Every finding
+was then handed to an adversarial reviewer that tried to refute it against the live code.
+
+**74 candidates, 10 refuted, 64 confirmed** — 8 that invalidate a comparison, 25 that move
+numbers, 31 cosmetic.
+
+##### The one-line result
+
+**The two pipelines inject the same noise. They do not save the same thing afterwards.**
+Both agreement gates pass on real data — `crosscheck_injectors.py` at 342 of 342 checks on
+the full QM9 label column, and `crosscheck_pipeline_reference.py` on all 17 conditions over
+3,999 real molecules with real scaffold groups, censoring agreeing to the digit. Every
+serious finding is downstream of the injectors, in what the code chooses to write down.
+
+##### What the two gates could not see, and now can
+
+Both gates compare statistics **at one noise level at a time**, so a quantity that is
+supposed to be identical ACROSS levels is invisible to them. That is exactly where the
+level-invariance defect lived (§2.26a), and it is why it survived every gate.
+
+##### Fixed and committed
+
+| | Commit | Proof |
+|---|---|---|
+| The censoring shape column is a DISTANCE on both sides, not a signed shift on one | `fb42cd8` | Was Spearman −1.0 between the two implementations on 3,000 real molecules; now +1.0, agreeing to 1.2e-07. Also agrees with `noise_scale`, which the analysis module already states ranks molecules identically and which measured −1.0 before |
+| QM9's censoring curve exists at all | `fb42cd8` | The level suffix is stripped where the condition is read. On a seven-level retention curve the QM9 naming produced 0 rows and now produces 1, `auc_norm` 0.75083 — the same value the laboratory naming gives |
+| The laboratory error bar carries BOTH of its parts | `53a0ad4` (KIRBy) | Gaussian process 0.334 → 0.792 on one fitted model; variational network 0.568 → 1.167. The plain Bayesian networks do not move, measured at 1.166139 both ways |
+| The laboratory Gaussian process starts its distance scale from the data | `9419af4` (KIRBy) | **The predicted collapse did NOT reproduce** — 900 real molecules, 200 descriptors, scaffold split: R² +0.8426 from the software default against +0.8498 from the data, neither flagged. Alignment, not a rescue |
+
+⚠️ **The failed-fit diagnosis was overstated and the record must say so.** The audit predicted
+every laboratory Gaussian-process number was a failed fit. It is not. Both pipelines
+standardise continuous features before the model sees them, which puts the typical distance
+between molecules at 17.3 — not the 1,100 the original QM9 diagnosis was measured at — and
+the optimiser recovers from the bad start. Untested: the learned embeddings, 1,024 columns
+against the descriptor vector's 200.
+
+##### Settled by the author 2026-08-29
+
+**A draw that lands slightly off target WARNS on both sides.** QM9 aborted where the
+experimental side warned. Measured: 0 of 200 draws outside the band at 8,000 labels, 1 of 200
+at 1,000 — so roughly one validation draw in two hundred killed a QM9 cell, for every model
+and every representation at once, and resubmitting reran the same seed and failed the same
+way. The delivered amount is on every row, so a wide draw is now recorded rather than lost.
+The solver's own algebra check still aborts.
+
+**A fit that cannot make real predictions is dropped from robustness on BOTH sides, and
+WHICH ones were dropped is recorded.** The author's words: *"There's no point in scoring
+robustness on a model which can't make actual predictions. Unless it could and it dropped off
+a cliff. That's worth noting."* So the discard log now separates two cases that were being
+reported as one:
+
+| | what it means | what to do with it |
+|---|---|---|
+| `never_worked` | already past the threshold on CLEAN labels | discard, say nothing more |
+| `collapsed` | sound on clean labels, fell past the threshold as the noise rose | **discard from retention AND report it** — retention cannot be computed, but the collapse is the strongest robustness result the study can produce |
+| `no_clean_row` | no zero-noise row, so the two cannot be told apart | reported as its own case rather than guessed at |
+
+Each row carries the clean-label score and the lowest level at which it went past the
+threshold, and the collapses are printed separately at the end of the run.
+
+##### Deferred by the author to other sessions — DO NOT TOUCH FROM HERE
+
+Whether the three experimental datasets should use searched hyperparameters; the NGBoost
+stopping rule; what a grouped condition means on the validation split; which molecules answer
+the corrupted-label question; the units the pooled uncertainty table reports; and which
+representations and models the uncertainty runs cover. Three files were reverted after a fix
+run touched the tuning path (`models/tuning_rosters.py`,
+`scripts/tune_hyperparameters.py`, `models/consolidate_tuned_params.py`).
+
+⚠️ **One thing the tuning session needs to know, found while reverting.** A full-roster sweep
+raises an unhandled error on its last three models, because `heteroscedastic_gp`,
+`dnn_bnn_full_variational_hetero` and `mlp_bnn_full_variational_hetero` are absent from both
+lookup tables in `models/tuning_rosters.py`. `write_best()` runs AFTER the loop, so the file
+`--confirm` and `--write-master` both need is never written and the whole search is lost.
+`scripts/test_tuning_rosters.py` already fails on it.
+
+##### Open, and it needs outside expertise rather than a measurement
+
+**Stereochemistry.** QM9 canonicalises without stereochemistry before featurising; the
+experimental side does not. Four of the six representations are stereo-blind by construction
+on both sides, so it reaches only the two that read the SMILES string — measured on 100
+drug-like molecules, 47 of 100 differ, by up to 204 against a feature spread of 13.7 on
+MHG-GNN and 5.27 against 0.50 on ChemBERTa. **The published convention is to strip it for
+two-dimensional work**: the Fourches/Muratov/Tropsha curation protocol and the EPA's
+QSAR-ready workflow both list stripping stereochemistry as a standard step before descriptor
+calculation. That supports QM9's behaviour as the standard and the experimental side as the
+one to change. Not yet applied — the author asked for the evidence first.
+
+##### Still open below that
+
+23 findings that move numbers and 31 cosmetic ones, applied but **not yet committed** pending
+review. Two of the eleven fix agents died partway when the machine slept, so the completeness
+scripts and the QM9 driver are only partly done. Full structured record, with each finding's
+evidence and its adversarial verdict:
+`/private/tmp/.../scratchpad/wf.json` and `remaining.json` (session-local; copy anything that
+must survive into this document).
+
+##### What has no executable guard, and should
+
+Nothing checks that the two pipelines write the same results columns; that the two rosters
+cover the same models and representations; that the generated job scripts still match their
+generator on the experimental side; or that both halves read `noise_conditions.json` — KIRBy
+does not read it at all.
+
+
 ## 4. Decisions I need from you
 
 These are the ones where different answers mean materially different work. Everything else in
