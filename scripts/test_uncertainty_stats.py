@@ -32,6 +32,8 @@ from uncertainty_stats import (  # noqa: E402
     ConditioningError,
     UncertaintySchemaError,
     assert_single_cell,
+    assert_one_scale,
+    ScaleError,
     check_noise_scale_redundancy,
     check_pattern_invariance,
     confound_controlled_effect,
@@ -884,6 +886,73 @@ def test_loader_puts_the_raw_and_standardised_qm9_columns_on_one_scale():
                 f"clean label standardised (sd {train['y_true_clean'].std():.3f}), "
                 f"rho_error {rho_error:.3f}, auc_error {auc_error:.3f}; "
                 f"identity holds to {np.abs(identity - identity).max():.1e}")
+
+
+def test_the_laboratory_uncertainty_is_converted_to_the_settled_scale():
+    """The two pipelines' uncertainties end up in the same units, or refuse to mix.
+
+    The laboratory runner converts predictions and uncertainties back to the
+    label's own units before writing -- log units on logD, Caco-2 and hERG. QM9
+    leaves them on the standardised scale it fitted on, which is multiples of the
+    clean training label spread. So one column called `uncertainty` held two
+    different physical quantities, and any table pooling the four datasets was
+    adding them together.
+
+    The settled scale is fractions of the clean training label spread (author,
+    2026-08-27). The runner now records that spread on every row and the loader
+    divides by it. A file written before it cannot be converted -- the spread
+    belongs to the fold's training split and is not recoverable from the scored
+    rows -- so those rows are marked and refused for pooling rather than guessed.
+    """
+    import tempfile
+    SPREAD = 0.91          # a hERG clean training label spread
+
+    def write(path, scale, n=40):
+        rng = np.random.default_rng(0)
+        y = rng.normal(2.0, SPREAD, n)
+        d = {'dataset': 'ChEMBL-hERG-Ki', 'model': 'QRF', 'rep': 'ECFP4',
+             'noise_type': 'censoring_25', 'sigma': 0.25, 'fold': 0,
+             'split': 'test', 'mol_idx': range(n), 'sample_idx': range(n),
+             'y_true': y, 'y_pred': y + rng.normal(0, 0.1, n),
+             'uncertainty': np.full(n, 0.30),      # 0.30 LOG UNITS
+             'injected_noise': 0.0, 'noise_scale': 0.0,
+             'noise_pattern': rng.random(n), 'noise_pattern_pred': rng.random(n)}
+        if scale is not None:
+            d['label_scale'] = scale
+        pd.DataFrame(d).to_csv(path, index=False)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / 'legacy').mkdir()
+        new_file = tmp / 'QRF_ECFP4_uncertainty_values.csv'
+        old_file = tmp / 'legacy' / 'QRF_ECFP4_uncertainty_values.csv'
+        write(new_file, SPREAD)
+        write(old_file, None)
+
+        converted = load_uncertainty(new_file, strict=False)
+        raw = load_uncertainty(old_file, strict=False)
+
+        got = float(converted['uncertainty'].iloc[0])
+        assert abs(got - 0.30 / SPREAD) < 1e-9, got
+        assert float(raw['uncertainty'].iloc[0]) == 0.30
+        assert bool(converted['on_settled_scale'].iloc[0]) is True
+        assert bool(raw['on_settled_scale'].iloc[0]) is False
+        # label_scale still means "multiply by this to get label units", on both.
+        assert abs(float(converted['label_scale'].iloc[0]) - SPREAD) < 1e-9
+        _record('scale_lab_converted',
+                f"0.30 log units becomes {got:.4f} of the label spread "
+                f"(spread {SPREAD}); a file without the spread stays at 0.300 "
+                f"and is marked")
+
+        mixed = pd.concat([converted, raw], ignore_index=True)
+        try:
+            assert_one_scale(mixed)
+            raise AssertionError('a frame mixing the two scales was allowed')
+        except ScaleError as exc:
+            assert 'raw label units' in str(exc)
+            _record('scale_mixed_refused',
+                    f"a frame mixing the two is refused: ...{str(exc)[-90:]}")
+        assert_one_scale(converted)
 
 
 def test_loader_refuses_a_qm9_frame_whose_scales_do_not_line_up():

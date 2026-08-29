@@ -19,8 +19,9 @@ What is in here
 ``q5_mean_uncertainty``         a POPULATION statement, labelled as one
 ``q6_error_ranking``            uncertainty against error from the CLEAN label
 
-Two diagnostics that report on the inputs rather than on the science:
-``check_pattern_invariance`` and ``check_noise_scale_redundancy``.
+Three diagnostics that report on the inputs rather than on the science:
+``check_pattern_invariance``, ``check_noise_scale_redundancy`` and
+``scale_check_coverage``.
 
 --------------------------------------------------------------------------
 Two things a reader must know before using any number from here
@@ -50,7 +51,36 @@ frame uses:
 
     dataset, model, rep, condition, sigma, fold, split, mol_id, sample_idx,
     y_true_clean, y_pred, uncertainty, injected_noise, noise_scale,
-    noise_pattern, noise_pattern_pred, oof_folds_ok, source_file
+    noise_pattern, noise_pattern_pred, oof_folds_ok, source_file,
+    aleatoric_uncertainty, epistemic_uncertainty,
+    aleatoric_support, epistemic_support, label_scale
+
+--------------------------------------------------------------------------
+The units, which are NOT the same on the two producers
+--------------------------------------------------------------------------
+
+Every value column on a row is on the scale that row's model was fitted on, and
+that scale is not the same for the two producers. QM9 standardises the labels in
+the injector before any model sees one, so its predictions, its uncertainty and
+both halves of its uncertainty come back in units of the clean training label
+spread. The experimental runner converts everything back before it writes, so
+its columns are in the label's own units — log units on all three datasets.
+
+Within one row that is harmless: every rank statistic here is invariant to it,
+and so is any ratio of two columns from the same row. It stops being harmless
+the moment a MAGNITUDE from one producer is put beside a magnitude from the
+other, which `q5_mean_uncertainty` and `q6_error_ranking`'s
+`mean_abs_error_clean` are the only statistics here that report. Measured on one
+experiment written into both schemas: every QM9 magnitude came out smaller than
+the identical laboratory magnitude by exactly 1.293, the QM9 label spread.
+
+``label_scale`` is the number that closes that gap: multiply a canonical value
+by it and you have the label's own units. It is the standardisation spread on
+QM9 and 1.0 on the experimental datasets, and it is 1.0 on a QM9 file that was
+written without standardisation, whose columns already are in label units. The
+two magnitude statistics apply it and say so in a ``*_units`` column; the
+settled convention for reported error is the label's own units on both sides
+(`RERUN_PLAN.md` 2.18), and this is the same convention for the uncertainty.
 
 ``condition`` is the noise type. It is read from whichever of ``condition``,
 ``noise_type``, ``task_condition`` or the legacy ``strategy``/``task_strategy``
@@ -94,6 +124,7 @@ __all__ = [
     'q6_error_ranking',
     'check_pattern_invariance',
     'check_noise_scale_redundancy',
+    'scale_check_coverage',
     'STATISTICS',
 ]
 
@@ -150,8 +181,29 @@ CANONICAL_COLS = [
     # carried so the split is readable at all; a statistic built on them must
     # first condition on the support column, because a rank correlation against
     # a constant column is undefined rather than zero.
+    #
+    # They were NOT carried until 2026-08-29. Both normalisers build their
+    # output column by column and neither copied any of the four, and the
+    # `reindex` at the end of `load_uncertainty` then created all four as
+    # all-NaN -- so nothing raised, the comment above was false, and a file
+    # that had the split on disk lost it on read. Measured: a QM9 file written
+    # by the real writer with all four populated on 20 of 20 rows loaded with
+    # 0 of 20. Both are copied through on the row's own scale now, which is the
+    # scale that row's `uncertainty` is on, so the identity the writers enforce
+    # (the two halves add as variances to the total) survives the read.
     'aleatoric_uncertainty', 'epistemic_uncertainty',
     'aleatoric_support', 'epistemic_support',
+    # Multiply any value column on this row by this to get the label's own
+    # units. See "The units" in the module docstring.
+    'label_scale',
+    # Whether this row is on the SETTLED scale -- fractions of the clean
+    # training label spread, the author's decision of 2026-08-27. QM9 is unless
+    # it was run with --normalize False; a laboratory row is once the loader has
+    # divided it by the spread its runner recorded, and is not if the file
+    # predates that column. `assert_one_scale` refuses a frame that mixes the
+    # two, because mean uncertainty over such a frame adds log units to
+    # multiples of a spread.
+    'on_settled_scale',
 ]
 
 # The conditions the injector can produce. Read from the injector itself where it
@@ -270,7 +322,52 @@ def unmapped_model_names():
 # float32, so a correctly scaled file misses by about 2e-6; a file read on the
 # wrong scale misses by the standardisation mean over the spread, which is 5.3
 # on QM9. Nothing lands between the two.
+#
+# What it covers, exactly: the clean label, the recorded noise and the corrupted
+# label. NOT the prediction and NOT the uncertainty. A file whose three label
+# columns agree but whose `y_pred` was left on the other scale passes this and
+# is wrong -- checked by writing one, which loaded without complaint and gave a
+# mean absolute error of 6.96 where the truth was 0.24. The check is worth
+# having and is narrower than "the file is on one scale".
 _SCALE_TOLERANCE = 1e-3
+
+
+def _check_label_noise_triple(out, noisy, path):
+    """Refuse a frame whose clean label, recorded noise and corrupted label do
+    not add up. Returns True if the check could be performed at all.
+
+    The corrupted label is what the model actually trained on, so
+    ``y_true_clean + injected_noise == y_true_noisy`` is checkable on every row
+    without reference to anything outside the file. `noisy` must already be on
+    the canonical frame's scale.
+
+    Only QM9 writes the corrupted label. On the experimental files the column is
+    absent, so this returns False and the frame is loaded unchecked -- which is
+    why `load_uncertainty` records, per file, whether the check ran, rather than
+    letting a producer that cannot be checked look the same as one that passed.
+    """
+    if noisy is None:
+        return False
+    gap = (out['y_true_clean'] + out['injected_noise'] - noisy).abs()
+    if not gap.notna().any():
+        return False
+    worst = float(gap.max())
+    if worst > _SCALE_TOLERANCE:
+        raise UncertaintySchemaError(
+            f"{path}: the clean label, the injected noise and the corrupted "
+            f"label are not on one scale -- max |y_true_clean + "
+            f"injected_noise - y_true_noisy| = {worst:.4g}, tolerance "
+            f"{_SCALE_TOLERANCE:g}. On an experimental file every column is "
+            f"written in the label's own units, so this can only mean one of "
+            f"the three was left on the model's scale. QM9 writes y_true_noisy "
+            f"standardised and y_true_original and injected_noise in the "
+            f"label's own units, and this loader converts with "
+            f"standardisation_mean / standardisation_sd. If those columns "
+            f"are blank the file predates 2026-08-27, and every error-based "
+            f"statistic on it would rank the signed residual by the raw "
+            f"label instead of the size of the error; re-run rather than "
+            f"loading it.")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +421,25 @@ def _slope(x, y):
     return float(np.polyfit(x[m], y[m], 1)[0])
 
 
+def _label_scale_of(cell):
+    """The factor that puts this cell's value columns into the label's own units.
+
+    One cell is one fitted model on one file, so the standardisation constants
+    are one number; the median is taken rather than the first value only so a
+    hand-built frame with a stray NaN still returns something usable. A frame
+    with no `label_scale` column at all — every fixture in the test suite, and
+    any frame assembled by a caller rather than by the loader — is taken to be
+    in label units already, which is what it was before the column existed.
+    """
+    if 'label_scale' not in cell.columns:
+        return 1.0
+    s = pd.to_numeric(cell['label_scale'], errors='coerce')
+    s = s[np.isfinite(s) & (s > 0)]
+    if s.empty:
+        return 1.0
+    return float(np.median(s.to_numpy(dtype=np.float64)))
+
+
 def _require_columns(df, cols, what):
     missing = [c for c in cols if c not in df.columns]
     if missing:
@@ -367,6 +483,48 @@ def assert_single_cell(df, cols=None):
             "a correlation was handed a frame pooled across "
             + ", ".join(f"{c} ({len(v)}+ values: {v})" for c, v in offenders.items())
             + ". Condition on it first.")
+    assert_one_scale(df)
+    return True
+
+
+class ScaleError(UncertaintySchemaError):
+    """Rows in one frame are not on one scale."""
+
+
+def assert_one_scale(df):
+    """Refuse a frame that mixes the settled scale with raw label units.
+
+    The settled scale is fractions of the clean training label spread (author,
+    2026-08-27). QM9 writes on it directly, because it standardises before
+    fitting and never converts back. The laboratory runner writes in the label's
+    own units -- log units on all three of its datasets -- and the loader divides
+    those rows by the clean training label spread the runner records on each row.
+
+    A row that could not be converted is one whose file predates that column, and
+    it is left in raw units and marked. Such a row is fine on its own and cannot
+    be averaged with a converted one: mean uncertainty, coverage and calibration
+    would all be adding log units to multiples of a spread. There is no way to
+    convert it after the fact -- the spread is a property of the fold's training
+    split, and the scored rows do not contain it.
+
+    So the choice the author set is taken literally: convert the laboratory rows,
+    or refuse to put them in one table.
+    """
+    if 'on_settled_scale' not in df.columns:
+        return True
+    flags = df['on_settled_scale'].dropna().unique()
+    if len(flags) > 1:
+        files = sorted(set(df.loc[~df['on_settled_scale'].astype(bool),
+                                  'source_file'].astype(str))) \
+            if 'source_file' in df.columns else []
+        raise ScaleError(
+            "this frame mixes rows on the settled scale (fractions of the clean "
+            "training label spread) with rows still in raw label units, so any "
+            "average over it adds two different quantities together. The rows "
+            "that could not be converted come from file(s) written before the "
+            "runner recorded the spread it standardised by"
+            + (f": {files[:4]}" if files else "")
+            + ". Re-run those, or select one scale before pooling.")
     return True
 
 
@@ -390,6 +548,35 @@ def _pick(df, names):
         if n in df.columns:
             return df[n]
     return None
+
+
+# The two halves of the uncertainty and the two columns that say whether each
+# half varies per molecule. Both producers write all four; neither normaliser
+# copied any of them until 2026-08-29, and the `reindex` at the end of the
+# loader then manufactured them as all-NaN, so the split was silently absent
+# from every frame this module produced.
+_COMPONENT_COLS = ('aleatoric_uncertainty', 'epistemic_uncertainty')
+_SUPPORT_COLS = ('aleatoric_support', 'epistemic_support')
+
+
+def _copy_components(df, out):
+    """Carry the uncertainty split across, on the row's own scale.
+
+    The two numeric halves are left exactly as `uncertainty` is left: they come
+    from the same model outputs, so they are standardised on QM9 and in label
+    units on the experimental datasets, and the writers' identity -- the halves
+    add as variances to the square of the total -- only holds if all three are
+    treated alike. `label_scale` is what puts any of them in label units.
+
+    The support labels are strings ('per_molecule', 'constant', 'none') and are
+    the reason a constant half is not read as a null result, so they travel with
+    the numbers rather than being reconstructed from them.
+    """
+    for c in _COMPONENT_COLS:
+        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+    for c in _SUPPORT_COLS:
+        out[c] = df[c].astype(object) if c in df.columns else np.nan
+    return out
 
 
 def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
@@ -496,29 +683,28 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
                            if 'oof_folds_ok' in df.columns else np.nan)
     out['source_file'] = str(path)
 
+    # The two halves of the uncertainty, on the same scale as `uncertainty`
+    # itself. They come out of the same model outputs as y_pred_std_*, so they
+    # are standardised exactly as it is and are NOT divided by the spread here:
+    # dividing them would break the identity the writer enforces, that the two
+    # halves add as variances to the square of the total.
+    _copy_components(df, out)
+
+    # What multiplies a value on this row into the label's own units. QM9 is
+    # standardised in the injector, so that is the spread; a file written with
+    # --normalize False is already in label units, so it is 1.0 -- which is what
+    # sd_safe holds in both cases.
+    out['label_scale'] = sd_safe
+    # Whether this row is on the settled scale -- fractions of the clean
+    # training label spread. A QM9 file written with --normalize False is in raw
+    # label units and is not, so it cannot be pooled with one that is.
+    out['on_settled_scale'] = to_model_scale
+
     # The check that makes a scale mismatch an error rather than a quiet wrong
-    # number. The file carries the corrupted label the model trained on, so
-    # y_true_clean + injected_noise == y_true_noisy is checkable on every row
-    # without reference to anything outside the file. It holds to float32 on a
-    # correctly scaled frame, and misses by the standardisation constants on a
-    # wrongly scaled one -- 5.3 in units of the spread on QM9.
-    if 'y_true_noisy' in df.columns:
-        noisy = pd.to_numeric(df['y_true_noisy'], errors='coerce')
-        gap = (out['y_true_clean'] + out['injected_noise'] - noisy).abs()
-        worst = float(gap.max()) if gap.notna().any() else 0.0
-        if worst > _SCALE_TOLERANCE:
-            raise UncertaintySchemaError(
-                f"{path}: the clean label, the injected noise and the corrupted "
-                f"label are not on one scale -- max |y_true_clean + "
-                f"injected_noise - y_true_noisy| = {worst:.4g}, tolerance "
-                f"{_SCALE_TOLERANCE:g}. QM9 writes y_pred and y_true_noisy "
-                f"standardised and y_true_original and injected_noise in the "
-                f"label's own units, and this loader converts with "
-                f"standardisation_mean / standardisation_sd. If those columns "
-                f"are blank the file predates 2026-08-27, and every error-based "
-                f"statistic on it would rank the signed residual by the raw "
-                f"label instead of the size of the error; re-run rather than "
-                f"loading it.")
+    # number.
+    noisy = (pd.to_numeric(df['y_true_noisy'], errors='coerce')
+             if 'y_true_noisy' in df.columns else None)
+    out.attrs['scale_checked'] = _check_label_noise_triple(out, noisy, path)
     return out
 
 
@@ -571,15 +757,68 @@ def _normalise_kirby(df, path, strict, dataset_name):
     out['split'] = df['split'] if 'split' in df.columns else 'test'
     out['mol_id'] = df['mol_idx'] if 'mol_idx' in df.columns else np.nan
     out['sample_idx'] = df['sample_idx'] if 'sample_idx' in df.columns else np.nan
-    out['y_true_clean'] = pd.to_numeric(df['y_true'], errors='coerce')
-    out['y_pred'] = pd.to_numeric(df['y_pred'], errors='coerce')
-    out['uncertainty'] = pd.to_numeric(df['uncertainty'], errors='coerce')
+    # ---- ONE SCALE ACROSS THE TWO PIPELINES ---------------------------------
+    # This runner converts its predictions and uncertainties back to RAW label
+    # units before writing them -- log units on all three laboratory datasets.
+    # QM9 leaves them on the standardised scale it fitted on, which is multiples
+    # of the clean training label spread, and _normalise_qm9 above keeps them
+    # there. So the column called `uncertainty` held two different physical
+    # quantities, and any table pooling the four datasets -- mean uncertainty,
+    # coverage, calibration -- averaged log units together with multiples of a
+    # spread.
+    #
+    # The settled scale is fractions of the CLEAN TRAINING LABEL SPREAD (author,
+    # 2026-08-27, the same decision that fixed the noise level grid). So this
+    # side is divided by `label_scale`, which the runner writes on every row: the
+    # spread of the clean training labels of that fold, the number it
+    # standardised by.
+    #
+    # A file written before the runner carried that column CANNOT be converted --
+    # the spread is a property of the fold's training split and is not
+    # recoverable from the scored rows. Those files load, so a single-dataset
+    # analysis still works, but the rows are marked and `assert_one_scale` below
+    # refuses to pool them. Guessing the spread from the rows present would be a
+    # silent wrong answer, which is the failure this whole module exists to stop.
+    scale = (pd.to_numeric(df['label_scale'], errors='coerce')
+             if 'label_scale' in df.columns
+             else pd.Series(np.nan, index=df.index))
+    convertible = scale.notna() & (scale > 0)
+    div = scale.where(convertible, 1.0)
+    out['on_settled_scale'] = convertible
+
+    out['y_true_clean'] = pd.to_numeric(df['y_true'], errors='coerce') / div
+    out['y_pred'] = pd.to_numeric(df['y_pred'], errors='coerce') / div
+    out['uncertainty'] = pd.to_numeric(df['uncertainty'], errors='coerce') / div
+    # The noise columns are in the label's own units on both sides, so they are
+    # divided by the same number and stay comparable with the error columns.
     for c in ('injected_noise', 'noise_scale', 'noise_pattern',
               'noise_pattern_pred'):
-        out[c] = pd.to_numeric(df[c], errors='coerce') if c in df.columns else np.nan
+        out[c] = (pd.to_numeric(df[c], errors='coerce') / div
+                  if c in df.columns else np.nan)
     out['oof_folds_ok'] = (pd.to_numeric(df['oof_folds_ok'], errors='coerce')
                            if 'oof_folds_ok' in df.columns else np.nan)
     out['source_file'] = str(path)
+    _copy_components(df, out)
+
+    # What multiplies a value on this row back into the label's own units. The
+    # runner writes in label units and the block above divides by the clean
+    # training label spread to reach the settled scale, so the factor back is
+    # that same spread -- the same meaning this column has on the QM9 side. A row
+    # that could not be converted was left alone, and its factor is 1.
+    out['label_scale'] = div
+
+    # The same scale check the QM9 files get. It cannot fire today, because the
+    # runner writes no corrupted label -- y_true is the clean one and the row
+    # carries the noise beside it, but never their sum. That is the whole point
+    # of recording whether it ran: an experimental file is not checked, and
+    # until 2026-08-29 nothing said so, so a mis-scaled experimental file was
+    # indistinguishable from a checked one. Written as a lookup rather than a
+    # QM9-only block so that the day the runner adds the column, the check
+    # starts biting with no further change here.
+    noisy = _pick(df, ['y_true_noisy'])
+    if noisy is not None:
+        noisy = pd.to_numeric(noisy, errors='coerce')
+    out.attrs['scale_checked'] = _check_label_noise_triple(out, noisy, path)
     return out
 
 
@@ -631,6 +870,7 @@ def load_uncertainty(paths, strict=True, uncertainty_column='uncalibrated',
         raise UncertaintySchemaError(f"no uncertainty files found under {paths!r}")
 
     frames, problems = [], []
+    checked, unchecked = [], []
     for f in files:
         try:
             raw = pd.read_csv(f)
@@ -648,6 +888,8 @@ def load_uncertainty(paths, strict=True, uncertainty_column='uncalibrated',
                     f"{f}: matches neither schema. A QM9 file has 'y_pred_mean' "
                     f"and 'y_true_original'; a KIRBy file has 'y_pred' and "
                     f"'uncertainty'. Found: {sorted(raw.columns)}")
+            (checked if frames[-1].attrs.get('scale_checked')
+             else unchecked).append(str(f))
         except Exception as exc:  # noqa: BLE001 - reported, not swallowed
             if on_error == 'raise':
                 raise
@@ -663,6 +905,13 @@ def load_uncertainty(paths, strict=True, uncertainty_column='uncalibrated',
     out = pd.concat(frames, ignore_index=True)
     out = out.reindex(columns=CANONICAL_COLS)
     out['fold'] = out['fold'].astype(str)
+    # Which files had their label/noise/corrupted-label arithmetic verified and
+    # which could not be. `pd.concat` drops attrs, so they are set here, after
+    # it. A caller that wants to know whether a frame was checked has to be able
+    # to ask; before this, "checked and passed" and "no corrupted label on the
+    # row, so nothing was checked" looked identical.
+    out.attrs['scale_checked_files'] = checked
+    out.attrs['scale_unchecked_files'] = unchecked
     return out
 
 
@@ -866,6 +1115,19 @@ def confound_controlled_effect(df, split=None, min_n=_DEFAULT_MIN_N,
     `effect > effect_pred`, and it is a necessary condition, not a sufficient
     one.
 
+    **The ceiling only exists for a condition whose shape depends on the label.**
+    Substituting the predicted label changes nothing for a condition that keys
+    its shape on the scaffold group or on a seeded draw, so the recomputed shape
+    comes back bit-identical to the real one, the two correlations agree to
+    every digit, and `effect > effect_pred` is False by construction rather than
+    by measurement. Measured on both producers: identical for gaussian, laplace,
+    student-t, the two grouped conditions and outlier; different only for
+    censoring. `ceiling_is_degenerate` says so, and `is_detection` is left
+    undefined rather than False wherever it is — a control that cannot differ is
+    undefined, not failed. Two conditions on the current grid are affected in a
+    way that matters, grouped_wider and outlier; the rest have a constant shape
+    anyway, which `pattern_constant` already reports.
+
     `noise_scale` is deliberately not used: it equals the noise level times
     `noise_pattern` exactly, so within a level the two rank molecules
     identically and reporting both would be reporting one number twice.
@@ -885,19 +1147,41 @@ def confound_controlled_effect(df, split=None, min_n=_DEFAULT_MIN_N,
         else:
             rec['rho_pattern'] = np.nan
             rec['rho_pattern_pred'] = np.nan
-        pat = cell['noise_pattern'].to_numpy(dtype=np.float64)
-        pat = pat[np.isfinite(pat)]
+        pat_all = cell['noise_pattern'].to_numpy(dtype=np.float64)
+        pat = pat_all[np.isfinite(pat_all)]
         rec['pattern_constant'] = bool(np.unique(pat).size < 2)
+        # Is the ceiling a copy of the thing it is supposed to be a ceiling on?
+        # Compared elementwise within the cell, treating two NaNs in the same
+        # position as agreeing, because a molecule missing from one column is
+        # missing from both.
+        if have_pred:
+            pred_all = cell['noise_pattern_pred'].to_numpy(dtype=np.float64)
+            same = ((pat_all == pred_all)
+                    | (~np.isfinite(pat_all) & ~np.isfinite(pred_all)))
+            rec['ceiling_is_degenerate'] = bool(same.all())
+        else:
+            rec['ceiling_is_degenerate'] = False
         rows.append(rec)
     out = pd.DataFrame(rows, columns=(
         _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'pattern_constant',
+                     'ceiling_is_degenerate',
                      'rho_pattern', 'rho_pattern_pred']))
     out = _subtract_zero_level(out, ['rho_pattern', 'rho_pattern_pred'],
                                base_cols=_base_cols(extra_group_cols))
     out = out.rename(columns={'rho_pattern_baselined': 'effect',
                               'rho_pattern_pred_baselined': 'effect_pred'})
-    out['is_detection'] = (out['effect'].notna() & out['effect_pred'].notna()
-                           & (out['effect'] > out['effect_pred']))
+    # Three-valued on purpose: True, False, or undefined. It was a plain bool,
+    # so a cell where the comparison could not be made at all -- no ceiling on
+    # the file, no zero-level partner to subtract, or a ceiling that is a copy
+    # of the real shape -- came out False, which reads as "this model does not
+    # detect the noise" and is a claim the data does not support. On the six
+    # non-censoring conditions the ceiling is always a copy, so every cell read
+    # False and the column measured nothing.
+    undefined = (out['effect'].isna() | out['effect_pred'].isna()
+                 | out['ceiling_is_degenerate'].fillna(False).astype(bool))
+    out['is_detection'] = pd.array(
+        np.where(undefined, None, out['effect'] > out['effect_pred']),
+        dtype='boolean')
     out['sham_ceiling_available'] = have_pred
     out['statistic'] = 'confound_controlled_effect'
     return out
@@ -1055,23 +1339,43 @@ def q5_mean_uncertainty(df, split=None, min_n=1, extra_group_cols=None):
     Unlike every other statistic here this one is on the raw uncertainty scale,
     so the `uncertainty_column` chosen at load time does change it.
 
+    **The units are the label's own** — eV on QM9, log units on the three
+    experimental datasets — on both producers, which is the convention settled
+    for reported error in `RERUN_PLAN.md` 2.18. That took a conversion: QM9's
+    models are fitted on standardised labels and its uncertainty column comes
+    back in units of the clean training label spread, while the experimental
+    runner converts back before writing. Every magnitude here was therefore
+    smaller on QM9 than on the experimental datasets by exactly the QM9 label
+    spread, for an identical experiment: measured at 1.293 on every level and on
+    the slope. The `label_scale` column the loader puts on each row is what
+    closes it, and `mean_uncertainty_model_scale` keeps the unconverted number
+    so nothing is lost. A frame built by hand with no `label_scale` is taken to
+    be in label units already.
+
     Also reports, broadcast onto every row of a
     (dataset, model, rep, condition, split) series, the slope and the Spearman
-    correlation of the mean uncertainty against the noise level.
+    correlation of the mean uncertainty against the noise level. The noise level
+    is dimensionless on both producers, so the slope is in label units too.
     """
     _require_columns(df, ['uncertainty'], 'q5_mean_uncertainty')
     rows = []
     for rec, cell in _cell_iter(df, split=split, min_n=min_n,
                                 extra_group_cols=extra_group_cols):
+        scale = _label_scale_of(cell)
         u = cell['uncertainty'].to_numpy(dtype=np.float64)
         u = u[np.isfinite(u)]
-        rec['mean_uncertainty'] = float(u.mean()) if u.size else np.nan
-        rec['median_uncertainty'] = float(np.median(u)) if u.size else np.nan
-        rec['sd_uncertainty'] = float(u.std(ddof=1)) if u.size > 1 else np.nan
+        u_label = u * scale
+        rec['mean_uncertainty'] = float(u_label.mean()) if u.size else np.nan
+        rec['median_uncertainty'] = float(np.median(u_label)) if u.size else np.nan
+        rec['sd_uncertainty'] = (float(u_label.std(ddof=1)) if u.size > 1
+                                 else np.nan)
+        rec['mean_uncertainty_model_scale'] = float(u.mean()) if u.size else np.nan
+        rec['label_scale'] = scale
         rows.append(rec)
     out = pd.DataFrame(rows, columns=(
         _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'mean_uncertainty',
-                     'median_uncertainty', 'sd_uncertainty']))
+                     'median_uncertainty', 'sd_uncertainty',
+                     'mean_uncertainty_model_scale', 'label_scale']))
     if len(out):
         base = _base_cols(extra_group_cols)
         trend = out.groupby(base, dropna=False).apply(
@@ -1082,6 +1386,7 @@ def q5_mean_uncertainty(df, split=None, min_n=1, extra_group_cols=None):
             }), include_groups=False).reset_index()
         out = out.merge(trend, on=base, how='left')
     out['level_of_inference'] = 'population_not_per_molecule'
+    out['uncertainty_units'] = 'label_units'
     out['statistic'] = 'q5_mean_uncertainty'
     return out
 
@@ -1100,24 +1405,35 @@ def q6_error_ranking(df, split=None, min_n=_DEFAULT_MIN_N,
     `y_true_original`, and on KIRBy `y_true` IS the clean label with the
     corrupted one being `y_true + injected_noise`. The loader maps both to
     `y_true_clean`.
+
+    The correlation is a rank statistic and is the answer to the question; it is
+    unaffected by which scale the frame is on. `mean_abs_error_clean` sits
+    beside it and is NOT, so it is reported in the label's own units on both
+    producers, the same convention as every other reported error
+    (`RERUN_PLAN.md` 2.18). Before that it was in units of the label spread on
+    QM9 and in log units on the experimental datasets under one column name, and
+    the two differed by the label spread for an identical experiment.
     """
     _require_columns(df, ['uncertainty', 'y_true_clean', 'y_pred'],
                      'q6_error_ranking')
     rows = []
     for rec, cell in _cell_iter(df, split=split, min_n=min_n,
                                 extra_group_cols=extra_group_cols):
+        scale = _label_scale_of(cell)
         err = np.abs(cell['y_true_clean'].to_numpy(dtype=np.float64)
                      - cell['y_pred'].to_numpy(dtype=np.float64))
         rec['rho_unc_vs_clean_error'] = (_spearman(cell['uncertainty'], err)
                                          if rec['n_sufficient'] else np.nan)
-        rec['mean_abs_error_clean'] = (float(np.nanmean(err))
+        rec['mean_abs_error_clean'] = (float(np.nanmean(err)) * scale
                                        if np.isfinite(err).any() else np.nan)
+        rec['label_scale'] = scale
         rows.append(rec)
     out = pd.DataFrame(rows, columns=(
         _cell_cols(extra_group_cols) + ['n', 'n_sufficient', 'rho_unc_vs_clean_error',
-                     'mean_abs_error_clean']))
+                     'mean_abs_error_clean', 'label_scale']))
     out['statistic'] = 'q6_error_ranking'
     out['error_reference'] = 'clean_label'
+    out['error_units'] = 'label_units'
     return out
 
 
@@ -1142,6 +1458,25 @@ def check_pattern_invariance(df, tol=1e-9):
     out = spread.merge(lvl, on=keys, how='left')
     out['invariant'] = out['pattern_spread_across_levels'].fillna(0.0).abs() <= tol
     return out
+
+
+def scale_check_coverage(df):
+    """Which loaded files had their label arithmetic verified, and which could not.
+
+    A diagnostic, not a result. The check needs the corrupted label the model
+    actually trained on. QM9 writes it, so a QM9 file that loads has passed; the
+    experimental runner writes the clean label and the noise but never their
+    sum, so an experimental file loads unchecked. Before this was recorded the
+    two looked the same from the outside, and a mis-scaled experimental file
+    would have been as quiet as a correct one -- demonstrated by putting the
+    recorded noise on the wrong scale in each producer's schema in turn: the QM9
+    file was refused by name, the experimental file loaded without complaint.
+    """
+    checked = list(df.attrs.get('scale_checked_files', []))
+    unchecked = list(df.attrs.get('scale_unchecked_files', []))
+    return {'n_checked': len(checked), 'n_unchecked': len(unchecked),
+            'checked': checked, 'unchecked': unchecked,
+            'all_checked': bool(checked) and not unchecked}
 
 
 def check_noise_scale_redundancy(df, min_n=_DEFAULT_MIN_N):
