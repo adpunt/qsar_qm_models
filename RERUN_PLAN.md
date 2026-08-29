@@ -5315,6 +5315,31 @@ already the default.
 
 #### 5.7m 📄 THE METHOD, AS IT SHOULD BE WRITTEN UP (2026-08-29)
 
+**WHAT TO CALL IT.** The established terms, for the Methods:
+
+> **Random search hyperparameter optimisation with hold-out validation**, with
+> **successive halving** on the three most expensive models.
+
+Each phrase is doing work and none is decorative:
+
+- **random search** — settings drawn at random from each parameter's range, as opposed to a grid.
+  `Bergstra2012` is the reference: random beats grid at equal cost once only a few of the
+  parameters matter, which is the case for every model here.
+- **hold-out validation** — ONE validation split, not cross-validation. This is the phrase that
+  tells a reader there are no folds, so it must not be dropped.
+- **successive halving** — `Jamieson2016`. Evaluate everything cheaply, keep the best few, spend
+  the real budget only on those.
+- **multi-fidelity** — the umbrella term for that idea. The cheap evaluation is the **low-fidelity**
+  one, and what you vary to make it cheap is the **budget** or **resource**. Here the resource is
+  the number of training molecules: 800 to screen, 4,000 for the survivors.
+- **NOT Hyperband.** Hyperband runs successive halving repeatedly from several starting budgets to
+  hedge against picking the wrong one. This runs a single round at one budget, so calling it
+  Hyperband would be wrong.
+
+The boundary test in the acceptance rule below has no established name. Describe it rather than
+naming it — "configurations lying on the boundary of the search space were rejected" — because
+reaching for a term that does not exist is worse than a sentence that does the job.
+
 **The split.** One scaffold split of 5,000 QM9 molecules at 80/10/10 — 4,000 training, 500
 validation, 500 test. No cross-validation and no repetitions: every setting is fitted once, from
 the same fixed seed. The test part is not touched by the search at any point.
