@@ -3819,6 +3819,58 @@ paper's Methods are wrong about its most-used representation.
 
 I verified the five highest-severity findings myself, in the source, before writing them here.
 
+#### 3.4d ✅ FIXED 2026-08-29 — the uncertainty column was in two different units
+
+**The settled scale is fractions of the clean training label spread.** The author settled it on
+2026-08-27 for the noise levels (*"I thought we decided on one. Whichever we decided, you need to
+stick with that"*), and it applies to the uncertainty column for the same reason.
+
+QM9 standardises before fitting and never converts back, so its uncertainty is already in multiples
+of the clean training label spread. The laboratory runner multiplies by its target scaler on the way
+out, so its uncertainty is in the label's own units — log units on logD, Caco-2 and hERG. One column
+called `uncertainty` held two different physical quantities. Mean uncertainty, coverage and
+calibration over a pooled frame added them together.
+
+**Applied, both halves.** The laboratory runner records the spread it standardised by on every
+uncertainty row (`label_scale`), and a run whose runner reports no usable spread now stops rather
+than writing rows in unknown units. `scripts/uncertainty_stats.py` divides the predictions, the
+uncertainty and the noise columns by it. Measured on a fixture: 0.30 log units against a hERG
+spread of 0.91 loads as 0.3297.
+
+**A file written before that column cannot be converted after the fact** — the spread belongs to
+the fold's training split and is not recoverable from the scored rows. Those rows load, so a
+single-dataset analysis still works, but they carry `on_settled_scale = False` and
+`assert_one_scale` refuses to pool them with converted rows. That is the author's instruction taken
+literally: convert the laboratory rows, or refuse to put them in one table. `assert_one_scale` runs
+from `assert_single_cell`, so every correlation in the module is covered.
+
+#### 3.4e 🔴 OPEN — the two halves do not run the same model-and-representation pairs
+
+**The author's ruling, 2026-08-28 02:52, verbatim:** *"The same thing that happens on QM9 happens on
+the others. Pick 5 or so interesting/well-performing model/rep pairs and run them through the circus
+of uncertainty on all datasets."* Then, at 02:56: *"just run 28 for all uncertainty including censor
+for all datasets. But what 4 reps? What 7 models? I don't feel comfortable with this number yet.
+these need to be determined after my uncertainty checks."* And at 02:58: *"leave that as a flexible
+decision pending more uncertainty results in the rerun plan."*
+
+**So: ONE set of pairs, used on all four datasets. The size was left flexible, pending the roster
+screen.** What is on disk now is not one set:
+
+| | pairs that emit an uncertainty |
+|---|---|
+| the laboratory uncertainty runs | **4 models × 3 representations**, VBLL restricted to ChemBERTa — 10 pairs (`slurm_scripts_uncertainty_rerun/generate_scripts.py`) |
+| QM9 | **every uncertainty-emitting model × every representation in the main grid** — 11 models × 6 representations, because QM9 has no uncertainty run of its own and its rows fall out of the grid |
+
+The laboratory cut is defensible on its face — it was made from the roster screen, which is what the
+author said the choice was pending on. **The problem is that it was applied to one side only.** The
+two halves cannot be compared pair for pair, and the author's instruction was explicitly that they
+should be.
+
+**This is a decision, not a defect.** Either QM9's uncertainty analysis is restricted to the same
+pairs the laboratory runs, or the laboratory list is widened back. Restricting QM9 costs nothing —
+the rows are a by-product of a grid that runs anyway, and the restriction is a filter at analysis
+time. Widening the laboratory list costs queue time in proportion.
+
 #### 3.4b ✅ FIXED 2026-08-28 — four models had no name in common, and nothing said so
 
 **The same failure `condition_names.json` exists to stop, one level up.** The two pipelines write
