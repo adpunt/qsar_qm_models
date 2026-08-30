@@ -5949,6 +5949,117 @@ meaningless numbers, which is worse.
 
 ---
 
+### 5.5i ✅ SETTLED 2026-08-30 — WHICH MODELS DECOMPOSE. Two of seven, and the study reports those two.
+
+**The author's decision, on the measurement below: only the Gaussian process and NGBoost fitted
+under several seeds carry an aleatoric/epistemic split. Nothing else does.**
+
+#### The question, and the test that answers it
+
+*Can we decompose uncertainty estimates under artificial label noise?*
+
+The test needs no per-molecule ranking, no noise pattern and no confound control. Inject plain
+label noise at rising levels. **The aleatoric term should rise, because that is the observation
+noise and there is more of it. The epistemic term should not, because neither the amount of data
+nor the model class has changed.** A model whose two terms rise together is reporting one signal
+twice.
+
+`scripts/decomposition_controls.py --level-response`. Real QM9, 3,000 molecules, PDV, three-fold
+out-of-fold scoring on Murcko scaffolds, plain gaussian label noise, none against one full label
+spread. Output: `results/decomposition_controls/level_response_qm9_PDV_n3000_FINAL.csv`.
+
+#### The result
+
+| model | aleatoric | epistemic | R2 clean | verdict |
+|---|---|---|---|---|
+| **Gaussian process** | **x12.9** | x1.6 | 0.85 | **PASS** |
+| **NGBoost, 3 seeds** | **x9.1** | x0.7 | 0.84 | **PASS** |
+| NGBoost, single fit | x9.1 | absent | 0.84 | aleatoric right, no epistemic axis exists |
+| random forest | x5.7 | x5.3 | 0.84 | **FAIL** — both rise together |
+| variational (VBLL) | x1.3 | x1.1 | **-0.04** | **cannot judge** — does not fit |
+| DNN Bayesian net + variance head | x1.4 | x1.9 | **-4.0** | **cannot judge** — does not fit |
+| MLP Bayesian net + variance head | x1.2 | x1.1 | **-0.04** | **cannot judge** — does not fit |
+
+**The forest failure is not a sample-size artefact.** The same result at 600, 3,000 and 5,000
+molecules, on PDV, ECFP4 and SNS, and on three of the study's own noise conditions. It is the
+mechanism: one bootstrap resampling widens the spread inside each leaf AND moves where the trees
+split, so both terms carry the same signal. No setting change repairs it (§5.5d).
+
+**🔴 All three neural families fail to FIT on QM9 descriptors**, R2 from -0.04 to -4.8 against 0.84
+for every tree model on identical data, with the pipeline's own early stopping. **The case the
+literature actually holds up — a network with a variance head, Kendall & Gal eq. 6 — is therefore
+untested here, not disproven.** Anything it reports about uncertainty is unreadable while the mean
+prediction is worse than predicting the average.
+
+**One property of the NGBoost ensemble to carry:** its epistemic term is real but minute, around
+5e-8 against an aleatoric of 2e-3, forty thousand times smaller. Three seeds land almost on top of
+each other. It behaves correctly; there is very little of it.
+
+#### What is built, and where
+
+| piece | state |
+|---|---|
+| the split, one shared definition, both pipelines | wired (§5.5g) |
+| Gaussian process | needed no change — it already decomposed |
+| NGBoost, three seeds | **built 2026-08-30**, `models/models.py`, seed count in the shared spec 1.6.0 |
+| the ensemble arithmetic | matches chemprop's `EnsemblePredictor` on a fixed array, gated |
+| the variance head for the Bayesian networks | built and gated; the model does not fit, so unproven |
+| the noise-predicting Gaussian process | built, wired, and **fails this test** — its epistemic rises more than its aleatoric |
+| the heteroscedastic variational layer | built, wired, and the model does not fit |
+
+**Member zero of the NGBoost ensemble IS the fit that was already being made**, early stopping and
+all, so no accuracy number moves. The extra members are fitted only under `-u/--uncertainty`.
+
+#### 🟠 OPEN — one decision, and it is only about cost
+
+The generator's own wall-clock guard fires on the ensemble: three seeds times one fit plus five
+out-of-fold folds is **eighteen fits per training run, 606 hours per task, 25 days**. It fits the
+long partition's 30-day limit with nothing to spare.
+
+**The lever already exists**: `--oof-folds-scored 1` scores ONE inner fold instead of all five. Every
+training molecule in that fold is still scored by a model that never saw its label. That takes
+eighteen fits back to six, which is roughly what NGBoost costs today with the ensemble included.
+
+**Two options, and the author has not chosen:**
+
+1. three seeds, one scored fold — today's cost
+2. three seeds, all five folds — 25 days per task, long partition only
+
+Nothing is blocked either way. The code runs as it stands; only the job scripts' wall clock depends
+on the answer.
+
+#### What this chat also found, recorded elsewhere
+
+- **§2.25** — two jobs starting together on one node can kill each other before training anything,
+  through a hard-coded temporary file in the Gaussian-process stack. Both generators now wait a
+  random nought to ten minutes inside the task.
+- **§5.5g** — the four defects found while wiring, including a Gaussian process handed a standard
+  deviation where a variance belonged, and two neural trainers that had already drifted apart.
+- **The silent variance head.** `models.py` widened a network's output by trying `fc_out` then
+  `output_layer` with no else, so a class with neither fell through in silence and kept a
+  one-column head under a two-column loss. `MLPRegressor` has `output_layer` and not `fc_out`, so
+  this was live. It raises by name now, at both sites, and a gate fails if the silence returns.
+- **A statistic that had to be thrown away.** A component that is one number PER FIT takes a
+  different value in each out-of-fold fold. Judged down the whole column it looks like a term that
+  varies per molecule, and the correlation against it is a correlation with fold membership. Caught
+  on real QM9 at -0.013 and +0.26 before the fix. Constancy is judged within each fit on both sides.
+
+#### 🔴 A number in §5.5e that must not be quoted
+
+**The +0.7307 recorded there for the noise-predicting Gaussian process is +0.109 when measured the
+way the pipeline works.** It came from a single train/test holdout, scored against the noise the
+REGION of a held-out molecule would carry, with no clean-label subtraction. Out of fold on scaffold
+groups, against the corruption a training molecule actually received, with the subtraction, it is
++0.109. And that model fails the decomposition test above regardless.
+
+#### Everything measured, and its sample size
+
+`results/decomposition_controls/` — five files with a README. **Sample sizes DIFFER between files
+and must not be pooled.** These are diagnostics for a pass/fail decision and are not for
+publication.
+
+---
+
 ### 5.6 The two representation repairs
 
 Both change the record layout, so they land together with the embedding storage fix (§2.8c) and
