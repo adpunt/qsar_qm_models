@@ -5960,6 +5960,58 @@ That second test had to be added after the fact. The first version could only fi
 parameters, so a learning rate at 97% of its range was reported as comfortably interior
 (RERUN_PLAN.md 5.7n).
 
+#### 5.7s 🚩 FOR THE METHODS — we MEASURED the cost of not tuning per representation
+
+**This is a paragraph the paper should have, and possibly a supplementary table.** The literature
+on comparing molecular representations either asserts that per-representation tuning is needed for
+a fair comparison, or says nothing about its protocol at all. We measured it.
+
+**The experiment** (`scripts/test_tuning_transfers.py`). Take each representation's winning setting
+and apply it to every other representation, refitting each time. The diagonal is each pairing's own
+setting, so it doubles as a check that a transfer run reproduces the recorded score.
+
+This is necessary because the obvious comparison does not work. Comparing the WINNING settings
+across representations and counting how many differ measures the random draws, not the models —
+each pairing drew its own twelve settings, so the winners would differ even if the true optimum
+were identical everywhere.
+
+**Support vector machine, QM9, 5,000 molecules. Rows are the representation being fitted, columns
+are whose setting was used.**
+
+| fitted on | default | its own | avalon | chemberta | ecfp4 | mhggnn | pdv | sns |
+|---|---|---|---|---|---|---|---|---|
+| avalon | +0.7859 | +0.8208 | **+0.8208** | +0.7437 | +0.8204 | +0.7857 | +0.8019 | +0.8148 |
+| chemberta | +0.7849 | +0.8231 | +0.8247 | **+0.8231** | +0.8193 | +0.8203 | — | +0.7646 |
+| ecfp4 | +0.7443 | +0.7640 | +0.7643 | +0.6234 | **+0.7640** | +0.6687 | +0.6683 | +0.7180 |
+| mhggnn | +0.8284 | +0.8774 | +0.8557 | +0.8651 | +0.8556 | **+0.8774** | +0.8541 | +0.5537 |
+| pdv | +0.8303 | +0.8933 | +0.8817 | +0.8768 | +0.8852 | +0.8627 | **+0.8933** | +0.8784 |
+| sns | +0.8210 | +0.8818 | +0.8677 | +0.7409 | +0.8664 | +0.8241 | +0.8597 | **+0.8818** |
+
+**Borrowing costs more than tuning gains.**
+
+- fitting **mhggnn** with **sns**'s setting: +0.8774 down to +0.5537, a loss of 0.3237
+- fitting **sns** with **chemberta**'s setting: +0.8818 down to +0.7409, a loss of 0.1410
+- fitting **ecfp4** with **chemberta**'s setting: +0.7640 down to +0.6234, a loss of 0.1407
+
+Tuning gains 0.02 to 0.07 on this model. A borrowed setting can lose 0.14 — so the wrong borrowed
+setting is worse than not tuning at all.
+
+**It is not symmetric, and that is the interesting result.** ChemBERTa's setting is poison for the
+fingerprints, while the fingerprints transfer to each other almost perfectly — Avalon's setting
+fits ECFP4 at +0.7643 against ECFP4's own +0.7640. The dense learned representations and the sparse
+fingerprints want genuinely different settings; within each family they do not.
+
+**A borrowed setting still beats the untuned default 20 times out of 29**, so borrowing is usually
+better than nothing — but the failures include the two worst cases above.
+
+**What to write.** That hyperparameters were tuned separately for each model and representation, and
+that this was verified rather than assumed: a setting tuned on one representation loses up to
+0.14 R² when applied to another, which exceeds the benefit tuning provides. Most of this literature
+asserts the need or ignores the question; the measurement is a small contribution in its own right.
+
+⚠️ Still to run: the same matrix ACROSS DATASETS, which is the other half of the question and is
+expected to be starker — the datasets differ in size and in label noise as well as in features.
+
 #### 5.7p 📋 HOW THE RESULTS GET SORTED — the author's rule, settled 2026-08-29
 
 Every model-representation pairing goes into one of four groups, and nothing else is reported:
