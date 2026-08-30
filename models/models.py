@@ -2375,6 +2375,54 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
     def _ngb_pred_dist(x):
         return model.pred_dist(x, max_iter=_ngb_best_iter)
 
+    # THE ENSEMBLE, and it is the only route NGBoost has to a model-uncertainty
+    # term. One fit predicts a distribution per molecule -- that is the
+    # aleatoric term -- and has nothing to disagree with, so its epistemic term
+    # is ABSENT. The literature's answer is an outer ensemble: fit the whole
+    # model again under a different seed, and the epistemic term is the variance
+    # of the members' means. chemprop's EnsemblePredictor computes exactly that,
+    # and the shared module matches it on a fixed array under test.
+    #
+    # SETTLED 2026-08-30 by the author, on the measurement in RERUN_PLAN.md 5.5i:
+    # of seven models tested, only the Gaussian process and NGBoost-over-seeds
+    # decompose correctly, and those two are what the study reports.
+    #
+    # MEMBER 0 IS THE MODEL FITTED ABOVE, so every accuracy number is the number
+    # it was before. The extra members are fitted only to be disagreed with.
+    #
+    # 🔴 IT COSTS ONE FIT PER SEED, and ONLY under -u/--uncertainty. A run not
+    # asked for uncertainty fits once, exactly as before, so no accuracy run
+    # gets slower.
+    def _fit_ngb_member(seed_offset, x_fit, y_fit):
+        m = NGBRegressor(
+            Dist=_ngb_dist, Score=_ngb_score,
+            natural_gradient=params['natural_gradient'],
+            n_estimators=params['n_estimators'],
+            learning_rate=params['learning_rate'],
+            minibatch_frac=_ngb_spec('minibatch_frac'),
+            col_sample=_ngb_spec('col_sample'),
+            verbose=False,
+            random_state=iteration_seed + 1000 * seed_offset,
+        )
+        best = None
+        if _ngb_stop > 0 and x_val is not None and len(x_val) > 0:
+            m.fit(x_fit, y_fit, X_val=x_val, Y_val=y_val,
+                  early_stopping_rounds=_ngb_stop)
+            if _ngb_spec('use_best_iteration'):
+                best = getattr(m, 'best_val_loss_itr', None)
+        else:
+            m.fit(x_fit, y_fit)
+        return m, best
+
+    _n_seeds = (int(SKLEARN_DEFAULTS.get('ngboost_ensemble_seeds', 3))
+                if args.uncertainty else 1)
+    _ngb_members = [(model, _ngb_best_iter)]
+    if _n_seeds > 1:
+        print(f"      [ngboost] ensemble: {_n_seeds} fits, for the epistemic "
+              f"term. Member 0 is the fit above.", flush=True)
+        _ngb_members += [_fit_ngb_member(k, x_val_train, y_val_train)
+                         for k in range(1, _n_seeds)]
+
     # STEP 2: Get predictions and calibrate
     y_pred = _ngb_predict(x_test)
     y_dist = _ngb_pred_dist(x_test)
@@ -2398,8 +2446,16 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
         # that today (RERUN_PLAN.md 5.5g).
         #
         # `.scale` is a standard deviation; the module takes VARIANCES.
-        alea_var = np.asarray(y_pred_std_uncalibrated, dtype=float) ** 2
-        alea_var, epis_var, _total_var = decompose_single_distribution(alea_var)
+        if len(_ngb_members) > 1:
+            _d = [m.pred_dist(x_test, max_iter=b) for m, b in _ngb_members]
+            alea_var, epis_var, _total_var = decompose_seed_ensemble(
+                np.stack([np.asarray(d.loc, dtype=float) for d in _d], axis=0),
+                np.stack([np.asarray(d.scale, dtype=float) ** 2 for d in _d],
+                         axis=0))
+        else:
+            alea_var = np.asarray(y_pred_std_uncalibrated, dtype=float) ** 2
+            alea_var, epis_var, _total_var = decompose_single_distribution(
+                alea_var)
 
         # The components are written RAW, uncalibrated. The temperature is a
         # calibration of the TOTAL and it is on the row in its own column

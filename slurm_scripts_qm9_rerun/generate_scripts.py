@@ -325,7 +325,12 @@ MODELS = {
     'xgboost':                  ('-m xgboost',   1, 23, '', ALL_REPS),
     'lgb':                      ('-m lgb',       1, 23, 'LightGBM', ALL_REPS),
     'svm':                      ('-m svm',       1, 35, 'RBF kernel on every representation', ALL_REPS),
-    'ngboost':                  ('-m ngboost -u True', 1, 47, 'slowest tree model; emits per-molecule uncertainty', ALL_REPS),
+    # 🔴 THREE FITS PER RUN under -u, not one. NGBoost is fitted under three
+    # seeds so it has a model-uncertainty term at all; a single fit has nothing
+    # to disagree with. Settled 2026-08-30 (RERUN_PLAN.md 5.5i). The hours below
+    # are TRIPLED from 47 to reflect it -- a task killed at the wall costs the
+    # whole task.
+    'ngboost':                  ('-m ngboost -u True', 1, 141, 'slowest tree model; three fits per run for the ensemble; emits both uncertainty components per molecule', ALL_REPS),
     'dnn':                      ('-m dnn',       1, 35, '', ALL_REPS),
     'mlp':                      ('-m mlp',       1, 35, '', ALL_REPS),
     'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True', 2, 47, 'BNN-alpha', ALL_REPS),

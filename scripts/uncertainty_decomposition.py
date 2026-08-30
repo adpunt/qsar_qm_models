@@ -95,7 +95,10 @@ SUPPORT = {
     # QM9 roster
     'rf':                        (PER_MOLECULE, PER_MOLECULE),
     'qrf':                       (PER_MOLECULE, PER_MOLECULE),
-    'ngboost':                   (PER_MOLECULE, NONE),
+    # NGBoost is fitted under several seeds from 2026-08-30, so it HAS a
+    # model-uncertainty term: the variance of the members' means. Settled by the
+    # author on the measurement in RERUN_PLAN.md 5.5i.
+    'ngboost':                   (PER_MOLECULE, PER_MOLECULE),
     'dnn':                       (NONE, NONE),
     'mlp':                       (NONE, NONE),
     'dnn_bnn_full':              (NONE, PER_MOLECULE),
@@ -131,7 +134,7 @@ SUPPORT = {
     # Laboratory roster
     'RF':                        (PER_MOLECULE, PER_MOLECULE),
     'QRF':                       (PER_MOLECULE, PER_MOLECULE),
-    'NGBoost':                   (PER_MOLECULE, NONE),
+    'NGBoost':                   (PER_MOLECULE, PER_MOLECULE),
     'GP':                        (CONSTANT, PER_MOLECULE),
     'GP-Tanimoto':               (CONSTANT, PER_MOLECULE),
     # The laboratory runner decorates a Gaussian process variant with a suffix,

@@ -61,7 +61,13 @@ def build_jobs():
     add('mlpvbll', ['--sample-size', '5000', '--screen-at', '800', '--promote', '4',
                     '--models', 'mlp_bnn_full_variational'],
         ['mlp_bnn_full_variational'])
-    add('dnnrest', ['--sample-size', '5000', '--screen-at', '800', '--promote', '4',
+    # PROMOTES TWO, NOT FOUR. Screening ranks settings by score and ignores what
+    # they will cost at full size, so a 1024-wide Bayesian network -- cheap on
+    # 800 molecules, hours on 4,000, because every weight is resampled on every
+    # batch -- was promoted and then produced NO full-size fit in three and a half
+    # hours. The top two almost always contain the winner; four was paying for
+    # runners-up at the price of the whole job.
+    add('dnnrest', ['--sample-size', '5000', '--screen-at', '800', '--promote', '2',
                     '--models', 'dnn_bnn_full', 'dnn_bnn_full_variational',
                     '--reps', 'sns', 'avalon', 'chemberta'],
         ['dnn_bnn_full', 'dnn_bnn_full_variational'], ['sns', 'avalon', 'chemberta'])
@@ -96,6 +102,34 @@ def progress(tag, pairings):
                 counts[(r['model'], r['rep'])] += 1
     done = sum(1 for p in pairings if counts.get(p, 0) >= FITS_PER_PAIRING)
     return done, len(pairings)
+
+
+def slowest_fit(tag):
+    """The longest single fit this job has recorded, in seconds.
+
+    A fixed stall threshold does not work here. A screened job writes twelve
+    cheap fits in a few minutes and then goes quiet for an hour while it refits
+    the survivors at full size -- which looks identical to being stuck. The only
+    honest reference is the job's own slowest fit so far.
+    """
+    worst = 0.0
+    for path in glob.glob(os.path.join(OUT_DIR, f'trials_{tag}*.csv')):
+        with open(path) as fh:
+            for r in csv.DictReader(fh):
+                try:
+                    worst = max(worst, float(r['seconds']))
+                except (TypeError, ValueError):
+                    pass
+    return worst
+
+
+def fits_done(tag):
+    """Total scored fits for this job, however many pairings they belong to."""
+    n = 0
+    for path in glob.glob(os.path.join(OUT_DIR, f'trials_{tag}*.csv')):
+        with open(path) as fh:
+            n += sum(1 for _ in csv.DictReader(fh))
+    return n
 
 
 def newest_row_age(tag):
@@ -134,6 +168,7 @@ def main():
     stall_after = args.stall_after
 
     build_jobs()
+    previous, stuck = {}, {}
     while True:
         stamp = datetime.now().strftime('%H:%M:%S')
         restarted = []
@@ -143,16 +178,35 @@ def main():
             live = alive(tag)
             state = 'running' if live else ('complete' if done >= total else 'DEAD')
 
-            # A LIVE PROCESS IS NOT THE SAME AS A WORKING ONE. A run that has
-            # written nothing for a long time is stuck, and the process being
-            # alive hides that completely -- which is how a whole night was lost.
-            fresh = newest_row_age(tag)
-            if state == 'running' and fresh is not None and fresh > stall_after:
-                state = f'STALLED ({fresh/60:.0f} min since its last result)'
+            # A LIVE PROCESS IS NOT THE SAME AS A WORKING ONE, and completed
+            # PAIRINGS are too coarse to tell -- a job can be thirteen fits into
+            # a pairing and still read as zero. Count the fits and watch whether
+            # the number moves. That is throughput, and it is the only thing that
+            # distinguishes slow from stuck.
+            fits = fits_done(tag)
+            moved = fits - previous.get(tag, 0)
+            previous[tag] = fits
+            if state == 'running':
+                stuck[tag] = stuck.get(tag, 0) + 1 if moved == 0 else 0
+                age = newest_row_age(tag)
+                # Judged against this job's OWN slowest fit, with room for the
+                # machine being shared, and never less than the flat floor.
+                limit = max(stall_after, 4 * slowest_fit(tag))
+                if stuck[tag] >= 2 and age and age > limit:
+                    state = (f'NOT ADVANCING — {age/60:.0f} min with no new fit, '
+                             f'against a slowest-ever fit of '
+                             f'{slowest_fit(tag)/60:.0f} min')
+                elif stuck[tag] >= 2:
+                    state = (f'slow — {age/60:.0f} min since the last fit, but '
+                             f'its slowest is {slowest_fit(tag)/60:.0f} min, so '
+                             f'this is within range')
+            else:
+                stuck[tag] = 0
 
-            print(f'{stamp}  {tag:10s} {done:2d}/{total:2d} pairings   {state}',
-                  flush=True)
-            lines.append(f'- {tag}: {done}/{total} pairings, {state}')
+            print(f'{stamp}  {tag:10s} {done:2d}/{total:2d} pairings  '
+                  f'{fits:4d} fits (+{moved})   {state}', flush=True)
+            lines.append(f'- **{tag}**: {done}/{total} pairings, {fits} fits '
+                         f'(+{moved} since the last check) — {state}')
             if state == 'DEAD':
                 # Spacing the restarts apart: several interpreters importing the
                 # same stack at once collide on a fixed temporary path and all

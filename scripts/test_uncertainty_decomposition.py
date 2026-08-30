@@ -441,8 +441,11 @@ def test_single_distribution_has_no_epistemic_axis():
     assert np.allclose(alea, [0.25, 4.0])
     assert epis is None
     assert np.allclose(total, alea)
-    assert SUPPORT['ngboost'] == (PER_MOLECULE, NONE)
-    assert SUPPORT['NGBoost'] == (PER_MOLECULE, NONE)
+    # NGBoost is queued as an ENSEMBLE from 2026-08-30, so the roster entry
+    # claims both terms. The single-fit function still has no epistemic axis and
+    # that is what this gate is about.
+    assert SUPPORT['ngboost'] == (PER_MOLECULE, PER_MOLECULE)
+    assert SUPPORT['NGBoost'] == (PER_MOLECULE, PER_MOLECULE)
 
 
 def test_a_variance_head_makes_a_constant_term_per_molecule():

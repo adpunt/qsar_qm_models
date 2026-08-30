@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.5.0'
+SPEC_VERSION = '1.6.0'
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +139,22 @@ SKLEARN_DEFAULTS = {
     # ngboost.NGBRegressor. Dist and Score are class objects, not literals, so
     # they are named here and resolved by the caller; the audit asserts that the
     # names still point where they used to.
+    # How many independent NGBoost fits make the ensemble that gives it a
+    # model-uncertainty term. A SINGLE fit has none: there is nothing for it to
+    # disagree with. The literature's route is an outer ensemble and the
+    # epistemic term is the variance of the members' means -- chemprop's
+    # EnsemblePredictor computes exactly that
+    # (research_archive/f692d614/chemprop_v1_uncertainty_predictor.py).
+    #
+    # SETTLED 2026-08-30 by the author, on the evidence in RERUN_PLAN.md 5.5i:
+    # of seven models tested, only the Gaussian process and NGBoost-over-seeds
+    # decompose correctly, so those two are the ones the study reports.
+    #
+    # 🔴 IT COSTS ONE FIT PER SEED. NGBoost is already the slowest tree model in
+    # the roster. Three seeds is three times its wall clock, and nothing else
+    # changes.
+    'ngboost_ensemble_seeds': 3,
+
     'ngboost': {
         # EVERY VALUE HERE IS THE ONE NGBOOST'S OWN AUTHORS USED. Duan, Avati,
         # Ding, Thai, Basu, Ng and Schuler, "NGBoost: Natural Gradient Boosting
