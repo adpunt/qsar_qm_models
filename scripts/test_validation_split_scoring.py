@@ -262,30 +262,92 @@ def main():
     if not os.path.exists(gen):
         check("the QM9 job generator exists", False, gen)
     else:
-        with tempfile.TemporaryDirectory() as gd:
-            r = subprocess.run([sys.executable, gen, '--out-dir', gd],
-                               capture_output=True, text=True)
-            if r.returncode != 0:
-                check("the QM9 job generator runs", False, r.stderr[-200:])
-            else:
+        # BOTH passes, with the arguments the runbook actually submits.
+        #
+        # This used to invoke the generator bare. The generator's defaults are
+        # the main grid at a 47-hour ceiling, and it REFUSES that combination on
+        # purpose -- ngboost's tier needs 202 hours, and silently capping the
+        # request is what gets a job killed after days in the queue. So this
+        # gate went red on a correct refusal, reporting "the QM9 job generator
+        # runs" as the failure and saying nothing about the route it exists to
+        # check. A gate that cries wolf is worse than no gate.
+        for label, extra in (('the screen', ['--stage', '0']),
+                             ('the main grid',
+                              ['--stage', '1', '--max-hours', '720'])):
+            with tempfile.TemporaryDirectory() as gd:
+                r = subprocess.run([sys.executable, gen, '--out-dir', gd] + extra,
+                                   capture_output=True, text=True)
+                if r.returncode != 0:
+                    check(f"the QM9 job generator runs ({label})", False,
+                          r.stderr[-200:] or r.stdout[-200:])
+                    continue
                 bodies = {f: open(os.path.join(gd, f)).read()
                           for f in sorted(os.listdir(gd)) if f.endswith('.sh')}
                 unc = {f: b for f, b in bodies.items() if '-u True' in b}
                 plain = {f: b for f, b in bodies.items() if '-u True' not in b}
-                check("every model that emits an uncertainty asks for a route",
-                      bool(unc) and all('--oof-folds' in b or '--score-validation' in b
-                                        for b in unc.values()),
-                      f"{len(unc)} scripts")
-                routes = {('cross-fit' if '--oof-folds' in b else 'validation')
-                          for b in unc.values()}
-                check("they all ask for the SAME route -- never a mixture",
-                      len(routes) == 1, f"routes in use: {sorted(routes)}")
-                check("the route is the leak-free one (cross-fitting)",
-                      routes == {'cross-fit'}, f"{sorted(routes)}")
-                check("a model with no per-molecule uncertainty asks for neither",
+
+                # THREE STATES, NOT TWO. This check used to demand that every
+                # script passing `-u True` also ask for a route, and that was
+                # true when it was written on 2026-08-28. On 2026-08-29 the
+                # author settled which model-and-representation pairs get the
+                # out-of-fold pass (uncertainty_pairs.json), and `-u True` was
+                # deliberately left unrestricted -- it is free and it writes the
+                # test rows either way. So a script can now be in one of three
+                # states, and only the third is a defect:
+                #
+                #   cross-fits           on the settled pairs, --oof-folds
+                #   test rows only       -u True, no route: legitimate, but its
+                #                        rows carry injected_noise = 0 by
+                #                        construction (scripts/utils.py
+                #                        CORRUPTED_SPLITS), so they answer
+                #                        nothing about corruption
+                #   scores validation    --score-validation: the leaky route
+                #
+                # Demanding two states made this gate fail on the settled design
+                # rather than on a defect. What is still worth asserting is
+                # sharper: the set that cross-fits is EXACTLY the settled pairs.
+                routed = {f: b for f, b in unc.items() if '--oof-folds' in b}
+                leaky = {f: b for f, b in unc.items() if '--score-validation' in b}
+                unrouted = {f for f in unc if f not in routed and f not in leaky}
+
+                check(f"{label}: nothing takes the leaky route (--score-validation)",
+                      not leaky, f"{sorted(leaky)}")
+                check(f"{label}: everything routed takes the SAME route, cross-fitting",
+                      bool(routed) and not leaky,
+                      f"{len(routed)} cross-fit, {len(leaky)} validation")
+
+                pairs = json.load(open(os.path.join(REPO, 'uncertainty_pairs.json')))
+                settled = {m['qm9'] for m in pairs['models']}
+                got = {f[len('qm9_s%d_' % int(extra[1])):-len('.sh')] for f in routed}
+                check(f"{label}: the models that cross-fit are exactly the settled pairs",
+                      got == settled,
+                      f"extra {sorted(got - settled)}, missing {sorted(settled - got)}")
+
+                check(f"{label}: a model with no per-molecule uncertainty asks for neither",
                       all('--oof-folds' not in b and '--score-validation' not in b
                           for b in plain.values()),
                       f"{len(plain)} scripts")
+
+                # NOT a failure -- a consequence of the settled design, printed
+                # so it is on the record rather than discovered at analysis time.
+                # A test row's injected noise is exactly zero, so a model here
+                # contributes nothing to "does uncertainty find the corrupted
+                # labels", however good its uncertainty is.
+                if unrouted:
+                    print(f"       note ({label}): {len(unrouted)} script(s) emit an "
+                          f"uncertainty on TEST ROWS ONLY, whose injected noise is "
+                          f"zero by construction: "
+                          f"{', '.join(sorted(f[:-3] for f in unrouted))}")
+
+        # And the refusal itself is a property worth holding: the bare defaults
+        # must NOT produce scripts, because they cannot be honoured.
+        with tempfile.TemporaryDirectory() as gd:
+            r = subprocess.run([sys.executable, gen, '--out-dir', gd],
+                               capture_output=True, text=True)
+            wrote = [f for f in os.listdir(gd) if f.endswith('.sh')]
+            check("the generator refuses a wall clock it cannot honour",
+                  r.returncode != 0,
+                  f"rc={r.returncode}, {len(wrote)} script(s) written")
 
     print()
     if FAILURES:

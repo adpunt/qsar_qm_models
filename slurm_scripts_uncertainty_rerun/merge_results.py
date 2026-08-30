@@ -19,11 +19,14 @@ would run out of memory on any normal node, at the very end of a multi-day run.
 So the big file is appended chunk by chunk and the coverage report is
 accumulated from per-file counts, never from the merged file.
 
-The expected cells are NOT restated here. The conditions come from the generated
-job scripts (falling back to noise_conditions.json), and the number of noise
-levels each (dataset, condition) should have is read out of the runner itself —
-the grid is the runner's to set and it has already changed twice, so "11 levels
-everywhere" was wrong the moment the ladder did.
+The expected cells are NOT restated here. The models, the representations each
+model runs, the datasets and the conditions all come from the generated job
+scripts, and the number of noise levels each (dataset, condition) should have is
+read out of the runner itself — the grid is the runner's to set and it has
+already changed twice, so "11 levels everywhere" was wrong the moment the ladder
+did. The models and representations WERE restated here until 2026-08-29, and by
+then they named three models the run had dropped and missed the representation
+it had added.
 
 Pass --parquet to write a partitioned Parquet dataset instead (much smaller and
 far faster to query); needs pyarrow.
@@ -87,6 +90,43 @@ def expected_conditions(explicit=None):
     settled = json.loads(NOISE_CONDITIONS_FILE.read_text())
     return ([c['name'] for c in settled['stage_1_full_grid']],
             f'the main grid ({NOISE_CONDITIONS_FILE.name})')
+
+
+def _rep_slug(rep):
+    """The representation as it appears in a task directory name.
+
+    Mirrors the generated script's own line:
+        rep_slug=$(echo "$rep" | tr 'A-Z' 'a-z' | tr -d '-')
+    """
+    return rep.lower().replace('-', '')
+
+
+def expected_model_reps():
+    """[(model name, [rep slug, ...]), ...] — which pairs this run submitted.
+
+    Read from the generated job scripts, for the same reason the conditions are:
+    they are what was actually queued. Each script names one model and carries
+    its own REPS array, so a model narrowed to one representation contributes
+    one column of cells rather than the full width.
+    """
+    found, datasets = [], None
+    for sh in sorted(HERE.glob('unc_*.sh')):
+        text = sh.read_text()
+        m = re.search(r'^\s*--models "([^"]+)"', text, re.M)
+        r = re.search(r'^REPS=\((.*?)\)$', text, re.M)
+        d = re.search(r'^DATASETS=\((.*?)\)$', text, re.M)
+        if not (m and r and d):
+            continue
+        reps = [_rep_slug(x.strip('"')) for x in r.group(1).split()]
+        found.append((m.group(1), reps))
+        if datasets is None:
+            datasets = d.group(1).split()
+    if found:
+        return found, datasets, f'read from {len(found)} generated unc_*.sh'
+    return ([(m, list(FALLBACK_REPS)) for m in FALLBACK_MODELS],
+            list(FALLBACK_DATASETS),
+            'NO GENERATED SCRIPTS FOUND — falling back to the roster hard-coded in '
+            'this file, which is only as current as the last time anyone edited it')
 
 
 def expected_level_counts(kirby_dir):
@@ -187,8 +227,13 @@ def main():
     root = Path(args.root)
     expected_oof = args.expected_oof_folds
     conditions, conditions_source = expected_conditions(args.conditions)
+    model_reps_pairs, datasets, roster_source = expected_model_reps()
     n_levels = expected_level_counts(args.kirby_dir)
     print(f"Expected conditions ({conditions_source}): {', '.join(conditions)}")
+    print(f"Expected roster ({roster_source}):")
+    for model, reps in model_reps_pairs:
+        print(f"    {model:16s} {', '.join(reps)}")
+    print(f"    datasets: {', '.join(datasets)}")
     if n_levels is None:
         print(f"  NOTE could not read the level grids from {args.kirby_dir} — the coverage "
               f"report will show each cell's level count but not flag a short one.")
@@ -326,10 +371,10 @@ def main():
 
     # ---- coverage ---------------------------------------------------------
     rows = []
-    for ds in EXPECTED_DATASETS:
-        for model in EXPECTED_MODELS:
+    for ds in datasets:
+        for model, model_reps in model_reps_pairs:
             slug = model.lower().replace('-', '_')
-            for rep in EXPECTED_REPS:
+            for rep in model_reps:
                 for cond in conditions:
                     c = cov.get((ds, model, rep, cond)) or cov.get((ds, slug, rep, cond))
                     want = n_levels(ds, cond) if n_levels else None

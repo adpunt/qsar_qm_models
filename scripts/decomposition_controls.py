@@ -496,7 +496,6 @@ def fit_vbll(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150,
     loader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(xt, yt),
         batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
-    net.train()
     # SINGLE-THREADED, for the same reason the Gaussian process is. Importing
     # models.py pulls in gpytorch, gauche and KeOps, and once they are loaded a
     # plain torch training loop on this machine spends most of its wall clock
@@ -504,13 +503,8 @@ def fit_vbll(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150,
     # (RERUN_PLAN.md 2.8e-bis, 2.8i). The context manager is the shared spec's,
     # not a second copy of the workaround.
     with gp_fit_threads():
-        for _ in range(epochs):
-            for bx, by in loader:
-                opt.zero_grad()
-                loss_fn(net(bx), by).backward()
-                opt.step()
-
-        net.eval()
+        net, ran = _train_with_early_stopping(net, loss_fn, xt, yt, seed,
+                                              'vbll')
         # The pipeline's OWN routine, not a copy of it: if the split changes
         # there, this measurement changes with it.
         mean, alea, epis, _total = sample_network_split(net, xst, passes, 'mse')
@@ -538,6 +532,65 @@ def fit_ngboost(x_fit, y_fit, x_score, seed=0):
     alea, epis, _ = decompose_single_distribution(
         np.asarray(dist.scale, dtype=float) ** 2)
     return np.asarray(dist.loc, dtype=float), alea, epis
+
+
+def _train_with_early_stopping(net, crit, xt, yt, seed, label=''):
+    """Train the way the pipeline trains: early stopping on a held-out slice,
+    with the best weights restored.
+
+    The harness used to run a fixed 150 epochs with no early stopping at all.
+    That is slower than the pipeline AND a different fit, so a badly-fitting
+    model here could not be told apart from a badly-fitting model there. The
+    settings are the shared spec's own -- epochs, patience, tolerance and
+    restore_best_weights come from models/model_defaults.py, not from literals.
+
+    The early-stopping slice is carved from the fit rows themselves, so no row
+    outside this fold is touched.
+    """
+    import torch
+    from model_defaults import NEURAL_DEFAULTS
+    t = NEURAL_DEFAULTS['training']
+
+    n_val = max(1, len(yt) // 5)
+    g = torch.Generator().manual_seed(seed)
+    perm = torch.randperm(len(yt), generator=g)
+    val_idx, fit_idx = perm[:n_val], perm[n_val:]
+    xf, yf = xt[fit_idx], yt[fit_idx]
+    xv, yv = xt[val_idx], yt[val_idx]
+
+    opt = torch.optim.Adam(net.parameters(), lr=t['lr'],
+                           weight_decay=t['weight_decay'])
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(xf, yf),
+        batch_size=t['batch_size'], shuffle=True)
+
+    best, waited, best_state, ran = float('inf'), 0, None, 0
+    for _ in range(t['epochs']):
+        net.train()
+        for bx, by in loader:
+            opt.zero_grad()
+            crit(net(bx), by).backward()
+            opt.step()
+        ran += 1
+        net.eval()
+        with torch.no_grad():
+            vl = float(crit(net(xv), yv))
+        if np.isfinite(vl) and vl < best - t['improvement_tolerance']:
+            best, waited = vl, 0
+            best_state = {k: v.clone() for k, v in net.state_dict().items()}
+        else:
+            waited += 1
+            if waited >= t['patience']:
+                break
+    if t['restore_best_weights']:
+        if best_state is None:
+            raise DecompositionControlsError(
+                f"{label}: the validation loss was never finite and never "
+                f"improved in {ran} epochs, so there is no epoch to restore. "
+                f"The fit diverged; it must not be recorded as a result.")
+        net.load_state_dict(best_state)
+    net.eval()
+    return net, ran
 
 
 def fit_ngboost_ensemble(x_fit, y_fit, x_score, seed=0, n_seeds=3):
@@ -631,20 +684,9 @@ def fit_bnn_mve(x_fit, y_fit, x_score, arch='dnn', seed=0, epochs=150,
     net = apply_bayesian_transformation(net)
     crit = bnn_elbo_criterion(get_loss_function('heteroscedastic'), net,
                               len(y_fit))
-    opt = torch.optim.Adam(net.parameters(),
-                           lr=NEURAL_DEFAULTS['training']['lr'])
-    loader = torch.utils.data.DataLoader(
-        torch.utils.data.TensorDataset(xt, yt),
-        batch_size=NEURAL_DEFAULTS['training']['batch_size'], shuffle=True)
-
     with gp_fit_threads():
-        net.train()
-        for _ in range(epochs):
-            for bx, by in loader:
-                opt.zero_grad()
-                crit(net(bx), by).backward()
-                opt.step()
-        net.eval()
+        net, ran = _train_with_early_stopping(net, crit, xt, yt, seed,
+                                              f'bnn_mve/{arch}')
         mean, alea, epis, _t = sample_network_split(net, xst, passes,
                                                     'heteroscedastic')
     return mean, alea, epis
@@ -1005,6 +1047,12 @@ def level_response(models, reps, conditions, levels=(0.0, 0.2, 0.4, 0.6, 0.8, 1.
         for rep_name in reps:
             x = np.asarray(features[rep_name], dtype=float)
             for name in models:
+                if name not in MODELS:
+                    raise DecompositionControlsError(
+                        f"{name!r} is not a model this measures. Known: "
+                        f"{', '.join(sorted(MODELS))}. (A shell that does not "
+                        f"split an unquoted variable sends the whole list as "
+                        f"one name, which is how this first fired.)")
                 fit = MODELS[name]
                 alea_kind, epis_kind = support(name)
                 if verbose:

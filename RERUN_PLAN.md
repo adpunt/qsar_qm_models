@@ -2597,6 +2597,41 @@ They therefore go in separate columns, and **must not share an axis or a
 significance test**. QM9's per-replicate equivalent is computed in the figure
 script rather than the pipeline, so it waits for that rewrite.
 
+### 2.25 🔴 FOUND 2026-08-30 — two jobs starting together on one node can kill each other before either trains anything
+
+Found by running two measurement processes side by side on this laptop. It is not a laptop problem.
+
+**The mechanism.** The KeOps library arrives with the Gaussian-process stack. At IMPORT time it runs
+`c++ --version` and writes the answer to a **hard-coded path**, `/tmp/compiler_version.txt`
+(`keopscore/config/base_config.py:250-263`). It then reads that file and deletes it. Two processes
+importing in the same instant race: one deletes the file while the other sits between
+`os.path.exists` and `open`, and the second dies with `FileNotFoundError`.
+
+**Why it reaches the cluster.** Jobs sharing a node share `/tmp`, and a SLURM array releases its
+tasks together. Two QM9 tasks landing on one node within the same second can take each other out.
+
+**Why it is nasty to diagnose.** The error names a missing file in `/tmp` and says nothing about
+chemistry. It happens during import, so the task writes **no output at all** — it is
+indistinguishable from a task that never started. The author reports having seen this shape of
+failure before without an explanation for it.
+
+**What does not fix it.**
+
+- `TMPDIR` — the path is a literal inside the library, not read from the environment.
+- Staggering *submission* — the queue decides when tasks actually start, not the submitter.
+
+**What is in the scripts now (the author's call, 2026-08-30).** A random wait inside the task, before
+anything is imported, in both job generators:
+
+```
+sleep $(( RANDOM % 600 ))
+```
+
+Zero to ten minutes. Imperfect — two tasks can still draw the same second — but it is the only lever
+this side of the queue controls, and it takes the collision probability from near-certain for a
+simultaneously-released array to negligible. Verified: every generated script carries it and passes
+`bash -n`.
+
 ### 2.19 ✅ FIXED 2026-08-28 — the randomized-SMILES field is written the way it is read
 
 Audit entries 47 and 48(a). Nothing separates one molecule from the next in the

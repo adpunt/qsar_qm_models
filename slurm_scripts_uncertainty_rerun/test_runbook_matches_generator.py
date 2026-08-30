@@ -18,13 +18,28 @@ of the ten scripts had no submit line at all.
 Prose cannot be kept in step by remembering to. So the numbers are checked
 against the generator, and the generator is the only place they are decided.
 
+THE SCRIPTS ARE NO LONGER ALL THE SAME LENGTH (2026-08-29)
+----------------------------------------------------------
+The first version of this file read one number, "N tasks each", out of the
+generator's summary and compared every `--array=` line in the runbook against
+it. The screen of 2026-08-28 then narrowed VBLL to ChemBERTa alone, so the
+roster became three scripts of 63 tasks and one of 21, the summary stopped
+printing "tasks each" at all, and this check failed with "could not read the
+generator's own summary" -- which is the check going blind, not the runbook
+being right. Preflight section 0b calls this file and aborts on a non-zero exit,
+so for as long as that lasted the lab queue was blocked on an unreadable
+message.
+
+Every range is now read PER SCRIPT out of the generator's own tier listing, so a
+roster where one model runs fewer representations than the others is checked
+rather than being the thing that breaks the checker.
+
 WHAT IT CHECKS
 --------------
   * the condition table names exactly the conditions the array runs
-  * the script count and the per-script task count, from the generator's own
-    printed summary
+  * the script count, from the generator's own printed summary
   * the total task count and the total fit count
-  * EVERY `--array=A-B` line, against the task count of the script it names --
+  * EVERY `--array=A-B` line, against the task count of the SCRIPT IT NAMES --
     this is the one that mis-submits
   * that every script the generator emits has a submit line somewhere, and that
     no submit line names a script the generator does not emit
@@ -73,11 +88,6 @@ def generator_summary(*args):
         return done.stdout
 
 
-def script_names():
-    """{script filename: model name}, the generator's own naming rule."""
-    return {f'unc_{m.lower().replace("-", "_")}.sh': m for m in gen.MODELS}
-
-
 def check_conditions(text):
     """The condition table must name what the array runs, and only that."""
     running = set(gen.MAIN_GRID_CONDITIONS + gen.DEEP_RUN_CONDITIONS)
@@ -94,22 +104,49 @@ def check_conditions(text):
              f'an operator will look for and not find; the reverse is one nobody runs.')
 
 
-def check_counts(text, summary):
-    """Script count, per-script task count, total tasks and total fits."""
-    head = re.search(r'Wrote (\d+) array scripts, (\d+) tasks each '
-                     r'\(([\d,]+) tasks total\)', summary)
+def generator_ranges(summary):
+    """{script filename: (model, n_tasks)} out of the generator's tier listing.
+
+    The listing is the generator's own answer to "how long is this array", the
+    same string an operator reads off the screen, so the check and the operator
+    cannot be looking at different numbers.
+    """
+    out = {}
+    for name, model, lo, hi in re.findall(
+            r'(unc_[a-z0-9_]+\.sh)\s+(\S+)\s+--array=(\d+)-(\d+)', summary):
+        if int(lo) != 0:
+            fail(f'the generator prints {name} as --array={lo}-{hi}; every array is '
+                 f'expected to start at 0')
+        out[name] = (model, int(hi) + 1)
+    return out
+
+
+def check_counts(text, summary, ranges):
+    """Script count, total tasks and total fits.
+
+    There is deliberately no "tasks each" check any more: with VBLL narrowed to
+    one representation the scripts have two different lengths, and a single
+    figure for all of them is exactly what mis-submits.
+    """
+    head = re.search(r'Wrote (\d+) array scripts, ([\d,]+) tasks total', summary)
     if not head:
         fail(f"could not read the generator's own summary:\n{summary}")
         return
     n_scripts = int(head.group(1))
-    per_script = int(head.group(2))
-    total = int(head.group(3).replace(',', ''))
+    total = int(head.group(2).replace(',', ''))
 
-    stated = {(int(a), int(b)) for a, b in
-              re.findall(r'(\d+) array scripts, (\d+) tasks each', text)}
-    if (n_scripts, per_script) not in stated:
-        fail(f'the generator emits {n_scripts} scripts of {per_script} tasks; the '
-             f'runbook states {sorted(stated) or "no such pair"}')
+    if n_scripts != len(ranges):
+        fail(f'the generator says it wrote {n_scripts} scripts and lists {len(ranges)} '
+             f'in its tier breakdown: {sorted(ranges)}')
+    listed_total = sum(n for _, n in ranges.values())
+    if listed_total != total:
+        fail(f'the generator says {total} tasks in total, and its per-script ranges '
+             f'add up to {listed_total}')
+
+    stated = {int(n) for n in re.findall(r'(\d+)\s+array\s+scripts', text)}
+    if n_scripts not in stated:
+        fail(f'the generator emits {n_scripts} array scripts; the runbook states '
+             f'{sorted(stated) or "no such figure"}')
 
     if not re.search(r'\*\*' + f'{total:,}' + r' tasks\*\*', text):
         fail(f'the generator emits {total:,} tasks in total; the runbook does not '
@@ -166,15 +203,19 @@ def _noise_levels():
     return None
 
 
-def check_array_ranges(text, per_script):
+def check_array_ranges(text, ranges):
     """The range every sbatch line asks for, against the script it names.
 
     This is the one that costs cluster time: a range that is too narrow drops
-    whole datasets, and does it without an error anywhere.
+    whole datasets, and does it without an error anywhere. Each script is
+    checked against ITS OWN length -- VBLL runs one representation and the rest
+    run three, so 0-62 on the VBLL line and 0-20 on a tier 1 line are both
+    wrong, in opposite directions.
     """
-    known = script_names()
     submitted, seen = set(), 0
     for line_no, line in enumerate(text.splitlines(), 1):
+        if not line.lstrip().startswith('sbatch'):
+            continue
         names = re.findall(r'(unc_[a-z0-9_]+\.sh)', line)
         if not names:
             continue
@@ -185,16 +226,19 @@ def check_array_ranges(text, per_script):
         for name in names:
             seen += 1
             submitted.add(name)
-            if name not in known:
+            if name not in ranges:
                 fail(f'RUNBOOK.md:{line_no} submits {name}, which the generator does '
                      f'not emit')
-            elif (lo, hi) != (0, per_script - 1):
-                fail(f'RUNBOOK.md:{line_no} submits {name} as --array={lo}-{hi}; it has '
-                     f'{per_script} tasks, so the range is 0-{per_script - 1}')
+                continue
+            model, n_tasks = ranges[name]
+            if (lo, hi) != (0, n_tasks - 1):
+                fail(f'RUNBOOK.md:{line_no} submits {name} ({model}) as '
+                     f'--array={lo}-{hi}; it has {n_tasks} tasks, so the range is '
+                     f'0-{n_tasks - 1}')
 
     if seen == 0:
         fail('no sbatch --array= line found in RUNBOOK.md at all')
-    for name, model in sorted(known.items()):
+    for name, (model, _) in sorted(ranges.items()):
         if name not in submitted:
             fail(f'the generator emits {name} ({model}) and no sbatch line in '
                  f'RUNBOOK.md submits it — an operator following this file would '
@@ -209,12 +253,15 @@ def main():
         print('FAIL — the generator would not run; nothing could be checked')
         return 1
 
-    head = re.search(r'Wrote \d+ array scripts, (\d+) tasks each', summary)
-    per_script = int(head.group(1)) if head else 0
+    emitted = generator_ranges(summary)
+    if not emitted:
+        print('FAIL — the generator printed no per-script --array= ranges; nothing '
+              'could be checked. Its tier listing is where this file reads them.')
+        return 1
 
     check_conditions(text)
-    check_counts(text, summary)
-    ranges = check_array_ranges(text, per_script) if per_script else 0
+    check_counts(text, summary, emitted)
+    ranges = check_array_ranges(text, emitted)
 
     if FAILURES:
         print(f'FAIL — {len(FAILURES)} disagreement(s) between RUNBOOK.md and the '

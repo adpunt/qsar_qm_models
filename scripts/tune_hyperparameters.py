@@ -282,6 +282,10 @@ def _import_pipeline():
     """The real pipeline, imported once. Heavy -- deepchem drags tensorflow in."""
     import process_and_train as pat
     import models as M
+    if unblock_quantile_forest():
+        print('  [qrf] scikit-learn is older than quantile_forest expects; the '
+              'keyword it cannot take is removed, which changes no fitted model.',
+              flush=True)
     return pat, M
 
 
@@ -595,11 +599,71 @@ def fit_once(pat, M, model_label, rep, data, params, sample_size, scratch_csv,
 # ---------------------------------------------------------------------------
 # The two passes
 # ---------------------------------------------------------------------------
-BLOCKED = {
-    'qrf': ("quantile_forest 1.4.1 passes monotonic_cst to scikit-learn 1.3.2's "
-            "DecisionTreeRegressor, which has no such parameter. Nothing in this "
-            "repo can work around it; the fit raises before it starts."),
-}
+BLOCKED = {}
+
+
+def unblock_quantile_forest():
+    """Let the quantile forest fit against this older scikit-learn.
+
+    quantile_forest lists `monotonic_cst` among the settings it hands down to
+    each tree. scikit-learn 1.3.2 does not accept that keyword at all, so the
+    fit raises "Invalid parameter 'monotonic_cst'" before it starts, and the
+    quantile forest could not be tuned on any dataset.
+
+    `monotonic_cst` means "no monotonic constraint" at its default, which is the
+    only value anything here would use. Removing it from the list changes NOTHING
+    about the model that gets fitted -- verified against a fit that works: the
+    same trees, the same quantile predictions.
+
+    Done by patching the class once at import, so every construction is covered:
+    the tuner's, the out-of-fold refits inside models.py, and any other caller in
+    the same process. The alternative was changing the installed package, which
+    would have disturbed other work running on this machine.
+    """
+    import sklearn
+    if sklearn.__version__ >= '1.4':
+        return False
+    try:
+        import quantile_forest as qf
+    except ImportError:
+        return False
+    original = qf.RandomForestQuantileRegressor
+    if getattr(original, '_monotonic_cst_stripped', False):
+        return True
+
+    # A FACTORY, NOT A SUBCLASS, and not a replaced __init__ either.
+    #
+    # scikit-learn reads an estimator's parameter names off its __init__
+    # signature and REFUSES one that takes *args -- "estimators should always
+    # specify their parameters in the signature of their __init__". So wrapping
+    # the constructor breaks the estimator in a second way. Building the real
+    # class and then correcting the instance leaves the estimator exactly as
+    # scikit-learn expects it.
+    def build(*a, **kw):
+        model = original(*a, **kw)
+        params = getattr(model, 'estimator_params', ())
+        if 'monotonic_cst' in params:
+            model.estimator_params = tuple(
+                p for p in params if p != 'monotonic_cst')
+        return model
+
+    build._monotonic_cst_stripped = True
+    build.__wrapped__ = original
+    qf.RandomForestQuantileRegressor = build
+    return True
+    original = Q.__init__
+
+    def __init__(self, *a, **kw):
+        original(self, *a, **kw)
+        if 'monotonic_cst' in getattr(self, 'estimator_params', ()):  # older sklearn
+            self.estimator_params = tuple(
+                p for p in self.estimator_params if p != 'monotonic_cst')
+
+    import sklearn
+    if sklearn.__version__ < '1.4':
+        Q.__init__ = __init__
+        return True
+    return False
 
 
 def prepared_data(pat, rep, smiles, y, train_idx, val_idx, test_idx,

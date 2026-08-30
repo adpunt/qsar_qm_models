@@ -353,9 +353,9 @@ def parse_arguments():
                              "grouped_shift. Default 0.62, from Bentz et al. 2013 Table 7.")
     parser.add_argument("--outlier-p", type=float, default=0.10,
                         help="Fraction of labels contaminated by the outlier type. Hampel (2001): "
-                             "1-10% for routine scientific data. Default 0.10 -- the ONE setting "
+                             "1-10%% for routine scientific data. Default 0.10 -- the ONE setting "
                              "the study runs, settled 2026-08-27 in noise_conditions.json, because "
-                             "1%, 5% and 10% came within 0.005 R2 of each other over twelve "
+                             "1%%, 5%% and 10%% came within 0.005 R2 of each other over twelve "
                              "replicates on real QM9 (RERUN_PLAN.md 13.9).")
     parser.add_argument("--censor-side", type=str, default="upper", choices=["upper", "lower"],
                         help="Which end of the label range the assay limit sits at.")

@@ -106,7 +106,19 @@ def check_tuned_keys_against_models_py():
     # 'mlp' arrives as model_type rather than a literal; assert the dynamic call
     # site exists instead of pretending it is a literal.
     dynamic = 'load_best_hyperparameters(model_type, rep)' in src
-    claimed = set(rosters.TUNED_KEY.values())
+    # None means the model has NO tuned path -- its builder never calls the
+    # reader, so no entry in either JSON file can reach it. That is a fact about
+    # the model, not a missing key, and it is recorded in TUNED_KEY rather than
+    # left out (leaving it out made this gate report the model as missing, which
+    # reads as an oversight). Check it is true rather than taking it on trust.
+    for label, key in sorted(rosters.TUNED_KEY.items()):
+        if key is not None:
+            continue
+        if label in literals:
+            fail(f'{label!r} is recorded as having no tuned path, but '
+                 f'load_best_hyperparameters({label!r}, ...) is called in '
+                 f'models.py — it does have one')
+    claimed = {k for k in rosters.TUNED_KEY.values() if k is not None}
     unbacked = {k for k in claimed if k not in literals
                 and not (k == 'mlp' and dynamic)}
     if unbacked:
@@ -117,13 +129,35 @@ def check_tuned_keys_against_models_py():
            f'({len(literals)} literal, model_type dynamic: {dynamic})')
 
 
+def _code_only(src):
+    """The source with comments removed, so a name can only be found in code.
+
+    This check searches for the quoted name. Until 2026-08-30 it searched the
+    raw text, and 'GP-Hetero' was satisfied by a COMMENT at line 296 while the
+    name itself was assembled with an f-string and existed nowhere as a literal
+    -- a check that passes on prose passes on stale prose. The names are now
+    spelled out in GP_DISPLAY_NAMES on that side, and this side no longer reads
+    comments.
+    """
+    import io
+    import tokenize
+    out = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type != tokenize.COMMENT:
+                out.append(tok.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return src        # unparseable: fall back rather than pass everything
+    return '\n'.join(out)
+
+
 def check_experimental_names_exist():
     """Every experimental name must be a name that pipeline actually uses."""
     path = rosters.KIRBY_PIPELINE_PATH
     if not os.path.exists(path):
         print(f'  skip  {path} not on this machine')
         return
-    src = open(path).read()
+    src = _code_only(open(path).read())
     for qm9_name, exp_name in sorted(rosters.MODEL_NAME_MAP.items()):
         if f"'{exp_name}'" not in src:
             fail(f'the experimental pipeline has no model called {exp_name!r} '

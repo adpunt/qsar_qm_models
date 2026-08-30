@@ -101,9 +101,14 @@ Their role is in question A and as the leakage check. Preflight section 4b print
 the per-(dataset, condition) count of distinct noise scales, so a condition that
 is flat where it should not be is visible before the queue is spent.
 
-**Scope:** 3 datasets × 10 models × 4 representations × 7 conditions × 7 noise
-levels × 5 scaffold folds. 10 array scripts, 84 tasks each, **840 tasks**,
-**176,400 model fits**.
+**Scope:** 3 datasets × 4 models × 3 representations × 7 conditions × 7 noise
+levels × 5 scaffold folds, with VBLL narrowed to ChemBERTa alone. 4 array
+scripts — 63 tasks each for QRF, NGBoost and the Gaussian process, 21 for VBLL —
+**210 tasks**, **44,100 model fits**.
+
+The scripts are not all the same length any more, so there is no single
+`--array=` range for the whole run. §5 and §6 give the range per script and
+`test_runbook_matches_generator.py` checks each one against the generator.
 
 The levels are **not** passed on the command line. The runner sweeps one shared
 grid in fractions of each dataset's own clean training label spread — 0, 0.2,
@@ -391,17 +396,22 @@ running and confirm they work before committing the rest of the queue.
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
 
-sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_ngboost.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_gp.sh
-sbatch --account=$ACCT --partition=$PART --array=0-83%6 unc_gp_hetero.sh
+sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_ngboost.sh
+sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_gp.sh
 ```
 
-> `0-83` is 3 datasets × 4 representations × 7 conditions. Each script's own header prints the
+> `0-62` is 3 datasets × 3 representations × 7 conditions. Each script's own header prints the
 > range it was generated for — use that, not this line, if you regenerated with a different
 > condition or representation set.
+>
+> A range that is too SHORT is the failure to watch for, because nothing reports it: SLURM
+> runs exactly what you asked for, every task that runs succeeds, and the tasks that never
+> ran surface only in `coverage.csv` after the queue is spent. The index maps datasets in
+> blocks, so a short range drops whole datasets from the end — `0-59` against 84 tasks
+> dropped 24 of hERG's 28 in the version of this file used before 2026-08-29.
 
-`%6` caps each array at 6 concurrent tasks — 24 running at once across tier 1.
+`%6` caps each array at 6 concurrent tasks — 18 running at once across tier 1.
 Raise it if `where_to_submit.sh` §3 shows idle capacity, lower it if §5 shows a
 backlog.
 
@@ -452,7 +462,7 @@ python merge_results.py --root /data/stat-cadd/scat9264/KIRBy/tests/results/unce
     --kirby-dir /data/stat-cadd/scat9264/KIRBy
 ```
 
-**Read `coverage.csv` first** — it lists all 840 expected cells and marks each
+**Read `coverage.csv` first** — it lists all 210 expected cells and marks each
 `OK` / `MISSING` / `NO_OOF` / `OOF_ALL_NAN` / `TRUNCATED_OOF` / `PARTIAL_FOLDS` /
 `PARTIAL_LEVELS`. Do not analyse anything until you know what is missing.
 
@@ -547,7 +557,7 @@ training rows.
 ## Cost and the one thing to decide
 
 Each task is 7 noise levels × 5 scaffold folds × (1 + 5) fits = **210 model
-fits**, against 35 without cross-fitting. 840 tasks, **176,400 fits**.
+fits**, against 35 without cross-fitting. 210 tasks, **44,100 fits**.
 
 ⚠️ **The `--time` requests are sized for a grid that no longer exists.** 36 h for
 QRF and 47 h for the rest were set when a task was 11 levels, i.e. 330 fits; it is
@@ -562,9 +572,10 @@ Two levers if the queue is tight, in order of how little they cost you:
 | `--oof-outer-folds 1` | ~3x on each task | the spread of question A across folds. **Test-side data for all five folds is unaffected** — those folds are trained regardless |
 | `--oof-folds 3` | ~40% on each task | each molecule is scored by a model trained on 67% of the data rather than 80% |
 
-**Dropping a condition is not a lever.** All five carry a question: `gaussian`
-and `grouped_shifted` are question A's, `grouped_wider`, `censoring` and
-`outlier_p10` are the three that can answer question B. `--drop-conditions`
+**Dropping a condition is not a lever.** All seven carry a question: `gaussian`,
+`grouped_shifted`, `student_t_nu5` and `laplace` are question A's, and
+`grouped_wider`, `censoring` and `outlier_p10` are the three that can answer
+question B. `--drop-conditions`
 exists, and the generator says out loud which question a drop removes.
 
 The five scaffold folds themselves are **not** a lever: they are trained whatever

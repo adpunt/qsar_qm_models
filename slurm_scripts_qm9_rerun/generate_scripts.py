@@ -431,6 +431,27 @@ TEMPLATE = '''#!/bin/bash
 
 set -uo pipefail
 
+# ---------------------------------------------------------------------------
+# WAIT A RANDOM MOMENT BEFORE DOING ANYTHING. This is not politeness.
+#
+# The KeOps library, which arrives with the Gaussian-process stack, runs
+# `c++ --version` at IMPORT time and writes the answer to a HARD-CODED path:
+# /tmp/compiler_version.txt. It then reads that file and deletes it. Two
+# processes importing within the same instant race: one deletes the file while
+# the other is between checking it exists and opening it, and the second dies
+# with FileNotFoundError before a single molecule is read.
+#
+# Jobs sharing a node share /tmp, and an array releases its tasks together, so
+# this hits real runs. The failure names a missing file in /tmp and says
+# nothing about chemistry, and because it happens during import the task
+# produces NO output at all -- it looks like a task that never started.
+#
+# TMPDIR does not help: the path is a literal inside the library, not taken
+# from the environment. Staggering submission does not help either, because the
+# queue decides when tasks actually start. A random wait inside the task is the
+# only lever this side controls (found 2026-08-30, RERUN_PLAN.md 2.25).
+sleep $(( RANDOM % 600 ))
+
 # micromamba has never worked on this cluster -- setup.sh has always fallen
 # through to its conda branch. The two `export MAMBA_EXE=...` lines that used to
 # sit here were dead: the hook failed, and because this script runs under
