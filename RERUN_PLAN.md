@@ -5037,13 +5037,13 @@ commit, because each of them changes what a noise level means.
 |---|---|---|
 | 1 | ✅ **DONE 2026-08-26** — deleted the five superseded noise types and the six unreachable distribution variants, plus the four functions that served them | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.1 |
 | 2 | ✅ **DONE 2026-08-26** — dose solver, three shapes, five targeting rules (the shifted grouped condition of §13.3 included) | `rust/src/main.rs`, per `NOISE_DESIGN.md` §6.2, §6.2a |
-| 3 | Implement the identical specification in Python and cross-check it against Rust on the same labels — **the specification is `NOISE_DESIGN.md` §6.2 step 6, the deletions are its §6.1, and the cross-check is its §6.3 items 6–8**; do not work from a paraphrase | `NoiseInject/noiseInject/core.py` |
+| 3 | ✅ **DONE 2026-08-26, and confirmed 2026-08-30.** `python scripts/crosscheck_injectors.py` passes 342 checks on all 133,885 real QM9 labels, and `crosscheck_noise_pattern.py` now agrees on the level-free shape column too, on real labels at 5,000 and on the full column (§2.28) | `NoiseInject/noiseInject/core.py` |
 | 4 | ✅ **DONE 2026-08-26** — standardisation constants come from the clean training labels; `generate_aggregate_stats` no longer takes the noise at all | `rust/src/main.rs`, `generate_aggregate_stats` |
-| 5 | Validation split gets its own independently drawn noise (decision 2) — **still the author's call (§13.5)**. The code is now shaped for it: `write_data` takes an `apply_noise` flag and a `NoisePlan`, so it is one extra plan built over the validation labels | `rust/src/main.rs`, `preprocess_data` |
+| 5 | ✅ **DONE, and seen running 2026-08-30.** Every level of the smoke test printed it: *"validation: seed 739635806166436098 (derived from 461062956), delivered 0.255161 against training's 0.261484 — both dosed against the clean TRAINING spread 1.276346, not validation's own 1.243578"*. Independent draw, dosed against the clean training spread, and the test split clean always (§2.28) | `rust/src/main.rs`, `preprocess_data` |
 | 6 | ✅ **DONE 2026-08-26** — recorded per molecule where it is drawn, never reconstructed. See §5.2 and `NOISE_DESIGN.md` §6.2a | `rust/src/main.rs`, `write_noise_manifest` + the provenance writer in `preprocess_data`; `scripts/process_and_train.py`, `record_noise_manifest` |
-| 7 | Guard the two truncation and index-drift risks | `rust/src/main.rs` ECFP4 block, `:173-191` |
-| 8 | Two-output head on the Bayesian networks (decision 3) | `models/models.py:2031`, `:2088` — note the head **already exists and is disabled**, and two models already compute a per-molecule aleatoric term and discard it (`:6835-6851`, `:6963-6977`) |
-| 9 | Out-of-fold uncertainty on QM9 training molecules (decision 1) | `process_and_train.py`, `models/models.py`, `scripts/utils.py` |
+| 7 | ✅ **DONE 2026-08-26 (§2.7)** — all-or-nothing records, the null-pointer check RDKit's binding needed, and a reader that refuses to guess. 36 Rust gates pass | `rust/src/main.rs` ECFP4 block |
+| 8 | ✅ **BUILT 2026-08-28 (§5.5f)** — the variational layer predicts the observation noise from the input, and the switch that reaches it is `--heteroscedastic-vbll`. Guarded by `scripts/test_heteroscedastic_vbll.py`, 8 gates, passing. ⚠️ **The two models that have it are on neither uncertainty list** — see §13.17 A5 | `models/models.py` |
+| 9 | ✅ **DONE 2026-08-27 (§3.1c), and seen running 2026-08-30.** The smoke test wrote 4,000 out-of-fold training rows per level per condition, scaffold-grouped: *"[oof rf] scaffold-grouped inner split: 3 folds over 1559 scaffold groups, 4000 molecules ... wrote 4000 train_oof rows (4000 scored, 0 left NaN), 3/3 inner folds ok"* | `process_and_train.py`, `models/models.py`, `scripts/utils.py` |
 
 ### 5.2 What every result row must carry from now on
 
@@ -5072,9 +5072,12 @@ patch.
 `process_and_train.py` appends to `<results>_noise_manifest.csv`. Held-out rows carry
 `epsilon_raw = 0` exactly, so the provenance file is itself the evidence for gate 3.
 
-Two things still to wire, and neither is chat A's: the Python injector writes the same columns
-(chat B), and the figure script joins the manifest onto the results rows so no figure can be
-un-traceable to the dose that produced it (chat J).
+✅ **Both of the two things that were still to wire are done, verified 2026-08-30.** The Python
+injector writes the same columns — that is what `crosscheck_injectors.py` compares, 342 checks. And
+the figure script does not need to join the manifest: `delivered_dose` is on the results row itself,
+and `delivered_dose_series` / `add_shared_dose_axis` read it there. Seen on a real row from the smoke
+test, beside `noise_type`, `level_units`, `params_source`, `spec_hash`, `standardisation_mean` and
+`standardisation_sd`.
 
 ### 5.3 Free savings, no statistical cost
 
@@ -8671,7 +8674,7 @@ not be raised again until its trigger fires.
 
 | # | What | Owner |
 |---|---|---|
-| A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label spread |
+| A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset. 🟠 **Half answered 2026-08-30, and it needed no cluster time.** `KIRBy/tests/data_cache/openadmet_raw.csv` is one flat extraction — 7,618 rows, one value per molecule, and **no laboratory, source, site, assay or batch column at all**, so nothing in the run can condition on one and the between-laboratory variance Bentz measured is not a property of THIS data. The efflux column has 3,777 non-null values with a log10 spread of 0.599, against the 0.44 the runner records after its own filtering. So the anchor is imported from a different design and is very likely too high. **What is left is the author's: which number replaces it** | **the author** — the evidence is in, the choice of anchor is a decision |
 | A2 | **The experimental pipeline draws its noise per fold, not once per label column** (§3.3a). Recommendation unchanged: keep the per-fold draw and say so in the Methods in one sentence. It needs an answer because it changes what a *molecule* means across folds | **the author** |
 | A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
 | ~~A4~~ | ✅ **CLOSED 2026-08-30 (§2.28).** It was three things, and two were not pipeline defects: the smoke test's stub Gaussian process never recorded the aleatoric/epistemic split (it predates the split being wired in on 2026-08-28), `probe_oof` was three arguments and three return values behind `_oof_predict`, and — the real one — `assert_matches_support` was asked about a block that no inner fold produced, before the empty-block skip. `smoke_kirby_uncertainty.py` runs 80 checks now and passes all of them; it used to stop at 13 | done |
