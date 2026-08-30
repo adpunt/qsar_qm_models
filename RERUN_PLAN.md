@@ -2106,7 +2106,7 @@ split molecules into identical tokens; and the collision count is reported.
 **Every ChemBERTa result must be rebuilt** — QM9, LogD, Caco-2 and hERG. Nothing else moves:
 no other representation and no accuracy number.
 
-#### 🚩 THE CAVEAT THE PAPER MUST CARRY — settled by the author 2026-08-30
+#### 🚩 THE CAVEAT THE PAPER MUST CARRY — settled by the author 2026-08-30, and CLOSED
 
 **Decision: ChemBERTa stays in the set of six.** *"Keep it but note the caveat in rerun
 plan."* What follows is that caveat. It is not optional wording — the encoder has a blind
@@ -2139,10 +2139,12 @@ The rate is a property of the dataset, not of the model. hERG is high because ha
 charges and stereocentres are everywhere in drug-like molecules. QM9 is lower but **not
 negligible, and not for the reason you would guess** — QM9 has no halogen beyond fluorine and
 this pipeline strips its stereochemistry, so a prediction of "near zero" was made and was
-wrong. All 3,604 QM9 clashes are aromatic-NH tautomers. **LogD and Caco-2 are not yet
-measured** — they are downloaded rather than held
-locally. Measure them on the cluster before the Methods sentence is finalised;
-`scripts/crosscheck_chemberta.py` gate 4 is the code, and it needs only a list of SMILES.
+wrong. All 3,604 QM9 clashes are aromatic-NH tautomers. LogD and Caco-2 were **deliberately not measured** — the author closed this on 2026-08-30
+with the caveat standing as a note. **This is not a blocker and nobody should treat it as
+one.** The two measured datasets already bracket the effect: 2.71% on the computed data,
+20.1% on the drug-like data. If a number for either is ever wanted, gate 4 of
+`scripts/crosscheck_chemberta.py` produces it from a list of SMILES with no training and no
+cluster time.
 
 **What this does and does not license.**
 - It does **not** invalidate ChemBERTa's robustness curve. Collisions are a fixed property of
