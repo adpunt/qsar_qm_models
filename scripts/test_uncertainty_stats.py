@@ -542,7 +542,16 @@ def _write_qm9_file(path, n=60, sigmas=(0.0, 0.6), condition_column=True):
                    if (sigma > 0 and split == 'train_oof') else np.zeros(n))
             rec = {
                 'model': 'qrf', 'representation': 'pdv', 'sigma': sigma,
-                'iteration': 0, 'file_no': 205052201,
+                'iteration': 0,
+                # A DIFFERENT FILE NUMBER PER LEVEL, because that is what the
+                # pipeline writes: it invokes the injector once per noise level
+                # and names the memory-mapped files by a fresh identifier each
+                # time. This fixture used one number for every level, so the
+                # loader's `fold` matched across levels by accident and the
+                # zero-noise baseline always merged. On real data it never did,
+                # and every confound-controlled effect came out NaN. Vary it
+                # here and the gate goes red without the fix.
+                'file_no': 205052201 + int(sigma * 1000),
                 'sample_idx': np.arange(n),
                 'y_pred_mean': y + rng.normal(0.0, 1.0, n),
                 'y_pred_std_uncalibrated': np.abs(rng.normal(0.0, 1.0, n)) + 0.1,
@@ -823,7 +832,8 @@ def _write_qm9_two_scale_file(path, n=400, sigma=1.5, mean=6.89, sd=1.30,
                    else np.zeros(n))
         rows.append(pd.DataFrame({
             'model': 'qrf', 'representation': 'ecfp4', 'sigma': sigma,
-            'iteration': 0, 'file_no': 4471,
+            # Per level, for the reason above.
+            'iteration': 0, 'file_no': 4471 + int(sigma * 1000),
             'sample_idx': np.arange(n),
             'y_pred_mean': z + rng.normal(0.0, model_error_sd, n),   # standardised
             'y_pred_std_uncalibrated': np.abs(rng.normal(0.0, 1.0, n)) + 0.1,

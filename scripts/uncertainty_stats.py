@@ -217,6 +217,12 @@ CANONICAL_COLS = [
     # two, because mean uncertainty over such a frame adds log units to
     # multiples of a spread.
     'on_settled_scale',
+    # The invocation a row came from. QM9 names its memory-mapped files by it,
+    # and it changes with every noise level, so it is PROVENANCE and not a fold
+    # -- putting it in `fold` is what made the zero-noise baseline unmatchable
+    # and every `effect` NaN. Blank on the laboratory side, which has no such
+    # identifier.
+    'file_no',
 ]
 
 # The conditions the injector can produce. Read from the injector itself where it
@@ -635,16 +641,38 @@ def _normalise_qm9(df, path, strict, uncertainty_column, dataset_name):
         _normalise_condition)
 
     out['sigma'] = pd.to_numeric(df['sigma'], errors='coerce')
-    fno = df['file_no'].astype(str) if 'file_no' in df.columns else None
+    # `fold` IS THE REPLICATE ON QM9, AND NOTHING ELSE.
+    #
+    # It used to be `file_no + ':' + iteration`, which broke the one statistic
+    # the uncertainty question is defined by. `file_no` is a fresh identifier for
+    # each invocation of the injector, and the pipeline invokes it once per NOISE
+    # LEVEL -- so a level-0 row and a level-0.5 row of the same replicate carried
+    # different fold labels.
+    #
+    # `_subtract_zero_level` matches the zero-noise control within
+    # (dataset, model, rep, condition, FOLD, split), deliberately excluding
+    # sigma. With the file number in the fold, the level-0 row could never be
+    # matched to any other level, so `effect` -- (correlation at the level) minus
+    # (correlation at zero) -- came out NaN on EVERY QM9 row. Measured on a real
+    # seven-condition run: every effect NaN, including censoring, whose
+    # correlation against the shape is -0.21 at level 0 and -0.73 at 0.5, so the
+    # answer was sitting in the two columns beside a blank.
+    #
+    # The laboratory side was unaffected: there `fold` is the outer scaffold fold
+    # index, which is the same across levels.
+    #
+    # This module's own comment above already said "on QM9 the loader puts the
+    # replicate number in `fold`". It did not. The fixture in
+    # scripts/test_uncertainty_stats.py gave every level ONE file number, so the
+    # merge always matched and the gate never saw it (fixed there too).
+    #
+    # The file number stays on the frame as its own column, because it is real
+    # provenance -- it names the memory-mapped files a row came from -- it is
+    # just not a fold.
     itr = df['iteration'].astype(str) if 'iteration' in df.columns else None
-    if fno is not None and itr is not None:
-        out['fold'] = fno + ':' + itr
-    elif itr is not None:
-        out['fold'] = itr
-    elif fno is not None:
-        out['fold'] = fno
-    else:
-        out['fold'] = '0'
+    out['fold'] = itr if itr is not None else '0'
+    out['file_no'] = (df['file_no'].astype(str) if 'file_no' in df.columns
+                      else pd.Series('', index=df.index))
 
     out['split'] = df['split'] if 'split' in df.columns else 'test'
     out['mol_id'] = (df['canonical_smiles'] if 'canonical_smiles' in df.columns
