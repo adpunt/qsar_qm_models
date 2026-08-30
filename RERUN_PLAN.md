@@ -166,7 +166,7 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
 | 21 | Hyperparameter tuning — replacing Optuna | 🟠 **built 2026-08-27, not yet run** — the experiment, the roster/name map and three checks are in; the sweep is priced but waits on decisions 7 and 8. Found and fixed two live defects on the way in: NN-β's Bayesian variants could not run at all (§5.7c), and the tuned-parameter reader would have raised NameError the first time it fired (§5.7g) | §5.7 |
 | 22 | NGBoost's stage count — do the two sides match, and does it matter | ✅ **closed 2026-08-30**. The experimental side stopped running the full 500 on 2026-08-28 (KIRBy `6e7b860`), so the two now both select the count. Measured what selecting it is worth: **nothing on QM9 at 10,000 molecules** — the curve is still improving at round 499 of 500 — and a real change on hERG and Caco-2, mostly to the predicted spread. The library-version worry is closed too: ngboost 0.5.5 on ARC reports `best_val_loss_itr` correctly. **One Methods sentence left**, because the two sides get their held-out rows from different places | §5.7q |
-| 23 | The guard that stops a flat uncertainty column being published as per-molecule | ✅ **fixed 2026-08-30**. It read the whole column, and out of fold that column is several fits stacked — so a Gaussian process that collapsed in every fold wrote one constant per fold, and the spread between them let it through. Only the one-fold sizing the screen used could catch it. Now checked within each fit, in the one file both pipelines read. A collapsed fit no longer stops a run either: it is recorded, its model half is written blank rather than flat, and the collapse rule now lives once in the shared spec instead of twice. **The collapse did not reproduce on the descriptor vector** in three configurations, so the original report's own error text is still needed to name its mechanism | §5.5i |
+| 23 | The guard that stops a flat uncertainty column being published as per-molecule | ✅ **fixed 2026-08-30**. It read the whole column, and out of fold that column is several fits stacked — so a Gaussian process that collapsed in every fold wrote one constant per fold, and the spread between them let it through. Only the one-fold sizing the screen used could catch it. Now checked within each fit, in the one file both pipelines read. A collapsed fit no longer stops a run either: it is recorded, its model half is written blank rather than flat, and the collapse rule now lives once in the shared spec instead of twice. **The collapse did not reproduce on the descriptor vector** in three configurations | §5.5i |
 
 ---
 
@@ -5780,9 +5780,6 @@ since 2026-08-26; this side now refuses it too, with the same message. The job g
 `--kernel rbf`, so the queued jobs were never affected; a hand-run command was. Measured before
 fixing: the Tanimoto kernel on the descriptor vector does not collapse — it produces varying,
 meaningless numbers, which is worse.
-
-**Still open, and it needs the other chat.** The configuration that produced the original report is
-not identified. The traceback quotes the constant, and that names the mechanism — ask for it.
 
 ---
 
