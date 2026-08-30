@@ -1048,13 +1048,19 @@ fn build_noise_plan(
     // The shifted grouped condition has no scale map — every molecule receives the
     // same amount, and what the condition changes is how the noise is CORRELATED, not
     // where it is concentrated — so its shape is flat at `reference_dose`, which is
-    // what it is meant to deliver. Note that the delivered amount equals that only
-    // for a shape whose unit standard deviation is 1, which is every shifted grouped
-    // condition in the roster (they are all Gaussian). Paired with a heavy-tailed
-    // shape the existing solver delivers `target / unit_sd` instead — the delivered
-    // dose gate above catches it and refuses the run, so it cannot pass quietly, but
-    // the combination does not work today. Flagged, not fixed here: the solver
-    // belongs to the dose-matching work, not to this change.
+    // what it is meant to deliver.
+    //
+    // It goes through the same solver as everything else and works under any shape.
+    // This comment used to say the opposite — that a heavy-tailed shifted condition
+    // delivered `target / unit_sd` and "does not work today" — which was left behind
+    // by the fix recorded twenty lines below and in `noiseInject/core.py`: both
+    // components are now drawn at the SHAPE'S OWN spread and both take `solved`, so
+    // `G * solved == target` whatever the shape is. Measured on 4,000 labels in 40
+    // scaffold groups, 40 seeds, target 0.65276: Gaussian G = 1.0000, delivered
+    // 0.6363; Laplace G = 1.4142, delivered 0.6303; Student-t at nu = 5 G = 1.2910,
+    // delivered 0.6471. The stale comment predicted 0.4616 under Laplace, 29% low.
+    // Leaving it in place would have argued against ever pairing this condition with
+    // a heavy tail in the depth run, for a defect that was already closed.
     let scale_rms = {
         let ms: f64 = scales.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
             / scales.len().max(1) as f64;
@@ -1272,10 +1278,55 @@ fn build_noise_plan(
 /// At nu <= 4 the fourth moment of a Student-t is infinite, so the sample kurtosis is
 /// meaningless and the band is set by fiat instead. Across 40 seeds at nu = 3 the
 /// error ranged from -3.5% to +6.8% while remaining unbiased.
+///
+/// THE FLAT 0.15 DOES NOT SHRINK WITH THE SAMPLE, AND EVERY OTHER BAND HERE DOES.
+/// The forty seeds above were run on the full QM9 column; the jobs run 8,000 training
+/// and 1,000 validation labels, where the same construction is far looser. Measured
+/// at nu = 3, uniform targeting, level 0.5, 200 independent draws each: at n = 1,000
+/// the error was past 15% on 21 of 200 draws (10.5%, median 6.8%, worst 64%); at
+/// n = 8,000 on 5 of 200 (2.5%, median 3.1%). So on a validation split one nu = 3 run
+/// in ten would be stopped by the band rather than by a defect. Nothing in
+/// `noise_conditions.json` runs nu <= 4 today, so no result is affected — but the
+/// branch is one flag away and the band it applies is not the three standard errors
+/// the rest of this function computes. Widening it needs a sampling law for a
+/// statistic with no fourth moment, which is a decision rather than a transcription,
+/// so it is recorded here and not guessed at.
 fn dose_tolerance(shape: &NoiseShape, epsilon: &[f32], effective_n: f32) -> f32 {
     if let NoiseShape::StudentT { nu } = shape {
         if *nu <= 4.0 {
-            return 0.15;
+            // A Student-t at four degrees of freedom or fewer has NO fourth moment,
+            // so the sample kurtosis the ordinary formula below is built on does not
+            // converge to anything and cannot be used.
+            //
+            // This used to be a flat 15% at every sample size. Every other band here
+            // shrinks as the sample grows; that one did not, so it was far too tight
+            // on the splits the jobs actually run — measured, 200 independent draws
+            // at three degrees of freedom and level 0.5, it stopped 21 of 200 runs at
+            // 1,000 labels (10.5%) and 5 of 200 at 8,000 — and far too loose on the
+            // full label column. The author settled it on 2026-08-29: make the
+            // allowance shrink as the sample grows.
+            //
+            // The rate is not the ordinary one over the square root of the count. For
+            // 2 < nu < 4 the sample second moment is in the domain of attraction of a
+            // stable law of index nu/2, so it converges at n^(1 - 2/nu) rather than
+            // n^(1/2), and the root-mean-square inherits that. Hence the exponent
+            // below, which returns to the ordinary square-root rate exactly at nu = 4.
+            //
+            // The constant is CALIBRATED, not chosen: at three degrees of freedom and
+            // 1,000 labels the measured spread of the delivered amount is 13%, which
+            // fixes it at 1.3. Checked against the same measurement at other sizes —
+            // predicted 3.3% at 60,000 labels against 4.0% measured, and 22% at 200
+            // against 16% measured, so it is conservative at the small end and close
+            // at the large one. Three standard errors as everywhere else, and the same
+            // half-percent floor.
+            //
+            // Nothing in the settled condition list runs four degrees of freedom or
+            // fewer, so no result moves today. Matches `dose_tolerance` in
+            // `NoiseInject/noiseInject/core.py`.
+            const HEAVY_TAIL_SE_AT_UNIT_N: f32 = 1.3;
+            let n_eff = effective_n.max(1.0);
+            let se = HEAVY_TAIL_SE_AT_UNIT_N * n_eff.powf(2.0 / nu - 1.0);
+            return (3.0 * se).max(0.005);
         }
     }
     let n_eff = effective_n.max(1.0);
@@ -1439,8 +1490,12 @@ fn assert_noise_plan_gates(
     // unit dose times solved scale is the target, exactly. This is the part that is
     // true by algebra rather than by luck of the draw, so it gets an exact check.
     //
-    // The shifted grouped condition has no solver step — its two variances sum to the
-    // target by construction — so its unit dose is 1 and the identity holds trivially.
+    // The shifted grouped condition has a flat scale map rather than no solver step,
+    // so its unit dose is the SHAPE'S own spread and not 1: measured 1.0000 under
+    // Gaussian, 1.4142 under Laplace, 1.2910 under Student-t at nu = 5, with `solved`
+    // moving inversely each time. The identity below still holds exactly — it is the
+    // reason the heavy-tailed pairing delivers the target — but it is not trivial and
+    // the comment that said "its unit dose is 1" was true only of the Gaussian roster.
     if spec.targeting.is_dose_matched() {
         let constructed = plan.unit_dose_g * plan.solved_scale;
         let slack = plan.target_dose_label_units.abs() * 1e-5;
@@ -1457,20 +1512,49 @@ fn assert_noise_plan_gates(
     // Gate 1, second half — what one realisation actually delivered. The population
     // dose is exact; the sample root-mean-square wobbles, by an amount the band below
     // works out from the draw itself. This catches breakage, not sampling.
+    //
+    // UNLIKE THE FIRST HALF, THIS ONE CAN FIRE ON A SOUND DRAW, so it WARNS and
+    // carries on. Settled by the author 2026-08-29: warn on both sides.
+    //
+    // It used to abort. The experimental side has warned since 2026-08-26
+    // (`noiseInject/core.py`, `DoseWarning`), and QM9 was left aborting on the
+    // stated grounds that "at 133,885 labels the band is never exceeded, so it
+    // costs nothing there". The jobs do not run 133,885 labels — every generated
+    // script runs `-n 10000`, which is 8,000 training and 1,000 validation — and
+    // the band is relative, so it tightens as the split shrinks. Measured, 200
+    // independent Gaussian draws at level 0.5: 0 of 200 outside the band at
+    // n = 8,000, 1 of 200 at n = 1,000. So roughly one validation draw in two
+    // hundred aborted a QM9 cell that the experimental pipeline would have kept,
+    // and the cell was lost for every representation and every model at once,
+    // because the seed does not depend on either. Resubmitting reran the same
+    // seed and failed the same way, so the cell could never be filled.
+    //
+    // Nothing is lost by continuing. The amount actually delivered is on every
+    // results row beside the amount requested
+    // (`realised_dose_label_units` / `target_dose_label_units`), so a wide draw is
+    // RECORDED rather than discarded and can be filtered out afterwards. What the
+    // check is for is the other case — a fixed offset present on every draw, which
+    // is what a broken solver looks like — and that shows as a warning on every
+    // seed rather than one unlucky one. The first half of the gate, which checks
+    // the solver's algebra rather than the draw, still aborts.
     if spec.targeting.is_dose_matched() {
         let tol = dose_tolerance(&spec.shape, &plan.epsilon, plan.effective_n);
         let err = (plan.realised_dose_label_units / plan.target_dose_label_units - 1.0).abs();
-        assert!(
-            err <= tol,
-            "gate ({split}): {} delivered {:.6} against a target of {:.6} ({:+.2}%), outside \
-             the {:.2}% band that {:.0} effective observations allow",
-            plan.noise_type,
-            plan.realised_dose_label_units,
-            plan.target_dose_label_units,
-            (plan.realised_dose_label_units / plan.target_dose_label_units - 1.0) * 100.0,
-            tol * 100.0,
-            plan.effective_n
-        );
+        if err > tol {
+            eprintln!(
+                "WARNING gate ({split}): {} delivered {:.6} against a target of {:.6} \
+                 ({:+.2}%), outside the {:.2}% band that {:.0} effective observations \
+                 allow. One draw outside a three-sigma band is expected; the SAME \
+                 offset on every draw is not. The delivered amount is recorded on \
+                 every row, so this run can be filtered afterwards rather than lost.",
+                plan.noise_type,
+                plan.realised_dose_label_units,
+                plan.target_dose_label_units,
+                (plan.realised_dose_label_units / plan.target_dose_label_units - 1.0) * 100.0,
+                tol * 100.0,
+                plan.effective_n
+            );
+        }
     }
 
     // Failure mode 6 — a cut-point in the wrong units caught 99.99925% of molecules
@@ -1514,20 +1598,33 @@ fn assert_validation_matches_training(
     let t_val = dose_tolerance(&spec.shape, &validation.epsilon, validation.effective_n);
     let band = (t_train * t_train + t_val * t_val).sqrt();
     let ratio = validation.realised_dose_label_units / train.realised_dose_label_units;
-    assert!(
-        (ratio - 1.0).abs() <= band,
-        "gate: validation received {:.6} label units of {} noise against training's {:.6} \
-         ({:+.2}%), outside the {:.2}% band the two splits' sizes allow. The two splits must \
-         receive the same AMOUNT — check the validation dose is anchored on the clean \
-         TRAINING spread ({:.6}) and not on validation's own ({:.6}).",
-        validation.realised_dose_label_units,
-        train.noise_type,
-        train.realised_dose_label_units,
-        (ratio - 1.0) * 100.0,
-        band * 100.0,
-        train.clean_label_sd,
-        validation.clean_label_sd
-    );
+    // WARNS, it does not abort. Same reasoning as the delivered-dose gate above, and
+    // it applies here more strongly: this band combines TWO sampling spreads, and the
+    // validation split is a tenth the size, so its own spread dominates and a sound
+    // pair of draws lands outside more often than either does alone. Settled by the
+    // author 2026-08-29: warn on both sides.
+    //
+    // What this exists to catch is the validation dose being anchored on the
+    // validation labels' own spread instead of the clean training spread. That is a
+    // wrong ANCHOR, not a wrong draw, so it shows on every seed and every level, not
+    // on one. Both amounts are on the row, so a pair that lands wide is recorded.
+    if (ratio - 1.0).abs() > band {
+        eprintln!(
+            "WARNING gate: validation received {:.6} label units of {} noise against \
+             training's {:.6} ({:+.2}%), outside the {:.2}% band the two splits' sizes \
+             allow. The two splits must receive the same AMOUNT. One pair of draws \
+             outside the band is expected; the same offset on EVERY level means the \
+             validation dose is anchored on validation's own spread ({:.6}) rather \
+             than on the clean TRAINING spread ({:.6}).",
+            validation.realised_dose_label_units,
+            train.noise_type,
+            train.realised_dose_label_units,
+            (ratio - 1.0) * 100.0,
+            band * 100.0,
+            validation.clean_label_sd,
+            train.clean_label_sd
+        );
+    }
 }
 
 /// Run the cross-type gate that no single training run can run: at ONE target, on
@@ -1621,6 +1718,79 @@ fn condition_roster(with_groups: bool) -> Vec<(NoiseShape, NoiseTargeting, f32)>
 /// could compare it against the Python injector. This is the way in, and nothing but
 /// a test uses it: both `--noise-shape` and `--noise-targeting` must be given, and
 /// no caller of the roster path passes either.
+fn pattern_min(v: &[f32]) -> f64 {
+    v.iter().fold(f64::INFINITY, |a, b| a.min(*b as f64))
+}
+
+fn pattern_max(v: &[f32]) -> f64 {
+    v.iter().fold(f64::NEG_INFINITY, |a, b| a.max(*b as f64))
+}
+
+/// A finite number, or the JSON literal `null`. A shape column that is all NaN
+/// must read as absent rather than as agreement with another all-NaN column.
+fn json_or_null(v: f64) -> String {
+    if v.is_finite() {
+        format!("{}", v)
+    } else {
+        "null".to_string()
+    }
+}
+
+/// Spearman rank correlation, for comparing the SHAPE column across
+/// implementations.
+///
+/// `noise_pattern` is produced by this binary and by `noiseInject` and was
+/// compared by NEITHER, which is how the censoring shape ran with the opposite
+/// sign on the two sides for a week: a model that found the clipped molecules
+/// perfectly scored +0.88 on the laboratory datasets and -0.88 here, and QM9's
+/// "does the uncertainty find the bad labels" answer came out inverted
+/// (RERUN_PLAN.md 2.26c). A rank correlation against the clean label is what
+/// catches that: it is exactly -1 against +1 under a sign flip, whatever the
+/// scale, and it is invariant to the dose the shape is quoted at, which the two
+/// sides are free to differ on.
+fn spearman(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() || a.len() < 2 {
+        return f64::NAN;
+    }
+    let rank = |v: &[f32]| -> Vec<f64> {
+        let mut idx: Vec<usize> = (0..v.len()).collect();
+        idx.sort_by(|x, y| v[*x].partial_cmp(&v[*y]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut r = vec![0.0f64; v.len()];
+        let mut i = 0usize;
+        // Ties take the mean of the ranks they span, which is what scipy does --
+        // censoring leaves a large tie block at exactly zero, so this is not a
+        // corner case here, it is most of the column.
+        while i < idx.len() {
+            let mut j = i + 1;
+            while j < idx.len() && v[idx[j]] == v[idx[i]] {
+                j += 1;
+            }
+            let mean_rank = ((i + j - 1) as f64) / 2.0;
+            for k in i..j {
+                r[idx[k]] = mean_rank;
+            }
+            i = j;
+        }
+        r
+    };
+    let (ra, rb) = (rank(a), rank(b));
+    let n = ra.len() as f64;
+    let (ma, mb) = (ra.iter().sum::<f64>() / n, rb.iter().sum::<f64>() / n);
+    let mut num = 0.0;
+    let mut da = 0.0;
+    let mut db = 0.0;
+    for i in 0..ra.len() {
+        let (x, y) = (ra[i] - ma, rb[i] - mb);
+        num += x * y;
+        da += x * x;
+        db += y * y;
+    }
+    if da <= 0.0 || db <= 0.0 {
+        return f64::NAN;
+    }
+    num / (da.sqrt() * db.sqrt())
+}
+
 fn self_test_json(
     labels: &[f32],
     groups: Option<&HashMap<String, u32>>,
@@ -1677,7 +1847,7 @@ fn self_test_json(
             / plan.epsilon.len() as f64;
         let censor_limit = plan.params.get("censor_limit").and_then(|v| v.as_f64());
         rows.push(format!(
-            r#"{{"condition":"{}","k":{},"dose_matched":{},"target_dose":{},"unit_dose":{},"solved_scale":{},"censoring_limit":{},"delivered_dose":{},"delivered_dose_sd":{},"mean_shift":{},"frac_beyond_3":{},"median_abs":{},"top5_energy_share":{},"affected_molecule_fraction":{},"effective_n":{},"dose_tolerance":{},"seeds":{}}}"#,
+            r#"{{"condition":"{}","k":{},"dose_matched":{},"target_dose":{},"unit_dose":{},"solved_scale":{},"censoring_limit":{},"delivered_dose":{},"delivered_dose_sd":{},"mean_shift":{},"frac_beyond_3":{},"median_abs":{},"top5_energy_share":{},"affected_molecule_fraction":{},"effective_n":{},"dose_tolerance":{},"seeds":{},"pattern_min":{},"pattern_max":{},"pattern_rms":{},"pattern_frac_negative":{},"pattern_spearman_label":{}}}"#,
             plan.noise_type,
             k,
             dose_matched,
@@ -1695,6 +1865,19 @@ fn self_test_json(
             plan.effective_n,
             dose_tolerance(&spec.shape, &plan.epsilon, plan.effective_n),
             seeds.max(1),
+            // THE SHAPE COLUMN. Two implementations write it and, until now,
+            // none compared it. Quoted four ways because each catches a
+            // different way of getting it wrong: the extremes catch a sign
+            // flip, the negative fraction catches it again on a column that
+            // happens to be centred, the root-mean-square catches a scale that
+            // has drifted, and the rank correlation against the clean label
+            // catches an order that has been reversed without the sign moving.
+            json_or_null(pattern_min(&plan.noise_pattern)),
+            json_or_null(pattern_max(&plan.noise_pattern)),
+            json_or_null(rms(&plan.noise_pattern) as f64),
+            plan.noise_pattern.iter().filter(|p| **p < 0.0).count() as f64
+                / plan.noise_pattern.len().max(1) as f64,
+            json_or_null(spearman(&plan.noise_pattern, labels)),
         ));
     }
     println!(

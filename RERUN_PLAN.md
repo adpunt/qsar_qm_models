@@ -2946,6 +2946,73 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.27 ✅ CLOSED 2026-08-30 — the shape column is in the cross-check, and the run counts are right
+
+**Two of the four open uncertainty items, both closed.**
+
+#### The shape column, which nothing compared
+
+`noise_pattern` is the level-free shape of the noise, and it is what the uncertainty question is
+answered against. Two implementations write it — `rust/src/main.rs` and `noiseInject` — and
+`scripts/crosscheck_injectors.py` compares six other quantities and not this one. That is how the
+censoring shape ran with the opposite sign on the two sides for a week (§2.26c). It matters more
+now than it did then: after §3.1f, **censoring is the only condition on which the question has an
+answer at all**, so this column IS the answer.
+
+**`scripts/crosscheck_noise_pattern.py`**, run against the production binary's own self-test output
+and against `noiseInject`, on **4,000 real QM9 labels with 200 real scaffold groups**:
+
+    PASS — 115 comparisons over 17 conditions, both injectors agree on the shape column
+
+Five statistics per condition, each catching a different way of getting it wrong: the negative
+fraction and the extremes catch a sign flip; the rank correlation against the clean label catches an
+order reversed without the sign moving; the root-mean-square catches a drifted scale; the max/min
+contrast is the shape free of scale; and flatness catches a condition that silently did nothing.
+
+**What it reads on real data.** Censoring: rank correlation with the clean label **+1.000 on both
+sides**, no negative entries, root-mean-square 4.956473 against 4.956473 — agreement to six
+decimals. The four uniform conditions and `grouped_shifted`: flat on both sides, so the correlation
+is undefined rather than zero, which is the property §3.2 claims and nothing had checked. Both
+grouped and all three outlier conditions: not flat, and their shape is uncorrelated with the label
+on both sides, which is what makes them structural nulls rather than label-keyed conditions.
+
+**One thing the comparison must NOT assert, and why.** For `grouped_wider` and the outlier
+conditions, WHICH molecules are hit is an independent draw on the two sides. Their extremes
+therefore sit on different molecules, and so does the rank correlation. Requiring those to be equal
+would be requiring the two injectors to make the same random selection, which they are not built to
+do and which no result depends on. What is required instead is that the shape is uncorrelated with
+the label on both sides — a side whose selection had leaked the label shows up there.
+
+**It bites.** It is a case in `scripts/check_fixes_fail_when_removed.py`: removing the `.abs()` from
+the Rust censoring shape, rebuilding, and re-running turns all seven censoring rows red with
+`rho_label = −1.000` against Python's `+1.000` — **28 disagreements over 115 comparisons**, the
+exact defect that ran undetected for a week. The fixture lives in `.crosscheck_tmp/`.
+
+#### The generator over-reported its own size by 10.5%
+
+`n_lev` was the **maximum** level count across the chosen conditions and the grid total was tasks
+times that, but `levels_for` strips the clean level from every condition except the reference and
+censoring. Counted from the scripts it actually emits: the screen is **1,862** training runs and the
+main grid **16,758**, against the 2,058 and 18,522 it printed. `--include-excluded` reads 2,432, not
+2,688.
+
+The wall clock is still worked out from the longest condition, and deliberately: one request covers
+a whole array, so it has to fit the worst task in it. Only the reported total moved. The summary now
+also prints the level count per condition whenever they differ, so the two numbers cannot be
+confused again. `RUNBOOK.md` carries the corrected totals and
+`test_runbook_matches_generator.py` passes.
+
+#### The decomposition question, answered rather than fixed
+
+Read off the support table against the settled pairs. **Five roster models have both halves varying
+per molecule** — `rf`, `qrf`, `heteroscedastic_gp`, and the two variational networks with a noise
+head. `rf` emits no uncertainty at all, so four can be measured. **Only `qrf` is in the settled
+list**, and its two halves both track the injected corruption at +0.84 and +0.81, which is one
+signal reported twice (§2.25). Of the other three settled models, NGBoost has no model-uncertainty
+term, and the Gaussian process and the variational network both report a data-noise term that is one
+number per fit. So on the settled pairs the split cannot be measured per molecule at all. Owned by
+another chat; recorded here so it is not rediscovered.
+
 ### 2.25 🔴 FOUND AND FIXED 2026-08-28 — the noise-predicting Gaussian process was learning from the wrong residual
 
 **This is the model the aleatoric/epistemic split rests on**, because it is the only one measured
@@ -5955,13 +6022,87 @@ smoke test: cap 500, **278 stages fitted, optimum at 227**, and predicting at th
 0.9606 against 0.9596 at the cap. Both effects are real — it is cheaper AND it is better, because
 the 51 stages past the optimum are fitted on noisy labels.
 
-🔴 **THE GAP, AND IT IS A PARITY GAP.** The experimental pipeline's tree path receives `X_train` and
-`X_test` and carves no validation split — `scaffold_validation_carve` exists but only the neural
-path uses it — so there is no curve to read M off. `_ngboost_kwargs` therefore **pops those two keys
-and does not apply them**, with a comment saying so, rather than deleting them from the spec and
-hiding the difference. Until that is closed, NGBoost fits 500 stages on LogD, Caco-2 and hERG and
-a validation-selected number on QM9. Closing it means handing `run_tree_experiment` the fold's
-groups and carving a validation split for NGBoost the way the neural path already does.
+~~🔴 **THE GAP, AND IT IS A PARITY GAP.**~~ ✅ **CLOSED 2026-08-28**, KIRBy commit `6e7b860`
+"NGBoost stops when it stops improving, the way QM9 does". The experimental pipeline's tree path
+used to receive `X_train` and `X_test` and carve no validation split, so there was no curve to read
+M off, and `_ngboost_kwargs` popped the two stage-selection keys without applying them. It now
+builds `EarlyStoppingNGBRegressor`, and `run_tree_experiment` hands it the fold's scaffold ids
+through `set_fit_groups`. **NGBoost no longer fits 500 stages on LogD, Caco-2 and hERG.**
+
+**The two sides still do it DIFFERENTLY, and that is what the Methods has to say** — see §5.7m,
+which measures what the difference is worth.
+
+#### 5.7m ✅ MEASURED 2026-08-30 — stage selection is INERT on QM9 and LIVE on the small datasets
+
+**One sentence: at the size QM9 actually runs, stopping early changes nothing, and the whole effect
+lands on hERG and Caco-2.** This was run because §5.7l's parity gap raised the obvious question —
+now that both sides select the stage count, does selecting it matter — and nothing had measured it.
+
+`scripts/check_ngboost_stage_selection.py`, real QM9 through `load_qm9('homo_lumo_gap')`, real
+scaffold split, labels standardised on the CLEAN training mean and spread, PDV standardised per
+feature on training, corruption by `noiseInject` 1.0.0 at level 0.5 of the clean training spread,
+training and validation labels drawn independently, test labels never corrupted. Three fits per
+cell: stop on the validation curve and predict at the best round; stop but predict at every round
+fitted; never stop and run the full 500. Results in
+`results/ngboost_stage_selection/stage_selection_by_training_size.json`.
+
+| rep | labels | fit rows | stopped at | of fitted | R² stopped | R² to cap | log score stopped | log score to cap |
+|---|---|---|---|---|---|---|---|---|
+| PDV | clean | 480 | 198 | 249 | 0.7616 | 0.8157 | 0.686 | 1.184 |
+| PDV | clean | 920 | 322 | 373 | 0.7760 | 0.7802 | 0.640 | 0.846 |
+| PDV | clean | 1,760 | 422 | 473 | 0.8759 | 0.8793 | 0.472 | 0.497 |
+| PDV | clean | 3,200 | 499 | 500 | 0.8667 | 0.8667 | 0.408 | 0.408 |
+| PDV | clean | **8,000** | **499** | **500** | **0.8448** | **0.8448** | **0.398** | **0.398** |
+| PDV | corrupted | 480 | 256 | 307 | 0.6676 | 0.6780 | 0.854 | 1.095 |
+| PDV | corrupted | 920 | 273 | 324 | 0.7415 | 0.7476 | 0.734 | 0.634 |
+| PDV | corrupted | 1,760 | 331 | 382 | 0.8406 | 0.8606 | 0.687 | 0.596 |
+| PDV | corrupted | 3,200 | 448 | 499 | 0.8471 | 0.8506 | 0.650 | 0.633 |
+| PDV | corrupted | **8,000** | **498** | **500** | **0.8328** | **0.8329** | **0.657** | **0.657** |
+| ECFP4 | clean | 480 | 216 | 267 | 0.6442 | 0.6766 | 0.908 | 1.102 |
+| ECFP4 | clean | 3,200 | 499 | 500 | 0.7588 | 0.7588 | 0.781 | 0.781 |
+| ECFP4 | corrupted | 480 | 196 | 247 | 0.5706 | 0.6091 | 0.998 | 0.952 |
+| ECFP4 | corrupted | 3,200 | 414 | 465 | 0.7316 | 0.7449 | 0.886 | 0.855 |
+
+**QM9 at production size does not stop.** 10,000 molecules is 8,000 training rows, and the
+validation curve is still improving at round 499 of a 500 cap. The stopped model and the unstopped
+model are the same model: R² identical to four decimals, and the largest change to any single
+molecule's prediction is **0.0000** on clean labels and **0.0145** standardised units on corrupted
+ones. **No QM9 number in the study moves because of stage selection**, and the cap of 500 is
+effectively the answer there rather than a cap.
+
+**Below about 2,000 rows it bites, and it hits the UNCERTAINTY rather than the accuracy.** At 480
+rows on clean PDV it stops at round 198, R² falls 0.054, and the log score improves by **0.50** —
+because running to the cap collapses the mean predicted spread to 0.228 against 0.438 when stopped.
+Running to the cap makes NGBoost overconfident and stopping is what corrects it. The largest
+per-molecule prediction change reaches 0.46 standardised units at 920 rows.
+
+**So the two datasets that sit in that range are hERG and Caco-2.** LogD has 5,039 molecules,
+Caco-2 has 2,161 and hERG has 1,415 (counted from KIRBy's `tests/data_cache/openadmet_train.csv`
+and `chembl_herg_ki.csv`). After the outer split and the fifth `EarlyStoppingNGBRegressor` carves
+off, NGBoost fits roughly 3,200 rows on LogD, 1,400 on Caco-2 and 900 on hERG — which is the 920
+and 1,760 rows of the table above, not the 8,000 row.
+
+✅ **The library-version worry is closed.** Both pipelines read the chosen round with
+`getattr(model, 'best_val_loss_itr', None)`, which would fall back to the cap in silence if an
+upgrade renamed it. Nothing in `scripts/audit_pipeline_parity.py` asserts the attribute. Checked on
+ARC by the author 2026-08-30: **ngboost 0.5.5 reports `best_val_loss_itr = 59`** on a 60-round
+fixture. The name is right on the cluster and no run has been silently predicting at the cap.
+
+🔴 **FOR THE METHODS — the two sides select the stage count differently, and the sentence must say
+so.** QM9 reads the curve off the validation split it already holds out, so NGBoost there is fitted
+on all 8,000 training molecules. LogD, Caco-2 and hERG have no spare split, so
+`EarlyStoppingNGBRegressor` cuts a scaffold-grouped fifth out of the fold's training rows to make
+one. **NGBoost on those three is therefore fitted on four fifths of what the forest and the boosted
+trees beside it receive** — the same asymmetry the four neural families on that side already carry,
+for the same reason. Do not write that the two sides run the same procedure. Write that both select
+the number of rounds on held-out data, that the experimental datasets carve theirs out of training
+because they have none spare, and that NGBoost there sees less training data than the tree models
+it is tabulated against.
+
+**Caveats on the table.** One seed (42), one replicate and one split per cell — enough to establish
+a stopping round of 499, not enough to quote an R² anywhere else. ECFP4 was not run at 8,000 rows
+because it agreed with PDV at every smaller size and each fit costs about twelve minutes. Local
+ngboost is 0.3.12; the cluster is 0.5.5.
 
 #### 5.7j ✅ SETTLED 2026-08-28 — the sweep runs on the cluster, and NGBoost stays whole
 

@@ -37,6 +37,14 @@ KIRBY = "/Users/apunt/repos/KIRBy"
 NOISE = "/Users/apunt/repos/NoiseInject"
 
 CASES = [
+ ("the two injectors write the same shape column",
+  f"{QSAR}/rust/src/main.rs",
+  "            .map(|y| clip(*y, reference_cut).abs())",
+  "            .map(|y| clip(*y, reference_cut))",
+  [sys.executable, f"{QSAR}/scripts/crosscheck_noise_pattern.py",
+   "--labels", f"{QSAR}/.crosscheck_tmp/pattern_labels.csv",
+   "--groups", f"{QSAR}/.crosscheck_tmp/pattern_groups.json"]),
+
  ("both pipelines run the uncertainty work on the same pairs",
   f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
   "        unc_reps = (UNCERTAINTY_PAIRS.get(model, []) if '-u True' in flags else [])",

@@ -847,12 +847,24 @@ def main():
                      f'(Add --include-excluded for the figure-excluded variants.)')
     chosen = {k: v for k, v in pool.items() if not args.models or k in args.models}
 
-    # Every condition on the grid has the same number of levels, and the wall
-    # clock is priced per training run, so one number covers the whole script.
-    # The reference condition runs one level more than the others -- the clean one.
-    # The wall clock is requested for the longest, so no task is short of time.
+    # TWO NUMBERS, AND THEY ARE NOT THE SAME NUMBER.
+    #
+    # The conditions do NOT all run the same levels: `levels_for` strips the
+    # clean level from every condition except the reference and censoring. So
+    # there is a longest task and there is a total, and using the longest for
+    # both over-reported the grid by 10.5% -- the screen printed 2,058 training
+    # runs and wrote 1,862, the main grid printed 18,522 and wrote 16,758. Those
+    # numbers go into the runbook, and the runbook is what gets read when the
+    # queue is sized.
+    #
+    # `runs_per_task` stays the LONGEST, deliberately: one wall clock covers a
+    # whole array, so it has to fit the worst task in it. Under-requesting loses
+    # the job after the queue wait, which is the most expensive way this run can
+    # fail. Only the reported total changes.
     n_lev = max(len(CONDITIONS[c][1].split()) for c in conditions)
     runs_per_task = n_lev * n_reps_run
+    levels_by_condition = {c: len(CONDITIONS[c][1].split()) for c in conditions}
+    runs_per_rep = sum(levels_by_condition.values()) * n_reps_run
     own_clean = [c for c in conditions if c in NEEDS_OWN_CLEAN_LEVEL]
     if REFERENCE_CONDITION not in conditions:
         borrowers = [c for c in conditions if c not in NEEDS_OWN_CLEAN_LEVEL]
@@ -862,6 +874,7 @@ def main():
 
     written = []
     grand = 0
+    grand_runs = 0
     for model, (flags, tier, hours_per_110, note, model_reps) in chosen.items():
         # EVERY MODEL THAT EMITS A PER-MOLECULE UNCERTAINTY IS CROSS-FITTED.
         # Settled by the author 2026-08-28.
@@ -941,6 +954,9 @@ def main():
         unc_block = build_uncertainty_block(model, unc_reps, args.oof_folds)
         n_tasks = len(conditions) * len(reps)
         grand += n_tasks
+        # The real total: this model's representations times the levels each
+        # condition actually runs, not times the longest condition's count.
+        grand_runs += len(reps) * runs_per_rep
         # The hours column is quoted for 110 training runs at ONE fit per run.
         #
         # THE CROSS-FIT IS NOT FREE, AND THIS IS WHERE THAT GETS PAID FOR.
@@ -994,8 +1010,12 @@ def main():
     print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total")
     print(f"  conditions: {' '.join(conditions)}")
     print(f"  replicates: {n_reps_run}, numbered {first_iter}..{first_iter + n_reps_run - 1}")
-    print(f"  each task: up to {n_lev} levels x {n_reps_run} replicate(s) = "
-          f"{runs_per_task} training runs")
+    _spread = sorted(set(levels_by_condition.values()))
+    print(f"  longest task: {n_lev} levels x {n_reps_run} replicate(s) = "
+          f"{runs_per_task} training runs"
+          + (f" (levels per condition: "
+             f"{', '.join(f'{c}={n}' for c, n in sorted(levels_by_condition.items()))})"
+             if len(_spread) > 1 else ""))
     if own_clean:
         print(f"  the clean level runs under {REFERENCE_CONDITION} and under "
               f"{' '.join(own_clean)}, which needs its OWN clean row as the control for the "
@@ -1004,7 +1024,7 @@ def main():
     else:
         print(f"  the clean level runs under {REFERENCE_CONDITION} only; "
               f"copy_zero_rows.py fills in the rest afterwards")
-    print(f"  grid total: {grand * runs_per_task:,} training runs")
+    print(f"  grid total: {grand_runs:,} training runs")
     if args.sample_size != 10000:
         print(f"  ⚠ sample size {args.sample_size}, NOT the production 10000")
     for tier, name in [(1, 'ANOVA roster — tree and deterministic'),

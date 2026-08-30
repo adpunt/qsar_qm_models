@@ -17,6 +17,14 @@
 > ```bash
 > python slurm_scripts_qm9_rerun/test_generate_scripts.py
 > ```
+>
+> A second test covers the other half of that failure — the generator being right and the `.sh`
+> on the cluster being old. It compares every `.sh` in this directory against a fresh
+> generation, byte for byte, and it passes trivially here because there are none:
+>
+> ```bash
+> python slurm_scripts_qm9_rerun/test_generated_scripts_match_generator.py
+> ```
 
 The noise map is keyed by **training** index, and `write_data` restarted its
 counter for each split — so validation and test molecules were handed the noise
@@ -49,8 +57,15 @@ and level 0 is one seventh of the cost.
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**The screen (`--stage 0`): 17 array scripts, 294 tasks** — 2,058 training runs.
-**The main grid (`--stage 1`): the same 294 tasks** at replicates 1–9 — 18,522 training runs.
+**The screen (`--stage 0`): 17 array scripts, 294 tasks** — 1,862 training runs.
+**The main grid (`--stage 1`): the same 294 tasks** at replicates 1–9 — 16,758 training runs.
+
+Those two totals were 2,058 and 18,522 until 2026-08-30, and both were 10.5% too
+high. The generator worked the total out as tasks times the LONGEST condition's
+level count, and the conditions do not all run the same levels — the clean level
+is stripped from every condition except the reference and censoring. The wall
+clock each job asks for is still worked out from the longest condition, which is
+correct: one request covers a whole array, so it has to fit the worst task in it.
 **20,580 between them**, plus censoring, which is generated and submitted separately (§5b).
 
 The roster grew on 2026-08-28 with the noise-predicting Gaussian process and the two variational
@@ -118,7 +133,7 @@ commented out:
 python generate_scripts.py --stage 0 --include-excluded   # 22 scripts, 384 tasks
 ```
 
-That is 2,688 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
+That is 2,432 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
 from every figure.
 
 **Out permanently:** binary `pdv` (superseded by PDV as continuous descriptors,
@@ -327,7 +342,7 @@ rm -f results/anova_*.csv
 # 2. The processed QM9 directory. ChemBERTa changed encoder on 2026-08-27 -- 768 wide to
 #    384 -- and the record layout moved with it, so anything cached before that decodes
 #    every field after it at the wrong offset.
-rm -rf data/QM9/processed
+rm -rf data/QM9/processed        # see the warning below -- it MUST be rebuilt before you submit
 
 # 3. The tuned hyperparameters. THIS IS THE ONE NOBODY EXPECTS.
 ls -l results/master_tuned_hyperparameters.json results/hyperparameter_decisions.json
@@ -395,6 +410,22 @@ Only the two-file pair fires that branch, so renaming either one is enough; rena
 leaves less to reason about. The local checkout already carries
 `master_tuned_hyperparameters.superseded_2026-02.json` for the same reason.
 
+### ⚠️ Deleting `data/QM9/processed` means it has to be rebuilt BEFORE the array
+
+`torch_geometric`'s QM9 builds `data/QM9/processed/data_v3.pt` from the raw files on first
+access, and it **takes no lock**. Submit the array cold and all 294 tasks build the same file
+into the same path at once: 294 times the work at best, and at worst a task loading a `.pt`
+another task is still writing.
+
+It has to go — the ChemBERTa encoder changed on 2026-08-27 and the record layout moved with it,
+so anything cached before that decodes every later field at the wrong offset. So rebuild it
+**once, in the interactive allocation**, which the smoke task in §6 does as a side effect.
+
+**The job scripts now refuse to start without it** (`generate_scripts.py`, the
+`data/QM9/processed/data_v3.pt` guard) and exit 2 naming the remedy, so this cannot be
+forgotten rather than merely documented. Same shape as the `setup.sh` extras refusal: the
+expensive shared work belongs in one allocation before a launch, never in 294 tasks at once.
+
 ## 3. Account and partition
 
 ```bash
@@ -435,9 +466,22 @@ used in prose here.)
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
+rm -f qm9_s0_*.sh
 python generate_scripts.py --stage 0
 ls qm9_s0_*.sh
+python test_generated_scripts_match_generator.py
 ```
+
+**Delete before regenerating, and run that last line.** The `.sh` are not in git, so what sits
+here is whatever was generated on this host last, and the generator overwrites the scripts it
+still emits while leaving the rest. The gap between the last set that WAS committed and a
+generation from today's source was not cosmetic: `--oof-folds 5` missing from all sixteen
+scripts whose model reports an uncertainty (and without it a QM9 uncertainty row is a test row,
+whose label is never corrupted — the question "does the uncertainty find the corrupted labels?"
+would have had no data behind it), the representation named `continuous_pdv` which the reader
+now refuses by name, no tuned-hyperparameter block, neither of the two start-up refusals, three
+models with no script at all, and wall clocks four to six times too short for the fits the
+scripts now ask for.
 
 **Before the first submission, run the concurrency check — it only works here.**
 
