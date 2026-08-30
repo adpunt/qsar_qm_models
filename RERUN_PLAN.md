@@ -2114,10 +2114,18 @@ spot that changes what a ChemBERTa row means, and a reader of the paper cannot i
 
 **What to say in Methods, in substance.** ChemBERTa reads a molecule as a string of single
 characters, because the published model was pretrained that way. Characters it has no entry
-for are dropped. Those characters are the ones that spell out a halogen beyond fluorine, a
-formal charge, and a stereocentre. So the encoder cannot distinguish chlorobenzene from
-toluene, an acid from its conjugate base, or two enantiomers. Two such molecules receive one
-identical feature vector.
+for are dropped: `l`, `r`, `[`, `]`, `+`, `@` and `H`. Between them those spell out a halogen
+beyond fluorine, a formal charge, a stereocentre, **and which nitrogen in an aromatic ring
+carries the hydrogen** — `[nH]` loses its brackets and its H and becomes a bare `n`. So the
+encoder cannot distinguish chlorobenzene from toluene, an acid from its conjugate base, two
+enantiomers, or two tautomers of an azole. Each such pair receives one identical feature
+vector.
+
+⚠️ **The aromatic-NH case was not anticipated and is the one that reaches QM9.** The first
+three losses are drug-chemistry problems. This fourth one bites hardest on small
+nitrogen heterocycles, which is exactly what QM9 is full of. Every QM9 clash measured below
+is of this kind, e.g. `CC#CCc1nc[nH]n1` and `CC#CCc1ncn[nH]1`. Do not write the caveat as a
+halogen-and-stereochemistry problem alone.
 
 **The rate, measured 2026-08-30 on the study's own molecules.** Report it per dataset; do not
 pool it.
@@ -2125,12 +2133,14 @@ pool it.
 | dataset | distinct molecules | distinct feature vectors | molecules sharing a vector |
 |---|---|---|---|
 | hERG | 648 | 583 | **130 (20.1%)** |
-| QM9 | *being measured 2026-08-30* | | |
+| QM9 | 132,908 | 131,001 | **3,604 (2.71%)** |
 
-The rate is a property of the dataset, not of the model: it is high wherever halogens,
-charges and stereocentres are common. It should be low on QM9, whose molecules are built from
-carbon, nitrogen, oxygen and fluorine, and whose stereochemistry this pipeline strips before
-featurising. **LogD and Caco-2 are not yet measured** — they are downloaded rather than held
+The rate is a property of the dataset, not of the model. hERG is high because halogens,
+charges and stereocentres are everywhere in drug-like molecules. QM9 is lower but **not
+negligible, and not for the reason you would guess** — QM9 has no halogen beyond fluorine and
+this pipeline strips its stereochemistry, so a prediction of "near zero" was made and was
+wrong. All 3,604 QM9 clashes are aromatic-NH tautomers. **LogD and Caco-2 are not yet
+measured** — they are downloaded rather than held
 locally. Measure them on the cluster before the Methods sentence is finalised;
 `scripts/crosscheck_chemberta.py` gate 4 is the code, and it needs only a list of SMILES.
 
