@@ -503,6 +503,13 @@ def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None,
     answer a per-molecule question: what varies is the fold, not the molecule.
     Without this the guard would stop a correct out-of-fold pass; with it, the
     check becomes constant WITHIN each fit, which is the real claim.
+
+    BOTH checks are made within a fit. The per-molecule one was made across the
+    whole column until 2026-08-30, and out of fold that column is several fits
+    stacked: a Gaussian process that collapsed in all five folds writes five
+    different constants, the column has a spread, and the check passed on a term
+    that varies by fold and not by molecule. The one-fold smoke test was the only
+    configuration that caught it (RERUN_PLAN.md 5.5i).
     """
     alea_kind, epis_kind = support(model_name, loss_name)
 
@@ -528,33 +535,61 @@ def assert_matches_support(model_name, aleatoric, epistemic, n_molecules=None,
                 f"{model_name}: {v.size} {name} values for {n_molecules} "
                 f"molecules")
 
-        spread = float(np.nanmax(v) - np.nanmin(v)) if v.size else 0.0
+        parts = _fits(v, blocks, model_name, name)
+
         if kind == CONSTANT:
-            if blocks is None:
-                within = spread
-            else:
-                b = np.asarray(blocks).ravel()
-                if b.size != v.size:
-                    raise DecompositionError(
-                        f"{model_name}: {b.size} block labels for {v.size} "
-                        f"{name} values")
-                within = 0.0
-                for label in np.unique(b):
-                    part = v[b == label]
-                    if part.size and np.isfinite(part).any():
-                        within = max(within, float(np.nanmax(part)
-                                                   - np.nanmin(part)))
+            within = 0.0
+            for _label, part in parts:
+                within = max(within, float(np.nanmax(part) - np.nanmin(part)))
             if within > 1e-12:
                 raise DecompositionError(
                     f"{model_name}: SUPPORT calls its {name} term one number per "
                     f"fit, but it varies by {within:.6g} within a single fit. "
                     f"Update SUPPORT -- a term that really does vary is worth "
                     f"more, not less.")
-        if kind == PER_MOLECULE and v.size > 1 and spread <= 1e-12 and np.isfinite(v).any():
-            raise DecompositionError(
-                f"{model_name}: SUPPORT calls its {name} term per molecule, but "
-                f"every molecule got {float(v[0]):.6g}. A constant cannot "
-                f"correlate with per-molecule noise, so this would be reported "
-                f"as a null result that is an artefact of the model, not a "
-                f"finding.")
+
+        if kind == PER_MOLECULE:
+            # WITHIN EACH FIT, for the same reason the constant check above is.
+            # This used to look at the whole column at once, and out of fold the
+            # column is several fits stacked: a process that collapsed in every
+            # one of five folds writes five different constants, the column has a
+            # spread, and the check passed on a term that answers nothing per
+            # molecule. Only the one-fold configuration -- the cheap smoke test --
+            # caught it. Found 2026-08-30 (RERUN_PLAN.md 5.5i).
+            flat = [(label, part) for label, part in parts if part.size > 1
+                    and float(np.nanmax(part) - np.nanmin(part)) <= 1e-12]
+            if flat:
+                label, part = flat[0]
+                value = float(part[np.isfinite(part)][0])
+                where = ('' if blocks is None
+                         else f" in fit {label} ({len(flat)} of {len(parts)} "
+                              f"fits, {part.size} molecules)")
+                raise DecompositionError(
+                    f"{model_name}: SUPPORT calls its {name} term per molecule, but "
+                    f"every molecule{where} got {value:.6g}. A constant cannot "
+                    f"correlate with per-molecule noise, so this would be reported "
+                    f"as a null result that is an artefact of the model, not a "
+                    f"finding.")
     return True
+
+
+def _fits(v, blocks, model_name, name):
+    """Split a column into the FITS it came from: [(label, values), ...].
+
+    Out-of-fold rows come from several fits, so both checks above have to be
+    made inside one fit rather than across the stack. Blocks with nothing finite
+    in them -- the molecules a fold that was not run left as NaN -- are dropped,
+    because a block of blanks says nothing either way.
+    """
+    if blocks is None:
+        return [(None, v)] if np.isfinite(v).any() else []
+    b = np.asarray(blocks).ravel()
+    if b.size != v.size:
+        raise DecompositionError(
+            f"{model_name}: {b.size} block labels for {v.size} {name} values")
+    out = []
+    for label in np.unique(b):
+        part = v[b == label]
+        if part.size and np.isfinite(part).any():
+            out.append((label, part))
+    return out

@@ -282,6 +282,27 @@ def test_seed_ensemble_needs_more_than_one_seed():
            'exactly zero')
 
 
+def test_seed_ensemble_matches_chemprop():
+    """chemprop's EnsemblePredictor is on disk and is the most-used package in
+    this space. Its model-uncertainty term is, verbatim:
+
+        uncal_var = sum_squared / N - square(sum_preds) / N**2
+
+    (research_archive/f692d614/chemprop_v1_uncertainty_predictor.py, class
+    EnsemblePredictor). That is the population variance of the members'
+    predictions, divisor N. Reproduced here on a fixed array so a change to our
+    arithmetic fails a test rather than moving a number."""
+    rng = np.random.default_rng(0)
+    preds = rng.normal(size=(4, 7))
+    variances = np.abs(rng.normal(size=(4, 7))) + 0.1
+    n = preds.shape[0]
+    chemprop = (np.square(preds).sum(0) / n
+                - np.square(preds.sum(0)) / n ** 2)
+    _alea, epis, _tot = decompose_seed_ensemble(preds, variances)
+    assert np.allclose(chemprop, epis), (
+        "the ensemble model-uncertainty term no longer matches chemprop's")
+
+
 def test_seed_ensemble_splits_correctly():
     means = np.array([[1.0, 2.0], [3.0, 2.0]])
     variances = np.array([[0.4, 0.6], [0.6, 0.4]])
@@ -347,6 +368,57 @@ def test_guard_allows_one_number_per_fold_out_of_fold():
                                           np.linspace(1, 2, 6),
                                           blocks=folds),
            'within a single fit')
+
+
+def test_guard_catches_a_collapse_in_every_fold():
+    """A Gaussian process that collapsed writes ONE number for the whole fold.
+
+    Out of fold that is five constants stacked, one per fit, so the column has a
+    spread and the old whole-column check passed it: the flat term reached the
+    file declared per molecule and correlated with the injected noise at exactly
+    zero, which reads as a null result and is an artefact of the failed fit.
+    Only the one-fold configuration caught it, which is why a smoke test found
+    this and no full run did (RERUN_PLAN.md 5.5i).
+    """
+    epis = np.repeat([0.9412, 0.9407, 0.9435, 0.9399, 0.9421], 4)
+    alea = np.repeat([0.31, 0.33, 0.30, 0.32, 0.29], 4)
+    folds = np.repeat([0, 1, 2, 3, 4], 4)
+    raises(DecompositionError,
+           lambda: assert_matches_support('gauche_rbf', alea, epis,
+                                          n_molecules=20, blocks=folds),
+           'per molecule')
+    # One collapsed fold among four sound ones is still caught, and the message
+    # says which fit and how many.
+    epis2 = np.concatenate([np.full(4, 0.94), np.linspace(0.1, 0.9, 16)])
+    raises(DecompositionError,
+           lambda: assert_matches_support('gauche_rbf', alea, epis2,
+                                          n_molecules=20, blocks=folds),
+           'fit 0')
+    # And a process that really does vary within every fold still passes.
+    epis3 = np.concatenate([np.linspace(0.1 + i, 0.9 + i, 4) for i in range(5)])
+    assert assert_matches_support('gauche_rbf', alea, epis3, n_molecules=20,
+                                  blocks=folds)
+
+
+def test_guard_reads_only_the_folds_that_were_scored():
+    """--oof-folds-scored 1 leaves every other molecule NaN. A block of blanks
+    is not a fit that produced a constant, and the message must quote the value
+    the fold actually produced rather than the NaN sitting at row zero."""
+    epis = np.full(20, np.nan)
+    alea = np.full(20, np.nan)
+    folds = np.full(20, -1)
+    held = np.array([3, 7, 11, 15])
+    epis[held] = 0.9412
+    alea[held] = 0.31
+    folds[held] = 0
+    raises(DecompositionError,
+           lambda: assert_matches_support('gauche_rbf', alea, epis,
+                                          n_molecules=20, blocks=folds),
+           '0.9412')
+    # The same one fold, scored and varying, is written without complaint.
+    epis[held] = np.linspace(0.2, 0.8, 4)
+    assert assert_matches_support('gauche_rbf', alea, epis, n_molecules=20,
+                                  blocks=folds)
 
 
 def test_guard_catches_a_missing_component():

@@ -375,6 +375,9 @@ def fit_rf(x_fit, y_fit, x_score, model='rf', seed=0):
     return mean, alea, epis
 
 
+GP_TRAIN_CAP = 1500   # an exact GP factorises an n-by-n matrix every step
+
+
 def fit_gp(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150):
     """The two Gaussian processes, built the way models.py builds them."""
     import gpytorch
@@ -383,6 +386,15 @@ def fit_gp(x_fit, y_fit, x_score, heteroscedastic=False, seed=0, epochs=150):
     from uncertainty_decomposition import decompose_gp, decompose_hetero_gp
 
     torch.manual_seed(seed)
+    # Subsample the GP's TRAINING rows, the way both pipelines do. An exact
+    # Gaussian process factorises an n-by-n matrix at every step, so it does not
+    # reach 5,000 molecules on any machine here. Recorded on the row so a GP
+    # number is never read as coming from the same training size as the rest.
+    x_fit = np.asarray(x_fit); y_fit = np.asarray(y_fit)
+    if len(y_fit) > GP_TRAIN_CAP:
+        take = np.random.RandomState(seed).choice(len(y_fit), GP_TRAIN_CAP,
+                                                  replace=False)
+        x_fit, y_fit = x_fit[take], y_fit[take]
     xf, xs = _standardise(x_fit, x_score)
     xt = torch.tensor(xf, dtype=torch.float32)
     yt = torch.tensor(y_fit, dtype=torch.float32)
