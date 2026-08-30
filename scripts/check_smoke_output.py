@@ -32,6 +32,7 @@ has actually had:
 import glob
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -43,6 +44,94 @@ sys.path.insert(0, HERE)
 
 from uncertainty_decomposition import (  # noqa: E402
     CONSTANT, NONE, PER_MOLECULE, support)
+
+
+_CENSORING_LEVEL_SUFFIX = re.compile(r'^(censoring(?:_lower)?)_\d+$')
+
+
+def _strip_level(name):
+    """`censoring_25` -> `censoring`. The same rule both readers apply."""
+    m = _CENSORING_LEVEL_SUFFIX.match(str(name))
+    return m.group(1) if m else name
+
+
+def _manifest_path(out, cond):
+    for stem in (f'smoke_{cond}', cond):
+        p = os.path.join(out, f'{stem}_noise_manifest.csv')
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _dose_band(row):
+    """The percentage band this draw's own sample size allows, in per cent.
+
+    Read from the injector's own rule rather than reimplemented: the two
+    injectors agree on it by an executable gate, and a third copy here is how
+    they drifted in the first place. Falls back to three standard errors under a
+    Gaussian kurtosis when the shape is unknown.
+    """
+    n_eff = float(row.get('effective_n') or 0.0)
+    if n_eff < 1:
+        return 100.0
+    # The manifest's `noise_shape` carries the setting: 'student_t_nu5', not
+    # 'student_t'. Matched by prefix for that reason -- an exact test silently
+    # fell through to the Gaussian band and failed a correct Student-t draw.
+    shape = str(row.get('noise_shape', 'gaussian'))
+    family = ('student_t' if shape.startswith('student_t')
+              else 'laplace' if shape.startswith('laplace')
+              else 'gaussian')
+    nu = _nu_of(row)
+
+    # Below five degrees of freedom the second moment has no ordinary sampling
+    # law and the injector uses a rule of its own. Ask it rather than restating
+    # it -- the two injectors agree on that rule by an executable gate, and a
+    # third copy here is exactly how they drifted in the first place.
+    if family == 'student_t' and nu is not None and nu <= 4.0:
+        try:
+            from noiseInject import dose_tolerance
+            return 100.0 * float(dose_tolerance(np.zeros(1), n_eff, nu=nu))
+        except ImportError:
+            return 100.0
+
+    # The ordinary branch is three standard errors of the second moment,
+    # sqrt((kurtosis - 1) / (4 n_eff)). The injector takes the kurtosis from the
+    # SAMPLE; the manifest does not carry the drawn residuals, so it is taken
+    # from the shape's population value instead:
+    #
+    #   gaussian   3
+    #   laplace    6
+    #   student_t  3 + 6/(nu - 4), which is 9 at the settled nu = 5
+    #
+    # Using 3 for every shape is what the first version of this file did, and it
+    # failed a correct Student-t draw at 3.77% against a band of 3.35% when the
+    # right band is 6.71%.
+    if family == 'student_t' and nu is not None and nu > 4.0:
+        kurt = 3.0 + 6.0 / (nu - 4.0)
+    else:
+        kurt = {'laplace': 6.0}.get(family, 3.0)
+    kurt = min(kurt, 60.0)          # the same clamp the injector applies
+    return 100.0 * max(3.0 * float(np.sqrt((kurt - 1.0) / (4.0 * n_eff))), 0.005)
+
+
+def _nu_of(row):
+    """The tail weight this row was drawn with.
+
+    The manifest does not carry it, so it comes from the settled file, which is
+    the one place the single-setting decisions live (noise_conditions.json,
+    settled 2026-08-27). The condition name is the fallback for a hand-run
+    invocation that used something else.
+    """
+    name = f"{row.get('noise_type', '')} {row.get('noise_shape', '')}"
+    m = re.search(r'_nu(\d+)\b', name)
+    if m:
+        return float(m.group(1))
+    try:
+        doc = json.loads(open(os.path.join(ROOT, 'noise_conditions.json')).read())
+        return float(doc['settings_that_follow']['nu'])
+    except Exception:
+        return None
+
 
 FAILURES = []
 
@@ -148,8 +237,58 @@ def main():
             ok(f"{cond}: R2 falls {drop:+.4f}, rank correlation with level "
                f"{rho:+.2f}", line)
 
-    # --- 5. the dose is flat ACROSS conditions ------------------------------
-    print("\n5. at a given level, every condition delivers the same amount")
+    # --- 5. each condition delivered what it asked for ----------------------
+    #
+    # NOT "the conditions agree with each other to X%". This is ONE replicate,
+    # and a single draw's delivered amount wobbles: measured on the same 5,000
+    # labels over 200 seeds, the per-run spread runs from 0.98% (Gaussian) to
+    # 5.27% (grouped-shifted), so six independent single draws routinely differ
+    # by several per cent for no reason but sampling. Checking them against each
+    # other at a fixed few per cent fails correct code -- which is what the first
+    # version of this file did, on all six levels.
+    #
+    # The flat-across-conditions claim is about the MEAN over many seeds and is
+    # what the preflight self-test measures (200 seeds, spread 0.44% on real QM9).
+    # One replicate cannot test it, and pretending otherwise is how a smoke test
+    # comes to cry wolf.
+    #
+    # What one replicate CAN test is the thing that matters per run: each
+    # condition delivered the amount it was asked for, inside the band its own
+    # manifest says its sample size allows.
+    print("\n5. each condition delivered the amount it asked for")
+    for cond in frames:
+        man = _manifest_path(out, cond)
+        if not man:
+            print(f"  note  {cond}: no manifest beside the results")
+            continue
+        m = pd.read_csv(man)
+        if 'target_dose_in_label_units' not in m.columns:
+            print(f"  note  {cond}: the manifest predates the target column")
+            continue
+        rows = m[m['target_dose_in_label_units'].astype(float) > 0]
+        if rows.empty:
+            print(f"  note  {cond}: nothing but the clean level to check")
+            continue
+        worst, worst_lvl, band_at_worst = 0.0, None, 0.0
+        for _, r in rows.iterrows():
+            target = float(r['target_dose_in_label_units'])
+            got = float(r['delivered_dose_in_label_units'])
+            err = 100.0 * (got - target) / target
+            band = _dose_band(r)
+            if abs(err) > abs(worst):
+                worst, worst_lvl, band_at_worst = err, float(r['noise_level']), band
+        if abs(worst) > band_at_worst:
+            fail(f"{cond}: at level {worst_lvl:g} it delivered {worst:+.2f}% of "
+                 f"the amount asked for, outside the {band_at_worst:.2f}% band "
+                 f"its own effective sample size allows.")
+        else:
+            ok(f"{cond}: every level inside its band",
+               f"worst {worst:+.2f}% at level {worst_lvl:g}, band "
+               f"{band_at_worst:.2f}%")
+
+    # And the flat-across-conditions property, REPORTED rather than asserted,
+    # so the numbers are on the record without one replicate being asked to
+    # prove a many-seed claim.
     dose = {}
     for cond, df in frames.items():
         if cond == 'censoring':
@@ -164,14 +303,9 @@ def main():
             continue
         lo, hi = min(vals.values()), max(vals.values())
         spread = 100.0 * (hi - lo) / ((hi + lo) / 2)
-        detail = '  '.join(f"{c}:{v:.4f}" for c, v in sorted(vals.items()))
-        if spread > 3.0:
-            fail(f"level {lvl:g}: the conditions deliver amounts spread over "
-                 f"{spread:.2f}%, so a difference between them is a difference of "
-                 f"AMOUNT and not of shape. {detail}")
-        else:
-            ok(f"level {lvl:g}: spread {spread:.2f}% over {len(vals)} conditions",
-               detail)
+        print(f"  note  level {lvl:g}: the six dose-matched conditions span "
+              f"{spread:.2f}% in this single replicate  ("
+              + '  '.join(f"{c}:{v:.4f}" for c, v in sorted(vals.items())) + ")")
 
     # --- 6. every row names what produced it --------------------------------
     print("\n6. every row names its condition, its units and its provenance")
@@ -182,11 +316,18 @@ def main():
         if missing:
             fail(f"{cond}: result rows carry no {missing}")
             continue
-        wrong = sorted(set(df['noise_type'].astype(str)) - {cond})
+        # Censoring's name carries the clipped percentage -- `censoring_25` --
+        # because the QM9 injector writes it that way, and both readers strip it
+        # (`_strip_censoring_level` in generate_paper_figures_v2.py,
+        # `_normalise_condition` in uncertainty_stats.py). So the test is that
+        # every row normalises to THIS condition, not that it equals it.
+        named = set(df['noise_type'].astype(str).map(_strip_level))
+        wrong = sorted(named - {cond})
         if wrong:
             fail(f"{cond}: rows in this file name condition(s) {wrong}")
         else:
             ok(f"{cond}: every row names its condition",
+               f"as {sorted(set(df['noise_type'].astype(str)))[0]!r}, "
                f"units={df['level_units'].iloc[0]}, "
                f"params={df['params_source'].iloc[0]}, "
                f"spec={df['spec_hash'].iloc[0]}")

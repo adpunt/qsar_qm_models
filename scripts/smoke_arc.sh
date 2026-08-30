@@ -129,6 +129,16 @@ print('  model_defaults spec_version', m.SPEC_VERSION if hasattr(m,'SPEC_VERSION
 
     run "the two injectors agree — 342 checks on all 133,885 labels" \
         python scripts/crosscheck_injectors.py
+    # The SHAPE column, on real labels. It takes --labels, so the gate sweep
+    # skips it unless it is given some, and the only ones lying around were
+    # synthetic -- where the labels are independent of the scaffolds and the
+    # clustering that widens a grouped condition's shape does not exist.
+    run "the two injectors agree on the level-free shape, at 5,000" \
+        python scripts/crosscheck_noise_pattern.py \
+            --labels "$OUT/qm9_5k.csv" --groups "$OUT/qm9_5k.groups.json"
+    run "...and on the whole column" \
+        python scripts/crosscheck_noise_pattern.py \
+            --labels "$OUT/qm9_full.csv" --groups "$OUT/qm9_full.groups.json"
     run "the settled condition set, on three sides" \
         python scripts/test_noise_conditions.py
     verdict

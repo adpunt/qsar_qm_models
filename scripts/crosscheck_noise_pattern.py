@@ -49,6 +49,7 @@ Each catches a different way of getting the column wrong:
 """
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -194,6 +195,12 @@ def main():
     # which the draw does not move, and the extremes themselves are reported but
     # not asserted.
     DRAWN = ('grouped_wider', 'outlier_p01', 'outlier_p05', 'outlier_p10')
+    # The settled parameters, read from the injector rather than retyped.
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(REPO), 'NoiseInject'))
+        from noiseInject import CONDITIONS as CONDITION_PARAMS
+    except ImportError:
+        CONDITION_PARAMS = {}
 
     failures, checked, uncovered = [], 0, []
     for name, r in sorted(rust.items()):
@@ -207,6 +214,44 @@ def main():
         keys = ['flat', 'frac_negative', 'rms', 'contrast']
         bad = []
         if drawn:
+            # HOW BIG A CORRELATION IS "ZERO" DEPENDS ON HOW MANY INDEPENDENT
+            # THINGS WERE DRAWN, and for a grouped condition that is the number
+            # of SCAFFOLD GROUPS, not the number of molecules.
+            #
+            # This was a flat 0.05 and it made the gate a coin flip on
+            # grouped_wider. Measured on 5,000 real QM9 labels over 200 seeds:
+            # the correlation is centred on +0.0041 (0.87 standard errors from
+            # zero, so there is no leak) with a spread of 0.0662, and 48% of
+            # correct draws land past 0.05 -- on BOTH sides at once, because
+            # both are drawing. It never showed up before because the only
+            # inputs lying around were synthetic, where the labels are
+            # independent of the scaffolds and the clustering that widens this
+            # does not exist.
+            #
+            # `outlier_p10` picks molecules one at a time, so its spread is
+            # 0.0141 and the old threshold was safe there. That is the whole
+            # difference, and it is exactly n_units.
+            # The unit is what the condition DRAWS, and the count is how many
+            # of them carry the contrast. `grouped_wider` marks a fraction of
+            # scaffold groups, so the shape is a two-level contrast driven by
+            # the marked groups alone -- 0.2 x 1,816 = 363 of them at 5,000
+            # molecules, not 5,000 and not 1,816. `outlier_p10` marks molecules
+            # one at a time, so its unit is the molecule.
+            #
+            # The constant is CALIBRATED, not chosen, the same way the heavy-tail
+            # dose tolerance is: over 200 seeds on 5,000 real QM9 labels the
+            # correlation's spread was 0.0662 at 363 marked groups, which fixes
+            # it at 0.0662 x sqrt(363) = 1.26. Three of those, so a correct draw
+            # lands outside about one time in three hundred. Checked at the same
+            # size on the other side: outlier_p10's spread was 0.0141 against
+            # 1/sqrt(5000) = 0.0141.
+            RHO_SE_AT_UNIT_N = 1.26
+            if groups is not None and base.startswith('grouped'):
+                frac = float(CONDITION_PARAMS.get(base, {}).get('group_fraction', 1.0))
+                n_units = max(2.0, frac * len(np.unique(groups)))
+            else:
+                n_units = max(2.0, float(len(y)))
+            rho_band = max(3.0 * RHO_SE_AT_UNIT_N / math.sqrt(n_units), 0.02)
             # WHICH molecules were hit is an independent draw on the two sides,
             # so the extremes sit on different molecules and the rank
             # correlation with the label is a property of that draw. Requiring
@@ -221,10 +266,12 @@ def main():
             for side, v in (('rust', r['spearman_label']),
                             ('python', p['spearman_label'])):
                 checked += 1
-                if v == v and abs(v) > 0.05:
-                    bad.append(f'spearman_label: {side}={v:.4f}, but this '
-                               f'condition selects independently of the label, '
-                               f'so its shape must not track it')
+                if v == v and abs(v) > rho_band:
+                    bad.append(f'spearman_label: {side}={v:.4f}, past the '
+                               f'{rho_band:.4f} that {n_units} independent '
+                               f'selection unit(s) allow. This condition selects '
+                               f'independently of the label, so its shape must '
+                               f'not track it.')
         else:
             keys += ['min', 'max', 'spearman_label']
         for k in keys:
