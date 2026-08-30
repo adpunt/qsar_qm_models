@@ -91,6 +91,7 @@ What can we say about uncertainty in these contexts?"*
 | **The paper is not about choosing a model, and not about choosing a metric** | 2026-08-20 | *"This paper isn't about which metric is the best."* The three numbers assess models from different angles. Watch for drift — §7.3 was edging toward a metric bake-off |
 | **The Gaussian process goes into the variance decomposition, on one kernel everywhere** | 2026-08-26 | *"The kernel is not why the Gaussian process was kept out of the variance decomposition. Commit to the radial basis everywhere and it can go in alongside the support vector machine — which is what those jobs were for."* Settled. Both `gauche` and `gauche_rbf` come out of `ANOVA_MODELS_EXCLUDE`; one model, one kernel, every representation. **Conditional on the embedding rescaling fix (§2.8c)** — see §10b.2 |
 | **The representation set** | 2026-08-26 | *"Drop SMILES from the list, add Avalon and ChemBERTa."* Final six: PDV, MHG-GNN, Avalon, ECFP4, ChemBERTa, Sort & Slice. Out: mol2vec and one-hot SMILES. Sort & Slice is fixed in place — a colleague's method. See §13.7 |
+| **ChemBERTa stays, and the paper carries its blind spot** | 2026-08-30 | *"Keep it but note the caveat in rerun plan."* The published encoder cannot separate two molecules that differ only by a halogen, a charge or a mirror image, and that cannot be fixed from here. It stays in the set of six. The Methods must say so and report the rate. See §2.8k |
 | **Ten replicates in stage 1** | 2026-08-26 | *"Let's do the 10 reps for stage 1 then."* Takes the whole staged design to 37% of the old one instead of 26% (§13.1) |
 | **Both forms of grouped noise are run** | 2026-08-26 | *"For the skewed noise lets go with option C."* Groups get wider errors *and*, as a separate condition, groups get shifted errors. See §13.3 |
 | **QM9 leads the Results** | 2026-08-26 | *"qm9 leads the results because it's actually clean data."* It is computed rather than measured, so it has no measurement error of its own to confound the injected noise. The three experimental datasets follow it. A question I asked on 2026-08-26 — whether they should lead instead — was wrong and is closed |
@@ -2104,6 +2105,57 @@ split molecules into identical tokens; and the collision count is reported.
 
 **Every ChemBERTa result must be rebuilt** — QM9, LogD, Caco-2 and hERG. Nothing else moves:
 no other representation and no accuracy number.
+
+#### 🚩 THE CAVEAT THE PAPER MUST CARRY — settled by the author 2026-08-30
+
+**Decision: ChemBERTa stays in the set of six.** *"Keep it but note the caveat in rerun
+plan."* What follows is that caveat. It is not optional wording — the encoder has a blind
+spot that changes what a ChemBERTa row means, and a reader of the paper cannot infer it.
+
+**What to say in Methods, in substance.** ChemBERTa reads a molecule as a string of single
+characters, because the published model was pretrained that way. Characters it has no entry
+for are dropped. Those characters are the ones that spell out a halogen beyond fluorine, a
+formal charge, and a stereocentre. So the encoder cannot distinguish chlorobenzene from
+toluene, an acid from its conjugate base, or two enantiomers. Two such molecules receive one
+identical feature vector.
+
+**The rate, measured 2026-08-30 on the study's own molecules.** Report it per dataset; do not
+pool it.
+
+| dataset | distinct molecules | distinct feature vectors | molecules sharing a vector |
+|---|---|---|---|
+| hERG | 648 | 583 | **130 (20.1%)** |
+| QM9 | *being measured 2026-08-30* | | |
+
+The rate is a property of the dataset, not of the model: it is high wherever halogens,
+charges and stereocentres are common. It should be low on QM9, whose molecules are built from
+carbon, nitrogen, oxygen and fluorine, and whose stereochemistry this pipeline strips before
+featurising. **LogD and Caco-2 are not yet measured** — they are downloaded rather than held
+locally. Measure them on the cluster before the Methods sentence is finalised;
+`scripts/crosscheck_chemberta.py` gate 4 is the code, and it needs only a list of SMILES.
+
+**What this does and does not license.**
+- It does **not** invalidate ChemBERTa's robustness curve. Collisions are a fixed property of
+  the representation and do not change with the noise level, so they cannot manufacture a
+  noise-response.
+- It **does** put a ceiling on ChemBERTa's accuracy that the other five representations do not
+  have. If ChemBERTa comes last on a drug-like dataset, this is a candidate explanation and
+  must be offered as one rather than read as "learned embeddings are weak".
+- It is **not** our defect and should not be written as one. Cite the two open reports:
+  the DeepChem issue *Chemberta-2 tokenizer files incomplete* (opened January 2025) and the
+  *Tokenization bugs* discussion on the model's own page. Both are unanswered by the
+  maintainers as of 2026-08-30.
+
+**The alternative that was NOT taken, recorded so it is not rediscovered.**
+`DeepChem/ChemBERTa-100M-MLM` is intact: 7,662 merge rules, it round-trips every probe
+molecule correctly, and its whole-atom tokens are trained (`Cl` sits at 2.29× the
+initialisation scale against `C` at 2.24×, with no untrained cluster anywhere in its 7,924
+rows). It is a genuine escape from this caveat. It was not taken because the cost is real:
+it is 768 wide and 12 layers against 384 and 3, so the record slot and the Rust buffer both
+change; and it is a masked language model, which reverses the 2026-08-27 decision to move to
+the multi-task regression variant. **Every other DeepChem ChemBERTa — 5M, 10M and 77M, both
+objectives — has the same defect as ours.** If the caveat ever becomes unacceptable, this is
+the route, and it costs a re-featurisation that a re-run needs anyway.
 
 ### 2.9 The Methods figure does not show the experiment
 
