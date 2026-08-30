@@ -95,7 +95,33 @@ TIME_LIMITS = {
     'GP': '47:59:00',
 }
 
-PREAMBLE = """KIRBY_DIR="{kirby_dir}"
+PREAMBLE = """# WAIT A RANDOM MOMENT BEFORE DOING ANYTHING. This is not politeness.
+#
+# KeOps arrives with the Gaussian-process stack, and at IMPORT time it runs
+# `c++ --version`, writes the answer to the hard-coded path
+# /tmp/compiler_version.txt, reads it back and deletes it. Two processes
+# importing within the same instant race: one deletes the file while the other
+# is between checking it exists and opening it, and the second dies with
+# FileNotFoundError before a single molecule is read.
+#
+# It reaches EVERY script in this directory, not only the Gaussian-process ones:
+# alternative_data_noise_robustness.py imports gpytorch at module scope, inside
+# a try block that sets HAS_GP, so a random-forest task on logD pulls KeOps in
+# too. Jobs sharing a node share /tmp, and an array releases its tasks together.
+#
+# The failure names a missing file in /tmp and says nothing about chemistry, and
+# because it happens during import the task produces NO output at all -- it
+# looks like a task that never started.
+#
+# TMPDIR does not help: the path is a literal inside the library, not taken from
+# the environment. Staggering submission does not help either, because the queue
+# decides when tasks actually start. A random wait inside the task is the only
+# lever this side controls (found 2026-08-30, RERUN_PLAN.md 2.25). The QM9 and
+# uncertainty generators have carried it since that day; this one did not, and
+# it has 96 scripts.
+sleep $(( RANDOM % 600 ))
+
+KIRBY_DIR="{kirby_dir}"
 QSAR_DIR="{qsar_dir}"
 
 cd "$KIRBY_DIR"
@@ -138,6 +164,34 @@ if [ "$(basename "$CONDA_PREFIX")" != "env_test" ]; then
     exit 2
 fi
 echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
+
+# WHICH qsar_qm_models CHECKOUT THE SHARED SPEC COMES FROM. Say it, do not let
+# it be guessed.
+#
+# `alternative_data_noise_robustness.py` loads three files from this repository
+# rather than holding copies: models/model_defaults.py (every hyperparameter),
+# scripts/uncertainty_decomposition.py (the aleatoric/epistemic split and its
+# guard) and noise_conditions.json (the settled condition set). It finds them by
+# trying $QSAR_QM_MODELS_ROOT first and then WALKING UP FROM THE KIRBy CHECKOUT
+# to a sibling named qsar_qm_models.
+#
+# That walk is right only while both checkouts sit under the same parent. There
+# are two KIRBy checkouts on this cluster -- stat-cadd and stat-ecr, and 125 of
+# KIRBy's own 127 job scripts use stat-ecr (RERUN_PLAN.md 2.8b) -- so a task
+# regenerated with --kirby-dir pointing at the other one would take its spec
+# from a sibling of THAT directory while setup.sh and check_environment.py above
+# used this one. Two copies of one specification, drifting, with nothing saying
+# so: failure mode 10 of RERUN_PLAN.md 0.6.
+#
+# Setting it explicitly costs nothing and removes the walk. The runner prints
+# each file it loaded and the spec hash; those lines are the receipt.
+export QSAR_QM_MODELS_ROOT="{qsar_dir}"
+if [ ! -f "$QSAR_QM_MODELS_ROOT/models/model_defaults.py" ]; then
+    echo "ERROR: no shared spec at $QSAR_QM_MODELS_ROOT/models/model_defaults.py."
+    echo "       Regenerate with --qsar-dir <path> rather than editing this file."
+    exit 2
+fi
+echo "=== shared spec: $QSAR_QM_MODELS_ROOT ($(git -C "$QSAR_QM_MODELS_ROOT" log --oneline -1 2>/dev/null || echo 'not a git checkout'))"
 
 # A private scratch directory per task.
 #

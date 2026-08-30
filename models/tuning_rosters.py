@@ -116,6 +116,20 @@ TUNED_KEY = {
     'mlp':                      'mlp',
     'mlp_bnn_full':             'mlp',
     'mlp_bnn_full_variational': 'mlp',
+    # The three models added to the roster on 2026-08-28. The two variational
+    # networks with a noise head are the SAME builders as the variational
+    # networks above -- `--heteroscedastic-vbll` is a flag on `-m dnn` /
+    # `-m mlp`, not a separate trainer -- so they read the same entry and
+    # collapse with it, which collapsed_models() now says.
+    'dnn_bnn_full_variational_hetero': 'dnn',
+    'mlp_bnn_full_variational_hetero': 'mlp',
+    # The heteroscedastic Gaussian process has NO tuned path at all:
+    # `train_heteroscedastic_gp` (models/models.py) never calls
+    # load_best_hyperparameters, so no entry in either JSON file can reach it.
+    # None records that, because leaving it out of this map made the roster gate
+    # fail with "missing", which reads as an oversight rather than as a fact
+    # about the model. It is excluded from writable_keys() by construction.
+    'heteroscedastic_gp':       None,
 }
 
 # Model labels whose tuned entry is shared with another model. Writing one of
@@ -125,17 +139,20 @@ def collapsed_models():
     with. Returns {label: [other labels sharing its key]}."""
     by_key = {}
     for label, key in TUNED_KEY.items():
+        if key is None:
+            continue
         by_key.setdefault(key, []).append(label)
     return {label: sorted(set(by_key[key]) - {label})
             for label, key in TUNED_KEY.items()
-            if len(by_key[key]) > 1}
+            if key is not None and len(by_key[key]) > 1}
 
 
 def writable_keys():
     """Tuned-file keys that address exactly one model, so a value written under
     them reaches the model it was measured on and nothing else."""
     collapsed = collapsed_models()
-    return sorted({TUNED_KEY[m] for m in TUNED_KEY if not collapsed.get(m)})
+    return sorted({TUNED_KEY[m] for m in TUNED_KEY
+                   if TUNED_KEY[m] is not None and not collapsed.get(m)})
 
 
 # ---------------------------------------------------------------------------
@@ -150,22 +167,65 @@ def writable_keys():
 # The GP is the awkward one: the experimental side names it by kernel, 'GP' for
 # RBF and 'GP-Tanimoto' otherwise, so it is the one model whose experimental
 # name distinguishes what the QM9 tuned-params key cannot.
-MODEL_NAME_MAP = {
-    'rf':                       'RF',
-    'qrf':                      'QRF',
-    'xgboost':                  'XGBoost',
-    'ngboost':                  'NGBoost',
-    'lgb':                      'LightGBM',
-    'svm':                      'SVM',
-    'gauche_rbf':               'GP',
-    'gauche':                   'GP-Tanimoto',
-    'dnn':                      'DNN',
-    'dnn_bnn_full':             'BNN-Full',
-    'dnn_bnn_full_variational': 'VBLL-Full',
-    'mlp':                      'MLP',
-    'mlp_bnn_full':             'MLP-BNN-Full',
-    'mlp_bnn_full_variational': 'MLP-VBLL-Full',
+# READ from model_names.json, not retyped. That file is the settled
+# correspondence between the two pipelines (2026-08-28, RERUN_PLAN.md 3.4b) and
+# the figure script and scripts/uncertainty_stats.py already read it. This map
+# was a SECOND hand-typed copy of the same fact, and it went stale exactly the
+# way a second copy does: the three models added to the roster on 2026-08-28 --
+# heteroscedastic_gp and the two variational networks with a noise head -- were
+# added to model_names.json and not here, so the roster gate failed and the
+# tuner could not name them.
+#
+# The one step model_names.json does NOT carry is roster label -> written name.
+# The generator submits `heteroscedastic_gp` and the model writes itself as
+# `het_gp_rbf` (it is `-m het_gp --kernel rbf`), so that hop is stated here, on
+# its own, beside the flags it comes from.
+_ROSTER_LABEL_TO_WRITTEN = {
+    # roster label in generate_scripts.py -> the name the model writes on a row
+    'heteroscedastic_gp':               'het_gp_rbf',
+    'dnn_bnn_full_variational_hetero':  'dnn_bnn_full_variational_hetero',
+    'mlp_bnn_full_variational_hetero':  'mlp_bnn_full_variational_hetero',
 }
+
+
+def _model_name_map():
+    """{QM9 roster label: the experimental pipeline's display name}.
+
+    Built by going QM9 label -> canonical (model_names.json 'qm9') -> the
+    laboratory display name (the same file's 'validation', inverted). A roster
+    label with no route through raises rather than being dropped: a model that
+    silently has no experimental name is how the tuner came to measure a model
+    it could not transfer.
+    """
+    import json
+    with open(os.path.join(_ROOT, 'model_names.json')) as fh:
+        spec = json.load(fh)
+    qm9_to_canonical = spec['qm9']
+    canonical_to_validation = {}
+    for display, canonical in spec['validation'].items():
+        # Several display names map to one canonical name (LGBM/LightGBM). Keep
+        # the first, which is the spelling the runner builds its list with.
+        canonical_to_validation.setdefault(canonical, display)
+
+    out = {}
+    missing = []
+    for label in MODELS:
+        written = _ROSTER_LABEL_TO_WRITTEN.get(label, label)
+        canonical = qm9_to_canonical.get(written)
+        display = canonical_to_validation.get(canonical) if canonical else None
+        if display is None:
+            missing.append(label)
+        else:
+            out[label] = display
+    if missing:
+        raise RuntimeError(
+            f"model_names.json has no experimental name for roster model(s) "
+            f"{sorted(missing)}. Add them there -- it is the one place the two "
+            f"pipelines' names are written down -- rather than here.")
+    return out
+
+
+MODEL_NAME_MAP = _model_name_map()
 
 REP_NAME_MAP = {
     'ecfp4':          'ECFP4',
