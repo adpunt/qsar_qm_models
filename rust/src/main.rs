@@ -1276,21 +1276,14 @@ fn build_noise_plan(
 /// far less tightly than the molecule count suggests).
 ///
 /// At nu <= 4 the fourth moment of a Student-t is infinite, so the sample kurtosis is
-/// meaningless and the band is set by fiat instead. Across 40 seeds at nu = 3 the
-/// error ranged from -3.5% to +6.8% while remaining unbiased.
-///
-/// THE FLAT 0.15 DOES NOT SHRINK WITH THE SAMPLE, AND EVERY OTHER BAND HERE DOES.
-/// The forty seeds above were run on the full QM9 column; the jobs run 8,000 training
-/// and 1,000 validation labels, where the same construction is far looser. Measured
-/// at nu = 3, uniform targeting, level 0.5, 200 independent draws each: at n = 1,000
-/// the error was past 15% on 21 of 200 draws (10.5%, median 6.8%, worst 64%); at
-/// n = 8,000 on 5 of 200 (2.5%, median 3.1%). So on a validation split one nu = 3 run
-/// in ten would be stopped by the band rather than by a defect. Nothing in
-/// `noise_conditions.json` runs nu <= 4 today, so no result is affected — but the
-/// branch is one flag away and the band it applies is not the three standard errors
-/// the rest of this function computes. Widening it needs a sampling law for a
-/// statistic with no fourth moment, which is a decision rather than a transcription,
-/// so it is recorded here and not guessed at.
+/// meaningless and the branch below uses a sampling law of its own. It used to be a
+/// flat 15% -- the only band here that did not shrink as the sample grew. Measured at
+/// nu = 3, uniform targeting, level 0.5, 200 independent draws each: at n = 1,000 the
+/// error was past 15% on 21 of 200 draws (10.5%, median 6.8%, worst 64%), so on a
+/// validation split one run in ten would have been stopped by the band rather than by
+/// a defect; at n = 8,000 on 5 of 200. The author settled it on 2026-08-29 and the
+/// branch below is the replacement. Nothing in `noise_conditions.json` runs nu <= 4,
+/// so no result moved.
 fn dose_tolerance(shape: &NoiseShape, epsilon: &[f32], effective_n: f32) -> f32 {
     if let NoiseShape::StudentT { nu } = shape {
         if *nu <= 4.0 {

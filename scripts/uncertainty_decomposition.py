@@ -345,9 +345,11 @@ def decompose_forest(forest, x_train, y_train, x_score):
     # whole predictive variance lands in the epistemic term and the aleatoric
     # term is identically zero. That is not a property of the data and it is not
     # a finding -- it is `min_samples_leaf`. Both forests in
-    # `models/model_defaults.py` are set to 1, so this fires by default and says
-    # so rather than writing a column of zeros that reads as "this model sees no
-    # label noise" (RERUN_PLAN.md 5.5c).
+    # `models/model_defaults.py` were set to 1 when this was written, so it fired
+    # by default; they were settled at 5 on 2026-08-28 (RERUN_PLAN.md 5.5c), so it
+    # should not fire on a queued run any more. It stays because a hand-run fit,
+    # or a tuned setting that puts the leaf back to 1, would otherwise write a
+    # column of zeros that reads as "this model sees no label noise".
     if float(np.max(aleatoric)) <= 1e-12:
         leaf = getattr(forest, 'min_samples_leaf', None)
         raise DecompositionError(
