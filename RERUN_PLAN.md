@@ -3050,6 +3050,94 @@ term, and the Gaussian process and the variational network both report a data-no
 number per fit. So on the settled pairs the split cannot be measured per molecule at all. Owned by
 another chat; recorded here so it is not rediscovered.
 
+### 2.28 ✅ FOUND AND FIXED 2026-08-30 — the pre-launch sweep: seven defects, and the smoke test that now passes
+
+Every gate in §8 was run end to end, and the final smoke test was run: **one model-and-representation
+pair against all seven settled conditions, 5,000 QM9 molecules, one replicate, cross-fitted three
+ways**. The pair is `rf`/`ecfp4` with `-u True`, because `qrf` cannot be fitted on this laptop
+(quantile-forest 1.4.1 against scikit-learn 1.3.2) and `rf` exercises the same forest split with both
+halves per molecule. It passes: `python scripts/check_smoke_output.py <dir>`.
+
+**The pipeline itself was sound.** Nothing was wrong with what gets injected, what gets trained or
+what gets recorded. What was wrong was the machinery around it: three gates were failing on correct
+code, one was passing on prose, one had never been run on real data, and the analysis module's
+headline statistic was blank on every QM9 row.
+
+| # | What | Where it bit |
+|---|---|---|
+| 1 | **The confound-controlled effect was NaN on every QM9 row.** `fold` was built as `file_no + ':' + iteration`, and the file number changes with every noise level, so the zero-noise baseline could never be joined to the level it is subtracted from. The statistic the uncertainty question is DEFINED by returned nothing | `scripts/uncertainty_stats.py`. Fixed: `fold` is the replicate, which the module's own comment already claimed. The fixture gave every level one file number, which is why no gate saw it; varying it turns an existing test red |
+| 2 | **The shape cross-check was a coin flip on `grouped_wider`, and only on real data.** A flat 0.05 threshold on a rank correlation whose spread depends on how many scaffold groups were marked. Measured over 200 seeds: centred on +0.0041 (no leak) with a spread of 0.0662, so **48% of correct draws failed** | `scripts/crosscheck_noise_pattern.py`. The band now scales with the marked-unit count; a deliberately label-keyed selection is still caught by 2.3x at 5,000 molecules and 10x on the full column |
+| 3 | **92 validation job scripts on disk against 129 the generator writes**, and the 42 missing were every Avalon and every ChemBERTa pairing. Submitting them would have run four of the six settled representations on all three laboratory datasets, and left no error behind | `slurm_scripts_validation_rerun/`. Regenerated, and it now carries the same byte-for-byte check the other two directories have |
+| 4 | **The validation generator had no KeOps stagger** (§2.25 above), and needs one as much as the other two — the laboratory runner imports gpytorch at module scope, so a random-forest task pulls KeOps in too | Added. **Reproduced live** while running seven local tasks at once: one died on import with `FileNotFoundError` and wrote nothing at all |
+| 5 | **Neither the uncertainty nor the validation job template exported `QSAR_QM_MODELS_ROOT`**, so the laboratory runner found the shared spec, the uncertainty split and the settled condition set by walking up from the KIRBy checkout — right only while both checkouts share a parent, and there are two KIRBy checkouts | Both set it explicitly now, check it, and print the commit it resolves to |
+| 6 | **`models/tuning_rosters.py` held a second hand-typed copy of the cross-pipeline name map**, stale by the three models added on 2026-08-28 | It reads `model_names.json` now. And `test_tuning_rosters` searched the whole KIRBy file for each quoted name, so `'GP-Hetero'` was satisfied by a **comment** while the name itself was assembled with an f-string |
+| 7 | **`test_validation_split_scoring` invoked the QM9 generator bare**, which the generator refuses on purpose, so it went red on a correct refusal and never reached the route check it exists for | It runs both passes with the runbook's arguments and asserts the sharper property: the models that cross-fit are exactly the settled pairs |
+
+**And one on the laboratory side, which closes §13.17 A4.** The Gaussian process writing no
+uncertainty rows was three things, and two of them were not pipeline defects: the smoke test's stub
+GP never recorded the split (it predates the split being wired in), `probe_oof` was three arguments
+and three return values behind `_oof_predict`, and — the real one — `assert_matches_support` was
+asked about a block that no inner fold produced, before the empty-block skip. `smoke_kirby_uncertainty.py`
+now runs 80 checks and passes all of them; it used to stop at 13.
+
+#### What the smoke test says, and it is worth reading
+
+**Accuracy falls with the level under every condition**, and censoring is in a different league:
+
+| condition | R² at clean | R² at the top of its grid | fall |
+|---|---|---|---|
+| gaussian | 0.829 | 0.760 | 0.069 |
+| grouped_wider | 0.829 | 0.774 | 0.054 |
+| grouped_shifted | 0.829 | 0.714 | 0.114 |
+| student_t (ν = 5) | 0.829 | 0.762 | 0.066 |
+| outlier (p = 10%) | 0.829 | 0.771 | 0.057 |
+| laplace | 0.829 | 0.784 | 0.045 |
+| **censoring** | 0.829 | **0.346** | **0.482** |
+
+That is §0.5 measured on real data at the smoke-test size: shape barely matters, censoring is
+enormous. One replicate, one pair — not a result, but the right shape.
+
+**And the uncertainty question now has an answer where the design says it should.** The
+confound-controlled effect, out of fold on scaffold groups:
+
+| condition | effect at the top of its grid |
+|---|---|
+| censoring | **−0.512** (−0.168 at 10% clipped, rising monotonically) |
+| grouped_wider | +0.076 |
+| outlier_p10 | +0.022 |
+| gaussian, grouped_shifted, laplace, student_t | undefined — their shape is flat, so there is nothing to correlate against |
+
+Censoring is the only condition that answers it, which is exactly §3.1f. **But it does not beat its
+own sham ceiling**: the same correlation computed against the model's PREDICTED label is −0.647
+against the real −0.512, so on this pair the uncertainty tracks the model's own prediction at least
+as well as the true censoring shape. For censoring that is close to tautological — the shape is
+`max(y − cut, 0)` and a model that predicts y reproduces it — and it is precisely what the ceiling
+exists to reveal. Whether it survives on a model that reports a real per-molecule data-noise term is
+the open question below.
+
+#### 🟠 THE DECISION THIS LEAVES YOU, and it is the sharpest one open
+
+Traced from the code, not from a note. Of the four models in `uncertainty_pairs.json`:
+
+| model | data-noise half | model half | can it answer the split per molecule? |
+|---|---|---|---|
+| `qrf` | per molecule | per molecule | **yes** |
+| `ngboost` | per molecule | **absent** | no |
+| `gauche_rbf` | **one number per fit** | per molecule | no |
+| `dnn_bnn_full_variational` | **one number per fit** | per molecule | no |
+
+The three models built expressly to answer it — `heteroscedastic_gp` and the two variational
+networks with a noise head — are on **neither** list. The QM9 generator gives them `-u True` and no
+`--oof-folds`, so they write **test rows only, whose injected noise is exactly zero by
+construction**. They contribute nothing to the question at all.
+
+So as the run stands, the aleatoric/epistemic split is measurable per molecule on **one** of the
+four settled pairs, and the three models that exist for it are not in the run. Adding them to
+`uncertainty_pairs.json` is your call, not a script's, and it costs `--oof-folds` extra fits per
+training run on the pairs added.
+
+---
+
 ### 2.25 🔴 FOUND AND FIXED 2026-08-28 — the noise-predicting Gaussian process was learning from the wrong residual
 
 **This is the model the aleatoric/epistemic split rests on**, because it is the only one measured
@@ -6874,6 +6962,22 @@ that is deleted, renamed or commented out fails them while a call sitting in an 
 still passes. That distinction matters here: this project has already shipped a smoke test whose
 checks searched the file as text, and it hid a live bug for two days.
 
+**Two things the sweep of 2026-08-30 changed about how this list is run (§2.28).**
+
+Running every gate with no arguments is not running every gate. `crosscheck_noise_pattern.py`
+requires `--labels`, so a bare sweep skips it — and the only inputs lying around were the synthetic
+4,000-label file it writes itself, on which it passes while failing on real QM9. The preflight
+self-test has the same shape: it takes a labels file and a scaffold map that nothing in the
+repository produced. Both now have real inputs, built by
+
+```
+python scripts/make_selftest_inputs.py 5000 <stem>          # and 133885
+python scripts/crosscheck_noise_pattern.py --labels <stem>.csv --groups <stem>.groups.json
+```
+
+and the whole list is run in six staged allocations by `bash scripts/smoke_arc.sh <stage>`, one per
+`srun`, ending in the final smoke test and `scripts/check_smoke_output.py`.
+
 **One more gate, and it costs a second — chat G, 2026-08-27.** It guards the settled condition set:
 
 ```
@@ -8570,7 +8674,8 @@ not be raised again until its trigger fires.
 | A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset | **one cluster check**: is the Caco-2 set single-source or pooled, and what is its clean training label spread |
 | A2 | **The experimental pipeline draws its noise per fold, not once per label column** (§3.3a). Recommendation unchanged: keep the per-fold draw and say so in the Methods in one sentence. It needs an answer because it changes what a *molecule* means across folds | **the author** |
 | A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
-| A4 | **The Gaussian process on PDV writes no uncertainty rows under `grouped_wider` when only the first fold is cross-fitted, and the run stops.** `run_dataset` raises "emit a per-molecule uncertainty but not one uncertainty row was written". Found 2026-08-29 while fixing an unrelated stub in `tests/smoke/smoke_kirby_uncertainty.py` — that stub had returned two values since the runner began returning four, so every check past its first section had been dead and this one had never run. **Reproduced at HEAD with no local changes**, so it predates the censoring, grouped-wider and NGBoost work of 2026-08-28/29 | **the uncertainty chat** — it is in the code that chat is working in |
+| ~~A4~~ | ✅ **CLOSED 2026-08-30 (§2.28).** It was three things, and two were not pipeline defects: the smoke test's stub Gaussian process never recorded the aleatoric/epistemic split (it predates the split being wired in on 2026-08-28), `probe_oof` was three arguments and three return values behind `_oof_predict`, and — the real one — `assert_matches_support` was asked about a block that no inner fold produced, before the empty-block skip. `smoke_kirby_uncertainty.py` runs 80 checks now and passes all of them; it used to stop at 13 | done |
+| A5 | 🟠 **The aleatoric/epistemic split is measurable per molecule on ONE of the four settled uncertainty pairs, and the three models built for it are in neither run.** `qrf` has both halves per molecule; NGBoost has no model half; the Gaussian process and the variational network each report a data-noise term that is one number per fit. `heteroscedastic_gp` and the two variational networks with a noise head are the three that have both, they are on neither list, and the QM9 generator gives them `-u True` with no `--oof-folds` — so they write test rows only, whose injected noise is exactly zero. Traced from the code, §2.28 | **the author** — which pairs the uncertainty pass runs on is a decision, not a script's |
 
 #### B. Deferred ON PURPOSE — decided, with the rule and what fires it
 
