@@ -649,6 +649,41 @@ def gp_fit_threads():
     return _ctx()
 
 
+def gp_fit_collapsed(y_pred, y_reference):
+    """Did a Gaussian-process fit return one number for every molecule it scored?
+
+    ONE definition, read by both pipelines. QM9 had it in `models/models.py` and
+    the laboratory runner wrote the same arithmetic out again inline; two copies
+    of one rule is failure mode 10 of RERUN_PLAN.md 0.6, and this one decides
+    whether a row reaches the results, so drift in it is not cosmetic.
+
+    A process that cannot use its features returns its prior: the mean
+    everywhere, and the prior variance everywhere. That still produces a number
+    and the number reads as a weak representation rather than as a fit that
+    answered nothing -- which is how the two learned embeddings were written off
+    (RERUN_PLAN.md 2.8f).
+
+    It also happens on a HEALTHY fit, one fold at a time. The inner split is
+    scaffold-grouped, so a held-out fold is whole scaffold families the fit set
+    does not contain; when the fitted length scale is short against the distance
+    to them, every kernel value is nil and the process returns its prior across
+    that entire fold. That is the process answering honestly -- it knows nothing
+    about those molecules -- and its model-uncertainty term is then one number
+    for the fold, which cannot answer a per-molecule question (RERUN_PLAN.md
+    3.1d, 5.5i).
+
+    `y_pred` are the predictions for the molecules being scored; `y_reference`
+    are the labels the model was FITTED on. Returns (collapsed, spread,
+    threshold), all three so a caller can report the numbers rather than a bare
+    flag.
+    """
+    import numpy as _np
+    spread = float(_np.std(_np.asarray(y_pred, dtype=float)))
+    reference = float(_np.std(_np.asarray(y_reference, dtype=float)))
+    threshold = GP_DEFAULTS['collapse_fraction'] * reference
+    return spread < threshold, spread, threshold
+
+
 def spec_dict():
     """Everything above, as one plain dictionary."""
     return {

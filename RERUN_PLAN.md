@@ -165,6 +165,8 @@ load-bearing claim against the code. **This is the status summary. §13 is the p
 | 19 | The two documents had drifted apart | ✅ **done 2026-08-26** (chat K). Ownership rule stated, ten disagreements resolved, two of them a document contradicting itself. Guarded by `scripts/check_bib_and_docs.py` | §13 chat K ✅ |
 | 20 | The bibliography | ✅ **done 2026-08-26** (chat K) — 25 entries added, a key collision on two different papers split, the rejected-source blocklist made executable. **One line left in `paper.tex`, and it is the author's** (§9.1) | §13 chat K ✅ |
 | 21 | Hyperparameter tuning — replacing Optuna | 🟠 **built 2026-08-27, not yet run** — the experiment, the roster/name map and three checks are in; the sweep is priced but waits on decisions 7 and 8. Found and fixed two live defects on the way in: NN-β's Bayesian variants could not run at all (§5.7c), and the tuned-parameter reader would have raised NameError the first time it fired (§5.7g) | §5.7 |
+| 22 | NGBoost's stage count — do the two sides match, and does it matter | ✅ **closed 2026-08-30**. The experimental side stopped running the full 500 on 2026-08-28 (KIRBy `6e7b860`), so the two now both select the count. Measured what selecting it is worth: **nothing on QM9 at 10,000 molecules** — the curve is still improving at round 499 of 500 — and a real change on hERG and Caco-2, mostly to the predicted spread. The library-version worry is closed too: ngboost 0.5.5 on ARC reports `best_val_loss_itr` correctly. **One Methods sentence left**, because the two sides get their held-out rows from different places | §5.7q |
+| 23 | The guard that stops a flat uncertainty column being published as per-molecule | ✅ **fixed 2026-08-30**. It read the whole column, and out of fold that column is several fits stacked — so a Gaussian process that collapsed in every fold wrote one constant per fold, and the spread between them let it through. Only the one-fold sizing the screen used could catch it. Now checked within each fit, in the one file both pipelines read. A collapsed fit no longer stops a run either: it is recorded, its model half is written blank rather than flat, and the collapse rule now lives once in the shared spec instead of twice. **The collapse did not reproduce on the descriptor vector** in three configurations, so the original report's own error text is still needed to name its mechanism | §5.5i |
 
 ---
 
@@ -3757,6 +3759,14 @@ for a *group-keyed* one: a predicted label does not change a molecule's scaffold
 shape is identical to the true one. Measured on both datasets — the two correlations agree to every
 digit. Report it for censoring; do not report it as a control for the grouped conditions.
 
+**A third, found 2026-08-30 and belonging in the same Methods sentence (§5.5i).** The grouped split
+does the same thing to the Gaussian process from the other side. A held-out fold is whole scaffold
+families the fit set does not contain, so when the fitted length scale is short against the distance
+to them the process returns its PRIOR across the entire fold: one predicted value and one latent
+variance for every molecule in it. That is the honest answer — it knows nothing about those
+molecules — and its model-uncertainty term is then one number for the fold, which cannot answer a
+per-molecule question. It is recorded rather than written flat, and it does not stop the run.
+
 ### 3.1f 🔴 FOUND 2026-08-28 — the grouped conditions cannot answer question B on ANY split, and censoring is the only condition that can
 
 **This corrects §3.1d point 1, which said the grouped conditions stay answerable on the
@@ -5685,6 +5695,97 @@ cosmetic.
 
 ---
 
+### 5.5i ✅ FOUND AND FIXED 2026-08-30 — the guard that stops a collapsed Gaussian process only worked when one fold was scored
+
+**The report.** On the descriptor vector, under the wider-groups condition, with one inner fold
+scored out of sample, the Gaussian process wrote no uncertainty numbers and the job stopped. The
+question put to this chat was whether the fit had collapsed or the guard was too strict.
+
+**The answer is neither, and the real defect is the opposite of the one suspected: the guard was
+too LOOSE.** It read the whole column at once. Out of fold that column is several fits stacked, so
+a process that collapsed in *every* fold writes one constant per fold, five different constants
+have a spread, and the check passed. Only the one-fold configuration — the cheap smoke test, and
+the sizing the screen actually used (§13 chat N) — put a single fit in the column and caught it.
+Measured on a five-fold column of five per-fold constants: **the old check accepted it; the new one
+stops it.** Every full-length run of the Gaussian process since the split was wired in on
+2026-08-28 could therefore have written a flat model-uncertainty column labelled per molecule, whose
+correlation against per-molecule injected noise is zero however good the model is — the exact null
+that reads as a finding and is an artefact, which is what the guard exists to prevent.
+
+**What was changed.** In `scripts/uncertainty_decomposition.py`, the per-molecule check is now made
+WITHIN each fit, exactly as the constant check already was, and the message names the fit and the
+value. Both pipelines read that one file — the laboratory runner loads it by path from this
+checkout — so one edit covers both. Guarded by two new tests in
+`scripts/test_uncertainty_decomposition.py`: a collapse in every fold, and the one-fold case where
+every other molecule is left blank (the message used to quote the blank at row zero rather than the
+value the fold produced).
+
+**What a collapsed process actually looks like, measured.** Forced the way it used to happen for
+real — the length scale left at the library default of 0.69 while molecules sit 17 apart — on 300
+molecules through this repository's own split and guard:
+
+| | |
+|---|---|
+| predictions vary by | 1.58e-64, against a threshold of 0.0508 |
+| model-uncertainty column | the PRIOR variance, 1.0, for every molecule; total spread 2.27e-13 |
+| the guard | stops the run, quoting the constant |
+
+**So the constant in the error message identifies the mechanism, and it is worth reading off the
+traceback before anything else.** A value equal to the outputscale (1.0) means the process returned
+its prior over the whole block. A value of exactly **1e-12** means something else: the out-of-fold
+and validation paths clip the latent variance at `1e-12` and the test path does not, so a fold whose
+latent variance is genuinely below that floor comes out exactly constant because of the clip. The
+asymmetry between the two paths is recorded here rather than changed.
+
+**The collapse did not reproduce on the descriptor vector.** Real QM9 molecules, this repository's
+own descriptor builder, injector and Gaussian process, scaffold-grouped folds:
+
+| molecules | scaffolds | folds | levels | fitter | result |
+|---|---|---|---|---|---|
+| 900 | 224 | 5 | 0, 1.0, 2.0 | Adam fallback | no collapse in any fold |
+| 900 | 224 | 5 | 0, 1.0, 2.0 | L-BFGS on the same marginal likelihood | no collapse in any fold |
+| 2,400 | 914 | 3 | 0, 1.5 | Adam fallback | no collapse in any fold |
+
+The 2,400-molecule row is the screen's own sizing. The median distance between molecules came out
+at 16.4 to 17.8, matching the 17.3 recorded for this representation, so the fit is the one the runs
+make. **On this laptop botorch 0.16.1 refuses a plain gpytorch ExactGP, so the local fit is always
+the Adam fallback; the cluster pins botorch 0.10.0, which does not refuse it.** The L-BFGS row is
+there for that reason — it optimises the same marginal likelihood the way botorch 0.10 does — and
+it agrees.
+
+**A collapse no longer stops a run.** The rule "did this fit return one number for every molecule it
+scored" now lives once, in `models/model_defaults.py`, and both pipelines read it; the laboratory
+runner had written the same arithmetic out inline. Every place a Gaussian process scores a block —
+the test set, each inner fold, validation, and both blocks of the noise-predicting variant — asks
+it. A fit that returned its prior has its MODEL half written blank rather than flat: the row keeps
+its prediction, its observation-noise half, the recorded noise and the reported total, the console
+says which fit and how many molecules, and the blank cannot be mistaken for a fold that was never
+run, because a fold that was never run has a blank prediction too. This matters *because* of the
+fix above — with the guard reading each fit separately, a collapse that used to slip through would
+now stop a full-length run.
+
+**This is not only a failed fit — it is what a scaffold-grouped split does.** A held-out fold is
+whole scaffold families the fit set does not contain. When the fitted length scale is short against
+the distance to them, the process returns its prior across the entire fold: that is the honest
+answer, and its model-uncertainty term is then one number for the fold and cannot answer a
+per-molecule question. It belongs with §3.1d, which already says a grouped split leaves one question
+undefined on held-out molecules, and it needs the same Methods sentence.
+
+**One more parity gap, found on the way and closed.** `--kernel` defaults to `tanimoto`, and the
+QM9 trainer built whatever kernel it was named on whatever features it was given. Every kernel in
+its map except the radial one is a fingerprint kernel — a ratio of set overlaps, defined on binary
+vectors — so a command line that omits `--kernel rbf` on the descriptor vector or either learned
+embedding fitted a similarity that is not one. The laboratory pipeline has refused this by name
+since 2026-08-26; this side now refuses it too, with the same message. The job generator does pass
+`--kernel rbf`, so the queued jobs were never affected; a hand-run command was. Measured before
+fixing: the Tanimoto kernel on the descriptor vector does not collapse — it produces varying,
+meaningless numbers, which is worse.
+
+**Still open, and it needs the other chat.** The configuration that produced the original report is
+not identified. The traceback quotes the constant, and that names the mechanism — ask for it.
+
+---
+
 ### 5.6 The two representation repairs
 
 Both change the record layout, so they land together with the embedding storage fix (§2.8c) and
@@ -6029,10 +6130,10 @@ M off, and `_ngboost_kwargs` popped the two stage-selection keys without applyin
 builds `EarlyStoppingNGBRegressor`, and `run_tree_experiment` hands it the fold's scaffold ids
 through `set_fit_groups`. **NGBoost no longer fits 500 stages on LogD, Caco-2 and hERG.**
 
-**The two sides still do it DIFFERENTLY, and that is what the Methods has to say** — see §5.7m,
+**The two sides still do it DIFFERENTLY, and that is what the Methods has to say** — see §5.7q,
 which measures what the difference is worth.
 
-#### 5.7m ✅ MEASURED 2026-08-30 — stage selection is INERT on QM9 and LIVE on the small datasets
+#### 5.7q ✅ MEASURED 2026-08-30 — stage selection is INERT on QM9 and LIVE on the small datasets
 
 **One sentence: at the size QM9 actually runs, stopping early changes nothing, and the whole effect
 lands on hERG and Caco-2.** This was run because §5.7l's parity gap raised the obvious question —
@@ -6043,8 +6144,10 @@ scaffold split, labels standardised on the CLEAN training mean and spread, PDV s
 feature on training, corruption by `noiseInject` 1.0.0 at level 0.5 of the clean training spread,
 training and validation labels drawn independently, test labels never corrupted. Three fits per
 cell: stop on the validation curve and predict at the best round; stop but predict at every round
-fitted; never stop and run the full 500. Results in
-`results/ngboost_stage_selection/stage_selection_by_training_size.json`.
+fitted; never stop and run the full 500. The script writes
+`results/ngboost_stage_selection/stage_selection_by_training_size.json`, which is **not tracked**
+(`results/` is gitignored) — the table below is the record, and the script regenerates it in about
+ninety minutes on a laptop.
 
 | rep | labels | fit rows | stopped at | of fitted | R² stopped | R² to cap | log score stopped | log score to cap |
 |---|---|---|---|---|---|---|---|---|
@@ -6648,7 +6751,10 @@ seconds and need no cluster, no GPU and no trained model; the fifth fits real mo
 minutes, so it is asked for by name:
 
 ```
-# the shared definition of the split, its arithmetic and its support table -- 30 gates
+# the shared definition of the split, its arithmetic and its support table -- 33 gates.
+# Two were added 2026-08-30 with the per-fit check (5.5i): a Gaussian process that
+# collapsed in EVERY fold, which the whole-column check used to accept, and the
+# one-fold case where every other molecule is left blank.
 python scripts/test_uncertainty_decomposition.py
 
 # the writer: variances in, one conversion to a standard deviation, and a component

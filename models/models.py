@@ -100,6 +100,7 @@ from model_defaults import (
     SPEC_VERSION, BAYESIAN_DEFAULTS, GP_DEFAULTS, NEURAL_DEFAULTS,
     SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, gp_fit_threads, provenance_columns,
     bnn_kl_weight, sklearn_params, spec_hash,
+    gp_fit_collapsed as _gp_fit_collapsed_spec, is_binary_matrix,
 )
 
 def bnn_elbo_criterion(base_criterion, model, n_train):
@@ -778,7 +779,14 @@ def train_epochs(epochs, model, train_loader, val_loader, args, s, iteration, fi
     Returns:
         array: returning train and validation losses over all epochs, prediction and ground truth values for training data in the last epoch
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=5e-4)
+    # From the spec, not a literal. This is the graph-model path, which no job in
+    # the roster runs today — but it carried a weight decay of 5e-4 while every
+    # other network in the study used the spec's 0.0, so "the graph models are a
+    # different model" was true for a reason nobody had chosen. Found by the guard
+    # added on 2026-08-29, which is the first thing to check this key at all.
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=learning_rate,
+        weight_decay=NEURAL_DEFAULTS['training']['weight_decay'])
     loss = torch.nn.MSELoss()
     train_target = np.empty((0))
     train_y_target = np.empty((0))
@@ -2627,21 +2635,23 @@ def init_rbf_lengthscale(model, train_x):
     return median
 
 
-def gp_fit_collapsed(y_pred, y_train):
-    """Did the fit give up and predict one constant?
+def gp_fit_collapsed(y_pred, y_train, label='the fit'):
+    """Did the fit give up and return one constant for every molecule it scored?
 
-    A Gaussian process that cannot use its features returns the mean everywhere.
-    That still produces a number, and the number looks like a bad result rather
-    than a failed fit -- which is how the two learned embeddings were written off.
-    Never let it pass silently.
+    The arithmetic is in `models/model_defaults.py` so that the laboratory runner
+    reads the SAME rule -- it used to write its own copy out inline.
+
+    A Gaussian process that cannot use its features returns its prior: the mean
+    everywhere. That still produces a number, and the number looks like a bad
+    result rather than a fit that answered nothing -- which is how the two
+    learned embeddings were written off. Never let it pass silently.
     """
-    spread = float(np.std(y_pred))
-    threshold = GP_DEFAULTS['collapse_fraction'] * float(np.std(y_train))
-    collapsed = spread < threshold
+    collapsed, spread, threshold = _gp_fit_collapsed_spec(y_pred, y_train)
     if collapsed:
-        print(f"[gp] WARNING: the fit COLLAPSED -- predictions vary by {spread:.4g} "
-              f"against a training label spread of {float(np.std(y_train)):.4g}. "
-              f"This is a failed fit, not a poor representation.")
+        print(f"[gp] WARNING: {label} COLLAPSED -- predictions vary by {spread:.4g}, "
+              f"under the {threshold:.4g} that {GP_DEFAULTS['collapse_fraction']:.0%} "
+              f"of the fitted label spread asks for. The process returned its prior: "
+              f"it has no per-molecule answer for these molecules.", flush=True)
     return collapsed, spread
 
 
@@ -2747,6 +2757,26 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     x_test_tensor = torch.from_numpy(x_test).double()
     y_train_tensor = torch.from_numpy(y_train_full).double()
 
+    # Every kernel in the map above except RBF is a fingerprint kernel: a ratio
+    # of set overlaps, defined on BINARY vectors and a similarity in [0, 1]
+    # there. On centred continuous values -- the descriptor vector, either
+    # learned embedding -- the denominator can vanish or go negative and the
+    # number it returns is not a similarity at all, so the fit is meaningless
+    # rather than merely different. `--kernel` DEFAULTS TO TANIMOTO, so a command
+    # line that omits `--kernel rbf` on a continuous representation gets this
+    # silently; the job generator passes the flag, a hand-run command need not.
+    # The laboratory pipeline has refused this by name since 2026-08-26 and this
+    # side did not, which is one specification with two behaviours
+    # (RERUN_PLAN.md 0.6, failure mode 10).
+    if params['kernel_name'] != 'RBF' and not is_binary_matrix(x_train_full):
+        raise ValueError(
+            f"the {params['kernel_name']} kernel was asked for on '{rep}', whose "
+            f"features are not binary. The fingerprint kernels are ratios of set "
+            f"overlaps and are defined on binary vectors only; on continuous "
+            f"values they do not return a similarity. Use --kernel rbf, or a "
+            f"representation that is a fingerprint. Note that --kernel defaults "
+            f"to tanimoto, so this is what omitting it does.")
+
     likelihood = gpytorch.likelihoods.GaussianLikelihood(noise=params['likelihood_noise'])
     kernel_class = kernel_map[params['kernel_name']]
     model = Gauche(x_train_tensor, y_train_tensor, likelihood, kernel_class)
@@ -2817,7 +2847,18 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     model_name = 'gauche_rbf' if params['kernel_name'] == 'RBF' else 'gauche'
     # A fit that gave up and predicted one constant still produces a number, and
     # that number reads as a bad representation rather than a failed fit. Record it.
-    collapsed, _ = gp_fit_collapsed(y_pred, y_train_full)
+    collapsed, _ = gp_fit_collapsed(y_pred, y_train_full, label='the test fit')
+    if collapsed and args.uncertainty:
+        # Its model-uncertainty term is the latent variance, and a process that
+        # returned its prior returns the PRIOR variance too -- the same number
+        # for every molecule. Written as it stands it is a column declared per
+        # molecule whose correlation with per-molecule noise is zero however good
+        # the model is, and the writer's guard refuses it and stops the job
+        # (RERUN_PLAN.md 5.5i). Blanked instead: the row still carries the
+        # prediction, the observation-noise half and the recorded noise, and the
+        # blank says the fit had no per-molecule answer. `gp_collapsed` on the
+        # results row says why.
+        epis_var = np.full(len(y_pred), np.nan)
     metrics = calculate_regression_metrics(y_test, y_pred, logging=True)
     save_results(args.filepath, s, iteration, model_name, rep, args.sample_size,
                  metrics, gp_fit_method=gp_fit_method, gp_collapsed=int(collapsed))
@@ -2876,7 +2917,19 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
                 _alea, _epis, _tot = decompose_gp(
                     np.clip(preds.variance.numpy(), 1e-12, None),
                     float(lik.noise.item()))
-                return (observed.mean.numpy(),
+                _mean = observed.mean.numpy()
+                # PER FOLD, and this is where it bites. The inner split is
+                # scaffold-grouped, so a held-out fold is whole scaffold families
+                # the fit set does not contain; when the fitted length scale is
+                # short against the distance to them the process returns its
+                # prior across the entire fold -- one predicted value and one
+                # latent variance for every molecule in it. That is the process
+                # answering honestly and it is not a per-molecule answer, so the
+                # model half is blanked rather than written flat and refused by
+                # the guard (RERUN_PLAN.md 3.1d, 5.5i).
+                if gp_fit_collapsed(_mean, y_fit, label='an inner fold')[0]:
+                    _epis = np.full(len(_mean), np.nan)
+                return (_mean,
                         np.sqrt(observed.variance.numpy()),
                         _alea, _epis)
 
@@ -2899,7 +2952,13 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
                 _alea, _epis, _tot = decompose_gp(
                     np.clip(preds.variance.numpy(), 1e-12, None),
                     float(likelihood.noise.item()))
-                return (observed.mean.numpy(),
+                _mean = observed.mean.numpy()
+                # Validation is a scaffold-held-out block too, so the same thing
+                # can happen to it as to an inner fold.
+                if gp_fit_collapsed(_mean, y_train_full,
+                                    label='the fit, on validation')[0]:
+                    _epis = np.full(len(_mean), np.nan)
+                return (_mean,
                         np.sqrt(observed.variance.numpy()), _alea, _epis)
 
         score_validation_molecules(
@@ -8371,6 +8430,13 @@ def train_heteroscedastic_gp(
             noise_var = noise_net(xs).cpu().numpy()
 
         alea, epis, total = decompose_hetero_gp(latent_var, noise_var)
+        # A process that returned its prior over the whole block it was asked to
+        # score has one latent variance for every molecule in it, and that half
+        # is declared per molecule. Blanked rather than written flat -- the noise
+        # half, which is what this model exists for, is untouched and still comes
+        # from the network per molecule (RERUN_PLAN.md 5.5i).
+        if gp_fit_collapsed(mean, y_fit, label='the noise-predicting fit')[0]:
+            epis = np.full(len(mean), np.nan)
         if also_score is None:
             return mean, np.sqrt(total), alea, epis
 
@@ -8382,6 +8448,9 @@ def train_heteroscedastic_gp(
             latent_a = post_a.variance.cpu().numpy()
             noise_a = noise_net(xa).cpu().numpy()
         alea_a, epis_a, total_a = decompose_hetero_gp(latent_a, noise_a)
+        if gp_fit_collapsed(mean_a, y_fit,
+                            label='the noise-predicting fit, on the second block')[0]:
+            epis_a = np.full(len(mean_a), np.nan)
         return (mean, np.sqrt(total), alea, epis,
                 (mean_a, np.sqrt(total_a), alea_a, epis_a))
 
