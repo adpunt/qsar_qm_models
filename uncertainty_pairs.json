@@ -24,6 +24,20 @@
     {"canonical": "chemberta", "qm9": "chemberta", "validation": "ChemBERTa"}
   ],
 
+  "decomposition": {
+    "_what_this_is": "The models whose uncertainty is split into a measurement-error half and a model-doubt half, and reported as such. A SUBSET of `models` above -- a model cannot have its split reported if it is not run at all. Every other model on the uncertainty list still writes a total uncertainty; it simply does not have a split reported.",
+
+    "_the_decision": "The author, 2026-08-30, on a measurement made in another session: as the injected noise grows, the ordinary Gaussian process's measurement-error half grows 12.9-fold while its model half grows 1.6-fold, and NGBoost over three seeds grows 9.1-fold against 0.7-fold. Both keep their clean accuracy (0.85 and 0.84). Single-seed NGBoost passes on the measurement half and has no model half at all, which is why the seed ensemble is named here rather than the plain fit.",
+
+    "_which_question_this_answers": "The POPULATION one: does the measurement-error half grow with the noise actually injected, while the model half holds still. It does NOT answer the per-molecule one -- does the measurement-error half point at the individual molecules whose labels were corrupted. The Gaussian process cannot answer that by construction: its measurement-error term is one number for the whole fit, so it is the same for every molecule and correlates with per-molecule noise at exactly zero however good the model is. Do not report a per-molecule detection statistic from these two.",
+
+    "_why_the_others_are_not_here": "The quantile forest is the only model on the uncertainty list whose two halves both vary per molecule, and both of its halves track the injected corruption at +0.84 and +0.81 -- one signal reported twice rather than a separation (RERUN_PLAN.md 2.25). The variational network's measurement-error half is one number per fit, like the Gaussian process's, and unlike the Gaussian process it was not measured to rise with the noise.",
+
+    "models": ["gauche_rbf", "ngboost"],
+
+    "ngboost_note": "NGBoost's model half exists only because it is fitted under several seeds and the spread of their means is taken; a single distributional fit has no second opinion to disagree with. `models/model_defaults.py` sets `ngboost_ensemble_seeds` to 3, and `models/models.py` builds the ensemble whenever uncertainty is switched on, so this is what already runs -- it is named here so the cost is visible: three fits per training run, not one, on top of the out-of-fold pass."
+  },
+
   "model_representations": {
     "_why": "A model that is only worth running on some of the three. The list is the CANONICAL representation names. A model absent from here runs on all three.",
     "dnn_vbll": ["chemberta"]

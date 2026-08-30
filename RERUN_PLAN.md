@@ -2983,6 +2983,46 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.28 ✅ SETTLED 2026-08-30 — the decomposition list, and it is a subset of the uncertainty list
+
+**The author's decision:** the aleatoric/epistemic split is reported from the **ordinary Gaussian
+process** and from **NGBoost over three seeds**. Both were already on the uncertainty list, so this
+is a marking rather than a change to what runs.
+
+The measurement it rests on, made in another session and **not re-measured here** — as the injected
+noise grows:
+
+| model | measurement-error half | model-doubt half | R² clean |
+|---|---|---|---|
+| ordinary Gaussian process | ×12.9 | ×1.6 | 0.85 |
+| NGBoost, one fit | ×9.1 | absent | 0.84 |
+| NGBoost over 3 seeds | ×9.1 | ×0.7 | 0.84 |
+
+**Which question this answers, and which it does not.** This is the POPULATION statement: the
+measurement-error half rises with the noise actually injected while the model half holds still. It
+is **not** the per-molecule statement. The Gaussian process cannot make that one by construction —
+its measurement-error term is a single likelihood noise for the whole fit, so it takes the same
+value for every molecule and correlates with per-molecule injected noise at exactly zero however
+good the model is. **Do not report a per-molecule detection statistic from either of these two.**
+
+**Why the other two on the uncertainty list are not on this one.** The quantile forest is the only
+one whose halves both vary per molecule, and both of its halves track the injected corruption at
++0.84 and +0.81 — one signal reported twice rather than a separation (§2.25). The variational
+network's measurement-error half is one number per fit, like the Gaussian process's, and unlike the
+Gaussian process it was not measured to rise with the noise.
+
+**NGBoost's three seeds already run.** `models/model_defaults.py` sets `ngboost_ensemble_seeds` to
+3 and `models/models.py` builds the ensemble whenever uncertainty is switched on, so the behaviour
+the decision names is the behaviour on disk. The support table was aligned to it on 2026-08-30 —
+`ngboost` reads (per molecule, per molecule) rather than (per molecule, none), which is what lets
+the row be written at all. Named in `uncertainty_pairs.json` so the cost is visible: **three fits
+per training run, not one**, on top of the out-of-fold pass.
+
+**Guarded.** `scripts/test_uncertainty_pairs.py` requires the decomposition list to be a subset of
+the models actually run, and requires the support table to give each of them both halves. Proven to
+bite in both directions: naming a model the uncertainty list does not run, and naming one whose
+support says a half is absent.
+
 ### 2.27 ✅ CLOSED 2026-08-30 — the shape column is in the cross-check, and the run counts are right
 
 **Two of the four open uncertainty items, both closed.**

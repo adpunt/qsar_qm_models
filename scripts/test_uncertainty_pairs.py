@@ -87,6 +87,57 @@ def check_file_is_consistent(pairs):
     return canon_models, canon_reps
 
 
+def check_decomposition_is_a_subset(pairs):
+    """The decomposition list is a subset of the uncertainty list, and its models
+    can actually produce both halves.
+
+    A model whose split is reported but which is not run produces nothing; a model
+    whose split is reported but which the support table says has no second half
+    produces a blank column that reads as a null result. Both are silent, which is
+    why this is a check and not a convention.
+    """
+    canon = {m['canonical'] for m in pairs['models']}
+    qm9_name = {m['canonical']: m['qm9'] for m in pairs['models']}
+    dec = pairs.get('decomposition', {}).get('models')
+    check(isinstance(dec, list) and bool(dec),
+          "uncertainty_pairs.json names no decomposition models. The split has to "
+          "say which models it is reported from, or every model on the uncertainty "
+          "list reads as one it was reported from.")
+    if not isinstance(dec, list):
+        return
+    stray = sorted(set(dec) - canon)
+    check(not stray,
+          f"the decomposition list names {stray}, which the uncertainty list does "
+          f"not run. A split cannot be reported from a model that is not fitted.")
+
+    sys.path.insert(0, str(HERE))
+    try:
+        from uncertainty_decomposition import support
+    except Exception as exc:
+        print(f"  NOTE  the support table was NOT consulted "
+              f"({type(exc).__name__}: {exc}) -- a skip, not a pass")
+        return
+    for m in dec:
+        if m not in canon:
+            continue
+        try:
+            alea, epis = support(qm9_name[m])
+        except Exception as exc:
+            check(False, f"{m}: the support table has no entry for "
+                         f"{qm9_name[m]!r} ({exc})")
+            continue
+        # Both halves must EXIST. Either may be one number per fit -- that is
+        # enough for the population question this list answers, and the file says
+        # so -- but a half that is absent makes the split undefined.
+        for half, kind in (('measurement-error', alea), ('model-doubt', epis)):
+            check(kind != 'none',
+                  f"{m}: the decomposition list reports its {half} half and the "
+                  f"support table says it has none, so that column would be blank "
+                  f"and read as a null result")
+    print(f"  decomposition: {len(dec)} of {len(canon)} uncertainty models, "
+          f"both halves present on each")
+
+
 def check_names_meet(pairs):
     """Every settled name resolves to one canonical name from both spellings."""
     names = load(ROOT / 'model_names.json')
@@ -249,6 +300,7 @@ def main():
     print('uncertainty_pairs.json — one set of pairs, both pipelines')
     pairs = load(ROOT / 'uncertainty_pairs.json')
     check_file_is_consistent(pairs)
+    check_decomposition_is_a_subset(pairs)
     check_names_meet(pairs)
     with tempfile.TemporaryDirectory() as tmp:
         check_qm9_matches(pairs, Path(tmp))
