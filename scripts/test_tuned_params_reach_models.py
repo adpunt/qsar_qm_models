@@ -321,7 +321,13 @@ def main():
     # 2.8e. The boosting and forest fits therefore run first, and the three that
     # go through torch run last, with the Gaussian process last of all.
     keys = ['rf', 'svm', 'xgboost', 'lgb', 'ngboost', 'dnn', 'mlp', 'gauche']
-    known = {rosters.TUNED_KEY[m] for m in rosters.TUNED_KEY}
+    # None means the model has NO tuned path at all -- its builder never calls
+    # load_best_hyperparameters, so no entry in either JSON file can reach it
+    # (the heteroscedastic Gaussian process). There is no key to check, which is
+    # different from a key that is missing, so it is dropped here rather than
+    # sorted with the strings -- which is what it used to do, and it raised
+    # TypeError comparing None with a str.
+    known = {k for k in rosters.TUNED_KEY.values() if k is not None}
     assert set(keys) == known, f'key list is stale: {sorted(known)}'
     for key in keys:
         check_key_reaches(key, SYNTHETIC[key], tuner, rosters, 'synthetic')

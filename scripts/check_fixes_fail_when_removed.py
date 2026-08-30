@@ -30,7 +30,7 @@ Add a case here whenever a fix lands. The four fields after the name are the
 file, the text that must be present, what to replace it with, and the check to
 run.
 """
-import subprocess, sys, os, shutil, tempfile
+import hashlib, subprocess, sys, os, shutil, tempfile
 
 QSAR = "/Users/apunt/repos/qsar_qm_models"
 KIRBY = "/Users/apunt/repos/KIRBy"
@@ -379,25 +379,76 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           ".harness_unrestored")
 
 
+# The backup is named by a hash of the path, and the path itself is written
+# beside it in a `.path` sidecar.
+#
+# It used to be named `path.replace(os.sep, "__")` and recovered by replacing
+# "__" back with a separator. That is not reversible: any directory whose name
+# already contains a double underscore reconstructs to a DIFFERENT path, and
+# recovery would then write a file's contents somewhere else entirely. Nothing
+# on the current list has one, so it never fired -- it is a trap rather than a
+# bug, and a trap in the code that puts files back after they were broken on
+# purpose is worth closing.
 def _backup_path(path):
-    return os.path.join(BACKUP_DIR, path.replace(os.sep, "__"))
+    key = hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:16]
+    return os.path.join(BACKUP_DIR, key + ".bak")
+
+
+def _write_backup(path, src):
+    backup = _backup_path(path)
+    with open(backup, "w") as f:
+        f.write(src)
+    with open(backup[:-4] + ".path", "w") as f:
+        f.write(os.path.abspath(path))
+    return backup
+
+
+def _drop_backup(path):
+    """Remove a backup and its sidecar once the file is back.
+
+    Tolerant of either being gone, and SAYS SO rather than dying: this runs in a
+    `finally`, so an exception here replaces whatever really went wrong with a
+    FileNotFoundError from the cleanup -- which is exactly what it used to do,
+    reporting a missing backup while the actual failure went unseen. The files
+    themselves are already restored by the time this runs.
+    """
+    backup = _backup_path(path)
+    for target in (backup, backup[:-4] + ".path"):
+        try:
+            os.remove(target)
+        except FileNotFoundError:
+            print(f"  note: {os.path.basename(target)} was already gone at "
+                  f"cleanup. The file itself has been restored; check "
+                  f"`git diff {path}`.")
+        except OSError as exc:
+            print(f"  note: could not remove {target}: {exc}")
 
 
 def recover_from_a_killed_run():
     if not os.path.isdir(BACKUP_DIR):
         return
-    left = sorted(os.listdir(BACKUP_DIR))
+    left = sorted(n for n in os.listdir(BACKUP_DIR) if n.endswith(".bak"))
     if not left:
         return
+    put_back = []
     for name in left:
         original = os.path.join(BACKUP_DIR, name)
-        target = "/" + name.replace("__", os.sep).lstrip(os.sep)
+        sidecar = original[:-4] + ".path"
+        if not os.path.exists(sidecar):
+            print(f"  cannot put back {name}: no .path sidecar says where it "
+                  f"came from. Left in place for you to look at.")
+            continue
+        target = open(sidecar).read().strip()
         shutil.copyfile(original, target)
         print(f"  put back: {target}")
         os.remove(original)
+        os.remove(sidecar)
+        put_back.append(target)
+    if not put_back:
+        return
     sys.exit(
-        f"\n{len(left)} file(s) were left broken by a run that was killed, and "
-        f"have been put back. Check `git diff` on them, then run this again.")
+        f"\n{len(put_back)} file(s) were left broken by a run that was killed, "
+        f"and have been put back. Check `git diff` on them, then run this again.")
 
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -420,15 +471,13 @@ for name, path, present, broken, cmd in CASES:
         print(f"      {clean_out.strip().splitlines()[-1][:150] if clean_out.strip() else '(no output)'}")
         ok = False
         continue
-    backup = _backup_path(path)
-    with open(backup, "w") as f:
-        f.write(src)
+    _write_backup(path, src)
     open(path, "w").write(src.replace(present, broken))
     try:
         code, out = run(cmd)
     finally:
         open(path, "w").write(src)
-        os.remove(backup)
+        _drop_backup(path)
     verdict = "RED (good)" if code != 0 else "GREEN (BAD)"
     if code == 0:
         ok = False
