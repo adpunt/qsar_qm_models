@@ -3044,6 +3044,32 @@ harness stops producing unreadable neural numbers, and re-take the neural rows o
 here because that file is a measurement instrument whose output is quoted in three places, and
 changing it silently would leave those quotes attached to numbers nobody re-measured.
 
+#### ✅ CHECKED 2026-08-31 — the roster screen is NOT affected, and the four-model choice stands
+
+The obvious worry is that the model roster was chosen on contaminated numbers too. **It was not.**
+Traced rather than assumed:
+
+- The screen is `results/uncertainty_screen/` — QM9, 800 molecules per cell, 7 models × 6
+  representations, written through `scripts/uncertainty_stats.py` from the production pipeline's own
+  `*_uncertainty_values.csv` files.
+- **It used a standardised label**, which is visible in its own numbers: mean absolute error on clean
+  labels runs **0.26 to 0.61** on a label whose standardised spread is 1.0. On the raw Hartree label,
+  spread 0.047, those errors would be around 0.02. The neural models on that screen have errors of
+  0.32 to 0.61 — worse than the trees, but fitting.
+- The numbers quoted in the uncertainty job generator match the screen file on the three settled
+  representations: the quantile forest tracks its error to 0.352 with coverage 0.640–0.828; NGBoost
+  0.302 and 0.581–0.627; the Gaussian process 0.279; the variational network 0.250 with coverage
+  0.233–0.448 against a target of 0.68.
+
+**So the contamination is confined to `decomposition_controls.py`.** Two different instruments
+measured two different things, and only one of them skipped the label.
+
+⚠️ **One entry in `uncertainty_pairs.json` did rest on the bad number and is corrected**: it said the
+variational network *"does not FIT on QM9 descriptors: its out-of-fold R2 is -0.03"*. That is the
+contaminated figure. It now rests on the structural reason, which the screen supports — the
+variational network's aleatoric half is one number per fit, and its coverage on the screen is 23%
+to 45% against a target of 68%.
+
 ### 2.30 🔴 FOUND AND FIXED 2026-08-30 — NGBoost's seed ensemble does not work, and it would have stopped every NGBoost task
 
 **This corrects §5.5i's table and §2.28, both of which recorded NGBoost over three seeds as a PASS
