@@ -6676,19 +6676,29 @@ Add noise and the unconstrained model memorises the corrupted labels while the c
 cannot.
 
 **So "LightGBM holds and grows under noise" was a PDV fact, not a LightGBM fact**, and the author was
-right to ask for the check. The consequence is larger than one model: whether a clean-tuned setting
-survives noise depends on whether the twelve draws happened to contain a constrained configuration
-at the top, which varies pairing by pairing for no reason connected to the science.
+right to ask for the check.
+
+**The two pairings get there differently, and the difference matters.** On PDV the top eight
+candidates are within 0.0168 of one another, so which one won was close to arbitrary; it happened to
+be the constrained one. On ECFP4 the unconstrained winner beat the runner-up by 0.0204, four times
+that spread — it was not luck. Clean-label scoring ACTIVELY PREFERRED the higher-capacity model, and
+higher capacity is exactly what label noise punishes. That is a systematic bias in the search, not a
+lottery, and it is worse: on a representation where a high-capacity model can win on clean data, the
+search will reliably choose the setting that fails under noise.
 
 **What follows from it.**
 
 1. **A setting chosen on clean labels cannot be adopted without a noise check.** The check is cheap —
    seven levels, two fits each, minutes for a tree model.
-2. **When two settings are close on clean labels, prefer the constrained one.** Depth, leaf count,
-   step size and the regularisation terms are the ones that matter, and the earlier at-an-end test
-   already flags the expensive end of exactly those (5.7w).
+2. ⚠️ **"Prefer the constrained runner-up" was proposed here on 2026-08-31 and then TESTED
+   AND FOUND NOT TO WORK.** The third-best ECFP4 candidate, capped at depth 4, was fitted across the
+   same levels: it ends at **+0.3376** against the winner's +0.2260 — better, and still far below
+   the DEFAULT's +0.6340. Picking a less extreme setting out of the same pool does not rescue the
+   pairing, because everything in the pool was selected by the same clean-label criterion. On this
+   pairing the default is simply more robust than anything the search found, and only the noise test
+   reveals it.
 3. It strengthens the case for **one setting per model** (5.7ad), because a per-pairing setting
-   carries this lottery into every cell of the decomposition.
+   carries this into every cell of the decomposition.
 
 🟠 Two representations so far. Avalon, MHG-GNN and Sort & Slice are running.
 

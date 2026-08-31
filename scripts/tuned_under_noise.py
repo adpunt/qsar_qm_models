@@ -57,16 +57,21 @@ ORDER = ['svm', 'mlp', 'xgboost', 'lgb', 'rf', 'dnn', 'qrf',
          'mlp_bnn_full_variational', 'dnn_bnn_full_variational', 'ngboost']
 
 
-def winners(dataset='qm9'):
-    """The setting the completed search picked, per (model, representation)."""
+def winners(dataset='qm9', rank=1):
+    """The setting the search ranked `rank`th, per (model, representation).
+
+    rank=1 is the winner. Higher ranks exist because the winner is not always
+    the setting worth adopting: on ECFP4 the LightGBM winner is an unconstrained
+    model that collapses under noise, and the question is what the next few cost
+    on clean labels and whether they survive.
+    """
     import report_tuning_results as RT
-    import tuning_rosters as R
     default, cands, _sizes, _rng = RT.load(dataset)
     out = {}
     for k, c in cands.items():
-        score, params = max(c, key=lambda t: t[0])
-        if params:
-            out[k] = params
+        ranked = [t for t in sorted(c, key=lambda t: -t[0]) if t[1]]
+        if len(ranked) >= rank:
+            out[k] = ranked[rank - 1][1]
     return out, default
 
 
@@ -80,13 +85,16 @@ def main():
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--condition', default='gaussian')
     ap.add_argument('--tag', default='noise')
+    ap.add_argument('--rank', type=int, default=1,
+                    help='Which drawn setting to test: 1 is the winner, 3 the '
+                         'third best on clean labels.')
     cli = ap.parse_args()
 
     from noiseInject import NoiseInjectorRegression
     import tune_hyperparameters as T
     import tuning_rosters as R
 
-    win, _default = winners()
+    win, _default = winners(rank=cli.rank)
     models = cli.models or [m for m in ORDER if m in R.MODELS]
 
     pat, M = T._import_pipeline()
@@ -137,8 +145,9 @@ def main():
                 if rep not in R.MODELS[model][4]:
                     continue
                 for label, params in (('default', None),
-                                      ('tuned', win.get((model, rep)))):
-                    if label == 'tuned' and params is None:
+                                      (f'rank{cli.rank}',
+                                       win.get((model, rep)))):
+                    if label != 'default' and params is None:
                         continue
                     t0 = time.perf_counter()
                     try:
