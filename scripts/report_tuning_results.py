@@ -40,6 +40,7 @@ default beside them, and a star. Nothing else.
 """
 from __future__ import annotations
 
+import collections
 import csv
 import glob
 import json
@@ -118,6 +119,23 @@ def load(dataset):
             rows += [r for r in csv.DictReader(fh) if r['status'] == 'ok']
     if not rows:
         return None, None, None, None
+
+    # A FILE'S DATASET IS INFERRED FROM ITS NAME, WHICH IS FRAGILE. A one-pairing
+    # hERG test written as trials_probe.csv on 2026-08-31 had no dataset in its
+    # name and was read as QM9, putting a -1.3728 hERG default into the QM9
+    # tables. The recorded sample_size is the check: every file for one dataset
+    # was run at one size, so rows that disagree with the majority are not from
+    # this dataset and are dropped with a message rather than silently mixed.
+    counts = collections.Counter(r['sample_size'] for r in rows
+                                 if r.get('sample_size'))
+    if len(counts) > 1:
+        keep_size, _n = counts.most_common(1)[0]
+        wrong = [r for r in rows if r.get('sample_size') != keep_size]
+        rows = [r for r in rows if r.get('sample_size') == keep_size]
+        odd = collections.Counter(r['sample_size'] for r in wrong)
+        print(f'  {dataset}: dropped {len(wrong)} row(s) recorded at '
+              f'{dict(odd)} molecules; this dataset was run at {keep_size}',
+              file=sys.stderr)
 
     sizes = {r['sample_size'] for r in rows if r.get('sample_size')}
     final = {(r['model'], r['rep']) for r in rows
@@ -301,7 +319,7 @@ def report(dataset, out):
                    'at an end |')
         out.append('|---|---|---|---|---|---|')
         for (m, rep), d, s, p, e in rowsx:
-            out.append(f'| {m} | {rep} | {d:+.4f} | {s:+.4f} | '
+            out.append(f'| {m} | {rep} | {d:.4f} | {s:.4f} | '
                        f'{beats(s, d)} | {", ".join(e) if e else "—"} |')
         out.append('')
 
@@ -330,7 +348,7 @@ def report(dataset, out):
                     clean = [(s, p) for s, p in ranked if not A.edges_in(p, sp)]
                     if not clean:
                         lines.append(f'| {k[0]} | {k[1]} | '
-                                     f'{default.get(k, float("nan")):+.4f} | — | '
+                                     f'{default.get(k, float("nan")):.4f} | — | '
                                      f'no clean setting was drawn | '
                                      + ' | '.join(['—'] * len(cols)) + ' |')
                         continue
@@ -344,7 +362,7 @@ def report(dataset, out):
                     cells.append(f'**{v}\\***' if c in e else v)
                 d = default.get(k, float('nan'))
                 lines.append(f'| {k[0]} | {k[1]} | '
-                             f'{d:+.4f} | {score:+.4f} | {beats(score, d)} | '
+                             f'{d:.4f} | {score:.4f} | {beats(score, d)} | '
                              + ' | '.join(cells) + ' |')
             if not lines:
                 continue

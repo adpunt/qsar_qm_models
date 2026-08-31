@@ -6644,6 +6644,45 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7ai ✅ THIRD FILTER ADDED 2026-08-31 — R-squared at noise level 0.5
+
+The author's rule. A setting is judged on three things now, not two:
+
+1. no value at the expensive end of its range,
+2. not much slower to train than the default,
+3. **not worse than the default when trained on labels noised to level 0.5.**
+
+Level 0.5 is the author's choice of judging point. The earlier tables compared at 1.5, which the
+author rejected as unrealistic.
+
+The number is plain R-squared on a clean held-out test set. Absolute R-squared values are now
+printed without a leading plus sign; only differences carry one, because the sign on an absolute
+score read as a comparison.
+
+Flagged so far — the tuned setting loses to the default at level 0.5:
+
+| model | representation |
+|---|---|
+| Bayesian alpha | PDV |
+| variational beta | ChemBERTa |
+| LightGBM | ECFP4, MHG-GNN, Sort & Slice |
+| network beta | PDV |
+| quantile forest | PDV, ChemBERTa |
+| support vector machine | PDV, ChemBERTa |
+
+⚠️ **The filter can only fire where a noise test has been run**, which so far is PDV in full,
+ChemBERTa in part, and LightGBM on four representations. Everything else is untested, not passed.
+
+#### 5.7aj 🚨 A TEST FILE WITH NO DATASET IN ITS NAME WAS READ AS QM9
+
+`trials_probe.csv`, a one-pairing hERG check written on 2026-08-31, had no dataset in its filename.
+A file's dataset is inferred from its name, so it was read as QM9 and put an hERG default of
+**-1.3728** into the QM9 tables in place of the real **-0.5568**.
+
+The recorded `sample_size` is now the check: every file for one dataset was run at one size, so rows
+disagreeing with the majority are dropped and the drop is reported. The stray files are moved to
+`results/tuning_local/stray_test_files/`.
+
 #### 5.7ah 🔴 WHETHER TUNING SURVIVES NOISE IS A PROPERTY OF THE PAIRING, NOT THE MODEL
 
 LightGBM, the same model, the same noise, the same molecules, two representations. **They do

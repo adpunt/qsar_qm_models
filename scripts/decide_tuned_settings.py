@@ -90,6 +90,37 @@ def significant(params, sp, family):
     return out
 
 
+NOISE_LEVEL = 0.5      # the level the author judges the settings at
+
+
+def noise_check():
+    """R2 at noise level 0.5, tuned against default, per (dataset, model, rep).
+
+    THE THIRD FILTER (author, 2026-08-31). The search scored every candidate on
+    CLEAN labels, and a setting that wins there can lose badly once labels are
+    noisy -- measured, LightGBM on ECFP4 ends at +0.226 where its own default
+    holds +0.634. So a setting is not adopted on its clean score alone: it is
+    refitted with noisy training labels and scored on a clean test split, and if
+    it is worse than the default there it is flagged for discussion.
+
+    Written by scripts/tuned_under_noise.py. Absent for pairings not yet tested.
+    """
+    out = {}
+    for path in glob.glob(os.path.join(OUT_DIR, 'noise_vs_tuned_*.csv')):
+        for r in csv.DictReader(open(path)):
+            if r['status'] != 'ok':
+                continue
+            try:
+                if abs(float(r['level']) - NOISE_LEVEL) > 1e-9:
+                    continue
+                ds = 'qm9'      # every noise run so far is QM9
+                key = (ds, r['model'], r['rep'])
+                out.setdefault(key, {})[r['setting']] = float(r['r2'])
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
 def trial_rows():
     """(dataset, model, rep) -> [(setting label, r2, seconds)] for every good fit.
 
@@ -131,6 +162,7 @@ def main():
     import tuning_rosters as R
 
     trials = trial_rows()
+    noise = noise_check()
     out = ['# The tuned settings, decided',
            '',
            'Regenerate with `python scripts/decide_tuned_settings.py`.',
@@ -171,9 +203,16 @@ def main():
             sig = significant(params, sp, fam)
             slow = ratio is not None and ratio >= SLOW_ENOUGH_TO_REVIEW
 
+            nz = noise.get((ds,) + k, {})
+            tuned_at_noise = next((v for kk, v in nz.items()
+                                   if kk != 'default'), None)
+            worse_under_noise = (
+                tuned_at_noise is not None and 'default' in nz
+                and tuned_at_noise < nz['default'])
+
             if score <= d:
                 keep.append((k, d, score, ratio))
-            elif not sig and not slow:
+            elif not sig and not slow and not worse_under_noise:
                 adopt.append((k, d, score, ratio))
             else:
                 alt = None
@@ -187,7 +226,8 @@ def main():
                         continue
                     alt = (s2, p2, a_ratio)
                     break
-                review.append((k, d, score, ratio, sig, slow, alt))
+                review.append((k, d, score, ratio, sig, slow, alt,
+                               worse_under_noise))
 
         tally[ds] = (len(adopt), len(keep), len(review))
         out.append(f'\n## {ds}\n')
@@ -200,31 +240,33 @@ def main():
                    'default fit |')
         out.append('|---|---|---|---|---|')
         for (m, rep), d, s, ratio in adopt:
-            out.append(f'| {m} | {rep} | {d:+.4f} | {s:+.4f} | '
+            out.append(f'| {m} | {rep} | {d:.4f} | {s:.4f} | '
                        f'{"—" if ratio is None else f"{ratio:.2f}x"} |')
 
         out.append(f'\n### Keep the default — tuning lost  ({len(keep)})\n')
         out.append('| model | representation | default | best drawn | shortfall |')
         out.append('|---|---|---|---|---|')
         for (m, rep), d, s, ratio in keep:
-            out.append(f'| {m} | {rep} | {d:+.4f} | {s:+.4f} | {s - d:+.4f} |')
+            out.append(f'| {m} | {rep} | {d:.4f} | {s:.4f} | {s - d:+.4f} |')
 
         out.append(f'\n### Needs a decision  ({len(review)})\n')
         out.append('| model | representation | default | tuned | times the '
                    'default fit | why flagged | alternative | alternative beats '
                    'the default by | alternative cost |')
         out.append('|---|---|---|---|---|---|---|---|---|')
-        for (m, rep), d, s, ratio, sig, slow, alt in review:
+        for (m, rep), d, s, ratio, sig, slow, alt, wun in review:
             why = ', '.join(sig) if sig else ''
             if slow:
                 why = (why + ', ' if why else '') + 'slow'
+            if wun:
+                why = (why + ', ' if why else '') + 'WORSE AT NOISE 0.5'
             if alt is None:
                 a, gap, ac = 'none drawn', '—', '—'
             else:
-                a = f'{alt[0]:+.4f}'
+                a = f'{alt[0]:.4f}'
                 gap = f'{alt[0] - d:+.4f}'
                 ac = '—' if alt[2] is None else f'{alt[2]:.2f}x'
-            out.append(f'| {m} | {rep} | {d:+.4f} | {s:+.4f} | '
+            out.append(f'| {m} | {rep} | {d:.4f} | {s:.4f} | '
                        f'{"—" if ratio is None else f"{ratio:.2f}x"} | {why} | '
                        f'{a} | {gap} | {ac} |')
         out.append('')
