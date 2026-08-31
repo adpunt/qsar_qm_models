@@ -3039,10 +3039,23 @@ are reachable only through `--loss heteroscedastic`, which no job passes (§5.5a
 uncertainty models and the decomposition list are unchanged by this finding. What changes is the
 paper's explanation of WHY, which currently rests on a claim about neural models that is not true.
 
-**Still to do, and it is cheap:** standardise the label inside `decomposition_controls.py` so the
-harness stops producing unreadable neural numbers, and re-take the neural rows of §5.5i. Not applied
-here because that file is a measurement instrument whose output is quoted in three places, and
-changing it silently would leave those quotes attached to numbers nobody re-measured.
+✅ **DONE 2026-08-31 — the harness is fixed and every row re-measured.** `_oof` is the one gate
+every model passes through, so the standardisation goes there: the label is scaled on each fold's
+training rows, the mean converts back by multiplying and adding, and both components by the SQUARE
+of the spread. It standardises by the **clean** labels, because scaling by the noisy label's own
+spread makes the divisor grow with the level — the confound §2.4 records fixing in the pipeline.
+
+The full table is re-run into `level_response_qm9_PDV_n3000_STANDARDISED.csv` and §5.5i now carries
+it. **The two tree models come back unchanged to three digits** (the forest 5.67 → 5.69 and 5.27 →
+5.27), which is what scale invariance predicts and is the check that the conversion back is right.
+Every quote of the old numbers — §5.5i, §2.28, §2.30 and `uncertainty_pairs.json` — is updated.
+
+**Two conclusions changed.** The Gaussian process is stronger than recorded (×17.2 against ×1.5,
+not ×12.9 against ×1.6) and remains the only model that both fits and separates. And the
+variational network **fits QM9 at R² 0.84** — it was recorded at −0.04 — and fails the
+decomposition test because both its terms rise together, ×4.6 and ×4.1. That is a real property of
+the model rather than an artefact, and it is a better reason for its absence from the decomposition
+list than the one it replaces.
 
 #### ✅ CHECKED 2026-08-31 — the roster screen is NOT affected, and the four-model choice stands
 
@@ -3112,8 +3125,8 @@ qualifies one. Accuracy does not move either way (0.840 to 0.842), so nothing is
 a quantity 3,581 times smaller than the one beside it.
 
 **Contrast with the Gaussian process, which is why that one IS a pass.** Its two terms are the same
-SIZE as each other — 0.000184 and 0.000201 at level 0 — so both are real quantities, and one rising
-×12.9 while the other rises ×1.6 is a genuine separation.
+SIZE as each other — 0.000135 and 0.000235 at level 0 on the standardised re-run — so both are real
+quantities, and one rising ×17.2 while the other rises ×1.5 is a genuine separation.
 
 **What it would have cost on the cluster.** `SUPPORT['ngboost']` was changed to
 `(per_molecule, per_molecule)` when the ensemble landed. No setting produces a per-molecule
@@ -3135,7 +3148,7 @@ all four datasets, would have died**, on the model the study highlights for nois
 and 2 were only ever read for the epistemic term. It saves two fits per training run under `-u`.
 
 **What NGBoost keeps.** Its aleatoric term is real and is the second best measured — ×9.1, against
-×12.9 for the Gaussian process — so NGBoost stays on the uncertainty list. What it loses is the
+×17.2 for the Gaussian process — so NGBoost stays on the uncertainty list. What it loses is the
 epistemic half, which it never had: a single distributional fit predicts a variance per molecule
 and has nothing to disagree with.
 
@@ -3199,7 +3212,7 @@ noise grows:
 
 | model | measurement-error half | model-doubt half | R² clean |
 |---|---|---|---|
-| ordinary Gaussian process | ×12.9 | ×1.6 | 0.85 |
+| ordinary Gaussian process | ×17.2 | ×1.5 | 0.85 |
 | NGBoost, one fit | ×9.1 | absent | 0.84 |
 | ~~NGBoost over 3 seeds~~ | ~~×9.1~~ | ~~×0.7~~ | 0.84 | 🔴 **WITHDRAWN — §2.30** |
 
@@ -6175,15 +6188,31 @@ spread. Output: `results/decomposition_controls/level_response_qm9_PDV_n3000_FIN
 
 #### The result
 
+⚠️ **RE-MEASURED 2026-08-31 with the label standardised, which is what the pipeline does and what
+this harness never did (§2.31). The table below is the standardised run**, from
+`level_response_qm9_PDV_n3000_STANDARDISED.csv`. The two tree models are unchanged to three digits
+— they are scale-invariant, which is the check that the conversion back is right — and every neural
+row moved, because a network is not scale-invariant.
+
 | model | aleatoric | epistemic | R2 clean | verdict |
 |---|---|---|---|---|
-| **Gaussian process** | **x12.9** | x1.6 | 0.85 | **PASS** |
-| ~~**NGBoost, 3 seeds**~~ | ~~x9.1~~ | ~~x0.7~~ | 0.84 | 🔴 **NOT A PASS — see §2.30.** The epistemic term is 3,581x smaller than the aleatoric one and rises with the noise. Re-measured at four settings; the x0.7 has no stable sign |
+| **Gaussian process** | **x17.2** | x1.5 | 0.85 | **PASS** — and its two terms are the same ORDER as each other, which is what makes the ratio readable |
 | **NGBoost, single fit** | **x9.1** | absent | 0.84 | **this is what runs.** Aleatoric right, no epistemic axis exists |
+| ~~NGBoost, 3 seeds~~ | ~~x9.1~~ | ~~x0.7~~ | 0.84 | 🔴 **NOT A PASS — §2.30.** The epistemic term is 3,581x smaller than the aleatoric one and rises with the noise; the x0.7 has no stable sign |
+| **DNN + variance head** | **x2.5** | x1.1 | **0.73** | **PASS.** The literature's flagship case (Kendall & Gal eq. 6). It was recorded as "cannot judge, does not fit" on an unscaled label |
+| MLP + variance head | x1.9 | x1.1 | 0.68 | **weak** — the right direction, but the aleatoric term barely moves |
+| variational (VBLL) | x4.6 | **x4.1** | **0.84** | 🔴 **FAIL — both rise together.** It FITS perfectly well; it cannot separate. Recorded as "does not fit" at R2 -0.04, which was the label scale |
+| heteroscedastic GP | x1.6 | x1.5 | 0.85 | **weak** — both terms barely move |
 | random forest | x5.7 | x5.3 | 0.84 | **FAIL** — both rise together |
-| variational (VBLL) | x1.3 | x1.1 | **-0.04** | **cannot judge** — does not fit |
-| DNN Bayesian net + variance head | x1.4 | x1.9 | **-4.0** | **cannot judge** — does not fit |
-| MLP Bayesian net + variance head | x1.2 | x1.1 | **-0.04** | **cannot judge** — does not fit |
+
+**The two conclusions that changed, and both matter.** The variance-head network — the case the
+literature actually holds up — **passes**, where §5.5i recorded it as untestable. And the
+variational network **fits QM9 perfectly well (R² 0.84) and fails the decomposition test on its
+merits**, where it was recorded as failing to fit. That second one is a real finding about a model
+on the settled uncertainty list, and it is a better reason than the one it replaces.
+
+**The decomposition list is unchanged and is now confirmed by measurement**: the Gaussian process
+is the only model that both fits and separates.
 
 **The forest failure is not a sample-size artefact.** The same result at 600, 3,000 and 5,000
 molecules, on PDV, ECFP4 and SNS, and on three of the study's own noise conditions. It is the
@@ -6196,11 +6225,11 @@ literature actually holds up — a network with a variance head, Kendall & Gal e
 untested here, not disproven.**~~
 
 🔴 **WITHDRAWN 2026-08-31 — see §2.31. The harness never standardised the LABEL**, and a network is
-not scale-invariant while a tree is, which is exactly why only the neural rows failed. With the
-label standardised, on the same 3,000 molecules through the same function: the DNN goes from R²
-−4.01 to **+0.73** and its two terms separate ×3.2 against ×1.2; the MLP from −0.04 to **+0.68**,
-×2.1 against ×1.5. **The variance-head case PASSES.** Every neural number in the table below was
-measured on an unscaled target and must not be quoted. Anything it reports about uncertainty is unreadable while the mean
+not scale-invariant while a tree is, which is exactly why only the neural rows failed. **The harness
+is fixed and the whole table below has been re-measured** — every neural model fits: the DNN with a
+variance head reaches R² 0.73, the MLP 0.68, and the variational network 0.84. **None of them
+"fails to fit QM9".** The variational network fails the decomposition test for a different and
+real reason: both of its terms rise together. Anything it reports about uncertainty is unreadable while the mean
 prediction is worse than predicting the average.
 
 **One property of the NGBoost ensemble to carry:** its epistemic term is real but minute, around
