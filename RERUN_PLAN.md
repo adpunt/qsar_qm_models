@@ -6602,6 +6602,97 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7y 🔴 OPEN DECISION — TUNING PER REPRESENTATION CONFOUNDS THE ANOVA (author, 2026-08-31)
+
+**The author raised this and is right.** The headline decomposition is a two-way analysis of
+variance over model and representation, with an explicit interaction term and a residual that is
+replicate variance (`_two_way_eta2_unbalanced` in `scripts/generate_paper_figures_v2.py`, called at
+line 2358 for the validation sets and through `_metric_two_way_anova` for QM9). It reports four
+shares: model, representation, model x representation, residual.
+
+**Why per-representation tuning breaks it.** If every model-and-representation cell carries its own
+hyperparameters, the hyperparameters vary along exactly the same axis as the interaction term. A
+network that is four layers deep on one representation and one layer deep on another is not one
+model measured twice — it is two models. Any effect of the tuning lands in the interaction share and
+in the main effect of model, and there is no way to separate it out afterwards. The sentence "the
+model and the representation interact, and that interaction is X% of the variance" would then be
+partly a statement about how the cells were configured.
+
+This is not a violation of a formal assumption — independence, equal variances and normal residuals
+are all untouched. It is a confound in what the terms MEAN, which is worse, because nothing in the
+output looks wrong.
+
+**A second, separate problem.** The search tuned on clean labels. A setting chosen at zero noise may
+be differentially good at zero noise, which biases the noise-level comparison the study is about.
+This applies whichever way the first question is settled.
+
+**What is affected:** the QM9 decomposition and the validation decomposition, both of which are
+model x representation. **What is not:** anything holding the representation fixed at PDV
+(`PRIMARY_REP`), and the uncertainty work, which is reported within a representation.
+
+**The three options.**
+
+1. **One tuned setting per model, shared across all representations.** The model becomes one fixed
+   thing, so the representation effect and the interaction are interpretable again. Costs
+   performance: the transfer measurement (5.7s) put the price of borrowing a setting across
+   representations at up to 0.14 in validation R-squared.
+2. **Defaults everywhere in the decomposition.** Maximally clean and it is what the paper currently
+   claims. Ruled out on its own evidence: the Bayesian network on PDV scores **-0.5568** at its
+   default. A robustness comparison that includes a model which does not fit at all is a worse
+   problem than the confound.
+3. **Tune per cell and report no interaction term.** Not viable — the interaction is a reported
+   result and `tab:anova_decomposition` is waiting on its column.
+
+**Recommendation: option 1**, and per-model tuning used for the sweep and both decompositions, with
+the per-representation values kept for any analysis that holds the representation fixed.
+
+🔴 **THE COST OF OPTION 1 IS NOT YET PAID.** Each pairing drew its OWN twelve random
+settings, so there is no common candidate pool to rank a model's settings across representations.
+Making one setting per model requires evaluating a shared pool on every representation. The cheapest
+honest version reuses each model's six winners, one per representation, and scores all six on all
+six representations: 36 fits per model per dataset, of which the six diagonal entries are already
+known. That is the machinery in `scripts/test_tuning_transfers.py`, which already ran for the
+support vector machine on QM9.
+
+#### 5.7z 🟠 THE THRESHOLDS
+
+**Settled — how close to an end a continuous value must be: the outer 10% of its range**, measured
+in log space for the parameters that are drawn on a log scale. Chosen because it barely matters:
+across a tenfold change in the tail width the count of significantly extreme pairings moves from 50
+to 67.
+
+| tail width | pairings significantly extreme |
+|---|---|
+| 2% | 50 |
+| 5% | 56 |
+| 10% | 60 |
+| 20% | 67 |
+
+**Replaced — the compute test is a rate, not a ratio.** A ratio cannot tell an expensive setting
+from a cheap one. Caco-2 LightGBM on ECFP4 is 56 times its default fit and adds 3.8 hours to the
+grid; the QM9 RBF Gaussian process on PDV is 2.1 times its default and adds 113.2 hours, the most in
+the whole search. The test is now **grid hours added per +0.01 in validation R-squared**, built from
+three measured quantities: seconds per fit as recorded by each run, the 280 fits the main grid runs
+per pairing (4 noise conditions x 7 levels x 10 replicates), and the validation R-squared the search
+scored.
+
+Adopting all 171 pairings that improve on their default costs 1,124 grid hours, at the tuning sample
+size, which is a floor for QM9.
+
+| most grid hours paid per +0.01 R-squared | pairings kept | grid hours | hours saved |
+|---|---|---|---|
+| 3 | 142 | 425 | 699 |
+| 5 | 146 | 447 | 677 |
+| 6 | 147 | 454 | 670 |
+| 7 | 151 | 537 | 587 |
+| 10 | 158 | 629 | 495 |
+| no limit | 171 | 1,124 | 0 |
+
+The curve is flat from 3 to 6 and steps up at 7.
+
+🟠 **AWAITING A NUMBER.** These figures are computed from the per-representation winners and
+will change if 5.7y settles on one setting per model.
+
 #### 5.7w 🟠 THE DECISION RULES — author, 2026-08-31
 
 Applied by `scripts/decide_tuned_settings.py`, which writes
