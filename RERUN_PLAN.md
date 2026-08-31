@@ -6644,6 +6644,53 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7ag ✅ THE NOISE TEST, PDV, COMPLETE — the variational families hold, the plain ones are unstable
+
+QM9, 3,000 molecules, one scaffold split, one seed. Training and validation labels noised with
+independent draws at a dose against the CLEAN training spread; scored on a clean test split. Both
+settings at a given level see the SAME noised labels, so the difference is paired and the swings
+below are fitting variance, not draw variance.
+
+**Tuned minus default, by noise level:**
+
+| model | 0.0 | 0.2 | 0.3 | 0.5 | 0.75 | 1.0 | 1.5 | verdict |
+|---|---|---|---|---|---|---|---|---|
+| variational alpha | +0.1503 | +0.1536 | +0.2063 | +0.1883 | +0.0855 | +0.1927 | +0.1931 | **holds** |
+| variational beta | +0.0719 | +0.1069 | +0.1253 | +0.1708 | +0.0930 | +0.0492 | +0.0617 | **holds** |
+| LightGBM | +0.0001 | -0.0050 | +0.0076 | +0.0307 | +0.0028 | +0.0418 | +0.0703 | holds, grows |
+| NGBoost | -0.0002 | +0.0023 | +0.0008 | +0.0047 | -0.0005 | +0.0044 | -0.0000 | inert |
+| random forest | +0.0072 | +0.0066 | +0.0086 | +0.0059 | -0.0038 | -0.0068 | -0.0039 | inert |
+| quantile forest | +0.0077 | +0.0101 | +0.0003 | -0.0062 | -0.0022 | -0.0163 | -0.0325 | inert |
+| XGBoost | -0.0108 | -0.0029 | -0.0024 | +0.0062 | -0.0225 | -0.0191 | +0.0194 | inert |
+| support vector machine | +0.0573 | +0.0403 | +0.0332 | -0.0218 | -0.0745 | -0.2361 | -0.3306 | **reverses** |
+| network beta | +0.0687 | +0.0173 | +0.0180 | -0.0613 | -0.0167 | -0.1139 | -0.0547 | **reverses** |
+| Bayesian beta | +0.4225 | -0.0962 | +0.6587 | +0.3392 | +0.4029 | +0.1897 | -0.1940 | erratic |
+| Bayesian alpha | -0.3244 | -0.6208 | -0.3753 | -0.4422 | -0.6245 | -0.6053 | +0.4340 | erratic |
+| network alpha | -0.1325 | -0.5192 | -0.5998 | +0.0424 | -0.6758 | -0.8320 | -0.0827 | erratic |
+
+**The two variational families are the clean case.** Both fall smoothly with noise and the tuned fit
+stays above the default at every level. Variational beta: default 0.774 down to 0.647, tuned 0.846
+down to 0.708. Variational alpha: default 0.548 down to 0.180, tuned 0.698 down to 0.373. Swings of
+0.13 to 0.37 across the whole noise range, all of it the noise doing its job. **Tune these two.**
+
+**The two plain Bayesian families cannot be decided from one seed.** Bayesian alpha's DEFAULT fit
+swings 1.001 across the levels and is non-monotone -- +0.550 at level 0.75, then -0.451 at 1.5. Its
+tuned fit is stable (swing 0.182) but sits near zero, which contradicts the +1.34 the search
+measured at 5,000 molecules. Bayesian beta's default swings 0.445, also non-monotone. **The
+instability is the finding**: these two have fitting variance larger than every effect being
+measured, and no tuning decision about them means anything until they are run with replicate seeds.
+
+**The support vector machine is the confound, cleanly.** Its DEFAULT is perfectly behaved -- a
+monotone decline from 0.853 to 0.734, swing 0.119. Its TUNED fit falls from 0.910 to 0.404, swing
+0.506. The clean-tuned setting degrades four times faster. Its tuned C sits at the top of its range,
+C is inverse regularisation, and there was no noise at tuning time to punish it.
+
+**The trees are indifferent** -- every tree family stays inside 0.07 at every level, and LightGBM
+slightly improves as noise rises.
+
+🟠 One seed, one representation, 300 test molecules. ChemBERTa is running and will say
+whether this is a property of the models or of PDV.
+
 #### 5.7ad ✅ SCOPE SETTLED 2026-08-31 — tune four models, and tune them per MODEL
 
 **Author's decision.** Only the four Bayesian and variational network families are tuned:
