@@ -3241,6 +3241,172 @@ the models actually run, and requires the support table to give each of them bot
 bite in both directions: naming a model the uncertainty list does not run, and naming one whose
 support says a half is absent.
 
+### 2.31 🔴 FOUND AND FIXED 2026-08-31 — five ways the screen would have died after the queue wait, and every wall clock was a guess
+
+An eight-way audit of the job generator, the generated scripts, the tuned-parameter path and
+the runbook, each serious finding then put to a skeptic told to refute it. 61 findings, 6
+refuted. Five would have killed tasks after days in the queue. All five are fixed; each is
+below with what it would have cost.
+
+**(a) THE RUST BINARY ON THE CLUSTER KILLS EVERY TASK.** `--selection-seed` became a required
+argument on 2026-08-28 (`rust/src/main.rs`, `.required_unless_present("self_test")`) and
+`process_and_train.py` passes it on every injection call. A binary built before that date is
+still executable, still passes an existence check, and rejects the argument with
+`error: unexpected argument '--selection-seed'` on the FIRST noise level of all 294 tasks.
+The job script's only check was `[ -x rust/target/release/rust_processor ]`, which a
+six-month-old binary satisfies, and the runbook's "confirm the fix is in the binary" step
+grepped `rust/src/main.rs` — the source, which is always current after a pull, and therefore
+says nothing about the artefact.
+
+Fixed by comparing timestamps rather than pinning the check to one flag name: the task refuses
+if `rust/target/release/rust_processor` is older than the newest file in `rust/src`. Three
+other commits changed the injector's behaviour after the canary without adding a flag, and a
+flag-name check would have passed all three. `git checkout` stamps a pulled source with the
+checkout time, so a binary built before the pull always loses the comparison.
+
+**(b) EVERY WALL CLOCK WAS ONE OF THREE GUESSED NUMBERS, AND FOUR WERE TOO SMALL.** The
+hours-per-110 column held 23, 35 or 47 — set in this generator's first commit (`afd92ec`) and
+never revisited, exactly as §10 already recorded. Against measured fit times at the production
+sample size (`results/tuning_local/timing.csv`, `timing_recovered.csv`, worst representation,
+default settings):
+
+| script | asked for | measured need | factor |
+|---|---|---|---|
+| `gauche_rbf` | 23:59 | **171 h** | 7.6x |
+| `ngboost` | 23:59 | **80 h** | 3.4x |
+| `dnn_bnn_full_variational` | 23:59 | **40 h** | 1.7x |
+| `mlp_bnn_full_variational` | 4:59 | **7 h** | 1.4x |
+
+Eleven others asked for far more than they need, which costs queue position rather than the
+run. Twelve measured numbers are now in the table with the source file named.
+
+**The screen no longer fits in one partition.** `gauche_rbf` (171:59) and `ngboost` (80:59)
+need `long`; the other fifteen belong on `medium`, where a shorter wall backfills sooner. The
+generator REFUSES rather than caps, so `--stage 0` without `--max-hours 720` now stops with
+the offending model named. The runbook sets the partition per script.
+
+**FIVE MODELS STILL HAVE NO MEASUREMENT ANYWHERE**: `qrf`, `gauche`, `heteroscedastic_gp` and
+the two heteroscedastic variational networks. They have no timing row at any sample size —
+and, separately, no scored row in any tuning sweep either, which is the same gap seen twice.
+Their entries are marked `UNMEASURED WALL` and the generator now prints them by name at the
+end of every run. Two are exact Gaussian processes, the same family as the entry that was
+wrong by 7.6x. Rung 5 of RUNBOOK §5c times them at 2,500 and 5,000 molecules and extrapolates
+cubically, which costs minutes rather than the hours a direct measurement at 10,000 would.
+
+**(c) THE TANIMOTO GAUSSIAN PROCESS WAS POINTED AT SORT & SLICE, WHICH IS NOT BINARY.** Sort
+& Slice is built with `sub_counts=True` and the featuriser multiplies each substructure by how
+often it occurs, so the vector holds small integers. `models/models.py` refuses a non-RBF
+kernel on a non-binary matrix at fit time. Three of that script's six tasks — and three of six
+in the main grid — would have queued, started, raised on every noise level and written an
+empty file. Nothing caught it: the generator's own test checks emitted command lines against
+the argument parser, and this failure happens inside the model. `FP_REPS` is now `['ecfp4']`
+and the submit range is `0-2`, not `0-5`. Sort & Slice keeps its Gaussian-process row through
+`gauche_rbf`, which runs on every representation. Binarising the counts for the Tanimoto
+kernel would be a decision about what is being compared, not a generator fix.
+
+**(d) IF CONDA CANNOT RESOLVE `env_test` BY NAME, EVERY TASK BUILDS THE ENVIRONMENT.**
+`setup.sh` decides whether the environment exists with `conda env list | awk '{print $1}' |
+grep -Fxq env_test`, which keys on the NAME column — and a prefix environment outside a
+configured `envs_dirs` prints with a blank name column. The runbook records `env_test` at
+`/data/stat-cadd/scat9264/conda_envs/env_test`, a prefix. The build branch had no array-task
+guard, unlike the extras block beside it. Reproduced by sourcing the real `setup.sh` against a
+stub `conda` printing the prefix shape with `SLURM_ARRAY_TASK_ID` set: it entered the build
+branch. Dozens of concurrent multi-gigabyte solves into one destination; the header of
+`setup.sh` already records that this solve is OOM-killed under a memory cap.
+
+Fixed with the same refusal the extras block has, under its own variable name
+(`SETUP_ENV_BUILD_REFUSED`, not the extras flag — reusing that one would tell the operator
+about torchsort when the problem is a missing environment), and a matching stop in the job
+template. **The refusal makes the failure clean, not absent**: rung 0 of RUNBOOK §5c settles
+on the cluster whether the name resolves at all, and it must be run.
+
+**(e) ROUGHLY A SIXTH OF THE TASKS WOULD FETCH THE CHEMBERTA WEIGHTS AT STARTUP.**
+`get_chemberta_model` calls `from_pretrained` with a hub id, so a cold cache reaches the
+internet. Nothing set `HF_HOME` or an offline flag, and the runbook's cache-clearing step did
+not mention the HuggingFace cache. On a compute node with no outbound network every ChemBERTa
+task dies inside `from_pretrained` having written nothing; with network they race to populate
+one shared directory. The documented smoke task is array index 0, which is ECFP4 — so the one
+task run before committing the queue never touched ChemBERTa. The job script now refuses on a
+cold cache and sets `HF_HUB_OFFLINE=1`, and rung 3 warms it once.
+
+**WHAT THE SKEPTICS KILLED.** Six findings did not survive, and two are worth recording so
+they are not raised again: a claim that a wall-clock-killed task leaves a short file the figure
+script reads as finished (the mechanics are real, the conclusion is the wrong way round), and
+a claim that the runbook's two dead pointers make it unfollowable (they are dead, the
+consequence is not).
+
+**STILL OPEN, AND THE AUTHOR'S CALL.** The main grid's `gauche_rbf` needs 1,534 hours against
+the `long` partition's 720-hour ceiling. Every option is a study decision: cap the Gaussian
+process's training set (`GP_DEFAULTS['max_train_n']` is `None`), reduce its scored folds the
+way `OOF_FOLDS_SCORED` allows, or split its array so the three settled uncertainty pairs get
+their own longer wall. **The screen is not blocked by this** — 171 hours fits `long` — so it
+is a main-grid decision, not a launch one.
+
+### 2.32 🟠 FOUND 2026-08-31 — the tuned hyperparameters had no working route to the cluster, and most of them still have none
+
+**The route was blocked.** `models/consolidate_tuned_params.py`, the file named for this job
+in §5069, has no argument parser at all: it globs `results/fig6a_*_default.csv`, which does not
+exist, prints an error and writes nothing. It never opens `results/tuning_local/`. The script
+that CAN produce the two files is `scripts/tune_hyperparameters.py --write-master`, and it was
+refusing at two separate points:
+
+1. `--write-master` reads only the untagged `best_by_pairing.json`, and its guard fires only
+   when that file is MISSING. It existed and was stale — 30 Aug 03:39, older than all seven
+   tagged sweeps. Consolidating would have silently used one sweep and dropped roughly two
+   days of search.
+2. `--merge`, the mode that combines tagged sweeps, globs `trials*.csv` in one shared
+   directory with no dataset filter, so the hERG (n=1415), Caco-2 (n=2161), LogD (n=5039) and
+   a 600-molecule probe sat alongside the eleven QM9 files at n=5000. It refused on mixed
+   sample sizes with a message naming the sizes but not the reason.
+
+**Unblocked 2026-08-31.** The six non-QM9 trials files were MOVED to
+`results/tuning_local/other_datasets/` (the glob is non-recursive, so a subdirectory is
+enough) and `best_by_pairing.json` was backed up as `best_by_pairing.before_merge_20260831.json`
+before the merge. `--merge` then read **1,122 rows from 11 files and wrote 75 pairings; the
+shared default won only 4 of them.** Largest gains: `dnn_bnn_full` x PDV **+1.3430**,
+`dnn_bnn_full_variational` x MHG-GNN **+0.7832**, `mlp_bnn_full_variational` x MHG-GNN
+**+0.5798**.
+
+**BUT MOST OF THE TUNING CANNOT REACH A MODEL, AND THE LARGEST GAINS ARE IN THE UNREACHABLE
+SET.** `models/tuning_rosters.writable_keys()` returns exactly `['lgb', 'ngboost', 'svm',
+'xgboost']`. Thirteen of the seventeen roster models share a tuned key with another model —
+six collapse onto `dnn`, four onto `mlp`, `rf`/`qrf` share one, both Gaussian processes share
+one, and `heteroscedastic_gp` has no call site at all — and `--write-master` skips every
+collapsed key, correctly, because one entry would apply one setting to four different models.
+So the tuned path reaches **24 of 98 pairings**. For the other 74,
+`load_best_hyperparameters` returns `None` silently; only the missing-FILE branch prints.
+Every row records the outcome in `params_source`, but nothing downstream reads that column.
+
+**The same five models are missing from the sweep as from the timing files** — `qrf`,
+`gauche`, `heteroscedastic_gp` and the two heteroscedastic variational networks produced no
+scored row in any sweep. Two independent gaps with one membership list.
+
+**OPEN, AND THE AUTHOR'S, IN ORDER OF COST.**
+
+1. **Does `--confirm` run, and at what size?** `--write-master` requires
+   `results/tuning_local/confirmation.csv`, which does not exist. Confirmation refits the
+   winner and the shared default and scores both on the TEST split — the stage that exists
+   because a search winner's own validation score is biased upward by construction. At the
+   default n=10000 this is real laptop compute; NGBoost alone is 5,443 s per fit on ChemBERTa.
+   Running it only on the four reachable models is the cheap version.
+2. **Do the collapsed models get their own keys?** One changed literal per call site in
+   `models/models.py` would give `rf`, `dnn`, `mlp` and the Gaussian processes separate
+   entries and make the +1.34 reachable. `models/tuning_rosters.py` already names this as the
+   author's decision.
+3. **Is the screen tuned at all?** RUNBOOK §2b currently moves both files ASIDE before
+   submitting, on the stated grounds that the screen's intended state is the shared defaults
+   uniformly. That contradicts the reason for re-running. It is one instruction, and it needs
+   an answer before the submit block is used.
+
+**A cost that is NOT a defect but must be priced in:** on the measured trials, the winning
+settings are much slower than the defaults for the tree models — LightGBM on ECFP4 goes from
+19.9 s to 397.9 s per fit (20x), the random forest on ECFP4 from 13.4 s to 170.1 s (12.7x).
+The wall clocks in §2.31 are measured at the DEFAULT settings. If tuning is switched on for
+the four reachable models, their walls must be re-derived first. And `rf` on ECFP4 and on
+ChemBERTa both won at `min_samples_leaf: 1`, where `models/model_defaults.py` records the
+forest's aleatoric share is exactly 0.0000 — adopting them deletes the forest's uncertainty
+split.
+
 ### 2.27 ✅ CLOSED 2026-08-30 — the shape column is in the cross-check, and the run counts are right
 
 **Two of the four open uncertainty items, both closed.**
@@ -6380,6 +6546,67 @@ So a parameter name the builder ignores cannot score well here and then do nothi
 declared `--use-best-params` with `action='store_true'` (`process_and_train.py:379`), so it takes
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
+
+#### 5.7w 🟠 THE DECISION RULES — author, 2026-08-31
+
+Applied by `scripts/decide_tuned_settings.py`, which writes
+`results/tuning_local/DECISIONS.md`. One row per pairing, no pairing left out.
+
+**How the author is deciding.** A tuned setting is only worth adopting if it earns its place three
+ways: it must beat the default, it must not be asking for a model at the edge of how large the
+search would let it grow, and it must not cost materially more to train. The third test was missing
+until now, and it turns out to be the one that fires most often — 49 pairings are flagged for
+training time alone, against 40 flagged for a value at an end.
+
+1. **The default beats the best drawn setting — keep the default.** It is still written out as the
+   tuned value, marked as deliberately the default, because an absent entry and a considered
+   decision to use the default look identical on disk otherwise.
+2. **Beats the default, nothing significantly extreme, not slower — adopt.**
+3. **Anything else needs a decision**, and for each one the script looks for an alternative that
+   beats the default, has no significantly extreme value, and costs no more than 1.5x the default.
+
+**"Significantly extreme" means at the EXPENSIVE end of the range.** A value at an end only matters
+when it is at the end that makes the model bigger or slower, because that is the end that would keep
+going if the range were widened, and the end that costs compute on the full grid. A width sitting at
+its smallest option is at an end too, and it is asking for a cheaper model — nothing to review. The
+parameters treated as expensive at their maximum: number of trees, tree depth, leaf count, feature
+fraction, all network widths, network layer count, the support vector machine's C, and the row and
+column sampling fractions. Expensive at their minimum: minimum samples per leaf, minimum samples per
+split, minimum child samples, minimum child weight, and — for the boosters only, which respond by
+running more rounds — the learning rate. A network's learning rate is not a cost, because the epoch
+count is fixed either way.
+
+**Compute is measured, not guessed.** Every fit recorded its own seconds, and each pairing's winner
+is compared against that same pairing's own default fit. The laptop ran up to six searches at once,
+so a ratio near 1 is noise. Only a ratio of 2 or more counts as slow, for that reason.
+
+🟠 **TWO THRESHOLDS AWAITING SIGN-OFF:** slow means 2x the default fit or worse; an
+alternative may cost up to 1.5x the default. Both are round numbers chosen to sit well clear of the
+timing noise, not measured quantities.
+
+**Where it lands:**
+
+| dataset | adopt | keep the default | needs a decision | of those, a cheaper clean alternative exists | no alternative |
+|---|---|---|---|---|---|
+| QM9 | 32 | 4 | 39 | 23 | 16 |
+| LogD | 11 | 0 | 25 | 15 | 10 |
+| Caco-2 | 10 | 6 | 20 | 11 | 9 |
+| hERG | 14 | 2 | 20 | 15 | 5 |
+
+Taking the alternative costs a median of 0.019 in validation R², and under 0.01 on 17 of the 64.
+The worst case gives up 0.249.
+
+The 40 with no alternative are two thirds XGBoost and LightGBM (12 each), which are searched on ten
+and nine parameters — those searches drew almost nothing that was both clean and cheap.
+
+#### 5.7x 🚨 THE VALIDATION RESULT FILES MOVED, AND THE REPORT WENT QUIET ABOUT IT
+
+On 2026-08-31 another session moved the hERG, LogD and Caco-2 result files into
+`results/tuning_local/other_datasets/`. Nothing was lost. But the report read a flat glob, so the
+next regeneration would have reported all three datasets as having no results at all — and a missing
+file is indistinguishable from a search that never ran. Both readers now search one level of
+subfolder, and both skip `aborted_10000/`, which holds the abandoned 10,000-molecule runs and must
+never be read beside the 5,000-molecule ones.
 
 #### 5.7t ✅ THE SEARCH IS FINISHED — all four datasets, 2026-08-31
 
@@ -10870,6 +11097,32 @@ the reason is in this document, with the fit count both ways.
 ---
 
 #### Chat H — Job scripts, preflight, gates, launch
+
+##### 🟡 2026-08-31 — THE SCREEN IS NOT SUBMITTED, AND THAT IS THE RIGHT STATE
+
+The two canary tasks of 2026-08-28 (`12925391` `rf`, `12925392` `qrf`) were queued before the
+audit in §2.31. **Nothing else has been submitted, and nothing should be until the interactive
+ladder in RUNBOOK §5c has been walked**, because the audit found five ways a task dies after
+the queue wait — one of which, the stale Rust binary (§2.31a), kills all 294.
+
+**Done, in the repository, this session:**
+
+| what | where |
+|---|---|
+| the binary must be newer than `rust/src`, not merely present | `generate_scripts.py` template |
+| twelve measured wall clocks replace three guessed ones; the generator names the five that are still guesses, every run | `generate_scripts.py` `MODELS` |
+| the Tanimoto GP runs on ECFP4 alone | `generate_scripts.py` `FP_REPS`, RUNBOOK §5 |
+| `setup.sh` refuses to build the environment from an array task, and the job stops when it does | `setup.sh`, `generate_scripts.py` template |
+| the ChemBERTa cache must be warm; a task refuses rather than downloads | `generate_scripts.py` template |
+| the screen needs `--max-hours 720`, and two of its scripts need `long` | RUNBOOK §3, §4, §5 |
+| the interactive proof ladder, seven rungs, each verified against the real flags | RUNBOOK §5c |
+| the tuned sweeps merged: 1,122 rows, 11 files, 75 pairings | `results/tuning_local/best_by_pairing.json` |
+
+**Not done, and each is the author's:** whether `--confirm` runs and at what sample size;
+whether the collapsed models get their own tuned keys; whether the screen is tuned at all;
+and what `gauche_rbf` does about the main grid's 1,534 hours against a 720-hour ceiling
+(§2.31, §2.32). **None of the four blocks the screen.**
+
 
 ### 🔵 UPDATING THE CLUSTER CHECKOUT — `bash scripts/pull_safely.sh`, always
 

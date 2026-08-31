@@ -51,6 +51,9 @@ from collections import defaultdict
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT_DIR = os.path.join(_ROOT, 'results', 'tuning_local')
+
+# Subfolders whose result files must never be read alongside the current run.
+SUPERSEDED = {'aborted_10000'}
 REPORT = os.path.join(OUT_DIR, 'TUNING_RESULTS.md')
 
 sys.path.insert(0, _HERE)
@@ -93,7 +96,17 @@ def load(dataset):
     import tuning_rosters as R
 
     files = []
-    for path in sorted(glob.glob(os.path.join(OUT_DIR, 'trials_*.csv'))):
+    # Subfolders too. Another session moved the three validation datasets'
+    # result files into other_datasets/ on 2026-08-31, and a flat glob then
+    # reported those datasets as having no results at all -- silently, because
+    # a missing file is indistinguishable from a search that never ran.
+    for path in sorted(glob.glob(os.path.join(OUT_DIR, 'trials_*.csv'))
+                       + glob.glob(os.path.join(OUT_DIR, '*', 'trials_*.csv'))):
+        # aborted_10000/ holds the abandoned 10,000-molecule runs. Reading them
+        # beside the 5,000-molecule ones is what produced '82 of 72 settings'
+        # once already; the subfolder search must not undo that.
+        if os.path.basename(os.path.dirname(path)) in SUPERSEDED:
+            continue
         name = os.path.basename(path)
         is_val = any(v in name for v in VALIDATION)
         if (dataset == 'qm9') == (not is_val) and (

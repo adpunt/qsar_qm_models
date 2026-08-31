@@ -45,6 +45,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT_DIR = os.path.join(_ROOT, 'results', 'tuning_local')
 
+# Subfolders whose result files must never be read alongside the current run.
+SUPERSEDED = {'aborted_10000'}
+
 # NOT EVERY EDGE IS A WARNING, and reporting all of them equally buries the ones
 # that matter.
 #
@@ -228,7 +231,17 @@ def main():
     import tuning_rosters as rosters
 
     rows = []
-    for path in sorted(glob.glob(os.path.join(OUT_DIR, 'trials_*.csv'))):
+    # Subfolders too. Another session moved the three validation datasets'
+    # result files into other_datasets/ on 2026-08-31, and a flat glob then
+    # reported those datasets as having no results at all -- silently, because
+    # a missing file is indistinguishable from a search that never ran.
+    for path in sorted(glob.glob(os.path.join(OUT_DIR, 'trials_*.csv'))
+                       + glob.glob(os.path.join(OUT_DIR, '*', 'trials_*.csv'))):
+        # aborted_10000/ holds the abandoned 10,000-molecule runs. Reading them
+        # beside the 5,000-molecule ones is what produced '82 of 72 settings'
+        # once already; the subfolder search must not undo that.
+        if os.path.basename(os.path.dirname(path)) in SUPERSEDED:
+            continue
         with open(path) as fh:
             rows += [r for r in csv.DictReader(fh)]
     if not rows:
