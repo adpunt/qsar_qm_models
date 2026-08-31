@@ -127,6 +127,7 @@ def seconds_for(rows, score):
 def main():
     import analyse_tuned_settings as A
     import report_tuning_results as RT
+    import tune_hyperparameters as T
     import tuning_rosters as R
 
     trials = trial_rows()
@@ -152,7 +153,7 @@ def main():
             continue
         adopt, keep, review = [], [], []
         for k, c in sorted(cands.items()):
-            fam = R.TUNED_KEY.get(k[0], k[0])
+            fam = T.search_family(k[0], R) or k[0]
             sp = ranges.get(fam, {})
             if not sp:
                 continue

@@ -264,6 +264,33 @@ SEARCH_SPACES = {
 GP_KERNEL_FOR = {'gauche_rbf': 'RBF', 'gauche': 'Tanimoto'}
 
 
+def search_family(model_label, rosters=None):
+    """Which SEARCH_SPACES entry this model is searched under.
+
+    NOT the same question as which tuned-file key it reads. Several models share
+    a search space because they share an architecture -- the quantile forest is
+    searched as a forest, the Bayesian and variational networks as their
+    deterministic base, both Gaussian processes as one. Which tuned FILE key each
+    one reads is a separate decision, recorded in models/tuning_rosters.py, and
+    it changed on 2026-08-31 when every model was given its own key. Reading the
+    search space off that map broke the moment it did, because the map then named
+    keys no search space has.
+    """
+    if rosters is not None:
+        key = getattr(rosters, 'TUNED_KEY', {}).get(model_label)
+        if key in SEARCH_SPACES:
+            return key
+    if model_label in SEARCH_SPACES:
+        return model_label
+    for suffix in ('_bnn_full_variational_hetero', '_bnn_full_variational',
+                   '_bnn_full'):
+        if model_label.endswith(suffix):
+            base = model_label[:-len(suffix)]
+            if base in SEARCH_SPACES:
+                return base
+    return {'qrf': 'rf', 'gauche_rbf': 'gauche'}.get(model_label)
+
+
 def sample_setting(key, rng, model_label=None):
     params = {name: draw(rng) for name, draw in SEARCH_SPACES[key].items()}
     if key == 'gauche':

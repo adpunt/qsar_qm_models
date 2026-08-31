@@ -134,8 +134,10 @@ def load(dataset):
     for m, rep in R.qm9_pairings():
         if m not in models_here:
             continue
-        drawn[(m, rep)] = [T.sample_setting(R.TUNED_KEY[m], rng, m)
-                           for _ in range(12)]
+        fam = T.search_family(m, R)
+        if fam is None:
+            continue
+        drawn[(m, rep)] = [T.sample_setting(fam, rng, m) for _ in range(12)]
 
     for r in rows:
         k = (r['model'], r['rep'])
@@ -174,6 +176,7 @@ def star_baseline(out):
     baseline before reading anything into a star.
     """
     import analyse_tuned_settings as A
+    import tune_hyperparameters as T
     import tuning_rosters as R
 
     agg = {}
@@ -182,7 +185,7 @@ def star_baseline(out):
         if not cands:
             continue
         for k, c in cands.items():
-            key = R.TUNED_KEY.get(k[0], k[0])
+            key = T.search_family(k[0], R) or k[0]
             sp = ranges.get(key, {})
             if not sp:
                 continue
@@ -240,6 +243,7 @@ def beats(score, d):
 
 def report(dataset, out):
     import analyse_tuned_settings as A
+    import tune_hyperparameters as T
     import tuning_rosters as R
 
     default, cands, sizes, ranges = load(dataset)
@@ -253,7 +257,7 @@ def report(dataset, out):
 
     groups = {'record': [], 'worse': [], 'one': [], 'two': [], 'depth': []}
     for k, c in sorted(cands.items()):
-        sp = ranges.get(R.TUNED_KEY.get(k[0], k[0]), {})
+        sp = ranges.get(T.search_family(k[0], R) or k[0], {})
         if not sp:
             continue
         score, params = max(c, key=lambda t: t[0])

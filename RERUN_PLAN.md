@@ -3390,12 +3390,54 @@ script reads as finished (the mechanics are real, the conclusion is the wrong wa
 a claim that the runbook's two dead pointers make it unfollowable (they are dead, the
 consequence is not).
 
-**STILL OPEN, AND THE AUTHOR'S CALL.** The main grid's `gauche_rbf` needs 1,534 hours against
-the `long` partition's 720-hour ceiling. Every option is a study decision: cap the Gaussian
-process's training set (`GP_DEFAULTS['max_train_n']` is `None`), reduce its scored folds the
-way `OOF_FOLDS_SCORED` allows, or split its array so the three settled uncertainty pairs get
-their own longer wall. **The screen is not blocked by this** — 171 hours fits `long` — so it
-is a main-grid decision, not a launch one.
+**(f) ✅ SETTLED SAME DAY — EVERY GAUSSIAN PROCESS TRAINS ON AT MOST 5,000 MOLECULES.**
+
+The main grid's `gauche_rbf` needed **1,536 hours against the longest partition's 720-hour
+ceiling**. It fitted in no partition, at any setting, and no amount of queue patience would
+have helped.
+
+An exact Gaussian process factorises an n x n matrix, so its cost grows with the CUBE of the
+training set. At 8,000 training molecules — 80% of the production sample of 10,000 — one fit
+is 3.25 hours measured. The author's decision, 2026-08-31: **cap it at 5,000, everywhere.**
+
+| | uncapped (8,000) | capped (5,000) |
+|---|---|---|
+| one fit | 3.25 h | **0.79 h** |
+| screen, per task | 171 h | **42 h** |
+| main grid, per task | 1,536 h | **375 h** |
+
+375 sits inside the ceiling with room to spare, and the screen drops back onto `medium`.
+
+**THE SETTING EXISTED AND NO CODE HAD EVER READ IT.** `GP_DEFAULTS['max_train_n']` was
+declared in `models/model_defaults.py` and consumed nowhere in the repository, so `None` and
+`5000` did the same thing: nothing. A grep for the name returned exactly one hit, its own
+declaration.
+
+**How it is applied**, in `cap_gp_training_set` (`models/model_defaults.py`), called by both
+Gaussian-process fitters in `models/models.py`:
+
+- **The same molecules every time.** Seeded on the run's own seed, so a repeat of a run fits
+  the identical subset.
+- **The same molecules for both Gaussian processes on one run.** The ordinary and the
+  heteroscedastic process draw from the same seed, so they differ by their noise model and by
+  nothing else. Comparing them would otherwise be comparing two training sets as well.
+- **The original molecule order is preserved** — the chosen indices are sorted — so nothing
+  downstream that assumes order is disturbed.
+- **The count is written onto every results row**, appended to `gp_fit_method` as
+  `n_train=5000`. A fit on 5,000 molecules and a fit on 8,000 are different experiments and a
+  reader must be able to see which one produced a row without consulting a comment.
+- **The test set is untouched**, so accuracy stays comparable with every other model. The
+  Gaussian process simply learns from fewer molecules, and says so.
+
+**WHY THIS IS NOT THE MISTAKE THE OLD COMMENT WARNED ABOUT.** The comment beside the setting
+recorded that a 2,000-molecule cap had once applied on the experimental side ONLY, making the
+two pipelines fit different models under one name. This cap applies to every Gaussian process,
+on every dataset, at every noise level, in both pipelines. It is uniform, and uniformity is
+precisely what the old cap lacked.
+
+**Still open on cost, and NOT blocking the screen:** the main grid's `ngboost` is 715 hours
+against the same 720-hour ceiling — inside it, but with five hours of margin. That is a
+main-grid decision, not a launch one.
 
 ### 2.32 🟠 FOUND 2026-08-31 — the tuned hyperparameters had no working route to the cluster, and most of them still have none
 
@@ -6601,6 +6643,83 @@ So a parameter name the builder ignores cannot score well here and then do nothi
 declared `--use-best-params` with `action='store_true'` (`process_and_train.py:379`), so it takes
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
+
+#### 5.7aa 🔴 TUNING ON CLEAN LABELS PICKS SETTINGS THAT BREAK UNDER NOISE — first result
+
+`scripts/tuned_under_noise.py`, QM9, 3,000 molecules, one scaffold split, one seed, no replicates.
+Training and validation labels are noised with independent draws at a dose set against the CLEAN
+training spread; the test split stays clean and is what everything is scored on. Levels are the
+settled grid.
+
+**Support vector machine on PDV, tuned minus default, on the clean test split:**
+
+| noise level | default | tuned | difference |
+|---|---|---|---|
+| 0.0 | +0.8529 | +0.9102 | **+0.0573** |
+| 0.2 | +0.8466 | +0.8868 | +0.0402 |
+| 0.3 | +0.8395 | +0.8727 | +0.0332 |
+| 0.5 | +0.8141 | +0.7924 | -0.0217 |
+| 0.75 | +0.8131 | +0.7386 | -0.0745 |
+| 1.0 | +0.7956 | +0.5595 | -0.2361 |
+| 1.5 | +0.7344 | +0.4038 | **-0.3306** |
+
+The advantage reverses between level 0.3 and 0.5 and the tuned setting ends up **0.33 worse** than
+the untuned one. The mechanism is not mysterious: this pairing's tuned C sits at the top of its
+range, C is inverse regularisation, and an under-regularised model fits the noise. The search chose
+it because at zero noise there is nothing to overfit.
+
+**This is the second problem in 5.7y, measured.** If it holds across models, adopting clean-tuned
+settings makes every model look LESS robust than it is, and the size of the distortion varies by
+model — which is exactly the comparison the paper makes. The test split here is 300 molecules, so
+single scores are loose; the comparison is paired on identical molecules and identical noise draws,
+so the DIFFERENCE column is much tighter than the individual scores.
+
+🟠 Full run in progress: 12 model families x 2 representations (PDV, and ChemBERTa as the
+next smallest at 384 features) x 7 levels x 2 settings.
+
+#### 5.7ab 📊 WHICH MODELS ACTUALLY NEED TUNING — measured, all four datasets
+
+Median gain in validation R-squared from the tuned setting over the default, and the count of
+pairings where tuning wins:
+
+| group | pairings | median gain | best | beats the default |
+|---|---|---|---|---|
+| **Bayesian and variational networks** | 24 | **+0.1924** | +1.3430 | 24 of 24 |
+| kernel (support vector machine, GP) | 27 | +0.0350 | +0.1032 | 25 of 27 |
+| forests | 30 | +0.0339 | +0.0696 | 29 of 30 |
+| plain networks | 48 | +0.0337 | +0.2702 | 47 of 48 |
+| boosted trees | 54 | +0.0181 | +0.0837 | 46 of 54 |
+
+**The author's instinct that networks need tuning and forests do not is half right, and the half
+that is wrong matters.** Plain networks gain +0.0337, forests +0.0339 — indistinguishable. The real
+divide is the Bayesian and variational networks, which gain six times as much as anything else and
+win on every single pairing. Their defaults are not merely suboptimal: the Bayesian network on PDV
+scores **-0.5568** untuned. Those defaults were never set for this problem.
+
+So the rule is not "networks yes, trees no". It is: **the four Bayesian and variational network
+families need tuning; everything else gains about 0.02 to 0.04 and can be argued either way.**
+
+Cost per model, as grid hours per +0.01 R-squared: the Bayesian networks are the CHEAPEST gains in
+the study at 0.1 to 0.5, the support vector machine 0.1, plain networks 0.4 to 0.5, XGBoost 1.3,
+forests 2.7 to 3.1, LightGBM 3.5, NGBoost 8.5, and the RBF Gaussian process 4,498 — which is why it
+was closed.
+
+#### 5.7ac 🔴 THE LAB DATASETS HAVE NO UNCERTAINTY SPLIT ON DISK — the author was right
+
+Checked 2026-08-31. `results/validation_full/` holds six per-molecule uncertainty files and their
+columns are `sigma, sample_idx, y_true, y_pred, uncertainty`. **One column. No split.** Coverage is
+LogD (the Gaussian process on PDV, the quantile forest on four representations) and Caco-2 (the
+quantile forest on ECFP4). **hERG has nothing.**
+
+Two things make it worse. The quantile forest is most of what is there, and the quantile forest is
+the model that FAILS the decomposition test (5.5i: both terms rise together). NGBoost, one of the
+two families that does pass, has no file at all.
+
+**The code is already fixed; the runs are not.** `alternative_data_noise_robustness.py` now writes
+`aleatoric_uncertainty` and its partner, and carries the comment that the pipeline "wrote one column
+and performed no split, and the paper's uncertainty section is built on these three datasets". The
+files on disk are dated **12 February 2026**, six months before that fix. Nothing has been
+regenerated.
 
 #### 5.7y 🔴 OPEN DECISION — TUNING PER REPRESENTATION CONFOUNDS THE ANOVA (author, 2026-08-31)
 
