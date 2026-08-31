@@ -2983,6 +2983,67 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.31 🔴 FOUND 2026-08-31 — the neural models did not fail to fit QM9; the harness never standardised the label
+
+**This corrects §5.5i's headline finding.** That section records, in bold: *"All three neural
+families fail to FIT on QM9 descriptors, R2 from -0.04 to -4.8 against 0.84 for every tree model on
+identical data"*, and concludes that **the case the literature actually holds up — a network with a
+variance head, Kendall & Gal eq. 6 — is untested here rather than disproven.** The failure is an
+artefact of the measurement harness.
+
+**What was wrong.** `scripts/decomposition_controls.py` has a `_standardise` helper, and it scales
+**X only**. The label is never touched. QM9's HOMO-LUMO gap is in Hartree: mean 0.254, spread
+0.047. The production pipeline standardises the label — `--normalize True`, and every results row
+carries `standardisation_mean` and `standardisation_sd`.
+
+**Why that hits only the neural models, which is exactly the pattern §5.5i saw.** A random forest is
+invariant to any monotone rescaling of the label, so it cannot care. NGBoost fits a distribution
+whose scale is a free parameter, so it adapts. Those are the models that scored 0.84. A network
+trained by gradient descent at a fixed learning rate is not invariant — and these networks use the
+heteroscedastic likelihood, `0.5*(log_var + (y-mean)^2/var)`, whose minimiser at residuals of order
+0.01 is a log-variance near −9.2 while the head starts near 0. That is a variance ten thousand times
+too large at initialisation.
+
+**Measured. Same 3,000 real QM9 molecules, PDV, three folds out of fold on scaffold groups, same
+`fit_bnn_mve` called unchanged — the only difference is that the label is standardised on the fit
+rows and both variance terms converted back by the SQUARE of the spread. Every number is in the
+label's own units.**
+
+| network | label | R² clean | aleatoric | epistemic | verdict |
+|---|---|---|---|---|---|
+| DNN + variance head | as measured in §5.5i | **−4.01** | ×1.4 | ×1.9 | cannot judge |
+| DNN + variance head | **standardised** | **+0.73** | **×3.2** | **×1.2** | **PASS** |
+| MLP + variance head | as measured in §5.5i | **−0.04** | ×1.2 | ×1.1 | cannot judge |
+| MLP + variance head | **standardised** | **+0.68** | **×2.1** | **×1.5** | **PASS** |
+
+The unstandardised rows reproduce §5.5i to four decimal places (−4.0147 against its −4.01, −0.0421
+against its −0.04), so the harness is faithful and the standardised rows are the like-for-like
+comparison.
+
+**What this changes.**
+
+1. **The literature's flagship case works here.** A network with a variance head separates the two
+   terms on QM9 descriptors: the aleatoric term rises with the injected noise and the epistemic term
+   roughly holds still, which is the pass condition. The two are also the same ORDER as each other
+   (0.00139 and 0.00032), which is what made the Gaussian process's result readable and NGBoost's
+   not (§2.30). **It is not untested and it is not disproven — it passes.**
+2. **§5.5i's neural rows must not be quoted.** Every neural number in that table was measured on an
+   unscaled target. That includes the VBLL row at R² −0.03, which is a model on the settled
+   uncertainty list.
+3. **No production result is affected.** The pipeline standardises. This is a defect in the
+   measurement harness only, and nothing on the cluster reads it.
+
+**What this does NOT change: the settled lists stand.** The two models measured here are the
+variance-head networks (`dnn_bnn_full_mve`, `mlp_bnn_full_mve`), which are on neither roster — they
+are reachable only through `--loss heteroscedastic`, which no job passes (§5.5a). The four
+uncertainty models and the decomposition list are unchanged by this finding. What changes is the
+paper's explanation of WHY, which currently rests on a claim about neural models that is not true.
+
+**Still to do, and it is cheap:** standardise the label inside `decomposition_controls.py` so the
+harness stops producing unreadable neural numbers, and re-take the neural rows of §5.5i. Not applied
+here because that file is a measurement instrument whose output is quoted in three places, and
+changing it silently would leave those quotes attached to numbers nobody re-measured.
+
 ### 2.30 🔴 FOUND AND FIXED 2026-08-30 — NGBoost's seed ensemble does not work, and it would have stopped every NGBoost task
 
 **This corrects §5.5i's table and §2.28, both of which recorded NGBoost over three seeds as a PASS
@@ -6103,10 +6164,17 @@ molecules, on PDV, ECFP4 and SNS, and on three of the study's own noise conditio
 mechanism: one bootstrap resampling widens the spread inside each leaf AND moves where the trees
 split, so both terms carry the same signal. No setting change repairs it (§5.5d).
 
-**🔴 All three neural families fail to FIT on QM9 descriptors**, R2 from -0.04 to -4.8 against 0.84
+~~**🔴 All three neural families fail to FIT on QM9 descriptors**, R2 from -0.04 to -4.8 against 0.84
 for every tree model on identical data, with the pipeline's own early stopping. **The case the
 literature actually holds up — a network with a variance head, Kendall & Gal eq. 6 — is therefore
-untested here, not disproven.** Anything it reports about uncertainty is unreadable while the mean
+untested here, not disproven.**~~
+
+🔴 **WITHDRAWN 2026-08-31 — see §2.31. The harness never standardised the LABEL**, and a network is
+not scale-invariant while a tree is, which is exactly why only the neural rows failed. With the
+label standardised, on the same 3,000 molecules through the same function: the DNN goes from R²
+−4.01 to **+0.73** and its two terms separate ×3.2 against ×1.2; the MLP from −0.04 to **+0.68**,
+×2.1 against ×1.5. **The variance-head case PASSES.** Every neural number in the table below was
+measured on an unscaled target and must not be quoted. Anything it reports about uncertainty is unreadable while the mean
 prediction is worse than predicting the average.
 
 **One property of the NGBoost ensemble to carry:** its epistemic term is real but minute, around
