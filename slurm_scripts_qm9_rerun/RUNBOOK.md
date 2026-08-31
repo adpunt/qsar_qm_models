@@ -454,11 +454,12 @@ echo "account=$ACCT (emit suggested $EMIT_ACCT)  partition=$PART"
 #
 # THE SCREEN NO LONGER FITS IN ONE PARTITION. Corrected 2026-08-31, when the
 # guessed wall clocks were replaced with measured ones (RERUN_PLAN.md 2.33).
-# Fourteen of the seventeen screen scripts are under 48 hours and belong on
-# `medium`, where a shorter requested wall backfills sooner. Three are not:
+# Fifteen of the seventeen screen scripts are under 48 hours and belong on
+# `medium`, where a shorter requested wall backfills sooner. Two are not:
 #
-#     gauche_rbf                171:59   -> long
 #     ngboost                    80:59   -> long
+#     gauche_rbf                 42:59   -> medium (the 5,000-molecule cap; it
+#                                          was 171:59 before the cap)
 #     dnn_bnn_full_variational   39:59   -> medium (fits, but only just)
 #
 # Submitting an 80-hour job to `medium` is rejected at submit time, which is
@@ -610,8 +611,8 @@ for s in heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variati
     sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_qrf.sh
-# gauche_rbf is 171:59 on measured timings -- `long`, and nothing else holds it.
-sbatch --account=$ACCT --partition=$PART_LONG --array=0-17%4 qm9_s0_gauche_rbf.sh
+# gauche_rbf is 42:59 with the 5,000-molecule cap, so it fits `medium`.
+sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-2%4  qm9_s0_gauche.sh   # ECFP4 only
 ```
 

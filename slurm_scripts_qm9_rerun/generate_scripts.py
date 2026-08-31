@@ -400,12 +400,27 @@ if _unused:
 # setting. At 5,000 the same fit is 0.79 hours, the screen is 42 and the main
 # grid 375. gauche_rbf's entry below is the capped number.
 #
-# FIVE MODELS HAVE NO MEASUREMENT ANYWHERE: qrf, gauche, heteroscedastic_gp and
-# the two hetero variational networks. Their entries are marked UNMEASURED, they
-# keep a deliberately generous placeholder, and main() prints them by name so a
-# submission is never made in ignorance of which walls rest on nothing. Two of
-# them are exact Gaussian processes -- the same family as gauche_rbf, the entry
-# that was wrong by 7.6x -- so those two are the ones to measure first.
+# FIVE MODELS HAD NO MEASUREMENT ANYWHERE AND ALL FIVE ARE NOW SIZED, 2026-08-31.
+# They produced no timing row at any sample size and no scored row in any tuning
+# sweep -- the same five, twice over. They sat at the guessed 47, which put three
+# of them at 4:59, and two of those are exact Gaussian processes: at the capped
+# size a single fit is 0.79 hours, so seven noise levels is 5.5 hours and they
+# would have been killed at the wall after their queue wait.
+#
+#   qrf                 6   MEASURED ON ARC. Canary job 12925392, array index 0:
+#                           55 minutes for seven training runs at six fits each,
+#                           which is 2.09 hours per 110 runs. Carried at 6, a
+#                           factor of three over the measurement.
+#   gauche             87   DERIVED from gauche_rbf. Same exact Gaussian process,
+#                           same capped training set; only the kernel differs, and
+#                           a Tanimoto kernel is not more expensive than an RBF one.
+#   heteroscedastic_gp 174  DERIVED: twice gauche_rbf, for the noise network on top
+#                           and its 100 Adam epochs over the same kernel.
+#   *_variational_hetero    DERIVED: 1.5x each one's plain sibling, for the noise head.
+#
+# DERIVED IS NOT MEASURED, and main() still prints anything not measured by name.
+# Rung 5 of RUNBOOK section 5c times them properly; until it has run, these are
+# sized from the nearest thing that HAS been measured, with margin.
 MODELS = {
     'rf':                       ('-m rf',        1, 12, 'random forest', ALL_REPS),
     'xgboost':                  ('-m xgboost',   1,  5, '', ALL_REPS),
@@ -426,10 +441,10 @@ MODELS = {
     'dnn_bnn_full_variational': ('-m dnn --bayesian-transformation full_variational -u True', 2, 81, 'VBLL-alpha (figure script reads this as dnn_vbll)', ALL_REPS),
     'mlp_bnn_full_variational': ('-m mlp --bayesian-transformation full_variational -u True', 2, 79, 'VBLL-beta (figure script reads this as mlp_vbll)', ALL_REPS),
     # Outside the ANOVA roster, but they feed figures and supplementary tables:
-    'qrf':        ('-m qrf -u True', 3, 23, 'UNMEASURED WALL. not in the ANOVA (rho 0.996 with rf) but the best error-ranker', ALL_REPS),
+    'qrf':        ('-m qrf -u True', 3, 6, 'MEASURED ON ARC. not in the ANOVA (rho 0.996 with rf) but the best error-ranker', ALL_REPS),
     'gauche_rbf': ('-m gauche --kernel rbf -u True', 3, 87, 'RBF GP on EVERY rep, so the GP can finally enter the cross-rep ANOVA', ALL_REPS),
-    'gauche':     ('-m gauche --kernel tanimoto -u True', 3, 47,
-                   'UNMEASURED WALL, and it is an exact GP like gauche_rbf, whose guess was 7.6x too small. '
+    'gauche':     ('-m gauche --kernel tanimoto -u True', 3, 87,
+                   'DERIVED from gauche_rbf, which is the same exact GP at the same capped size. '
                    'Tanimoto GP. Only defined on BINARY fingerprints, so ecfp4 only. '
                    'This is the RBF-vs-Tanimoto head-to-head; the figure script gives it its '
                    'own colour and marker and labels it GP', FP_REPS),
@@ -445,9 +460,8 @@ MODELS = {
     # script, so neither has run under a real job -- which is itself worth
     # knowing before the grid is committed.
     # ---------------------------------------------------------------------
-    'heteroscedastic_gp': ('-m het_gp --kernel rbf -u True', 3, 47,
-                   'UNMEASURED WALL, and an exact GP like gauche_rbf, whose guess was 7.6x '
-                   'too small -- measure this one before submitting. '
+    'heteroscedastic_gp': ('-m het_gp --kernel rbf -u True', 3, 174,
+                   'DERIVED: twice gauche_rbf, for the noise network and its 100 Adam epochs. '
                    'Gaussian process whose observation noise is predicted per molecule by a '
                    'second network. Measured locally at R2 0.5315 against 0.5318 for the '
                    'ordinary one on identical data, so it is free, and its data-noise term '
@@ -455,13 +469,13 @@ MODELS = {
                    '-0.16 (RERUN_PLAN.md 5.5e)', ALL_REPS),
     'dnn_bnn_full_variational_hetero': (
                    '-m dnn --bayesian-transformation full_variational '
-                   '--heteroscedastic-vbll -u True', 3, 47,
-                   'UNMEASURED WALL. VBLL-alpha with a noise head, so its data-noise term varies per molecule '
+                   '--heteroscedastic-vbll -u True', 3, 122,
+                   'DERIVED: 1.5x dnn_bnn_full_variational, its plain sibling. VBLL-alpha with a noise head, so its data-noise term varies per molecule '
                    'instead of being one number per fit (RERUN_PLAN.md 5.5f)', ALL_REPS),
     'mlp_bnn_full_variational_hetero': (
                    '-m mlp --bayesian-transformation full_variational '
-                   '--heteroscedastic-vbll -u True', 3, 47,
-                   'UNMEASURED WALL. VBLL-beta with a noise head', ALL_REPS),
+                   '--heteroscedastic-vbll -u True', 3, 119,
+                   'DERIVED: 1.5x mlp_bnn_full_variational, its plain sibling. VBLL-beta with a noise head', ALL_REPS),
 }
 
 # Excluded from EVERY figure by GLOBAL_MODELS_EXCLUDE, so re-running them
