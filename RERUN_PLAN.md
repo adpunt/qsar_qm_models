@@ -2983,6 +2983,61 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.32 ✅ MEASURED 2026-08-31 — three seeds, and only the Gaussian process separates by more than a whisker
+
+**Why this exists.** §5.5i's re-measured table is one seed. The variance-head network came out at
+aleatoric ×2.5 against epistemic ×1.1 there and was reported as a PASS, and the author asked for it
+to be added to the decomposition list on that basis. **Two more seeds say it is not a pass.**
+
+Three seeds, 3,000 real QM9 molecules each, PDV, three folds out of fold on Murcko scaffold groups,
+label standardised, plain Gaussian noise at level 0 and level 1. `separation` is how many times
+faster the aleatoric term rises than the epistemic one — the whole test in one number, because the
+aleatoric term must rise and the epistemic term must not.
+
+| model | R² (3 seeds) | aleatoric rise | separation | worst | verdict |
+|---|---|---|---|---|---|
+| **Gaussian process** | 0.85, 0.83, 0.86 | ×17.2, ×21.9, ×16.9 | **11.9×, 18.7×, 11.2×** | **11.2×** | **PASS — large and reproducible** |
+| DNN + variance head | 0.73, 0.63, 0.62 | ×2.5, ×2.0, ×2.1 | 2.3×, 1.6×, 1.5× | 1.5× | **weak** — real but small |
+| MLP + variance head | 0.68, 0.65, 0.73 | ×1.8, ×1.7, ×2.8 | 1.7×, 1.7×, 1.9× | 1.7× | **weak** — real but small |
+| variational (VBLL) | 0.84, 0.82, 0.84 | ×4.6, ×4.5, ×4.7 | 1.1×, 1.7×, 1.6× | 1.1× | **weak**, and the least stable |
+| random forest | 0.84 | ×5.7 | 1.1× | 1.1× | **FAIL** — one bootstrap causes both |
+| NGBoost | 0.84 | ×9.1 | — | — | no epistemic term to test (§2.30) |
+
+**The finding, and it is the useful one for the paper.** The Gaussian process separates by an
+**order of magnitude more than anything else** — 11× to 19× against 1.5× to 1.9× for every neural
+model. And the three neural models are **indistinguishable from one another** on this test: the
+variance-head networks median 1.6× and 1.7×, the variational network 1.6×. So the case the
+literature holds up is not better here than the model already on the roster; it is the same.
+
+⚠️ **The ×2.5 quoted from seed 0 was the best of the three.** Its median over three seeds is ×2.0
+and its separation median is 1.6×. A single-seed decomposition verdict on a neural model is not
+safe, and this is the second time in two days that a single-seed number read as a pass and did not
+survive replication (§2.30 was the first).
+
+**What this means for the two lists.**
+
+- The **decomposition list stays the Gaussian process**, on evidence rather than on absence of
+  evidence: it is the only model whose two terms come apart by a margin that survives replication.
+- **A second decomposing model is available for free if one is wanted**: the variational network is
+  already on the uncertainty list and already running, and it separates exactly as well as the
+  variance-head networks do. It needs no roster entry and no build on either side.
+- **Building the variance-head model is not worth it on this evidence.** It separates no better than
+  what is already running, and it does not exist on the laboratory side at all — its runner has no
+  variance-head model type, so one would have to be built and tested there before the author's rule
+  of one set of pairs across all four datasets could hold.
+
+**What IS only available from a variance-head model**, and is the one argument for building it: a
+per-molecule aleatoric term. The Gaussian process and the variational network both report one
+observation noise for the whole fit, so their split is a **population** statement and cannot answer
+"is the model less certain about the individual corrupted molecules". Of the models that do report a
+per-molecule aleatoric term, the forests report the same signal twice (§2.25) and the variance-head
+networks separate weakly. **So no model in this study can answer the per-molecule decomposition
+question well**, and that is a finding to state rather than a gap to hide.
+
+**Reproduce:** `python scripts/decomposition_controls.py --level-response --reps PDV
+--n-molecules 3000 --n-folds 3 --seed <0|1|2> --levels 0.0 1.0 --conditions gaussian --models
+gauche_rbf dnn_bnn_full_mve mlp_bnn_full_mve dnn_bnn_full_variational`
+
 ### 2.31 🔴 FOUND 2026-08-31 — the neural models did not fail to fit QM9; the harness never standardised the label
 
 **This corrects §5.5i's headline finding.** That section records, in bold: *"All three neural
