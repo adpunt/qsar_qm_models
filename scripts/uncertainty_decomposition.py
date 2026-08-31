@@ -95,10 +95,31 @@ SUPPORT = {
     # QM9 roster
     'rf':                        (PER_MOLECULE, PER_MOLECULE),
     'qrf':                       (PER_MOLECULE, PER_MOLECULE),
-    # NGBoost is fitted under several seeds from 2026-08-30, so it HAS a
-    # model-uncertainty term: the variance of the members' means. Settled by the
-    # author on the measurement in RERUN_PLAN.md 5.5i.
-    'ngboost':                   (PER_MOLECULE, PER_MOLECULE),
+    # NGBoost has NO model-uncertainty term, and the seed ensemble does not give
+    # it one. MEASURED on 3,000 real QM9 molecules, PDV, out of fold on scaffold
+    # groups, three seeds, at four settings of the two parameters the seed
+    # actually reaches (RERUN_PLAN.md 2.30):
+    #
+    #   setting          aleatoric   epistemic   how many times smaller
+    #   as shipped         x9.1        x1.9              3,581
+    #   half the rows      x8.8        x2.7                150
+    #   80% of rows        x9.1        x2.2                243
+    #   80% of columns     x9.1        x1.6                506
+    #
+    # `random_state` feeds only `minibatch_frac` and `col_sample`, and the spec
+    # sets both to 1.0, so the members are the same fit and their spread is
+    # floating-point dust. Subsampling makes it 24x larger and it is still two to
+    # three orders of magnitude below the aleatoric term -- and it RISES with the
+    # noise level, which is the behaviour that disqualifies a model-uncertainty
+    # term rather than the behaviour that qualifies one.
+    #
+    # So the term is marked ABSENT, which is what it is: a single distributional
+    # fit predicts a variance per molecule and has nothing to disagree with. Its
+    # aleatoric term is real and is the second best measured (x9.1). This entry
+    # said (PER_MOLECULE, PER_MOLECULE) for one day, and while it did,
+    # `assert_matches_support` refused every NGBoost uncertainty row on both
+    # pipelines -- it would have stopped every NGBoost task on the cluster.
+    'ngboost':                   (PER_MOLECULE, NONE),
     'dnn':                       (NONE, NONE),
     'mlp':                       (NONE, NONE),
     'dnn_bnn_full':              (NONE, PER_MOLECULE),
@@ -134,7 +155,8 @@ SUPPORT = {
     # Laboratory roster
     'RF':                        (PER_MOLECULE, PER_MOLECULE),
     'QRF':                       (PER_MOLECULE, PER_MOLECULE),
-    'NGBoost':                   (PER_MOLECULE, PER_MOLECULE),
+    # Same as `ngboost` above: no epistemic term, measured (RERUN_PLAN.md 2.30).
+    'NGBoost':                   (PER_MOLECULE, NONE),
     'GP':                        (CONSTANT, PER_MOLECULE),
     'GP-Tanimoto':               (CONSTANT, PER_MOLECULE),
     # The laboratory runner decorates a Gaussian process variant with a suffix,

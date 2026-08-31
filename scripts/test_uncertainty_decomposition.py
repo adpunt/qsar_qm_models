@@ -441,11 +441,19 @@ def test_single_distribution_has_no_epistemic_axis():
     assert np.allclose(alea, [0.25, 4.0])
     assert epis is None
     assert np.allclose(total, alea)
-    # NGBoost is queued as an ENSEMBLE from 2026-08-30, so the roster entry
-    # claims both terms. The single-fit function still has no epistemic axis and
-    # that is what this gate is about.
-    assert SUPPORT['ngboost'] == (PER_MOLECULE, PER_MOLECULE)
-    assert SUPPORT['NGBoost'] == (PER_MOLECULE, PER_MOLECULE)
+    # And the roster says so too, on BOTH pipelines. The seed ensemble was
+    # queued for one day and withdrawn on measurement: NGBoost's seed reaches
+    # only `minibatch_frac` and `col_sample`, both pinned at 1.0, so the members
+    # are the same fit and their spread is 150 to 3,581 times smaller than the
+    # aleatoric term -- and it rises with the noise level instead of holding
+    # still (RERUN_PLAN.md 2.30). While the entry claimed an epistemic term,
+    # `assert_matches_support` refused every NGBoost uncertainty row on both
+    # pipelines, which would have killed every NGBoost task on the cluster.
+    assert SUPPORT['ngboost'] == (PER_MOLECULE, NONE)
+    assert SUPPORT['NGBoost'] == (PER_MOLECULE, NONE)
+    # The two spellings must agree, or one pipeline writes a column the other
+    # refuses.
+    assert SUPPORT['ngboost'] == SUPPORT['NGBoost']
 
 
 def test_a_variance_head_makes_a_constant_term_per_molecule():

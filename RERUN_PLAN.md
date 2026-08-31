@@ -2983,6 +2983,124 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.30 🔴 FOUND AND FIXED 2026-08-30 — NGBoost's seed ensemble does not work, and it would have stopped every NGBoost task
+
+**This corrects §5.5i's table and §2.28, both of which recorded NGBoost over three seeds as a PASS
+on the aleatoric/epistemic split. It is not one, and the number that made it look like one was
+noise.**
+
+**How it was caught.** The generator's own wall-clock guard priced the ensemble at 606 hours and
+that prompted a check of what the extra fits actually buy. The recorded result was aleatoric ×9.1
+against epistemic ×0.7 — an aleatoric term that rises with the noise and an epistemic term that
+holds still, which is exactly the pass condition. But the same file records, two paragraphs below
+the table, that the epistemic term is *"around 5e-8 against an aleatoric of 2e-3, forty thousand
+times smaller."* The verdict and the caveat were both true and only the verdict was carried
+forward.
+
+**Re-measured, and the harness was validated first.** Same protocol as the original: real QM9,
+3,000 molecules, PDV, three-fold out-of-fold on Murcko scaffold groups, plain Gaussian noise at
+level 0 and level 1. Reproduces `level_response_qm9_PDV_n3000_FINAL.csv` to three significant
+figures at the shipped setting (R² 0.8395, aleatoric 0.000216, epistemic 6.03e-08 against
+6.89e-08), so what it reports about the other settings is trustworthy.
+
+| NGBoost setting | aleatoric | epistemic | epistemic is this many times smaller | R² clean |
+|---|---|---|---|---|
+| **as shipped** (rows 1.0, cols 1.0) | ×9.1 | ×1.9 | **3,581** | 0.840 |
+| half the rows | ×8.8 | ×2.7 | 150 | 0.842 |
+| 80% of the rows | ×9.1 | ×2.2 | 243 | 0.841 |
+| 80% of the columns | ×9.1 | ×1.6 | 506 | 0.840 |
+
+**The mechanism.** `random_state` reaches exactly two things in NGBoost: which rows a boosting
+stage sees (`minibatch_frac`) and which columns (`col_sample`). Both were pinned to 1.0 in spec
+1.5.0 — correctly, because those are the values Duan et al. used. So every seed sees every row and
+every column, the three fits are the same fit, and the variance across their means is
+floating-point dust.
+
+**Subsampling does not rescue it.** It makes the term 24 times larger and it is still two to three
+orders of magnitude below the aleatoric term — and it **rises** with the noise level at every
+setting, which is the behaviour that disqualifies an epistemic term rather than the behaviour that
+qualifies one. Accuracy does not move either way (0.840 to 0.842), so nothing is bought.
+
+**The ×0.7 has no stable sign.** My own run at the identical setting gives ×1.9. Both are noise on
+a quantity 3,581 times smaller than the one beside it.
+
+**Contrast with the Gaussian process, which is why that one IS a pass.** Its two terms are the same
+SIZE as each other — 0.000184 and 0.000201 at level 0 — so both are real quantities, and one rising
+×12.9 while the other rises ×1.6 is a genuine separation.
+
+**What it would have cost on the cluster.** `SUPPORT['ngboost']` was changed to
+`(per_molecule, per_molecule)` when the ensemble landed. No setting produces a per-molecule
+epistemic term, so `assert_matches_support` refuses the row — **every NGBoost uncertainty task, on
+all four datasets, would have died**, on the model the study highlights for noise robustness.
+`scripts/test_uncertainty_writer.py` was red on this and is now green.
+
+**Applied.**
+
+| where | change |
+|---|---|
+| `models/model_defaults.py` | `ngboost_ensemble_seeds` 3 → **1**, spec **1.7.0**, with the table above in the change log. The 1.6.0 entry was missing entirely and is written in as superseded |
+| `scripts/uncertainty_decomposition.py` | `SUPPORT['ngboost']` back to `(per_molecule, NONE)`, with the measurement in the comment |
+| `models/models.py` | the ensemble loop reads the spec and does not run at 1 |
+| `KIRBy` runner | the ensemble helper reads the same spec key, so both sides fit one model |
+| `uncertainty_pairs.json` | the decomposition list is **the Gaussian process alone** |
+
+**No fitted model moves and nothing is re-run.** Member 0 was always the ordinary fit; members 1
+and 2 were only ever read for the epistemic term. It saves two fits per training run under `-u`.
+
+**What NGBoost keeps.** Its aleatoric term is real and is the second best measured — ×9.1, against
+×12.9 for the Gaussian process — so NGBoost stays on the uncertainty list. What it loses is the
+epistemic half, which it never had: a single distributional fit predicts a variance per molecule
+and has nothing to disagree with.
+
+**The lesson for this file.** The caveat under §5.5i's table said the number was forty thousand
+times too small to be a quantity, and the table said PASS. **A verdict and a caveat that
+contradict each other are a defect, not a nuance** — the table is what gets read.
+
+### 2.29 ✅ SETTLED 2026-08-30 — NGBoost's three seeds cost nothing, because it scores one fold
+
+**The problem, in one line: three seeds multiply the out-of-fold pass.** NGBoost is fitted under
+three seeds so it has a model-uncertainty term at all (`c2aec9d`, today), and the out-of-fold pass
+refits once per fold. Three seeds times one fit plus five folds is **eighteen fits per training
+run**, which prices a main-grid task at **606 hours — 25.2 days against the long partition's 30-day
+limit**. It would queue for days and then be killed at the wall, which loses the whole task.
+
+**The lever, and it was already in the code.** `--oof-folds-scored` scores fewer folds than were
+cut. The property that makes an out-of-fold row worth having is untouched: a molecule in a scored
+fold is still scored by a model that never saw its label. What is given up is **coverage** — the
+molecules in the unscored folds are left blank. It buys the cost back with coverage, not with
+correctness.
+
+| NGBoost, main-grid task | fits per run | wall clock |
+|---|---|---|
+| before the seeds landed | 1 seed × (1 + 5) = 6 | 202h — 8.4 days |
+| three seeds, five scored folds | 3 × (1 + 5) = **18** | **606h — 25.2 days** |
+| **three seeds, one scored fold** | 3 × (1 + 1) = 6 | **202h — 8.4 days** |
+| three seeds, two scored folds | 3 × (1 + 2) = 9 | 303h — 12.6 days |
+
+**Applied: `OOF_FOLDS_SCORED = {'ngboost': 1}` in the QM9 job generator.** NGBoost is back to
+exactly what it cost before the seed ensemble existed, with the ensemble included. Nothing else
+moves — the setting is per model, and the screen's NGBoost tier reads 23:59 as before.
+
+**Why one fold is the right trade for THIS model specifically.** The out-of-fold rows are the input
+to the which-molecules question. NGBoost is not the model that answers it: the decomposition claim
+it is on the list for is a **population** statement — does the measurement-error half rise with the
+injected noise while the model half holds still — and that statistic does not read per-molecule
+rows at all (§2.28). The quantile forest, the Gaussian process and the variational network all keep
+five scored folds.
+
+**Guarded.** `scripts/test_uncertainty_pairs.py` fails any main-grid task asking more than 540
+hours — three quarters of the partition limit, so a task has room for a slow node rather than
+sitting at 96% of the wall. Proven: removing `OOF_FOLDS_SCORED` puts NGBoost at 606h and the check
+reports it by name, and says to cut the scored folds rather than the seeds.
+
+**Asked and answered: can the seeds be run only for the decomposition work?** They already are, in
+the sense that matters. The ensemble is built only when uncertainty is switched on
+(`models/models.py`: `_n_seeds` is 3 under `-u`, 1 otherwise), and since 2026-08-29 the uncertainty
+pass runs only on the settled pairs — so NGBoost fits three times on its three settled
+representations and once on the other three. Splitting it further, into a separate NGBoost run for
+the decomposition alone, would cost MORE rather than less: the seeds share the first fit, which is
+the one the accuracy row comes from, so a separate run would repeat it.
+
 ### 2.28 ✅ SETTLED 2026-08-30 — the decomposition list, and it is a subset of the uncertainty list
 
 **The author's decision:** the aleatoric/epistemic split is reported from the **ordinary Gaussian
@@ -2996,7 +3114,7 @@ noise grows:
 |---|---|---|---|
 | ordinary Gaussian process | ×12.9 | ×1.6 | 0.85 |
 | NGBoost, one fit | ×9.1 | absent | 0.84 |
-| NGBoost over 3 seeds | ×9.1 | ×0.7 | 0.84 |
+| ~~NGBoost over 3 seeds~~ | ~~×9.1~~ | ~~×0.7~~ | 0.84 | 🔴 **WITHDRAWN — §2.30** |
 
 **Which question this answers, and which it does not.** This is the POPULATION statement: the
 measurement-error half rises with the noise actually injected while the model half holds still. It
@@ -5973,8 +6091,8 @@ spread. Output: `results/decomposition_controls/level_response_qm9_PDV_n3000_FIN
 | model | aleatoric | epistemic | R2 clean | verdict |
 |---|---|---|---|---|
 | **Gaussian process** | **x12.9** | x1.6 | 0.85 | **PASS** |
-| **NGBoost, 3 seeds** | **x9.1** | x0.7 | 0.84 | **PASS** |
-| NGBoost, single fit | x9.1 | absent | 0.84 | aleatoric right, no epistemic axis exists |
+| ~~**NGBoost, 3 seeds**~~ | ~~x9.1~~ | ~~x0.7~~ | 0.84 | 🔴 **NOT A PASS — see §2.30.** The epistemic term is 3,581x smaller than the aleatoric one and rises with the noise. Re-measured at four settings; the x0.7 has no stable sign |
+| **NGBoost, single fit** | **x9.1** | absent | 0.84 | **this is what runs.** Aleatoric right, no epistemic axis exists |
 | random forest | x5.7 | x5.3 | 0.84 | **FAIL** — both rise together |
 | variational (VBLL) | x1.3 | x1.1 | **-0.04** | **cannot judge** — does not fit |
 | DNN Bayesian net + variance head | x1.4 | x1.9 | **-4.0** | **cannot judge** — does not fit |

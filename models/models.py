@@ -2414,7 +2414,19 @@ def train_ngboost_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s,
             m.fit(x_fit, y_fit)
         return m, best
 
-    _n_seeds = (int(SKLEARN_DEFAULTS.get('ngboost_ensemble_seeds', 3))
+    # THE SEED ENSEMBLE IS OFF, and the spec key says so. Measured on 3,000 real
+    # QM9 molecules at four settings: the spread between the members is 150 to
+    # 3,581 times smaller than the aleatoric term and it RISES with the noise
+    # level, which is what disqualifies a model-uncertainty term rather than what
+    # qualifies one (RERUN_PLAN.md 2.30). `random_state` reaches only
+    # `minibatch_frac` and `col_sample`, both 1.0 in the spec, so the members are
+    # the same fit.
+    #
+    # Read from the spec rather than deleted, so the ensemble can be switched
+    # back on in one place if the sampling parameters are ever changed -- and so
+    # this reads as a measured decision rather than as code that was never
+    # written. At 1 it costs nothing: the loop below does not run.
+    _n_seeds = (int(SKLEARN_DEFAULTS.get('ngboost_ensemble_seeds', 1))
                 if args.uncertainty else 1)
     _ngb_members = [(model, _ngb_best_iter)]
     if _n_seeds > 1:

@@ -39,7 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-SPEC_VERSION = '1.6.0'
+SPEC_VERSION = '1.7.0'
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,13 @@ SKLEARN_DEFAULTS = {
     # 🔴 IT COSTS ONE FIT PER SEED. NGBoost is already the slowest tree model in
     # the roster. Three seeds is three times its wall clock, and nothing else
     # changes.
-    'ngboost_ensemble_seeds': 3,
+    # 1 = OFF. NGBoost's seed reaches only `minibatch_frac` and `col_sample`,
+    # both 1.0 above, so several seeds are the same fit and their spread is
+    # dust. Measured on 3,000 real QM9 molecules at four settings: 150 to 3,581
+    # times smaller than the aleatoric term, and rising with the noise level
+    # rather than holding still (RERUN_PLAN.md 2.30). Raising this without also
+    # lowering `minibatch_frac` below 1.0 buys nothing and costs a fit per seed.
+    'ngboost_ensemble_seeds': 1,
 
     'ngboost': {
         # EVERY VALUE HERE IS THE ONE NGBOOST'S OWN AUTHORS USED. Duan, Avati,
@@ -755,6 +761,38 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------------------
 # CHANGE LOG
 # ---------------------------------------------------------------------------
+# 1.7.0  2026-08-30  NGBoost's seed ensemble switched OFF (ngboost_ensemble_seeds
+#                    3 -> 1), because it does not produce a usable
+#                    model-uncertainty term. MEASURED on 3,000 real QM9
+#                    molecules, PDV, out of fold on scaffold groups, three seeds,
+#                    at the four settings of the two parameters `random_state`
+#                    actually reaches:
+#
+#                      setting          aleatoric  epistemic  times smaller
+#                      as shipped         x9.1       x1.9         3,581
+#                      half the rows      x8.8       x2.7           150
+#                      80% of rows        x9.1       x2.2           243
+#                      80% of columns     x9.1       x1.6           506
+#
+#                    `random_state` feeds only minibatch_frac and col_sample,
+#                    both 1.0 since 1.5.0, so the members are the same fit and
+#                    their spread is floating-point dust. Subsampling makes it
+#                    24x larger and it is still two to three orders of magnitude
+#                    below the aleatoric term, and it RISES with the noise level
+#                    -- the behaviour that disqualifies a model-uncertainty term.
+#                    Accuracy is unchanged at every setting (R2 0.840 to 0.842),
+#                    so nothing is bought.
+#                    SUPPORT['ngboost'] goes back to (per molecule, NONE).
+#                    Its aleatoric term is untouched and is the second best
+#                    measured. NO FITTED MODEL MOVES: member 0 was always the
+#                    ordinary fit, and members 1 and 2 were only ever read for
+#                    the epistemic term. Saves two fits per training run under
+#                    -u. See RERUN_PLAN.md 2.30.
+# 1.6.0  2026-08-30  NGBoost fitted under three seeds, for a model-uncertainty
+#                    term. Superseded by 1.7.0 the same day, on the measurement
+#                    above. Recorded here because it shipped: it was live for one
+#                    day, and while it was, assert_matches_support refused every
+#                    NGBoost uncertainty row on both pipelines.
 # 1.5.0  2026-08-28  NGBoost pinned to the settings its own paper used, read
 #                    from Duan et al., ICML 2020 section 4: base learner depth 3,
 #                    friedman_mse, minibatch fraction 1.0, column sample 1.0. All
