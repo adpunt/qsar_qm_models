@@ -6346,7 +6346,7 @@ branch, every job script, and the figure script's representation lists and label
 ⚠️ **Watch for substring matches when renaming**: `pdv` occurs inside `continuous_pdv`, so a naive
 find-and-replace will corrupt one while fixing the other.
 
-### 5.7 🟠 BUILT 2026-08-27, NOT YET RUN — the local hyperparameter tuning experiment
+### 5.7 ✅ COMPLETE 2026-08-31, ALL FOUR DATASETS — the local hyperparameter tuning experiment
 
 **It replaces Optuna, which no job ever used.** `--tuning` appears in no script
 `slurm_scripts_qm9_rerun/generate_scripts.py` writes, and four of its suggested values never
@@ -6380,6 +6380,87 @@ So a parameter name the builder ignores cannot score well here and then do nothi
 declared `--use-best-params` with `action='store_true'` (`process_and_train.py:379`), so it takes
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
+
+#### 5.7t ✅ THE SEARCH IS FINISHED — all four datasets, 2026-08-31
+
+Regenerate everything below with `python scripts/report_tuning_results.py`, which writes
+`results/tuning_local/TUNING_RESULTS.md`. Raw fits are in `results/tuning_local/trials_*.csv`.
+No number here was typed by hand.
+
+| dataset | molecules | model families | pairings | scored fits |
+|---|---|---|---|---|
+| QM9 | 5,000 | 13 | 75 | 1,122 |
+| LogD | 5,039 | 6 | 36 | 530 |
+| Caco-2 | 2,161 | 6 | 36 | 848 |
+| hERG | 1,415 | 6 | 36 | 468 |
+
+QM9 is 75 rather than 78 because the RBF Gaussian process ran on three representations before
+tuning was closed on it (5.7r evidence: every setting within 0.0005 of the default at full size).
+The Tanimoto process shares its tuned entry and was not searched separately. The three validation
+datasets carry the six low-cost families only — the Bayesian and variational networks, NGBoost and
+the quantile forest were run on QM9 alone. **That is a real gap and it is not yet closed.**
+
+**Does the best setting actually beat the default?** Asked because the four-group sort in 5.7p only
+applied that test to the group with no value at an end, so a pairing could sit in "needs a second
+pass" while its best setting was WORSE than the default. Twelve did:
+
+| dataset | best beats the default | loses |
+|---|---|---|
+| QM9 | 71 of 75 | gauche_rbf/mhggnn, ngboost/chemberta, xgboost/mhggnn, xgboost/pdv |
+| LogD | 36 of 36 | — |
+| hERG | 34 of 36 | lgb/ecfp4, xgboost/avalon |
+| Caco-2 | 30 of 36 | dnn/avalon, lgb/avalon, rf/ecfp4, svm/chemberta, xgboost/avalon, xgboost/ecfp4 |
+
+Every one of those twelve keeps the default. The report now prints the difference beside each score
+and marks a loss, in the group tables and in the per-family tables alike.
+
+#### 5.7u 🚩 FOR THE METHODS — a star means different things to different families
+
+The at-an-end test is applied per parameter, so a family searched on ten parameters trips it far
+more readily than one searched on three. Measured over every setting drawn and scored across all
+four datasets:
+
+| family | parameters searched | share of ALL draws with no value at an end |
+|---|---|---|
+| support vector machine | 3 | 87.5% |
+| NGBoost | 3 | 66.7% |
+| Gaussian process | 2 | 54.5% |
+| network alpha | 3 | 34.1% |
+| random forest | 6 | 26.2% |
+| network beta | 4 | 19.3% |
+| LightGBM | 9 | 12.5% |
+| XGBoost | 10 | 4.2% |
+
+**Consequence.** Only one XGBoost draw in twenty-four has no value at an end, so in twelve draws the
+search is not expected to produce a clean setting at all — and for XGBoost it produced none, on any
+dataset. Asking for a non-extreme alternative there is asking the search for something it was never
+going to contain, and the absence says nothing about what the data prefers. The opposite holds for
+the support vector machine: seven draws in eight are clean, so C landing at the top of its range is
+real evidence about the data. **Read a starred winner against its own family's baseline.**
+
+Where the winner is cleaner than chance, the data is actively choosing interior settings: the random
+forest wins clean 70% of the time against a 26.2% baseline, and network alpha 47.2% against 34.1%.
+
+#### 5.7v 🟠 THE CLEAN ALTERNATIVE, WHERE ONE EXISTS — measured, not assumed
+
+For every pairing whose best setting has a value at an end, the report now prints the highest-scoring
+drawn setting with NO value at an end, and whether it still beats the default. Counts:
+
+| dataset | pairings flagged | clean alternative beats the default | no clean setting was drawn at all |
+|---|---|---|---|
+| QM9 | 46 | 27 | 12 |
+| hERG | 22 | 11 | 6 |
+| LogD | 22 | 12 | 6 |
+| Caco-2 | 23 | 8 | 6 |
+
+The thirty "no clean setting was drawn" cases are concentrated in XGBoost and LightGBM and are
+explained by 5.7u, not by the data.
+
+Where a clean alternative does exist, what it costs varies by an order of magnitude and the decision
+cannot be made family-wide. Cheap to take, on QM9: svm/pdv +0.8933 to +0.8906, mlp/pdv +0.8885 to
++0.8864, mlp_bnn_full/pdv +0.8736 to +0.8689, lgb/mhggnn +0.8828 to +0.8806. Expensive, and the
+extreme is doing real work: dnn_bnn_full_variational/avalon +0.6464 to +0.4224, lgb/sns +0.8736 to
++0.7827, dnn_bnn_full_variational/pdv +0.6713 to +0.5622.
 
 #### 5.7m 📄 THE METHOD, AS IT SHOULD BE WRITTEN UP (2026-08-29)
 
@@ -6546,7 +6627,12 @@ reported before this was found mixed two sample sizes. Moved to
 `results/tuning_local/aborted_10000/`, and `scripts/analyse_tuned_settings.py` now refuses to read
 files that disagree on the sample size.
 
-#### 5.7o ✅ CLEARED FOR QM9 — 17 pairings, no value at an end, all beating the default
+#### 5.7o ⚠️ SUPERSEDED BY 5.7t — CLEARED FOR QM9 — 17 pairings, no value at an end, all
+beating the default
+
+**The count below is from 2026-08-29, when the Bayesian and variational network families and
+the quantile forest had not finished. It is 27 on the completed search. Take the list from
+`results/tuning_local/TUNING_RESULTS.md`, not from here.**
 
 Written by `scripts/analyse_tuned_settings.py` to `results/tuning_local/recorded_for_qm9.json`.
 Validation R², 5,000 molecules, one scaffold split.

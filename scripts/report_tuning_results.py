@@ -148,6 +148,83 @@ def fmt(v):
     return str(v)
 
 
+def star_baseline(out):
+    """How often a RANDOM draw lands on an end, per family.
+
+    Without this the star count is unreadable. The test is per parameter, so a
+    model searched on ten parameters is far likelier to show a star than one
+    searched on three -- and it does: only 4.2% of XGBoost draws have no value
+    at an end, against 87.5% of support vector machine draws. Asking for a
+    non-extreme alternative to an XGBoost winner is asking the search for
+    something it almost never produced, which is a fact about the search space
+    and not about the data. Compare each family's winner rate against its own
+    baseline before reading anything into a star.
+    """
+    import analyse_tuned_settings as A
+    import tuning_rosters as R
+
+    agg = {}
+    for ds in ('qm9', 'herg', 'logd', 'caco2'):
+        default, cands, _sizes, ranges = load(ds)
+        if not cands:
+            continue
+        for k, c in cands.items():
+            key = R.TUNED_KEY.get(k[0], k[0])
+            sp = ranges.get(key, {})
+            if not sp:
+                continue
+            a = agg.setdefault(key, {'draws': 0, 'clean': 0, 'win': 0,
+                                     'winclean': 0, 'np': len(sp)})
+            for _s, prm in c:
+                if not prm:
+                    continue
+                a['draws'] += 1
+                if not A.edges_in(prm, sp):
+                    a['clean'] += 1
+            best = max(c, key=lambda t: t[0])[1]
+            if best:
+                a['win'] += 1
+                if not A.edges_in(best, sp):
+                    a['winclean'] += 1
+    if not agg:
+        return
+    out.append('\n## How much a star is worth, per family\n')
+    out.append('A star is tested per parameter, so a family searched on ten '
+               'parameters shows one far more readily than a family searched on '
+               'three. The first column is the share of ALL settings drawn that '
+               'had no value at an end. Read a starred winner against its own '
+               'family\'s baseline, not against zero.\n')
+    out.append('| family | parameters searched | share of draws with no value at '
+               'an end | share of winners with none | reading |')
+    out.append('|---|---|---|---|---|')
+    for k, a in sorted(agg.items(), key=lambda t: -t[1]['draws']):
+        b = 100 * a['clean'] / a['draws']
+        w = 100 * a['winclean'] / a['win']
+        if b >= 60:
+            read = 'a star here means something'
+        elif b >= 25:
+            read = 'a star is weak evidence'
+        else:
+            read = 'a star is expected by chance, and carries little'
+        out.append(f'| {k} | {a["np"]} | {b:.1f}% | {w:.1f}% | {read} |')
+    out.append('')
+
+
+def beats(score, d):
+    """Did this setting actually beat the default, and by how much.
+
+    Added because the four groups only tested this on the group with no value at
+    an end. A pairing could sit in "one value at an end, needs a second pass"
+    while its best setting was WORSE than the default -- and two did, so the
+    second pass would have been spent looking for an alternative to something
+    that should never have been adopted at all.
+    """
+    if d != d or score != score:
+        return '—'
+    diff = score - d
+    return f'{diff:+.4f}' if diff > 0 else f'{diff:+.4f} LOSES'
+
+
 def report(dataset, out):
     import analyse_tuned_settings as A
     import tuning_rosters as R
@@ -181,6 +258,15 @@ def report(dataset, out):
         else:
             groups['two'].append((k, d, score, params, e))
 
+    lost = [k for k, c in sorted(cands.items())
+            if default.get(k) is not None and max(c, key=lambda t: t[0])[0]
+            <= default[k]]
+    out.append(f'Best setting beats the default on '
+               f'{len(cands) - len(lost)} of {len(cands)} pairings; it loses on '
+               f'{len(lost)}'
+               + (f' ({", ".join(f"{m}/{r}" for m, r in lost)})' if lost else '')
+               + '.\n')
+
     titles = [
         ('record', 'RECORD — no value at an end, beats the default. USE THESE.'),
         ('worse', 'KEEP THE DEFAULT — no value at an end but the default wins'),
@@ -194,11 +280,12 @@ def report(dataset, out):
         if not rowsx:
             out.append('none\n')
             continue
-        out.append('| model | representation | default | tuned | at an end |')
-        out.append('|---|---|---|---|---|')
+        out.append('| model | representation | default | tuned | vs default | '
+                   'at an end |')
+        out.append('|---|---|---|---|---|---|')
         for (m, rep), d, s, p, e in rowsx:
             out.append(f'| {m} | {rep} | {d:+.4f} | {s:+.4f} | '
-                       f'{", ".join(e) if e else "—"} |')
+                       f'{beats(s, d)} | {", ".join(e) if e else "—"} |')
         out.append('')
 
     # Per family: best, then runner-ups for the starred rows.
@@ -212,7 +299,10 @@ def report(dataset, out):
             f'{c} {A.describe(sp[c])[0]}' for c in cols if c in sp)
         out.append(f'Search ranges: {rng_txt}\n')
 
-        for label, want_star in (('Best', None), ('Runner-up, starred rows only', True)):
+        for label, want_star in (
+                ('Best', None),
+                ('Best alternative with NO value at an end — starred rows only',
+                 True)):
             lines = []
             for k in sorted(present):
                 ranked = sorted(cands[k], key=lambda t: -t[0])
@@ -224,6 +314,7 @@ def report(dataset, out):
                     if not clean:
                         lines.append(f'| {k[0]} | {k[1]} | '
                                      f'{default.get(k, float("nan")):+.4f} | — | '
+                                     f'no clean setting was drawn | '
                                      + ' | '.join(['—'] * len(cols)) + ' |')
                         continue
                     score, params = clean[0]
@@ -234,14 +325,16 @@ def report(dataset, out):
                 for c in cols:
                     v = fmt(params.get(c, '—'))
                     cells.append(f'**{v}\\***' if c in e else v)
+                d = default.get(k, float('nan'))
                 lines.append(f'| {k[0]} | {k[1]} | '
-                             f'{default.get(k, float("nan")):+.4f} | {score:+.4f} | '
+                             f'{d:+.4f} | {score:+.4f} | {beats(score, d)} | '
                              + ' | '.join(cells) + ' |')
             if not lines:
                 continue
             out.append(f'\n**{label}**\n')
-            out.append('| model | rep | default | score | ' + ' | '.join(cols) + ' |')
-            out.append('|---' * (4 + len(cols)) + '|')
+            out.append('| model | rep | default | score | vs default | '
+                       + ' | '.join(cols) + ' |')
+            out.append('|---' * (5 + len(cols)) + '|')
             out += lines
             out.append('')
 
@@ -256,6 +349,7 @@ def main():
            'A starred value sits at an end of the range the search could draw '
            'from, which means the range chose it rather than the data.',
            '']
+    star_baseline(out)
     for ds in ('qm9', 'herg', 'logd', 'caco2'):
         report(ds, out)
     text = '\n'.join(out) + '\n'
