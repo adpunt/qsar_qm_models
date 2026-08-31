@@ -178,18 +178,42 @@ def check_pair_subset_scope():
         # with that partition's ceiling, the way the RUNBOOK submits them. Only
         # the screen fits inside medium's default 47.
         LONG = ['--max-hours', '720']
-        for stage, extra in (('0', []), ('1', LONG),
+        for stage, extra in (('0', LONG), ('1', LONG),
                              # ngboost is on the author's deep-run shortlist
                              # (RERUN_PLAN.md 13.15) and the generator refuses a
                              # deep run without it, so this fixture carries it.
+                             # --replicates 9, not the deep run's default 10.
+                             # On the measured wall clocks (RERUN_PLAN.md 2.33)
+                             # ngboost's deep run at 10 replicates needs 793
+                             # hours against long's ceiling of 720, and the
+                             # generator refuses rather than capping. Nine fits,
+                             # at 714. The refusal at 10 is asserted below, so
+                             # the ceiling is recorded by a test and not only in
+                             # prose.
                              ('2', ['--models', 'lgb', 'rf', 'dnn', 'svm', 'ngboost',
-                                    '--reps', 'pdv', 'ecfp4', 'mhggnn'] + LONG)):
+                                    '--reps', 'pdv', 'ecfp4', 'mhggnn',
+                                    '--replicates', '9'] + LONG)):
             r = run('--stage', stage, *extra, '--out-dir', tmp)
             assert r.returncode == 0, f"stage {stage} failed to generate:\n{r.stderr[-800:]}"
             line = [l for l in r.stdout.splitlines() if 'conditions:' in l]
             assert line, f"stage {stage} did not report its conditions"
             assert 'censoring' not in line[0], (
                 f"stage {stage} still runs censoring at full breadth by default: {line[0].strip()}")
+
+        # THE DEEP RUN DOES NOT FIT AT TEN REPLICATES, and the generator must say
+        # so rather than write a wall it cannot honour. Measured 2026-08-31:
+        # ngboost is 166 hours per 110 training runs and does six fits per run
+        # under the out-of-fold pass, so ten replicates is 793 hours against the
+        # long partition's 720. Nine is 714. This is the author's decision to
+        # take -- fewer replicates, or fewer scored folds for ngboost -- and it
+        # is recorded here so it cannot be discovered after a queue wait.
+        r = run('--stage', '2', '--models', 'ngboost', '--reps', 'pdv',
+                '--out-dir', tmp, *LONG)
+        assert r.returncode != 0, (
+            "the deep run generated ngboost at ten replicates; on the measured "
+            "wall clock it needs 793 hours and no partition allows that")
+        assert 'ngboost needs' in r.stderr and '720' in r.stderr, (
+            f"the refusal does not name ngboost and the ceiling:\n{r.stderr[-400:]}")
 
         r = run('--stage', '1', '--conditions', 'censoring', '--out-dir', tmp, *LONG)
         assert r.returncode != 0, \
@@ -209,9 +233,13 @@ def check_pair_subset_scope():
         assert 'per-molecule uncertainty' in r.stderr, \
             f"the refusal does not name the rule it enforces:\n{r.stderr[-400:]}"
 
+        # --replicates 7 for the same reason as the deep run above: on the
+        # measured wall clock ngboost's out-of-fold pass does not fit inside the
+        # long partition at the main grid's nine replicates. The number here is
+        # a fixture, not the study's replicate count.
         r = run('--stage', '1', '--conditions', 'censoring',
                 '--models', 'lgb', 'qrf', 'ngboost', '--reps', 'pdv',
-                '--out-dir', tmp, *LONG)
+                '--replicates', '7', '--out-dir', tmp, *LONG)
         assert r.returncode == 0, \
             f"censoring on a named pair subset was refused:\n{r.stderr[-800:]}"
 

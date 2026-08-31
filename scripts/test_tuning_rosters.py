@@ -99,18 +99,76 @@ def check_tuned_keys_against_models_py():
     src = open(MODELS_PY).read()
     literals = set(re.findall(
         r"load_best_hyperparameters\(\s*'([a-z_0-9]+)'", src))
-    if not literals:
-        fail('no literal load_best_hyperparameters call site found in models.py '
-             '— the reader may have been renamed or removed')
+    # THE CALL SITES NO LONGER PASS LITERALS, AND THAT IS THE POINT.
+    #
+    # Until 2026-08-31 each builder passed a hard-coded family name, so four
+    # networks read 'dnn', four read 'mlp', the quantile forest read 'rf' and
+    # both Gaussian processes read 'gauche'. Thirteen of seventeen models could
+    # not be addressed on their own. The builders now derive the label from the
+    # run's own arguments through rosters.roster_label(), so what has to be
+    # checked is that the function produces every roster label and that the
+    # builders actually call it.
+    if 'roster_label(' not in src:
+        fail('models.py no longer calls roster_label() — the tuned settings '
+             'would go back to being shared between models')
         return
-    # 'mlp' arrives as model_type rather than a literal; assert the dynamic call
-    # site exists instead of pretending it is a literal.
-    dynamic = 'load_best_hyperparameters(model_type, rep)' in src
-    # None means the model has NO tuned path -- its builder never calls the
-    # reader, so no entry in either JSON file can reach it. That is a fact about
-    # the model, not a missing key, and it is recorded in TUNED_KEY rather than
-    # left out (leaving it out made this gate report the model as missing, which
-    # reads as an oversight). Check it is true rather than taking it on trust.
+    n_dynamic = src.count('load_best_hyperparameters(_label, rep)')
+    if n_dynamic < 4:
+        fail(f'only {n_dynamic} call site(s) pass the derived label; the forest, '
+             f'the Gaussian process, the dnn family and the mlp family all need '
+             f'one, or their models silently share settings again')
+
+    # Every label the roster knows must be produced by roster_label from some
+    # argument combination -- otherwise a tuned entry written under that label
+    # is unreachable, which is the defect this whole change exists to remove.
+    class _Args:
+        kernel = None
+        bayesian_transformation = None
+        heteroscedastic_vbll = False
+
+    def _args(**kw):
+        a = _Args()
+        for k, v in kw.items():
+            setattr(a, k, v)
+        return a
+
+    ARG_CASES = {
+        'rf': ('rf', {}), 'qrf': ('qrf', {}), 'svm': ('svm', {}),
+        'xgboost': ('xgboost', {}), 'lgb': ('lgb', {}), 'ngboost': ('ngboost', {}),
+        'gauche_rbf': ('gauche', {'kernel': 'rbf'}),
+        'gauche': ('gauche', {'kernel': 'tanimoto'}),
+        'heteroscedastic_gp': ('het_gp', {'kernel': 'rbf'}),
+        'dnn': ('dnn', {}), 'mlp': ('mlp', {}),
+        'dnn_bnn_full': ('dnn', {'bayesian_transformation': 'full'}),
+        'mlp_bnn_full': ('mlp', {'bayesian_transformation': 'full'}),
+        'dnn_bnn_full_variational':
+            ('dnn', {'bayesian_transformation': 'full_variational'}),
+        'mlp_bnn_full_variational':
+            ('mlp', {'bayesian_transformation': 'full_variational'}),
+        'dnn_bnn_full_variational_hetero':
+            ('dnn', {'bayesian_transformation': 'full_variational',
+                     'heteroscedastic_vbll': True}),
+        'mlp_bnn_full_variational_hetero':
+            ('mlp', {'bayesian_transformation': 'full_variational',
+                     'heteroscedastic_vbll': True}),
+    }
+    missing_case = [l for l in rosters.TUNED_KEY if l not in ARG_CASES]
+    if missing_case:
+        fail(f'no argument case here for roster model(s) {sorted(missing_case)} '
+             f'— add one, or a tuned entry for it can never be shown to arrive')
+    wrong = []
+    for label, (model_type, kw) in sorted(ARG_CASES.items()):
+        got = rosters.roster_label(model_type, _args(**kw))
+        if got != label:
+            wrong.append(f'{model_type} {kw} -> {got!r}, expected {label!r}')
+    if wrong:
+        fail('roster_label does not produce the roster label:\n      '
+             + '\n      '.join(wrong))
+    else:
+        ok(f'roster_label produces all {len(ARG_CASES)} roster labels from the '
+           f'run arguments')
+
+    # A label recorded as having no tuned path must really have none.
     for label, key in sorted(rosters.TUNED_KEY.items()):
         if key is not None:
             continue
@@ -119,14 +177,14 @@ def check_tuned_keys_against_models_py():
                  f'load_best_hyperparameters({label!r}, ...) is called in '
                  f'models.py — it does have one')
     claimed = {k for k in rosters.TUNED_KEY.values() if k is not None}
-    unbacked = {k for k in claimed if k not in literals
-                and not (k == 'mlp' and dynamic)}
+    unbacked = {k for k in claimed if k not in ARG_CASES}
     if unbacked:
         fail(f'tuned key(s) {sorted(unbacked)} appear at no call site in '
              f'models.py; nothing would ever read them')
     else:
-        ok(f'every tuned key is a real call site '
-           f'({len(literals)} literal, model_type dynamic: {dynamic})')
+        ok(f'every tuned key is reachable from a real run '
+           f'({len(rosters.TUNED_KEY)} roster models, {n_dynamic} builders '
+           f'deriving their label)')
 
 
 def _code_only(src):

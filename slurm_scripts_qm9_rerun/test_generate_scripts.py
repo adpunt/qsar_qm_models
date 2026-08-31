@@ -524,7 +524,7 @@ def main():
     failures, checked = [], [0]
     emitted = []
     for label, stage_args in [
-        ('stage 0', ('--stage', '0')),
+        ('stage 0', ('--stage', '0', '--max-hours', '720')),
         # The main grid needs `long`. With the cross-fit costed in, ngboost is
         # 202 h per task and the generator refuses rather than capping, so it is
         # generated with that partition's ceiling -- the way the RUNBOOK submits it.
@@ -538,7 +538,8 @@ def main():
         # cross-fit costed in it needs `long` for the same reason the main grid does.
         ('stage 2', ('--stage', '2', '--models', 'rf', 'lgb', 'ngboost',
                      '--reps', 'pdv', 'ecfp4', '--max-hours', '720')),
-        ('stage 0, excluded models', ('--stage', '0', '--include-excluded')),
+        ('stage 0, excluded models', ('--stage', '0', '--include-excluded',
+                                     '--max-hours', '720')),
     ]:
         print(f'{label}...')
         emitted += check_stage(stage_args, label, failures, checked)

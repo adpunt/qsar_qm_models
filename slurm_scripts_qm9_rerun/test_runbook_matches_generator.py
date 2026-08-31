@@ -112,9 +112,10 @@ def check_counts(text):
     # main grid is generated the way the RUNBOOK submits it -- with the long
     # partition's ceiling. The screen stays on `medium`'s 47.
     for label, args in [
-            ('screen', ('--stage', '0')),
+            ('screen', ('--stage', '0', '--max-hours', '720')),
             ('main grid', ('--stage', '1', '--max-hours', '720')),
-            ('include-excluded', ('--stage', '0', '--include-excluded'))]:
+            ('include-excluded', ('--stage', '0', '--include-excluded',
+                                  '--max-hours', '720'))]:
         summary = generator_summary(*args)
         if summary is None:
             continue

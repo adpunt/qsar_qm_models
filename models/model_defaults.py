@@ -236,9 +236,32 @@ GP_DEFAULTS = {
     # ScaleKernel actually started at gpytorch's default of softplus(0) ~ 0.693
     # while the experimental side set 1.0 "to match". Both now apply it.
     'apply_outputscale': True,
-    # None = fit on the whole training set. A 2,000-molecule cap made this a
-    # DIFFERENT model on the experimental side, not the same model on less data.
-    'max_train_n': None,
+    # CAP THE GAUSSIAN PROCESS'S TRAINING SET. Author's decision, 2026-08-31.
+    #
+    # An exact Gaussian process factorises an n x n matrix, so its cost grows
+    # with the CUBE of the training set. Measured on ARC-sized data, one fit on
+    # 8,000 molecules is 3.25 hours; the main grid asks for 378 such fits, which
+    # is 1,536 hours against the longest partition's ceiling of 720. It does not
+    # fit anywhere, at any setting, and no amount of queue patience helps.
+    #
+    # At 5,000 the same fit is 0.79 hours and the main grid is 375 -- inside the
+    # ceiling with room to spare, and the screen drops from 171 hours to 42.
+    #
+    # WHY THIS IS NOT THE MISTAKE THE OLD COMMENT WARNED ABOUT. A 2,000-molecule
+    # cap used to apply on the experimental side ONLY, so the two pipelines fitted
+    # different models and called them the same name. This cap applies to every
+    # Gaussian process, on every dataset, in every run, and the number of
+    # molecules actually fitted is written into the results row, so nothing is
+    # silently different from anything else. The comparison stays honest because
+    # it is the same everywhere -- which is exactly what the old cap was not.
+    #
+    # The test set is untouched, so accuracy stays comparable with the other
+    # models; the GP simply learns from fewer molecules, and says so.
+    #
+    # UNTIL TODAY THIS SETTING WAS NEVER READ BY ANY CODE. It was declared here
+    # and consumed nowhere, so `None` and `5000` did the same thing: nothing. It
+    # is applied now in both Gaussian-process fitters.
+    'max_train_n': 5000,
     # Fallback Adam loop, used only when the botorch fitter refuses a plain
     # gpytorch ExactGP. Recorded in the results as gp_fit_method, never silent.
     'fallback_adam_lr': 0.1,
@@ -465,6 +488,34 @@ def is_binary_matrix(X):
     if finite.size == 0:
         return False
     return bool(np.isin(finite, (0, 1)).all())
+
+
+def cap_gp_training_set(X, y, seed, n_max=None):
+    """Subsample a Gaussian process's training set to GP_DEFAULTS['max_train_n'].
+
+    An exact Gaussian process is cubic in the number of training molecules, so
+    the whole training set is unaffordable on the main grid (RERUN_PLAN.md 2.33).
+    Every Gaussian process in the study fits at most this many molecules, on
+    every dataset and at every noise level, and the count is recorded.
+
+    Deterministic in `seed`, so the same molecules are chosen for the same run
+    however many times it is repeated, and the SAME molecules for the ordinary
+    and the heteroscedastic Gaussian process on one run -- otherwise the two
+    would differ by their training sets as well as by their noise model, and the
+    comparison between them would mean nothing.
+
+    Returns (X, y, n_fitted). Passing fewer molecules than the cap is a no-op.
+    """
+    import numpy as np
+    if n_max is None:
+        n_max = GP_DEFAULTS['max_train_n']
+    n = len(y)
+    if not n_max or n <= n_max:
+        return X, y, n
+    idx = np.random.RandomState(int(seed) & 0x7FFFFFFF).choice(
+        n, size=int(n_max), replace=False)
+    idx.sort()                       # keep the original molecule order
+    return X[idx], y[idx], int(n_max)
 
 
 def is_sparse_count_matrix(X):

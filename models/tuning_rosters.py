@@ -102,35 +102,94 @@ def qm9_pairings(include_excluded=False):
 # ---------------------------------------------------------------------------
 # Verified by scripts/test_tuning_rosters.py against the literal call sites.
 TUNED_KEY = {
+    # EVERY MODEL HAS ITS OWN KEY (author's decision, 2026-08-31).
+    #
+    # Until today thirteen of these shared a key with another model: four
+    # networks read 'dnn', four read 'mlp', the quantile forest read 'rf' and
+    # both Gaussian processes read 'gauche'. `write_master` skipped every shared
+    # key -- correctly, because one entry would have changed a model the tuning
+    # run never scored -- so only four of the seventeen could receive a tuned
+    # value, and the sweep's largest measured gain (dnn_bnn_full on PDV, +1.34)
+    # could not reach the cluster at all.
+    #
+    # The call sites now derive the label from the run's own arguments through
+    # roster_label() above, so the key, the job script name and the results file
+    # all name the same model.
     'rf':                       'rf',
-    'qrf':                      'rf',
+    'qrf':                      'qrf',
     'svm':                      'svm',
     'xgboost':                  'xgboost',
     'lgb':                      'lgb',
     'ngboost':                  'ngboost',
-    'gauche_rbf':               'gauche',
+    'gauche_rbf':               'gauche_rbf',
     'gauche':                   'gauche',
     'dnn':                      'dnn',
-    'dnn_bnn_full':             'dnn',
-    'dnn_bnn_full_variational': 'dnn',
+    'dnn_bnn_full':             'dnn_bnn_full',
+    'dnn_bnn_full_variational': 'dnn_bnn_full_variational',
     'mlp':                      'mlp',
-    'mlp_bnn_full':             'mlp',
-    'mlp_bnn_full_variational': 'mlp',
-    # The three models added to the roster on 2026-08-28. The two variational
-    # networks with a noise head are the SAME builders as the variational
-    # networks above -- `--heteroscedastic-vbll` is a flag on `-m dnn` /
-    # `-m mlp`, not a separate trainer -- so they read the same entry and
-    # collapse with it, which collapsed_models() now says.
-    'dnn_bnn_full_variational_hetero': 'dnn',
-    'mlp_bnn_full_variational_hetero': 'mlp',
-    # The heteroscedastic Gaussian process has NO tuned path at all:
+    'mlp_bnn_full':             'mlp_bnn_full',
+    'mlp_bnn_full_variational': 'mlp_bnn_full_variational',
+    'dnn_bnn_full_variational_hetero': 'dnn_bnn_full_variational_hetero',
+    'mlp_bnn_full_variational_hetero': 'mlp_bnn_full_variational_hetero',
+    # The heteroscedastic Gaussian process still has NO tuned path:
     # `train_heteroscedastic_gp` (models/models.py) never calls
     # load_best_hyperparameters, so no entry in either JSON file can reach it.
-    # None records that, because leaving it out of this map made the roster gate
-    # fail with "missing", which reads as an oversight rather than as a fact
-    # about the model. It is excluded from writable_keys() by construction.
+    # None records that as a fact about the model rather than an oversight.
+    # It also produced no scored row in any tuning sweep, so there is nothing
+    # to give it yet.
     'heteroscedastic_gp':       None,
 }
+
+def roster_label(model_type, args):
+    """The roster label for the model this run is actually training.
+
+    WHY THIS EXISTS. Until 2026-08-31 every call site passed a hard-coded family
+    name, so four different networks asked for the tuned settings of 'dnn', four
+    more asked for 'mlp', the quantile forest asked for 'rf' and both Gaussian
+    processes asked for 'gauche'. Writing any of those into the master file would
+    have changed a model the tuning run never scored, so `write_master` skipped
+    them all -- correctly -- and only four of the seventeen models could receive
+    a tuned value at all. The largest measured gain in the whole sweep,
+    dnn_bnn_full on PDV, was in the unreachable set.
+
+    The label is not a free choice: it is the same string the job generator uses
+    for the script name and the results file, so a tuned entry, a job script and
+    a results row all name the same model. `scripts/test_tuning_rosters.py`
+    checks this function against the generator's own roster.
+
+    Author's decision, 2026-08-31: every model gets its own key.
+    """
+    bt = getattr(args, 'bayesian_transformation', None)
+    hetero = bool(getattr(args, 'heteroscedastic_vbll', False))
+
+    if model_type in ('rf', 'qrf'):
+        return model_type
+    if model_type == 'gauche':
+        # --kernel defaults to tanimoto, so the RBF process must be named by the
+        # flag rather than assumed.
+        return 'gauche_rbf' if getattr(args, 'kernel', None) == 'rbf' else 'gauche'
+    if model_type == 'het_gp':
+        return 'heteroscedastic_gp'
+    if model_type in ('dnn', 'mlp'):
+        if not bt or bt == 'none':
+            return model_type
+        suffix = {'last_layer': '_bnn_last',
+                  'variational': '_bnn_variational',
+                  'full': '_bnn_full',
+                  'full_variational': '_bnn_full_variational'}.get(bt)
+        if suffix is None:
+            # An unknown transformation must not silently borrow the plain
+            # network's tuned settings.
+            raise ValueError(
+                f"roster_label does not know the bayesian transformation "
+                f"'{bt}'. Add it here rather than letting this run read another "
+                f"model's tuned hyperparameters.")
+        label = model_type + suffix
+        if hetero:
+            label += '_hetero'
+        return label
+    return model_type
+
 
 # Model labels whose tuned entry is shared with another model. Writing one of
 # these into the master file changes a model the tuning run never scored.

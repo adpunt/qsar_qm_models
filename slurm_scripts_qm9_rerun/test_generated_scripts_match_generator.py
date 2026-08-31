@@ -54,7 +54,7 @@ RUNBOOK = HERE / 'RUNBOOK.md'
 # a test that invented its own arguments would compare against scripts nobody
 # generates.
 STAGE_COMMANDS = {
-    '0': ['--stage', '0'],
+    '0': ['--stage', '0', '--max-hours', '720'],
     '1': ['--stage', '1', '--max-hours', '720'],
 }
 

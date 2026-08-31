@@ -57,8 +57,13 @@ and level 0 is one seventh of the cost.
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**The screen (`--stage 0`): 17 array scripts, 294 tasks** — 1,862 training runs.
-**The main grid (`--stage 1`): the same 294 tasks** at replicates 1–9 — 16,758 training runs.
+**The screen (`--stage 0`): 17 array scripts, 291 tasks** — 1,843 training runs.
+**The main grid (`--stage 1`): the same 291 tasks** at replicates 1–9 — 16,587 training runs.
+
+Those counts dropped from 294 and 1,862 on 2026-08-31, when the Tanimoto Gaussian process
+stopped running on Sort & Slice: those features are counts, not bits, and the kernel is only
+defined on bits, so those three tasks would have raised on every noise level and written an
+empty file (RERUN_PLAN.md 2.33c).
 
 Those two totals were 2,058 and 18,522 until 2026-08-30, and both were 10.5% too
 high. The generator worked the total out as tasks times the LONGEST condition's
@@ -130,10 +135,10 @@ scripts and 90 tasks — it was 8 and 144 before the three conformal entries wer
 commented out:
 
 ```bash
-python generate_scripts.py --stage 0 --include-excluded   # 22 scripts, 384 tasks
+python generate_scripts.py --stage 0 --include-excluded --max-hours 720   # 22 scripts, 381 tasks
 ```
 
-That is 2,432 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
+That is 2,413 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
 from every figure.
 
 **Out permanently:** binary `pdv` (superseded by PDV as continuous descriptors,
@@ -185,7 +190,7 @@ cd /data/stat-cadd/scat9264/qsar_qm_models
 . setup.sh
 ```
 
-**Why once is enough for all 294 tasks.** The shell environment `setup.sh` sets — `PATH`,
+**Why once is enough for all 291 tasks.** The shell environment `setup.sh` sets — `PATH`,
 `CONDA_PREFIX` — is per-shell and per-node, and does not carry; every job script sources the file
 itself, which is correct. What carries is on the shared project filesystem: the environment at
 `/data/stat-cadd/scat9264/conda_envs/env_test`, and the stamp written inside it,
@@ -194,7 +199,7 @@ compares against that one file, and prints *"Extras already match the recipe; no
 
 **Why it now fails loudly instead of quietly, 2026-08-28.** `setup_reconcile` has always refused to
 install from inside an array task. The extras block — a from-source `torchsort` compile plus three
-more installs — did not, so on the first launch after `env.yml` changed, all 294 tasks would enter it
+more installs — did not, so on the first launch after `env.yml` changed, all 291 tasks would enter it
 at once. It now refuses the same way, and the job scripts **exit 2** when it does, rather than
 training in an environment that is not the one `env.yml` describes. Proven three ways: an array task
 with a mismatched stamp refuses, an array task with a matching stamp proceeds, and an ordinary shell
@@ -413,8 +418,8 @@ leaves less to reason about. The local checkout already carries
 ### ⚠️ Deleting `data/QM9/processed` means it has to be rebuilt BEFORE the array
 
 `torch_geometric`'s QM9 builds `data/QM9/processed/data_v3.pt` from the raw files on first
-access, and it **takes no lock**. Submit the array cold and all 294 tasks build the same file
-into the same path at once: 294 times the work at best, and at worst a task loading a `.pt`
+access, and it **takes no lock**. Submit the array cold and all 291 tasks build the same file
+into the same path at once: 291 times the work at best, and at worst a task loading a `.pt`
 another task is still writing.
 
 It has to go — the ChemBERTa encoder changed on 2026-08-27 and the record layout moved with it,
@@ -424,7 +429,7 @@ so anything cached before that decodes every later field at the wrong offset. So
 **The job scripts now refuse to start without it** (`generate_scripts.py`, the
 `data/QM9/processed/data_v3.pt` guard) and exit 2 naming the remedy, so this cannot be
 forgotten rather than merely documented. Same shape as the `setup.sh` extras refusal: the
-expensive shared work belongs in one allocation before a launch, never in 294 tasks at once.
+expensive shared work belongs in one allocation before a launch, never in 291 tasks at once.
 
 ## 3. Account and partition
 
@@ -446,10 +451,22 @@ ACCT=stat-cadd
 echo "account=$ACCT (emit suggested $EMIT_ACCT)  partition=$PART"
 
 # Recorded limits, 2026-08-28: short 12 h, medium 2 days, long 30 days.
-# The screen's longest tier asks 23:59, so `medium` holds all of it and a shorter
-# requested wall backfills sooner. Use `long` only for the main grid.
+#
+# THE SCREEN NO LONGER FITS IN ONE PARTITION. Corrected 2026-08-31, when the
+# guessed wall clocks were replaced with measured ones (RERUN_PLAN.md 2.33).
+# Fourteen of the seventeen screen scripts are under 48 hours and belong on
+# `medium`, where a shorter requested wall backfills sooner. Three are not:
+#
+#     gauche_rbf                171:59   -> long
+#     ngboost                    80:59   -> long
+#     dnn_bnn_full_variational   39:59   -> medium (fits, but only just)
+#
+# Submitting an 80-hour job to `medium` is rejected at submit time, which is
+# cheap and loud -- but it is one more thing to notice at midnight, so the
+# submit block below sets the partition per script.
 sinfo -o "%.12P %.12l" | grep -E "medium|long"
 PART=medium
+PART_LONG=long
 ```
 
 ## 4. Generate the scripts, then run ONE task — do not submit the grid blind
@@ -467,10 +484,24 @@ used in prose here.)
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
 rm -f qm9_s0_*.sh
-python generate_scripts.py --stage 0
+python generate_scripts.py --stage 0 --max-hours 720
 ls qm9_s0_*.sh
 python test_generated_scripts_match_generator.py
 ```
+
+**`--max-hours 720` IS NOW REQUIRED FOR THE SCREEN, AND THAT IS NOT A FORMALITY.**
+On 2026-08-31 every wall clock in the generator was replaced with a measured number
+(`results/tuning_local/timing.csv`, `timing_recovered.csv`; RERUN_PLAN.md §2.31). Three
+screen scripts turn out to need more than `medium`'s 48 hours: `gauche_rbf` 171, `ngboost`
+80, `dnn_bnn_full_variational` 40. The generator REFUSES to write a script it cannot honour
+rather than capping it, so without this flag it stops with the offending model named. That
+refusal is the fix working; do not raise the ceiling silently or drop the model.
+
+**Read the last four lines the generator prints.** Five models still have NO measurement
+behind their wall — `qrf`, `gauche`, `heteroscedastic_gp` and the two heteroscedastic
+variational networks — and it names them every run. Two of those are exact Gaussian
+processes, the same family as `gauche_rbf`, whose guess was 7.6x too small. Time one fit of
+each (rung 5 in section 6a) before trusting them.
 
 **Delete before regenerating, and run that last line.** The `.sh` are not in git, so what sits
 here is whatever was generated on this host last, and the generator overwrites the scripts it
@@ -539,25 +570,34 @@ sacct -j <jobid> --format=JobID,JobName%22,State,Elapsed,MaxRSS
 ## 5. Submit
 
 Three conditions x six representations is 18 tasks per model, so `--array=0-17`; the
-Tanimoto Gaussian process runs on the two binary fingerprints only, so it is 6 and
-`--array=0-5`. An index past the end exits 2 on the generator's own guard, so a range
-that is too wide mis-submits and one that is too narrow drops cells silently.
+Tanimoto Gaussian process runs on ECFP4 alone, so it is 3 and `--array=0-2`. An index past
+the end exits 2 on the generator's own guard, so a range that is too wide mis-submits and
+one that is too narrow drops cells silently.
+
+⚠️ **The Tanimoto range CHANGED on 2026-08-31, from `0-5` to `0-2`.** Sort & Slice was in
+that script and should never have been: it is built with `sub_counts=True`, so its features
+are counts, not bits, and `models/models.py` refuses a Tanimoto kernel on a non-binary
+matrix at fit time. Those three tasks would have queued, started, raised on every noise
+level and written an empty file. Sort & Slice keeps its Gaussian-process row through
+`gauche_rbf`, which runs on every representation.
 
 ⚠️ **This block covers all SEVENTEEN scripts.** Until 2026-08-28 it listed fourteen: the
 three decomposition models added that day — `heteroscedastic_gp` and the two heteroscedastic
-variational networks — appeared in no `sbatch` line, so 54 of the 294 tasks would never have
+variational networks — appeared in no `sbatch` line, so 54 of the 291 tasks would never have
 been queued. Those three are the only models in the roster that report both halves of the
 uncertainty per molecule, so their absence would have been discovered at analysis time.
 Submit by looping over the generator's own output rather than a hand-typed list:
 
 ```bash
-# Every script the generator wrote, nothing hand-typed. 17 scripts, 294 tasks.
+# Every script the generator wrote, nothing hand-typed. 17 scripts, 291 tasks.
 ls qm9_s0_*.sh | wc -l          # must print 17
 
-# Tier 1 — the ANOVA roster, tree and deterministic models
-for s in rf xgboost lgb svm ngboost dnn mlp; do
+# Tier 1 — the ANOVA roster, tree and deterministic models.
+# ngboost is 80:59 on measured timings and goes to `long`; the rest are 1:59.
+for s in rf xgboost lgb svm dnn mlp; do
     sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_$s.sh
 done
+sbatch --account=$ACCT --partition=$PART_LONG --array=0-17%5 qm9_s0_ngboost.sh
 
 # Tier 2 — the Bayesian networks
 for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational; do
@@ -570,11 +610,12 @@ for s in heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variati
     sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-5%4  qm9_s0_gauche.sh   # fingerprints only
+# gauche_rbf is 171:59 on measured timings -- `long`, and nothing else holds it.
+sbatch --account=$ACCT --partition=$PART_LONG --array=0-17%4 qm9_s0_gauche_rbf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-2%4  qm9_s0_gauche.sh   # ECFP4 only
 ```
 
-The main grid is the same 294 tasks at replicates 1–9, appending to the same files, so it
+The main grid is the same 291 tasks at replicates 1–9, appending to the same files, so it
 is submitted the same way once the screen has landed and been checked:
 
 ```bash
@@ -627,6 +668,161 @@ the other conditions and there is no screen for this one.
 Censoring has no clean row of its own — the generator strips level 0 from every condition
 but the reference — so `copy_zero_rows.py` supplies it from the Gaussian run for the same
 pairs. Run it after these land as well.
+
+## 5c. THE INTERACTIVE PROOF LADDER — prove it before the queue, not in it
+
+Added 2026-08-31. The two canary jobs cost days in the queue. Everything below runs in
+`interactive` allocations (four-hour limit) and settles, on the real cluster, the things a
+laptop cannot: whether the environment resolves, whether the binary is current, whether the
+weights are on disk, whether two tasks can run side by side, and what the five unmeasured
+models actually cost.
+
+Run the rungs in order. Each is small enough to paste on its own. Stop at the first failure
+and fix it — a rung that fails is a task that would have died after the queue wait.
+
+**Rung 0 — thirty seconds on the login node.** Nothing here needs an allocation.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+bash scripts/pull_safely.sh && git log --oneline -1
+conda env list
+conda env list | awk '{print $1}' | grep -Fxq env_test; echo "name_resolves=$?"
+```
+
+PASS: `name_resolves=0`. FAIL: anything else means `env_test` exists as a path but not under
+a name conda can resolve, and every array task would have tried to BUILD it. `setup.sh` now
+refuses that from inside an array, so the array exits cleanly instead of destroying the
+environment — but it still cannot run. Fix it by making the prefix an `envs_dirs` entry, or
+by exporting `ENV_TEST_PREFIX` before sourcing `setup.sh`.
+
+**Rung 1 — the environment, once, in an allocation.** The extras stamp lives on the shared
+filesystem, so one run covers all 291 tasks.
+
+```bash
+srun --account=stat-cadd --partition=interactive --cpus-per-task=8 --mem=32G \
+     --time=01:00:00 --pty bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+. ./setup.sh
+python -c "import sys; print(sys.executable)"
+python scripts/check_environment.py
+```
+
+PASS: the interpreter path is under `env_test`, NOT under `/apps/system`. Section 3 records
+that an unactivated job silently ran the system Anaconda.
+
+**Rung 2 — the Rust binary, rebuilt, and its own gates.** This is the one that would have
+killed all 291 tasks: `--selection-seed` became a required argument on 2026-08-28 and a
+binary built before that rejects it on the first noise level.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+( cd rust && cargo build --release )
+ls -l --time-style=full-iso rust/target/release/rust_processor
+python scripts/make_selftest_inputs.py 5000 /tmp/qm9_5k
+./rust/target/release/rust_processor --self-test /tmp/qm9_5k.csv \
+    --scaffold-file /tmp/qm9_5k.groups.json
+```
+
+PASS: today's timestamp, and the last line reads `all noise gates passed`. The job scripts
+now compare the binary's timestamp against `rust/src`, so a stale one is refused before any
+training — but it is refused per task, after the queue. Build it here.
+
+**Rung 3 — warm the two caches that 291 tasks would otherwise fetch at once.**
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+ls -l data/QM9/processed/data_v3.pt
+python -c "from transformers import AutoTokenizer, AutoModel; \
+  AutoTokenizer.from_pretrained('DeepChem/ChemBERTa-77M-MTR'); \
+  AutoModel.from_pretrained('DeepChem/ChemBERTa-77M-MTR'); print('chemberta cached')"
+ls -d "${HF_HOME:-$HOME/.cache/huggingface}"/hub/models--DeepChem--ChemBERTa-77M-MTR
+```
+
+PASS: `data_v3.pt` is about 325 MB, and the ChemBERTa directory exists. Both are now guarded
+in the job script, so a cold cache stops the task instead of racing — but warm them here or
+a sixth of the array refuses.
+
+**Rung 4 — the real job script, tiny, driven by hand.** The point is to exercise the script
+that will be submitted, not a hand-written python command. Two lines must change first: the
+startup stagger, and the output path, because results are opened in APPEND mode and a
+400-molecule row would otherwise land in the real file.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_qm9_rerun
+mkdir -p /tmp/tiny/run /data/stat-cadd/scat9264/qsar_qm_models/results/smoke_arc
+python generate_scripts.py --stage 0 --sample-size 400 --conditions gaussian \
+    --models rf gauche_rbf --reps ecfp4 --out-dir /tmp/tiny --max-hours 720
+cd /tmp/tiny && for f in qm9_s0_*.sh; do
+    sed -e 's|^sleep \$(( RANDOM % 600 ))$|sleep 0|' \
+        -e 's|^OUT="\.\./results/|OUT="../results/smoke_arc/|' "$f" > run/$f; done
+for f in qm9_s0_*.sh; do echo "$f: $(diff "$f" run/$f | grep -c '^[<>]')"; done
+```
+
+PASS: the generator warns `sample size 400, NOT the production 10000`, and every script
+prints **4** — two changed lines, counted on both sides of the diff. Anything else means the
+template moved; read the diff before going on. Verified on this exact command 2026-08-31:
+line 55 is the stagger, line 270 is the output path, and nothing else differs.
+
+```bash
+cd /tmp/tiny/run
+time SLURM_ARRAY_TASK_ID=0 bash qm9_s0_rf.sh 2>&1 | tee /tmp/rf0.log | tail -30
+```
+
+PASS: the log carries `=== interpreter:` under `env_test`, `=== task 0: model=rf`, seven
+levels, and ends `exit=0`. Then check the numbers moved the right way:
+
+```bash
+python -c "import pandas as pd; d=pd.read_csv('/data/stat-cadd/scat9264/qsar_qm_models/results/smoke_arc/anova_gaussian_ecfp4_rf.csv'); print(d[['sigma','r2','n','params_source']].to_string())"
+```
+
+PASS: seven rows, R2 falling as the level rises, `n` 400 throughout, and `params_source`
+saying which settings were used. A `delivered_dose` of 1e-17 rather than 0 at level zero is
+the old zero-noise control defect and is a stop.
+
+**Rung 5 — TIME THE FIVE MODELS WHOSE WALL CLOCK IS A GUESS.** `qrf`, `gauche`,
+`heteroscedastic_gp` and the two heteroscedastic variational networks have no timing row at
+any sample size, and two of them are exact Gaussian processes — the same family as
+`gauche_rbf`, whose guess was 7.6x too small. An exact GP is cubic in the training set, so
+measuring at 2,500 and 5,000 gives the exponent and extrapolates honestly to 10,000 in
+minutes rather than hours.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/scripts
+for n in 2500 5000; do for m in "qrf" "gauche --kernel tanimoto" "het_gp --kernel rbf"; do
+  echo "--- $m at n=$n"
+  /usr/bin/time -f "%e s" python -u process_and_train.py -d QM9 -t homo_lumo_gap \
+    -m $m -u True -r ecfp4 --noise-level 0.0 --dose-units spread -n $n \
+    --repetitions 1 -s scaffold --normalize True -f /tmp/timing_probe.csv
+done; done
+```
+
+Then set each model's hours-per-110 in `generate_scripts.py` to
+`seconds_at_10000 / 3600 * 110`, extrapolating the two Gaussian processes cubically
+(`t10000 = t5000 * 8`) and the others linearly, and regenerate. Do the two heteroscedastic
+variational networks the same way with `-m dnn --bayesian-transformation full_variational
+--heteroscedastic-vbll` and its `mlp` twin.
+
+**Rung 6 — two tasks at once, the only check that means nothing on a laptop.**
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/scripts && python test_config_isolation.py --end-to-end
+cd /tmp/tiny/run
+SLURM_ARRAY_TASK_ID=0 bash qm9_s0_rf.sh > /tmp/par0.log 2>&1 &
+SLURM_ARRAY_TASK_ID=0 bash qm9_s0_gauche_rbf.sh > /tmp/par1.log 2>&1 &
+wait; grep -h "exit=" /tmp/par0.log /tmp/par1.log
+```
+
+PASS: both end `exit=0`. If `test_config_isolation.py` says concurrent tasks interfere, read
+its output before believing it — on 2026-08-28 it reported exactly that when the real cause
+was that neither task could start.
+
+**Before submitting, prove nothing leaked into the real results:**
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+ls results/anova_*.csv 2>/dev/null | wc -l    # must print 0
+rm -f scripts/config_*.json scripts/scaffold_groups_*.json scripts/*.mmap
+```
 
 ## 6. Monitor and resubmit
 

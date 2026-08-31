@@ -89,8 +89,28 @@ from pathlib import Path
 #   ALL_REPS  the six.
 #   FP_REPS   binary fingerprints only. The Tanimoto kernel is defined on binary
 #             vectors, so the Tanimoto GP can only run here.
+#
+# SORT & SLICE IS NOT A BINARY FINGERPRINT AND WAS REMOVED FROM FP_REPS
+# 2026-08-31. It is built with sub_counts=True (process_and_train.py), and the
+# featuriser multiplies each substructure by how often it occurs, so the vector
+# holds small integers, not bits -- measured max 6 on ordinary drug-like
+# molecules. models/models.py refuses the pairing at fit time:
+#
+#     if params['kernel_name'] != 'RBF' and not is_binary_matrix(x_train_full):
+#         raise ValueError(...)
+#
+# So half of the Tanimoto script's tasks -- three of six in the screen, three of
+# six in the main grid -- would have raised on every noise level and written an
+# empty results file after their queue wait. Nothing caught it: the generator's
+# own test checks emitted command lines against the argument parser, and this
+# failure happens inside the model, long after parsing.
+#
+# Sort & Slice keeps its Gaussian-process row through gauche_rbf, which runs on
+# every representation. Binarising the counts for the Tanimoto kernel would be a
+# study decision about what is being compared, not a generator fix, and it must
+# not be made silently.
 ALL_REPS = ['ecfp4', 'pdv', 'mhggnn', 'avalon', 'chemberta', 'sns']
-FP_REPS = ['ecfp4', 'sns']
+FP_REPS = ['ecfp4']
 
 # ---------------------------------------------------------------------------
 # Noise conditions
@@ -357,11 +377,40 @@ if _unused:
 # eleven-level ten-replicate design asked of each task. The actual grid is
 # smaller now and varies by stage, so the wall clock is scaled from it below
 # rather than carried as a fixed number that would silently over-request.
+#
+# THESE NUMBERS ARE MEASURED, AND WHERE THEY ARE NOT, THE GENERATOR SAYS SO.
+#
+# Until 2026-08-31 every entry here was one of three guessed values -- 23, 35 or
+# 47 -- set in this generator's first commit (afd92ec) and never revisited. Four
+# of them were too small, and one of those, gauche_rbf, was too small by a factor
+# of seven and a half: 23:59 requested against 171 hours of measured fit time.
+# Every one of those tasks would have queued for days and then been killed at the
+# wall with a partial results file, and the four include both models the
+# uncertainty decomposition is reported from.
+#
+# The measured entries below are (worst representation's seconds per fit at
+# n=10000, default settings) / 3600 * 110, from results/tuning_local/timing.csv
+# and results/tuning_local/timing_recovered.csv. The worst representation, not
+# the mean, because one wall clock covers a whole array.
+#
+# THE THREE GAUSSIAN PROCESSES ARE CAPPED AT 5,000 TRAINING MOLECULES (author's
+# decision 2026-08-31, GP_DEFAULTS['max_train_n']). An exact GP is cubic in the
+# training set: uncapped, one fit on 8,000 molecules is 3.25 hours and the main
+# grid needs 1,536 against a 720-hour ceiling, so it fits in no partition at any
+# setting. At 5,000 the same fit is 0.79 hours, the screen is 42 and the main
+# grid 375. gauche_rbf's entry below is the capped number.
+#
+# FIVE MODELS HAVE NO MEASUREMENT ANYWHERE: qrf, gauche, heteroscedastic_gp and
+# the two hetero variational networks. Their entries are marked UNMEASURED, they
+# keep a deliberately generous placeholder, and main() prints them by name so a
+# submission is never made in ignorance of which walls rest on nothing. Two of
+# them are exact Gaussian processes -- the same family as gauche_rbf, the entry
+# that was wrong by 7.6x -- so those two are the ones to measure first.
 MODELS = {
-    'rf':                       ('-m rf',        1, 23, 'random forest', ALL_REPS),
-    'xgboost':                  ('-m xgboost',   1, 23, '', ALL_REPS),
-    'lgb':                      ('-m lgb',       1, 23, 'LightGBM', ALL_REPS),
-    'svm':                      ('-m svm',       1, 35, 'RBF kernel on every representation', ALL_REPS),
+    'rf':                       ('-m rf',        1, 12, 'random forest', ALL_REPS),
+    'xgboost':                  ('-m xgboost',   1,  5, '', ALL_REPS),
+    'lgb':                      ('-m lgb',       1,  4, 'LightGBM', ALL_REPS),
+    'svm':                      ('-m svm',       1,  4, 'RBF kernel on every representation', ALL_REPS),
     # ONE FIT PER RUN, back to 47 hours. The seed ensemble was queued on
     # 2026-08-30 and withdrawn on measurement the next day: NGBoost's seed
     # reaches only minibatch_frac and col_sample, both pinned at 1.0, so three
@@ -369,18 +418,19 @@ MODELS = {
     # smaller than the aleatoric term -- and it RISES with the noise level
     # (RERUN_PLAN.md 2.30). `ngboost_ensemble_seeds` is 1 in the shared spec, so
     # the tripled wall clock this line carried for one day is wrong again.
-    'ngboost':                  ('-m ngboost -u True', 1, 47, 'slowest tree model; emits a per-molecule aleatoric term, and no epistemic one -- one distributional fit has nothing to disagree with (RERUN_PLAN.md 2.30)', ALL_REPS),
-    'dnn':                      ('-m dnn',       1, 35, '', ALL_REPS),
-    'mlp':                      ('-m mlp',       1, 35, '', ALL_REPS),
-    'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True', 2, 47, 'BNN-alpha', ALL_REPS),
-    'mlp_bnn_full':             ('-m mlp --bayesian-transformation full -u True', 2, 47, 'BNN-beta', ALL_REPS),
-    'dnn_bnn_full_variational': ('-m dnn --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-alpha (figure script reads this as dnn_vbll)', ALL_REPS),
-    'mlp_bnn_full_variational': ('-m mlp --bayesian-transformation full_variational -u True', 2, 47, 'VBLL-beta (figure script reads this as mlp_vbll)', ALL_REPS),
+    'ngboost':                  ('-m ngboost -u True', 1, 166, 'slowest tree model; emits a per-molecule aleatoric term, and no epistemic one -- one distributional fit has nothing to disagree with (RERUN_PLAN.md 2.30)', ALL_REPS),
+    'dnn':                      ('-m dnn',       1, 12, '', ALL_REPS),
+    'mlp':                      ('-m mlp',       1, 11, '', ALL_REPS),
+    'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True', 2, 30, 'BNN-alpha', ALL_REPS),
+    'mlp_bnn_full':             ('-m mlp --bayesian-transformation full -u True', 2, 46, 'BNN-beta', ALL_REPS),
+    'dnn_bnn_full_variational': ('-m dnn --bayesian-transformation full_variational -u True', 2, 81, 'VBLL-alpha (figure script reads this as dnn_vbll)', ALL_REPS),
+    'mlp_bnn_full_variational': ('-m mlp --bayesian-transformation full_variational -u True', 2, 79, 'VBLL-beta (figure script reads this as mlp_vbll)', ALL_REPS),
     # Outside the ANOVA roster, but they feed figures and supplementary tables:
-    'qrf':        ('-m qrf -u True', 3, 23, 'not in the ANOVA (rho 0.996 with rf) but the best error-ranker', ALL_REPS),
-    'gauche_rbf': ('-m gauche --kernel rbf -u True', 3, 47, 'RBF GP on EVERY rep, so the GP can finally enter the cross-rep ANOVA', ALL_REPS),
+    'qrf':        ('-m qrf -u True', 3, 23, 'UNMEASURED WALL. not in the ANOVA (rho 0.996 with rf) but the best error-ranker', ALL_REPS),
+    'gauche_rbf': ('-m gauche --kernel rbf -u True', 3, 87, 'RBF GP on EVERY rep, so the GP can finally enter the cross-rep ANOVA', ALL_REPS),
     'gauche':     ('-m gauche --kernel tanimoto -u True', 3, 47,
-                   'Tanimoto GP. Only defined on BINARY fingerprints, so ecfp4/sns only. '
+                   'UNMEASURED WALL, and it is an exact GP like gauche_rbf, whose guess was 7.6x too small. '
+                   'Tanimoto GP. Only defined on BINARY fingerprints, so ecfp4 only. '
                    'This is the RBF-vs-Tanimoto head-to-head; the figure script gives it its '
                    'own colour and marker and labels it GP', FP_REPS),
     # ---------------------------------------------------------------------
@@ -396,6 +446,8 @@ MODELS = {
     # knowing before the grid is committed.
     # ---------------------------------------------------------------------
     'heteroscedastic_gp': ('-m het_gp --kernel rbf -u True', 3, 47,
+                   'UNMEASURED WALL, and an exact GP like gauche_rbf, whose guess was 7.6x '
+                   'too small -- measure this one before submitting. '
                    'Gaussian process whose observation noise is predicted per molecule by a '
                    'second network. Measured locally at R2 0.5315 against 0.5318 for the '
                    'ordinary one on identical data, so it is free, and its data-noise term '
@@ -404,12 +456,12 @@ MODELS = {
     'dnn_bnn_full_variational_hetero': (
                    '-m dnn --bayesian-transformation full_variational '
                    '--heteroscedastic-vbll -u True', 3, 47,
-                   'VBLL-alpha with a noise head, so its data-noise term varies per molecule '
+                   'UNMEASURED WALL. VBLL-alpha with a noise head, so its data-noise term varies per molecule '
                    'instead of being one number per fit (RERUN_PLAN.md 5.5f)', ALL_REPS),
     'mlp_bnn_full_variational_hetero': (
                    '-m mlp --bayesian-transformation full_variational '
                    '--heteroscedastic-vbll -u True', 3, 47,
-                   'VBLL-beta with a noise head', ALL_REPS),
+                   'UNMEASURED WALL. VBLL-beta with a noise head', ALL_REPS),
 }
 
 # Excluded from EVERY figure by GLOBAL_MODELS_EXCLUDE, so re-running them
@@ -475,26 +527,6 @@ TEMPLATE = '''#!/bin/bash
 
 set -uo pipefail
 
-# ---------------------------------------------------------------------------
-# WAIT A RANDOM MOMENT BEFORE DOING ANYTHING. This is not politeness.
-#
-# The KeOps library, which arrives with the Gaussian-process stack, runs
-# `c++ --version` at IMPORT time and writes the answer to a HARD-CODED path:
-# /tmp/compiler_version.txt. It then reads that file and deletes it. Two
-# processes importing within the same instant race: one deletes the file while
-# the other is between checking it exists and opening it, and the second dies
-# with FileNotFoundError before a single molecule is read.
-#
-# Jobs sharing a node share /tmp, and an array releases its tasks together, so
-# this hits real runs. The failure names a missing file in /tmp and says
-# nothing about chemistry, and because it happens during import the task
-# produces NO output at all -- it looks like a task that never started.
-#
-# TMPDIR does not help: the path is a literal inside the library, not taken
-# from the environment. Staggering submission does not help either, because the
-# queue decides when tasks actually start. A random wait inside the task is the
-# only lever this side controls (found 2026-08-30, RERUN_PLAN.md 2.25).
-sleep $(( RANDOM % 600 ))
 
 # micromamba has never worked on this cluster -- setup.sh has always fallen
 # through to its conda branch. The two `export MAMBA_EXE=...` lines that used to
@@ -523,6 +555,17 @@ if [ "${{SETUP_EXTRAS_REFUSED:-0}}" = "1" ]; then
     echo "ERROR: the environment does not match the recipe and setup.sh refused"
     echo "       to repair it from an array task. Run '. ./setup.sh' once in an"
     echo "       interactive allocation, then resubmit this array."
+    exit 2
+fi
+
+# The same refusal, one step earlier: setup.sh could not find the environment at
+# all and would have BUILT it, from every task in the array at once.
+if [ "${{SETUP_ENV_BUILD_REFUSED:-0}}" = "1" ]; then
+    echo "ERROR: setup.sh could not find the environment and refused to build it"
+    echo "       from an array task. This usually means it exists as a path but"
+    echo "       not under a name conda can resolve. Run '. ./setup.sh' once in"
+    echo "       an interactive allocation and confirm it activates, then"
+    echo "       resubmit this array."
     exit 2
 fi
 PY_PATH="$(command -v python)"
@@ -570,11 +613,65 @@ export TMPDIR="${{TMPDIR:-/tmp}}/qsar_${{SLURM_JOB_ID:-$$}}_${{SLURM_ARRAY_TASK_
 mkdir -p "$TMPDIR"
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# ---------------------------------------------------------------------------
+# GIVE THIS TASK ITS OWN KeOps CACHE. This replaces a random wait of up to ten
+# minutes that every task used to serve before it did anything (2026-08-30).
+#
+# WHAT THE WAIT WAS FOR. The KeOps library arrives with the Gaussian-process
+# stack. On MACOS it runs `c++ --version` at import time, writes the answer to
+# the hard-coded path /tmp/compiler_version.txt, reads it back and deletes it.
+# Two processes importing at the same instant race over that file and one dies.
+#
+# WHY THAT CANNOT HAPPEN HERE, CHECKED IN THE LIBRARY ITSELF. Both hard-coded
+# /tmp paths in keopscore/config/base_config.py -- compiler_version.txt and
+# brew_prefix.txt -- sit inside `if platform.system() == "Darwin"`. On Linux
+# neither line runs. The wait was guarding a macOS-only bug on a Linux cluster,
+# at a cost of five minutes of wall clock per task on average.
+#
+# WHAT IS ACTUALLY SHARED ON LINUX, and what this line fixes instead. KeOps
+# compiles into a cache directory: $KEOPS_CACHE_FOLDER, defaulting to
+# ~/.cache/keops<version>/<system>_<node>_<release>_p<python>. The node name is
+# in that path, so the collision is between tasks ON THE SAME NODE -- which is
+# exactly what an array does. Several tasks compiling into one directory at once
+# is a real race, and unlike the macOS one it is a race the environment can
+# settle, because KeOps reads this folder from the environment.
+#
+# Each task now compiles into its own private scratch, which the TMPDIR line
+# above creates per job and array index and deletes on exit. Nothing is shared,
+# so nothing can collide, and no task waits. The cost is that each task compiles
+# the kernels once for itself instead of finding them already built -- a minute
+# or two, deterministic, against an average five-minute wait that guaranteed
+# nothing (RERUN_PLAN.md 2.25).
+export KEOPS_CACHE_FOLDER="$TMPDIR/keops"
+mkdir -p "$KEOPS_CACHE_FOLDER"
 
-# The binary carries the held-out-noise fix. Refuse to run without it rather
-# than silently regenerating the same invalid results.
+
+# THE BINARY MUST BE NEWER THAN THE SOURCE IT WAS BUILT FROM.
+#
+# An existence check is not enough and this has already nearly cost a queue
+# cycle. `--selection-seed` became a REQUIRED argument on 2026-08-28
+# (rust/src/main.rs, `.required_unless_present("self_test")`) and
+# process_and_train.py now passes it on every injection call. A binary built
+# before that date is still executable, still passes an existence check, and
+# rejects the argument with `error: unexpected argument '--selection-seed'` on
+# the first noise level of every one of the 294 tasks -- after the whole queue
+# wait. Three earlier commits changed the injector's behaviour without changing
+# any flag, so pinning the check to one flag name would give false confidence.
+#
+# Comparing timestamps catches all of them. git stamps a pulled source with the
+# checkout time, so a binary built before the pull always loses this comparison.
+NEWEST_RUST_SRC=$(ls -t rust/src/*.rs rust/Cargo.toml 2>/dev/null | head -1)
 if [ ! -x rust/target/release/rust_processor ]; then
     echo "ERROR: rust/target/release/rust_processor missing. Run:"
+    echo "  cd {qsar_dir}/rust && cargo build --release"
+    exit 2
+fi
+if [ -n "$NEWEST_RUST_SRC" ] \
+   && [ "$NEWEST_RUST_SRC" -nt rust/target/release/rust_processor ]; then
+    echo "ERROR: rust_processor is OLDER than $NEWEST_RUST_SRC, so it was built"
+    echo "       from source this checkout no longer has. It would reject the"
+    echo "       injector arguments this pipeline now passes and kill every task"
+    echo "       in the array on its first noise level. Rebuild it once:"
     echo "  cd {qsar_dir}/rust && cargo build --release"
     exit 2
 fi
@@ -632,6 +729,38 @@ fi
 
 rep="${{REPS[$(( i % n_rep ))]}}"
 cond="${{CONDS[$(( i / n_rep ))]}}"
+
+# THE CHEMBERTA WEIGHTS MUST ALREADY BE ON DISK, for the same reason.
+#
+# get_chemberta_model calls AutoTokenizer/AutoModel.from_pretrained with a hub
+# id (process_and_train.py, CHEMBERTA_MODEL_ID), so on a cold cache it reaches
+# the internet. Roughly a sixth of the array's tasks build the ChemBERTa
+# representation. On a compute node with no outbound network they all die inside
+# from_pretrained having written nothing; with network they race to populate one
+# shared cache directory. Neither is acceptable after a queue wait, and the
+# documented smoke task is array index 0, which is ecfp4 -- so the one task the
+# operator runs before committing the queue never touches ChemBERTa.
+#
+# Warm it ONCE in the interactive allocation:
+#   python -c "from transformers import AutoTokenizer, AutoModel; \
+#              AutoTokenizer.from_pretrained('DeepChem/ChemBERTa-77M-MTR'); \
+#              AutoModel.from_pretrained('DeepChem/ChemBERTa-77M-MTR')"
+#
+# HF_HUB_OFFLINE is then set so a task fails immediately and legibly on a cold
+# cache instead of hanging on a network call inside a 24-hour allocation.
+if [ "$rep" = "chemberta" ]; then
+    HF_CACHE="${{HF_HOME:-$HOME/.cache/huggingface}}"
+    if ! ls -d "$HF_CACHE"/hub/models--DeepChem--ChemBERTa-77M-MTR >/dev/null 2>&1; then
+        echo "ERROR: the ChemBERTa weights are not in $HF_CACHE, so this task"
+        echo "       would download them -- and so would every other chemberta"
+        echo "       task in the array, into the same directory, at the same time."
+        echo "  Warm the cache ONCE in an interactive allocation before submitting."
+        echo "  See the comment above this check in the script for the command."
+        exit 2
+    fi
+    export HF_HUB_OFFLINE=1
+fi
+
 
 # Each condition is a (shape, targeting) pair plus whatever that pair needs, and
 # its own level grid -- censoring is a fraction of labels clipped, not a dose, so
@@ -1106,7 +1235,24 @@ def main():
         if rows:
             print(f"\n  Tier {tier} ({name}):")
             for _, nm, m, h, nt, nr in rows:
-                print(f"    {nm:36s} {m:26s} {nr} reps  {nt:3d} tasks  --time={h}:59:00")
+                unmeasured = 'UNMEASURED WALL' in pool[m][3]
+                print(f"    {nm:36s} {m:26s} {nr} reps  {nt:3d} tasks  "
+                      f"--time={h}:59:00" + ("   <- wall not measured" if unmeasured else ""))
+
+    # NAME THE WALLS THAT REST ON NOTHING, EVERY TIME, AT THE END WHERE IT IS READ.
+    #
+    # The four under-requested walls found on 2026-08-31 were all guesses that had
+    # been sitting in this file since its first commit, and nothing printed said
+    # so. A guess is not a defect; a guess that looks like a measurement is.
+    guessed = sorted({w[2] for w in written if 'UNMEASURED WALL' in pool[w[2]][3]})
+    if guessed:
+        print(f"\n  ⚠ {len(guessed)} of these wall clocks are NOT measured: "
+              f"{', '.join(guessed)}")
+        print(f"    Every other entry comes from results/tuning_local/timing*.csv. "
+              f"These five have no timing row at any sample size.")
+        print(f"    gauche_rbf's guess was 7.6x too small, and 'gauche' and "
+              f"'heteroscedastic_gp' are exact Gaussian processes of the same size,")
+        print(f"    so time one fit of each before trusting their walls.")
 
 
 if __name__ == '__main__':

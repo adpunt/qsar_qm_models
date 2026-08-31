@@ -121,6 +121,29 @@ setup_build_failed() {  # setup_build_failed <exit code>
 }
 
 if [ "${SETUP_REBUILD:-0}" = "1" ] || ! setup_env_exists; then
+    # NEVER BUILD THE ENVIRONMENT FROM INSIDE AN ARRAY TASK.
+    #
+    # Same reasoning as the extras refusal further down, and a worse failure. If
+    # the environment cannot be found by name -- which is how it is looked up,
+    # and a prefix environment outside any configured envs_dir does not answer to
+    # its name -- then every task in the array reaches this branch at once and
+    # starts its own multi-gigabyte solve into the same destination. The header
+    # above records that this solve is OOM-killed under a memory cap; dozens of
+    # them on one node is worse.
+    #
+    # A separate variable from SETUP_EXTRAS_REFUSED on purpose: reusing that one
+    # would print the operator a message about the extra packages when the real
+    # problem is that the environment was never found.
+    if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+        echo "ERROR: $ENV_LABEL was not found, and this is array task ${SLURM_ARRAY_TASK_ID}."
+        echo "  Building it from inside an array is exactly the race this file"
+        echo "  exists to prevent. Nothing has been changed on disk."
+        echo "  Run '. ./setup.sh' ONCE in an interactive allocation, confirm it"
+        echo "  activates, then resubmit."
+        SETUP_ENV_BUILD_REFUSED=1
+        export SETUP_ENV_BUILD_REFUSED
+        return 1 2>/dev/null || exit 1
+    fi
     if [ -n "$SETUP_TARGET" ] && [ -e "$SETUP_TARGET" ]; then
         SETUP_ASIDE="${SETUP_TARGET}.old"
         rm -rf "$SETUP_ASIDE"

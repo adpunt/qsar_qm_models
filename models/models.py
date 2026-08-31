@@ -101,7 +101,9 @@ from model_defaults import (
     SKLEARN_DEFAULTS, UNCERTAINTY_DEFAULTS, gp_fit_threads, provenance_columns,
     bnn_kl_weight, sklearn_params, spec_hash,
     gp_fit_collapsed as _gp_fit_collapsed_spec, is_binary_matrix,
+    cap_gp_training_set,
 )
+from tuning_rosters import roster_label
 
 def bnn_elbo_criterion(base_criterion, model, n_train):
     """Wrap a plain loss so a torchbnn network is fitted on the ELBO.
@@ -2015,11 +2017,12 @@ def train_rf_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep,
     params_source = 'default'
 
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
-        best_params = load_best_hyperparameters('rf', rep)
+        _label = roster_label(model_type, args)
+        best_params = load_best_hyperparameters(_label, rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
-            print(f"Using tuned hyperparameters for rf-{rep}")
+            print(f"Using tuned hyperparameters for {_label}-{rep}")
     
     if not params:
         if args.tuning:
@@ -2764,11 +2767,12 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     params = {}
     params_source = 'default'
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
-        best_params = load_best_hyperparameters('gauche', rep)
+        _label = roster_label('gauche', args)
+        best_params = load_best_hyperparameters(_label, rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
-            print(f"Using tuned hyperparameters for gauche-{rep}")
+            print(f"Using tuned hyperparameters for {_label}-{rep}")
     
     if not params:
         if args.tuning:
@@ -2821,6 +2825,16 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         x_train_full = x_train
         y_train_full = y_train
 
+    # CAP THE TRAINING SET. An exact Gaussian process is cubic in the number of
+    # training molecules, so the whole set is unaffordable on the main grid --
+    # 1,536 hours against a 720-hour ceiling. Author's decision 2026-08-31: every
+    # Gaussian process in the study fits at most GP_DEFAULTS['max_train_n']
+    # molecules, on every dataset, at every noise level, and records how many.
+    # Seeded on the run, so the heteroscedastic Gaussian process below picks the
+    # SAME molecules and the two differ only by their noise model.
+    x_train_full, y_train_full, gp_n_train = cap_gp_training_set(
+        x_train_full, y_train_full, iteration_seed)
+
     x_train_tensor = torch.from_numpy(x_train_full).double()
     x_test_tensor = torch.from_numpy(x_test).double()
     y_train_tensor = torch.from_numpy(y_train_full).double()
@@ -2857,6 +2871,14 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
     gp_fit_method = fit_gp_with_fallback(mll, model, likelihood,
                                          x_train_tensor, y_train_tensor)
+    # HOW MANY MOLECULES THIS FIT ACTUALLY SAW, recorded on the row.
+    #
+    # A Gaussian process trained on 5,000 molecules and one trained on 8,000 are
+    # different experiments. The cap is a study-wide setting and is meant to be,
+    # but a reader must be able to see it on the row rather than infer it from a
+    # comment, so it rides along with the fit method -- the column that already
+    # exists to say how this particular fit was produced.
+    gp_fit_method = f"{gp_fit_method}|n_train={gp_n_train}"
 
     model.eval()
     likelihood.eval()
@@ -3237,11 +3259,12 @@ def train_dnn_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, rep
     params_source = 'default'
 
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
-        best_params = load_best_hyperparameters('dnn', rep)
+        _label = roster_label('dnn', args)
+        best_params = load_best_hyperparameters(_label, rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
-            print(f"Using tuned hyperparameters for dnn-{rep}")
+            print(f"Using tuned hyperparameters for {_label}-{rep}")
 
     if not params:
         if args.tuning:
@@ -4014,11 +4037,12 @@ def train_mlp_variant_model(x_train, y_train, x_test, y_test, x_val, y_val, mode
     params_source = 'default'
 
     if hasattr(args, 'use_best_params') and args.use_best_params and not args.tuning:
-        best_params = load_best_hyperparameters(model_type, rep)
+        _label = roster_label(model_type, args)
+        best_params = load_best_hyperparameters(_label, rep)
         if best_params is not None:
             params = best_params
             params_source = 'tuned'
-            print(f"Using tuned hyperparameters for {model_type}-{rep}")
+            print(f"Using tuned hyperparameters for {_label}-{rep}")
 
     if not params:
         if args.tuning:
@@ -8359,6 +8383,12 @@ def train_heteroscedastic_gp(
     # Get kernel
     kernel_type = args.kernel if hasattr(args, 'kernel') else 'tanimoto'
     
+    # CAP THE TRAINING SET -- same rule, same seed, same molecules as the ordinary
+    # Gaussian process above, so the two differ only by their noise model
+    # (GP_DEFAULTS['max_train_n'], RERUN_PLAN.md 2.31).
+    x_train, y_train, gp_n_train = cap_gp_training_set(
+        x_train, y_train, iteration_seed)
+
     # Prepare data
     x_train_t = torch.tensor(x_train, dtype=torch.float32).to(device)
     y_train_t = torch.tensor(y_train, dtype=torch.float32).to(device)

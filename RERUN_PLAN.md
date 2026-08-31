@@ -3296,7 +3296,7 @@ the models actually run, and requires the support table to give each of them bot
 bite in both directions: naming a model the uncertainty list does not run, and naming one whose
 support says a half is absent.
 
-### 2.31 🔴 FOUND AND FIXED 2026-08-31 — five ways the screen would have died after the queue wait, and every wall clock was a guess
+### 2.33 🔴 FOUND AND FIXED 2026-08-31 — five ways the screen would have died after the queue wait, and every wall clock was a guess
 
 An eight-way audit of the job generator, the generated scripts, the tuned-parameter path and
 the runbook, each serious finding then put to a skeptic told to refute it. 61 findings, 6
@@ -3439,7 +3439,7 @@ precisely what the old cap lacked.
 against the same 720-hour ceiling — inside it, but with five hours of margin. That is a
 main-grid decision, not a launch one.
 
-### 2.32 🟠 FOUND 2026-08-31 — the tuned hyperparameters had no working route to the cluster, and most of them still have none
+### 2.34 🟠 FOUND 2026-08-31 — the tuned hyperparameters had no working route to the cluster, and most of them still have none
 
 **The route was blocked.** `models/consolidate_tuned_params.py`, the file named for this job
 in §5069, has no argument parser at all: it globs `results/fig6a_*_default.csv`, which does not
@@ -3498,7 +3498,7 @@ scored row in any sweep. Two independent gaps with one membership list.
 **A cost that is NOT a defect but must be priced in:** on the measured trials, the winning
 settings are much slower than the defaults for the tree models — LightGBM on ECFP4 goes from
 19.9 s to 397.9 s per fit (20x), the random forest on ECFP4 from 13.4 s to 170.1 s (12.7x).
-The wall clocks in §2.31 are measured at the DEFAULT settings. If tuning is switched on for
+The wall clocks in §2.33 are measured at the DEFAULT settings. If tuning is switched on for
 the four reachable models, their walls must be re-derived first. And `rf` on ECFP4 and on
 ChemBERTa both won at `min_samples_leaf: 1`, where `models/model_defaults.py` records the
 forest's aleatoric share is exactly 0.0000 — adopting them deletes the forest's uncertainty
@@ -11423,7 +11423,7 @@ the reason is in this document, with the fit count both ways.
 The two canary tasks of 2026-08-28 (`12925391` `rf`, `12925392` `qrf`) were queued before the
 audit in §2.31. **Nothing else has been submitted, and nothing should be until the interactive
 ladder in RUNBOOK §5c has been walked**, because the audit found five ways a task dies after
-the queue wait — one of which, the stale Rust binary (§2.31a), kills all 294.
+the queue wait — one of which, the stale Rust binary (§2.33a), kills all 294.
 
 **Done, in the repository, this session:**
 
@@ -11441,7 +11441,7 @@ the queue wait — one of which, the stale Rust binary (§2.31a), kills all 294.
 **Not done, and each is the author's:** whether `--confirm` runs and at what sample size;
 whether the collapsed models get their own tuned keys; whether the screen is tuned at all;
 and what `gauche_rbf` does about the main grid's 1,534 hours against a 720-hour ceiling
-(§2.31, §2.32). **None of the four blocks the screen.**
+(§2.33, §2.34). **None of the four blocks the screen.**
 
 
 ### 🔵 UPDATING THE CLUSTER CHECKOUT — `bash scripts/pull_safely.sh`, always

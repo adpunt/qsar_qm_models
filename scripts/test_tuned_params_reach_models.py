@@ -135,9 +135,22 @@ SYNTHETIC = {
 BEHAVIOURAL = {'gauche', 'dnn', 'mlp'}
 
 
-def toy_data(n=120, d=12, seed=0):
+def toy_data(n=120, d=12, seed=0, binary=False):
+    """A small regression problem.
+
+    `binary` gives a 0/1 matrix instead of Gaussian columns. The fingerprint
+    kernels -- Tanimoto and its family -- are ratios of set overlaps and are
+    defined on binary vectors ONLY; models.py refuses them on anything else, so
+    fitting the Tanimoto Gaussian process on Gaussian columns raises before it
+    reaches a single hyperparameter. That is what this fixture used to do, and
+    it made the one check that proves a tuned value reaches the Gaussian process
+    fail for a reason that had nothing to do with tuned values.
+    """
     rng = np.random.default_rng(seed)
-    x = rng.normal(size=(n, d)).astype(np.float32)
+    if binary:
+        x = (rng.random((n, d)) < 0.35).astype(np.float32)
+    else:
+        x = rng.normal(size=(n, d)).astype(np.float32)
     y = (x[:, 0] * 2.0 - x[:, 1] + rng.normal(scale=0.1, size=n)).astype(np.float32)
     cut = int(n * 0.75)
     return x[:cut], y[:cut], x[cut:], y[cut:]
@@ -224,7 +237,12 @@ def a_model_for(key, rosters):
 def check_key_reaches(key, params, tuner, rosters, why):
     """Assert that every parameter in `params` reaches the built model."""
     label, rep = a_model_for(key, rosters)
-    data = toy_data()
+    # A fingerprint kernel needs binary features or models.py refuses it before
+    # any hyperparameter is read. The Tanimoto Gaussian process is the only
+    # model here that asks for one; the RBF process, which the roster spells
+    # gauche_rbf, is happy either way and shares this builder.
+    needs_binary = rosters.MODELS[label][0].split().count('tanimoto') > 0
+    data = toy_data(binary=needs_binary)
 
     if key in BEHAVIOURAL:
         try:
@@ -327,8 +345,42 @@ def main():
     # different from a key that is missing, so it is dropped here rather than
     # sorted with the strings -- which is what it used to do, and it raised
     # TypeError comparing None with a str.
+    # ONE KEY PER BUILDER, NOT ONE PER MODEL.
+    #
+    # Every model got its own tuned key on 2026-08-31, so there are sixteen keys
+    # where there were eight. They do NOT go through sixteen builders: a
+    # Bayesian network is `train_dnn_model` with a flag, the heteroscedastic
+    # variational network is the same builder with two flags, the quantile
+    # forest is `train_rf_model` with a different model_type, and the Tanimoto
+    # Gaussian process is `train_gauche_model` with a different kernel. Fitting
+    # all sixteen would fit the same eight functions twice over and double an
+    # already slow check for nothing.
+    #
+    # So this fits one key per BUILDER, and asserts that every other key reaches
+    # one of those builders. That every key is produced by a real run's
+    # arguments is checked separately and cheaply, in
+    # scripts/test_tuning_rosters.py, which drives roster_label directly.
+    BUILDER_OF = {
+        'rf': 'rf', 'qrf': 'rf',
+        'svm': 'svm', 'xgboost': 'xgboost', 'lgb': 'lgb', 'ngboost': 'ngboost',
+        'gauche': 'gauche', 'gauche_rbf': 'gauche',
+        'dnn': 'dnn', 'dnn_bnn_full': 'dnn',
+        'dnn_bnn_full_variational': 'dnn',
+        'dnn_bnn_full_variational_hetero': 'dnn',
+        'mlp': 'mlp', 'mlp_bnn_full': 'mlp',
+        'mlp_bnn_full_variational': 'mlp',
+        'mlp_bnn_full_variational_hetero': 'mlp',
+    }
     known = {k for k in rosters.TUNED_KEY.values() if k is not None}
-    assert set(keys) == known, f'key list is stale: {sorted(known)}'
+    unmapped = sorted(known - set(BUILDER_OF))
+    assert not unmapped, (
+        f'tuned key(s) {unmapped} reach no builder listed here. Add them to '
+        f'BUILDER_OF, and if they are a NEW builder add them to `keys` above '
+        f'so the fit is actually exercised.')
+    builders = {BUILDER_OF[k] for k in known}
+    assert set(keys) == builders, (
+        f'the fitted key list is stale: builders are {sorted(builders)}, '
+        f'fitted are {sorted(keys)}')
     for key in keys:
         check_key_reaches(key, SYNTHETIC[key], tuner, rosters, 'synthetic')
 
