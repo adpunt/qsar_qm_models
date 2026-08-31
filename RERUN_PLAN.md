@@ -6644,6 +6644,27 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7ak 🟠 THE LAB SEARCHES GO TO ARC — measured, not guessed
+
+The four families' cost on a lab dataset is **two full-size neural fits per pairing**, the candidate
+and the default. One of those on LogD took **1,294 seconds** measured locally on 2026-08-31. Forty
+eight of them is about seventeen hours for LogD alone, and the author has no overnight window.
+
+hERG (1,182 training molecules) and Caco-2 (1,729) are small enough to finish locally and were left
+running. LogD is not, and it is now `slurm_scripts_tuning/tune_bnn_lab.sh`: 72 array tasks, one per
+dataset-model-representation pairing, covering all three lab datasets so the cluster result is
+consistent rather than two-thirds laptop and one-third cluster.
+
+    scp slurm_scripts_tuning/tune_bnn_lab.sh \
+        scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/
+    ssh scat9264@arc-login.arc.ox.ac.uk
+    cd /data/stat-cadd/scat9264/qsar_qm_models
+    sbatch --account=stat-cadd --partition=long --array=0-71%12 tune_bnn_lab.sh
+
+The partial LogD rows from the abandoned 5,039-molecule local run are kept at
+`results/tuning_local/partial/trials_bnnlogd_at5039.csv`. They are NOT read by the report: the
+sample-size guard added in 5.7aj would drop them anyway, which is the correct behaviour.
+
 #### 5.7ai ✅ THIRD FILTER ADDED 2026-08-31 — R-squared at noise level 0.5
 
 The author's rule. A setting is judged on three things now, not two:

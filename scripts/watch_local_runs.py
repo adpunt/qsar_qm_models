@@ -35,12 +35,15 @@ JOBS = [
      'tuned against default across seven noise levels'),
     ('noise test, LightGBM',  'noise_vs_tuned_lgb.csv', 56,
      'does LightGBM improve under noise on four more representations'),
+    ('per-model pick at noise', 'per_model_varia.csv', 252,
+     'one setting per model, chosen at noise 0.5 over three seeds'),
     ('Bayesian search, hERG',   'trials_bnnherg.csv',  312, '24 pairings'),
     ('Bayesian search, Caco-2', 'trials_bnncaco2.csv', 312, '24 pairings, screened'),
     ('Bayesian search, LogD',   'trials_bnnlogd.csv',  312, '24 pairings, screened'),
 ]
 
-PATTERNS = ['scripts/tuned_under_noise', 'tune_hyperparameters.py --sweep']
+PATTERNS = ['scripts/tuned_under_noise', 'tune_hyperparameters.py --sweep',
+            'pick_per_model_setting']
 
 
 def running(pattern):
