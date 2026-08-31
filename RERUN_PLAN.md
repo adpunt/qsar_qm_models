@@ -6644,6 +6644,54 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7ah 🔴 WHETHER TUNING SURVIVES NOISE IS A PROPERTY OF THE PAIRING, NOT THE MODEL
+
+LightGBM, the same model, the same noise, the same molecules, two representations. **They do
+opposite things.**
+
+| representation | 0.0 | 0.2 | 0.3 | 0.5 | 0.75 | 1.0 | 1.5 |
+|---|---|---|---|---|---|---|---|
+| PDV | +0.0001 | -0.0050 | +0.0076 | +0.0307 | +0.0028 | +0.0418 | **+0.0703** |
+| ECFP4 | +0.0247 | +0.0200 | -0.0212 | -0.0492 | -0.0961 | -0.1769 | **-0.4077** |
+
+Raw, so the shape is visible. ECFP4: the default falls 0.823 to 0.634, the tuned setting falls 0.848
+to **0.226**. PDV: the default falls 0.891 to 0.631, the tuned setting falls 0.892 to 0.701 — it
+degrades LESS than its own default.
+
+**The mechanism is in the two settings, and it is not subtle.**
+
+| | ECFP4 winner | PDV winner |
+|---|---|---|
+| max_depth | **-1 (unlimited)** | **4** |
+| num_leaves | 63 | 31 |
+| learning_rate | 0.060 | 0.019 |
+| reg_alpha | **0.008** | **0.508** |
+| reg_lambda | 0.603 | 1.08 |
+| n_estimators | 1000 | 1000 |
+
+The ECFP4 search happened to land on an unconstrained model — unlimited depth, twice the leaves,
+three times the step size, regularisation near zero. The PDV search happened to land on a
+constrained one. On clean labels both look fine, and the unconstrained one looks slightly better.
+Add noise and the unconstrained model memorises the corrupted labels while the constrained one
+cannot.
+
+**So "LightGBM holds and grows under noise" was a PDV fact, not a LightGBM fact**, and the author was
+right to ask for the check. The consequence is larger than one model: whether a clean-tuned setting
+survives noise depends on whether the twelve draws happened to contain a constrained configuration
+at the top, which varies pairing by pairing for no reason connected to the science.
+
+**What follows from it.**
+
+1. **A setting chosen on clean labels cannot be adopted without a noise check.** The check is cheap —
+   seven levels, two fits each, minutes for a tree model.
+2. **When two settings are close on clean labels, prefer the constrained one.** Depth, leaf count,
+   step size and the regularisation terms are the ones that matter, and the earlier at-an-end test
+   already flags the expensive end of exactly those (5.7w).
+3. It strengthens the case for **one setting per model** (5.7ad), because a per-pairing setting
+   carries this lottery into every cell of the decomposition.
+
+🟠 Two representations so far. Avalon, MHG-GNN and Sort & Slice are running.
+
 #### 5.7ag ✅ THE NOISE TEST, PDV, COMPLETE — the variational families hold, the plain ones are unstable
 
 QM9, 3,000 molecules, one scaffold split, one seed. Training and validation labels noised with
