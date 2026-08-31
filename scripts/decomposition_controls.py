@@ -328,8 +328,37 @@ def injector_noise(condition, y, level, groups, spread, seed):
 # The models, each scored out of fold on scaffold groups
 # ---------------------------------------------------------------------------
 
-def _oof(fit_predict, x, y, groups, n_folds):
-    """Out-of-fold mean and split. Mirrors both pipelines' own out-of-fold pass."""
+def _oof(fit_predict, x, y, groups, n_folds, y_clean=None):
+    """Out-of-fold mean and split. Mirrors both pipelines' own out-of-fold pass.
+
+    THE LABEL IS STANDARDISED, and until 2026-08-31 it was not. `_standardise`
+    below scales the FEATURES and nothing ever scaled the target, while both
+    production pipelines standardise it (`--normalize True`; every results row
+    carries standardisation_mean and standardisation_sd). QM9's HOMO-LUMO gap is
+    in Hartree -- mean 0.254, spread 0.047.
+
+    That difference is invisible for a forest, which is invariant to any monotone
+    rescaling of the label, and for NGBoost, whose fitted distribution has a free
+    scale. It is severe for a network trained by gradient descent at a fixed
+    learning rate, and worse still for one trained by the heteroscedastic
+    likelihood, whose minimising log-variance at residuals of order 0.01 is near
+    -9.2 while the head starts at 0. So this harness reported R2 of -4.0 for
+    networks that reach +0.73 on the same molecules once the label is scaled, and
+    the study concluded from that the networks could not fit QM9 at all
+    (RERUN_PLAN.md 2.31).
+
+    `y_clean` is the UNCORRUPTED label and is what the mean and spread are taken
+    from. Standardising by the noisy label's own spread makes the divisor grow
+    with the noise level, so the standardised target shrinks and the same nominal
+    level poses a different optimisation problem at every level -- which is the
+    confound RERUN_PLAN.md 2.4 records finding and fixing in the pipeline, and it
+    must not be reintroduced here. It defaults to `y` so an existing caller that
+    passes no clean labels still runs, and at level zero the two are identical.
+
+    Everything comes back in the LABEL'S OWN UNITS: the mean by multiplying by
+    the spread and adding the mean back, and both components by the SQUARE of the
+    spread, because they are variances.
+    """
     from sklearn.model_selection import GroupKFold
 
     n = len(y)
@@ -338,17 +367,29 @@ def _oof(fit_predict, x, y, groups, n_folds):
     epis = np.full(n, np.nan)
     fold = np.full(n, -1, dtype=int)
     got_a = got_e = False
+    ref = np.asarray(y if y_clean is None else y_clean, dtype=float)
+    if len(ref) != n:
+        raise DecompositionControlsError(
+            f"y_clean has {len(ref)} entries against {n} labels; the "
+            f"standardisation would be taken from the wrong molecules.")
 
     splitter = GroupKFold(n_splits=n_folds)
     for i, (keep, held) in enumerate(splitter.split(x, y, groups)):
-        m, a, e = fit_predict(x[keep], y[keep], x[held])
-        mean[held] = np.asarray(m, dtype=float).ravel()
+        mu = float(np.mean(ref[keep]))
+        sd = float(np.std(ref[keep]))
+        if not np.isfinite(sd) or sd <= 0:
+            raise DecompositionControlsError(
+                f"fold {i}: the clean training label spread is {sd}, so the "
+                f"label cannot be standardised and a network would be fitted "
+                f"on an unscaled target.")
+        m, a, e = fit_predict(x[keep], (y[keep] - mu) / sd, x[held])
+        mean[held] = np.asarray(m, dtype=float).ravel() * sd + mu
         fold[held] = i
         if a is not None:
-            alea[held] = np.asarray(a, dtype=float).ravel()
+            alea[held] = np.asarray(a, dtype=float).ravel() * sd ** 2
             got_a = True
         if e is not None:
-            epis[held] = np.asarray(e, dtype=float).ravel()
+            epis[held] = np.asarray(e, dtype=float).ravel() * sd ** 2
             got_e = True
     return (mean, alea if got_a else None, epis if got_e else None, fold)
 
@@ -761,7 +802,7 @@ def measure(models=None, conditions=CONDITIONS, level=0.6, n_molecules=2000,
                 try:
                     mean, alea, epis, fold = _oof(
                         lambda a, b, c: fit(a, b, c, seed), x, y_noisy, groups,
-                        n_folds)
+                        n_folds, y_clean=y)
                 except Exception as exc:
                     # A model this interpreter cannot build is BLOCKED, not a
                     # result. The quantile forest is the standing case: it needs
@@ -934,7 +975,7 @@ def measure_real_conditions(models, reps, conditions, level=0.6,
                     try:
                         mean, alea, epis, fold = _oof(
                             lambda a, b, c: fit(a, b, c, seed), x, y_noisy,
-                            groups, n_folds)
+                            groups, n_folds, y_clean=y)
                     except Exception as exc:
                         if verbose:
                             print(f"    {condition:<14} {lvl:.1f} {rep_name:<7} "
@@ -1064,7 +1105,7 @@ def level_response(models, reps, conditions, levels=(0.0, 0.2, 0.4, 0.6, 0.8, 1.
                     try:
                         mean, alea, epis, fold = _oof(
                             lambda a, b, c: fit(a, b, c, seed), x, y_noisy,
-                            groups, n_folds)
+                            groups, n_folds, y_clean=y)
                     except Exception as exc:
                         if verbose:
                             print(f"    {lvl:>6.1f}  BLOCKED {type(exc).__name__}",

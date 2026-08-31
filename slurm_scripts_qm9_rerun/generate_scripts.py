@@ -149,6 +149,41 @@ for _m in _PAIRS['models']:
     UNCERTAINTY_PAIRS[_m['qm9']] = ([_canon_to_qm9_rep[c] for c in _only]
                                     if _only else list(_pair_reps_all))
 
+# HOW MANY OF THE INNER FOLDS ARE ACTUALLY SCORED, per model.
+#
+# The out-of-fold pass splits the training molecules into `--oof-folds` folds and
+# refits once per fold, so every molecule is scored by a model that never saw its
+# label. Scoring FEWER folds than were cut keeps that property exactly -- the
+# molecules in a scored fold are still scored out of fold -- and costs one refit
+# per scored fold instead of five. The molecules in the unscored folds are left
+# blank, so it buys the cost back with coverage, not with correctness.
+#
+# NGBoost is the only model that needs it, and it needs it because it pays for
+# two different questions at once. Three seeds give it a model-uncertainty term
+# at all (a single distributional fit has nothing to disagree with, added
+# 2026-08-30 in c2aec9d); the out-of-fold pass gives per-molecule rows whose
+# labels were corrupted. The two multiply: three seeds times six fits is
+# EIGHTEEN fits per training run, which prices the main grid task at 606 hours --
+# 25 days against a 30-day partition limit, with nothing spare for a hiccup.
+#
+# Three seeds and one scored fold is six fits, 202 hours, which is exactly what
+# NGBoost cost before the seeds landed. What is given up is per-molecule coverage
+# on NGBoost: a fifth of the training molecules get an out-of-fold row instead of
+# all of them. That is the input to the which-molecules question, which NGBoost is
+# not the model that answers -- and the decomposition claim it IS on the list for
+# is a population statement that does not read those rows at all
+# (uncertainty_pairs.json, `_which_question_this_answers`).
+#
+# Set to 0, or leave a model out, to score every fold that was cut.
+# EMPTY, and that is the current state rather than a missing feature. It existed
+# for one day because NGBoost's seed ensemble made it eighteen fits per training
+# run -- 606 hours, 25 days against a 30-day limit -- and scoring one fold took
+# that back to six. The ensemble was withdrawn on measurement the next day
+# (RERUN_PLAN.md 2.30), so NGBoost is six fits again on its own and every model
+# scores every fold it cuts. The machinery stays because the lever is real and
+# the wall-clock guard that found the problem is worth keeping pointed at it.
+OOF_FOLDS_SCORED = {}
+
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
 _SETTINGS = _SETTLED['settings_that_follow']
@@ -220,7 +255,7 @@ REFERENCE_CONDITION = 'gaussian'
 NEEDS_OWN_CLEAN_LEVEL = {'censoring'}
 
 
-def build_uncertainty_block(model, unc_reps, oof_folds):
+def build_uncertainty_block(model, unc_reps, oof_folds, oof_scored=0):
     """The shell that decides whether THIS array task runs the uncertainty pass.
 
     The pass costs `oof_folds` extra fits on top of the training run, and it is
@@ -244,14 +279,16 @@ def build_uncertainty_block(model, unc_reps, oof_folds):
         '# representation must not pay for it. `-u True` is NOT restricted: it is\n'
         '# free and it writes the test rows either way.\n'
         'case "$rep" in\n'
-        '  %s) OOF_FLAGS="--oof-folds %d" ;;\n'
+        '  %s) OOF_FLAGS="--oof-folds %d%s" ;;\n'
         '  *) OOF_FLAGS="" ;;\n'
         'esac\n'
         'if [ -n "$OOF_FLAGS" ]; then\n'
         '    echo "=== out-of-fold pass: settled pair %s/$rep -> $OOF_FLAGS"\n'
         'else\n'
         '    echo "=== out-of-fold pass: %s/$rep is not a settled pair, test rows only"\n'
-        'fi' % (1 + oof_folds, cases, oof_folds, model, model))
+        'fi' % (1 + (oof_scored or oof_folds), cases, oof_folds,
+                (f' --oof-folds-scored {oof_scored}' if oof_scored else ''),
+                model, model))
 
 
 def levels_for(name, levels):
@@ -325,12 +362,14 @@ MODELS = {
     'xgboost':                  ('-m xgboost',   1, 23, '', ALL_REPS),
     'lgb':                      ('-m lgb',       1, 23, 'LightGBM', ALL_REPS),
     'svm':                      ('-m svm',       1, 35, 'RBF kernel on every representation', ALL_REPS),
-    # 🔴 THREE FITS PER RUN under -u, not one. NGBoost is fitted under three
-    # seeds so it has a model-uncertainty term at all; a single fit has nothing
-    # to disagree with. Settled 2026-08-30 (RERUN_PLAN.md 5.5i). The hours below
-    # are TRIPLED from 47 to reflect it -- a task killed at the wall costs the
-    # whole task.
-    'ngboost':                  ('-m ngboost -u True', 1, 141, 'slowest tree model; three fits per run for the ensemble; emits both uncertainty components per molecule', ALL_REPS),
+    # ONE FIT PER RUN, back to 47 hours. The seed ensemble was queued on
+    # 2026-08-30 and withdrawn on measurement the next day: NGBoost's seed
+    # reaches only minibatch_frac and col_sample, both pinned at 1.0, so three
+    # seeds are the same fit and the spread between them is 150 to 3,581 times
+    # smaller than the aleatoric term -- and it RISES with the noise level
+    # (RERUN_PLAN.md 2.30). `ngboost_ensemble_seeds` is 1 in the shared spec, so
+    # the tripled wall clock this line carried for one day is wrong again.
+    'ngboost':                  ('-m ngboost -u True', 1, 47, 'slowest tree model; emits a per-molecule aleatoric term, and no epistemic one -- one distributional fit has nothing to disagree with (RERUN_PLAN.md 2.30)', ALL_REPS),
     'dnn':                      ('-m dnn',       1, 35, '', ALL_REPS),
     'mlp':                      ('-m mlp',       1, 35, '', ALL_REPS),
     'dnn_bnn_full':             ('-m dnn --bayesian-transformation full -u True', 2, 47, 'BNN-alpha', ALL_REPS),
@@ -977,7 +1016,13 @@ def main():
         # will never run.
         unc_reps = (UNCERTAINTY_PAIRS.get(model, []) if '-u True' in flags else [])
         unc_reps = [r for r in unc_reps if r in reps]
-        unc_block = build_uncertainty_block(model, unc_reps, args.oof_folds)
+        oof_scored = OOF_FOLDS_SCORED.get(model, 0)
+        if oof_scored and oof_scored > args.oof_folds:
+            raise SystemExit(
+                f"ERROR: OOF_FOLDS_SCORED asks {model} to score {oof_scored} of "
+                f"{args.oof_folds} folds, which is more folds than are cut.")
+        unc_block = build_uncertainty_block(model, unc_reps, args.oof_folds,
+                                            oof_scored)
         n_tasks = len(conditions) * len(reps)
         grand += n_tasks
         # The real total: this model's representations times the levels each
@@ -1006,7 +1051,7 @@ def main():
         # appears in the literal command and reading the flags would size every
         # script for one fit. One wall clock covers the whole array, so it has to
         # be the worst task in it: a task on a settled pair.
-        fits_per_run = 1 + args.oof_folds if unc_reps else 1
+        fits_per_run = 1 + (oof_scored or args.oof_folds) if unc_reps else 1
         hours = max(1, math.ceil(
             hours_per_110 * runs_per_task * fits_per_run / 110 * 1.25))
         if hours > args.max_hours:

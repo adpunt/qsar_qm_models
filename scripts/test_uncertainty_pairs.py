@@ -175,8 +175,12 @@ def qm9_emitted_pairs(out_dir):
         src = path.read_text()
         # Every case line, not the first -- re.search would read one and miss a
         # second if a script ever carried two.
-        cases = re.findall(r'^\s*([a-z0-9_ |]+)\)\s*OOF_FLAGS="--oof-folds (\d+)"',
-                           src, re.M)
+        # The flags string carries `--oof-folds-scored N` for a model that
+        # scores fewer folds than it cuts, so the pattern must not end at the
+        # fold count. Anchored on the opening quote and the flag name instead.
+        cases = re.findall(
+            r'^\s*([a-z0-9_ |]+)\)\s*OOF_FLAGS="--oof-folds (\d+)[^"]*"',
+            src, re.M)
         emitted[model] = [r.strip() for line, _ in cases for r in line.split('|')]
         h = re.search(r'#SBATCH --time=(\d+):', src)
         hours[model] = int(h.group(1)) if h else 0
@@ -204,6 +208,56 @@ def qm9_emitted_pairs(out_dir):
                       f'{path.name} runs the out-of-fold pass but does not pass '
                       f'-u True, so nothing is written')
     return emitted, hours
+
+
+def check_the_wall_clock_fits_the_partition(out_dir):
+    """No task may ask for more than the longest partition can give it.
+
+    A job that asks for more than the queue allows is rejected at submission,
+    which is cheap. The expensive case is the one just under: NGBoost at three
+    seeds and five scored folds is eighteen fits per training run and prices the
+    main-grid task at 606 hours -- 25 days against a 30-day limit, with nothing
+    spare. It would queue for days and then be killed at the wall, losing the
+    whole task.
+
+    Three seeds and ONE scored fold is six fits and 202 hours, which is what
+    NGBoost cost before the seed ensemble landed. That is what OOF_FOLDS_SCORED
+    buys, and this is the check that says so out loud rather than leaving the
+    number to be rediscovered.
+    """
+    # The long partition, in hours. RERUN_PLAN.md 2.8i: medium is 2 days, long
+    # is 30.
+    LONG_PARTITION_HOURS = 30 * 24
+    # How much headroom a job must leave. A task sized at 96% of the limit has
+    # no room for a slow node, and it has already queued for days by the time it
+    # finds out.
+    HEADROOM = 0.75
+
+    subprocess.run(
+        [sys.executable, str(QM9_GENERATOR), '--stage', '1', '--max-hours', '720',
+         '--out-dir', str(out_dir)],
+        capture_output=True, text=True, check=True)
+    worst = []
+    for path in sorted(out_dir.glob('qm9_s1_*.sh')):
+        m = re.search(r'#SBATCH --time=(\d+):', path.read_text())
+        if not m:
+            continue
+        hours = int(m.group(1))
+        checked[0] += 1
+        if hours > LONG_PARTITION_HOURS * HEADROOM:
+            worst.append((path.stem[len('qm9_s1_'):], hours))
+    for model, hours in worst:
+        check(False,
+              f"{model} asks for {hours}h on the main grid, over "
+              f"{int(LONG_PARTITION_HOURS * HEADROOM)}h -- {hours / 24:.1f} days "
+              f"against a {LONG_PARTITION_HOURS // 24}-day limit. It would queue "
+              f"for days and be killed at the wall. Cut the scored folds "
+              f"(OOF_FOLDS_SCORED in the generator) rather than the seeds.")
+    if not worst:
+        peak = max((int(re.search(r'#SBATCH --time=(\d+):', p.read_text()).group(1))
+                    for p in out_dir.glob('qm9_s1_*.sh')), default=0)
+        print(f"  wall clock: the longest main-grid task asks {peak}h "
+              f"({peak / 24:.1f} days), inside the {LONG_PARTITION_HOURS // 24}-day limit")
 
 
 def check_qm9_matches(pairs, out_dir):
@@ -304,6 +358,8 @@ def main():
     check_names_meet(pairs)
     with tempfile.TemporaryDirectory() as tmp:
         check_qm9_matches(pairs, Path(tmp))
+    with tempfile.TemporaryDirectory() as tmp:
+        check_the_wall_clock_fits_the_partition(Path(tmp))
     check_lab_matches(pairs)
 
     if failures:
