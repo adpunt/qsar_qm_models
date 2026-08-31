@@ -6644,6 +6644,61 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7ad ✅ SCOPE SETTLED 2026-08-31 — tune four models, and tune them per MODEL
+
+**Author's decision.** Only the four Bayesian and variational network families are tuned:
+`dnn_bnn_full`, `dnn_bnn_full_variational`, `mlp_bnn_full`, `mlp_bnn_full_variational`. Everything
+else keeps its default.
+
+**Why those four and nothing else** (measured, 5.7ab): they gain a median +0.1924 in validation
+R-squared and win on 24 of 24 pairings, six times the gain of any other group. Every other family
+gains 0.02 to 0.04, which is inside the range where the choice can be argued either way and is not
+worth the compute or the confound. The four are not merely improved by tuning — their defaults do
+not work. The Bayesian alpha network scores **-0.5568** on QM9 PDV and **-1.3728** on hERG PDV
+untuned.
+
+**One setting per model, shared across all six representations.** This is 5.7y option 1, and taking
+it removes the confound in the two-way decomposition: with the hyperparameters no longer varying
+cell by cell, the representation effect and the model-by-representation interaction mean what they
+say again.
+
+**Applies across the board** — the QM9 sweep, the three lab datasets, and the fixed-PDV results.
+Uncertainty work is NOT in scope: the author cancelled the uncertainty experiments on 2026-08-31.
+
+**Running now, all local:** the search for the four families on hERG (1,415 molecules, 24 pairings),
+Caco-2 (2,161, screened) and LogD (5,039, screened). They had never been run on the lab datasets at
+all. When they finish, each model's six winners are scored on all six representations to pick the
+single per-model setting, and the chosen setting is then tested against increasing noise the way
+5.7aa tests the others.
+
+#### 5.7ae 🚨 THE ROSTER CHANGE BROKE THE TUNER ITSELF, NOT ONLY THE REPORTING
+
+Second and worse instance of 5.7x. Giving every model its own tuned-file key made
+`rosters.TUNED_KEY[model_label]` name keys that `SEARCH_SPACES` has no entry for, and the tuner uses
+that same lookup to decide WHICH SEARCH SPACE TO DRAW FROM. Every Bayesian and variational pairing
+raised `KeyError: 'dnn_bnn_full'` at the first candidate. The search for the four families the
+author has just chosen could not start.
+
+**They are two different questions and are now two different lookups.** `search_family()` in
+`scripts/tune_hyperparameters.py` says which space a model is SEARCHED under — several models share
+one because they share an architecture. `TUNED_KEY` still says which file entry a model READS, which
+is what the other session changed and is untouched here. A model with neither is recorded as blocked
+with its reason rather than skipped.
+
+**`models/tuning_rosters.py` itself has not been modified by this chat.** Both versions are kept
+outside the repo in case the author wants the change reverted.
+
+#### 5.7af 🟠 THE LAB DATASETS ARE BEHIND, NOT BROKEN — one cluster job fixes it
+
+Following 5.7ac. Nothing is wrong with the code. `alternative_data_noise_robustness.py` writes the
+aleatoric column today. The six files in `results/validation_full/` are dated **12 February 2026**
+and predate that fix by six months, so they carry one undivided uncertainty column.
+
+**The action is to re-run the validation pipeline on ARC.** The scripts are in
+`slurm_scripts_validation_rerun/` and already exist; they need regenerating first because they still
+carry the old injector flags (see the CLI change of 2026-08-26). Nothing here can be done on the
+laptop.
+
 #### 5.7aa 🔴 TUNING ON CLEAN LABELS PICKS SETTINGS THAT BREAK UNDER NOISE — first result
 
 `scripts/tuned_under_noise.py`, QM9, 3,000 molecules, one scaffold split, one seed, no replicates.

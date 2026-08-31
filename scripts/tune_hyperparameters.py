@@ -760,7 +760,7 @@ def run(args_cli):
     # Models refused below never reach it, so they are not required to be here.
     refused = set(getattr(rosters, 'READS_NO_TUNED_PARAMS', frozenset()))
     unpinned = sorted({m for m, _ in pairings
-                       if rosters.TUNED_KEY[m] == 'gauche'
+                       if search_family(m, rosters) == 'gauche'
                        and m not in GP_KERNEL_FOR and m not in refused})
     if unpinned:
         raise SystemExit(
@@ -852,7 +852,19 @@ def run(args_cli):
                   f'(standardised: {cache[rep][1]})', flush=True)
         data, _ = cache[rep]
 
-        key = rosters.TUNED_KEY[model_label]
+        # The SEARCH SPACE, not the tuned-file key. They were the same lookup
+        # until 2026-08-31, when every model was given its own file key; the
+        # file key then named things no search space has and this line raised
+        # KeyError on the first Bayesian pairing. Which file a model READS is a
+        # separate question and still comes from TUNED_KEY, below.
+        key = search_family(model_label, rosters)
+        if key is None:
+            record(dict(model=model_label, rep=rep, setting='blocked', r2='',
+                        seconds=0, status='blocked',
+                        detail=f'{model_label} has no entry in SEARCH_SPACES '
+                               f'and no family to fall back to'))
+            print(f'  no search space for {model_label}', flush=True)
+            continue
         candidates = [sample_setting(key, rng, model_label)
                       for _ in range(n_settings)]
 
