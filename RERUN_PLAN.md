@@ -6827,7 +6827,8 @@ This replaces the earlier worst-representation rule (2026-09-01, author's decisi
 | filter | test |
 |---|---|
 | extreme | No value at the end of its range that makes the model BIGGER or SLOWER. For these four models: `hidden_size1` at 1024, `hidden_size2` at 512, `hidden_size` at 512, `num_hidden_layers` at 4. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. Dropout and learning rate are never flagged: a network runs the same number of passes either way. Ranges are the search spaces in `scripts/tune_hyperparameters.py`. |
-| compute | The setting's slowest representation takes no more than **2x** the default's slowest. Compared only over representations BOTH were timed on — taking each one's own worst over whatever it happened to have finished failed settings smaller than the default. The table prints the two times so the size of the gap is visible. |
+| compute | The setting's slowest representation takes no more than **2x** the yardstick's slowest. Compared only over representations BOTH were timed on — taking each one's own worst over whatever it happened to have finished failed settings smaller than the default. The table prints the two times so the size of the gap is visible. |
+| | **The yardstick is normally the default, but not when the default is broken** (author's decision, 2026-09-01). For these four models the default is sometimes fast BECAUSE IT FAILS TO TRAIN: Bayesian alpha on QM9 scores -0.826 and quits in 66 seconds, and twice that rejected every setting beating it by more than +0.8, leaving the model with a default that does not work. When the default's mean R-squared across its representations is below zero, the yardstick becomes the FASTEST SETTING THAT ACTUALLY TRAINS. Each table names the yardstick it used. |
 | noise | From Run 3. Mean change from the default over PDV and ChemBERTa at noise 0.5. Negative fails. |
 
 ##### The walk
@@ -6845,12 +6846,21 @@ ends at 0.226 under noise where its own default holds 0.634 (5.7ah). The study i
 to label noise, so a setting chosen only on clean labels is choosing against the thing being
 measured.
 
-##### A caution the tables make visible
+##### The cost of each representation, measured
 
-For these four models the default is sometimes fast BECAUSE IT FAILS TO TRAIN. Bayesian alpha's
-default fits QM9 PDV in 36 seconds and scores -0.826. Twice that is a very low bar, and settings
-that train properly fail the compute filter against it. The rule is unchanged — this is flagged, not
-worked around, and the table prints both times so it can be seen.
+Paired on identical dataset, model and setting, against PDV:
+
+| representation | features | cost | dropping it from the WHOLE analysis saves |
+|---|---|---|---|
+| ECFP4 | 2048 | 3.06x PDV | 31% |
+| Avalon | 2048 | 2.48x PDV | 25% |
+| MHG-GNN | 1024 | 1.87x PDV | 19% (only 2 pairs — not yet reliable) |
+| ChemBERTa | 384 | 1.40x PDV | 14% |
+
+**A representation may only be dropped from EVERY dataset, never from one.** The ranking is the mean
+of the per-representation changes, so a mean taken over a different set of representations is not
+comparable with one taken over another, and the ranks would be meaningless across datasets. The
+table prints the count of representations behind each mean for exactly this reason.
 
 ##### The data needed, in full
 

@@ -176,7 +176,31 @@ def main():
             dl, baseline = deltas(clean, reps)
             nd, _ = deltas(scores.get(nk, {}), NOISE_REPS)
 
-            dsec = secs.get(ck, {}).get('DEFAULT', {})
+            # THE COMPUTE YARDSTICK. Normally the default. But for these four
+            # models the default is sometimes fast BECAUSE IT FAILS TO TRAIN --
+            # Bayesian alpha on QM9 scores -0.826 and quits in 66s -- and twice
+            # that rejected every setting that beat it by more than +0.8,
+            # leaving a model with a default that does not work. Author's
+            # decision, 2026-09-01: when the default fails, measure against the
+            # FASTEST SETTING THAT ACTUALLY WORKS instead. The filter still
+            # catches genuinely expensive settings; a broken baseline no longer
+            # vetoes a working one.
+            base_r2 = statistics.mean([v for v in baseline.values()
+                                       if v is not None] or [0.0])
+            all_secs = secs.get(ck, {})
+            yard, yard_name = 'DEFAULT', 'the default'
+            if base_r2 < 0:
+                working = []
+                for sg, (mn, _dd) in dl.items():
+                    sc = all_secs.get(sg, {})
+                    if mn is not None and (base_r2 + mn) > 0 and sc:
+                        working.append((max(med(v) for v in sc.values() if v), sg))
+                if working:
+                    yard = min(working)[1]
+                    yard_name = ('the fastest setting that trains '
+                                 '(the default fails, R2 '
+                                 f'{base_r2:+.3f})')
+            dsec = all_secs.get(yard, {})
 
             rows = sorted(((s, m, d) for s, (m, d) in dl.items() if m is not None),
                           key=lambda t: -t[1])
@@ -185,6 +209,7 @@ def main():
                       'default R2: ' + '  '.join(
                           f'{r} {baseline[r]:.3f}' for r in reps
                           if baseline.get(r) is not None), '',
+                      f'compute measured against {yard_name}.', '',
                       '| rank | ' + ' | '.join(f'D {r}' for r in reps) +
                       ' | MEAN D (n reps) | extreme | compute | noise | verdict |',
                       '|---' * (len(reps) + 6) + '|']
@@ -198,7 +223,7 @@ def main():
                 # settings smaller than the default, purely because the
                 # candidate had reached a slow representation and the default
                 # had not.
-                ssec = secs.get(ck, {}).get(sig, {})
+                ssec = all_secs.get(sig, {})
                 shared = [r for r in reps if ssec.get(r) and dsec.get(r)]
                 if shared:
                     worst = max(med(ssec[r]) for r in shared)
