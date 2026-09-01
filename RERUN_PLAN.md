@@ -8200,12 +8200,35 @@ every transformation.
 > on every results row without moving the number the model was built with, which is exactly what
 > §2.13 exists to prevent. `scripts/test_spec_is_live.py` covers it and now passes.
 
-#### 5.7d The experimental pipeline has no reader — RAISED, NOT BUILT
+#### 5.7d ✅ BUILT 2026-09-01 — the experimental pipeline reads tuned settings
 
-`alternative_data_noise_robustness.py` builds every model from `sklearn_params(...)` and
-`NEURAL_DEFAULTS`, so a tuned value cannot reach LogD, Caco-2 or hERG today. Adding one is a
-second change and is not made here. The name map in `models/tuning_rosters.py` is checked against
-that pipeline's own display names so it is ready if you want it.
+It used to build every model from `sklearn_params(...)` and `NEURAL_DEFAULTS`, so a tuned value
+could not reach LogD, Caco-2 or hERG at all: a setting could be chosen with great care and the job
+would run at its default anyway.
+
+**TWO FILES, because the two pipelines ask different questions.**
+`results/master_tuned_hyperparameters.json` is keyed by model and representation and is read by QM9.
+`results/master_tuned_hyperparameters_lab.json` is keyed by DATASET first, then model and
+representation, and is read by `alternative_data_noise_robustness.py`. The lab datasets each choose
+their own setting per dataset, so one flat file cannot hold both. Both are written by
+`python scripts/ship_tuned_settings.py --write`.
+
+**What changed in the pipeline.** `run_neural_experiment` takes `dataset_name`, resolves the setting
+ONCE through `tuned_neural_params(model_type, rep_name, dataset_name)`, and passes it to the main
+fit and to every out-of-fold fit -- an out-of-fold fit at a different setting is not out of fold for
+that model. `train_neural_regression` applies width, depth, dropout and learning rate.
+
+**Two things that would otherwise have been silent.** `DeterministicRegressor` hard-coded ReLU,
+so a tuned `activation: tanh` could only have been applied by dropping it and fitting a different
+model from the one chosen; the activation is now a constructor argument and an unknown one raises.
+And any tuned key the pipeline does not apply STOPS the run by name rather than being ignored.
+
+**hERG is called `herg` by the tuning runs and `herg_ki` by this pipeline.** The alias is in
+`TUNED_DATASET_ALIAS` and is covered by the gate.
+
+**Gate:** `python scripts/test_lab_tuned_reaches_models.py` — checks the shipped file against the
+roster, that the reader returns exactly what the file holds through the name alias, that the built
+network really carries the tuned width, depth and activation, and that an unapplied key raises.
 
 #### 5.7g ✅ FIXED 2026-08-27 — the tuned-parameter path would have crashed on the cluster
 
