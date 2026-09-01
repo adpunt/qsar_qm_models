@@ -63,6 +63,15 @@ RUNS = [
     ('x_herg', 'herg', ALL4, R2, 0.5),
     ('x_caco2', 'caco2', ALL4, R2, 0.5),
     ('x_logd', 'logd', ALL4, R2, 0.5),
+    # Variational beta had only 2 or 3 of its 6 search representations finished
+    # when the runs above started, so on hERG and Caco-2 it is assessed against
+    # 3 candidate settings instead of 7. These refit it with the full pool and
+    # are launched by a waiter once each search exits -- so they are expected to
+    # be absent at first, and must NOT be started early by this watcher.
+    ('c_herg_vb', 'herg', ['mlp_bnn_full_variational'], R6, 0.0),
+    ('x_herg_vb', 'herg', ['mlp_bnn_full_variational'], R2, 0.5),
+    ('c_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R6, 0.0),
+    ('x_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R2, 0.5),
 ]
 # QM9 at noise finished before this list existed; its files are read by the
 # table script and there is nothing left to run.
@@ -174,10 +183,24 @@ def main():
                 state = 'finished'
             elif pids:
                 state, alive_any = 'running', True
+            elif not os.path.exists(os.path.join(OUT, fname)) and \
+                    not os.path.exists(os.path.join(OUT, f'log_{tag}.txt')):
+                # NEVER LAUNCHED IS NOT DEAD. Some runs wait on a search to
+                # finish before they are started; restarting them here would
+                # start them early with the smaller pool they are meant to fix.
+                state = 'not started yet'
+                alive_any = True
             else:
                 # NOT FINISHED AND NOT ALIVE IS DEAD.
                 state = '**DEAD**'
-                if restarts.get(tag, 0) < 3:
+                # THE CAP IS NOT 3. These deaths are memory kills, not code
+                # faults: free memory sits at zero and the system kills whatever
+                # is allocating when it runs out. That is transient -- the run
+                # succeeds once something else finishes -- so giving up after
+                # three attempts loses a whole model for a reason that fixes
+                # itself. A run that is genuinely broken fails in seconds and
+                # the log says why.
+                if restarts.get(tag, 0) < 25:
                     restarts[tag] = restarts.get(tag, 0) + 1
                     log = open(os.path.join(OUT, f'log_{tag}.txt'), 'a')
                     subprocess.Popen(
@@ -186,10 +209,10 @@ def main():
                         start_new_session=True, cwd=_ROOT,
                         env=dict(os.environ, OMP_NUM_THREADS='1',
                                  MKL_NUM_THREADS='1', KMP_DUPLICATE_LIB_OK='TRUE'))
-                    state = f'**DEAD — restarted ({restarts[tag]} of 3)**'
+                    state = f'**DEAD — restarted (attempt {restarts[tag]})**'
                     alive_any = True
                 else:
-                    state = '**DEAD — 3 restarts failed, needs a person**'
+                    state = '**DEAD — 25 restarts failed, needs a person**'
 
             age = ('never' if mtime is None
                    else f'{(time.time() - mtime) / 60:.0f} min ago')
