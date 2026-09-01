@@ -68,15 +68,17 @@ RUNS = [
     ('x_herg', 'herg', ALL4, R2, 0.5),
     ('x_caco2', 'caco2', ALL4, R2, 0.5),
     ('x_logd', 'logd', ALL4, R2, 0.5),
-    # Variational beta had only 2 or 3 of its 6 search representations finished
-    # when the runs above started, so on hERG and Caco-2 it is assessed against
-    # 3 candidate settings instead of 7. These refit it with the full pool and
-    # are launched by a waiter once each search exits -- so they are expected to
-    # be absent at first, and must NOT be started early by this watcher.
-    ('c_herg_vb', 'herg', ['mlp_bnn_full_variational'], R6, 0.0),
-    ('x_herg_vb', 'herg', ['mlp_bnn_full_variational'], R2, 0.5),
+    # Caco-2 variational beta got its own run because the four-model Caco-2 job
+    # would not have reached it for hours. hERG needs no equivalent: c_herg
+    # covers all four models and x_herg has finished.
+    #
+    # THE hERG AND CACO-2 TOP-UPS ARE GONE. They were to refit variational beta
+    # against the full seven-setting pool once the two searches finished; the
+    # searches were stopped at 20 of 24 pairings to free cores, so that pool
+    # will not exist and the runs would never have started. Listing a run that
+    # can never start also meant this watcher counted it as live and could
+    # never report that everything had finished.
     ('c_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R6, 0.0),
-    ('x_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R2, 0.5),
 ]
 # A run in here does not start until every tag it names has finished.
 AFTER = {
