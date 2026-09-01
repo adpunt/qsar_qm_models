@@ -81,8 +81,9 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--models', nargs='+', default=FOUR)
+    # Avalon dropped from the study 2026-09-01 (author's decision).
     ap.add_argument('--reps', nargs='+',
-                    default=['pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns'])
+                    default=['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'sns'])
     ap.add_argument('--level', type=float, default=0.5)
     ap.add_argument('--seeds', type=int, default=3)
     ap.add_argument('--sample-size', type=int, default=3000)
@@ -147,6 +148,37 @@ def main():
         # problem and burned a restart each time.
         fh.flush()
 
+    # WHAT IS ALREADY ON DISK. A restart used to refit everything from the top
+    # of the pool, so stopping a run to change its representations threw away
+    # every fit it had done. Combinations already recorded are skipped instead.
+    # ACROSS EVERY FILE, not just this run's own. A fit is a fit: it is
+    # identified by dataset, noise level, model, representation and setting, and
+    # which process happened to write it is irrelevant. Reading only this run's
+    # own file meant that renaming a file, splitting a job by model, or
+    # recovering rows from an older layout all caused the same fits to be
+    # computed again -- 79 of them on 2026-09-01.
+    import glob as _glob
+    already = set()
+    for _f in _glob.glob(os.path.join(OUT_DIR, 'per_model_*.csv')):
+        try:
+            with open(_f) as _fh:
+                for _r in csv.DictReader(_fh):
+                    if _r.get('status') != 'ok':
+                        continue
+                    if (_r.get('dataset') or 'qm9') != cli.dataset:
+                        continue
+                    try:
+                        if abs(float(_r.get('level') or 0.0) - cli.level) > 1e-9:
+                            continue
+                    except ValueError:
+                        continue
+                    already.add((_r.get('model'), _r.get('applied_to'),
+                                 _r.get('from_rep')))
+        except OSError:
+            continue
+    if already:
+        print(f'resuming: {len(already)} fits already recorded', flush=True)
+
     for model in cli.models:
         # The pool: this model's own winners, one per representation, deduped.
         # THE POOL IS REPRESENTATION-AGNOSTIC. It was built from cli.reps,
@@ -168,7 +200,12 @@ def main():
             if sig not in seen:
                 seen.add(sig)
                 pool.append((rep, params))
-        pool.append(('DEFAULT', None))
+        # THE DEFAULT IS FITTED FIRST, not last. Every number in the table is
+        # a change FROM the default, so a representation's whole column stays
+        # blank until its default lands. With the default last, ECFP4 showed as
+        # empty on QM9 Bayesian alpha when three of its six fits were already
+        # done, and the table read as though no data had been collected.
+        pool.insert(0, ('DEFAULT', None))
         print(f'\n=== {model}: {len(pool)} settings x {len(cli.reps)} '
               f'representations x {cli.seeds} seeds ===', flush=True)
 
@@ -191,6 +228,8 @@ def main():
                 data = dict(data0, y_train=np.asarray(ntr, dtype=np.float32),
                             y_val=np.asarray(nva, dtype=np.float32))
                 for from_rep, params in pool:
+                    if (model, rep, from_rep) in already:
+                        continue
                     t0 = time.perf_counter()
                     try:
                         r2, _ = T.fit_once(pat, M, model, rep, data, params,

@@ -39,7 +39,8 @@ OUT = os.path.join(_ROOT, 'results', 'tuning_local')
 STATUS = os.path.join(OUT, 'STATUS.md')
 PY = sys.executable
 
-R6 = ['pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns']
+# Avalon dropped from the study 2026-09-01 (author). Five representations.
+R6 = ['pdv', 'chemberta', 'ecfp4', 'mhggnn', 'sns']
 R2 = ['pdv', 'chemberta']
 ALL4 = ['dnn_bnn_full', 'mlp_bnn_full',
         'dnn_bnn_full_variational', 'mlp_bnn_full_variational']
@@ -57,6 +58,10 @@ RUNS = [
     ('c_vb', 'qm9', ['mlp_bnn_full_variational'], R6, 0.0),
     ('c_herg', 'herg', ALL4, R6, 0.0),
     ('c_caco2', 'caco2', ALL4, R6, 0.0),
+    # LogD waits. 16GB of RAM cannot hold twelve of these at once -- swap was
+    # at 8.5GB of 9.2GB and every fit ran about ten times slower than it should
+    # -- and re-running a job now RESUMES rather than refitting, so holding LogD
+    # back costs nothing and is given back the moment QM9 and Caco-2 are done.
     ('c_logd1', 'logd', ['dnn_bnn_full', 'mlp_bnn_full'], R6, 0.0),
     ('c_logd2', 'logd', ['dnn_bnn_full_variational',
                          'mlp_bnn_full_variational'], R6, 0.0),
@@ -73,6 +78,13 @@ RUNS = [
     ('c_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R6, 0.0),
     ('x_caco2_vb', 'caco2', ['mlp_bnn_full_variational'], R2, 0.5),
 ]
+# A run in here does not start until every tag it names has finished.
+AFTER = {
+    'c_logd1': ['c_ba', 'c_bb', 'c_va', 'c_vb'],
+    'c_logd2': ['c_ba', 'c_bb', 'c_va', 'c_vb'],
+    'x_logd':  ['c_ba', 'c_bb', 'c_va', 'c_vb'],
+}
+
 # QM9 at noise finished before this list existed; its files are read by the
 # table script and there is nothing left to run.
 FINISHED = [('QM9 noise, variational', 'per_model_varia.csv'),
@@ -164,6 +176,12 @@ def main():
         now = datetime.now()
         body, alive_any = [], False
 
+        finished = {}
+        for tag, _d, _m, _r, _l in RUNS:
+            n, _ = rows(f'per_model_{tag}.csv')
+            w = target.get(tag)
+            finished[tag] = said_it_finished(tag) or (w is not None and n >= w)
+
         for tag, dataset, models, reps, level in RUNS:
             fname = f'per_model_{tag}.csv'
             n, mtime = rows(fname)
@@ -183,6 +201,14 @@ def main():
                 state = 'finished'
             elif pids:
                 state, alive_any = 'running', True
+            elif any(not finished.get(t, False) for t in AFTER.get(tag, [])):
+                blockers = [t for t in AFTER[tag] if not finished.get(t, False)]
+                state = f'waiting for {", ".join(blockers)}'
+                alive_any = True
+                if pids:
+                    for pp in pids:
+                        subprocess.run(['kill', pp])
+                    state += ' (stopped; it resumes where it left off)'
             elif not os.path.exists(os.path.join(OUT, fname)) and \
                     not os.path.exists(os.path.join(OUT, f'log_{tag}.txt')):
                 # NEVER LAUNCHED IS NOT DEAD. Some runs wait on a search to

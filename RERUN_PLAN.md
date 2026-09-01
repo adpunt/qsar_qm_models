@@ -6800,14 +6800,54 @@ scored on a clean test split. Two representations, by the author's decision — 
 catch the failure this is guarding against, and six would cost three times as much for no extra
 answer. **This run is not part of the ranking. It contributes one column.**
 
+##### TO SEE A TABLE — one command, no re-derivation
+
+    python scripts/write_chosen_settings.py --show qm9
+    python scripts/write_chosen_settings.py --show qm9/mlp_bnn_full_variational
+
+Sixteen tables exist: four datasets x four models. `--show` prints one dataset,
+or one dataset and model. With no argument the script rewrites all sixteen into
+`results/tuning_local/CHOSEN_SETTINGS.md`.
+
 ##### The table, one per model per dataset
 
-| rank | D pdv | D chemberta | D ecfp4 | D avalon | D mhggnn | D sns | MEAN D | extreme | compute | noise | verdict |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | +0.719 | +0.716 | +0.360 | +0.336 | +0.629 | +0.231 | +0.499 | pass | pass | pass | **CHOSEN** |
-| 2 | +0.754 | +0.785 | +0.279 | +0.352 | +0.613 | +0.161 | +0.491 | pass | pass | pass | below the chosen |
+| rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n) | extreme | compute | noise | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | +0.719 | +0.716 | +0.360 | +0.629 | +0.231 | +0.531 (5) | pass | pass | pass | **CHOSEN** |
+| 2 | +0.754 | +0.785 | +0.279 | +0.613 | +0.161 | +0.518 (5) | pass | pass | pass | below the chosen |
 
-Every number is a CHANGE FROM THAT REPRESENTATION'S OWN DEFAULT, on clean labels.
+**What every column is:**
+
+| column | what it holds |
+|---|---|
+| rank | position after sorting by MEAN D, largest first |
+| D `<rep>` | this setting's R-squared MINUS the default's R-squared, on that representation, ON CLEAN LABELS. `—` means the fit is not recorded yet. |
+| MEAN D (n) | the mean of those changes, and how many representations it is over. **Rows with different n are not comparable**; the loop order fits one representation for every setting before moving to the next, so within a table n is the same on every row. |
+| extreme | a value at the end of its range that makes the model bigger or slower |
+| compute | slowest fit against the yardstick's slowest, with both times printed |
+| noise | mean change from the default at noise 0.5, PDV and ChemBERTa only. A separate run. |
+| verdict | the walk: CHOSEN, the reason it was rejected, below the chosen, or STOP |
+
+**One row per candidate setting, and the default is not a row** — it is the
+baseline every row is measured against, printed above the table as raw
+R-squared per representation.
+
+**THE DEFAULT IS FITTED FIRST.** It used to be fitted last, so a representation's
+whole column stayed blank until its final fit landed and a half-finished ECFP4
+column read as no data at all.
+
+##### Representations: FIVE, not six
+
+PDV, ChemBERTa, ECFP4, MHG-GNN, Sort & Slice. **Avalon was dropped from the study
+on 2026-09-01 (author's decision.)** Rows already collected for it stay on disk
+and are not read.
+
+Measured cost, paired on identical dataset, model and setting: ECFP4 3.06x PDV,
+Avalon 2.48x, MHG-GNN 1.87x, ChemBERTa 1.40x.
+
+**A representation may only be dropped from EVERY dataset at once.** The ranking
+is a mean over representations, so a mean over one set is not comparable with a
+mean over another.
 
 ##### The ranking rule
 
@@ -6886,7 +6926,11 @@ table prints the count of representations behind each mean for exactly this reas
         --dataset <qm9|herg|caco2|logd> --sample-size <3000|1415|2161|3000> \
         --models dnn_bnn_full mlp_bnn_full \
                  dnn_bnn_full_variational mlp_bnn_full_variational \
-        --reps pdv chemberta ecfp4 avalon mhggnn sns --seeds 1 --tag c_<dataset>
+        --reps pdv chemberta ecfp4 mhggnn sns --seeds 1 --tag c_<dataset>
+
+    # Re-running a clean job RESUMES: combinations already recorded in its own
+    # output file are skipped, so its representation list can be changed without
+    # throwing away the fits it has done.
 
     # Run 3 — NOISE at 0.5, PDV and ChemBERTa only. THE FILTER COLUMN.
     python scripts/pick_per_model_setting.py --level 0.5 \
