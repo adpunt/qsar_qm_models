@@ -13,3 +13,4 @@ qm9,0.0,mlp_bnn_full_variational,ecfp4,sns,0,0.7477549514412974,275.7,ok,"{""hid
 qm9,0.0,mlp_bnn_full_variational,mhggnn,sns,0,0.758688282300646,96.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.357, ""lr"": 0.001185606743480818}"
 qm9,0.0,mlp_bnn_full_variational,pdv,sns,0,0.7764067719425266,136.8,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.412, ""lr"": 0.0006343509199762551}"
 qm9,0.0,mlp_bnn_full_variational,sns,sns,0,0.8138891092829198,62.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.169, ""lr"": 0.006017629069106814}"
+qm9,0.0,mlp_bnn_full_variational,avalon,sns,0,0.803010914510257,65.0,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"

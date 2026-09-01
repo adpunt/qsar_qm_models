@@ -92,3 +92,5 @@ caco2,0.0,dnn_bnn_full_variational,sns,chemberta,0,0.059823719396093655,140.0,ok
 caco2,0.0,dnn_bnn_full_variational,DEFAULT,ecfp4,0,0.11821828880129093,586.2,ok,{}
 caco2,0.0,dnn_bnn_full_variational,chemberta,ecfp4,0,0.05867422354171259,652.2,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
 caco2,0.0,dnn_bnn_full_variational,ecfp4,ecfp4,0,0.10792237693416329,319.7,ok,"{""hidden_size1"": 64, ""hidden_size2"": 128, ""activation"": ""tanh""}"
+caco2,0.0,dnn_bnn_full_variational,mhggnn,ecfp4,0,-0.07286151076916436,1722.6,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+caco2,0.0,dnn_bnn_full_variational,pdv,ecfp4,0,0.1638411511473975,146.3,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"

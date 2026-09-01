@@ -28,6 +28,7 @@
     "lr": 0.006017629069106814,
     "num_hidden_layers": 2
   },
+  "herg/mlp_bnn_full_variational": null,
   "logd/dnn_bnn_full": null,
   "logd/dnn_bnn_full_variational": null,
   "qm9/dnn_bnn_full": {
