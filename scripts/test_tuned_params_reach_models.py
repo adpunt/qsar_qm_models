@@ -132,7 +132,26 @@ SYNTHETIC = {
                 'lr': 0.0077},
 }
 
-BEHAVIOURAL = {'gauche', 'dnn', 'mlp'}
+BEHAVIOURAL = {'gauche', 'gauche_rbf', 'dnn', 'mlp'}
+
+
+def behavioural_keys(rosters):
+    """Keys checked by whether the FIT MOVES, not by intercepting a constructor.
+
+    A network is built by hand from torch layers, so there is no single class to
+    record; the check is that the same data fitted with and without the setting
+    gives a different score. DERIVED FROM THE ROSTER rather than hard-coded:
+    when every model got its own tuned key on 2026-08-31 the set still named
+    only 'dnn' and 'mlp', so a master file carrying 'dnn_bnn_full' fell through
+    to the constructor branch and this test died with KeyError instead of
+    checking anything.
+    """
+    out = set(BEHAVIOURAL)
+    for label, key in rosters.TUNED_KEY.items():
+        if key and (label.startswith('dnn') or label.startswith('mlp')
+                    or label.startswith('gauche')):
+            out.add(key)
+    return out
 
 
 def toy_data(n=120, d=12, seed=0, binary=False):
@@ -244,7 +263,7 @@ def check_key_reaches(key, params, tuner, rosters, why):
     needs_binary = rosters.MODELS[label][0].split().count('tanimoto') > 0
     data = toy_data(binary=needs_binary)
 
-    if key in BEHAVIOURAL:
+    if key in behavioural_keys(rosters):
         try:
             import torch
             torch.manual_seed(0)
@@ -263,6 +282,11 @@ def check_key_reaches(key, params, tuner, rosters, why):
                f'(R2 {base:+.4f} -> {tuned:+.4f})')
         return
 
+    if key not in CONSTRUCTOR_SITES:
+        fail(f'{why}: {key} has no constructor site here and is not checked '
+             f'behaviourally, so nothing proves a tuned value reaches it. Add '
+             f'it to CONSTRUCTOR_SITES or to behavioural_keys().')
+        return
     module_name, attr = CONSTRUCTOR_SITES[key]
     try:
         with recording(module_name, attr) as seen:
