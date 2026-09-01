@@ -34,34 +34,34 @@
     },
     "dnn_bnn_full_variational": {
       "avalon": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       },
       "chemberta": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       },
       "ecfp4": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       },
       "mhggnn": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       },
       "pdv": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       },
       "sns": {
-        "activation": "tanh",
+        "activation": "relu",
         "hidden_size1": 64,
-        "hidden_size2": 128
+        "hidden_size2": 32
       }
     },
     "mlp_bnn_full": {
@@ -171,6 +171,78 @@
         "dropout_rate": 0.169,
         "hidden_size": 64,
         "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      }
+    }
+  },
+  "logd": {
+    "dnn_bnn_full_variational": {
+      "avalon": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      },
+      "chemberta": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      },
+      "ecfp4": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      },
+      "mhggnn": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      },
+      "pdv": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      },
+      "sns": {
+        "activation": "tanh",
+        "hidden_size1": 256,
+        "hidden_size2": 32
+      }
+    },
+    "mlp_bnn_full_variational": {
+      "avalon": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
+        "num_hidden_layers": 2
+      },
+      "chemberta": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
+        "num_hidden_layers": 2
+      },
+      "ecfp4": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
+        "num_hidden_layers": 2
+      },
+      "mhggnn": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
+        "num_hidden_layers": 2
+      },
+      "pdv": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
+        "num_hidden_layers": 2
+      },
+      "sns": {
+        "dropout_rate": 0.079,
+        "hidden_size": 128,
+        "lr": 0.00011017131165932221,
         "num_hidden_layers": 2
       }
     }

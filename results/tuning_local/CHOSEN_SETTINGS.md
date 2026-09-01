@@ -172,15 +172,15 @@ chosen setting: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 64}`
 
 ### variational beta  (`mlp_bnn_full_variational`)
 
-default R2: pdv 0.291
+default R2: pdv 0.291  chemberta 0.342  ecfp4 0.460  mhggnn 0.357  sns 0.526
 
 compute measured against the default.
 
 | rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | +0.190 | — | — | — | — | **+0.190** (1) | FAIL | pass 60/37s | — | rejected: extreme (num_hidden_layers) |
-| 2 | -0.272 | — | — | — | — | **-0.272** (1) | pass | pass 45/37s | FAIL | **STOP — no longer beats the default** |
-| 3 | -0.634 | — | — | — | — | **-0.634** (1) | FAIL | pass 26/37s | — | not assessed |
+| 1 | +0.190 | +0.108 | +0.077 | +0.097 | +0.039 | **+0.102** (5) | FAIL | pass 168/104s | — | rejected: extreme (num_hidden_layers) |
+| 2 | -0.272 | -0.349 | +0.067 | -0.048 | -0.082 | **-0.137** (5) | pass | pass 116/104s | FAIL | **STOP — no longer beats the default** |
+| 3 | -0.634 | -0.465 | +0.055 | +0.073 | -0.189 | **-0.232** (5) | FAIL | pass 73/104s | — | not assessed |
 
 **no setting chosen — the default is kept**
 
@@ -240,37 +240,37 @@ chosen setting: `{"dropout_rate": 0.401, "hidden_size": 64, "lr": 0.005865018723
 
 ### variational alpha  (`dnn_bnn_full_variational`)
 
-default R2: pdv 0.361  chemberta -0.006  ecfp4 0.118
+default R2: pdv 0.361  chemberta -0.006  ecfp4 0.118  mhggnn -0.163  sns 0.149
 
 compute measured against the default.
 
 | rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | -0.119 | +0.304 | -0.010 | — | — | **+0.058** (3) | pass | pass 320/586s | pass +0.045 | **CHOSEN** |
-| 2 | +0.072 | +0.041 | +0.046 | — | — | **+0.053** (3) | pass | pass 146/586s | pass +0.003 | below the chosen |
-| 3 | -0.112 | +0.166 | -0.060 | — | — | **-0.002** (3) | pass | pass 652/586s | pass +0.043 | **STOP — no longer beats the default** |
-| 4 | -0.128 | +0.066 | — | — | — | **-0.031** (2) | pass | pass 140/125s | pass +0.085 | not assessed |
-| 5 | -0.127 | +0.028 | -0.191 | — | — | **-0.096** (3) | FAIL | FAIL 1723/586s | FAIL | not assessed |
+| 1 | +0.072 | +0.041 | +0.046 | +0.293 | +0.086 | **+0.108** (5) | pass | pass 146/586s | pass +0.003 | **CHOSEN** |
+| 2 | -0.128 | +0.066 | +0.106 | +0.333 | +0.127 | **+0.101** (5) | pass | pass 140/586s | pass +0.085 | below the chosen |
+| 3 | -0.112 | +0.166 | -0.060 | +0.284 | -0.004 | **+0.055** (5) | pass | pass 652/586s | pass +0.043 | below the chosen |
+| 4 | -0.119 | +0.304 | -0.010 | +0.057 | -0.018 | **+0.043** (5) | pass | pass 320/586s | pass +0.045 | below the chosen |
+| 5 | -0.127 | +0.028 | -0.191 | +0.132 | -0.162 | **-0.064** (5) | FAIL | FAIL 1723/586s | FAIL | **STOP — no longer beats the default** |
 
-chosen setting: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 128}`
+chosen setting: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 32}`
 
-- rank 1: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 128}`
-- rank 2: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 32}`
+- rank 1: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 32}`
+- rank 2: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 64}`
 - rank 3: `{"activation": "tanh", "hidden_size1": 128, "hidden_size2": 64}`
-- rank 4: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 64}`
+- rank 4: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 128}`
 - rank 5: `{"activation": "tanh", "hidden_size1": 1024, "hidden_size2": 32}`
 
 ### variational beta  (`mlp_bnn_full_variational`)
 
-default R2: pdv 0.392  chemberta 0.134  ecfp4 0.376  mhggnn 0.110  sns 0.373
+default R2: pdv 0.389  chemberta 0.134  ecfp4 0.376  mhggnn 0.110  sns 0.373
 
 compute measured against the default.
 
 | rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | +0.099 | +0.311 | +0.140 | +0.347 | +0.120 | **+0.203** (5) | FAIL | pass 350/478s | pass +0.296 | rejected: extreme (num_hidden_layers) |
-| 2 | +0.083 | +0.261 | +0.138 | +0.314 | +0.091 | **+0.177** (5) | FAIL | pass 920/478s | pass +0.249 | rejected: extreme (num_hidden_layers) |
-| 3 | -0.016 | +0.167 | +0.085 | +0.196 | +0.030 | **+0.093** (5) | FAIL | pass 784/478s | — | rejected: extreme (num_hidden_layers) |
+| 1 | +0.102 | +0.311 | +0.140 | +0.347 | +0.120 | **+0.204** (5) | FAIL | pass 205/285s | pass +0.296 | rejected: extreme (num_hidden_layers) |
+| 2 | +0.091 | +0.255 | +0.138 | +0.314 | +0.091 | **+0.178** (5) | FAIL | pass 539/285s | pass +0.249 | rejected: extreme (num_hidden_layers) |
+| 3 | +0.023 | +0.167 | +0.085 | +0.196 | +0.030 | **+0.100** (5) | FAIL | pass 455/285s | — | rejected: extreme (num_hidden_layers) |
 
 **no setting chosen — the default is kept**
 
@@ -282,49 +282,83 @@ compute measured against the default.
 
 ### Bayesian alpha  (`dnn_bnn_full`)
 
-default R2: pdv 0.327  chemberta 0.495  ecfp4 0.645  mhggnn 0.701
+default R2: pdv 0.327  chemberta 0.495  ecfp4 0.645  mhggnn 0.701  sns 0.528
 
 compute measured against the default.
 
 | rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | +0.132 | -0.154 | +0.083 | — | — | **+0.020** (3) | pass | pass 150/127s | FAIL | rejected: worse under noise |
-| 2 | +0.076 | -0.093 | +0.028 | — | — | **+0.004** (3) | FAIL | FAIL 848/127s | pass +0.064 | rejected: extreme (hidden_size1) |
-| 3 | +0.264 | +0.089 | +0.068 | -0.630 | — | **-0.053** (4) | pass | pass 119/142s | FAIL | **STOP — no longer beats the default** |
-| 4 | +0.306 | +0.031 | +0.059 | -0.650 | — | **-0.063** (4) | pass | pass 78/142s | pass +0.086 | not assessed |
-| 5 | +0.270 | -1.381 | -0.003 | -0.709 | — | **-0.456** (4) | pass | FAIL 500/142s | FAIL | not assessed |
-| 6 | +0.075 | -0.736 | -0.477 | -0.693 | — | **-0.458** (4) | pass | pass 79/142s | FAIL | not assessed |
+| 1 | +0.076 | -0.093 | +0.028 | -0.039 | +0.253 | **+0.045** (5) | FAIL | FAIL 848/142s | pass +0.064 | rejected: extreme (hidden_size1) |
+| 2 | +0.132 | -0.154 | +0.083 | -0.134 | +0.157 | **+0.017** (5) | pass | pass 150/142s | FAIL | rejected: worse under noise |
+| 3 | +0.306 | +0.031 | +0.059 | -0.650 | -0.118 | **-0.074** (5) | pass | pass 78/142s | pass +0.086 | **STOP — no longer beats the default** |
+| 4 | +0.264 | +0.089 | +0.068 | -0.630 | -0.163 | **-0.075** (5) | pass | pass 119/142s | FAIL | not assessed |
+| 5 | +0.075 | -0.736 | -0.477 | -0.693 | +0.031 | **-0.360** (5) | pass | pass 79/142s | FAIL | not assessed |
+| 6 | +0.270 | -1.381 | -0.003 | -0.709 | +0.000 | **-0.365** (5) | pass | FAIL 500/142s | FAIL | not assessed |
 
 **no setting chosen — the default is kept**
 
-- rank 1: `{"activation": "relu", "hidden_size1": 128, "hidden_size2": 64}`
-- rank 2: `{"activation": "tanh", "hidden_size1": 1024, "hidden_size2": 32}`
-- rank 3: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 64}`
-- rank 4: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 64}`
-- rank 5: `{"activation": "relu", "hidden_size1": 512, "hidden_size2": 128}`
-- rank 6: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 256}`
+- rank 1: `{"activation": "tanh", "hidden_size1": 1024, "hidden_size2": 32}`
+- rank 2: `{"activation": "relu", "hidden_size1": 128, "hidden_size2": 64}`
+- rank 3: `{"activation": "tanh", "hidden_size1": 64, "hidden_size2": 64}`
+- rank 4: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 64}`
+- rank 5: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 256}`
+- rank 6: `{"activation": "relu", "hidden_size1": 512, "hidden_size2": 128}`
 
 ### Bayesian beta  (`mlp_bnn_full`)
 
-_no clean results recorded yet_
-
-### variational alpha  (`dnn_bnn_full_variational`)
-
-default R2: pdv 0.447  chemberta 0.346  ecfp4 0.406
+default R2: pdv 0.705  chemberta 0.613  ecfp4 0.741  mhggnn 0.522  sns 0.731
 
 compute measured against the default.
 
 | rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | +0.148 | +0.107 | +0.066 | — | — | **+0.107** (3) | pass | FAIL 808/397s | pass +0.224 | rejected: too slow |
-| 2 | +0.007 | -0.154 | +0.057 | — | — | **-0.030** (3) | pass | pass 255/397s | pass +0.325 | **STOP — no longer beats the default** |
+| 1 | +0.009 | -0.069 | +0.083 | +0.146 | +0.045 | **+0.043** (5) | pass | pass 61/52s | FAIL | rejected: worse under noise |
+| 2 | +0.027 | -0.043 | +0.053 | +0.181 | -0.018 | **+0.040** (5) | pass | pass 84/52s | FAIL | rejected: worse under noise |
+| 3 | -0.045 | +0.084 | +0.051 | +0.135 | -0.119 | **+0.021** (5) | pass | pass 46/52s | FAIL | rejected: worse under noise |
+| 4 | -0.029 | -0.199 | +0.072 | +0.193 | -0.028 | **+0.002** (5) | pass | pass 73/52s | FAIL | rejected: worse under noise |
+| 5 | -0.101 | -0.172 | +0.017 | -0.038 | -0.062 | **-0.071** (5) | pass | pass 46/52s | FAIL | **STOP — no longer beats the default** |
 
 **no setting chosen — the default is kept**
+
+- rank 1: `{"dropout_rate": 0.398, "hidden_size": 64, "lr": 0.009342068369367122, "num_hidden_layers": 2}`
+- rank 2: `{"dropout_rate": 0.429, "hidden_size": 128, "lr": 0.0035645098822783107, "num_hidden_layers": 3}`
+- rank 3: `{"dropout_rate": 0.461, "hidden_size": 64, "lr": 0.001362574016561972, "num_hidden_layers": 2}`
+- rank 4: `{"dropout_rate": 0.221, "hidden_size": 128, "lr": 0.0008069016522267505, "num_hidden_layers": 1}`
+- rank 5: `{"dropout_rate": 0.412, "hidden_size": 128, "lr": 0.0006343509199762551, "num_hidden_layers": 1}`
+
+### variational alpha  (`dnn_bnn_full_variational`)
+
+default R2: pdv 0.447  chemberta 0.346  ecfp4 0.406  mhggnn 0.354  sns 0.527
+
+compute measured against the default.
+
+| rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | +0.148 | +0.107 | +0.060 | +0.163 | +0.010 | **+0.097** (5) | pass | pass 585/397s | pass +0.262 | **CHOSEN** |
+| 2 | +0.007 | -0.154 | +0.057 | +0.097 | -0.091 | **-0.017** (5) | pass | pass 255/397s | pass +0.302 | **STOP — no longer beats the default** |
+
+chosen setting: `{"activation": "tanh", "hidden_size1": 256, "hidden_size2": 32}`
 
 - rank 1: `{"activation": "tanh", "hidden_size1": 256, "hidden_size2": 32}`
 - rank 2: `{"activation": "relu", "hidden_size1": 64, "hidden_size2": 32}`
 
 ### variational beta  (`mlp_bnn_full_variational`)
 
-_no clean results recorded yet_
+default R2: pdv 0.749  chemberta 0.577  ecfp4 0.666  mhggnn 0.617  sns 0.753
+
+compute measured against the default.
+
+| rank | D pdv | D chemberta | D ecfp4 | D mhggnn | D sns | MEAN D (n reps) | extreme | compute | noise | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | +0.066 | +0.181 | +0.156 | +0.168 | +0.038 | **+0.122** (5) | pass | pass 126/145s | pass +0.168 | **CHOSEN** |
+| 2 | +0.053 | +0.168 | +0.142 | +0.167 | +0.056 | **+0.117** (5) | pass | FAIL 300/145s | pass +0.151 | below the chosen |
+| 3 | -0.012 | +0.096 | +0.078 | +0.060 | +0.006 | **+0.046** (5) | pass | pass 117/145s | pass +0.100 | below the chosen |
+| 4 | +0.031 | -0.031 | +0.032 | +0.072 | -0.012 | **+0.018** (5) | pass | pass 104/145s | pass +0.055 | below the chosen |
+
+chosen setting: `{"dropout_rate": 0.079, "hidden_size": 128, "lr": 0.00011017131165932221, "num_hidden_layers": 2}`
+
+- rank 1: `{"dropout_rate": 0.079, "hidden_size": 128, "lr": 0.00011017131165932221, "num_hidden_layers": 2}`
+- rank 2: `{"dropout_rate": 0.158, "hidden_size": 256, "lr": 0.00030320976574698305, "num_hidden_layers": 3}`
+- rank 3: `{"dropout_rate": 0.371, "hidden_size": 128, "lr": 0.0006280360883703941, "num_hidden_layers": 2}`
+- rank 4: `{"dropout_rate": 0.429, "hidden_size": 64, "lr": 0.001035918917302251, "num_hidden_layers": 3}`
 
