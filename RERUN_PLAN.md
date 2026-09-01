@@ -6644,6 +6644,32 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7am 📁 WHERE THE TUNING RESULTS LIVE — read this before looking anywhere else
+
+Everything is under `results/tuning_local/`. Four files matter; the rest are raw.
+
+| file | what it holds | rebuilt by |
+|---|---|---|
+| **`CHOSEN_SETTINGS.md`** / **`.json`** | **the answer** — one setting per model, the table it was chosen from, and the per-representation scores behind it | `python scripts/write_chosen_settings.py` |
+| `DECISIONS.md` | every pairing sorted into adopt / keep the default / needs a decision, by the three filters | `python scripts/decide_tuned_settings.py` |
+| `TUNING_RESULTS.md` | the raw search: four datasets, every pairing, search ranges, values at an end starred | `python scripts/report_tuning_results.py` |
+| `STATUS.md` | what is running right now, and what has died | written by `scripts/watch_local_runs.py` |
+
+Raw fits, none of which should be read directly:
+
+| pattern | what produced it |
+|---|---|
+| `trials_*.csv` | the random search. One row per fit. Validation R-squared, clean labels. |
+| `other_datasets/trials_*.csv` | the same, for hERG, Caco-2 and LogD |
+| `noise_vs_tuned_*.csv` | the noise test: tuned against default across seven levels |
+| `per_model_*.csv` | the per-model selection: every candidate on every representation at noise 0.5 |
+| `partial/`, `aborted_10000/`, `stray_test_files/` | superseded or abandoned. **Not read by any report** — the sample-size guard in 5.7aj would drop them anyway. |
+
+**The three filters a setting must pass** (5.7w, 5.7ai): no value at the expensive end of its range;
+not much slower to train than the default; and not worse than the default at noise level 0.5.
+
+**The rule for choosing between candidates** (5.7al): worst representation, not average.
+
 #### 5.7al ✅ TWO SETTINGS CHOSEN 2026-09-01 — the variational families, one setting each
 
 `scripts/pick_per_model_setting.py`. Every candidate fitted on all six representations with training

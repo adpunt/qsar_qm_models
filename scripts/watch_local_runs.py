@@ -30,16 +30,31 @@ OUT = os.path.join(_ROOT, 'results', 'tuning_local')
 STATUS = os.path.join(OUT, 'STATUS.md')
 
 # name -> (file it writes, how many rows when finished, how it is described)
+BNN = ['dnn_bnn_full', 'dnn_bnn_full_variational',
+       'mlp_bnn_full', 'mlp_bnn_full_variational']
+
+
+def sweep_cmd(dataset, size, rep, tag, screen=True):
+    c = [sys.executable, '-u', 'scripts/tune_hyperparameters.py', '--sweep',
+         '--settings', '12', '--dataset', dataset, '--sample-size', str(size)]
+    if screen:
+        c += ['--screen-at', '800', '--promote', '1']
+    return c + ['--models'] + BNN + ['--reps', rep, '--tag', tag]
+
+
 JOBS = [
-    ('noise test, ChemBERTa', 'noise_vs_tuned_cb.csv', 168,
-     'tuned against default across seven noise levels'),
-    ('noise test, LightGBM',  'noise_vs_tuned_lgb.csv', 56,
-     'does LightGBM improve under noise on four more representations'),
-    ('per-model pick at noise', 'per_model_varia.csv', 252,
-     'one setting per model, chosen at noise 0.5 over three seeds'),
-    ('Bayesian search, hERG',   'trials_bnnherg.csv',  312, '24 pairings'),
-    ('Bayesian search, Caco-2', 'trials_bnncaco2.csv', 312, '24 pairings, screened'),
-    ('Bayesian search, LogD',   'trials_bnnlogd.csv',  312, '24 pairings, screened'),
+    ('Bayesian search, hERG', 'trials_bnnherg.csv', 312, 'tag bnnherg', None),
+    ('Bayesian search, Caco-2', 'trials_bnncaco2.csv', 312, 'tag bnncaco2', None),
+] + [
+    (f'LogD, {r}', f'trials_bnnlogd_{r}.csv', 56, f'tag bnnlogd_{r}',
+     sweep_cmd('logd', 3000, r, f'bnnlogd_{r}'))
+    for r in ('pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns')
+] + [
+    # 72, not 84: the two models' candidate pools dedupe to 7 and 5 settings,
+    # not 7 and 7, so a COMPLETE run showed as 72 of 84 and read as dead.
+    ('per-model pick, variational', 'per_model_varia.csv', 72, 'tag varia', None),
+    ('per-model pick, Bayesian a', 'per_model_bayes_a.csv', 126, 'tag bayes_a', None),
+    ('per-model pick, Bayesian b', 'per_model_bayes_b.csv', 126, 'tag bayes_b', None),
 ]
 
 PATTERNS = ['scripts/tuned_under_noise', 'tune_hyperparameters.py --sweep',
@@ -66,32 +81,54 @@ def rows(name):
 
 
 def main():
-    previous = {}
+    previous, restarts = {}, {}
     while True:
-        live = sum(running(p) for p in PATTERNS)
         now = datetime.now()
-        lines = [f'# what this laptop is running, {now:%Y-%m-%d %H:%M}', '',
-                 f'{live} job(s) alive.', '']
-        lines.append('| job | done | of | moved since last check | last wrote |')
-        lines.append('|---|---|---|---|---|')
-        for label, fname, total, _why in JOBS:
+        lines = [f'# what this laptop is running, {now:%Y-%m-%d %H:%M}', '']
+        body, alive_any = [], False
+        for label, fname, total, pattern, cmd in JOBS:
             n, mtime = rows(fname)
             moved = n - previous.get(fname, n)
             previous[fname] = n
-            if mtime is None:
-                age = 'never'
+            live = running(pattern) > 0
+            done = n >= total
+
+            if done:
+                state = 'finished'
+            elif live:
+                state = 'running'
+                alive_any = True
             else:
-                mins = (time.time() - mtime) / 60
-                age = f'{mins:.0f} min ago'
-            done = 'finished' if n >= total else f'{n}'
-            lines.append(f'| {label} | {done} | {total} | +{moved} | {age} |')
+                # NOT FINISHED AND NOT ALIVE IS DEAD. Reported as 'never wrote'
+                # before, which is what let a job killed by the KeOps import
+                # race sit unnoticed for an hour on 2026-09-01.
+                state = '**DEAD**'
+                if cmd and restarts.get(fname, 0) < 3:
+                    restarts[fname] = restarts.get(fname, 0) + 1
+                    log = open(os.path.join(OUT, f'restart_{fname}.log'), 'a')
+                    subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
+                                     start_new_session=True, cwd=_ROOT,
+                                     env=dict(os.environ, OMP_NUM_THREADS='1',
+                                              KMP_DUPLICATE_LIB_OK='TRUE'))
+                    state = f'**DEAD — restarted (attempt {restarts[fname]})**'
+                    alive_any = True
+                elif cmd:
+                    state = '**DEAD — 3 restarts failed, needs a person**'
+
+            age = ('never' if mtime is None
+                   else f'{(time.time() - mtime) / 60:.0f} min ago')
+            body.append(f'| {label} | {n} | {total} | +{moved} | {age} | {state} |')
+
+        lines.append('| job | done | of | moved | last wrote | state |')
+        lines.append('|---|---|---|---|---|---|')
+        lines += body
         lines.append('')
-        if live == 0:
+        if not alive_any:
             lines.append('**Everything has finished.**')
         with open(STATUS, 'w') as fh:
             fh.write('\n'.join(lines) + '\n')
         print('\n'.join(lines), flush=True)
-        if live == 0:
+        if not alive_any:
             return 0
         time.sleep(600)
 
