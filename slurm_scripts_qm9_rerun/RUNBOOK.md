@@ -57,8 +57,17 @@ and level 0 is one seventh of the cost.
 | Noise levels | 7 per condition (`NOISE_DESIGN.md` §6.4) |
 | Replicates | 10 — the screen contributes 1, the main grid the other 9 |
 
-**The screen (`--stage 0`): 17 array scripts, 291 tasks** — 1,843 training runs.
-**The main grid (`--stage 1`): the same 291 tasks** at replicates 1–9 — 16,587 training runs.
+**The screen (`--stage 0`): 19 array scripts, 327 tasks** — 2,071 training runs.
+**The main grid (`--stage 1`): the same 327 tasks** at replicates 1–9 — 18,639 training runs.
+
+Two scripts and 36 tasks of that are the **variance-head networks**, added
+2026-09-01: a Bayesian network that predicts its own observation noise alongside
+the value (`--bayesian-transformation full --loss heteroscedastic`), on the DNN
+and the MLP base. They are the only models on either pipeline whose aleatoric
+term varies per molecule while the two halves come from different mechanisms.
+They are **tier 3 and outside the ANOVA** — a different model from the plain
+Bayesian network beside them, here to answer the uncertainty question rather
+than to compete on accuracy (RERUN_PLAN.md 2.32).
 
 Those counts dropped from 294 and 1,862 on 2026-08-31, when the Tanimoto Gaussian process
 stopped running on Sort & Slice: those features are counts, not bits, and the kernel is only
@@ -135,10 +144,10 @@ scripts and 90 tasks — it was 8 and 144 before the three conformal entries wer
 commented out:
 
 ```bash
-python generate_scripts.py --stage 0 --include-excluded --max-hours 720   # 22 scripts, 381 tasks
+python generate_scripts.py --stage 0 --include-excluded --max-hours 720   # 24 scripts, 417 tasks
 ```
 
-That is 2,413 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
+That is 2,641 training runs in the screen alone, on models `GLOBAL_MODELS_EXCLUDE` drops
 from every figure.
 
 **Out permanently:** binary `pdv` (superseded by PDV as continuous descriptors,

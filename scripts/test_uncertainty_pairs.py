@@ -39,6 +39,7 @@ WHAT IT CHECKS
 """
 import ast
 import json
+import math
 import re
 import subprocess
 import sys
@@ -261,7 +262,19 @@ def check_the_wall_clock_fits_the_partition(out_dir):
 
 
 def check_qm9_matches(pairs, out_dir):
-    want = {}
+    # The generator itself, for its roster hours and its stage-0 shape. Imported
+    # rather than restated: the per-model hours are re-measured from time to
+    # time and a copy here would go stale silently.
+    sys.path.insert(0, str(QM9_GENERATOR.parent))
+    import generate_scripts as gen
+    # Stage 0 as this test generates it: one replicate, and the longest
+    # condition's level count -- which is what the generator sizes the wall
+    # clock from.
+    runs_per_task = max(
+        len(gen.CONDITIONS[c][1].split()) for c in gen.STAGE_DEFAULTS[0]['conditions'])
+    oof_folds = 5
+
+    want = {}          # model -> the representations it should run the pass on
     canon_to_qm9_rep = {r['canonical']: r['qm9'] for r in pairs['representations']}
     all_reps = [r['qm9'] for r in pairs['representations']]
     for m in pairs['models']:
@@ -279,14 +292,35 @@ def check_qm9_matches(pairs, out_dir):
             check(sorted(got) == sorted(reps),
                   f"{model} runs the uncertainty pass on {sorted(got)}; the "
                   f"settled file says {sorted(reps)}")
-            # The wall clock covers the whole array, so it has to fit the worst
-            # task in it -- one that runs the pass.
-            check(hours.get(model, 0) >= 5,
-                  f"{model} runs the out-of-fold pass on {sorted(reps)} but asks "
-                  f"for only {hours.get(model)}h. One request covers the whole "
-                  f"array and the pass costs extra fits per training run, so this "
-                  f"is sized for a task that does not run it. The job would be "
-                  f"killed after its queue wait.")
+            # THE WALL CLOCK MUST INCLUDE THE PASS.
+            #
+            # One request covers a whole array, so it has to fit the worst task
+            # in it -- one that runs the out-of-fold pass, which costs
+            # (1 + folds) fits per training run instead of one. Sizing it for a
+            # task that does not run the pass is how a job queues for days and
+            # is then killed at the wall.
+            #
+            # Checked against the generator's OWN formula rather than against an
+            # hour threshold. The first version of this asserted at least 5
+            # hours; another session then measured the real per-model timings and
+            # the quantile forest came in at 6 hours per 110 runs, so its correct
+            # screen request is 3 hours and a correct generator failed this test.
+            # An absolute threshold cannot tell "sized without the pass" from
+            # "genuinely cheap".
+            # A model may score FEWER folds than it cuts, which is the lever
+            # that keeps NGBoost inside the partition limit. The fits it pays
+            # for are 1 + the folds it SCORES, so this must read the same
+            # override the generator does or it demands a wall clock for work
+            # the job does not do.
+            scored = gen.OOF_FOLDS_SCORED.get(model, 0) or oof_folds
+            want_hours = math.ceil(gen.MODELS[model][2] * runs_per_task
+                                   * (1 + scored) / 110 * 1.25)
+            check(hours.get(model) == want_hours,
+                  f"{model} runs the out-of-fold pass and asks for "
+                  f"{hours.get(model)}h; the generator's own formula on "
+                  f"{runs_per_task} training runs at {1 + scored} fits each "
+                  f"gives {want_hours}h. A smaller number means the pass was "
+                  f"left out of the sizing.")
 
     stray = sorted(m for m, r in emitted.items() if r and m not in want)
     check(not stray,

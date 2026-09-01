@@ -200,19 +200,43 @@ def check_pair_subset_scope():
             assert 'censoring' not in line[0], (
                 f"stage {stage} still runs censoring at full breadth by default: {line[0].strip()}")
 
-        # THE DEEP RUN DOES NOT FIT AT TEN REPLICATES, and the generator must say
-        # so rather than write a wall it cannot honour. Measured 2026-08-31:
-        # ngboost is 166 hours per 110 training runs and does six fits per run
-        # under the out-of-fold pass, so ten replicates is 793 hours against the
-        # long partition's 720. Nine is 714. This is the author's decision to
-        # take -- fewer replicates, or fewer scored folds for ngboost -- and it
-        # is recorded here so it cannot be discovered after a queue wait.
+        # THE DEEP RUN FITS AT TEN REPLICATES, and it did not until 2026-09-01.
+        #
+        # Measured 2026-08-31: ngboost is 166 hours per 110 training runs, and at
+        # six fits per run under the out-of-fold pass ten replicates came to 793
+        # hours against the long partition's 720. This check asserted the
+        # generator REFUSED that, and named the two ways out as the author's to
+        # choose between -- fewer replicates, or fewer scored folds for ngboost.
+        #
+        # The second was taken: `OOF_FOLDS_SCORED['ngboost'] = 3`. Scoring three
+        # of the five folds it cuts keeps every scored molecule scored by a model
+        # that never saw its label, and costs four fits per run instead of six.
+        # The deep run is 530 hours and the main grid 476, both inside the limit.
+        # What is given up is per-molecule coverage on ngboost -- 60% of training
+        # molecules get an out-of-fold row rather than all of them -- and ngboost
+        # is not the model the per-molecule question rests on: it has no
+        # epistemic term at all (RERUN_PLAN.md 2.30).
         r = run('--stage', '2', '--models', 'ngboost', '--reps', 'pdv',
                 '--out-dir', tmp, *LONG)
+        assert r.returncode == 0, (
+            f"the deep run no longer fits. It should come to 530 hours with "
+            f"ngboost scoring 3 of its 5 folds (OOF_FOLDS_SCORED in the "
+            f"generator):\n{r.stderr[-500:]}")
+        hours = [l for l in r.stdout.splitlines() if 'ngboost' in l and '--time=' in l]
+        assert hours, "the deep run reported no wall clock for ngboost"
+        asked = int(hours[0].split('--time=')[1].split(':')[0])
+        assert asked <= 720, (
+            f"the deep run asks {asked}h, over the long partition's 720. The "
+            f"lever is OOF_FOLDS_SCORED in the generator.")
+
+        # AND THE REFUSAL STILL WORKS. Whatever the folds are cut to, a wall the
+        # partition cannot honour has to stop the generator rather than be
+        # discovered after a queue wait.
+        r = run('--stage', '2', '--models', 'ngboost', '--reps', 'pdv',
+                '--out-dir', tmp, '--max-hours', '100')
         assert r.returncode != 0, (
-            "the deep run generated ngboost at ten replicates; on the measured "
-            "wall clock it needs 793 hours and no partition allows that")
-        assert 'ngboost needs' in r.stderr and '720' in r.stderr, (
+            "a deep run needing more than the stated ceiling was accepted")
+        assert 'ngboost needs' in r.stderr and '100' in r.stderr, (
             f"the refusal does not name ngboost and the ceiling:\n{r.stderr[-400:]}")
 
         r = run('--stage', '1', '--conditions', 'censoring', '--out-dir', tmp, *LONG)

@@ -195,14 +195,35 @@ for _m in _PAIRS['models']:
 # (uncertainty_pairs.json, `_which_question_this_answers`).
 #
 # Set to 0, or leave a model out, to score every fold that was cut.
-# EMPTY, and that is the current state rather than a missing feature. It existed
-# for one day because NGBoost's seed ensemble made it eighteen fits per training
-# run -- 606 hours, 25 days against a 30-day limit -- and scoring one fold took
-# that back to six. The ensemble was withdrawn on measurement the next day
-# (RERUN_PLAN.md 2.30), so NGBoost is six fits again on its own and every model
-# scores every fold it cuts. The machinery stays because the lever is real and
-# the wall-clock guard that found the problem is worth keeping pointed at it.
-OOF_FOLDS_SCORED = {}
+# HOW MANY INNER FOLDS EACH MODEL ACTUALLY SCORES.
+#
+# Scoring fewer folds than were cut keeps the property that matters exactly -- a
+# molecule in a scored fold is still scored by a model that never saw its label
+# -- and costs one refit per scored fold instead of five. What is given up is
+# per-molecule COVERAGE: the molecules in the unscored folds are left blank.
+#
+# NGBOOST NEEDS IT AGAIN, for a different reason than the first time. It was set
+# to 1 on 2026-08-30 because the seed ensemble made NGBoost eighteen fits per
+# training run; the ensemble was withdrawn the next day (RERUN_PLAN.md 2.30) and
+# this went empty. Then NGBoost's wall clock was MEASURED at 166 hours per 110
+# training runs, against the 47 it had been guessed at, and at six fits per run
+# that prices a main-grid task at 714 hours -- 29.8 days against the long
+# partition's 30-day limit, with nothing spare. It would queue for days and be
+# killed at the wall, which loses the whole task.
+#
+#   scored folds    wall clock    per-molecule coverage
+#        5             714h  ✗           100%
+#        4             595h  ✗            80%
+#        3             476h  ✓            60%
+#        1             238h  ✓            20%
+#
+# THREE is the most coverage that fits inside the guard's 540-hour ceiling
+# (three quarters of the partition limit, so a slow node does not lose the job).
+# NGBoost is also not the model the per-molecule question rests on -- it has no
+# epistemic term at all (2.30), and its place on the decomposition list was
+# withdrawn -- so coverage is the right thing to spend here rather than seeds or
+# levels.
+OOF_FOLDS_SCORED = {'ngboost': 3}
 
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
@@ -476,6 +497,44 @@ MODELS = {
                    '-m mlp --bayesian-transformation full_variational '
                    '--heteroscedastic-vbll -u True', 3, 119,
                    'DERIVED: 1.5x mlp_bnn_full_variational, its plain sibling. VBLL-beta with a noise head', ALL_REPS),
+    # ---------------------------------------------------------------------
+    # THE VARIANCE-HEAD NETWORKS, added 2026-09-01 on the author's decision.
+    #
+    # Kendall & Gal eq. 6: one network predicts the value AND its own
+    # observation noise, fitted by the negative log likelihood of a Gaussian
+    # with that variance, with the weights sampled for the model term. Two
+    # mechanisms, which is why the halves can come apart -- and the only route
+    # on either pipeline to a NETWORK whose aleatoric term varies per molecule.
+    #
+    # TIER 3 ON PURPOSE: trained, and OUTSIDE the ANOVA. They are a different
+    # model from the plain Bayesian network beside them -- two outputs and a
+    # different loss -- and they are here to answer the uncertainty question,
+    # not to compete on accuracy, which they lose (R2 0.62-0.73 against 0.84 for
+    # the trees on the level-response measurement). `ANOVA_MODELS_EXCLUDE` in
+    # the figure script keeps them out of the variance decomposition; this tier
+    # keeps them out of its roster tables.
+    #
+    # models.py names the row `<base>_heteroscedastic`, because it appends the
+    # loss whenever the loss is not mse, and `support()` resolves it through the
+    # loss-aware lookup rather than a key of its own (RERUN_PLAN.md 2.32).
+    #
+    # WALL CLOCK, DERIVED the same way this file's other unmeasured entries are:
+    # 1.5x the plain Bayesian sibling that WAS measured -- dnn_bnn_full at 30 and
+    # mlp_bnn_full at 46. The variance head adds one output column and changes
+    # the loss; it does not change the architecture or the pass count, so the
+    # multiplier is the same one the hetero-VBLL entries above take over theirs.
+    # Mark as DERIVED so the next timing pass knows it was not measured.
+    'dnn_bnn_full_mve': ('-m dnn --bayesian-transformation full '
+                   '--loss heteroscedastic -u True', 3, 45,
+                   'DERIVED: 1.5x dnn_bnn_full, its plain sibling. A Bayesian '
+                   'network with a VARIANCE HEAD -- the literature\'s flagship '
+                   'case, and the only network whose aleatoric term varies per '
+                   'molecule. Uncertainty only, not in the ANOVA', ALL_REPS),
+    'mlp_bnn_full_mve': ('-m mlp --bayesian-transformation full '
+                   '--loss heteroscedastic -u True', 3, 69,
+                   'DERIVED: 1.5x mlp_bnn_full, its plain sibling. The same '
+                   'variance head on the NN-beta base, so the finding does not '
+                   'rest on one architecture', ALL_REPS),
 }
 
 # Excluded from EVERY figure by GLOBAL_MODELS_EXCLUDE, so re-running them

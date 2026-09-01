@@ -2983,6 +2983,72 @@ checkout now. Delete them with the mmaps, or write them under `$TMPDIR`.
 - **§6.1** says six levels on each experimental dataset; `NOISE_LEVELS_BY_DATASET`
   (`alternative_data_noise_robustness.py:252`) runs the same seven as QM9.
 
+### 2.34 ✅ BUILT 2026-09-01 — the variance-head networks, on both pipelines, and the ChemBERTa restriction lifted
+
+**The author's decision, on the three-seed table in §2.32:** the study reports the neural
+decomposition case rather than leaving it untested. The uncertainty list gains the two
+variance-head networks; the decomposition list gains those two and the variational network.
+
+| | before | after |
+|---|---|---|
+| uncertainty | qrf, ngboost, gauche_rbf, dnn_vbll | **+ dnn_bnn_full_mve, mlp_bnn_full_mve** — six models |
+| decomposition | gauche_rbf | **+ dnn_vbll, dnn_bnn_full_mve, mlp_bnn_full_mve** — four models |
+| VBLL representations | ChemBERTa only | **all three** |
+
+**Why the restriction went.** It rested on a roster screen that measured the variational network
+tracking its own error at 0.25 on ChemBERTa against 0.01–0.15 elsewhere — and that screen's neural
+numbers predate the label-scale defect of §2.31. A restriction resting on them is not safe.
+
+**What had to be BUILT, because it did not exist.** QM9 could already run these models:
+`--bayesian-transformation full --loss heteroscedastic` widens the head to two outputs, the loss
+exists, `split_predictive_head` reads the variance back through the transform it was fitted with,
+and `support()` resolves the row through its loss-aware lookup. **The laboratory runner had no
+variance-head model type at all.** Added: `full-bnn-mve` and `mlp-full-bnn-mve`, which widen the
+head, fit QM9's own `HeteroscedasticLoss` wrapped in the same KL term every Bayesian network there
+carries, and split the two output columns at prediction time. The loss and the split are **loaded
+from the qsar_qm_models checkout**, not transcribed — the transform between the head's second output
+and a variance belongs to the loss, and two copies of that pair is the drift this project exists to
+prevent.
+
+**THREE DEFECTS THE SMOKE TEST FOUND, all in the new code, none of which a reading would have caught:**
+
+1. The laboratory DNN wraps its layers in an `nn.Sequential` called `net`, so it has **no named
+   output layer** and the widener could not see it. It now replaces the last `Linear` in the
+   sequence.
+2. `split_predictive_head` clips the log variance with `np.clip`, which raises on a tensor that
+   still carries a gradient. The call detaches to numpy first.
+3. Loading `scripts/utils.py` by path failed with `ModuleNotFoundError` for a file sitting next to
+   it: shared modules import their siblings by bare name, so the loader now puts the module's own
+   directory on the path.
+
+**Smoke-tested end to end, both pipelines.** QM9, through the real `process_and_train.py` on 400
+real molecules with the out-of-fold pass: both models train, write 320 out-of-fold rows, and their
+two halves are **per molecule** and **add as variances to the total**. The laboratory runner builds
+and fits both new types and returns both halves per molecule, and the existing model types are
+unchanged.
+
+**A LAUNCH BLOCKER FOUND BY THE NEW WALL-CLOCK CHECK.** NGBoost was re-measured at 166 hours per 110
+training runs on 2026-08-31, and at six fits per run the main grid came to **714 hours — 29.8 days
+against a 30-day partition limit**, with the deep run at 793 hours and refusing to generate at all.
+`scripts/test_noise_conditions.py` had recorded this as the author's choice between fewer replicates
+and fewer scored folds. **Fewer scored folds, applied:** `OOF_FOLDS_SCORED['ngboost'] = 3`. Every
+scored molecule is still scored by a model that never saw its label; what is given up is coverage,
+60% of training molecules instead of all. The main grid is 476 hours and the deep run 530, both
+inside the limit — and NGBoost is not the model the per-molecule question rests on, because it has
+no epistemic term at all (§2.30).
+
+⚠️ **The wall-clock check itself was wrong and is fixed.** It asserted at least five hours for any
+model running the pass. The quantile forest was then measured at 6 hours per 110 runs, so its
+correct screen request is 3 hours and a correct generator failed. It now recomputes the generator's
+own formula — hours per 110 × runs × (1 + folds actually scored) — and compares. An absolute
+threshold cannot tell "sized without the pass" from "genuinely cheap".
+
+**Counts.** The screen is 19 scripts, 327 tasks, 2,071 training runs; the main grid 18,639. The
+laboratory uncertainty run is 6 scripts, 378 tasks. `RUNBOOK.md` and its test agree.
+
+**Open, and it is the author's:** the two variance-head models have never been hyperparameter-tuned,
+because the tuning sweep predates them. They run at the shared defaults.
+
 ### 2.32 ✅ MEASURED 2026-08-31 — three seeds, and only the Gaussian process separates by more than a whisker
 
 **Why this exists.** §5.5i's re-measured table is one seed. The variance-head network came out at

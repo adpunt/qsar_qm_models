@@ -149,6 +149,13 @@ SUPPORT = {
     'het_gp_rbf':                (PER_MOLECULE, PER_MOLECULE),
     'het_gp_tanimoto':           (PER_MOLECULE, PER_MOLECULE),
     'het_gp_matern':             (PER_MOLECULE, PER_MOLECULE),
+    # The variance-head networks under the name the LABORATORY runner writes.
+    # QM9 reaches the same model through `--loss heteroscedastic`, so its rows
+    # resolve through the loss-aware lookup below rather than through a key here.
+    # Both halves per molecule, from two different mechanisms: the head predicts
+    # the noise, the sampled weights give the model term.
+    'BNN-Full-MVE':              (PER_MOLECULE, PER_MOLECULE),
+    'MLP-BNN-Full-MVE':          (PER_MOLECULE, PER_MOLECULE),
     'xgboost':                   (NONE, NONE),
     'lgb':                       (NONE, NONE),
     'svm':                       (NONE, NONE),

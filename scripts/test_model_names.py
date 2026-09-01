@@ -91,6 +91,12 @@ QM9_ROW_NAME = {
     'dnn_bnn_full_variational_hetero': ['bnn_full_variational_hetero',
                                         'dnn_bnn_full_variational_hetero'],
     'mlp_bnn_full_variational_hetero': ['mlp_bnn_full_variational_hetero'],
+    # The variance-head networks. models.py appends the loss to the row name
+    # whenever the loss is not mse, so `--bayesian-transformation full --loss
+    # heteroscedastic` writes `<base>_heteroscedastic`. The roster label is also
+    # mapped, because uncertainty_pairs.json keys the settled pairs on it.
+    'dnn_bnn_full_mve': ['bnn_full_heteroscedastic', 'dnn_bnn_full_mve'],
+    'mlp_bnn_full_mve': ['mlp_bnn_full_heteroscedastic', 'mlp_bnn_full_mve'],
 }
 
 

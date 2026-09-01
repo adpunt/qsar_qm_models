@@ -132,7 +132,17 @@ MODELS = {
     'QRF':            (1, 8,  '128G', 36, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
     'NGBoost':        (1, 8,  '128G', 47, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
     'GP':             (1, 8,  '128G', 47, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
-    'VBLL-Full':      (2, 8,  '128G', 47, 'the one Bayesian network worth running, and only on ChemBERTa (see MODEL_REPS): 0.25 there against 0.01-0.15 elsewhere. Badly overconfident -- truth inside 1 sd 0.27-0.51 -- which is itself the finding'),
+    'VBLL-Full':      (2, 8,  '128G', 47, 'the variational network. Badly overconfident -- truth inside 1 sd 0.27-0.51 against a target of 0.68 -- which is itself the finding. On ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted'),
+    # THE VARIANCE-HEAD NETWORKS, added 2026-09-01 on the author's decision.
+    # Kendall & Gal eq. 6 -- one network predicts the value and its own
+    # observation noise, with the weights sampled for the model term. The only
+    # models on either pipeline whose ALEATORIC term varies per molecule while
+    # the two halves come from different mechanisms, so the only ones that can be
+    # asked the per-molecule decomposition question at all (RERUN_PLAN.md 2.32).
+    # Wall clock from their plain Bayesian siblings, which is what QM9 derived
+    # theirs from.
+    'BNN-Full-MVE':     (2, 8,  '128G', 47, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
+    'MLP-BNN-Full-MVE': (2, 8,  '128G', 47, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
 }
 DATASETS = ['logd', 'caco2', 'herg_ki']
 # THREE, by the author's decision of 2026-08-28 (RERUN_PLAN.md chat N): ECFP4,
@@ -151,7 +161,12 @@ REPS = ['ECFP4', 'PDV', 'ChemBERTa']
 # tracks its error at 0.25 on ChemBERTa and at 0.011 on ECFP4 and 0.152 on PDV,
 # so two of its three representations would produce rows nobody can use.
 MODEL_REPS = {
-    'VBLL-Full': ['ChemBERTa'],
+    # EMPTY from 2026-09-01. The variational network was restricted to ChemBERTa
+    # on a roster screen that measured it tracking its own error at 0.25 there
+    # against 0.01 to 0.15 elsewhere -- but that screen's neural numbers predate
+    # the label-scale defect (RERUN_PLAN.md 2.31), and a restriction resting on
+    # them is not safe. The author lifted it. Every model runs on every
+    # representation in REPS.
 }
 
 # ---------------------------------------------------------------------------

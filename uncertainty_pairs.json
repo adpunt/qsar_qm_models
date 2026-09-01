@@ -15,7 +15,11 @@
     {"canonical": "gauche_rbf", "qm9": "gauche_rbf",               "validation": "GP",
      "why": "the only non-tree model that shows anything, and what it shows depends on the representation"},
     {"canonical": "dnn_vbll",   "qm9": "dnn_bnn_full_variational", "validation": "VBLL-Full",
-     "why": "the one Bayesian network worth running, and badly overconfident, which is itself the finding"}
+     "why": "the variational network. Its aleatoric term is one number per fit and its coverage is badly wrong on the roster screen -- 23% to 45% against a target of 68% -- which is itself the finding. Run on ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted"},
+    {"canonical": "dnn_bnn_full_mve", "qm9": "dnn_bnn_full_mve", "validation": "BNN-Full-MVE",
+     "why": "a Bayesian network with a VARIANCE OUTPUT HEAD -- Kendall & Gal eq. 6, the case the uncertainty literature actually holds up. The only route on either pipeline to a NETWORK whose aleatoric term varies per molecule. Added 2026-09-01"},
+    {"canonical": "mlp_bnn_full_mve", "qm9": "mlp_bnn_full_mve", "validation": "MLP-BNN-Full-MVE",
+     "why": "the same variance head on the NN-beta base, so the finding does not rest on one architecture"}
   ],
 
   "representations": [
@@ -39,14 +43,16 @@
 
     "_a_number_NOT_used_here": "An earlier version of this entry said the variational network fails to FIT on QM9, quoting an out-of-fold R2 of -0.03. That number came from scripts/decomposition_controls.py, whose _standardise scales the features and never touches the LABEL, and a network is not scale-invariant while a tree is. With the label standardised the same networks reach R2 +0.68 to +0.73 (RERUN_PLAN.md 2.31). The roster screen that chose these four models is NOT affected -- it went through the production pipeline, which standardises, and its errors are on a unit scale (0.26 to 0.61 mean absolute error against a label spread of 1.0). The choice of models stands on the screen; only the discarded reason was wrong.",
 
-    "models": ["gauche_rbf"],
+    "models": ["gauche_rbf", "dnn_vbll", "dnn_bnn_full_mve", "mlp_bnn_full_mve"],
+
+    "_what_each_one_is_for": "The Gaussian process is the only model whose two terms come apart by a margin that survives replication -- separation 11.2x, 18.7x and 11.9x over three seeds, an order of magnitude above everything else. The other three are the NETWORKS, and they are here because the author's decision of 2026-09-01 is that the study reports what the neural case does rather than leaving it untested: all three separate weakly and consistently, medians 1.6x, 1.6x and 1.7x. The two variance-head models are additionally the ONLY models on either pipeline whose aleatoric term varies per molecule while both halves come from different mechanisms, so they are the only ones that can be asked the per-molecule question at all. Full table in RERUN_PLAN.md 2.32.",
 
     "_what_this_costs": "Nothing. The Gaussian process already decomposes -- it needed no change at any point -- and the split is read off a fit that is being made anyway."
   },
 
   "model_representations": {
     "_why": "A model that is only worth running on some of the three. The list is the CANONICAL representation names. A model absent from here runs on all three.",
-    "dnn_vbll": ["chemberta"]
+    "_none_today": "The variational network was restricted to ChemBERTa from 2026-08-29, on a roster screen that measured it tracking its own error at 0.25 there against 0.01 to 0.15 elsewhere. The author lifted that restriction on 2026-09-01: the screen's neural numbers were measured before the label-scale defect was found (RERUN_PLAN.md 2.31), and a restriction that rests on them is not safe. Every model now runs on all three representations."
   },
 
   "notes": {

@@ -131,6 +131,19 @@ ANOVA_MODELS_EXCLUDE = {
     'qrf',  # Redundant with rf (rho = 0.996)
     'gauche',  # Tanimoto kernel incompatible with continuous PDV (non-binary features)
     'gauche_rbf',  # RBF GP for PDV only; excluded from cross-rep ANOVA
+    # The variance-head networks, added 2026-09-01. They exist to answer the
+    # uncertainty question and are a DIFFERENT model from the plain Bayesian
+    # network beside them -- two outputs and a different loss -- so they must not
+    # enter a variance decomposition that asks how much of the accuracy spread
+    # is the model and how much the representation. They lose on accuracy
+    # (R2 0.62-0.73 against 0.84 for the trees) and including them would move
+    # the model term for a reason that has nothing to do with the question.
+    'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
+    # The same argument for the two variational networks with a noise head.
+    'dnn_vbll_hetero', 'mlp_vbll_hetero',
+    # And the noise-predicting Gaussian process, which is PDV-shaped in the same
+    # way gauche_rbf is.
+    'het_gp_rbf',
 } | GLOBAL_MODELS_EXCLUDE
 
 # Models that only have PDV data by design (show N/A for other reps in heatmaps)
@@ -269,6 +282,10 @@ MODEL_COLORS = {
     'het_gp_rbf': '#882255',       # Wine (GP family)
     'dnn_vbll_hetero': '#E69F00',  # NN-alpha
     'mlp_vbll_hetero': '#CC79A7',  # NN-beta
+    # The variance-head networks, added 2026-09-01. Family colour, separated by
+    # marker, like every other variant here.
+    'dnn_bnn_full_mve': '#E69F00',  # NN-alpha
+    'mlp_bnn_full_mve': '#CC79A7',  # NN-beta
 }
 
 # Within-family colors for figures that compare variants of the same family.
@@ -314,6 +331,8 @@ UNCERTAINTY_COLORS = {
     'het_gp_rbf':      '#661100',  # Dark red
     'dnn_vbll_hetero': '#88CCEE',  # Light blue
     'mlp_vbll_hetero': '#DDCC77',  # Sand
+    'dnn_bnn_full_mve': '#44AA99',  # Teal-green
+    'mlp_bnn_full_mve': '#999933',  # Olive
 }
 
 # Markers: variants of the same family get different shapes.
@@ -330,6 +349,10 @@ MODEL_MARKERS = {
     # The per-molecule-noise variants: a plus, so they are distinguishable from
     # the model they are a variant of while keeping the family colour.
     'het_gp_rbf': 'P', 'dnn_vbll_hetero': 'P', 'mlp_vbll_hetero': 'P',
+    # A star for the variance-head networks: they are the only models whose
+    # aleatoric term varies per molecule, so they are worth telling apart at a
+    # glance from the plain Bayesian network they are built on.
+    'dnn_bnn_full_mve': '*', 'mlp_bnn_full_mve': '*',
 }
 
 # Canonical ordering for legends — grouped by family, base model first.
@@ -337,8 +360,8 @@ MODEL_ORDER = [
     'rf', 'qrf',
     'xgboost', 'lgb', 'ngboost',
     'svm', 'gauche', 'gauche_rbf', 'het_gp_rbf',
-    'dnn', 'dnn_bnn_full', 'dnn_vbll', 'dnn_vbll_hetero',
-    'mlp', 'mlp_bnn_full', 'mlp_vbll', 'mlp_vbll_hetero',
+    'dnn', 'dnn_bnn_full', 'dnn_bnn_full_mve', 'dnn_vbll', 'dnn_vbll_hetero',
+    'mlp', 'mlp_bnn_full', 'mlp_bnn_full_mve', 'mlp_vbll', 'mlp_vbll_hetero',
 ]
 
 def sort_models_by_family(models):
@@ -424,6 +447,8 @@ MODEL_LABELS = {
     # label: they report a different KIND of quantity from the model they are a
     # variant of (RERUN_PLAN.md 5.5f).
     'het_gp_rbf': 'GP (RBF, het.)',
+    'dnn_bnn_full_mve': 'BNN-α (var. head)',
+    'mlp_bnn_full_mve': 'BNN-β (var. head)',
     'dnn_vbll_hetero': 'VBLL-α (het.)',
     'mlp_vbll_hetero': 'VBLL-β (het.)',
 }
