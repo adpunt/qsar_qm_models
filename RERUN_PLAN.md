@@ -6644,6 +6644,59 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7al ✅ TWO SETTINGS CHOSEN 2026-09-01 — the variational families, one setting each
+
+`scripts/pick_per_model_setting.py`. Every candidate fitted on all six representations with training
+labels noised to level 0.5 and scored on a clean test split, QM9, 3,000 molecules. The pool is the
+model's own six search winners plus the default. **Chosen by WORST representation, not average** —
+the author's concern is that PDV, the strongest representation under noise, must not pay for a
+shared choice, so a setting that is excellent on five and ruinous on one loses.
+
+**Variational beta** (`mlp_bnn_full_variational`), R-squared at noise 0.5:
+
+| setting drawn on | pdv | chemberta | ecfp4 | avalon | mhggnn | sns | worst |
+|---|---|---|---|---|---|---|---|
+| **chemberta** | 0.830 | 0.793 | 0.619 | 0.804 | 0.843 | 0.775 | **0.619** |
+| DEFAULT | 0.704 | 0.738 | 0.585 | 0.735 | 0.740 | 0.791 | 0.585 |
+| avalon | 0.849 | 0.754 | 0.577 | 0.675 | 0.773 | 0.799 | 0.577 |
+| mhggnn | 0.873 | 0.817 | 0.528 | 0.618 | 0.785 | 0.779 | 0.528 |
+| sns | 0.708 | 0.636 | 0.526 | 0.584 | 0.575 | 0.769 | 0.526 |
+| pdv | 0.817 | 0.787 | 0.502 | 0.654 | 0.801 | 0.729 | 0.502 |
+| ecfp4 | 0.477 | 0.161 | 0.655 | 0.653 | 0.392 | 0.637 | 0.161 |
+
+Chosen: `hidden_size 128, num_hidden_layers 4, dropout_rate 0.269, lr 0.000268`. It beats the default
+on five of six representations and on PDV by 0.126.
+
+**Variational alpha** (`dnn_bnn_full_variational`):
+
+| setting drawn on | pdv | chemberta | ecfp4 | avalon | mhggnn | sns | worst |
+|---|---|---|---|---|---|---|---|
+| **ecfp4** | 0.746 | 0.681 | 0.666 | 0.731 | 0.793 | 0.730 | **0.666** |
+| avalon | 0.780 | 0.751 | 0.585 | 0.746 | 0.776 | 0.660 | 0.585 |
+| pdv | 0.746 | 0.484 | 0.358 | 0.590 | 0.619 | 0.553 | 0.358 |
+| chemberta | 0.631 | 0.685 | 0.450 | 0.305 | 0.559 | 0.637 | 0.305 |
+| DEFAULT | 0.291 | 0.565 | 0.306 | 0.395 | 0.163 | 0.499 | 0.163 |
+
+Chosen: `hidden_size1 64, hidden_size2 64, activation tanh`. It beats the default on **all six**
+representations, by 0.455 on PDV and by 0.630 on MHG-GNN.
+
+**Three things this settles.**
+
+1. **Neither chosen setting came from PDV.** PDV's own winner is the second-WORST option for
+   variational beta and the third-worst for variational alpha. Had the shared setting been picked
+   any other way -- by PDV, by the average, by the clean score -- PDV would have done worse than it
+   does under the rule actually used. The author's concern was well founded and the maximin rule
+   answers it.
+2. **Both chosen settings are small.** Variational alpha's is the SMALLEST width pair in its grid.
+   That is the opposite of what clean-label tuning selected in 5.7ah, and it is what noise selection
+   was expected to do.
+3. **The default is not competitive for either.** Variational alpha's default has a worst case of
+   0.163 against the chosen 0.666.
+
+⚠️ One seed. The two variational families move only 0.13 and 0.33 across the entire noise range, so
+one seed is defensible for them; it would NOT be for the two plain Bayesian families, whose fits
+swing 0.3 to 0.7 between adjacent levels.
+
 #### 5.7ak 🟠 THE LAB SEARCHES GO TO ARC — measured, not guessed
 
 The four families' cost on a lab dataset is **two full-size neural fits per pairing**, the candidate
