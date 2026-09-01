@@ -171,8 +171,10 @@ def main():
                           '_no clean results recorded yet_', '']
                 continue
 
-            reps = [r for r in REPS
-                    if any(r in v for v in clean.values())] or REPS
+            # ALWAYS ALL SIX COLUMNS. Dropping a representation that has no
+            # data yet hides the shape of the table being filled, so an unfilled
+            # cell has to show as an empty cell, not as a missing column.
+            reps = list(REPS)
             dl, baseline = deltas(clean, reps)
             nd, _ = deltas(scores.get(nk, {}), NOISE_REPS)
 
