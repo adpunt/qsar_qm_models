@@ -14,7 +14,31 @@ import re
 import os
 from pathlib import Path
 
-MODELS_ALL = ['RF', 'QRF', 'XGBoost', 'DNN', 'GP', 'NGBoost', 'SVM', 'LightGBM']
+# THE SAME NINETEEN MODELS QM9 RUNS. Author's decision, 2026-09-01: "accuracy
+# roster should match as well. this was an oversight."
+#
+# It was eight against QM9's nineteen, so the cross-model comparison existed on
+# QM9 and did not exist on the three laboratory datasets -- every Bayesian and
+# variational network, both variance-head networks, the Tanimoto and
+# heteroscedastic Gaussian processes and the plain MLP were absent. The runner
+# has had all of them for some time; only this list was short.
+#
+# The names are the laboratory spellings from model_names.json, which is the one
+# place the correspondence between the two pipelines is written down. Every one
+# of QM9's nineteen screen scripts maps to exactly one name here -- checked, no
+# gaps -- so every row can be joined across the four datasets on the canonical
+# name.
+MODELS_ALL = [
+    # tree and deterministic (QM9 tier 1)
+    'RF', 'QRF', 'XGBoost', 'LightGBM', 'SVM', 'NGBoost', 'DNN', 'MLP',
+    # Bayesian and variational networks (QM9 tier 2)
+    'BNN-Full', 'MLP-BNN-Full', 'VBLL-Full', 'MLP-VBLL-Full',
+    # the variance-head pair and the heteroscedastic variational pair
+    'BNN-Full-MVE', 'MLP-BNN-Full-MVE',
+    'VBLL-Full-Hetero', 'MLP-VBLL-Full-Hetero',
+    # the three Gaussian processes
+    'GP', 'GP-Tanimoto', 'GP-Hetero',
+]
 # All SIX of the study's representations, matching the QM9 grid (author, 2026-08-28:
 # "it should run all 6 this is a mistake"). Avalon and ChemBERTa were absent while the
 # rest of the study moved to six, so every representation claim on logD, Caco-2 and hERG
@@ -133,8 +157,30 @@ BREADTH_GRID = [c for c in FULL_GRID if c not in PAIR_SUBSET]
 # molecules at a fixed round count; the Gaussian process is cubic and is treated
 # as such below.
 SECONDS_PER_FIT_PER_1K = {
+    # Measured, from results/tuning_local.
     'RF': 37.7, 'QRF': 112.3, 'XGBoost': 31.6, 'LightGBM': 37.4,
     'SVM': 15.5, 'NGBoost': 544.4, 'DNN': 38.2, 'GP': 1169.5,
+    # DERIVED for the eleven models added 2026-09-01, from the QM9 measurement of
+    # the model each one extends, scaled by that model's own laboratory number.
+    # QM9's hours-per-110-runs, measured: dnn 12, mlp 11, dnn_bnn_full 30,
+    # mlp_bnn_full 46, dnn_bnn_full_variational 81, mlp_bnn_full_variational 79.
+    # DNN is 38.2 here against 12 there, a factor of 3.2, applied to the rest.
+    'MLP': 35.0,                    # mlp is 11/12 of dnn on QM9
+    'BNN-Full': 95.5,               # 30/12 x 38.2
+    'MLP-BNN-Full': 146.4,          # 46/12 x 38.2
+    'VBLL-Full': 257.9,             # 81/12 x 38.2
+    'MLP-VBLL-Full': 251.5,         # 79/12 x 38.2
+    # The variance-head and heteroscedastic variants: 1.5x their plain sibling,
+    # the same margin the QM9 generator carries for them.
+    'BNN-Full-MVE': 143.3,
+    'MLP-BNN-Full-MVE': 219.6,
+    'VBLL-Full-Hetero': 386.9,
+    'MLP-VBLL-Full-Hetero': 377.3,
+    # The other two Gaussian processes: the same exact GP at the same capped
+    # size, so the same per-fit cost as 'GP'. The heteroscedastic one carries a
+    # noise network and 100 Adam epochs on top, hence twice.
+    'GP-Tanimoto': 1169.5,
+    'GP-Hetero': 2339.0,
 }
 
 # Training molecules per dataset (RERUN_PLAN.md 13.14: logD 4,031, Caco-2 1,729,
@@ -174,7 +220,12 @@ def wall_clock(model, dataset, n_conditions, n_levels):
     """Hours to request for one laboratory job, from the measurements above."""
     n = TRAIN_N[dataset]
     per_fit = SECONDS_PER_FIT_PER_1K[model]
-    if model == 'GP':
+    if model.startswith('GP'):
+        # startswith, not == 'GP'. With eight models this only had to catch one
+        # name; at nineteen it must also catch GP-Tanimoto and GP-Hetero, which
+        # are the same exact process with a different kernel and a noise network.
+        # Scaling those linearly asked 207 and 413 hours against a true 34 and 68
+        # (found 2026-09-01, the day the roster grew).
         # An exact Gaussian process factorises an n x n matrix, so it is cubic in
         # the training set rather than linear. The basis above was measured at
         # 10,000 molecules, hence the /10 twice.
@@ -484,9 +535,10 @@ esac
 # defaults to rbf, but Tanimoto is defined on binary vectors only and four of the
 # six representations are not binary.
 GP_FLAGS=""
-if [ "{model}" = "GP" ]; then
-    GP_FLAGS="--gp-kernel rbf --gp-reps $rep"
-fi
+case "{model}" in
+  GP|GP-Hetero)                   GP_FLAGS="--gp-kernel rbf --gp-reps $rep" ;;
+  GP-Tanimoto|GP-Tanimoto-Hetero) GP_FLAGS="--gp-kernel tanimoto --gp-reps $rep" ;;
+esac
 
 # THE MODEL AND THE REPRESENTATION ARE BOTH IN THE OUTPUT PATH. Until 2026-09-01
 # the model was not, so seven or eight scripts sharing a representation and a
@@ -688,7 +740,15 @@ def main():
         # ONE ARRAY PER MODEL. Its tasks are (representation x dataset), and the
         # wall clock is the WORST dataset in it, because one clock covers the
         # whole array.
-        model_reps = list(reps)
+        # THE TANIMOTO GAUSSIAN PROCESS RUNS ON ECFP4 ALONE. Its kernel is a
+        # ratio of set overlaps, defined on BINARY vectors. Sort & Slice is built
+        # with sub_counts=True so its features are small integers, and the other
+        # four are continuous; the fit is refused at run time. Without this, 5 of
+        # every 6 tasks queue, start, raise on every noise level and write an
+        # empty file -- the identical defect the QM9 generator carried until
+        # 2026-08-31 (RERUN_PLAN.md 2.33c), and QM9 restricts it the same way.
+        model_reps = (['ECFP4'] if model.startswith('GP-Tanimoto')
+                      else list(reps))
         n_tasks = len(model_reps) * len(DATASETS)
         hours = max(wall_clock(model, d, len(conditions), len(DOSE_LEVELS))
                     for d, _ in DATASETS)

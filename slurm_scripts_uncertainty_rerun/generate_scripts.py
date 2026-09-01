@@ -526,11 +526,34 @@ def main():
         conditions = list(dict.fromkeys(args.conditions))
         source = 'named on the command line'
     else:
-        # ALL SEVEN, by the author's decision of 2026-08-28. See the header.
-        conditions = MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS
-        source = (f'every settled condition ({NOISE_CONDITIONS_FILE.name}) — '
-                  f'the run answers whether uncertainty tracks some kinds of noise '
-                  f'better than others, which needs all of them')
+        # THE SAME THREE THE QM9 SCREEN RUNS, and for the same reason.
+        #
+        # Superseding the all-seven default of 2026-08-28. Author's decision,
+        # 2026-09-01: "this should apply to both qm9 and lab. Lab needs to follow
+        # suit in waiting for the decision. These should be identical."
+        #
+        # QM9 answers the uncertainty question on three conditions in the screen
+        # and on the other four afterwards, on a named subset of model-and-
+        # representation pairs CHOSEN FROM THE SCREEN. Running all seven here
+        # while QM9 runs three meant the two halves of the study answered the
+        # same question on different noise, and could not be compared until the
+        # QM9 follow-ups landed.
+        #
+        # The four that wait are censoring -- which is a pair-subset condition on
+        # both sides, and sweeps a clipped fraction on its own axis rather than a
+        # dose -- and the three depth-only ones. Ask for them by name with
+        # --conditions, or for the depth three with --include-deep-conditions,
+        # once the pairs are settled.
+        # Censoring is named here, not derived from the settled file's
+        # pair-subset marking. When censoring runs on THIS side it runs at full
+        # breadth, on every settled pair -- the author's decision of 2026-08-27
+        # (RERUN_PLAN.md 13.1 item 6), which scripts/test_noise_conditions.py
+        # enforces by refusing to let this file read that marking at all. What is
+        # deferred below is WHEN censoring runs, never how wide.
+        conditions = [c for c in MAIN_GRID_CONDITIONS if c != 'censoring']
+        source = (f'the three the QM9 screen runs ({NOISE_CONDITIONS_FILE.name}) '
+                  f'— censoring and the three depth-only conditions follow on a '
+                  f'named subset of pairs, exactly as they do on QM9')
     dropped = set(args.drop_conditions)
     conditions = [c for c in conditions if c not in dropped]
     if not conditions:

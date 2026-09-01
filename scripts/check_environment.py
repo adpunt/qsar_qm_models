@@ -141,6 +141,12 @@ VALIDATION_MODELS = {
                    "botorch.fit:fit_gpytorch_mll|fit_gpytorch_model"), None),
     "VBLL-Full-Hetero": (("torch",), None),
     "MLP-VBLL-Full-Hetero": (("torch",), None),
+    # The plain MLP and the Tanimoto Gaussian process, added to the laboratory
+    # roster 2026-09-01 when it was brought up to QM9's nineteen models. Same
+    # packages as the models beside them; the kernel is a flag, not a dependency.
+    "MLP": (("torch",), None),
+    "GP-Tanimoto": (("gpytorch", "gauche",
+                     "botorch.fit:fit_gpytorch_mll|fit_gpytorch_model"), None),
     # The two variance-head networks, built into the laboratory runner on
     # 2026-09-01 (db50157). Same packages as the Bayesian networks they widen --
     # the second output column is a head, not a new dependency. Without these two
