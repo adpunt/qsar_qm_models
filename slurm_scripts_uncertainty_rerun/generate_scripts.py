@@ -198,7 +198,12 @@ FLAT_BY_DESIGN = {'gaussian', 'laplace', 'grouped_shifted',
 # every one of them leaves the run unable to answer it.
 QUESTION_A_CONDITION = 'gaussian'
 
-KIRBY_DIR = '/data/stat-cadd/scat9264/KIRBy'
+# CORRECTED 2026-09-01, same as the accuracy generator. This said stat-cadd,
+# the checkout KIRBy moved AWAY from when that filesystem hit its quota; 125
+# of KIRBy's own 127 job scripts use stat-ecr. The guard below already names
+# the other checkout in its error message -- it was pointing at the wrong one
+# as the default and telling the operator the right one was the alternative.
+KIRBY_DIR = '/data/stat-ecr/scat9264/KIRBy'
 QSAR_DIR = '/data/stat-cadd/scat9264/qsar_qm_models'
 RESULTS_ROOT = 'results/uncertainty_rerun'
 
@@ -243,25 +248,23 @@ TEMPLATE = '''#!/bin/bash
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# WAIT A RANDOM MOMENT BEFORE DOING ANYTHING. This is not politeness.
+# GIVE THIS TASK ITS OWN KeOps CACHE AND ITS OWN SCRATCH.
 #
-# The KeOps library, which arrives with the Gaussian-process stack, runs
-# `c++ --version` at IMPORT time and writes the answer to a HARD-CODED path:
-# /tmp/compiler_version.txt. It then reads that file and deletes it. Two
-# processes importing within the same instant race: one deletes the file while
-# the other is between checking it exists and opening it, and the second dies
-# with FileNotFoundError before a single molecule is read.
+# This replaced a random wait of up to ten minutes at the top of every task
+# (removed 2026-09-01, the same change both sister generators got).
 #
-# Jobs sharing a node share /tmp, and an array releases its tasks together, so
-# this hits real runs. The failure names a missing file in /tmp and says
-# nothing about chemistry, and because it happens during import the task
-# produces NO output at all -- it looks like a task that never started.
-#
-# TMPDIR does not help: the path is a literal inside the library, not taken
-# from the environment. Staggering submission does not help either, because the
-# queue decides when tasks actually start. A random wait inside the task is the
-# only lever this side controls (found 2026-08-30, RERUN_PLAN.md 2.25).
-sleep $(( RANDOM % 600 ))
+# The wait guarded a race over /tmp/compiler_version.txt, which KeOps writes at
+# import. Checked in the library rather than assumed: both hard-coded /tmp paths
+# in keopscore/config/base_config.py sit inside `if platform.system() ==
+# "Darwin"`. On Linux neither line runs. What IS shared on Linux is the compile
+# cache, $KEOPS_CACHE_FOLDER, whose default path contains the node name -- so the
+# clash is between tasks on one node, which is what an array produces. Each task
+# now compiles into its own scratch, removed on exit.
+export TMPDIR="${{TMPDIR:-/tmp}}/unc_${{SLURM_JOB_ID:-$$}}_${{SLURM_ARRAY_TASK_ID:-0}}"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+export KEOPS_CACHE_FOLDER="$TMPDIR/keops"
+mkdir -p "$KEOPS_CACHE_FOLDER"
 
 KIRBY_DIR="{kirby_dir}"
 
@@ -276,8 +279,8 @@ KIRBY_DIR="{kirby_dir}"
 # producing 336 tasks' worth of results from the wrong code.
 if [ ! -d "$KIRBY_DIR" ]; then
     echo "ERROR: no KIRBy checkout at $KIRBY_DIR."
-    echo "       The other checkout is /data/stat-ecr/scat9264/KIRBy, which is what"
-    echo "       125 of KIRBy's own 127 job scripts use. Regenerate with"
+    echo "       The other checkout is /data/stat-cadd/scat9264/KIRBy, which is"
+    echo "       the one KIRBy moved away from. Regenerate with"
     echo "       --kirby-dir <path> rather than editing this file."
     exit 2
 fi

@@ -152,6 +152,24 @@ CV_FOLDS = 5
 WALL_MARGIN = 1.5
 
 
+BS = chr(92)   # one backslash: the shell's line continuation
+
+
+def gp_flags_for(model, rep):
+    """The two flags the Gaussian process needs, and nothing for other models.
+
+    The runner runs its Gaussian process on PDV alone unless --gp-reps says
+    otherwise, so a GP job for any other representation builds the features,
+    finds no experiment to run, and stops with "No experiments to run". Naming
+    the representation makes the script's filename and what it actually runs the
+    same thing.
+    """
+    if model != 'GP':
+        return ''
+    return ("    --gp-kernel rbf " + BS + "\n"
+            "    --gp-reps " + rep + " " + BS + "\n")
+
+
 def wall_clock(model, dataset, n_conditions, n_levels):
     """Hours to request for one laboratory job, from the measurements above."""
     n = TRAIN_N[dataset]
@@ -445,7 +463,7 @@ python alternative_data_noise_robustness.py \\
     --models {model} \\
     --reps {rep} \\
     --conditions {conditions} \\
-    --results-root results/validation_rerun/{model_lower}_{rep_safe}_{dataset}
+{gp_flags}    --results-root results/validation_rerun/{model_lower}_{rep_safe}_{dataset}
 status=$?
 
 # CARRY THE EXIT STATUS. The last statement used to be an echo, which always
@@ -623,9 +641,23 @@ def main():
 
     for model in models:
         for rep in reps:
-            # GP is PDV-only in the code
-            if model == 'GP' and rep != 'PDV':
-                continue
+            # THE GAUSSIAN PROCESS RUNS ON EVERY REPRESENTATION (author's
+            # decision, 2026-09-01). It was PDV only, which is the runner's
+            # DEFAULT when --gp-reps is not passed, not a limitation of the code:
+            # the runner has taken --gp-reps and --gp-kernel for some time.
+            #
+            # QM9 runs its RBF Gaussian process on all six -- that is the whole
+            # point of the gauche_rbf entry, so the process can enter the
+            # cross-representation comparison. Restricting the laboratory side to
+            # one representation left the Gaussian process in the QM9 analysis
+            # and absent from the laboratory one, which is a difference between
+            # the two halves of the study that nothing recorded as a decision.
+            #
+            # The kernel is RBF, stated rather than inherited: --gp-kernel
+            # DEFAULTS to rbf, but Tanimoto is a ratio of set overlaps and is
+            # defined on binary vectors only, so a silent default is the wrong
+            # thing to rely on for a flag that would make four of the six
+            # representations meaningless.
             for dataset, dataset_cli in DATASETS:
                 sn = f"{model}_{safe_name(rep)}_{dataset}"
                 content = (
@@ -641,6 +673,7 @@ def main():
                                         model=model, model_lower=model.lower(),
                                         rep=rep,
                                         rep_safe=safe_name(rep),
+                                        gp_flags=gp_flags_for(model, rep),
                                         conditions=condition_args)
                 )
                 filename = f"val_{model.lower()}_{safe_name(rep)}_{dataset}.sh"
