@@ -10250,14 +10250,31 @@ written as that, not as a single pooled claim.
 this table by re-running the generator, never by editing the numbers. The commands that produced
 every figure below are in the note after the table.
 
-QM9 has **17 models** and **98 model-and-representation pairs** — not every model runs on every
-representation, so the pair count is the generator's own sum, not 17 × 6.
+QM9 has **19 models**; the task count is the generator's own sum, not 19 × 6, because the Tanimoto
+Gaussian process runs on ECFP4 alone.
+
+**REBUILT 2026-09-02 and now CHECK-LOCKED.** The numbers below were 17 models, 294 tasks, 2,058 and
+18,522 — the third drift of this table, which the note under it had already predicted twice.
+`scripts/test_plan_run_design.py` now re-runs the generator and fails if this table disagrees with
+it, the way the runbook has been locked to the generator since 2026-08-28.
 
 | Part | Noise types | Array scripts | Tasks | Training runs |
 |---|---|---|---|---|
-| **The screen** — 1 replicate | Gaussian, grouped-wider, grouped-shifted | 17 | 294 | **2,058** |
-| **The main grid** — 9 more replicates | the same three | 17 | 294 | **18,522** |
-| **QM9 total, generated** | | | **588** | **20,580** |
+| **The screen** — 1 replicate | Gaussian, grouped-wider, grouped-shifted | 19 | 327 | **2,071** |
+| **The main grid** — 9 more replicates | the same three | 19 | 327 | **18,639** |
+| **QM9 total, generated** | | | **654** | **20,710** |
+
+**THE SCREEN IS THE QM9 ACCURACY RUN.** There is no separate accuracy family and there never was:
+the screen is replicate 0, the main grid is replicates 1–9, both write to the same files, and the
+uncertainty rows come out of those same jobs — `-u True` on every model that can emit one, and the
+out-of-fold pass on the three settled representations, decided per task by a case statement on the
+representation. QM9 therefore answers accuracy and uncertainty from ONE fit.
+
+⚠️ **The laboratory does not.** Its accuracy grid (19 arrays, 327 tasks) passes no uncertainty flags
+at all, and its uncertainty runs (6 arrays, 162 tasks) are separate jobs that refit. So a laboratory
+uncertainty row and a laboratory accuracy row for the same model, representation and noise level come
+from two different fits, where the QM9 pair comes from one. Whether that matters is §13.17 open item
+— it is a structural difference between the two halves that nothing has recorded as a decision.
 
 Each task is up to 7 noise levels; the screen is replicate 0 of the main grid and is reused, which
 is why the main grid adds nine replicates rather than ten.
