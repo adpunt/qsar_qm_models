@@ -1,0 +1,15 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+qm9,0.0,mlp_bnn_full_variational,DEFAULT,ecfp4,0,0.6386313593485868,333.8,ok,{}
+qm9,0.0,mlp_bnn_full_variational,DEFAULT,mhggnn,0,0.7373898687465665,318.8,ok,{}
+qm9,0.0,mlp_bnn_full_variational,chemberta,mhggnn,0,0.8673706450668618,449.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.269, ""lr"": 0.00026760523091972835}"
+qm9,0.0,mlp_bnn_full_variational,ecfp4,mhggnn,0,0.3600465727559147,267.4,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.303, ""lr"": 0.002704202598944105}"
+qm9,0.0,mlp_bnn_full_variational,mhggnn,mhggnn,0,0.8516357329597212,238.7,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.357, ""lr"": 0.001185606743480818}"
+qm9,0.0,mlp_bnn_full_variational,pdv,mhggnn,0,0.8099192776586834,375.7,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.412, ""lr"": 0.0006343509199762551}"
+qm9,0.0,mlp_bnn_full_variational,sns,mhggnn,0,0.6827286279904052,366.8,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.169, ""lr"": 0.006017629069106814}"
+qm9,0.0,mlp_bnn_full_variational,avalon,mhggnn,0,0.8222142369094613,453.0,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"
+qm9,0.0,mlp_bnn_full_variational,DEFAULT,sns,0,0.7842869450213998,424.8,ok,{}
+qm9,0.0,mlp_bnn_full_variational,chemberta,sns,0,0.8419151003726711,577.8,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.269, ""lr"": 0.00026760523091972835}"
+qm9,0.0,mlp_bnn_full_variational,ecfp4,sns,0,0.7477549514412974,275.7,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.303, ""lr"": 0.002704202598944105}"
+qm9,0.0,mlp_bnn_full_variational,mhggnn,sns,0,0.758688282300646,96.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.357, ""lr"": 0.001185606743480818}"
+qm9,0.0,mlp_bnn_full_variational,pdv,sns,0,0.7764067719425266,136.8,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.412, ""lr"": 0.0006343509199762551}"
+qm9,0.0,mlp_bnn_full_variational,sns,sns,0,0.8138891092829198,62.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.169, ""lr"": 0.006017629069106814}"

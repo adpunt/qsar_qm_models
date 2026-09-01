@@ -1,0 +1,29 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+qm9,0.0,mlp_bnn_full,pdv,pdv,0,0.8761265003917946,178.0,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.175, ""lr"": 0.0018679656620337437}"
+qm9,0.0,mlp_bnn_full,chemberta,pdv,0,0.8924932135963011,168.3,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.414, ""lr"": 0.005151500958133726}"
+qm9,0.0,mlp_bnn_full,ecfp4,pdv,0,0.881817511905921,246.5,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.493, ""lr"": 0.0051361233116248295}"
+qm9,0.0,mlp_bnn_full,avalon,pdv,0,0.6095030275484357,50.3,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"
+qm9,0.0,mlp_bnn_full,mhggnn,pdv,0,0.8860252034570014,82.1,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.379, ""lr"": 0.004285944143830873}"
+qm9,0.0,mlp_bnn_full,sns,pdv,0,0.8169646392374172,96.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.104, ""lr"": 0.006033573786938741}"
+qm9,0.0,mlp_bnn_full,DEFAULT,pdv,0,0.5921182125037956,66.3,ok,{}
+qm9,0.0,mlp_bnn_full,pdv,chemberta,0,0.8098558271735969,102.1,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.175, ""lr"": 0.0018679656620337437}"
+qm9,0.0,mlp_bnn_full,chemberta,chemberta,0,0.8419451089526495,137.0,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.414, ""lr"": 0.005151500958133726}"
+qm9,0.0,mlp_bnn_full,ecfp4,chemberta,0,0.751734483444801,174.1,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.493, ""lr"": 0.0051361233116248295}"
+qm9,0.0,mlp_bnn_full,avalon,chemberta,0,0.7176301805762691,45.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"
+qm9,0.0,mlp_bnn_full,mhggnn,chemberta,0,0.807139961166997,77.8,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.379, ""lr"": 0.004285944143830873}"
+qm9,0.0,mlp_bnn_full,sns,chemberta,0,0.7033023284256916,136.8,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.104, ""lr"": 0.006033573786938741}"
+qm9,0.0,mlp_bnn_full,DEFAULT,chemberta,0,0.6612085292856094,142.7,ok,{}
+qm9,0.0,mlp_bnn_full,pdv,ecfp4,0,0.769857163889749,283.2,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.175, ""lr"": 0.0018679656620337437}"
+qm9,0.0,mlp_bnn_full,chemberta,ecfp4,0,0.795110168252945,190.9,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.414, ""lr"": 0.005151500958133726}"
+qm9,0.0,mlp_bnn_full,ecfp4,ecfp4,0,0.7940809028985483,236.7,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.493, ""lr"": 0.0051361233116248295}"
+qm9,0.0,mlp_bnn_full,avalon,ecfp4,0,0.7210597861371513,186.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"
+qm9,0.0,mlp_bnn_full,mhggnn,ecfp4,0,0.7264137583498149,228.7,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.379, ""lr"": 0.004285944143830873}"
+qm9,0.0,mlp_bnn_full,sns,ecfp4,0,0.7951659861521503,267.0,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.104, ""lr"": 0.006033573786938741}"
+qm9,0.0,mlp_bnn_full,DEFAULT,ecfp4,0,0.7371400925124906,231.7,ok,{}
+qm9,0.0,mlp_bnn_full,pdv,avalon,0,0.8606583525478182,166.1,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.175, ""lr"": 0.0018679656620337437}"
+qm9,0.0,mlp_bnn_full,chemberta,avalon,0,0.7769818274465374,95.2,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.414, ""lr"": 0.005151500958133726}"
+qm9,0.0,mlp_bnn_full,ecfp4,avalon,0,0.8472591010204863,234.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.493, ""lr"": 0.0051361233116248295}"
+qm9,0.0,mlp_bnn_full,avalon,avalon,0,0.6933026228242367,50.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.136, ""lr"": 0.001181874895585407}"
+qm9,0.0,mlp_bnn_full,mhggnn,avalon,0,0.8428654213725029,140.5,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 1, ""dropout_rate"": 0.379, ""lr"": 0.004285944143830873}"
+qm9,0.0,mlp_bnn_full,sns,avalon,0,0.8387991476233001,216.1,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.104, ""lr"": 0.006033573786938741}"
+qm9,0.0,mlp_bnn_full,DEFAULT,avalon,0,0.7907206622719485,196.7,ok,{}

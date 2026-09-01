@@ -1,0 +1,55 @@
+{
+  "caco2/dnn_bnn_full": {
+    "activation": "tanh",
+    "hidden_size1": 64,
+    "hidden_size2": 32
+  },
+  "caco2/dnn_bnn_full_variational": {
+    "activation": "tanh",
+    "hidden_size1": 64,
+    "hidden_size2": 128
+  },
+  "caco2/mlp_bnn_full": {
+    "dropout_rate": 0.401,
+    "hidden_size": 64,
+    "lr": 0.005865018723574268,
+    "num_hidden_layers": 3
+  },
+  "caco2/mlp_bnn_full_variational": null,
+  "herg/dnn_bnn_full": null,
+  "herg/dnn_bnn_full_variational": {
+    "activation": "tanh",
+    "hidden_size1": 64,
+    "hidden_size2": 64
+  },
+  "herg/mlp_bnn_full": {
+    "dropout_rate": 0.169,
+    "hidden_size": 64,
+    "lr": 0.006017629069106814,
+    "num_hidden_layers": 2
+  },
+  "logd/dnn_bnn_full": null,
+  "logd/dnn_bnn_full_variational": null,
+  "qm9/dnn_bnn_full": {
+    "activation": "tanh",
+    "hidden_size1": 64,
+    "hidden_size2": 32
+  },
+  "qm9/dnn_bnn_full_variational": {
+    "activation": "tanh",
+    "hidden_size1": 64,
+    "hidden_size2": 64
+  },
+  "qm9/mlp_bnn_full": {
+    "dropout_rate": 0.379,
+    "hidden_size": 64,
+    "lr": 0.004285944143830873,
+    "num_hidden_layers": 1
+  },
+  "qm9/mlp_bnn_full_variational": {
+    "dropout_rate": 0.357,
+    "hidden_size": 64,
+    "lr": 0.001185606743480818,
+    "num_hidden_layers": 1
+  }
+}

@@ -1,0 +1,13 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+qm9,0.0,dnn_bnn_full,DEFAULT,pdv,0,0.22681814171946768,54.0,ok,{}
+qm9,0.0,dnn_bnn_full,chemberta,pdv,0,-0.020524191976168282,73.3,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,chemberta,chemberta,0,0.7958079873225099,164.5,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,DEFAULT,ecfp4,0,0.4096529269097835,31.2,ok,{}
+qm9,0.0,dnn_bnn_full,chemberta,ecfp4,0,0.648364016378842,546.3,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,mhggnn,ecfp4,0,0.6609459397244704,1516.8,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,sns,ecfp4,0,0.04778383965442046,73.4,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,DEFAULT,mhggnn,0,-0.40913507238961966,67.6,ok,{}
+qm9,0.0,dnn_bnn_full,chemberta,mhggnn,0,0.8340359310844208,957.6,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,ecfp4,mhggnn,0,0.5981040539055071,314.8,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+qm9,0.0,dnn_bnn_full,mhggnn,mhggnn,0,0.6889964905736183,901.7,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full,sns,mhggnn,0,0.7871579229946788,64.6,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"

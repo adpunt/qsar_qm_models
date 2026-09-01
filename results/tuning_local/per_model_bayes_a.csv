@@ -1,0 +1,40 @@
+model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+dnn_bnn_full,pdv,pdv,0,0.23787744085887996,75.9,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,ecfp4,pdv,0,-0.06970165873829748,26.5,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+dnn_bnn_full,avalon,pdv,0,0.4657215410151152,36.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,mhggnn,pdv,0,-0.3567338620740115,84.5,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,sns,pdv,0,-0.2705664902167024,22.7,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,DEFAULT,pdv,0,-0.9139674619639278,9.3,ok,{}
+dnn_bnn_full,pdv,pdv,1,-0.014200354136909121,54.0,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,ecfp4,pdv,1,0.46374969020672696,27.7,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+dnn_bnn_full,avalon,pdv,1,0.2027963141058453,18.1,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,mhggnn,pdv,1,-0.07718517335149055,63.8,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,sns,pdv,1,-1.096638162097384,11.8,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,DEFAULT,pdv,1,-0.5899587731619096,12.5,ok,{}
+dnn_bnn_full,pdv,pdv,2,0.04057452239402415,59.8,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,ecfp4,pdv,2,-0.9755323563576215,10.8,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+dnn_bnn_full,avalon,pdv,2,0.40002037486790365,33.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,mhggnn,pdv,2,-0.7940805473917685,44.6,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,sns,pdv,2,0.12301283402570151,24.9,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+dnn_bnn_full,DEFAULT,pdv,2,-0.5799422559422345,20.6,ok,{}
+dnn_bnn_full,pdv,chemberta,0,0.6842699382022508,83.2,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+dnn_bnn_full,ecfp4,chemberta,0,-1.5387054516202046,20.2,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+dnn_bnn_full,avalon,chemberta,0,0.7242766833116288,39.9,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,pdv,pdv,0,0.12575594709236093,51.0,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,ecfp4,pdv,0,0.22530289830583827,16.9,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+qm9,dnn_bnn_full,avalon,pdv,0,-0.007372154926261976,18.7,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,mhggnn,pdv,0,-0.7102799512706091,54.4,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,sns,pdv,0,0.24540814833572588,25.1,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,DEFAULT,pdv,0,-0.024661291340983382,12.0,ok,{}
+qm9,dnn_bnn_full,pdv,chemberta,0,0.666168740706369,126.0,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,ecfp4,chemberta,0,0.14474731524965812,18.8,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+qm9,dnn_bnn_full,avalon,chemberta,0,0.7794582311880004,44.9,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,mhggnn,chemberta,0,0.6560694665007483,236.5,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,sns,chemberta,0,0.6437102417652949,45.2,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,DEFAULT,chemberta,0,0.057568884086635186,69.4,ok,{}
+qm9,dnn_bnn_full,pdv,ecfp4,0,0.32919821680604033,128.6,ok,"{""hidden_size1"": 512, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,ecfp4,ecfp4,0,0.195784911843374,30.2,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+qm9,dnn_bnn_full,avalon,ecfp4,0,0.40752039986103084,25.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,mhggnn,ecfp4,0,0.3957024060193398,326.6,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,sns,ecfp4,0,0.3066187700656008,48.7,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,dnn_bnn_full,DEFAULT,ecfp4,0,0.3626754862356423,55.4,ok,{}

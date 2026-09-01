@@ -1,0 +1,12 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+logd,0.0,dnn_bnn_full_variational,avalon,pdv,0,0.5359396325121838,163.7,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.0,dnn_bnn_full_variational,chemberta,pdv,0,0.4539251394816619,114.4,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+logd,0.0,dnn_bnn_full_variational,DEFAULT,pdv,0,0.44734400871820035,256.8,ok,{}
+logd,0.0,dnn_bnn_full_variational,avalon,chemberta,0,0.4061265677785445,348.4,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.0,dnn_bnn_full_variational,chemberta,chemberta,0,0.19136034960108805,237.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+logd,0.0,dnn_bnn_full_variational,DEFAULT,chemberta,0,0.3456713519344323,164.4,ok,{}
+logd,0.0,dnn_bnn_full_variational,avalon,ecfp4,0,0.4721918448991367,807.8,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.0,dnn_bnn_full_variational,chemberta,ecfp4,0,0.46244410420071813,254.8,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+logd,0.0,dnn_bnn_full_variational,DEFAULT,ecfp4,0,0.4057110161492343,397.4,ok,{}
+logd,0.0,dnn_bnn_full_variational,ecfp4,pdv,0,0.6538944882171203,110.4,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.0,dnn_bnn_full_variational,ecfp4,chemberta,0,0.49888101272516827,117.2,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"

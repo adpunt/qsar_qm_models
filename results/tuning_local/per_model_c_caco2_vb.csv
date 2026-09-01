@@ -1,0 +1,14 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+caco2,0.0,mlp_bnn_full_variational,DEFAULT,pdv,0,0.39206339905347976,56.1,ok,{}
+caco2,0.0,mlp_bnn_full_variational,ecfp4,pdv,0,0.4749452024150588,124.5,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.102, ""lr"": 0.0002815910845718377}"
+caco2,0.0,mlp_bnn_full_variational,mhggnn,pdv,0,0.37653770445033796,69.3,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.47, ""lr"": 0.0003834626952928267}"
+caco2,0.0,mlp_bnn_full_variational,pdv,pdv,0,0.4910482862717368,76.6,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.09, ""lr"": 0.0003197405383748456}"
+caco2,0.0,mlp_bnn_full_variational,DEFAULT,chemberta,0,0.13444874450124977,64.5,ok,{}
+caco2,0.0,mlp_bnn_full_variational,ecfp4,chemberta,0,0.3958953866867395,195.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.102, ""lr"": 0.0002815910845718377}"
+caco2,0.0,mlp_bnn_full_variational,mhggnn,chemberta,0,0.30194093712594994,197.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.47, ""lr"": 0.0003834626952928267}"
+caco2,0.0,mlp_bnn_full_variational,pdv,chemberta,0,0.44522233367239883,191.2,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.09, ""lr"": 0.0003197405383748456}"
+caco2,0.0,mlp_bnn_full_variational,DEFAULT,ecfp4,0,0.3756196506854975,478.2,ok,{}
+caco2,0.0,mlp_bnn_full_variational,ecfp4,ecfp4,0,0.5133288122701732,919.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.102, ""lr"": 0.0002815910845718377}"
+caco2,0.0,mlp_bnn_full_variational,mhggnn,ecfp4,0,0.4608528658840587,784.4,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 4, ""dropout_rate"": 0.47, ""lr"": 0.0003834626952928267}"
+caco2,0.0,mlp_bnn_full_variational,pdv,ecfp4,0,0.5152205406470927,349.9,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.09, ""lr"": 0.0003197405383748456}"
+caco2,0.0,mlp_bnn_full_variational,DEFAULT,mhggnn,0,0.11004461987441616,179.3,ok,{}

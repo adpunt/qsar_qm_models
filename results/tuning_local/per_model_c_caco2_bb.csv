@@ -1,0 +1,4 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+caco2,0.0,mlp_bnn_full,avalon,pdv,0,0.41703697022048836,29.7,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.051, ""lr"": 0.007098234307633582}"
+caco2,0.0,mlp_bnn_full,chemberta,pdv,0,0.29649152793595723,29.3,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.236, ""lr"": 0.0018177358034255457}"
+caco2,0.0,mlp_bnn_full,ecfp4,pdv,0,0.4816496990784521,44.7,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 4, ""dropout_rate"": 0.414, ""lr"": 0.005151500958133726}"

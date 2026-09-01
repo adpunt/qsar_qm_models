@@ -1,0 +1,17 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+qm9,0.0,dnn_bnn_full_variational,pdv,pdv,0,0.8128637456735106,174.5,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+qm9,0.0,dnn_bnn_full_variational,chemberta,pdv,0,0.7011963649092243,328.1,ok,"{""hidden_size1"": 256, ""hidden_size2"": 256, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,ecfp4,pdv,0,0.8140729982641104,173.8,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,avalon,pdv,0,0.7346544562768662,150.3,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,DEFAULT,pdv,0,0.5915455095101244,113.6,ok,{}
+qm9,0.0,dnn_bnn_full_variational,pdv,chemberta,0,0.6239966392042053,135.1,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+qm9,0.0,dnn_bnn_full_variational,chemberta,chemberta,0,0.6127519385286934,237.0,ok,"{""hidden_size1"": 256, ""hidden_size2"": 256, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,ecfp4,chemberta,0,0.7917430684143977,118.0,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,avalon,chemberta,0,0.7480688219138889,211.4,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,DEFAULT,chemberta,0,0.643201393533011,298.5,ok,{}
+qm9,0.0,dnn_bnn_full_variational,pdv,ecfp4,0,0.2968468444653105,358.0,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+qm9,0.0,dnn_bnn_full_variational,chemberta,ecfp4,0,0.5626212423123131,732.3,ok,"{""hidden_size1"": 256, ""hidden_size2"": 256, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,ecfp4,ecfp4,0,0.6054297353219472,228.5,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,avalon,ecfp4,0,0.6695296850820984,215.4,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+qm9,0.0,dnn_bnn_full_variational,DEFAULT,ecfp4,0,0.19554553523992246,337.4,ok,{}
+qm9,0.0,dnn_bnn_full_variational,pdv,avalon,0,0.3655228598226511,237.8,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"

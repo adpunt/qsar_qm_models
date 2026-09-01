@@ -1,0 +1,32 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+logd,0.5,dnn_bnn_full,chemberta,pdv,0,0.5090040304039835,58.8,ok,"{""hidden_size1"": 64, ""hidden_size2"": 256, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,chemberta,pdv,0,0.4408187919067711,35.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 256, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,pdv,pdv,0,-0.10816062770362134,72.3,ok,"{""hidden_size1"": 512, ""hidden_size2"": 128, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,avalon,pdv,0,0.732041597754298,357.4,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.5,dnn_bnn_full,ecfp4,pdv,0,0.6551927205445498,134.4,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+logd,0.5,dnn_bnn_full,mhggnn,pdv,0,0.5364910440343085,111.6,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,sns,pdv,0,0.3900851521740063,124.8,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,DEFAULT,pdv,0,0.5108969900558463,73.3,ok,{}
+logd,0.5,dnn_bnn_full,chemberta,chemberta,0,0.4706488018422561,170.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 256, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,pdv,chemberta,0,0.2498264667019504,152.9,ok,"{""hidden_size1"": 512, ""hidden_size2"": 128, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,avalon,chemberta,0,0.4296093869273955,244.4,ok,"{""hidden_size1"": 1024, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.5,dnn_bnn_full,ecfp4,chemberta,0,0.5501357306013728,63.7,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""tanh""}"
+logd,0.5,dnn_bnn_full,mhggnn,chemberta,0,-0.0596575673882056,27.6,ok,"{""hidden_size1"": 64, ""hidden_size2"": 64, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,sns,chemberta,0,0.31359432205234006,38.4,ok,"{""hidden_size1"": 128, ""hidden_size2"": 64, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full,DEFAULT,chemberta,0,0.5228011940984074,124.7,ok,{}
+logd,0.5,mlp_bnn_full,chemberta,pdv,0,0.7701075088226987,124.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.429, ""lr"": 0.0035645098822783107}"
+logd,0.5,mlp_bnn_full,pdv,pdv,0,0.627755043951319,22.7,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.221, ""lr"": 0.0008069016522267505}"
+logd,0.5,mlp_bnn_full,avalon,pdv,0,0.7282826715424362,57.2,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.461, ""lr"": 0.001362574016561972}"
+logd,0.5,mlp_bnn_full,ecfp4,pdv,0,0.41442612166013726,14.4,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.412, ""lr"": 0.0006343509199762551}"
+logd,0.5,mlp_bnn_full,sns,pdv,0,0.7507301918185502,50.1,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.398, ""lr"": 0.009342068369367122}"
+logd,0.5,mlp_bnn_full,DEFAULT,pdv,0,0.7637131023565812,82.0,ok,{}
+logd,0.5,mlp_bnn_full,chemberta,chemberta,0,0.6144104164102935,93.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 3, ""dropout_rate"": 0.429, ""lr"": 0.0035645098822783107}"
+logd,0.5,mlp_bnn_full,pdv,chemberta,0,0.4989933244244167,43.3,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.221, ""lr"": 0.0008069016522267505}"
+logd,0.5,mlp_bnn_full,avalon,chemberta,0,0.6424172878130093,89.4,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.461, ""lr"": 0.001362574016561972}"
+logd,0.5,mlp_bnn_full,ecfp4,chemberta,0,0.5796646992847814,108.9,ok,"{""hidden_size"": 128, ""num_hidden_layers"": 1, ""dropout_rate"": 0.412, ""lr"": 0.0006343509199762551}"
+logd,0.5,mlp_bnn_full,sns,chemberta,0,0.5715700285059181,65.0,ok,"{""hidden_size"": 64, ""num_hidden_layers"": 2, ""dropout_rate"": 0.398, ""lr"": 0.009342068369367122}"
+logd,0.5,mlp_bnn_full,DEFAULT,chemberta,0,0.6323927549270427,129.6,ok,{}
+logd,0.5,dnn_bnn_full_variational,chemberta,pdv,0,0.6276860296346822,122.2,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"
+logd,0.5,dnn_bnn_full_variational,avalon,pdv,0,0.5268778860634314,186.1,ok,"{""hidden_size1"": 256, ""hidden_size2"": 32, ""activation"": ""tanh""}"
+logd,0.5,dnn_bnn_full_variational,DEFAULT,pdv,0,0.3027009547291114,155.9,ok,{}
+logd,0.5,dnn_bnn_full_variational,chemberta,chemberta,0,0.34669158578763615,138.4,ok,"{""hidden_size1"": 64, ""hidden_size2"": 32, ""activation"": ""relu""}"

@@ -1,0 +1,2 @@
+dataset,level,model,from_rep,applied_to,noise_seed,r2,seconds,status,detail
+logd,0.0,dnn_bnn_full,chemberta,pdv,0,0.31699022655676834,47.3,ok,"{""hidden_size1"": 64, ""hidden_size2"": 256, ""activation"": ""relu""}"
