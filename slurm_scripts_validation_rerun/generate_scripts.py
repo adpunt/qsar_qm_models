@@ -282,10 +282,16 @@ echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
 # NOISE_DESIGN.md section 6.4 is the one place the levels live. This asks the
 # runner what it would use and refuses if it disagrees, rather than discovering
 # it in the results (found 2026-09-01).
-python - <<'PYLEVELS' || exit 2
+# The heredoc delimiter is QUOTED so the regex backslashes below survive the
+# shell -- which also means $KIRBY_DIR is NOT expanded inside it. The path is
+# passed as an argument instead. Getting that wrong made every one of these jobs
+# exit 2 on a file called literally '$KIRBY_DIR/tests/...' (found and fixed the
+# same day, 2026-09-01).
+python - "$KIRBY_DIR" <<'PYLEVELS' || exit 2
 import json, re, sys, pathlib
 want = {levels_json}
-src = pathlib.Path("$KIRBY_DIR/tests/alternative_data_noise_robustness.py").read_text()
+src = pathlib.Path(sys.argv[1], 'tests',
+                   'alternative_data_noise_robustness.py').read_text()
 m = re.search(r"^\s*(?:DEFAULT_)?(?:SIGMAS|NOISE_LEVELS|LEVELS)\s*=\s*(\[[^\]]*\])",
               src, re.M)
 if not m:

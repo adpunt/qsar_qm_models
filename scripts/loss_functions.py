@@ -50,6 +50,28 @@ class HeteroscedasticLoss(nn.Module):
             outputs: tensor of shape (batch, 2) where [:, 0] is mean, [:, 1] is log_var
             y_true: true values
         """
+        # BOTH ARGUMENTS ARE NORMALISED, NOT JUST THE OUTPUTS.
+        #
+        # `mean` below is a COLUMN, (batch, 1). If y_true arrives 1-D, (batch,),
+        # then `y_true - mean` BROADCASTS to (batch, batch) and the loss is
+        # averaged over every molecule PAIR in the batch rather than over the
+        # molecules. The fit still runs and still reports a number; it simply
+        # does not learn. Measured on the laboratory runner, hERG, ECFP4:
+        # R-squared -0.005 with a 1-D target against +0.289 with a column, same
+        # data and seed, and predictions spanning 0.07 log units against a label
+        # spread of 0.97.
+        #
+        # QM9 always passed a column (models.py views its targets as (-1, 1)) so
+        # this never bit there and these reshapes are a no-op for it -- verified,
+        # no QM9 number moves. The laboratory runner passes a ravelled 1-D array,
+        # because every one of its other models has a one-wide head. Normalising
+        # here fixes the class rather than one caller (found 2026-09-01 by
+        # running both networks).
+        #
+        # reshape, not view: view raises on a non-contiguous tensor.
+        outputs = outputs.reshape(-1, 2)
+        y_true = y_true.reshape(-1, 1)
+
         mean = outputs[:, 0:1]
         log_var = outputs[:, 1:2]
         
