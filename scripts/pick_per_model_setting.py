@@ -77,6 +77,8 @@ def main():
     ap.add_argument('--seeds', type=int, default=3)
     ap.add_argument('--sample-size', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--dataset', default='qm9',
+                    choices=['qm9', 'herg', 'caco2', 'logd'])
     ap.add_argument('--tag', default='pick')
     cli = ap.parse_args()
 
@@ -85,19 +87,31 @@ def main():
     import tune_hyperparameters as T
     import tuning_rosters as R
 
-    _default, cands, _s, _r = RT.load('qm9')
+    _default, cands, _s, _r = RT.load(cli.dataset)
+    if not cands:
+        print(f'no search results for {cli.dataset}; nothing to choose between',
+              file=sys.stderr)
+        return 1
 
     pat, M = T._import_pipeline()
-    smiles, y, tr, va, te = T.build_split(pat, cli.sample_size, cli.seed)
+    K = cache_key = None
+    if cli.dataset == 'qm9':
+        smiles, y, tr, va, te = T.build_split(pat, cli.sample_size, cli.seed)
+    else:
+        smiles, y, tr, va, te, K = T.build_validation_split(
+            cli.dataset, cli.sample_size, cli.seed, None)
+        cache_key = f'{cli.dataset}_seed{cli.seed}'
     spread = float(np.std(y[tr].astype(np.float64)))
     scratch = os.path.join(OUT_DIR, f'scratch_{cli.tag}.csv')
 
     out = os.path.join(OUT_DIR, f'per_model_{cli.tag}.csv')
+    print(f'{cli.dataset}: train {len(tr)}  validation {len(va)}  '
+          f'test {len(te)}  label spread {spread:.4f}', flush=True)
     fresh = not os.path.exists(out)
     fh = open(out, 'a', newline='')
-    w = csv.DictWriter(fh, fieldnames=['model', 'from_rep', 'applied_to',
-                                       'noise_seed', 'r2', 'seconds', 'status',
-                                       'detail'])
+    w = csv.DictWriter(fh, fieldnames=['dataset', 'model', 'from_rep',
+                                       'applied_to', 'noise_seed', 'r2',
+                                       'seconds', 'status', 'detail'])
     if fresh:
         w.writeheader()
 
@@ -123,7 +137,8 @@ def main():
             if rep not in R.MODELS[model][4]:
                 continue
             data0, _ = T.prepared_data(pat, rep, smiles, y, tr, va, te,
-                                       cli.sample_size, cli.seed)
+                                       cli.sample_size, cli.seed,
+                                       K=K, cache_key=cache_key)
             for ns in range(cli.seeds):
                 inj_t = NoiseInjectorRegression.from_condition(
                     'gaussian', random_state=2000 + ns)
@@ -151,7 +166,8 @@ def main():
                           f'{from_rep:10s} seed {ns} '
                           f'R2={r2 if r2 == "" else f"{r2:.4f}"} {secs:6.1f}s',
                           flush=True)
-                    w.writerow(dict(model=model, from_rep=from_rep,
+                    w.writerow(dict(dataset=cli.dataset, model=model,
+                                    from_rep=from_rep,
                                     applied_to=rep, noise_seed=ns, r2=r2,
                                     seconds=round(secs, 1), status=status,
                                     detail=detail))

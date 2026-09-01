@@ -128,14 +128,20 @@ def load(dataset):
     # this dataset and are dropped with a message rather than silently mixed.
     counts = collections.Counter(r['sample_size'] for r in rows
                                  if r.get('sample_size'))
+    # ONLY A TINY MINORITY IS A STRAY. The first version of this guard kept the
+    # majority size and dropped everything else, which was right for the two-row
+    # hERG file that leaked into QM9 and WRONG the moment a dataset was
+    # legitimately run at two sizes: it silently dropped all 315 Bayesian rows
+    # from LogD at 3,000 because the six cheap models had 530 rows at 5,039, and
+    # the final list then said LogD keeps every default.
+    total = sum(counts.values())
     if len(counts) > 1:
-        keep_size, _n = counts.most_common(1)[0]
-        wrong = [r for r in rows if r.get('sample_size') != keep_size]
-        rows = [r for r in rows if r.get('sample_size') == keep_size]
-        odd = collections.Counter(r['sample_size'] for r in wrong)
-        print(f'  {dataset}: dropped {len(wrong)} row(s) recorded at '
-              f'{dict(odd)} molecules; this dataset was run at {keep_size}',
-              file=sys.stderr)
+        stray = {sz for sz, n in counts.items() if n < max(3, 0.02 * total)}
+        if stray:
+            rows = [r for r in rows if r.get('sample_size') not in stray]
+            print(f'  {dataset}: dropped rows recorded at {sorted(stray)} '
+                  f'molecules — too few to be a run of their own',
+                  file=sys.stderr)
 
     sizes = {r['sample_size'] for r in rows if r.get('sample_size')}
     final = {(r['model'], r['rep']) for r in rows

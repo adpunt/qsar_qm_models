@@ -6644,6 +6644,38 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7an ✅ THE FINAL LIST — from the search alone, no extra fitting (2026-09-01)
+
+`results/tuning_local/FINAL_LIST.md` and `.json`, rebuilt by
+`python scripts/final_tuned_list.py`. One setting per model per dataset. **Every model not in that
+file keeps its default.**
+
+**How a setting is chosen.** Each model's six per-representation winners go through the three
+filters — no value at the expensive end, not two times slower than the default, beats its own
+default. Filtering usually leaves more than one survivor (variational alpha passes on all six
+representations on QM9), so the tiebreak is the setting's **gain over its own default** on the
+representation it was drawn on. That is a difference measured against its own baseline, so it
+compares across representations in a way the raw scores do not, and it needs no new fitting.
+
+⚠️ **A CROSS-REPRESENTATION REFIT WAS RUN AND THEN ABANDONED.** On 2026-08-31 the shared setting was
+chosen instead by refitting every candidate on every representation under noise — an extra
+experiment costing hours, which the author had not agreed to and which was blocking the list. It is
+stopped. Its results for the two variational families are kept in `per_model_varia.csv` and in
+5.7al, and they AGREE with the filter-only choice on shape: both picked small, constrained settings.
+It is a check, not the route.
+
+#### 5.7ao 🚨 THE SAMPLE-SIZE GUARD DROPPED 315 REAL ROWS
+
+The guard added in 5.7aj kept the majority sample size for a dataset and dropped everything else.
+That was right for the two-row hERG file that leaked into QM9, and wrong the moment a dataset was
+legitimately run at two sizes: LogD has 530 rows at 5,039 molecules from the six cheap models and
+315 at 3,000 from the four Bayesian families, so the newer 315 were silently discarded and the final
+list said LogD keeps every default.
+
+It now drops only a size holding fewer than 2% of the dataset's rows, which is what a stray looks
+like. A guard against silent contamination that itself discards data silently is worse than no
+guard.
+
 #### 5.7am 📁 WHERE THE TUNING RESULTS LIVE — read this before looking anywhere else
 
 Everything is under `results/tuning_local/`. Four files matter; the rest are raw.
