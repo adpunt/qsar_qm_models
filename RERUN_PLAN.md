@@ -6644,46 +6644,100 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
-#### 5.7RULES ✅ THE RULES FOR CHOOSING TUNED HYPERPARAMETERS — settled, 2026-09-01
+#### 5.7RULES ✅ THE RULES AND THE PROCESS — settled 2026-09-01, reproducible
 
-**This section is the rules. Everything else in 5.7 is working notes. If they disagree, this wins.**
+**This section is authoritative. Everything else in 5.7 is working notes; if they disagree, this
+wins.**
 
-Applied by `scripts/final_tuned_list.py`, which writes
-`results/tuning_local/FINAL_LIST.md` and `.json`.
+##### Which models are tuned
 
-**1. WHICH MODELS ARE TUNED.** Four: `dnn_bnn_full`, `mlp_bnn_full`,
-`dnn_bnn_full_variational`, `mlp_bnn_full_variational`. **Every other model keeps its default.**
-Measured over all four datasets: these four gain a median +0.19 in validation R-squared and win on
-24 of 24 pairings, where every other family gains 0.02 to 0.04.
+Four, and no others: `dnn_bnn_full`, `mlp_bnn_full`, `dnn_bnn_full_variational`,
+`mlp_bnn_full_variational`. **Every other model keeps its default.** Measured over all four
+datasets: these four gain a median +0.19 in validation R-squared and win on 24 of 24 pairings, where
+every other family gains 0.02 to 0.04. Their defaults do not merely underperform — the Bayesian
+alpha network scores -0.5568 on QM9 PDV untuned.
 
-**2. ONE SETTING PER MODEL, PER DATASET.** Not per representation. The headline analysis splits
-variance over model and representation and reports their interaction; per-cell hyperparameters would
-vary along that same axis and could never be separated from it.
+##### One setting per model, per dataset — NOT per representation
 
-**3. THE THREE FILTERS.** A setting must pass all three, plus beat its own default on clean labels.
+The headline analysis splits variance over model and representation and reports their interaction.
+Per-cell hyperparameters would vary along that same axis and could never be separated from it.
+
+##### THE TWO TESTS, AND WHY BOTH ARE NEEDED
+
+**Test 1 — the search, on clean labels.** `scripts/tune_hyperparameters.py --sweep`. Twelve random
+settings plus the default per pairing, scored on the validation split of one scaffold split. Four
+models x six representations x four datasets.
+
+**Test 2 — the cross-representation test, at noise level 0.5.** `scripts/pick_per_model_setting.py`.
+Every candidate setting fitted on EVERY representation with training labels noised to 0.5, scored on
+a clean test split.
+
+**Test 1 alone cannot give a per-model answer, and this is the point that was missed for a full
+day.** Each representation drew its own twelve candidates and scored them ONLY on itself. No setting
+was ever tried on a representation other than the one that drew it. So the search cannot say how one
+setting behaves across representations — and that is exactly what choosing one setting per model
+requires. Test 2 supplies it.
+
+**Test 2 runs on PDV and ChemBERTa for the three lab datasets** (author's decision — the two are
+enough), and on all six for QM9.
+
+##### The rules, applied to Test 2's results
+
+Rank a model's candidates by their **worst representation**. Not the average: a setting that is
+excellent on five representations and ruinous on one must not win on the strength of the five.
+
+Then walk DOWN the ranking and take the first candidate that passes:
 
 | filter | test |
 |---|---|
-| extreme | no value at the end of its range that makes the model bigger or slower. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. |
-| compute | fits in under 2x the default's measured seconds |
-| noise | R-squared at noise level 0.5 not below the default's. **Applied where a noise test exists — PDV and ChemBERTa. A setting drawn on an untested representation is not failed for lack of a test.** |
+| extreme | no value at the end of its range that makes the model BIGGER or SLOWER. For these four models that means width at its maximum (1024, 512) or layer count at 4. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. Dropout and learning rate are never flagged: a network runs the same number of passes either way. |
+| compute | no more than 2x the default's measured fit time |
+| beats the default | its worst representation beats the default's worst representation. Everything in Test 2 is already at noise 0.5, so this IS the noise test. |
 
-**4. THE TIEBREAK.** Filtering leaves more than one survivor — variational alpha passes on all six
-representations on QM9 — so one number chooses: the setting's **gain over its own default** on the
-representation it was drawn on. A difference against its own baseline, comparable across
-representations where the raw scores are not, and it needs no new fitting.
+**STOP at the first candidate that no longer beats the default** — everything below it in the
+ranking is worse still, so there is nothing left to assess. If nothing has passed by then, the model
+keeps its default, recorded as a decision rather than left absent.
 
-**5. NOTHING SURVIVES → KEEP THE DEFAULT**, recorded as a decision rather than left absent.
+##### Why the noise filter exists
 
-**What produced the noise filter.** The search scored every candidate on CLEAN labels, and clean
-scoring prefers larger, less restricted models — which are the ones that memorise noisy labels.
-Measured: LightGBM's clean winner on ECFP4 ends at 0.226 under noise where its own default holds
-0.634 (5.7ah). The noise filter exists to catch exactly that.
+The search scored every candidate on CLEAN labels, and clean scoring prefers larger, less restricted
+models — which are the ones that memorise noisy labels. Measured: LightGBM's clean winner on ECFP4
+ends at 0.226 under noise where its own default holds 0.634 (5.7ah).
 
-**Two things that were tried and are NOT the rule.** A cross-representation refit choosing by worst
-representation (5.7al) — correct in principle, hours of extra fitting, abandoned; its results are
-kept as a check and agree on shape. And "prefer the constrained runner-up" (5.7ah) — tested and it
-does not work.
+##### To reproduce the whole thing
+
+    # Test 1, per dataset. QM9 at 5,000; the lab datasets at their own size.
+    python scripts/tune_hyperparameters.py --sweep --settings 12 \
+        --dataset <qm9|herg|caco2|logd> --sample-size <5000|1415|2161|3000> \
+        --screen-at 800 --promote 1 \
+        --models dnn_bnn_full mlp_bnn_full \
+                 dnn_bnn_full_variational mlp_bnn_full_variational \
+        --reps <one representation> --tag <name>
+
+    # Test 2, per dataset. Six representations on QM9, two on the lab datasets.
+    python scripts/pick_per_model_setting.py \
+        --dataset <qm9|herg|caco2|logd> --sample-size <3000|1415|2161|3000> \
+        --models dnn_bnn_full mlp_bnn_full \
+                 dnn_bnn_full_variational mlp_bnn_full_variational \
+        --reps pdv chemberta --seeds 1 --tag <name>
+
+    # The answer, and the evidence behind it
+    python scripts/write_chosen_settings.py      # CHOSEN_SETTINGS.md / .json
+    python scripts/final_tuned_list.py           # FINAL_LIST.md / .json
+
+    # What is running, and what has died
+    nohup python3 -u scripts/watch_local_runs.py &     # writes STATUS.md
+
+Local runs need `OMP_NUM_THREADS=1` or torch segfaults, and starts must be spaced about 25 seconds
+apart — KeOps writes one fixed temporary path at import and two processes starting together race for
+it, which silently killed a LogD job for an hour on 2026-09-01.
+
+##### Two approaches tried and rejected
+
+"Prefer the constrained runner-up" (5.7ah) — tested, does not work: the third-best ECFP4 LightGBM
+setting still ends at 0.338 against the default's 0.634. And choosing from Test 1 alone by gain over
+the setting's own default — it is a per-REPRESENTATION choice wearing a per-model label, and the
+author rejected it.
 
 #### 5.7an ✅ THE FINAL LIST — from the search alone, no extra fitting (2026-09-01)
 

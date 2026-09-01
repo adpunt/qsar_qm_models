@@ -1,33 +1,39 @@
 #!/usr/bin/env python3
-"""The chosen setting per model, written to one file. Regenerate any time.
+"""The chosen setting per model, PER MODEL not per representation.
 
     python scripts/write_chosen_settings.py
 
 Writes results/tuning_local/CHOSEN_SETTINGS.json and .md.
 
-WHERE THE CHOICE COMES FROM
----------------------------
-scripts/pick_per_model_setting.py fits every candidate on all six
-representations with training labels noised to level 0.5 and scores it on a
-clean test split. This reads those results and applies the rule:
+WHY THE SEARCH ALONE CANNOT ANSWER THIS
+----------------------------------------
+Each representation drew its own twelve candidates and scored them only on
+itself. No setting was ever tried on a representation other than the one that
+drew it. So the search cannot say how a model's setting behaves across
+representations, and a per-model choice needs exactly that.
 
-    a setting is scored by its WORST representation, and the winner is the
-    setting whose worst case is best.
+scripts/pick_per_model_setting.py supplies it: every candidate fitted on all six
+representations with training labels noised to level 0.5, scored on a clean test
+split. This reads those results.
 
-Worst case, not average, because a setting that is excellent on five
-representations and ruinous on one would win on the average -- and the whole
-reason for one setting per model is that no representation should pay for the
-shared choice.
+THE RULES, APPLIED PER MODEL
+-----------------------------
+Candidates are ranked by their WORST representation -- not the average, because
+a setting that is excellent on five and ruinous on one must not win on the
+strength of the five.
 
-WHY IT IS NOT THE SEARCH'S OWN WINNER
--------------------------------------
-The search scored candidates on CLEAN labels, which prefers larger, less
-restricted models, and those are the ones that memorise noisy labels. Measured:
-LightGBM's clean winner on ECFP4 ends at 0.226 under noise where its own default
-holds 0.634. Every setting here was re-chosen under noise for that reason.
+Then walk DOWN that ranking and take the first candidate that passes:
 
-A model whose DEFAULT has the best worst case keeps the default, and the file
-records that as a decision rather than leaving the model absent.
+  1. EXTREME   no value at the end of its range that makes the model bigger or
+               slower. A width at its smallest option is not flagged.
+  2. COMPUTE   no more than 2x the default's measured fit time.
+  3. BEATS THE DEFAULT   its worst representation beats the default's worst
+               representation. Everything here is already measured at noise 0.5,
+               so this is the noise test as well.
+
+STOP when a candidate no longer beats the default: everything below it in the
+ranking is worse still, so there is nothing left to assess. If that happens
+before anything passes, the model keeps its default.
 """
 from __future__ import annotations
 
@@ -67,10 +73,17 @@ def load():
 
 
 def main():
+    import decide_tuned_settings as D
+    import tune_hyperparameters as T
+    import tuning_rosters as R
+    import report_tuning_results as RT
+
     by, params = load()
     if not by:
         print('no per-model results yet', file=sys.stderr)
         return 1
+    _d, _c, _s, ranges = RT.load('qm9')
+    trials = D.trial_rows()
 
     chosen, md = {}, []
     md.append('# The chosen setting, one per model')
@@ -78,67 +91,96 @@ def main():
     md.append('Regenerate with `python scripts/write_chosen_settings.py`. '
               'Machine-readable copy in `CHOSEN_SETTINGS.json`.')
     md.append('')
-    md.append('R-squared on a clean held-out test set, with training labels '
-              'noised to level 0.5. QM9, 3,000 molecules. Where a setting was '
-              'fitted under several noise seeds the median is shown.')
+    md.append('R-squared on a clean held-out test set, training labels noised to '
+              'level 0.5. QM9, 3,000 molecules. Every candidate is fitted on '
+              'ALL SIX representations, so these are per-model numbers.')
     md.append('')
-    md.append('**The rule: a setting is scored by its WORST representation, and '
-              'the setting with the best worst case wins.** Not the average — a '
-              'setting that is ruinous on one representation must not win on '
-              'the strength of the other five.')
+    md.append('Candidates are ranked by their WORST representation. Walking down '
+              'that ranking, the first one that passes the extreme and compute '
+              'filters and beats the default is taken. The walk stops at the '
+              'first candidate that no longer beats the default — everything '
+              'below it is worse still.')
     md.append('')
 
     for model in sorted(by, key=lambda m: NICE.get(m, m)):
-        srcs = by[model]
-        rows, seeds_seen = [], set()
-        for src, d in srcs.items():
-            vals = []
-            for rep in REPS:
-                if rep not in d:
-                    vals = None
-                    break
-                seeds_seen.add(len(d[rep]))
-                vals.append(statistics.median(d[rep]))
-            if vals:
-                rows.append((min(vals), src, vals))
+        fam = T.search_family(model, R) or model
+        sp = ranges.get(fam, {})
+        rows = []
+        for src, d in by[model].items():
+            vals = [statistics.median(d[r]) for r in REPS if r in d]
+            if len(vals) != len(REPS):
+                continue
+            rows.append((min(vals), src, vals))
         if not rows:
             continue
         rows.sort(reverse=True)
-        worst, src, vals = rows[0]
-        keeps_default = (src == 'DEFAULT')
-        chosen[model] = {
-            'setting': None if keeps_default else params[model].get(src),
-            'keeps_default': keeps_default,
-            'drawn_on': None if keeps_default else src,
-            'worst_representation_r2_at_noise_0.5': round(worst, 4),
-            'per_representation_r2': {r: round(v, 4) for r, v in zip(REPS, vals)},
-            'noise_seeds': sorted(seeds_seen),
-        }
+        dflt = next((w for w, s2, _v in rows if s2 == 'DEFAULT'), None)
 
         md.append(f'\n## {NICE.get(model, model)}  (`{model}`)\n')
-        md.append(f'Noise seeds per fit: {sorted(seeds_seen)}\n')
-        md.append('| setting drawn on | ' + ' | '.join(REPS) + ' | worst |')
-        md.append('|---' * (len(REPS) + 2) + '|')
-        for w, s2, v in rows:
-            mark = ' **← chosen**' if s2 == src else ''
-            md.append(f'| {s2}{mark} | ' + ' | '.join(f'{x:.3f}' for x in v)
-                      + f' | **{w:.3f}** |')
+        md.append('| rank | setting from | ' + ' | '.join(REPS)
+                  + ' | worst | extreme | compute | beats default | verdict |')
+        md.append('|---' * (len(REPS) + 6) + '|')
+
+        picked = None
+        stopped = False
+        for rank, (worst, src, vals) in enumerate(rows, 1):
+            if src == 'DEFAULT':
+                md.append(f'| {rank} | DEFAULT | '
+                          + ' | '.join(f'{v:.3f}' for v in vals)
+                          + f' | **{worst:.3f}** | — | — | — | the baseline |')
+                continue
+            p = params[model].get(src, {})
+            ex = not D.significant(p, sp, fam)
+            rr = trials.get(('qm9', model, src), [])
+            b = next((x for l, _r, x in rr if l == 'default'), None)
+            w = max((x for l, _r, x in rr if l != 'default'), default=None)
+            ratio = (w / b) if (b and w and b > 0) else None
+            co = not (ratio and ratio >= 2.0)
+            beats = dflt is None or worst > dflt
+
+            if stopped:
+                verdict = 'not assessed'
+            elif not beats:
+                verdict = '**STOP — no longer beats the default**'
+                stopped = True
+            elif not ex:
+                verdict = 'rejected: extreme'
+            elif not co:
+                verdict = 'rejected: too slow'
+            elif picked is None:
+                verdict = '**CHOSEN**'
+                picked = (src, p, worst, vals)
+            else:
+                verdict = 'passes, but ranked below the chosen'
+            md.append(f'| {rank} | {src} | '
+                      + ' | '.join(f'{v:.3f}' for v in vals)
+                      + f' | **{worst:.3f}** | {"pass" if ex else "FAIL"} | '
+                      f'{"pass" if co else "FAIL"} | '
+                      f'{"yes" if beats else "no"} | {verdict} |')
         md.append('')
-        if keeps_default:
-            md.append('**Keeps the default** — no drawn setting had a better '
-                      'worst case.')
+
+        if picked is None:
+            md.append('**Keeps the default** — every candidate above the default '
+                      'was rejected by a filter, and the walk stopped where they '
+                      'stopped beating it.')
+            chosen[model] = {'keeps_default': True}
         else:
+            src, p, worst, vals = picked
             md.append('**Chosen setting:**')
             md.append('')
             md.append('```json')
-            md.append(json.dumps(params[model].get(src), indent=2,
-                                 sort_keys=True))
+            md.append(json.dumps(p, indent=2, sort_keys=True))
             md.append('```')
-            dflt = next((w for w, s2, _v in rows if s2 == 'DEFAULT'), None)
+            md.append('')
             if dflt is not None:
-                md.append('')
-                md.append(f'Worst case {worst:.3f} against the default\'s '
-                          f'{dflt:.3f}, a gain of {worst - dflt:+.3f}.')
+                md.append(f'Worst representation {worst:.3f} against the '
+                          f'default\'s {dflt:.3f}, a gain of {worst - dflt:+.3f}.')
+            chosen[model] = {
+                'keeps_default': False, 'drawn_on': src, 'setting': p,
+                'worst_rep_r2_at_noise_0.5': round(worst, 4),
+                'default_worst_rep': None if dflt is None else round(dflt, 4),
+                'per_representation_r2': {r: round(v, 4)
+                                          for r, v in zip(REPS, vals)}}
         md.append('')
 
     with open(JSON_OUT, 'w') as fh:
@@ -147,7 +189,6 @@ def main():
     with open(MD_OUT, 'w') as fh:
         fh.write(text)
     print(text)
-    print(f'written to {MD_OUT} and {JSON_OUT}')
     return 0
 
 

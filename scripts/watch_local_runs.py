@@ -32,29 +32,49 @@ STATUS = os.path.join(OUT, 'STATUS.md')
 # name -> (file it writes, how many rows when finished, how it is described)
 BNN = ['dnn_bnn_full', 'dnn_bnn_full_variational',
        'mlp_bnn_full', 'mlp_bnn_full_variational']
+SIZE = {'herg': 1415, 'caco2': 2161, 'logd': 3000}
 
 
-def sweep_cmd(dataset, size, rep, tag, screen=True):
-    c = [sys.executable, '-u', 'scripts/tune_hyperparameters.py', '--sweep',
-         '--settings', '12', '--dataset', dataset, '--sample-size', str(size)]
-    if screen:
-        c += ['--screen-at', '800', '--promote', '1']
-    return c + ['--models'] + BNN + ['--reps', rep, '--tag', tag]
+def sweep_cmd(dataset, size, rep, tag):
+    """The clean search: one representation, all four models."""
+    return [sys.executable, '-u', 'scripts/tune_hyperparameters.py', '--sweep',
+            '--settings', '12', '--dataset', dataset, '--sample-size', str(size),
+            '--screen-at', '800', '--promote', '1', '--models'] + BNN + \
+           ['--reps', rep, '--tag', tag]
 
 
+def pick_cmd(dataset, models, tag, reps):
+    """The cross-representation test at noise 0.5 — what picks one setting
+    per model."""
+    return [sys.executable, '-u', 'scripts/pick_per_model_setting.py',
+            '--dataset', dataset, '--sample-size', str(SIZE.get(dataset, 3000)),
+            '--models'] + models + ['--reps'] + reps + \
+           ['--seeds', '1', '--tag', tag]
+
+
+# label, file, rows when finished, process pattern, how to restart it
 JOBS = [
-    ('Bayesian search, hERG', 'trials_bnnherg.csv', 312, 'tag bnnherg', None),
-    ('Bayesian search, Caco-2', 'trials_bnncaco2.csv', 312, 'tag bnncaco2', None),
+    # the clean search, still filling in the last representations
+    ('search hERG', 'trials_bnnherg.csv', 312, 'tag bnnherg', None),
+    ('search Caco-2', 'trials_bnncaco2.csv', 312, 'tag bnncaco2', None),
 ] + [
-    (f'LogD, {r}', f'trials_bnnlogd_{r}.csv', 56, f'tag bnnlogd_{r}',
+    (f'search LogD {r}', f'trials_bnnlogd_{r}.csv', 56, f'tag bnnlogd_{r}',
      sweep_cmd('logd', 3000, r, f'bnnlogd_{r}'))
     for r in ('pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns')
 ] + [
-    # 72, not 84: the two models' candidate pools dedupe to 7 and 5 settings,
-    # not 7 and 7, so a COMPLETE run showed as 72 of 84 and read as dead.
-    ('per-model pick, variational', 'per_model_varia.csv', 72, 'tag varia', None),
-    ('per-model pick, Bayesian a', 'per_model_bayes_a.csv', 126, 'tag bayes_a', None),
-    ('per-model pick, Bayesian b', 'per_model_bayes_b.csv', 126, 'tag bayes_b', None),
+    # the cross-representation test. QM9 on all six; the three lab datasets on
+    # PDV and ChemBERTa only, which is what the author asked for.
+    ('QM9 pick, variational', 'per_model_varia.csv', 72, 'tag varia', None),
+    ('QM9 pick, Bayesian a', 'per_model_bayes_a.csv', 42, 'tag bayes_a',
+     pick_cmd('qm9', ['dnn_bnn_full'], 'bayes_a',
+              ['pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns'])),
+    ('QM9 pick, Bayesian b', 'per_model_bayes_b.csv', 42, 'tag bayes_b',
+     pick_cmd('qm9', ['mlp_bnn_full'], 'bayes_b',
+              ['pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns'])),
+] + [
+    (f'{ds} pick, 4 models', f'per_model_x_{ds}.csv', 56, f'tag x_{ds}',
+     pick_cmd(ds, BNN, f'x_{ds}', ['pdv', 'chemberta']))
+    for ds in ('herg', 'caco2', 'logd')
 ]
 
 PATTERNS = ['scripts/tuned_under_noise', 'tune_hyperparameters.py --sweep',
