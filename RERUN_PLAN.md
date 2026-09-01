@@ -6644,6 +6644,47 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7RULES ✅ THE RULES FOR CHOOSING TUNED HYPERPARAMETERS — settled, 2026-09-01
+
+**This section is the rules. Everything else in 5.7 is working notes. If they disagree, this wins.**
+
+Applied by `scripts/final_tuned_list.py`, which writes
+`results/tuning_local/FINAL_LIST.md` and `.json`.
+
+**1. WHICH MODELS ARE TUNED.** Four: `dnn_bnn_full`, `mlp_bnn_full`,
+`dnn_bnn_full_variational`, `mlp_bnn_full_variational`. **Every other model keeps its default.**
+Measured over all four datasets: these four gain a median +0.19 in validation R-squared and win on
+24 of 24 pairings, where every other family gains 0.02 to 0.04.
+
+**2. ONE SETTING PER MODEL, PER DATASET.** Not per representation. The headline analysis splits
+variance over model and representation and reports their interaction; per-cell hyperparameters would
+vary along that same axis and could never be separated from it.
+
+**3. THE THREE FILTERS.** A setting must pass all three, plus beat its own default on clean labels.
+
+| filter | test |
+|---|---|
+| extreme | no value at the end of its range that makes the model bigger or slower. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. |
+| compute | fits in under 2x the default's measured seconds |
+| noise | R-squared at noise level 0.5 not below the default's. **Applied where a noise test exists — PDV and ChemBERTa. A setting drawn on an untested representation is not failed for lack of a test.** |
+
+**4. THE TIEBREAK.** Filtering leaves more than one survivor — variational alpha passes on all six
+representations on QM9 — so one number chooses: the setting's **gain over its own default** on the
+representation it was drawn on. A difference against its own baseline, comparable across
+representations where the raw scores are not, and it needs no new fitting.
+
+**5. NOTHING SURVIVES → KEEP THE DEFAULT**, recorded as a decision rather than left absent.
+
+**What produced the noise filter.** The search scored every candidate on CLEAN labels, and clean
+scoring prefers larger, less restricted models — which are the ones that memorise noisy labels.
+Measured: LightGBM's clean winner on ECFP4 ends at 0.226 under noise where its own default holds
+0.634 (5.7ah). The noise filter exists to catch exactly that.
+
+**Two things that were tried and are NOT the rule.** A cross-representation refit choosing by worst
+representation (5.7al) — correct in principle, hours of extra fitting, abandoned; its results are
+kept as a check and agree on shape. And "prefer the constrained runner-up" (5.7ah) — tested and it
+does not work.
+
 #### 5.7an ✅ THE FINAL LIST — from the search alone, no extra fitting (2026-09-01)
 
 `results/tuning_local/FINAL_LIST.md` and `.json`, rebuilt by
