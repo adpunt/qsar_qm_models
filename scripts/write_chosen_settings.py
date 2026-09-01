@@ -186,7 +186,7 @@ def main():
                           f'{r} {baseline[r]:.3f}' for r in reps
                           if baseline.get(r) is not None), '',
                       '| rank | ' + ' | '.join(f'D {r}' for r in reps) +
-                      ' | MEAN D | extreme | compute | noise | verdict |',
+                      ' | MEAN D (n reps) | extreme | compute | noise | verdict |',
                       '|---' * (len(reps) + 6) + '|']
 
             picked, stopped = None, False
@@ -234,9 +234,12 @@ def main():
                 else:
                     verdict, picked = '**CHOSEN**', sig
 
+                # HOW MANY REPRESENTATIONS THE MEAN IS OVER. If a setting
+                # failed to fit somewhere, its mean is over fewer than the rest
+                # and is not comparable to them. Shown rather than hidden.
                 lines.append(
                     f'| {i} | ' + ' | '.join(cell(d.get(r)) for r in reps) +
-                    f' | **{mean_d:+.3f}** | '
+                    f' | **{mean_d:+.3f}** ({len(d)}) | '
                     f'{"FAIL" if ext else "pass"} | {comp} | {noi} | {verdict} |')
 
             lines.append('')

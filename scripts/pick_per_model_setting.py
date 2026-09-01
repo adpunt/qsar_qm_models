@@ -15,21 +15,31 @@ This scores a shared pool on every representation. The pool is the model's own
 six winners; each is fitted on all six representations and the default is fitted
 alongside as the baseline.
 
-CHOSEN AT NOISE, NOT ON CLEAN LABELS
-------------------------------------
-Selecting on clean labels is what produced the problem in the first place: clean
-scoring prefers larger, less restricted models, and those are the ones that
-memorise noisy labels. Training labels are noised to the level the author judges
-at; the test split stays clean.
+TWO RUNS, AND THIS SCRIPT IS BOTH OF THEM
+-----------------------------------------
+--level 0.0 on all six representations is the MAIN experiment. Its table --
+every candidate's change from the default on each representation, and the mean
+of those changes -- is what the setting is ranked on.
 
-THE RULE IS MAXIMIN, WHICH IS THE POINT
----------------------------------------
-A setting is scored by its WORST representation, measured against that
-representation's own default, and the winner is the setting whose worst case is
-best. Picking by the average would let a setting that is excellent on four
-representations and ruinous on PDV come out ahead. The author's concern is
-exactly that PDV, the strongest representation under noise, must not pay for a
-shared choice -- so the rule protects every representation rather than the mean.
+--level 0.5 on PDV and ChemBERTa is a separate run that supplies ONE COLUMN of
+that table. Training labels are noised to half the clean training label spread;
+the test split stays clean. It is a filter, not the ranking.
+
+The noise run exists because clean scoring prefers larger, less restricted
+models, and those are the ones that memorise noisy labels: LightGBM's clean
+winner on ECFP4 ends at 0.226 under noise where its own default holds 0.634. Two
+representations are enough to catch that, by the author's decision.
+
+RANKED BY THE MEAN CHANGE FROM THE DEFAULT
+------------------------------------------
+Not by the raw score, which would rank the representations rather than the
+settings, and not by the worst representation, which was the rule until
+2026-09-01. If ECFP4's default scores 0.6 and this setting scores 0.7 that is
++0.1; if PDV's default scores 0.7 and this setting scores 0.5 that is -0.2; the
+setting is ranked on mean(+0.1, -0.2) = -0.05.
+
+The ranking itself is applied in scripts/write_chosen_settings.py. This script
+only measures.
 
 SEEDS
 -----
