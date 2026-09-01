@@ -132,8 +132,15 @@ def targets():
 
 
 def live(tag):
-    """Live processes for this tag, excluding this watcher."""
-    r = subprocess.run(['pgrep', '-f', '--', f'--tag {tag}'],
+    """Live processes for this tag, excluding this watcher.
+
+    THE PATTERN IS ANCHORED. `--tag c_caco2` is a SUBSTRING of
+    `--tag c_caco2_vb`, so checking c_caco2 found two processes, decided the
+    second was a duplicate of itself and killed it -- every cycle, for hours.
+    The tag is the last argument on the command line, so anchoring on the end
+    matches one job and only that job.
+    """
+    r = subprocess.run(['pgrep', '-f', '--', f'--tag {tag}$'],
                        capture_output=True, text=True)
     me = str(os.getpid())
     return [p for p in r.stdout.split() if p != me]
