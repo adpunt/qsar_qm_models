@@ -153,12 +153,18 @@ def said_it_finished(tag):
     the search may add a candidate between the target being worked out and the
     job building its pool -- and a job one row short of its target would be
     restarted forever, appending duplicates each time. The script prints
-    'wrote <path>' when it has finished, and that is definitive."""
+    'wrote <path>' when it has finished, and that is definitive.
+    Logs are APPENDED to across restarts, so 'wrote' appearing anywhere in one
+    only proves that SOME earlier run finished -- c_vb was reported finished
+    with zero rows on that basis. Only the last non-empty line counts, because
+    the script prints it and then exits.
+    """
     path = os.path.join(OUT, f'log_{tag}.txt')
     if not os.path.exists(path):
         return False
     with open(path, errors='replace') as fh:
-        return 'wrote ' in fh.read()[-4000:]
+        tail = [ln.strip() for ln in fh.read()[-4000:].splitlines() if ln.strip()]
+    return bool(tail) and tail[-1].startswith('wrote ')
 
 
 def refresh_tables():
@@ -191,7 +197,18 @@ def main():
             want = target.get(tag)
             done = said_it_finished(tag) or (want is not None and n >= want)
 
-            if len(pids) > 1:
+            blockers = [t for t in AFTER.get(tag, []) if not finished.get(t, False)]
+            if blockers and not done:
+                # CHECKED BEFORE 'running'. Placed after it, the gate could only
+                # refuse to restart a dead job, never stop a live one, so LogD
+                # kept running against the whole point of holding it back.
+                for pp in pids:
+                    subprocess.run(['kill', pp])
+                state = f'waiting for {", ".join(blockers)}'
+                if pids:
+                    state += ' (stopped; it resumes where it left off)'
+                alive_any = True
+            elif len(pids) > 1:
                 # TWO PROCESSES ON ONE FILE. Keep the oldest, stop the rest.
                 for p in pids[1:]:
                     subprocess.run(['kill', p])
@@ -201,14 +218,6 @@ def main():
                 state = 'finished'
             elif pids:
                 state, alive_any = 'running', True
-            elif any(not finished.get(t, False) for t in AFTER.get(tag, [])):
-                blockers = [t for t in AFTER[tag] if not finished.get(t, False)]
-                state = f'waiting for {", ".join(blockers)}'
-                alive_any = True
-                if pids:
-                    for pp in pids:
-                        subprocess.run(['kill', pp])
-                    state += ' (stopped; it resumes where it left off)'
             elif not os.path.exists(os.path.join(OUT, fname)) and \
                     not os.path.exists(os.path.join(OUT, f'log_{tag}.txt')):
                 # NEVER LAUNCHED IS NOT DEAD. Some runs wait on a search to

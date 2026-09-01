@@ -189,6 +189,14 @@ def main():
     import glob as _glob
     already = set()
     for _f in _glob.glob(os.path.join(OUT_DIR, 'per_model_*.csv')):
+        # FILES WRITTEN BEFORE 'level' EXISTED HAVE NO LEVEL COLUMN, and
+        # defaulting those to 0.0 read the QM9 NOISE run as clean: c_vb decided
+        # all 35 of its clean fits were done and exited having done none. The
+        # level comes from the tag for those files -- c_* is clean, everything
+        # else is the noise level -- which is the same rule the table script
+        # uses.
+        _tag = os.path.basename(_f)[len('per_model_'):-len('.csv')]
+        _fallback_level = 0.0 if _tag.startswith('c_') else 0.5
         try:
             with open(_f) as _fh:
                 for _r in csv.DictReader(_fh):
@@ -196,10 +204,12 @@ def main():
                         continue
                     if (_r.get('dataset') or 'qm9') != cli.dataset:
                         continue
+                    _lv = _r.get('level')
                     try:
-                        if abs(float(_r.get('level') or 0.0) - cli.level) > 1e-9:
-                            continue
+                        _lv = float(_lv) if _lv else _fallback_level
                     except ValueError:
+                        continue
+                    if abs(_lv - cli.level) > 1e-9:
                         continue
                     already.add((_r.get('model'), _r.get('applied_to'),
                                  _r.get('from_rep')))
