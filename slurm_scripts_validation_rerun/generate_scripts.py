@@ -447,30 +447,75 @@ set -uo pipefail
 """
 
 SLURM_BODY = """
+# ONE ARRAY PER MODEL, NOT ONE JOB PER COMBINATION.
+#
+# This directory used to emit one script per (model, representation, dataset) --
+# 144 separate sbatch submissions, against QM9's 19 array scripts for 327 tasks.
+# The author's call, 2026-09-01: the same four families should each be a handful
+# of arrays. 8 models x 18 tasks = the same 144 units of work, submitted as 8.
+#
+# The index picks the pair, the same arithmetic the QM9 template uses.
+CONDS_UNUSED=""
+REPS=({reps_list})
+REPS_SAFE=({reps_safe_list})
+DATASETS=({datasets_list})
+n_rep=${{#REPS[@]}}
+i="${{SLURM_ARRAY_TASK_ID:-0}}"
+n_task=$(( n_rep * ${{#DATASETS[@]}} ))
+if [ "$i" -ge "$n_task" ]; then
+    echo "ERROR: array index $i is past the end; this script has $n_task tasks (0-$(( n_task - 1 )))."
+    exit 2
+fi
+rep="${{REPS[$(( i % n_rep ))]}}"
+rep_safe="${{REPS_SAFE[$(( i % n_rep ))]}}"
+dataset="${{DATASETS[$(( i / n_rep ))]}}"
+
+# The runner spells hERG 'herg_ki' on the command line and 'herg' in its output
+# directory; both spellings are load-bearing and neither can be derived from the
+# other, so the pair is carried explicitly.
+case "$dataset" in
+{dataset_cases}
+  *) echo "ERROR: unknown dataset '$dataset'"; exit 2 ;;
+esac
+
+# The Gaussian process runs on PDV alone unless --gp-reps says otherwise, so a GP
+# task for any other representation would build its features, find no experiment
+# to run, and stop. The kernel is stated rather than inherited: --gp-kernel
+# defaults to rbf, but Tanimoto is defined on binary vectors only and four of the
+# six representations are not binary.
+GP_FLAGS=""
+if [ "{model}" = "GP" ]; then
+    GP_FLAGS="--gp-kernel rbf --gp-reps $rep"
+fi
+
+# THE MODEL AND THE REPRESENTATION ARE BOTH IN THE OUTPUT PATH. Until 2026-09-01
+# the model was not, so seven or eight scripts sharing a representation and a
+# dataset wrote into ONE directory. The runner appends with no lock, so rows were
+# lost or torn and the merge could not tell.
+OUT_ROOT="results/validation_rerun/{model_lower}_${{rep_safe}}_${{dataset}}"
+
+echo "=== task $i: model={model} rep=$rep dataset=$dataset"
+echo "=== out: $OUT_ROOT"
+echo "=== started: $(date)"
+
 cd tests || {{ echo "ERROR: no tests/ under $KIRBY_DIR"; exit 2; }}
 [ -f alternative_data_noise_robustness.py ] || {{
     echo "ERROR: the runner is not in $KIRBY_DIR/tests"; exit 2; }}
 
-# THE MODEL IS IN THE OUTPUT PATH. Until 2026-09-01 it was not, so the seven or
-# eight scripts that share a representation and a dataset all wrote into ONE
-# directory -- 129 scripts across 18 roots -- and submit_all.sh fires them all at
-# once. The runner appends, with no lock, so rows are lost or torn and the merge
-# cannot tell: it deduplicates on (model, rep, noise_type, sigma, fold) and
-# cannot restore a row that was never written. The module docstring claimed the
-# isolation this line did not provide.
-python alternative_data_noise_robustness.py \\
-    --datasets {dataset_cli} \\
-    --models {model} \\
-    --reps {rep} \\
-    --conditions {conditions} \\
-{gp_flags}    --results-root results/validation_rerun/{model_lower}_{rep_safe}_{dataset}
+python -u alternative_data_noise_robustness.py \
+    --datasets "$dataset_cli" \
+    --models {model} \
+    --reps "$rep" \
+    --conditions {conditions} \
+    $GP_FLAGS \
+    --results-root "../$OUT_ROOT"
 status=$?
 
 # CARRY THE EXIT STATUS. The last statement used to be an echo, which always
 # returns 0, so a job whose python run died was recorded by sacct as COMPLETED
 # with exit 0 and mailed an END rather than a FAIL. That is the shape of a run
 # that looks finished and has no results.
-echo "Done: {model} x {rep} x {dataset}  exit=$status"
+echo "=== finished: $(date)  exit=$status"
 exit $status
 """
 
@@ -640,46 +685,34 @@ def main():
     scripts = []
 
     for model in models:
-        for rep in reps:
-            # THE GAUSSIAN PROCESS RUNS ON EVERY REPRESENTATION (author's
-            # decision, 2026-09-01). It was PDV only, which is the runner's
-            # DEFAULT when --gp-reps is not passed, not a limitation of the code:
-            # the runner has taken --gp-reps and --gp-kernel for some time.
-            #
-            # QM9 runs its RBF Gaussian process on all six -- that is the whole
-            # point of the gauche_rbf entry, so the process can enter the
-            # cross-representation comparison. Restricting the laboratory side to
-            # one representation left the Gaussian process in the QM9 analysis
-            # and absent from the laboratory one, which is a difference between
-            # the two halves of the study that nothing recorded as a decision.
-            #
-            # The kernel is RBF, stated rather than inherited: --gp-kernel
-            # DEFAULTS to rbf, but Tanimoto is a ratio of set overlaps and is
-            # defined on binary vectors only, so a silent default is the wrong
-            # thing to rely on for a flag that would make four of the six
-            # representations meaningless.
-            for dataset, dataset_cli in DATASETS:
-                sn = f"{model}_{safe_name(rep)}_{dataset}"
-                content = (
-                    SLURM_HEADER.format(safe_name=sn[:30], mem='128G',
-                                        partition='long',
-                                        time_limit=f'{wall_clock(model, dataset, len(conditions), len(DOSE_LEVELS))}:00:00')
-                    + PREAMBLE.format(kirby_dir=args.kirby_dir,
-                                      qsar_dir=args.qsar_dir,
-                                      model=model,
-                                      levels_json=repr(DOSE_LEVELS),
-                                      condition_list_py=repr(conditions))
-                    + SLURM_BODY.format(dataset=dataset, dataset_cli=dataset_cli,
-                                        model=model, model_lower=model.lower(),
-                                        rep=rep,
-                                        rep_safe=safe_name(rep),
-                                        gp_flags=gp_flags_for(model, rep),
-                                        conditions=condition_args)
-                )
-                filename = f"val_{model.lower()}_{safe_name(rep)}_{dataset}.sh"
-                with open(os.path.join(output_dir, filename), 'w') as f:
-                    f.write(content)
-                scripts.append(filename)
+        # ONE ARRAY PER MODEL. Its tasks are (representation x dataset), and the
+        # wall clock is the WORST dataset in it, because one clock covers the
+        # whole array.
+        model_reps = list(reps)
+        n_tasks = len(model_reps) * len(DATASETS)
+        hours = max(wall_clock(model, d, len(conditions), len(DOSE_LEVELS))
+                    for d, _ in DATASETS)
+        cases = '\n'.join(
+            f'  {d}) dataset_cli="{cli}" ;;' for d, cli in DATASETS)
+        content = (
+            SLURM_HEADER.format(safe_name=f'{model.lower()}'[:30], mem='128G',
+                                partition='long', time_limit=f'{hours}:00:00')
+            + PREAMBLE.format(kirby_dir=args.kirby_dir,
+                              qsar_dir=args.qsar_dir,
+                              model=model,
+                              levels_json=repr(DOSE_LEVELS),
+                              condition_list_py=repr(conditions))
+            + SLURM_BODY.format(model=model, model_lower=model.lower(),
+                                reps_list=' '.join(model_reps),
+                                reps_safe_list=' '.join(safe_name(r) for r in model_reps),
+                                datasets_list=' '.join(d for d, _ in DATASETS),
+                                dataset_cases=cases,
+                                conditions=condition_args)
+        )
+        filename = f"val_{model.lower()}.sh"
+        with open(os.path.join(output_dir, filename), 'w') as f:
+            f.write(content)
+        scripts.append((filename, n_tasks, hours))
 
     # The smoke test runs RF and SVM, so its guard has to cover both.
     herg_path, herg_cli = next(d for d in DATASETS if d[0] == 'herg')
@@ -694,16 +727,33 @@ def main():
     with open(os.path.join(output_dir, 'smoke_test.sh'), 'w') as f:
         f.write(smoke)
 
-    lines = ["#!/bin/bash", "# Submit all validation re-run jobs", "COUNT=0", ""]
-    for s in sorted(scripts):
-        lines.append(f"sbatch {s}")
-        lines.append("COUNT=$((COUNT + 1))")
-    lines += ["", f'echo "Submitted $COUNT jobs (expected {len(scripts)})"', ""]
+    # SUBMIT SCRIPT. It used to print "Submitted N jobs" from a counter it
+    # incremented itself, so it said 144 even if every sbatch had been rejected.
+    # It now reads sbatch's own exit status and refuses to claim a submission
+    # that did not happen.
+    total = sum(n for _, n, _ in scripts)
+    lines = ["#!/bin/bash",
+             "# Submit the laboratory accuracy grid: one array per model.",
+             f"# {len(scripts)} arrays, {total} tasks. The account and the wall clock",
+             "# are in the scripts; the throttle is here because it is queue state.",
+             "THROTTLE=${THROTTLE:-4}",
+             "ok=0; bad=0", ""]
+    for name, n, hours in sorted(scripts):
+        lines.append(f"# {name}: {n} tasks, --time={hours}:00:00")
+        lines.append(f'if sbatch --array=0-{n - 1}%$THROTTLE {name}; then '
+                     f'ok=$((ok+1)); else bad=$((bad+1)); fi')
+    lines += ["",
+              f'echo "submitted $ok of {len(scripts)} arrays'
+              f' ({total} tasks); $bad rejected"',
+              'if [ "$bad" -ne 0 ]; then exit 1; fi', ""]
 
     with open(os.path.join(output_dir, 'submit_all.sh'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
-    print(f"Generated {len(scripts)} SLURM scripts + submit_all.sh")
+    print(f"Generated {len(scripts)} array scripts, {total} tasks total, "
+          f"+ submit_all.sh")
+    for name, n, hours in sorted(scripts):
+        print(f"    {name:24s} --array=0-{n - 1}  --time={hours}:00:00")
 
 
 if __name__ == '__main__':
