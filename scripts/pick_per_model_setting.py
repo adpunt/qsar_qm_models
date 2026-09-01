@@ -55,6 +55,35 @@ import sys
 for _v in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
     os.environ.setdefault(_v, '1')
 os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+
+
+def _defuse_keops_compiler_probe():
+    """Stop KeOps racing every other process over one fixed file.
+
+    keopscore's get_use_Apple_clang writes `c++ --version` to the HARD-CODED
+    path /tmp/compiler_version.txt, reads it, then deletes it. Every process on
+    this machine uses the same path, so two of them starting close together
+    means one deletes the file while the other is reading, and the loser dies
+    with FileNotFoundError before fitting anything. It killed LogD/SNS for an
+    hour on 2026-08-31 and Caco-2 variational beta repeatedly on 2026-09-01,
+    and it looks exactly like a memory kill from the outside.
+
+    The probe only asks whether the compiler is Apple clang. On macOS with the
+    default toolchain it is -- `c++ --version` reports Apple clang 16 here -- so
+    answering directly is both correct and race-free. On anything other than
+    macOS the real probe is left alone.
+    """
+    import platform
+    if platform.system() != 'Darwin':
+        return
+    try:
+        from keopscore.config.base_config import Config
+        Config.get_use_Apple_clang = lambda self: True
+    except Exception:
+        pass  # KeOps not installed, or its internals moved; nothing to defuse
+
+
+_defuse_keops_compiler_probe()
 import lightgbm as _lgb_first  # noqa: F401
 
 import argparse
