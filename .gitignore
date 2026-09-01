@@ -56,7 +56,23 @@ research_archive/e1d07839/probe.csv
 # are, and every version remains in history --
 #     git checkout <commit> -- results/<path>
 # brings any of them back.
-results/
+# TWO EXCEPTIONS. The tuned-hyperparameter files are not run output -- they are
+# a DECISION that the cluster has to read, and `results/` being ignored meant
+# they could not be committed or pulled at all. `results/*` rather than
+# `results/` because git cannot re-include a file whose parent directory is
+# excluded.
+results/*
+!results/master_tuned_hyperparameters.json
+!results/hyperparameter_decisions.json
+# The tuned-hyperparameter answer and the fits behind it. A negation cannot
+# reach inside a directory that is itself excluded, so results/tuning_local has
+# to be re-included first and then emptied again -- without this the chosen
+# settings stayed ignored even though the lines below named them.
+!results/tuning_local/
+results/tuning_local/*
+!results/tuning_local/CHOSEN_SETTINGS.json
+!results/tuning_local/CHOSEN_SETTINGS.md
+!results/tuning_local/per_model_*.csv
 data/smiles_db.sqlite
 
 # Generated job scripts. The GENERATORS (generate_scripts.py and friends) and the

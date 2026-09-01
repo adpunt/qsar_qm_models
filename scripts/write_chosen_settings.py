@@ -1,43 +1,60 @@
 #!/usr/bin/env python3
-"""The chosen setting per model, PER MODEL not per representation.
+"""One table per dataset per model, and the setting each one picks.
 
     python scripts/write_chosen_settings.py
 
-Writes results/tuning_local/CHOSEN_SETTINGS.json and .md.
+Writes results/tuning_local/CHOSEN_SETTINGS.md (the tables) and
+results/tuning_local/CHOSEN_SETTINGS.json (the answer, machine readable).
 
-WHY THE SEARCH ALONE CANNOT ANSWER THIS
-----------------------------------------
-Each representation drew its own twelve candidates and scored them only on
-itself. No setting was ever tried on a representation other than the one that
-drew it. So the search cannot say how a model's setting behaves across
-representations, and a per-model choice needs exactly that.
+WHAT IS BEING CHOSEN
+--------------------
+ONE setting per MODEL per DATASET. Not per representation. The models are
+tested across six representations, but the six share a single setting, because
+the two-way decomposition over model and representation cannot be read if each
+cell carries its own hyperparameters -- a difference between two cells would
+then be part model, part representation, part tuning, with no way to separate
+them.
 
-scripts/pick_per_model_setting.py supplies it: every candidate fitted on all six
-representations with training labels noised to level 0.5, scored on a clean test
-split. This reads those results.
+Four models are tuned: the two plain Bayesian networks and the two variational
+ones. Every other model keeps its default, because measured over the search
+those four gain a median +0.19 validation R2 and win every pairing, and no other
+family gains more than 0.04.
 
-THE RULES, APPLIED PER MODEL
------------------------------
-Candidates are ranked by their WORST representation -- not the average, because
-a setting that is excellent on five and ruinous on one must not win on the
-strength of the five.
+HOW A SETTING IS RANKED
+-----------------------
+By the MEAN OF ITS CHANGES FROM THE DEFAULT, one change per representation.
 
-Then walk DOWN that ranking and take the first candidate that passes:
+If ECFP4's default scores 0.6 and this setting scores 0.7, that is +0.1. If
+PDV's default scores 0.7 and this setting scores 0.5, that is -0.2. The setting
+is ranked on mean(+0.1, -0.2) = -0.05.
 
-  1. EXTREME   no value at the end of its range that makes the model bigger or
-               slower. A width at its smallest option is not flagged.
-  2. COMPUTE   no more than 2x the default's measured fit time.
-  3. BEATS THE DEFAULT   its worst representation beats the default's worst
-               representation. Everything here is already measured at noise 0.5,
-               so this is the noise test as well.
+Ranking on the raw scores instead would rank the representations, not the
+settings -- a setting scored mostly on easy representations would beat a better
+one scored on hard ones. Subtracting each representation's own default removes
+that.
 
-STOP when a candidate no longer beats the default: everything below it in the
-ranking is worse still, so there is nothing left to assess. If that happens
-before anything passes, the model keeps its default.
+THE THREE FILTERS
+-----------------
+extreme  A value at the end of its range that makes the model bigger or slower:
+         width at 1024 or 512, or four hidden layers. Dropout and learning rate
+         are never flagged; they cost nothing at a fixed number of epochs.
+compute  The setting's slowest representation takes more than twice as long as
+         the default's slowest. Measured across all six, not one.
+noise    Refitted with training labels noised to half the clean training label
+         spread, scored on a clean test split, on PDV and ChemBERTa only. If the
+         setting is worse than the default there, it fails. Clean scoring
+         prefers larger, less restricted models, and those are the ones that
+         memorise noisy labels -- so a clean winner is not adopted until it has
+         been seen under noise.
+
+THE WALK
+--------
+Start at rank 1. If it passes all three filters, it is chosen. If it fails any,
+reject it and try the next. Stop at the first setting whose mean change is not
+positive: from there down nothing beats the default, so the default is kept.
 """
 from __future__ import annotations
 
-import collections
 import csv
 import glob
 import json
@@ -48,147 +65,202 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 OUT_DIR = os.path.join(_ROOT, 'results', 'tuning_local')
-JSON_OUT = os.path.join(OUT_DIR, 'CHOSEN_SETTINGS.json')
-MD_OUT = os.path.join(OUT_DIR, 'CHOSEN_SETTINGS.md')
 
+DATASETS = ['qm9', 'herg', 'caco2', 'logd']
 REPS = ['pdv', 'chemberta', 'ecfp4', 'avalon', 'mhggnn', 'sns']
-NICE = {'dnn_bnn_full': 'Bayesian alpha', 'mlp_bnn_full': 'Bayesian beta',
-        'dnn_bnn_full_variational': 'variational alpha',
-        'mlp_bnn_full_variational': 'variational beta'}
+NOISE_REPS = ['pdv', 'chemberta']
+MODELS = {'dnn_bnn_full': 'Bayesian alpha',
+          'mlp_bnn_full': 'Bayesian beta',
+          'dnn_bnn_full_variational': 'variational alpha',
+          'mlp_bnn_full_variational': 'variational beta'}
+
+# A value at the end of its range that makes the model BIGGER OR SLOWER.
+# The ranges are the search spaces in scripts/tune_hyperparameters.py.
+EXTREME_AT = {'hidden_size1': 1024, 'hidden_size2': 512,
+              'hidden_size': 512, 'num_hidden_layers': 4}
+COMPUTE_MULTIPLE = 2.0
+
+
+def is_extreme(params):
+    return sorted(k for k, v in (params or {}).items()
+                  if k in EXTREME_AT and v == EXTREME_AT[k])
 
 
 def load():
-    """model -> setting source -> representation -> [scores, one per seed]."""
-    by = collections.defaultdict(
-        lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
-    params = collections.defaultdict(dict)
+    """(dataset, level, model) -> setting -> representation -> [scores],
+    and the same shape for seconds, and setting -> parameters."""
+    scores, secs, params = {}, {}, {}
     for path in sorted(glob.glob(os.path.join(OUT_DIR, 'per_model_*.csv'))):
-        for r in csv.DictReader(open(path)):
-            if r['status'] != 'ok':
-                continue
-            by[r['model']][r['from_rep']][r['applied_to']].append(float(r['r2']))
-            if r['detail'] and r['from_rep'] not in params[r['model']]:
-                params[r['model']][r['from_rep']] = json.loads(r['detail'])
-    return by, params
+        tag = os.path.basename(path)[len('per_model_'):-len('.csv')]
+        with open(path) as fh:
+            for r in csv.DictReader(fh):
+                # GUARD. Files written before 'dataset' and 'level' existed were
+                # appended to by restarts that wrote the wider row, so some rows
+                # are shifted and name a level or a dataset where the model goes.
+                # Those rows are not repairable and are dropped here.
+                if r.get('model') not in MODELS or r.get('status') != 'ok':
+                    continue
+                try:
+                    r2 = float(r['r2'])
+                except (TypeError, ValueError):
+                    continue
+                ds = r.get('dataset') or 'qm9'
+                if ds not in DATASETS:
+                    continue
+                lvl = r.get('level')
+                lvl = float(lvl) if lvl else (0.0 if tag.startswith('c_') else 0.5)
+                key = (ds, 'clean' if lvl == 0.0 else 'noise', r['model'])
+                sig = 'DEFAULT' if r['from_rep'] == 'DEFAULT' else r['detail']
+                if sig != 'DEFAULT':
+                    try:
+                        params[sig] = json.loads(r['detail'])
+                    except ValueError:
+                        continue
+                scores.setdefault(key, {}).setdefault(sig, {}) \
+                      .setdefault(r['applied_to'], []).append(r2)
+                try:
+                    secs.setdefault(key, {}).setdefault(sig, {}) \
+                        .setdefault(r['applied_to'], []).append(float(r['seconds']))
+                except (TypeError, ValueError):
+                    pass
+    return scores, secs, params
+
+
+def med(xs):
+    return statistics.median(xs) if xs else None
+
+
+def deltas(tbl, reps):
+    """setting -> (mean change, {rep: change}) against the default."""
+    base = tbl.get('DEFAULT')
+    if not base:
+        return {}, {}
+    baseline = {rep: med(base.get(rep, [])) for rep in reps}
+    out = {}
+    for sig, per_rep in tbl.items():
+        if sig == 'DEFAULT':
+            continue
+        d = {}
+        for rep in reps:
+            here, there = med(per_rep.get(rep, [])), baseline.get(rep)
+            if here is not None and there is not None:
+                d[rep] = here - there
+        out[sig] = (statistics.mean(d.values()) if d else None, d)
+    return out, baseline
+
+
+def cell(v):
+    return '—' if v is None else f'{v:+.3f}'
 
 
 def main():
-    import decide_tuned_settings as D
-    import tune_hyperparameters as T
-    import tuning_rosters as R
-    import report_tuning_results as RT
+    scores, secs, params = load()
+    lines = ['# One setting per model per dataset', '',
+             'Generated by `scripts/write_chosen_settings.py`. Every number is a',
+             'change from that representation\'s own default. `—` means the fit has',
+             'not been recorded yet.', '']
+    chosen = {}
 
-    by, params = load()
-    if not by:
-        print('no per-model results yet', file=sys.stderr)
-        return 1
-    _d, _c, _s, ranges = RT.load('qm9')
-    trials = D.trial_rows()
-
-    chosen, md = {}, []
-    md.append('# The chosen setting, one per model')
-    md.append('')
-    md.append('Regenerate with `python scripts/write_chosen_settings.py`. '
-              'Machine-readable copy in `CHOSEN_SETTINGS.json`.')
-    md.append('')
-    md.append('R-squared on a clean held-out test set, training labels noised to '
-              'level 0.5. QM9, 3,000 molecules. Every candidate is fitted on '
-              'ALL SIX representations, so these are per-model numbers.')
-    md.append('')
-    md.append('Candidates are ranked by their WORST representation. Walking down '
-              'that ranking, the first one that passes the extreme and compute '
-              'filters and beats the default is taken. The walk stops at the '
-              'first candidate that no longer beats the default — everything '
-              'below it is worse still.')
-    md.append('')
-
-    for model in sorted(by, key=lambda m: NICE.get(m, m)):
-        fam = T.search_family(model, R) or model
-        sp = ranges.get(fam, {})
-        rows = []
-        for src, d in by[model].items():
-            vals = [statistics.median(d[r]) for r in REPS if r in d]
-            if len(vals) != len(REPS):
+    for ds in DATASETS:
+        lines += [f'## {ds}', '']
+        for model, nice in MODELS.items():
+            ck, nk = (ds, 'clean', model), (ds, 'noise', model)
+            clean = scores.get(ck, {})
+            if not clean or 'DEFAULT' not in clean:
+                lines += [f'### {nice}  (`{model}`)', '',
+                          '_no clean results recorded yet_', '']
                 continue
-            rows.append((min(vals), src, vals))
-        if not rows:
-            continue
-        rows.sort(reverse=True)
-        dflt = next((w for w, s2, _v in rows if s2 == 'DEFAULT'), None)
 
-        md.append(f'\n## {NICE.get(model, model)}  (`{model}`)\n')
-        md.append('| rank | setting from | ' + ' | '.join(REPS)
-                  + ' | worst | extreme | compute | beats default | verdict |')
-        md.append('|---' * (len(REPS) + 6) + '|')
+            reps = [r for r in REPS
+                    if any(r in v for v in clean.values())] or REPS
+            dl, baseline = deltas(clean, reps)
+            nd, _ = deltas(scores.get(nk, {}), NOISE_REPS)
 
-        picked = None
-        stopped = False
-        for rank, (worst, src, vals) in enumerate(rows, 1):
-            if src == 'DEFAULT':
-                md.append(f'| {rank} | DEFAULT | '
-                          + ' | '.join(f'{v:.3f}' for v in vals)
-                          + f' | **{worst:.3f}** | — | — | — | the baseline |')
-                continue
-            p = params[model].get(src, {})
-            ex = not D.significant(p, sp, fam)
-            rr = trials.get(('qm9', model, src), [])
-            b = next((x for l, _r, x in rr if l == 'default'), None)
-            w = max((x for l, _r, x in rr if l != 'default'), default=None)
-            ratio = (w / b) if (b and w and b > 0) else None
-            co = not (ratio and ratio >= 2.0)
-            beats = dflt is None or worst > dflt
+            dsec = secs.get(ck, {}).get('DEFAULT', {})
 
-            if stopped:
-                verdict = 'not assessed'
-            elif not beats:
-                verdict = '**STOP — no longer beats the default**'
-                stopped = True
-            elif not ex:
-                verdict = 'rejected: extreme'
-            elif not co:
-                verdict = 'rejected: too slow'
-            elif picked is None:
-                verdict = '**CHOSEN**'
-                picked = (src, p, worst, vals)
+            rows = sorted(((s, m, d) for s, (m, d) in dl.items() if m is not None),
+                          key=lambda t: -t[1])
+
+            lines += [f'### {nice}  (`{model}`)', '',
+                      'default R2: ' + '  '.join(
+                          f'{r} {baseline[r]:.3f}' for r in reps
+                          if baseline.get(r) is not None), '',
+                      '| rank | ' + ' | '.join(f'D {r}' for r in reps) +
+                      ' | MEAN D | extreme | compute | noise | verdict |',
+                      '|---' * (len(reps) + 6) + '|']
+
+            picked, stopped = None, False
+            for i, (sig, mean_d, d) in enumerate(rows, 1):
+                ext = is_extreme(params.get(sig))
+                # LIKE FOR LIKE. Compare the slowest fit of each, over the
+                # representations BOTH were timed on. Taking each one's own
+                # worst across whatever it happened to have finished failed
+                # settings smaller than the default, purely because the
+                # candidate had reached a slow representation and the default
+                # had not.
+                ssec = secs.get(ck, {}).get(sig, {})
+                shared = [r for r in reps if ssec.get(r) and dsec.get(r)]
+                if shared:
+                    worst = max(med(ssec[r]) for r in shared)
+                    base = max(med(dsec[r]) for r in shared)
+                    slow = bool(base) and worst > COMPUTE_MULTIPLE * base
+                    # The seconds are shown, not just the verdict. For these
+                    # four models the default is sometimes fast BECAUSE IT
+                    # FAILS TO TRAIN -- Bayesian alpha's default fits PDV in
+                    # 36s and scores -0.826 -- so twice the default can be a
+                    # very low bar, and the reader has to be able to see that.
+                    comp = f'{"FAIL" if slow else "pass"} {worst:.0f}/{base:.0f}s'
+                else:
+                    comp = '—'
+                nmean = nd.get(sig, (None, {}))[0]
+                noi = '—' if nmean is None else ('FAIL' if nmean < 0
+                                                 else f'pass {nmean:+.3f}')
+
+                if stopped:
+                    verdict = 'not assessed'
+                elif mean_d <= 0:
+                    verdict = '**STOP — no longer beats the default**'
+                    stopped = True
+                elif picked is not None:
+                    verdict = 'below the chosen'
+                elif ext:
+                    verdict = f'rejected: extreme ({", ".join(ext)})'
+                elif comp.startswith('FAIL'):
+                    verdict = 'rejected: too slow'
+                elif noi == 'FAIL':
+                    verdict = 'rejected: worse under noise'
+                elif comp == '—' or noi == '—':
+                    verdict = 'held: filter data missing'
+                else:
+                    verdict, picked = '**CHOSEN**', sig
+
+                lines.append(
+                    f'| {i} | ' + ' | '.join(cell(d.get(r)) for r in reps) +
+                    f' | **{mean_d:+.3f}** | '
+                    f'{"FAIL" if ext else "pass"} | {comp} | {noi} | {verdict} |')
+
+            lines.append('')
+            if picked:
+                chosen[f'{ds}/{model}'] = params[picked]
+                lines += ['chosen setting: `' + json.dumps(params[picked],
+                                                           sort_keys=True) + '`', '']
             else:
-                verdict = 'passes, but ranked below the chosen'
-            md.append(f'| {rank} | {src} | '
-                      + ' | '.join(f'{v:.3f}' for v in vals)
-                      + f' | **{worst:.3f}** | {"pass" if ex else "FAIL"} | '
-                      f'{"pass" if co else "FAIL"} | '
-                      f'{"yes" if beats else "no"} | {verdict} |')
-        md.append('')
+                chosen[f'{ds}/{model}'] = None
+                lines += ['**no setting chosen — the default is kept**', '']
 
-        if picked is None:
-            md.append('**Keeps the default** — every candidate above the default '
-                      'was rejected by a filter, and the walk stopped where they '
-                      'stopped beating it.')
-            chosen[model] = {'keeps_default': True}
-        else:
-            src, p, worst, vals = picked
-            md.append('**Chosen setting:**')
-            md.append('')
-            md.append('```json')
-            md.append(json.dumps(p, indent=2, sort_keys=True))
-            md.append('```')
-            md.append('')
-            if dflt is not None:
-                md.append(f'Worst representation {worst:.3f} against the '
-                          f'default\'s {dflt:.3f}, a gain of {worst - dflt:+.3f}.')
-            chosen[model] = {
-                'keeps_default': False, 'drawn_on': src, 'setting': p,
-                'worst_rep_r2_at_noise_0.5': round(worst, 4),
-                'default_worst_rep': None if dflt is None else round(dflt, 4),
-                'per_representation_r2': {r: round(v, 4)
-                                          for r, v in zip(REPS, vals)}}
-        md.append('')
+            for i, (sig, mean_d, _d) in enumerate(rows, 1):
+                lines.append(f'- rank {i}: `' +
+                             json.dumps(params.get(sig, {}), sort_keys=True) + '`')
+            lines.append('')
 
-    with open(JSON_OUT, 'w') as fh:
+    with open(os.path.join(OUT_DIR, 'CHOSEN_SETTINGS.md'), 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    with open(os.path.join(OUT_DIR, 'CHOSEN_SETTINGS.json'), 'w') as fh:
         json.dump(chosen, fh, indent=2, sort_keys=True)
-    text = '\n'.join(md) + '\n'
-    with open(MD_OUT, 'w') as fh:
-        fh.write(text)
-    print(text)
+
+    done = sum(1 for v in chosen.values() if v is not None)
+    print(f'{len(chosen)} of 16 model-and-dataset pairs assessed, '
+          f'{done} chose a tuned setting')
     return 0
 
 

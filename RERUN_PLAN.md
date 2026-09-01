@@ -6710,102 +6710,191 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
-#### 5.7RULES ✅ THE RULES AND THE PROCESS — settled 2026-09-01, reproducible
+#### 5.7RULES ✅ THE RULES AND THE PROCESS — rewritten 2026-09-01, reproducible
 
 **This section is authoritative. Everything else in 5.7 is working notes; if they disagree, this
-wins.**
+wins. It was rewritten on 2026-09-01 and it REPLACES the earlier version, which ranked candidates by
+their worst representation and ran the main test at noise. Both of those changed. If you find text
+anywhere in 5.7 describing either, it is superseded by this section.**
+
+##### What is being chosen, in one sentence
+
+**One setting per MODEL, per DATASET.** Four models, four datasets, sixteen answers.
+
+##### The models are tuned; the representations are only where they are tested
+
+This is the point most easily lost, and it is the reason the whole design looks the way it does.
+
+A setting belongs to a MODEL. It is *measured* on six representations, but the six share the single
+setting the model ends up with. Representations are not being tuned and never get their own values.
+
+The reason is the headline analysis, which splits variance over model and representation and reports
+the interaction between them. If every model-and-representation cell carried its own
+hyperparameters, a difference between two cells would be part model, part representation and part
+tuning, with no way to separate the three. One setting per model removes the third.
+
+So the candidate pool is representation-agnostic: it is everything the search found for that model
+anywhere, pooled and deduplicated. **This was a real defect until 2026-09-01** — the pool was built
+only from the representations being scored, so asking for two representations silently shrank the
+list from seven settings to three, and the noise filter then covered fewer settings than the clean
+table it was meant to filter.
 
 ##### Which models are tuned
 
-Four, and no others: `dnn_bnn_full`, `mlp_bnn_full`, `dnn_bnn_full_variational`,
-`mlp_bnn_full_variational`. **Every other model keeps its default.** Measured over all four
-datasets: these four gain a median +0.19 in validation R-squared and win on 24 of 24 pairings, where
-every other family gains 0.02 to 0.04. Their defaults do not merely underperform — the Bayesian
-alpha network scores -0.5568 on QM9 PDV untuned.
+Four, and no others: `dnn_bnn_full` (Bayesian alpha), `mlp_bnn_full` (Bayesian beta),
+`dnn_bnn_full_variational` (variational alpha), `mlp_bnn_full_variational` (variational beta).
+**Every other model keeps its default.** Measured over all four datasets these four gain a median
++0.19 in validation R-squared and win on 24 of 24 pairings, where no other family gains more than
+0.04. Their defaults do not merely underperform: the Bayesian alpha network scores -0.826 on QM9 PDV
+untuned.
 
-##### One setting per model, per dataset — NOT per representation
+##### THE THREE RUNS, AND WHY EACH EXISTS
 
-The headline analysis splits variance over model and representation and reports their interaction.
-Per-cell hyperparameters would vary along that same axis and could never be separated from it.
+**Run 1 — the search.** `scripts/tune_hyperparameters.py --sweep`. Twelve random settings plus the
+default per model-and-representation pairing, scored on the validation split of one scaffold split,
+on clean labels. This produces the CANDIDATES and nothing else. It cannot produce the answer: each
+representation drew its own twelve settings and scored them only on itself, so no setting was ever
+tried on a representation other than the one that drew it, and the six winners come from six
+different pools and are not comparable.
 
-##### THE TWO TESTS, AND WHY BOTH ARE NEEDED
+**Run 2 — CLEAN, across representations. THE MAIN TABLE.**
+`scripts/pick_per_model_setting.py --level 0.0 --reps pdv chemberta ecfp4 avalon mhggnn sns`.
+Every candidate for a model, fitted on every representation, real labels, scored on a held-out test
+split. This is what the ranking and the table are built from.
 
-**Test 1 — the search, on clean labels.** `scripts/tune_hyperparameters.py --sweep`. Twelve random
-settings plus the default per pairing, scored on the validation split of one scaffold split. Four
-models x six representations x four datasets.
+**Run 3 — NOISE, PDV and ChemBERTa only. THE FILTER COLUMN.**
+`scripts/pick_per_model_setting.py --level 0.5 --reps pdv chemberta`.
+The same candidates, refitted with training labels noised to half the clean training label spread,
+scored on a clean test split. Two representations, by the author's decision — they are enough to
+catch the failure this is guarding against, and six would cost three times as much for no extra
+answer. **This run is not part of the ranking. It contributes one column.**
 
-**Test 2 — the cross-representation test, at noise level 0.5.** `scripts/pick_per_model_setting.py`.
-Every candidate setting fitted on EVERY representation with training labels noised to 0.5, scored on
-a clean test split.
+##### The table, one per model per dataset
 
-**Test 1 alone cannot give a per-model answer, and this is the point that was missed for a full
-day.** Each representation drew its own twelve candidates and scored them ONLY on itself. No setting
-was ever tried on a representation other than the one that drew it. So the search cannot say how one
-setting behaves across representations — and that is exactly what choosing one setting per model
-requires. Test 2 supplies it.
+| rank | D pdv | D chemberta | D ecfp4 | D avalon | D mhggnn | D sns | MEAN D | extreme | compute | noise | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | +0.719 | +0.716 | +0.360 | +0.336 | +0.629 | +0.231 | +0.499 | pass | pass | pass | **CHOSEN** |
+| 2 | +0.754 | +0.785 | +0.279 | +0.352 | +0.613 | +0.161 | +0.491 | pass | pass | pass | below the chosen |
 
-**Test 2 runs on PDV and ChemBERTa for the three lab datasets** (author's decision — the two are
-enough), and on all six for QM9.
+Every number is a CHANGE FROM THAT REPRESENTATION'S OWN DEFAULT, on clean labels.
 
-##### The rules, applied to Test 2's results
+##### The ranking rule
 
-Rank a model's candidates by their **worst representation**. Not the average: a setting that is
-excellent on five representations and ruinous on one must not win on the strength of the five.
+**Rank by the mean of the per-representation changes from the default.**
 
-Then walk DOWN the ranking and take the first candidate that passes:
+If ECFP4's default scores 0.6 and this setting scores 0.7, that is +0.1. If PDV's default scores 0.7
+and this setting scores 0.5, that is -0.2. The setting is ranked on mean(+0.1, -0.2) = -0.05.
+
+Ranking on raw scores instead would rank the REPRESENTATIONS, not the settings: a setting scored
+mostly on easy representations would beat a better one scored on hard ones. Subtracting each
+representation's own default removes that.
+
+This replaces the earlier worst-representation rule (2026-09-01, author's decision).
+
+##### The three filters
 
 | filter | test |
 |---|---|
-| extreme | no value at the end of its range that makes the model BIGGER or SLOWER. For these four models that means width at its maximum (1024, 512) or layer count at 4. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. Dropout and learning rate are never flagged: a network runs the same number of passes either way. |
-| compute | no more than 2x the default's measured fit time |
-| beats the default | its worst representation beats the default's worst representation. Everything in Test 2 is already at noise 0.5, so this IS the noise test. |
+| extreme | No value at the end of its range that makes the model BIGGER or SLOWER. For these four models: `hidden_size1` at 1024, `hidden_size2` at 512, `hidden_size` at 512, `num_hidden_layers` at 4. A width at its SMALLEST option is at an end too and is NOT flagged — it asks for a cheaper model. Dropout and learning rate are never flagged: a network runs the same number of passes either way. Ranges are the search spaces in `scripts/tune_hyperparameters.py`. |
+| compute | The setting's slowest representation takes no more than **2x** the default's slowest. Compared only over representations BOTH were timed on — taking each one's own worst over whatever it happened to have finished failed settings smaller than the default. The table prints the two times so the size of the gap is visible. |
+| noise | From Run 3. Mean change from the default over PDV and ChemBERTa at noise 0.5. Negative fails. |
 
-**STOP at the first candidate that no longer beats the default** — everything below it in the
-ranking is worse still, so there is nothing left to assess. If nothing has passed by then, the model
-keeps its default, recorded as a decision rather than left absent.
+##### The walk
 
-##### Why the noise filter exists
+Start at rank 1. If it passes all three filters, it is **CHOSEN**. If it fails any, record the
+reason and try the next. **STOP at the first setting whose mean change is not positive** — from
+there down nothing beats the default, so the model keeps its default, recorded as a decision rather
+than left absent.
+
+##### Why the noise filter exists at all
 
 The search scored every candidate on CLEAN labels, and clean scoring prefers larger, less restricted
 models — which are the ones that memorise noisy labels. Measured: LightGBM's clean winner on ECFP4
-ends at 0.226 under noise where its own default holds 0.634 (5.7ah).
+ends at 0.226 under noise where its own default holds 0.634 (5.7ah). The study is about robustness
+to label noise, so a setting chosen only on clean labels is choosing against the thing being
+measured.
+
+##### A caution the tables make visible
+
+For these four models the default is sometimes fast BECAUSE IT FAILS TO TRAIN. Bayesian alpha's
+default fits QM9 PDV in 36 seconds and scores -0.826. Twice that is a very low bar, and settings
+that train properly fail the compute filter against it. The rule is unchanged — this is flagged, not
+worked around, and the table prints both times so it can be seen.
+
+##### The data needed, in full
+
+| dataset | Run 2, CLEAN | Run 3, NOISE |
+|---|---|---|
+| QM9 | 4 models x all 6 representations | 4 models x PDV, ChemBERTa |
+| hERG | 4 models x all 6 representations | 4 models x PDV, ChemBERTa |
+| Caco-2 | 4 models x all 6 representations | 4 models x PDV, ChemBERTa |
+| LogD | 4 models x all 6 representations | 4 models x PDV, ChemBERTa |
 
 ##### To reproduce the whole thing
 
-    # Test 1, per dataset. QM9 at 5,000; the lab datasets at their own size.
+    # Run 1 — the candidates, per dataset, one process per representation.
     python scripts/tune_hyperparameters.py --sweep --settings 12 \
-        --dataset <qm9|herg|caco2|logd> --sample-size <5000|1415|2161|3000> \
+        --dataset <qm9|herg|caco2|logd> --sample-size <3000|1415|2161|3000> \
         --screen-at 800 --promote 1 \
         --models dnn_bnn_full mlp_bnn_full \
                  dnn_bnn_full_variational mlp_bnn_full_variational \
         --reps <one representation> --tag <name>
 
-    # Test 2, per dataset. Six representations on QM9, two on the lab datasets.
-    python scripts/pick_per_model_setting.py \
+    # Run 2 — CLEAN, all six representations. THE MAIN TABLE.
+    python scripts/pick_per_model_setting.py --level 0.0 \
         --dataset <qm9|herg|caco2|logd> --sample-size <3000|1415|2161|3000> \
         --models dnn_bnn_full mlp_bnn_full \
                  dnn_bnn_full_variational mlp_bnn_full_variational \
-        --reps pdv chemberta --seeds 1 --tag <name>
+        --reps pdv chemberta ecfp4 avalon mhggnn sns --seeds 1 --tag c_<dataset>
 
-    # The answer, and the evidence behind it
-    python scripts/write_chosen_settings.py      # CHOSEN_SETTINGS.md / .json
-    python scripts/final_tuned_list.py           # FINAL_LIST.md / .json
+    # Run 3 — NOISE at 0.5, PDV and ChemBERTa only. THE FILTER COLUMN.
+    python scripts/pick_per_model_setting.py --level 0.5 \
+        --dataset <qm9|herg|caco2|logd> --sample-size <3000|1415|2161|3000> \
+        --models dnn_bnn_full mlp_bnn_full \
+                 dnn_bnn_full_variational mlp_bnn_full_variational \
+        --reps pdv chemberta --seeds 1 --tag x_<dataset>
 
-    # What is running, and what has died
-    nohup python3 -u scripts/watch_local_runs.py &     # writes STATUS.md
+    # The tables and the answer
+    python scripts/write_chosen_settings.py   # CHOSEN_SETTINGS.md and .json
 
-Local runs need `OMP_NUM_THREADS=1` or torch segfaults, and starts must be spaced about 25 seconds
-apart — KeOps writes one fixed temporary path at import and two processes starting together race for
-it, which silently killed a LogD job for an hour on 2026-09-01.
+    # Run everything at once, restart what dies, refresh the tables every 5 min
+    nohup python3 -u scripts/watch_local_runs.py \
+        > results/tuning_local/watch.log 2>&1 &
+    cat results/tuning_local/STATUS.md
 
-##### Two approaches tried and rejected
+##### Where the results live
 
-"Prefer the constrained runner-up" (5.7ah) — tested, does not work: the third-best ECFP4 LightGBM
-setting still ends at 0.338 against the default's 0.634. And choosing from Test 1 alone by gain over
-the setting's own default — it is a per-REPRESENTATION choice wearing a per-model label, and the
-author rejected it.
+| file | what it holds |
+|---|---|
+| `results/tuning_local/per_model_c_*.csv` | Run 2, clean, one row per setting x representation |
+| `results/tuning_local/per_model_x_*.csv` | Run 3, noise 0.5, PDV and ChemBERTa |
+| `results/tuning_local/CHOSEN_SETTINGS.md` | the tables above, one per model per dataset |
+| `results/tuning_local/CHOSEN_SETTINGS.json` | the chosen setting per dataset and model, or null |
+| `results/tuning_local/STATUS.md` | what is running, what died, what was restarted |
+| `results/tuning_local/superseded/` | runs made with the shrunken candidate pool, kept not deleted |
 
-#### 5.7an ✅ THE FINAL LIST — from the search alone, no extra fitting (2026-09-01)
+##### To send the answer to the cluster
+
+    python scripts/ship_tuned_settings.py --write
+    git add results/master_tuned_hyperparameters.json \
+            results/hyperparameter_decisions.json \
+            results/tuning_local/CHOSEN_SETTINGS.json \
+            results/tuning_local/CHOSEN_SETTINGS.md
+    git commit -m "The tuned settings, one per model per dataset"
+    git push
+    # then on the cluster: bash scripts/pull_safely.sh
+
+`results/` is gitignored except for these files — `.gitignore` carries the negations that let them
+through, added 2026-09-01 because otherwise a chosen setting could never reach a job.
+
+#### 5.7an 🗄️ SUPERSEDED 2026-09-01 — the list from the search alone
+
+**This is not the answer.** It chose a setting from the search results alone, with no
+cross-representation fitting, and its tiebreak was the gain on the ONE representation that drew the
+setting. The author's rule is the mean of the changes across ALL representations, which the search
+cannot supply because no setting was ever fitted on a representation other than its own. The
+cross-representation run described below as "abandoned" is the route that was reinstated, and the
+answer is in `results/tuning_local/CHOSEN_SETTINGS.md`. Kept as a record of what was tried.
 
 `results/tuning_local/FINAL_LIST.md` and `.json`, rebuilt by
 `python scripts/final_tuned_list.py`. One setting per model per dataset. **Every model not in that
@@ -6843,7 +6932,7 @@ Everything is under `results/tuning_local/`. Four files matter; the rest are raw
 
 | file | what it holds | rebuilt by |
 |---|---|---|
-| **`CHOSEN_SETTINGS.md`** / **`.json`** | **the answer** — one setting per model, the table it was chosen from, and the per-representation scores behind it | `python scripts/write_chosen_settings.py` |
+| **`CHOSEN_SETTINGS.md`** / **`.json`** | **the answer** — one table per model per dataset: every candidate's change from the default on each representation, the mean of those changes, the three filters and the verdict | `python scripts/write_chosen_settings.py` |
 | `DECISIONS.md` | every pairing sorted into adopt / keep the default / needs a decision, by the three filters | `python scripts/decide_tuned_settings.py` |
 | `TUNING_RESULTS.md` | the raw search: four datasets, every pairing, search ranges, values at an end starred | `python scripts/report_tuning_results.py` |
 | `STATUS.md` | what is running right now, and what has died | written by `scripts/watch_local_runs.py` |
@@ -6855,15 +6944,27 @@ Raw fits, none of which should be read directly:
 | `trials_*.csv` | the random search. One row per fit. Validation R-squared, clean labels. |
 | `other_datasets/trials_*.csv` | the same, for hERG, Caco-2 and LogD |
 | `noise_vs_tuned_*.csv` | the noise test: tuned against default across seven levels |
-| `per_model_*.csv` | the per-model selection: every candidate on every representation at noise 0.5 |
+| `per_model_c_*.csv` | Run 2, CLEAN: every candidate on all six representations. The main table. |
+| `per_model_x_*.csv` | Run 3, NOISE 0.5: the same candidates on PDV and ChemBERTa. The filter column. |
+| `per_model_bayes_*.csv`, `per_model_varia.csv` | QM9 at noise 0.5, written before the naming settled |
+| `superseded/` | runs made with the shrunken candidate pool (see 5.7RULES). Kept, not deleted. |
 | `partial/`, `aborted_10000/`, `stray_test_files/` | superseded or abandoned. **Not read by any report** — the sample-size guard in 5.7aj would drop them anyway. |
 
 **The three filters a setting must pass** (5.7w, 5.7ai): no value at the expensive end of its range;
 not much slower to train than the default; and not worse than the default at noise level 0.5.
 
-**The rule for choosing between candidates** (5.7al): worst representation, not average.
+**The rule for choosing between candidates**: the mean of the per-representation changes from the
+default, on CLEAN labels, with noise as a filter column. See **5.7RULES**, which is authoritative.
+The worst-representation rule described in 5.7al below was replaced on 2026-09-01.
 
-#### 5.7al ✅ TWO SETTINGS CHOSEN 2026-09-01 — the variational families, one setting each
+#### 5.7al 🗄️ SUPERSEDED 2026-09-01 — chosen under the worst-representation rule, which no longer applies
+
+**Do not take the two settings below as the answer.** They were chosen by ranking each candidate on
+its WORST representation, at noise 0.5, and the author replaced that rule the same day with the mean
+of the per-representation changes from the default, measured on CLEAN labels, with noise demoted to
+a filter column. See **5.7RULES**. The measurements here are real and are kept as evidence — in
+particular the point that neither chosen setting came from PDV — but the choice is remade in
+`results/tuning_local/CHOSEN_SETTINGS.md`.
 
 `scripts/pick_per_model_setting.py`. Every candidate fitted on all six representations with training
 labels noised to level 0.5 and scored on a clean test split, QM9, 3,000 molecules. The pool is the

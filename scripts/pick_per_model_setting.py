@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pick ONE setting per model, chosen at noise, that no representation pays for.
+"""Score every candidate setting for a model on every representation.
 
     export OMP_NUM_THREADS=1
     python scripts/pick_per_model_setting.py --models mlp_bnn_full_variational
@@ -107,18 +107,40 @@ def main():
     out = os.path.join(OUT_DIR, f'per_model_{cli.tag}.csv')
     print(f'{cli.dataset}: train {len(tr)}  validation {len(va)}  '
           f'test {len(te)}  label spread {spread:.4f}', flush=True)
+    FIELDS = ['dataset', 'level', 'model', 'from_rep', 'applied_to',
+              'noise_seed', 'r2', 'seconds', 'status', 'detail']
+    # A RESTART MUST NOT APPEND A WIDER ROW THAN THE HEADER. When 'dataset'
+    # and 'level' were added, restarted jobs wrote ten fields under a
+    # nine-field header, and every later row was read one or two columns out of
+    # step -- which is how rows appeared claiming the model was called 'qm9'
+    # or '0.5'. If the layout on disk is not the layout being written, the old
+    # file is set aside rather than appended to.
+    if os.path.exists(out):
+        with open(out) as _fh:
+            head = _fh.readline().strip().split(',')
+        if head != FIELDS:
+            os.rename(out, out + '.oldlayout')
+            print(f'set aside {out}: header {head} is not {FIELDS}', flush=True)
     fresh = not os.path.exists(out)
     fh = open(out, 'a', newline='')
-    w = csv.DictWriter(fh, fieldnames=['dataset', 'model', 'from_rep',
-                                       'applied_to', 'noise_seed', 'r2',
-                                       'seconds', 'status', 'detail'])
+    # THE LEVEL IS A COLUMN. Without it a clean run and a noise run are
+    # indistinguishable once written, and the only thing separating them was the
+    # tag someone happened to choose.
+    w = csv.DictWriter(fh, fieldnames=FIELDS)
     if fresh:
         w.writeheader()
 
     for model in cli.models:
         # The pool: this model's own winners, one per representation, deduped.
+        # THE POOL IS REPRESENTATION-AGNOSTIC. It was built from cli.reps,
+        # so asking for two representations silently shrank the candidate list
+        # from seven settings to three -- and the noise filter then covered
+        # fewer settings than the clean table it was meant to filter.
+        # A candidate setting belongs to the MODEL. Which representations it
+        # gets scored on is a separate question.
         pool, seen = [], set()
-        for rep in cli.reps:
+        searched = [r for (m, r) in cands if m == model]
+        for rep in sorted(set(searched), key=lambda r: (r not in cli.reps, r)):
             c = cands.get((model, rep))
             if not c:
                 continue
@@ -166,8 +188,8 @@ def main():
                           f'{from_rep:10s} seed {ns} '
                           f'R2={r2 if r2 == "" else f"{r2:.4f}"} {secs:6.1f}s',
                           flush=True)
-                    w.writerow(dict(dataset=cli.dataset, model=model,
-                                    from_rep=from_rep,
+                    w.writerow(dict(dataset=cli.dataset, level=cli.level,
+                                    model=model, from_rep=from_rep,
                                     applied_to=rep, noise_seed=ns, r2=r2,
                                     seconds=round(secs, 1), status=status,
                                     detail=detail))
