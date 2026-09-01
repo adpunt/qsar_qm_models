@@ -1,0 +1,178 @@
+{
+  "caco2": {
+    "dnn_bnn_full": {
+      "avalon": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      },
+      "chemberta": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      },
+      "ecfp4": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      },
+      "mhggnn": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      },
+      "pdv": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      },
+      "sns": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 32
+      }
+    },
+    "dnn_bnn_full_variational": {
+      "avalon": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      },
+      "chemberta": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      },
+      "ecfp4": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      },
+      "mhggnn": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      },
+      "pdv": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      },
+      "sns": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 128
+      }
+    },
+    "mlp_bnn_full": {
+      "avalon": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      },
+      "chemberta": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      },
+      "ecfp4": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      },
+      "mhggnn": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      },
+      "pdv": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      },
+      "sns": {
+        "dropout_rate": 0.401,
+        "hidden_size": 64,
+        "lr": 0.005865018723574268,
+        "num_hidden_layers": 3
+      }
+    }
+  },
+  "herg": {
+    "dnn_bnn_full_variational": {
+      "avalon": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      },
+      "chemberta": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      },
+      "ecfp4": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      },
+      "mhggnn": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      },
+      "pdv": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      },
+      "sns": {
+        "activation": "tanh",
+        "hidden_size1": 64,
+        "hidden_size2": 64
+      }
+    },
+    "mlp_bnn_full": {
+      "avalon": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      },
+      "chemberta": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      },
+      "ecfp4": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      },
+      "mhggnn": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      },
+      "pdv": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      },
+      "sns": {
+        "dropout_rate": 0.169,
+        "hidden_size": 64,
+        "lr": 0.006017629069106814,
+        "num_hidden_layers": 2
+      }
+    }
+  }
+}

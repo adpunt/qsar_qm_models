@@ -64,6 +64,10 @@ research_archive/e1d07839/probe.csv
 results/*
 !results/master_tuned_hyperparameters.json
 !results/hyperparameter_decisions.json
+# The lab pipeline's tuned settings, keyed by dataset. Same reason as the two
+# above: a decision the cluster has to read, not run output. Without this line
+# the file was written, committed around, and never reached a job.
+!results/master_tuned_hyperparameters_lab.json
 # The tuned-hyperparameter answer and the fits behind it. A negation cannot
 # reach inside a directory that is itself excluded, so results/tuning_local has
 # to be re-included first and then emptied again -- without this the chosen
