@@ -10270,11 +10270,19 @@ uncertainty rows come out of those same jobs — `-u True` on every model that c
 out-of-fold pass on the three settled representations, decided per task by a case statement on the
 representation. QM9 therefore answers accuracy and uncertainty from ONE fit.
 
-⚠️ **The laboratory does not.** Its accuracy grid (19 arrays, 327 tasks) passes no uncertainty flags
-at all, and its uncertainty runs (6 arrays, 162 tasks) are separate jobs that refit. So a laboratory
-uncertainty row and a laboratory accuracy row for the same model, representation and noise level come
-from two different fits, where the QM9 pair comes from one. Whether that matters is §13.17 open item
-— it is a structural difference between the two halves that nothing has recorded as a decision.
+**The laboratory reaches the same place by two jobs instead of one, and that is the design working,
+not a difference to reconcile.** The whole shape of this study is sweep, then select, then deepen:
+the breadth grid runs every model on every representation, the settled uncertainty pairs are chosen
+from it, and only those pairs pay for the out-of-fold pass. QM9 applies the already-settled pairs
+inline, with a case statement on the representation inside the same task; the laboratory applies them
+as a separate run. The pairs are the same on both sides — `uncertainty_pairs.json`, six models on
+ECFP4, PDV and ChemBERTa — so the selection is identical and only the plumbing differs.
+
+⚠️ **Do not price folding them together as "six times the grid".** The out-of-fold pass costs six
+fits instead of one, but ONLY on the settled pairs: six models of nineteen, on three representations
+of six, which is 54 of the laboratory's 327 tasks. The other 273 are unaffected. Recorded here
+because that multiplier was misapplied to the whole grid once, on 2026-09-02, and it made a
+non-decision look like an expensive one.
 
 Each task is up to 7 noise levels; the screen is replicate 0 of the main grid and is reused, which
 is why the main grid adds nine replicates rather than ten.
