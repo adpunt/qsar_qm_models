@@ -6741,6 +6741,70 @@ needs a sweep that includes `--loss heteroscedastic`.
 **Gates:** `python scripts/test_tuning_rosters.py` (was failing, now passes, 19 roster models) and
 `python scripts/test_tuned_params_reach_models.py`.
 
+#### 5.7LAND ✅ THE TUNED SETTINGS ARE FINAL AND WIRED — 2026-09-01
+
+All sixteen tables complete: four datasets x four models, every one on all five representations, the
+same count on every row, all three filters applied and the walk run. **Eleven adopt a tuned setting,
+five keep their default.**
+
+| dataset | Bayesian alpha | Bayesian beta | variational alpha | variational beta |
+|---|---|---|---|---|
+| QM9 | 64/32 tanh | w64, 1 layer, drop 0.379, lr 0.00429 | 64/64 tanh | w64, 1 layer, drop 0.357, lr 0.00119 |
+| hERG | **default** | w64, 2 layers, drop 0.169, lr 0.00602 | 64/64 tanh | **default** |
+| Caco-2 | 64/32 tanh | w64, 3 layers, drop 0.401, lr 0.00587 | 64/32 relu | **default** |
+| LogD | **default** | **default** | 256/32 tanh | w128, 2 layers, drop 0.079, lr 0.00011 |
+
+**Ten of the eleven are width 64, the smallest in the grid.** The one exception is LogD variational
+alpha. That is a finding about choosing against label noise, not a settings-table detail.
+
+##### TO MAKE THEM LAND — BOTH CHECKOUTS, and no job script does it for you
+
+`slurm_scripts_validation_rerun/generate_scripts.py:196,334` sets `KIRBY_DIR` and
+`QSAR_QM_MODELS_ROOT` and **pulls neither**. A submitted job runs whatever those checkouts hold.
+
+    # 1. this repository -- the settings themselves
+    cd <qsar_qm_models>            && bash scripts/pull_safely.sh
+    # 2. the KIRBy checkout -- the READER for LogD, Caco-2 and hERG.
+    #    Without this the lab jobs find no reader and run every model at its
+    #    default, however carefully the settings were chosen.
+    cd <KIRBy>                     && git pull --ff-only origin similarity-metrics-study
+
+##### WHAT EACH PIPELINE READS
+
+| pipeline | file | keyed by | gate |
+|---|---|---|---|
+| QM9 (`models/models.py`) | `results/master_tuned_hyperparameters.json` | model, representation | `hyperparameter_decisions.json` must say `USE_TUNED` for that model, or `load_best_hyperparameters` returns None (models.py:5689) |
+| LogD / Caco-2 / hERG (`alternative_data_noise_robustness.py`) | `results/master_tuned_hyperparameters_lab.json` | **dataset**, model, representation | none needed: an absent file means every model runs at its default, and that is PRINTED |
+
+Both are written by `python scripts/ship_tuned_settings.py --write`, from
+`results/tuning_local/CHOSEN_SETTINGS.json`. **Re-run it after any re-run of the tables**, or the
+files still hold the previous answer.
+
+##### THE THREE GATES, and one that was passing falsely
+
+    python scripts/test_tuning_rosters.py            # roster, both files, every name matched
+    python scripts/test_lab_tuned_reaches_models.py  # the lab reader, end to end
+    python scripts/test_tuned_params_reach_models.py # every master-file entry moves a real fit
+
+⚠️ **Do not pipe these through `grep`.** The exit code then comes from the grep, not the test.
+`test_tuned_params_reach_models.py` was reported as passing on 2026-09-01 while it was dying with
+`KeyError: 'dnn_bnn_full'` — networks are checked by whether the fit MOVES rather than by
+intercepting a constructor, and that set was still hard-coded to the pre-2026-08-31 shared keys
+`dnn` and `mlp`, so nothing was checking that the QM9 settings arrive at all. It is derived from the
+roster now, and a key with neither route FAILS by name instead of raising.
+
+##### TWO RESULTS THAT NEED A DECISION, NOT A FIX
+
+1. **hERG Bayesian alpha keeps a default that scores R-squared -3.35 on PDV.** Candidates beat it by
+   up to +1.24 and every one failed the compute filter, because the default fits in 30 seconds and
+   the cheapest candidate that beats it takes 64. This is the same shape as the QM9 case where the
+   yardstick became the fastest setting that trains — but hERG's default does produce a number, so
+   that rule does not fire. Whether -3.35 counts as trained is the author's call.
+2. **Variational beta on hERG and Caco-2 ranked 4 candidate settings, not 7.** The two searches were
+   stopped at 20 of 24 pairings to free cores; the four unfinished pairings were all that model.
+   Both tables chose the default, so nothing adopted rests on the thin pool — but a fuller pool
+   might have found something.
+
 #### 5.7RULES ✅ THE RULES AND THE PROCESS — rewritten 2026-09-01, reproducible
 
 **This section is authoritative. Everything else in 5.7 is working notes; if they disagree, this
