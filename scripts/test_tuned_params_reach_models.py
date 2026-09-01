@@ -370,6 +370,11 @@ def main():
         'mlp': 'mlp', 'mlp_bnn_full': 'mlp',
         'mlp_bnn_full_variational': 'mlp',
         'mlp_bnn_full_variational_hetero': 'mlp',
+        # The variance-head networks are the same two builders with a
+        # likelihood loss, so a tuned entry under their own key would reach
+        # them. Nothing has scored them yet, so they train at their defaults.
+        'dnn_bnn_full_mve': 'dnn',
+        'mlp_bnn_full_mve': 'mlp',
     }
     known = {k for k in rosters.TUNED_KEY.values() if k is not None}
     unmapped = sorted(known - set(BUILDER_OF))

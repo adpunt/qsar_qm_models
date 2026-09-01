@@ -6710,6 +6710,37 @@ declared `--use-best-params` with `action='store_true'` (`process_and_train.py:3
 no value and the underscored spelling is not an option at all. `--tuning False` is accepted but is
 already the default.
 
+#### 5.7mve 🔴 FIXED 2026-09-01 — the two variance-head networks were reading Bayesian alpha's and beta's tuned settings
+
+**Found by answering a question, and the repo's own test was already failing on it.**
+
+`dnn_bnn_full_mve` and `mlp_bnn_full_mve` were added to the job generator on 2026-09-01. They are
+launched as `-m dnn --bayesian-transformation full --loss heteroscedastic` — the plain Bayesian
+network plus a likelihood loss and a second output.
+
+**`roster_label()` did not look at the loss at all.** So both of them resolved to `dnn_bnn_full` and
+`mlp_bnn_full`, and `load_best_hyperparameters` (models.py:2020, 3262, 4040) would have handed them
+the tuned width, depth, dropout and learning rate chosen for a ONE-OUTPUT network fitted under
+squared error. Those are two of the four models being tuned tonight, so the moment a tuned file was
+written the variance-head networks would have silently changed with it.
+
+This is the same silent borrowing the 2026-08-31 "every model gets its own key" decision was made to
+remove. `roster_label` already refused to guess for an unknown *transformation*; the loss was simply
+not part of the resolution.
+
+**What was true and what was not.** They have never been searched — 26 trials files, thirteen model
+names, neither of them among them. They are not, however, "running at the shared defaults": they
+were about to inherit their siblings' tuned values.
+
+**The fix.** `roster_label()` appends `_mve` when the loss is `heteroscedastic`, and raises if a
+noise head and a variance head are combined, because that is not a model in the roster. Both models
+have their own entry in `TUNED_KEY`. No sweep has scored them, so they now train at their defaults —
+which is a fact about what has been measured, not a decision to leave them untuned. Tuning them
+needs a sweep that includes `--loss heteroscedastic`.
+
+**Gates:** `python scripts/test_tuning_rosters.py` (was failing, now passes, 19 roster models) and
+`python scripts/test_tuned_params_reach_models.py`.
+
 #### 5.7RULES ✅ THE RULES AND THE PROCESS — rewritten 2026-09-01, reproducible
 
 **This section is authoritative. Everything else in 5.7 is working notes; if they disagree, this

@@ -131,6 +131,13 @@ TUNED_KEY = {
     'mlp_bnn_full_variational': 'mlp_bnn_full_variational',
     'dnn_bnn_full_variational_hetero': 'dnn_bnn_full_variational_hetero',
     'mlp_bnn_full_variational_hetero': 'mlp_bnn_full_variational_hetero',
+    # The two variance-head networks. They have their own keys, so they read
+    # their own entry or none -- and no sweep has ever scored them, so as things
+    # stand they train at their defaults. That is a fact about what has been
+    # measured, not a decision to leave them untuned; tuning them needs a sweep
+    # that includes `--loss heteroscedastic`.
+    'dnn_bnn_full_mve':         'dnn_bnn_full_mve',
+    'mlp_bnn_full_mve':         'mlp_bnn_full_mve',
     # The heteroscedastic Gaussian process still has NO tuned path:
     # `train_heteroscedastic_gp` (models/models.py) never calls
     # load_best_hyperparameters, so no entry in either JSON file can reach it.
@@ -185,8 +192,27 @@ def roster_label(model_type, args):
                 f"'{bt}'. Add it here rather than letting this run read another "
                 f"model's tuned hyperparameters.")
         label = model_type + suffix
+        # THE LOSS IS PART OF THE MODEL, so it has to be part of the label.
+        # The two variance-head networks are launched as the plain Bayesian
+        # network plus `--loss heteroscedastic`, and until 2026-09-01 this
+        # function ignored the loss entirely -- so they resolved to
+        # 'dnn_bnn_full' and 'mlp_bnn_full' and silently read the tuned width,
+        # depth, dropout and learning rate of a ONE-OUTPUT network fitted under
+        # squared error. They have two outputs and a likelihood loss. That is
+        # the same silent borrowing the 2026-08-31 'every model gets its own
+        # key' decision was made to remove, and `scripts/test_tuning_rosters.py`
+        # was already failing on it.
+        mve = getattr(args, 'loss', None) == 'heteroscedastic'
+        if hetero and mve:
+            raise ValueError(
+                "a noise head (--heteroscedastic-vbll) and a variance head "
+                "(--loss heteroscedastic) together are not a model in the "
+                "roster. Add it there before running it, rather than letting "
+                "this run read another model's tuned hyperparameters.")
         if hetero:
             label += '_hetero'
+        elif mve:
+            label += '_mve'
         return label
     return model_type
 

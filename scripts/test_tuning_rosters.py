@@ -151,6 +151,15 @@ def check_tuned_keys_against_models_py():
         'mlp_bnn_full_variational_hetero':
             ('mlp', {'bayesian_transformation': 'full_variational',
                      'heteroscedastic_vbll': True}),
+        # The variance-head networks: the plain Bayesian network plus a
+        # likelihood loss. Without these cases roster_label ignored the loss and
+        # both of them read the tuned settings of their one-output sibling.
+        'dnn_bnn_full_mve':
+            ('dnn', {'bayesian_transformation': 'full',
+                     'loss': 'heteroscedastic'}),
+        'mlp_bnn_full_mve':
+            ('mlp', {'bayesian_transformation': 'full',
+                     'loss': 'heteroscedastic'}),
     }
     missing_case = [l for l in rosters.TUNED_KEY if l not in ARG_CASES]
     if missing_case:
