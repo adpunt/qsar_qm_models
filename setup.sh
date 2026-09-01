@@ -120,6 +120,35 @@ setup_build_failed() {  # setup_build_failed <exit code>
     echo "         bash scripts/rebuild_env.sh"
 }
 
+# IS THIS A SCHEDULED JOB THAT MUST NOT BUILD ANYTHING?
+#
+# The three refusals below used to ask "is SLURM_ARRAY_TASK_ID set", i.e. "am I
+# an array task". That was too narrow and it was found on 2026-09-01: the
+# laboratory pipeline submits 129 SEPARATE jobs rather than an array, so none of
+# them sets that variable and every refusal was blind to all of them. A hundred
+# concurrent jobs rebuilding one shared environment is the failure these guards
+# exist to prevent, and it does not care whether the jobs came from one array or
+# from a submit script.
+#
+# It must still ALLOW an interactive allocation, because running `. ./setup.sh`
+# once inside `srun --pty` is the documented way to prepare the environment
+# (slurm_scripts_qm9_rerun/RUNBOOK.md section 5c, rung 1). An interactive session
+# has a terminal on standard input; a batch job does not. So: a scheduled job
+# with no terminal is a batch job, and refuses.
+setup_is_batch_job() {
+    [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && return 0
+    [ -n "${SLURM_JOB_ID:-}" ] && [ ! -t 0 ] && return 0
+    return 1
+}
+
+setup_job_label() {
+    if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+        echo "array task ${SLURM_ARRAY_TASK_ID} of job ${SLURM_ARRAY_JOB_ID:-?}"
+    else
+        echo "batch job ${SLURM_JOB_ID:-?}"
+    fi
+}
+
 if [ "${SETUP_REBUILD:-0}" = "1" ] || ! setup_env_exists; then
     # NEVER BUILD THE ENVIRONMENT FROM INSIDE AN ARRAY TASK.
     #
@@ -134,8 +163,8 @@ if [ "${SETUP_REBUILD:-0}" = "1" ] || ! setup_env_exists; then
     # A separate variable from SETUP_EXTRAS_REFUSED on purpose: reusing that one
     # would print the operator a message about the extra packages when the real
     # problem is that the environment was never found.
-    if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
-        echo "ERROR: $ENV_LABEL was not found, and this is array task ${SLURM_ARRAY_TASK_ID}."
+    if setup_is_batch_job; then
+        echo "ERROR: $ENV_LABEL was not found, and this is $(setup_job_label)."
         echo "  Building it from inside an array is exactly the race this file"
         echo "  exists to prevent. Nothing has been changed on disk."
         echo "  Run '. ./setup.sh' ONCE in an interactive allocation, confirm it"
@@ -293,8 +322,8 @@ setup_reconcile() {
     # Never install from inside an array task. 390 tasks writing into one
     # site-packages at once is the failure this file was rewritten to stop; the
     # environment has to be right BEFORE a launch, not repaired during one.
-    if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
-        echo "  REFUSING to install: this is array task ${SLURM_ARRAY_TASK_ID}."
+    if setup_is_batch_job; then
+        echo "  REFUSING to install: this is $(setup_job_label)."
         echo "  Run '. ./setup.sh' once on a login node before submitting."
         return 1
     fi
@@ -372,11 +401,11 @@ HAVE_STAMP="$(cat "$STAMP_FILE" 2>/dev/null)"
 # The environment and its stamp both live on the shared project filesystem, so
 # ONE run before the launch is enough for every task. This makes that ordering a
 # property of the code rather than of whoever remembers the runbook.
-if [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && [ "$WANT_STAMP" != "$HAVE_STAMP" ]; then
-    echo "ERROR: the extras do not match the recipe and this is array task" \
-         "${SLURM_ARRAY_TASK_ID}."
-    echo "  Installing them from 294 tasks at once is the failure this file exists"
-    echo "  to prevent, and running without them is an environment nobody audited."
+if setup_is_batch_job && [ "$WANT_STAMP" != "$HAVE_STAMP" ]; then
+    echo "ERROR: the extras do not match the recipe and this is $(setup_job_label)."
+    echo "  Installing them from hundreds of jobs at once is the failure this file"
+    echo "  exists to prevent, and running without them is an environment nobody"
+    echo "  audited."
     echo "  Run '. ./setup.sh' ONCE in an interactive allocation, then resubmit."
     SETUP_EXTRAS_REFUSED=1
     export SETUP_EXTRAS_REFUSED

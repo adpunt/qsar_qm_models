@@ -63,6 +63,16 @@ QM9_MODELS = {
     # (slurm_scripts_qm9_rerun/generate_scripts.py MODELS).
     "dnn_bnn_full_variational": ("torchbnn", None),
     "mlp_bnn_full_variational": ("torchbnn", None),
+    # The heteroscedastic variational pair and the two variance-head networks.
+    # Added to the roster 2026-08-28 and 2026-09-01; this probe gates every job,
+    # so a label it does not know stops the task for the guard's own reason
+    # rather than for anything wrong with the run. --audit-roster catches that,
+    # and did: it reported both _mve labels as unknown on 2026-09-01.
+    "dnn_bnn_full_variational_hetero": ("torchbnn", None),
+    "mlp_bnn_full_variational_hetero": ("torchbnn", None),
+    "dnn_bnn_full_mve": ("torchbnn", None),
+    "mlp_bnn_full_mve": ("torchbnn", None),
+    "het_gp": ("gpytorch", None),
     "conformal": ("torchcp", None),
     "graph": ("torch_geometric", None),
     # The EXCLUDED_MODELS labels from generate_scripts.py. They are off by
@@ -131,6 +141,16 @@ VALIDATION_MODELS = {
                    "botorch.fit:fit_gpytorch_mll|fit_gpytorch_model"), None),
     "VBLL-Full-Hetero": (("torch",), None),
     "MLP-VBLL-Full-Hetero": (("torch",), None),
+    # The two variance-head networks, built into the laboratory runner on
+    # 2026-09-01 (db50157). Same packages as the Bayesian networks they widen --
+    # the second output column is a head, not a new dependency. Without these two
+    # entries every BNN-Full-MVE and MLP-BNN-Full-MVE task on all three datasets
+    # exits 2 in its own preamble, after the queue wait, on "unknown validation
+    # model names".
+    "BNN-Full-MVE": (("torchbnn", "torchhk:transform_model",
+                      "torchhk:transform_layer"), None),
+    "MLP-BNN-Full-MVE": (("torchbnn", "torchhk:transform_model",
+                          "torchhk:transform_layer"), None),
 }
 
 # Packages worth reporting a version for whatever was asked.

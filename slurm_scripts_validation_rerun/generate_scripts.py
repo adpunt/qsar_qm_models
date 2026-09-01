@@ -9,6 +9,8 @@ After all jobs complete, run merge_results.py to combine into results/validation
 """
 import argparse
 import json
+import math
+import re
 import os
 from pathlib import Path
 
@@ -22,7 +24,15 @@ MODELS_ALL = ['RF', 'QRF', 'XGBoost', 'DNN', 'GP', 'NGBoost', 'SVM', 'LightGBM']
 # this file emits that the runner does not know stops the task at argument parsing.
 ALL_REPS = ['ECFP4', 'SNS', 'MHG-GNN-pretrained', 'PDV', 'Avalon', 'ChemBERTa']
 
-KIRBY_DIR = '/data/stat-cadd/scat9264/KIRBy'
+# CORRECTED 2026-09-01. This said /data/stat-cadd/scat9264/KIRBy, which is the
+# checkout KIRBy moved AWAY from when stat-cadd hit its quota; 125 of KIRBy's own
+# 127 job scripts use the stat-ecr path (RERUN_PLAN.md 0.4). The `cd` below had no
+# guard and the script had no `set -e`, so all 129 jobs would have carried on past
+# a failed `cd` and died later saying they could not open a python file -- or, if a
+# stale second checkout happened to be there, run an OLD runner and write a full
+# set of results from the retired noise scheme. The sister uncertainty generator
+# was fixed for exactly this; its guard is copied into the preamble below.
+KIRBY_DIR = '/data/stat-ecr/scat9264/KIRBy'
 QSAR_DIR = '/data/stat-cadd/scat9264/qsar_qm_models'
 
 # The hERG set is spelled two different ways and both spellings are load-bearing.
@@ -62,6 +72,28 @@ DATASETS = [
 # runner's --conditions carries choices=sorted(CONDITIONS), so a name this file
 # emits that the injector does not know stops the task at argument parsing
 # instead of part way through.
+# THE NOISE LADDER, READ FROM THE QM9 GENERATOR RATHER THAN RETYPED.
+#
+# NOISE_DESIGN.md section 6.4 is the one place the levels live and says so:
+# "one shared ladder ... Applies to QM9, logD, Caco-2 and hERG". The QM9
+# generator holds the operative copy as DOSE_LEVELS. This file used to hold none
+# at all and passed none on the command line, so the laboratory ladder came from
+# a default inside the other repository and nothing here could state it. It is
+# lifted, not copied, so the two cannot drift (2026-09-01).
+def _dose_levels():
+    src = (Path(__file__).resolve().parent.parent
+           / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py').read_text()
+    m = re.search(r"^DOSE_LEVELS\s*=\s*'([^']+)'", src, re.M)
+    if not m:
+        raise SystemExit(
+            "ERROR: cannot find DOSE_LEVELS in the QM9 generator. The two "
+            "pipelines share one ladder (NOISE_DESIGN.md 6.4) and this file "
+            "reads it from there rather than holding a second copy.")
+    return [float(x) for x in m.group(1).split()]
+
+
+DOSE_LEVELS = _dose_levels()
+
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
 FULL_GRID = [c['name'] for c in _SETTLED['stage_1_full_grid']]
@@ -84,48 +116,121 @@ PAIR_SUBSET = {c['name']: c['scope']
                and 'validation_robustness' in c['scope'].get('applies_to', [])}
 BREADTH_GRID = [c for c in FULL_GRID if c not in PAIR_SUBSET]
 
-TIME_LIMITS = {
-    'RF': '8:00:00',
-    'QRF': '8:00:00',
-    'XGBoost': '8:00:00',
-    'LightGBM': '8:00:00',
-    'SVM': '16:00:00',
-    'NGBoost': '24:00:00',
-    'DNN': '24:00:00',
-    'GP': '47:59:00',
+# WALL CLOCKS, COMPUTED FROM MEASUREMENT, NOT TYPED.
+#
+# This used to be eight round numbers with no provenance -- RF 8h, NGBoost 24h,
+# GP 47:59 and so on -- one per model, the same for all three datasets. Two of
+# them were too small (found 2026-09-01, the same defect the QM9 generator had):
+# NGBoost on logD needs 64 hours and asked for 24, and the quantile forest needs
+# 13 and asked for 8. A job killed at the wall leaves a partial results file
+# holding the low noise levels and nothing above them, which merges in looking
+# like a finished condition sweep with the top of the ladder missing.
+#
+# SECONDS PER FIT PER 1,000 TRAINING MOLECULES, worst representation, default
+# settings, from results/tuning_local/timing*.csv and trials*.csv -- the same
+# sweeps that sized the QM9 generator, normalised by the sample size each was
+# measured at. The tree and network models are close to linear in the number of
+# molecules at a fixed round count; the Gaussian process is cubic and is treated
+# as such below.
+SECONDS_PER_FIT_PER_1K = {
+    'RF': 37.7, 'QRF': 112.3, 'XGBoost': 31.6, 'LightGBM': 37.4,
+    'SVM': 15.5, 'NGBoost': 544.4, 'DNN': 38.2, 'GP': 1169.5,
 }
 
-PREAMBLE = """# WAIT A RANDOM MOMENT BEFORE DOING ANYTHING. This is not politeness.
+# Training molecules per dataset (RERUN_PLAN.md 13.14: logD 4,031, Caco-2 1,729,
+# hERG 1,132). The three differ almost fourfold, so one wall clock per MODEL was
+# always wrong for two of them.
+TRAIN_N = {'logd': 4031, 'caco2': 1729, 'herg': 1132}
+
+# Fits per script: conditions x levels x folds. The folds are the runner's
+# GroupKFold(n_splits=5) over scaffold groups.
+CV_FOLDS = 5
+
+# Margin over the computed need. The QM9 generator uses 1.25; this side uses 1.5
+# because its per-fit numbers are normalised across sample sizes rather than
+# measured at the size that will run, so they carry more uncertainty.
+WALL_MARGIN = 1.5
+
+
+def wall_clock(model, dataset, n_conditions, n_levels):
+    """Hours to request for one laboratory job, from the measurements above."""
+    n = TRAIN_N[dataset]
+    per_fit = SECONDS_PER_FIT_PER_1K[model]
+    if model == 'GP':
+        # An exact Gaussian process factorises an n x n matrix, so it is cubic in
+        # the training set rather than linear. The basis above was measured at
+        # 10,000 molecules, hence the /10 twice.
+        seconds = per_fit * (n / 1000.0) ** 3 / 100.0
+    else:
+        seconds = per_fit * n / 1000.0
+    hours = seconds * n_conditions * n_levels * CV_FOLDS / 3600.0
+    return max(1, math.ceil(hours * WALL_MARGIN))
+
+PREAMBLE = """# GIVE THIS JOB ITS OWN KeOps CACHE AND ITS OWN SCRATCH.
 #
-# KeOps arrives with the Gaussian-process stack, and at IMPORT time it runs
-# `c++ --version`, writes the answer to the hard-coded path
-# /tmp/compiler_version.txt, reads it back and deletes it. Two processes
-# importing within the same instant race: one deletes the file while the other
-# is between checking it exists and opening it, and the second dies with
-# FileNotFoundError before a single molecule is read.
+# This replaced a random wait of up to ten minutes at the top of every job
+# (removed 2026-09-01, the same change the QM9 generator got the day before).
 #
-# It reaches EVERY script in this directory, not only the Gaussian-process ones:
-# alternative_data_noise_robustness.py imports gpytorch at module scope, inside
-# a try block that sets HAS_GP, so a random-forest task on logD pulls KeOps in
-# too. Jobs sharing a node share /tmp, and an array releases its tasks together.
+# WHAT THE WAIT WAS FOR. KeOps arrives with the Gaussian-process stack, and the
+# runner imports gpytorch at module scope, so every job here pulls it in --
+# a random-forest job on logD too. On MACOS it runs `c++ --version` at import,
+# writes the answer to the hard-coded /tmp/compiler_version.txt, reads it back
+# and deletes it; two processes importing together race over that file.
 #
-# The failure names a missing file in /tmp and says nothing about chemistry, and
-# because it happens during import the task produces NO output at all -- it
-# looks like a task that never started.
+# WHY IT CANNOT HAPPEN HERE, checked in the library rather than assumed. Both
+# hard-coded /tmp paths in keopscore/config/base_config.py sit inside
+# `if platform.system() == "Darwin"`. On Linux neither line runs. The wait was
+# guarding a macOS bug on a Linux cluster and cost five minutes a job on average.
 #
-# TMPDIR does not help: the path is a literal inside the library, not taken from
-# the environment. Staggering submission does not help either, because the queue
-# decides when tasks actually start. A random wait inside the task is the only
-# lever this side controls (found 2026-08-30, RERUN_PLAN.md 2.25). The QM9 and
-# uncertainty generators have carried it since that day; this one did not, and
-# it has 96 scripts.
-sleep $(( RANDOM % 600 ))
+# WHAT IS ACTUALLY SHARED ON LINUX. KeOps compiles into $KEOPS_CACHE_FOLDER,
+# which defaults to a path containing the NODE name -- so the clash is between
+# jobs on one node, and submit_all.sh fires 129 at once with no throttle. Each
+# job now compiles into its own scratch, removed on exit. Nothing shared,
+# nothing waits.
+export TMPDIR="${{TMPDIR:-/tmp}}/val_${{SLURM_JOB_ID:-$$}}"
+mkdir -p "$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+export KEOPS_CACHE_FOLDER="$TMPDIR/keops"
+mkdir -p "$KEOPS_CACHE_FOLDER"
 
 KIRBY_DIR="{kirby_dir}"
 QSAR_DIR="{qsar_dir}"
 
-cd "$KIRBY_DIR"
+# THE CHECKOUT MUST BE THERE, AND IT MUST BE CURRENT.
+#
+# Copied from slurm_scripts_uncertainty_rerun/generate_scripts.py, where it has
+# been proven. Without it a wrong path is silent: the cd fails, the environment
+# guards below still pass because they use the absolute $QSAR_DIR, and the job
+# dies much later saying it cannot open a python file -- after the queue wait.
+if [ ! -d "$KIRBY_DIR" ]; then
+    echo "ERROR: no KIRBy checkout at $KIRBY_DIR."
+    echo "       The other checkout is /data/stat-cadd/scat9264/KIRBy, which is"
+    echo "       the one KIRBy moved away from. Regenerate with --kirby-dir <path>"
+    echo "       rather than editing this file."
+    exit 2
+fi
+RUNNER="$KIRBY_DIR/tests/alternative_data_noise_robustness.py"
+if [ ! -f "$RUNNER" ]; then
+    echo "ERROR: $RUNNER does not exist."; exit 2
+fi
+if ! grep -q -- "'--conditions'" "$RUNNER"; then
+    echo "ERROR: $RUNNER has no --conditions flag, so this checkout predates the"
+    echo "       noise redesign (noiseInject 1.0.0, 2026-08-26). Running it would"
+    echo "       produce a full set of results from the retired six strategies."
+    echo "       Pull it, or point --kirby-dir at the other checkout."
+    exit 2
+fi
+echo "=== KIRBy: $KIRBY_DIR  ($(git -C "$KIRBY_DIR" log --oneline -1 2>/dev/null || echo 'not a git checkout'))"
+
+cd "$KIRBY_DIR" || {{ echo "ERROR: cannot enter $KIRBY_DIR"; exit 2; }}
 . "$QSAR_DIR/setup.sh"
+
+# setup.sh refuses to build the environment or install the extras from inside an
+# ARRAY task -- but these 129 are separate jobs, not an array, so neither refusal
+# can see them. SLURM_ARRAY_TASK_ID is exported here for the same reason: a
+# hundred concurrent jobs rebuilding one shared environment is the failure those
+# refusals exist to prevent, and it does not care whether the jobs came from one
+# array or from a submit script (found 2026-09-01).
 
 # Activation is not optional. micromamba has never worked on this cluster, so
 # the `export MAMBA_EXE=...` lines that used to sit above `. setup.sh` pointed
@@ -164,6 +269,41 @@ if [ "$(basename "$CONDA_PREFIX")" != "env_test" ]; then
     exit 2
 fi
 echo "=== interpreter: $PY_PATH  (CONDA_PREFIX=$CONDA_PREFIX)"
+
+# THE NOISE LADDER MUST BE THE SETTLED ONE, AND THIS SIDE NEVER STATES IT.
+#
+# The command line below passes --conditions and NOT --sigmas, deliberately:
+# censoring is a clipped fraction on its own axis, and overriding the ladder
+# would dose it on the wrong one. So the seven levels come from a default inside
+# the runner, in the OTHER repository, and nothing here could say what they were.
+# The last completed laboratory results carry ELEVEN levels, 0.0 to 1.0 by 0.1 --
+# the retired ladder -- so this is not hypothetical.
+#
+# NOISE_DESIGN.md section 6.4 is the one place the levels live. This asks the
+# runner what it would use and refuses if it disagrees, rather than discovering
+# it in the results (found 2026-09-01).
+python - <<'PYLEVELS' || exit 2
+import json, re, sys, pathlib
+want = {levels_json}
+src = pathlib.Path("$KIRBY_DIR/tests/alternative_data_noise_robustness.py").read_text()
+m = re.search(r"^\s*(?:DEFAULT_)?(?:SIGMAS|NOISE_LEVELS|LEVELS)\s*=\s*(\[[^\]]*\])",
+              src, re.M)
+if not m:
+    print("ERROR: cannot find the runner's default noise ladder. It is passed")
+    print("       nowhere on the command line, so it cannot be confirmed. Look for")
+    print("       the sigma list in alternative_data_noise_robustness.py by hand")
+    print("       and compare it with NOISE_DESIGN.md section 6.4:")
+    print("       " + " ".join(str(x) for x in want))
+    sys.exit(2)
+got = [float(x) for x in re.findall(r"-?\d*\.?\d+", m.group(1))]
+if got != [float(x) for x in want]:
+    print("ERROR: the runner's noise ladder is not the settled one.")
+    print("       runner:  " + " ".join(str(x) for x in got))
+    print("       settled: " + " ".join(str(x) for x in want))
+    print("       Pull KIRBy, or the whole degradation curve is on a retired axis.")
+    sys.exit(2)
+print("=== noise ladder: " + " ".join(str(x) for x in got) + "  (matches NOISE_DESIGN 6.4)")
+PYLEVELS
 
 # WHICH qsar_qm_models CHECKOUT THE SHARED SPEC COMES FROM. Say it, do not let
 # it be guessed.
@@ -262,7 +402,8 @@ PYCHECK
 # one big template would do -- fails with "Single '{' encountered".
 SLURM_HEADER = """#!/bin/bash
 #SBATCH --job-name=val_{safe_name}
-#SBATCH --output=slurm-%j.out
+#SBATCH --account=stat-cadd
+#SBATCH --output=val_{safe_name}_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -272,19 +413,41 @@ SLURM_HEADER = """#!/bin/bash
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
 #SBATCH --mail-type=END,FAIL
 
+# `set -u` catches an unset variable rather than expanding it to nothing, and
+# `pipefail` makes a failing command in a pipeline fail the pipeline. NOT
+# `set -e`: sourcing setup.sh legitimately returns non-zero on some paths and
+# would kill the job before it started. The exit status is carried by hand at
+# the end of the body instead, which is what the QM9 side does.
+set -uo pipefail
+
 """
 
 SLURM_BODY = """
-cd tests
+cd tests || {{ echo "ERROR: no tests/ under $KIRBY_DIR"; exit 2; }}
+[ -f alternative_data_noise_robustness.py ] || {{
+    echo "ERROR: the runner is not in $KIRBY_DIR/tests"; exit 2; }}
 
+# THE MODEL IS IN THE OUTPUT PATH. Until 2026-09-01 it was not, so the seven or
+# eight scripts that share a representation and a dataset all wrote into ONE
+# directory -- 129 scripts across 18 roots -- and submit_all.sh fires them all at
+# once. The runner appends, with no lock, so rows are lost or torn and the merge
+# cannot tell: it deduplicates on (model, rep, noise_type, sigma, fold) and
+# cannot restore a row that was never written. The module docstring claimed the
+# isolation this line did not provide.
 python alternative_data_noise_robustness.py \\
     --datasets {dataset_cli} \\
     --models {model} \\
     --reps {rep} \\
     --conditions {conditions} \\
-    --results-root results/validation_rerun/{rep_safe}_{dataset}
+    --results-root results/validation_rerun/{model_lower}_{rep_safe}_{dataset}
+status=$?
 
-echo "Done: {model} x {rep} x {dataset}"
+# CARRY THE EXIT STATUS. The last statement used to be an echo, which always
+# returns 0, so a job whose python run died was recorded by sacct as COMPLETED
+# with exit 0 and mailed an END rather than a FAIL. That is the shape of a run
+# that looks finished and has no results.
+echo "Done: {model} x {rep} x {dataset}  exit=$status"
+exit $status
 """
 
 # The smoke test: two models writing into ONE rep_dataset directory, checking
@@ -364,6 +527,14 @@ def main():
                     help=f'Override the conditions. Default: {" ".join(BREADTH_GRID)}. '
                          f'The pair-subset conditions ({", ".join(PAIR_SUBSET) or "none"}) are '
                          f'not in the default and need --models and --reps.')
+    ap.add_argument('--kirby-dir', default=KIRBY_DIR,
+                    help=f'The KIRBy checkout the jobs cd into (default: '
+                         f'{KIRBY_DIR}). The preamble has told the operator to '
+                         f'"regenerate with --kirby-dir" since it was written; '
+                         f'until 2026-09-01 the flag did not exist.')
+    ap.add_argument('--qsar-dir', default=QSAR_DIR,
+                    help=f'This checkout, which the runner loads the shared spec '
+                         f'from (default: {QSAR_DIR}).')
     ap.add_argument('--include-depth-conditions', action='store_true',
                     help=f'The DEEP RUN: also run the depth-only conditions '
                          f'({", ".join(DEPTH_ONLY)}), on a named subset of pairs. Requires '
@@ -454,12 +625,15 @@ def main():
                 content = (
                     SLURM_HEADER.format(safe_name=sn[:30], mem='128G',
                                         partition='long',
-                                        time_limit=TIME_LIMITS[model])
-                    + PREAMBLE.format(kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR,
+                                        time_limit=f'{wall_clock(model, dataset, len(conditions), len(DOSE_LEVELS))}:00:00')
+                    + PREAMBLE.format(kirby_dir=args.kirby_dir,
+                                      qsar_dir=args.qsar_dir,
                                       model=model,
+                                      levels_json=repr(DOSE_LEVELS),
                                       condition_list_py=repr(conditions))
                     + SLURM_BODY.format(dataset=dataset, dataset_cli=dataset_cli,
-                                        model=model, rep=rep,
+                                        model=model, model_lower=model.lower(),
+                                        rep=rep,
                                         rep_safe=safe_name(rep),
                                         conditions=condition_args)
                 )
@@ -473,7 +647,8 @@ def main():
     smoke = (
         SLURM_HEADER.format(safe_name='smoke', mem='128G', partition='short',
                             time_limit='1:00:00')
-        + PREAMBLE.format(kirby_dir=KIRBY_DIR, qsar_dir=QSAR_DIR, model='RF SVM',
+        + PREAMBLE.format(kirby_dir=args.kirby_dir, qsar_dir=args.qsar_dir,
+                          model='RF SVM', levels_json=repr(DOSE_LEVELS),
                           condition_list_py=repr(conditions))
         + SMOKE_BODY.format(dataset=herg_path, dataset_cli=herg_cli)
     )
