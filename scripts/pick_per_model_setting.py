@@ -139,6 +139,13 @@ def main():
     w = csv.DictWriter(fh, fieldnames=FIELDS)
     if fresh:
         w.writeheader()
+        # FLUSH THE HEADER NOW. It was sitting in the buffer until the first row
+        # was written, so a run killed during its first fit -- which is what
+        # memory pressure does -- left a ZERO-BYTE file. The next run then read
+        # its header as [''], decided the layout had changed, set the empty file
+        # aside and started again, so a memory kill looked like a layout
+        # problem and burned a restart each time.
+        fh.flush()
 
     for model in cli.models:
         # The pool: this model's own winners, one per representation, deduped.
