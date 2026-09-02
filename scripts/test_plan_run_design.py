@@ -43,6 +43,24 @@ def emit(stage):
                 int(runs.group(1).replace(',', '')))
 
 
+def check_no_restated_settings(plan):
+    """Settings the generator owns must not be written out as a literal here.
+
+    Section 2.29 said `OOF_FOLDS_SCORED = {'ngboost': 1}` for two days against a
+    generator that had moved to 3, because the value was restated in prose instead
+    of pointed at. The plan owns WHAT RUNS; a per-model cost setting is the
+    generator's. Naming the constant is fine and is how a reader finds it -- giving
+    it a value here is not.
+    """
+    for m in re.finditer(r'OOF_FOLDS_SCORED[^\n]*', plan):
+        line = m.group(0)
+        if re.search(r"OOF_FOLDS_SCORED\s*=|'ngboost'\s*:\s*\d|--oof-folds-scored\s+\d", line):
+            failures.append(
+                f'RERUN_PLAN.md states a value for OOF_FOLDS_SCORED: {line.strip()!r}. '
+                f'That setting lives in slurm_scripts_qm9_rerun/generate_scripts.py '
+                f'with its wall-clock table. Point at it, do not copy it.')
+
+
 def main():
     plan = PLAN.read_text()
     row = re.compile(
@@ -90,6 +108,8 @@ def main():
         else:
             print(f'  ok    the total is the sum: {t_tasks:,} tasks, '
                   f'{t_runs:,} training runs')
+
+    check_no_restated_settings(plan)
 
     if failures:
         print()

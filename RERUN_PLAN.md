@@ -3277,13 +3277,13 @@ and has nothing to disagree with.
 times too small to be a quantity, and the table said PASS. **A verdict and a caveat that
 contradict each other are a defect, not a nuance** — the table is what gets read.
 
-### 2.29 ✅ SETTLED 2026-08-30 — NGBoost's three seeds cost nothing, because it scores one fold
+### 2.29 ✅ SETTLED 2026-08-30 — NGBoost's three seeds cost nothing, because it scores fewer folds than it cuts
 
 **The problem, in one line: three seeds multiply the out-of-fold pass.** NGBoost is fitted under
-three seeds so it has a model-uncertainty term at all (`c2aec9d`, today), and the out-of-fold pass
-refits once per fold. Three seeds times one fit plus five folds is **eighteen fits per training
-run**, which prices a main-grid task at **606 hours — 25.2 days against the long partition's 30-day
-limit**. It would queue for days and then be killed at the wall, which loses the whole task.
+three seeds so it has a model-uncertainty term at all (`c2aec9d`), and the out-of-fold pass refits
+once per fold. Three seeds times one fit plus five folds is **eighteen fits per training run**,
+which prices a main-grid task past the long partition's 30-day limit. It would queue for days and
+then be killed at the wall, which loses the whole task.
 
 **The lever, and it was already in the code.** `--oof-folds-scored` scores fewer folds than were
 cut. The property that makes an out-of-fold row worth having is untouched: a molecule in a scored
@@ -3291,19 +3291,21 @@ fold is still scored by a model that never saw its label. What is given up is **
 molecules in the unscored folds are left blank. It buys the cost back with coverage, not with
 correctness.
 
-| NGBoost, main-grid task | fits per run | wall clock |
-|---|---|---|
-| before the seeds landed | 1 seed × (1 + 5) = 6 | 202h — 8.4 days |
-| three seeds, five scored folds | 3 × (1 + 5) = **18** | **606h — 25.2 days** |
-| **three seeds, one scored fold** | 3 × (1 + 1) = 6 | **202h — 8.4 days** |
-| three seeds, two scored folds | 3 × (1 + 2) = 9 | 303h — 12.6 days |
+**The number lives in the generator, not here.** `OOF_FOLDS_SCORED` in
+`slurm_scripts_qm9_rerun/generate_scripts.py`, with the wall clock for every choice in the comment
+above it. Restating it in this section is what let the two drift: this said **1 scored fold** until
+2026-09-02, against a generator that moved to **3** on 2026-09-01 (`db50157`), when the
+variance-head networks re-timed the grid and five folds went from 606h to 714h. Read the file.
 
-**Applied: `OOF_FOLDS_SCORED = {'ngboost': 1}` in the QM9 job generator.** NGBoost is back to
-exactly what it cost before the seed ensemble existed, with the ensemble included. Nothing else
-moves — the setting is per model, and the screen's NGBoost tier reads 23:59 as before.
+The shape of the trade has not changed, and it is why the setting exists at all: scoring fewer
+folds than were cut gives up **coverage** — the molecules in the unscored folds are left blank —
+and gives up nothing about correctness, because a molecule in a scored fold is still scored by a
+model that never saw its label. What moved on 2026-09-01 is only which point on that curve fits
+inside the guard's 540-hour ceiling. The setting is per model, so nothing else moves either way,
+and the screen's NGBoost tier is unaffected.
 
-**Why one fold is the right trade for THIS model specifically.** The out-of-fold rows are the input
-to the which-molecules question. NGBoost is not the model that answers it: the decomposition claim
+**Why coverage is the right thing to spend on THIS model specifically.** The out-of-fold rows are the input
+to the which-molecules question. NGBoost is not the model that answers it — it has no model-uncertainty term at all (§2.30) and its place on the decomposition list was withdrawn: the decomposition claim
 it is on the list for is a **population** statement — does the measurement-error half rise with the
 injected noise while the model half holds still — and that statistic does not read per-molecule
 rows at all (§2.28). The quantile forest, the Gaussian process and the variational network all keep
@@ -3311,8 +3313,8 @@ five scored folds.
 
 **Guarded.** `scripts/test_uncertainty_pairs.py` fails any main-grid task asking more than 540
 hours — three quarters of the partition limit, so a task has room for a slow node rather than
-sitting at 96% of the wall. Proven: removing `OOF_FOLDS_SCORED` puts NGBoost at 606h and the check
-reports it by name, and says to cut the scored folds rather than the seeds.
+sitting at 96% of the wall. Proven: removing `OOF_FOLDS_SCORED` puts NGBoost over the ceiling and
+the check reports it by name, and says to cut the scored folds rather than the seeds.
 
 **Asked and answered: can the seeds be run only for the decomposition work?** They already are, in
 the sense that matters. The ensemble is built only when uncertainty is switched on
