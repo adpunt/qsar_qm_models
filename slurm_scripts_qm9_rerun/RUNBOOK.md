@@ -199,7 +199,7 @@ cd /data/stat-cadd/scat9264/qsar_qm_models
 . setup.sh
 ```
 
-**Why once is enough for all 291 tasks.** The shell environment `setup.sh` sets — `PATH`,
+**Why once is enough for all 327 tasks.** The shell environment `setup.sh` sets — `PATH`,
 `CONDA_PREFIX` — is per-shell and per-node, and does not carry; every job script sources the file
 itself, which is correct. What carries is on the shared project filesystem: the environment at
 `/data/stat-cadd/scat9264/conda_envs/env_test`, and the stamp written inside it,
@@ -208,7 +208,7 @@ compares against that one file, and prints *"Extras already match the recipe; no
 
 **Why it now fails loudly instead of quietly, 2026-08-28.** `setup_reconcile` has always refused to
 install from inside an array task. The extras block — a from-source `torchsort` compile plus three
-more installs — did not, so on the first launch after `env.yml` changed, all 291 tasks would enter it
+more installs — did not, so on the first launch after `env.yml` changed, all 327 tasks would enter it
 at once. It now refuses the same way, and the job scripts **exit 2** when it does, rather than
 training in an environment that is not the one `env.yml` describes. Proven three ways: an array task
 with a mismatched stamp refuses, an array task with a matching stamp proceeds, and an ordinary shell
@@ -427,8 +427,8 @@ leaves less to reason about. The local checkout already carries
 ### ⚠️ Deleting `data/QM9/processed` means it has to be rebuilt BEFORE the array
 
 `torch_geometric`'s QM9 builds `data/QM9/processed/data_v3.pt` from the raw files on first
-access, and it **takes no lock**. Submit the array cold and all 291 tasks build the same file
-into the same path at once: 291 times the work at best, and at worst a task loading a `.pt`
+access, and it **takes no lock**. Submit the array cold and all 327 tasks build the same file
+into the same path at once: 327 times the work at best, and at worst a task loading a `.pt`
 another task is still writing.
 
 It has to go — the ChemBERTa encoder changed on 2026-08-27 and the record layout moved with it,
@@ -438,7 +438,7 @@ so anything cached before that decodes every later field at the wrong offset. So
 **The job scripts now refuse to start without it** (`generate_scripts.py`, the
 `data/QM9/processed/data_v3.pt` guard) and exit 2 naming the remedy, so this cannot be
 forgotten rather than merely documented. Same shape as the `setup.sh` extras refusal: the
-expensive shared work belongs in one allocation before a launch, never in 291 tasks at once.
+expensive shared work belongs in one allocation before a launch, never in 327 tasks at once.
 
 ## 3. Account and partition
 
@@ -591,16 +591,20 @@ matrix at fit time. Those three tasks would have queued, started, raised on ever
 level and written an empty file. Sort & Slice keeps its Gaussian-process row through
 `gauche_rbf`, which runs on every representation.
 
-⚠️ **This block covers all SEVENTEEN scripts.** Until 2026-08-28 it listed fourteen: the
-three decomposition models added that day — `heteroscedastic_gp` and the two heteroscedastic
-variational networks — appeared in no `sbatch` line, so 54 of the 291 tasks would never have
-been queued. Those three are the only models in the roster that report both halves of the
-uncertainty per molecule, so their absence would have been discovered at analysis time.
-Submit by looping over the generator's own output rather than a hand-typed list:
+⚠️ **This block covers all NINETEEN scripts, and it has fallen behind the roster TWICE.**
+Until 2026-08-28 it listed fourteen: `heteroscedastic_gp` and the two heteroscedastic
+variational networks, added that day, appeared in no `sbatch` line, so 54 of the 291 tasks
+then in the grid would never have been queued. It then listed seventeen until 2026-09-02,
+missing `dnn_bnn_full_mve` and `mlp_bnn_full_mve` — the two variance-head networks built on
+2026-09-01 (RERUN_PLAN.md §2.34) — which is another 36 tasks, and they are the literature's
+flagship case for a per-molecule aleatoric term. Both omissions would only have surfaced at
+analysis time. `test_runbook_matches_generator.py` now fails when a script the generator
+emits appears in no `sbatch` line, so there is no third time. Submit by looping over the
+generator's own output rather than a hand-typed list:
 
 ```bash
-# Every script the generator wrote, nothing hand-typed. 17 scripts, 291 tasks.
-ls qm9_s0_*.sh | wc -l          # must print 17
+# Every script the generator wrote, nothing hand-typed. 19 scripts, 327 tasks.
+ls qm9_s0_*.sh | wc -l          # must print 19
 
 # Tier 1 — the ANOVA roster, tree and deterministic models.
 # ngboost is 80:59 on measured timings and goes to `long`; the rest are 1:59.
@@ -614,9 +618,10 @@ for s in dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variati
     sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 
-# Tier 3 — outside the ANOVA: uncertainty, both Gaussian processes, and the three
-# models that report BOTH uncertainty components per molecule
-for s in heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero; do
+# Tier 3 — outside the ANOVA: uncertainty, both Gaussian processes, and the five
+# models that report BOTH uncertainty components per molecule. The last two are the
+# variance-head networks, 22:59 and 33:59, so they still fit `medium`.
+for s in heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero dnn_bnn_full_mve mlp_bnn_full_mve; do
     sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_$s.sh
 done
 sbatch --account=$ACCT --partition=$PART --array=0-17%5 qm9_s0_qrf.sh
@@ -625,7 +630,7 @@ sbatch --account=$ACCT --partition=$PART --array=0-17%4 qm9_s0_gauche_rbf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-2%4  qm9_s0_gauche.sh   # ECFP4 only
 ```
 
-The main grid is the same 291 tasks at replicates 1–9, appending to the same files, so it
+The main grid is the same 327 tasks at replicates 1–9, appending to the same files, so it
 is submitted the same way once the screen has landed and been checked:
 
 ```bash
@@ -706,7 +711,7 @@ environment — but it still cannot run. Fix it by making the prefix an `envs_di
 by exporting `ENV_TEST_PREFIX` before sourcing `setup.sh`.
 
 **Rung 1 — the environment, once, in an allocation.** The extras stamp lives on the shared
-filesystem, so one run covers all 291 tasks.
+filesystem, so one run covers all 327 tasks.
 
 ```bash
 srun --account=stat-cadd --partition=interactive --cpus-per-task=8 --mem=32G \
@@ -721,7 +726,7 @@ PASS: the interpreter path is under `env_test`, NOT under `/apps/system`. Sectio
 that an unactivated job silently ran the system Anaconda.
 
 **Rung 2 — the Rust binary, rebuilt, and its own gates.** This is the one that would have
-killed all 291 tasks: `--selection-seed` became a required argument on 2026-08-28 and a
+killed all 327 tasks: `--selection-seed` became a required argument on 2026-08-28 and a
 binary built before that rejects it on the first noise level.
 
 ```bash
@@ -737,7 +742,7 @@ PASS: today's timestamp, and the last line reads `all noise gates passed`. The j
 now compare the binary's timestamp against `rust/src`, so a stale one is refused before any
 training — but it is refused per task, after the queue. Build it here.
 
-**Rung 3 — warm the two caches that 291 tasks would otherwise fetch at once.**
+**Rung 3 — warm the two caches that 327 tasks would otherwise fetch at once.**
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models

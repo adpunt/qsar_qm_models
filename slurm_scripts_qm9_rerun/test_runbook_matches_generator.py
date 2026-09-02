@@ -23,7 +23,9 @@ WHAT IT CHECKS
   * the training-run totals
   * EVERY `--array=A-B` in an sbatch line, against the task count of the script
     that line names -- this is the one that mis-submits
-  * that no sbatch line names a script the generator does not emit
+  * that no sbatch line names a script the generator does not emit, AND that no
+    script the generator emits is missing from the submit block -- the second
+    direction was unchecked until 2026-09-02 and had let two models through
   * that a pair-subset condition (censoring) has a command, with its --out-dir
 
 WHAT IT DOES NOT CHECK
@@ -206,6 +208,42 @@ def check_array_ranges(text):
     return seen
 
 
+def check_every_script_is_submitted(text):
+    """Every script the generator emits must appear in some sbatch line.
+
+    The hole this closes. check_array_ranges verifies that a script the runbook
+    NAMES exists and is submitted over the right range. Nothing verified the other
+    direction -- a script the generator emits that the runbook never names -- so a
+    model added to MODELS was simply absent from the submit block and everything
+    still passed. That happened twice: three heteroscedastic models on 2026-08-28
+    (54 tasks) and the two variance-head networks on 2026-09-02 (36 tasks), and
+    both were found by hand rather than here.
+
+    The screen only. The main grid is submitted "as above, with qm9_s1_ in place of
+    qm9_s0_" rather than spelled out, which is deliberate -- the block is long
+    enough already.
+    """
+    conditions, models, _ = pass_shape(0)
+    named = set()
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        for name in re.findall(r'qm9_s0_([\w]+)\.sh', line):
+            named.add(name)
+        loop = re.match(r'\s*for s in (.+?); do\s*$', line)
+        if not loop:
+            continue
+        # only count the loop's labels if an sbatch line inside it builds the name
+        if any(re.search(r'qm9_s0_\$s\.sh', f) for f in lines[i + 1:i + 4]):
+            named.update(loop.group(1).split())
+
+    missing = sorted(set(models) - named)
+    if missing:
+        per = tasks_per_model(conditions, models)
+        lost = sum(per[m] for m in missing)
+        fail(f'the generator emits {len(missing)} script(s) that no sbatch line in the '
+             f'runbook names: {", ".join(missing)} — {lost} tasks would never be queued')
+
+
 def check_pair_subset_has_a_command(text):
     """Censoring runs on a subset of pairs and is not in the array. It needs its own line.
 
@@ -249,6 +287,7 @@ def main():
     check_conditions(text)
     check_counts(text)
     ranges = check_array_ranges(text)
+    check_every_script_is_submitted(text)
     check_pair_subset_has_a_command(text)
     check_no_retired_flag(text)
 

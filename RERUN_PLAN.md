@@ -10372,6 +10372,99 @@ for its reasoning about replicate counts, not for its totals.
 
 ---
 
+### 13.18 LAUNCH LOG — what is on the cluster right now
+
+**Started 2026-09-02.** One row per submission, so that a results file can be traced back to the
+job that wrote it and a missing cell can be told apart from a job that never ran. Add to this
+section; do not start a second file for it.
+
+#### Submission 1 — the QM9 screen, 2026-09-02
+
+`slurm_scripts_qm9_rerun`, `--stage 0`: replicate 0, three conditions (gaussian, grouped-wider,
+grouped-shifted), 19 array scripts, **327 tasks, 2,071 training runs**.
+
+| | |
+|---|---|
+| Job IDs | **12971601 – 12971619** (19 arrays, one per model) |
+| What it is | The screen. It is also QM9's accuracy run — there is no separate accuracy family (§13.14) |
+| Uncertainty rows | Come out of these same jobs: `-u True` on every model that emits one, and the out-of-fold pass on the three settled representations, chosen per task by a case statement on the representation |
+| What it unblocks | Every deferred decision in §13.17 B — the deep-run pairs, the censoring pairs, and hERG's reporting level |
+
+⚠️ **Confirm the two variance-head networks are among the 19.** `RUNBOOK.md` §5 listed only
+seventeen scripts until it was fixed on 2026-09-02: `dnn_bnn_full_mve` and `mlp_bnn_full_mve` were
+in no `sbatch` line, which is 36 tasks and the only pair of models that gives the literature's
+flagship case — a network with a variance head — a per-molecule aleatoric term on QM9 (§2.34). The
+generator emitted 19 scripts and the submission reported 19 arrays, so they are almost certainly
+there, but it costs one command to be sure:
+
+```bash
+sacct -j 12971601-12971619 -X --format=JobID%12,JobName%42,State,Elapsed | sort -k2
+```
+
+Every one of the 19 model labels must appear once. `mve` must appear twice.
+
+#### Submission 2 — the laboratory breadth grid, 2026-09-02
+
+`slurm_scripts_validation_rerun`, `bash submit_all.sh` at `THROTTLE=4`: the same 19 models on the
+same three conditions, **327 tasks**, across logD, Caco-2 and hERG.
+
+| Job ID | Script | Tasks | Wall |
+|---|---|---|---|
+| 12971620 | `val_bnn-full-mve.sh` | 18 | 26:00 |
+| 12971621 | `val_bnn-full.sh` | 18 | 17:00 |
+| 12971622 | `val_dnn.sh` | 18 | 7:00 |
+| 12971623 | `val_gp-hetero.sh` | 18 | 68:00 |
+| 12971624 | `val_gp-tanimoto.sh` | **3** | 34:00 |
+| 12971625 | `val_gp.sh` | 18 | 34:00 |
+| 12971626 | `val_lightgbm.sh` | 18 | 7:00 |
+| 12971627 | `val_mlp-bnn-full-mve.sh` | 18 | 39:00 |
+| 12971628 | `val_mlp-bnn-full.sh` | 18 | 26:00 |
+| 12971629 | `val_mlp-vbll-full-hetero.sh` | 18 | 67:00 |
+| 12971630 | `val_mlp-vbll-full.sh` | 18 | 45:00 |
+| 12971631 | `val_mlp.sh` | 18 | 7:00 |
+| 12971632 | `val_ngboost.sh` | 18 | 97:00 |
+| 12971633 | `val_qrf.sh` | 18 | 20:00 |
+| 12971634 | `val_rf.sh` | 18 | 7:00 |
+| 12971635 | `val_svm.sh` | 18 | 3:00 |
+| 12971636 | `val_vbll-full-hetero.sh` | 18 | 69:00 |
+| 12971637 | `val_vbll-full.sh` | 18 | 46:00 |
+| 12971638 | `val_xgboost.sh` | 18 | 6:00 |
+
+The mapping is read off `submit_all.sh`, which submits in that order and nothing else, so the IDs
+are assigned in it. Tanimoto is 3 tasks because it runs on ECFP4 alone — Sort & Slice is built with
+counts rather than bits and the kernel refuses a non-binary matrix at fit time.
+
+**Why the laboratory is a separate second job and QM9 is not.** Not a difference to reconcile. QM9
+applies the settled uncertainty pairs inline, inside the same task; the laboratory runs them as a
+separate pass over the same pairs (`uncertainty_pairs.json`). The pairs are identical on both
+sides — six models on ECFP4, PDV and ChemBERTa — and only the plumbing differs (§13.14).
+
+#### The longest wall clocks, which is when this lands
+
+The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:59, then
+`gauche_rbf` at 42:59 and `dnn_bnn_full_variational` at 39:59. On the laboratory it is `ngboost` at
+97:00, then `vbll-full-hetero` at 69:00 and `gp-hetero` at 68:00 — and those are per task, with a
+throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
+**Nothing downstream should be planned against the mean.**
+
+#### What to run when they land, in order
+
+```bash
+# 1. Did every task finish, or did some hit the wall clock?
+sacct -j 12971601-12971638 -X --format=JobID%14,JobName%30,State,Elapsed,MaxRSS | grep -v COMPLETED
+
+# 2. QM9 only: fill the clean level in for the two conditions that did not run it.
+#    It refuses to overwrite a clean row a job computed and checks it instead --
+#    a free four-way agreement test on production runs.
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results <results-dir> --dry-run
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results <results-dir>
+
+# 3. The laboratory: merge the per-task files.
+python slurm_scripts_validation_rerun/merge_results.py
+```
+
+---
+
 ### 13.16 ✅ THE REPORTING LEVELS — SET 2026-08-28. Read this before quoting any accuracy number.
 
 ## QM9 1.0 · logD 1.0 · hERG 1.0 · Caco-2 0.75
