@@ -9028,7 +9028,7 @@ Nothing here is started. Steps 1 and 2 are the only ones that need you.
 |---|---|---|
 | 1 | Settle the five open decisions in §4 (the sixth was withdrawn — already decided 2026-08-14) | you |
 | 2 | ✅ **CLOSED 2026-08-27 — `NOISE_DESIGN.md` §7 has nothing open.** Laplace is kept at depth, the dose-matching rule was approved 2026-08-21, the positive-control question and the level grids were closed 2026-08-26, and the condition set was settled 2026-08-27 | — |
-| 3 | **Do NOT blanket-cancel the Gaussian-process jobs.** I previously said to kill job range 12822669–12822694. That was wrong: you submitted them deliberately on 2026-08-19 to settle a live question — *"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* Their zero-noise rows answer that question whatever happens to the noise scheme, because no noise is drawn there. **Let the zero-noise point land, harvest the kernel comparison, then cancel the rest.** Check state first: `sacct -j 12822669-12822694 --format=JobID,JobName%24,State,Elapsed` | you |
+| 3 | **Do NOT blanket-cancel the Gaussian-process jobs.** I previously said to kill job range 12822669–12822694. That was wrong: you submitted them deliberately on 2026-08-19 to settle a live question — *"Unsure if I should do tanimoto or switch to rbf. Or do both … It would be nice to include it in the anova and the kernel difference is holding me back."* Their zero-noise rows answer that question whatever happens to the noise scheme, because no noise is drawn there. **Let the zero-noise point land, harvest the kernel comparison, then cancel the rest.** Check state first: `sacct -j $(seq -s, 12822669 12822694) --format=JobID,JobName%24,State,Elapsed` — **`sacct -j` takes a comma-separated list, never a range.** Given a range it silently reports the first job only; written as `12822669-12822694` this line was asking about one job of twenty-six | you |
 | 4 | Archive the current results before anything overwrites them — they are the only record of what the paper claims today | — |
 | 5 | Delete and build the noise scheme in Rust (§5.1 items 1–4) | 2 |
 | 6 | Implement the same specification in Python and cross-check (§5.1 item 3) | 5 |
@@ -10451,9 +10451,27 @@ throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five t
 
 #### What to run when they land, in order
 
+⚠️ **`sacct -j` takes a comma-separated list, never a range.** `sacct -j 12971601-12971638`
+reports on job 12971601 and silently ignores the other 37 — caught on 2026-09-03, when it showed
+eighteen completed tasks and nothing else while four tasks of 12971620 were running. Build the list
+with `seq -s,`. **And `sacct` cannot see a job that has not started**: with a `-S` window a queued
+array is simply absent, which reads exactly like a job that vanished. `squeue` is what answers
+"where is it in the queue"; `sacct` answers "how did it end".
+
 ```bash
+JOBS=$(seq -s, 12971601 12971638)
+
+# The tally: how many tasks are in each state.
+sacct -M arc -S 2026-09-02 -j "$JOBS" -X -n --format=State%20 \
+  | awk '{print $1}' | sort | uniq -c | sort -rn
+
+# Per array, so a part-finished array is visible as such.
+sacct -M arc -S 2026-09-02 -j "$JOBS" -X -n -P --format=JobID,JobName,State \
+  | awk -F'|' '{split($1,a,"_"); print a[1], $2, $3}' | sort | uniq -c | sort -k2,2n
+
 # 1. Did every task finish, or did some hit the wall clock?
-sacct -j 12971601-12971638 -X --format=JobID%14,JobName%30,State,Elapsed,MaxRSS | grep -v COMPLETED
+sacct -M arc -S 2026-09-02 -j "$JOBS" -X -n -P \
+      --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS | grep -vE '\|(COMPLETED|RUNNING)\|'
 
 # 2. QM9 only: fill the clean level in for the two conditions that did not run it.
 #    It refuses to overwrite a clean row a job computed and checks it instead --
