@@ -10476,22 +10476,48 @@ cp /data/stat-cadd/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv \
 wc -l /data/stat-ecr/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv   # expect 1416
 ```
 
-Then resubmit only the hERG third of the arrays that already got that far, and **only after the
-file is in place** — every array still queued is saved by the copy alone:
+**Recovery, in four steps. Do not submit four arrays on one diagnosis.** A failed array task
+cannot be restarted, so recovery is always a new submission — but the first three steps cost no
+cluster time and each one has to pass before the next.
 
 ```bash
-for s in bnn-full-mve bnn-full dnn lightgbm; do
-    sbatch --array=12-17%4 val_$s.sh
-done
-sbatch --array=2 val_gp-tanimoto.sh
+# 1. Does hERG load now? Login node, submits nothing, exits non-zero if not.
+#    Written for exactly this question; it ends by reporting the molecule count
+#    from the runner's own loader, which is the thing a task really does.
+bash slurm_scripts_validation_rerun/preflight.sh
+
+# 2. ONE task. lightgbm is the cheapest witness -- 7:00 wall, and it failed at
+#    26 seconds, so a pass is obvious fast. Index 12 is hERG on ECFP4.
+sbatch --array=12 val_lightgbm.sh
+
+# 3. Did it write rows, not just exit 0? State is not output.
+sacct -M arc -j <that job> -X --format=JobID,State,ExitCode,Elapsed
+find /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/lightgbm_ecfp4_herg \
+     -name 'all_results*.csv' -exec wc -l {} +
+
+# 4. Only then, the rest of the hERG third.
+for s in bnn-full-mve bnn-full dnn; do sbatch --array=12-17%4 val_$s.sh; done
+sbatch --array=13-17%4 val_lightgbm.sh    # 12 was step 2
+sbatch --array=2       val_gp-tanimoto.sh
 ```
 
-**Guarded, 2026-09-03.** The generated scripts now check the cache for the dataset the task is
+**Every array still queued is saved by the copy alone** — fourteen of the nineteen had not reached
+index 12 when this was found, so they need no resubmission at all.
+
+**Guarded twice, 2026-09-03.** The generated scripts check the cache for the dataset the task is
 about to run, before the model backend is imported, and exit 2 naming the file and the `cp`. LogD
 and Caco-2 get a warning rather than a refusal, because the runner does refetch those — but
 eighteen tasks fetching one file at once is the pattern the QM9 runbook warms caches to avoid.
 Proved three ways: hERG with no cache exits 2, hERG with the cache reports 1,416 lines and
 proceeds, logd with no cache warns and proceeds.
+
+The second guard is `preflight.sh`, generated beside the job scripts and carrying no SLURM header
+on purpose. The in-script guard stops a task early; it still needs a task. The preflight answers
+the question **before anything is queued** — it checks the three cache files, then loads hERG
+through the runner's own loader and reports the molecule count. Proved both ways: against a
+checkout with no cache it exits 1 naming the file, against one with the cache it reports **1,415
+molecules** and passes. An import failure is reported as INCONCLUSIVE rather than as a failure,
+because that is an environment problem and not this one.
 
 **A second defect, found while reading for this.** The laboratory scripts wrote their log to
 `val_<model>_%j.out`. For an array task `%j` is the task's own internal job id, which appears

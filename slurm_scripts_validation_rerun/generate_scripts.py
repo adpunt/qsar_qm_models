@@ -614,6 +614,140 @@ echo "=== finished: $(date)  exit=$status"
 exit $status
 """
 
+# PREFLIGHT. Costs nothing, submits nothing, runs on a login node.
+#
+# Written 2026-09-03, after all 26 failures in the first laboratory launch turned
+# out to be one missing file: tests/data_cache/*.csv is gitignored in KIRBy, and
+# hERG is the one dataset the runner REFUSES to refetch (RERUN_PLAN.md 13.18).
+# The in-script guard added the same day stops a task early; this answers the
+# question before a task is submitted at all, which is what the author actually
+# needed and did not have.
+PREFLIGHT_BODY = """#!/bin/bash
+# Will an hERG task run? Answers it without submitting anything.
+#
+#   bash preflight.sh [path-to-KIRBy]
+#
+# Exit 0 means an hERG task will get past the point where all 26 tasks failed on
+# 2026-09-02. It does NOT promise the fit succeeds -- only that the data loads.
+set -u
+KIRBY_DIR="${{1:-{kirby_dir}}}"
+CACHE="$KIRBY_DIR/tests/data_cache"
+fail=0
+warn=0
+
+echo "=== KIRBy:  $KIRBY_DIR"
+echo "=== cache:  $CACHE"
+echo
+
+if [ ! -d "$KIRBY_DIR" ]; then
+    echo "FAIL  no KIRBy checkout at $KIRBY_DIR"
+    echo "      Pass the right path as the first argument."
+    exit 1
+fi
+
+# 1. THE FILE THAT WAS MISSING.
+if [ ! -s "$CACHE/chembl_herg_ki.csv" ]; then
+    echo "FAIL  $CACHE/chembl_herg_ki.csv is missing or empty."
+    echo "      This is what killed every hERG task. The runner will not fetch it:"
+    echo "      ChEMBL today is a different dataset from the one this study is built"
+    echo "      on, so fetching would silently change the labels."
+    echo
+    echo "      Copy it from the other checkout:"
+    echo "        cp /data/stat-cadd/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv $CACHE/"
+    echo "      Do NOT set KIRBY_ALLOW_CHEMBL_FETCH."
+    fail=1
+else
+    n_lines=$(wc -l < "$CACHE/chembl_herg_ki.csv")
+    echo "ok    chembl_herg_ki.csv present, $n_lines lines"
+    if [ "$n_lines" -ne 1416 ]; then
+        echo "WARN  expected 1416 lines -- 1,415 molecules plus a header, which is the"
+        echo "      hERG count the reporting level in RERUN_PLAN.md 13.16 rests on."
+        echo "      A different count means a different extraction; check before running."
+        warn=1
+    fi
+fi
+
+# 2. WHICH ChEMBL RELEASE. A warning, never a failure -- an unstamped cache still
+#    trains, it just cannot be cited.
+if [ -s "$CACHE/chembl_herg_ki.provenance.json" ]; then
+    echo "ok    provenance stamp present"
+else
+    echo "WARN  no chembl_herg_ki.provenance.json beside it, so which ChEMBL release"
+    echo "      produced these labels is unrecorded. Copy it across if it exists."
+    warn=1
+fi
+
+# 3. THE OTHER TWO DATASETS. The runner refetches these with no guard, so a miss
+#    is slow rather than fatal -- but eighteen tasks fetching one file at once is
+#    the pattern the QM9 runbook warms caches to avoid.
+if [ -s "$CACHE/openadmet_train.csv" ]; then
+    echo "ok    openadmet_train.csv present (logD and Caco-2)"
+else
+    echo "WARN  no openadmet_train.csv -- every logD and Caco-2 task will download it."
+    warn=1
+fi
+
+echo
+if [ "$fail" -ne 0 ]; then
+    echo "PREFLIGHT FAILED -- fix the above and run this again. Submit nothing yet."
+    exit 1
+fi
+
+# 4. THE ACTUAL PROOF: ask the runner's own loader for the data. Everything above
+#    is about a file on disk; this is the thing a task really does. Import failure
+#    is reported as its own outcome, because that is an environment problem and
+#    not the missing-cache problem this script is about.
+echo "=== loading hERG through the runner's own loader (a minute or so) ..."
+python - "$KIRBY_DIR" <<'PYLOAD'
+import sys, pathlib, importlib.util, traceback
+root = pathlib.Path(sys.argv[1], 'tests')
+sys.path.insert(0, str(root))
+try:
+    spec = importlib.util.spec_from_file_location(
+        'kirby_runner', root / 'alternative_data_noise_robustness.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+except Exception:
+    traceback.print_exc()
+    print()
+    print("INCONCLUSIVE: the runner would not import. That is an environment")
+    print("              problem, not the missing hERG cache. Check that env_test")
+    print("              is activated -- '. setup.sh' in an allocation.")
+    sys.exit(2)
+try:
+    smiles, labels = mod.load_chembl_herg()
+except Exception:
+    traceback.print_exc()
+    print()
+    print("FAIL: the loader raised. If the message mentions KIRBY_ALLOW_CHEMBL_FETCH")
+    print("      the cache is still not where the runner looks for it.")
+    sys.exit(1)
+n = len(labels)
+print(f"ok    hERG loaded: {{n}} molecules")
+if n != 1415:
+    print(f"WARN  expected 1415 -- the count every existing hERG result and the")
+    print(f"      reporting level rest on. Got {{n}}. Do not resubmit until you know why.")
+    sys.exit(3)
+PYLOAD
+rc=$?
+
+echo
+case "$rc" in
+  0) if [ "$warn" -ne 0 ]; then
+         echo "PREFLIGHT PASSED, with warnings above. An hERG task will now run."
+     else
+         echo "PREFLIGHT PASSED. An hERG task will now run."
+     fi
+     echo "Next: ONE task, not the grid --  sbatch --array=12 val_lightgbm.sh"
+     ;;
+  2) echo "PREFLIGHT INCONCLUSIVE -- the environment, not the cache. See above." ;;
+  3) echo "PREFLIGHT PASSED THE FILE CHECKS but the molecule count is wrong. See above." ;;
+  *) echo "PREFLIGHT FAILED -- see above. Submit nothing." ;;
+esac
+exit $rc
+"""
+
+
 # The smoke test: two models writing into ONE rep_dataset directory, checking
 # that the second does not overwrite the first. Generated here rather than kept
 # by hand -- it was the last script in this directory still carrying the dead
@@ -829,6 +963,12 @@ def main():
     )
     with open(os.path.join(output_dir, 'smoke_test.sh'), 'w') as f:
         f.write(smoke)
+
+    # The preflight is NOT a SLURM script and deliberately has no header: its
+    # whole value is that it answers the hERG question on a login node, before
+    # any task is queued.
+    with open(os.path.join(output_dir, 'preflight.sh'), 'w') as f:
+        f.write(PREFLIGHT_BODY.format(kirby_dir=args.kirby_dir))
 
     # SUBMIT SCRIPT. It used to print "Submitted N jobs" from a counter it
     # incremented itself, so it said 144 even if every sbatch had been rejected.
