@@ -10480,7 +10480,20 @@ wc -l /data/stat-ecr/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv   # expe
 cannot be restarted, so recovery is always a new submission — but the first three steps cost no
 cluster time and each one has to pass before the next.
 
+⚠️ **Step 0 is on the laptop, and it is not optional: `git push origin additional_reps`.**
+The cluster's only route in is a pull, so a fix that is committed and not pushed does not exist
+there. On 2026-09-03 the recovery was run against an unpushed branch: `git pull` said *"Already up
+to date"*, HEAD stayed at `b2b8cd8`, the regenerate rebuilt the scripts that had just failed, and
+`bash preflight.sh` answered *"No such file or directory"* — then a task went in under the old
+script anyway. Nothing was lost, but the whole recovery ran on the version of the code being
+recovered from. This is §13.17 A3, and it is the second time it has cost a launch.
+
 ```bash
+# 0. ON THE LAPTOP FIRST. Then, on the cluster: bash scripts/pull_safely.sh and
+#    regenerate. Confirm the pull actually moved before going on -- `git log -1`
+#    must show the commit carrying the fix, not the one before it.
+git push origin additional_reps
+
 # 1. Does hERG load now? Login node, submits nothing, exits non-zero if not.
 #    Written for exactly this question; it ends by reporting the molecule count
 #    from the runner's own loader, which is the thing a task really does.
