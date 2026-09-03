@@ -10449,6 +10449,61 @@ The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:
 throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
 **Nothing downstream should be planned against the mean.**
 
+#### 🔴 2026-09-03 — the whole hERG third of the laboratory failed, and the cause is a gitignored file
+
+**Every failure in the launch was hERG, and only hERG.** `sacct` on 2026-09-03: 26 FAILED, all of
+them array index 12–17 of a `val_*` array, all exit 1, all in under two minutes and twenty seconds.
+Index 12–17 is `dataset = i / 6` = the third dataset. `val_gp-tanimoto` has three tasks rather than
+eighteen and the one that failed was index 2 — the same third. Nothing else in either submission
+failed, and QM9 has no failures at all.
+
+**Why.** `tests/data_cache/*.csv` is gitignored in KIRBy, so a checkout on a filesystem that has
+never fetched carries none of it. LogD and Caco-2 survive that: `download_openadmet` refetches
+them with no guard, which is why index 0–11 completed. hERG does not:
+`fetch_chembl_herg_ki` **refuses** to fetch without `KIRBY_ALLOW_CHEMBL_FETCH=1`, on purpose,
+because ChEMBL grows and today's release is not the dataset any existing result came from. The
+refusal is correct. What was missing is anything that says so before eighteen tasks have started.
+
+**The fix is to copy the file, not to set the flag.** The cached CSV is 1,416 lines — 1,415
+molecules, which is the hERG count every existing result and the §13.16 reporting level rest on.
+Fetching live would silently change the dataset under the study.
+
+```bash
+cp /data/stat-cadd/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv \
+   /data/stat-ecr/scat9264/KIRBy/tests/data_cache/
+# bring chembl_herg_ki.provenance.json too if it exists, or which ChEMBL release
+# produced the labels goes unrecorded
+wc -l /data/stat-ecr/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv   # expect 1416
+```
+
+Then resubmit only the hERG third of the arrays that already got that far, and **only after the
+file is in place** — every array still queued is saved by the copy alone:
+
+```bash
+for s in bnn-full-mve bnn-full dnn lightgbm; do
+    sbatch --array=12-17%4 val_$s.sh
+done
+sbatch --array=2 val_gp-tanimoto.sh
+```
+
+**Guarded, 2026-09-03.** The generated scripts now check the cache for the dataset the task is
+about to run, before the model backend is imported, and exit 2 naming the file and the `cp`. LogD
+and Caco-2 get a warning rather than a refusal, because the runner does refetch those — but
+eighteen tasks fetching one file at once is the pattern the QM9 runbook warms caches to avoid.
+Proved three ways: hERG with no cache exits 2, hERG with the cache reports 1,416 lines and
+proceeds, logd with no cache warns and proceeds.
+
+**A second defect, found while reading for this.** The laboratory scripts wrote their log to
+`val_<model>_%j.out`. For an array task `%j` is the task's own internal job id, which appears
+nowhere in `squeue` or in `sacct`'s `JobID` — so the log of a failed task could not be found by its
+array index at all. Now `%A_%a`, the way QM9 has always done it. **The scripts submitted on
+2026-09-02 still carry `%j`**, so until they are resubmitted, find a log through `JobIDRaw`:
+
+```bash
+sacct -M arc -j 12971626 -X -n -P --format=JobID,JobIDRaw,State | grep FAILED
+# then: slurm_scripts_validation_rerun/val_lightgbm_<JobIDRaw>.out
+```
+
 #### What to run when they land, in order
 
 ⚠️ **`sacct -j` takes a comma-separated list, never a range.** `sacct -j 12971601-12971638`

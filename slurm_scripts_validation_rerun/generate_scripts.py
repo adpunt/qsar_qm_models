@@ -478,7 +478,7 @@ PYCHECK
 SLURM_HEADER = """#!/bin/bash
 #SBATCH --job-name=val_{safe_name}
 #SBATCH --account=stat-cadd
-#SBATCH --output=val_{safe_name}_%j.out
+#SBATCH --output=val_{safe_name}_%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -527,6 +527,49 @@ dataset="${{DATASETS[$(( i / n_rep ))]}}"
 case "$dataset" in
 {dataset_cases}
   *) echo "ERROR: unknown dataset '$dataset'"; exit 2 ;;
+esac
+
+# THE DATASET'S CACHE MUST BE ON DISK BEFORE THE MODEL IS IMPORTED.
+#
+# `tests/data_cache/*.csv` is gitignored in KIRBy, so a fresh clone or a checkout
+# on a different filesystem has none of it. The two OpenADMET endpoints survive
+# that -- `download_openadmet` refetches them with no guard -- but hERG does NOT:
+# `fetch_chembl_herg_ki` REFUSES to fetch without KIRBY_ALLOW_CHEMBL_FETCH=1,
+# deliberately, because ChEMBL grows and today's release is not the dataset any
+# existing result came from.
+#
+# That refusal cost the whole hERG third of the 2026-09-02 launch: every task at
+# index 12-17 of every array that got that far died with exit 1 in under two
+# minutes, and nothing said why until a log was read (RERUN_PLAN.md 13.18). It is
+# the last third of the array, so it fails AFTER logd and caco2 have succeeded
+# and the run looks healthy.
+#
+# Checked here rather than left to the runner, because the runner raises after
+# importing a torch backend -- one to two minutes per task, times eighteen tasks,
+# times nineteen arrays.
+CACHE_DIR="$KIRBY_DIR/tests/data_cache"
+case "$dataset" in
+  herg)
+    if [ ! -s "$CACHE_DIR/chembl_herg_ki.csv" ]; then
+        echo "ERROR: $CACHE_DIR/chembl_herg_ki.csv is missing or empty, and the"
+        echo "       runner will not fetch hERG live -- ChEMBL today is a different"
+        echo "       dataset from the one every existing result was produced from."
+        echo "       COPY the cached file in; do not set KIRBY_ALLOW_CHEMBL_FETCH."
+        echo "       The other checkout is the likely source:"
+        echo "         cp /data/stat-cadd/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv $CACHE_DIR/"
+        echo "       Bring chembl_herg_ki.provenance.json with it if it exists, or"
+        echo "       which ChEMBL release the labels came from goes unrecorded."
+        exit 2
+    fi
+    _n_herg=$(wc -l < "$CACHE_DIR/chembl_herg_ki.csv")
+    echo "=== hERG cache: $CACHE_DIR/chembl_herg_ki.csv, $_n_herg lines"
+    ;;
+  *)
+    # Not fatal: the runner refetches these. But eighteen tasks fetching one file
+    # at once is the pattern the QM9 runbook warms caches to avoid.
+    [ -s "$CACHE_DIR/openadmet_train.csv" ] || \
+        echo "WARNING: no $CACHE_DIR/openadmet_train.csv -- this task will download it."
+    ;;
 esac
 
 # The Gaussian process runs on PDV alone unless --gp-reps says otherwise, so a GP
