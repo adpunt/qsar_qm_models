@@ -314,9 +314,13 @@ def main():
     ap.add_argument('--n-models', type=int, default=4,
                     help='4 models x 3 representations is the dozen pairs 13.14 '
                          'prices the deep run at.')
+    # The repo root, NOT results/: results/* is gitignored, and this file has to
+    # reach the cluster through git because every deep-run task reads it at run
+    # time. It sits beside uncertainty_pairs.json and noise_conditions.json, which
+    # are the same kind of file.
     ap.add_argument('--out', default=None,
-                    help='write the selection here as JSON (default: '
-                         '<results-dir>/deep_run_pairs.json)')
+                    help='write the selection here as JSON '
+                         '(default: deep_run_pairs.json at the repo root)')
     cli = ap.parse_args()
 
     check_family_map()
@@ -410,7 +414,7 @@ def main():
         print(f"  Re-run this when they land. The rule does not change; only what it "
               f"can see does.")
 
-    out = Path(cli.out) if cli.out else results_dir / 'deep_run_pairs.json'
+    out = Path(cli.out) if cli.out else ROOT / 'deep_run_pairs.json'
     out.write_text(json.dumps({
         'what_this_is': 'the deep-run and censoring selection, read off the screen',
         'rule': 'RERUN_PLAN.md 13.17 B',

@@ -1,0 +1,20 @@
+{
+  "what_this_is": "The models and representations the DEEP RUN and CENSORING run on, on both pipelines. Read by every deep-run task WHEN IT STARTS, not when it was generated -- so this file can be edited at any time up to the moment a task begins, and that is the point of it.",
+  "the_rule": "RERUN_PLAN.md 13.17 B. Seeded 2026-09-05 with the six models the author settled on 2026-09-04, before the screen finished. Re-read it with: python scripts/select_deep_run_pairs.py --results-dir results",
+  "one_way": "NARROWING this list later is free -- a task that is no longer listed skips and exits 0. WIDENING it means resubmitting the indices of the models you add, because a task that already skipped stays skipped.",
+
+  "models": ["ngboost", "rf", "het_gp_rbf", "svm", "gauche_rbf", "dnn_bnn_full_mve"],
+  "generator_labels": ["ngboost", "rf", "heteroscedastic_gp", "svm", "gauche_rbf", "dnn_bnn_full_mve"],
+  "validation_labels": ["NGBoost", "RF", "GP-Hetero", "SVM", "GP", "BNN-Full-MVE"],
+  "representations": ["ecfp4", "pdv", "chemberta"],
+
+  "why_each": {
+    "ngboost": "locked on by 13.17 B; the generator refuses to build a deep run without it",
+    "rf": "most noise-tolerant model on all three representations in the screen",
+    "het_gp_rbf": "least noise-tolerant on two of three -- READ OFF ONE CONDITION, the slot most likely to change",
+    "svm": "the only kernel model; covers a family nothing else does",
+    "gauche_rbf": "author's addition, for the per-molecule uncertainty requirement: aleatoric x17.2 against epistemic x1.5, the cleanest separation in the roster (5.5i)",
+    "dnn_bnn_full_mve": "author's addition: x2.5 against x1.1, and the literature's flagship variance-head case"
+  },
+  "provisional": true
+}

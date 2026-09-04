@@ -845,6 +845,14 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
+# 64G AT 8 CORES IS EXACTLY THE 8 GB/core THE PARTITIONS OFFER, so a task
+# backfills into an ordinary slot. 128G at 8 cores asks for 16 cores' worth
+# of memory and therefore waits for a whole node, which is why 29 of the
+# author's pending jobs sat on (Priority) with 5,000 CPUs idle on 2026-09-05.
+# The measured peak over 179 completed QM9 tasks was 4.03 GB.
+MEM = '64G'
+
+
 def main():
     ap = argparse.ArgumentParser(
         description='Generate the validation re-run job scripts.',
@@ -909,8 +917,17 @@ def main():
     # now get the same noise as QM9 (author, 2026-08-28), which means the same
     # conditions on the same shape of run -- not these three across 8 models x 6
     # representations, which is 3 x the breadth grid's cost and was never the design.
+    # --runtime-selection is the exemption, and only that: it generates a task for
+    # every pair on purpose, because the whole point is to hold a queue position
+    # before the selection exists. The task itself then refuses to do any work
+    # unless the file lists it, so the grid is still restricted -- just later, and
+    # by the file rather than by the command line.
     deep = [c for c in conditions if c in DEEP_ONLY_SET]
-    if deep and not (args.models and args.reps):
+    if deep and args.runtime_selection and not (args.models or args.reps):
+        print(f"  run-time selection: every model and representation is generated; "
+              f"each task reads\n    {args.runtime_selection}\n  when it starts and "
+              f"exits 0 without work if it is not listed.")
+    elif deep and not (args.models and args.reps):
         ap.error(
             f"the deep run ({', '.join(deep)}) goes on a named subset of "
             f"model-and-representation pairs, not the full grid, so it needs --models and "
@@ -920,14 +937,16 @@ def main():
 
     # A pair-subset condition across the whole grid is the accident this guards.
     restricted = [c for c in conditions if c in PAIR_SUBSET]
-    if restricted and not (args.models and args.reps):
+    if restricted and args.runtime_selection and not (args.models or args.reps):
+        pass                       # same exemption; the file restricts it at run time
+    elif restricted and not (args.models and args.reps):
         n = PAIR_SUBSET[restricted[0]]['n_pairs']
         ap.error(
             f"{', '.join(restricted)} runs on about {n} model-and-representation pairs, not the "
             f"full grid, so it needs --models and --reps. Which pairs comes from the screen; see "
             f"RERUN_PLAN.md 13.13. To run the rest without it, take the default: "
             f"{' '.join(BREADTH_GRID)}.")
-    if restricted and args.models and args.reps:
+    if restricted and args.models and args.reps and not args.runtime_selection:
         n_pairs = len(args.models) * len(args.reps)
         want = PAIR_SUBSET[restricted[0]]['n_pairs']
         if n_pairs > 2 * want:
@@ -976,7 +995,7 @@ def main():
         cases = '\n'.join(
             f'  {d}) dataset_cli="{cli}" ;;' for d, cli in DATASETS)
         content = (
-            SLURM_HEADER.format(safe_name=f'{model.lower()}'[:30], mem='128G',
+            SLURM_HEADER.format(safe_name=f'{model.lower()}'[:30], mem=MEM,
                                 partition='long', time_limit=f'{hours}:00:00')
             + PREAMBLE.format(kirby_dir=args.kirby_dir,
                               qsar_dir=args.qsar_dir,
@@ -1003,7 +1022,7 @@ def main():
     # The smoke test runs RF and SVM, so its guard has to cover both.
     herg_path, herg_cli = next(d for d in DATASETS if d[0] == 'herg')
     smoke = (
-        SLURM_HEADER.format(safe_name='smoke', mem='128G', partition='short',
+        SLURM_HEADER.format(safe_name='smoke', mem=MEM, partition='short',
                             time_limit='1:00:00')
         + PREAMBLE.format(kirby_dir=args.kirby_dir, qsar_dir=args.qsar_dir,
                           model='RF SVM', levels_json=repr(DOSE_LEVELS),

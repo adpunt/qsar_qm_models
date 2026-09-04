@@ -1006,10 +1006,11 @@ def main():
     # Gaussian processes, the variational networks and the two variance-head
     # networks -- have not been measured, which is why the headroom is 8x rather
     # than 2x. Re-measure once they land and cut it again if it holds.
-    ap.add_argument('--mem', default='32G',
-                    help='memory per task. Default measured off the screen: '
-                         '4.03 GB worst case over 179 completed tasks, 8x '
-                         'headroom for the models not yet measured.')
+    ap.add_argument('--mem', default='64G',
+                    help='memory per task. 64G at 8 cores is exactly the 8 GB/core '
+                         'the partitions offer, so it backfills; 128G asks for a '
+                         'whole node. Measured peak over 179 completed tasks: '
+                         '4.03 GB.')
     ap.add_argument('--stage', type=int, default=1, choices=[0, 1, 2],
                     help='0 screen (1 replicate), 1 breadth (replicates 1-9, appended to '
                          'stage 0), 2 depth (all conditions, chosen models and reps). '
