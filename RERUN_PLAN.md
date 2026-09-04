@@ -10880,19 +10880,30 @@ changed in place — which keeps the submit time, and therefore the queue positi
 cancel-and-resubmit throws away. **Two tiers, not one** (§13.21): the six tree and deterministic
 arrays go to 64G, the thirteen networks and Gaussian processes to 96G.
 
+⚠️ **`MinMemoryNode` takes MEGABYTES as a plain integer.** `MinMemoryNode=96G` is rejected with
+`error: Invalid MinMemoryNode value: 96G` — the suffix is what it refuses, not the size. `--mem=96G`
+in a batch script and `MinMemoryNode=98304` on `scontrol` are the same request. 64G = **65536**,
+96G = **98304**, 128G = 131072.
+
 ```bash
 for j in 12980573 12980574 12980575 12980576 12980577 12980589; do   # rf xgboost lgb svm ngboost qrf
-    scontrol update JobId=$j MinMemoryNode=64G; done
+    scontrol update JobId=$j MinMemoryNode=65536; done
 for j in 12980578 12980579 12980580 12980581 12980582 12980583 12980584 \
          12980585 12980586 12980587 12980588 12980590 12980591; do   # the networks and the GPs
-    scontrol update JobId=$j MinMemoryNode=96G; done
+    scontrol update JobId=$j MinMemoryNode=98304; done
 
-scontrol show job 12980573 | grep -o 'mem=[0-9]*[MG]'      # mem=64G
-scontrol show job 12980578 | grep -o 'mem=[0-9]*[MG]'      # mem=96G
+# Check it took. scontrol prints this as MinMemoryNode=<n>M on the same line as MinCPUsNode.
+for j in 12980573 12980578; do
+    printf "%s  " $j; scontrol show job $j | grep -o 'MinMemoryNode=[0-9]*[A-Z]*'; done
+# 12980573  MinMemoryNode=64G     (or 65536M, depending on the build)
+# 12980578  MinMemoryNode=96G     (or 98304M)
 ```
 
-The mapping is the launch log's own table below, read against `model_memory.json`; regenerate it
-rather than retyping it if the tiers change.
+If `scontrol` still refuses — some sites forbid raising memory on a pending job at all — fall back
+to `scancel` and resubmit, which is the block below.
+
+The job-to-tier mapping is the launch log's own table further down, read against
+`model_memory.json`; regenerate it rather than retyping it if the tiers change.
 
 If `scontrol` refuses — some sites restrict it — cancel and resubmit, and only then:
 
