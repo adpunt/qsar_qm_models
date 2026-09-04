@@ -10931,6 +10931,56 @@ input to both deep runs:
  "representations": ["ecfp4", "pdv", "chemberta"]}
 ```
 
+#### STEPS 4 AND 5 CAN BE SUBMITTED NOW — the selection is read when a task STARTS
+
+**The author's reason for wanting the selection in a JSON, stated 2026-09-04 and missed the first
+time.** It was never about avoiding retyping six flags. It is the same fact that makes a blanket
+cancel wrong in STEP 2: **a queued task has read nothing yet.** So the deep run can hold a queue
+position before the screen has been read, and the choice can be made any time before the tasks
+start — which on this queue is days.
+
+`--pairs-file` does NOT do that. It is consumed by the generator and the choice is baked into the
+`.sh`, so editing the file afterwards changes nothing. **`--runtime-selection` does.** It generates
+a task for every model and representation and puts a check inside each one:
+
+```bash
+# generate for EVERYTHING, and let the file decide at run time. Absolute path --
+# it is read on the compute node.
+SEL=/data/stat-cadd/scat9264/qsar_qm_models/results/deep_run_pairs.json
+
+cd slurm_scripts_qm9_rerun
+python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
+for f in qm9_s2_*.sh; do sbatch --account=$ACCT --partition=long --array=0-35%4 $f; done
+
+cd ../slurm_scripts_validation_rerun
+python generate_scripts.py --include-depth-conditions --runtime-selection $SEL \
+    --out-dir ../slurm_scripts_validation_depth
+cd ../slurm_scripts_validation_depth && bash submit_all.sh
+```
+
+A task whose model and representation are not in the file prints `SKIPPED`, explains that this is
+not a failure, and **exits 0 without fitting anything**. One selected does its work as usual. The
+QM9 gate matches the generator's labels, the laboratory gate matches the runner's spellings
+(`RF`, `NGBoost`, `GP`), and `select_deep_run_pairs.py` writes both — `generator_labels` and
+`validation_labels` — off `model_names.json`, so one file drives both pipelines.
+
+Proved four ways on each side: a listed pair runs, an unlisted one skips with exit 0, **editing the
+file flips an already-generated script's behaviour with no regeneration**, and a missing file exits
+2 rather than guessing.
+
+⚠️ **Three things to know before using it.**
+
+- **Skipping is one-way.** A task that has already skipped stays skipped. NARROWING the selection
+  later is free; WIDENING it means resubmitting those indices.
+- **The file must exist and be right from the moment you submit.** Seed it with the current best
+  reading — a task that starts before you have edited it uses what is there. A missing file is an
+  exit 2, not a silent skip.
+- **A skipped task is not a failed one.** Any coverage check run over these arrays has to read
+  `SKIPPED` as intended, or it will report most of the grid as missing.
+
+**If you would rather decide first**, `--pairs-file` is still the route, and it is the one to use
+once the screen has landed:
+
 #### STEP 4 — the QM9 deep run and censoring
 
 ```bash

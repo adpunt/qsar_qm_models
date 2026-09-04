@@ -215,6 +215,28 @@ def floor_disagrees(df, conditions, reps, n_models):
     return (sorted(a), sorted(b)) if sorted(a) != sorted(b) else None
 
 
+def validation_labels(chosen):
+    """The laboratory runner's spellings, so one file drives both pipelines.
+
+    The runner says 'RF', 'NGBoost', 'GP'; the results say 'rf', 'ngboost',
+    'gauche_rbf'. model_names.json holds the correspondence and is the only place
+    it is written down.
+    """
+    val_map = json.loads((ROOT / 'model_names.json').read_text()).get('validation', {})
+    out, unresolved = [], []
+    for m in chosen:
+        cands = sorted([k for k, v in val_map.items() if v == m], key=len)
+        if cands:
+            out.append(cands[-1])
+        else:
+            unresolved.append(m)
+    if unresolved:
+        print(f"\n  WARNING no laboratory spelling in model_names.json for "
+              f"{', '.join(unresolved)}. The laboratory run-time gate will not "
+              f"match them.")
+    return out
+
+
 def generator_labels(chosen):
     """Translate results-side names into the labels --models will accept.
 
@@ -399,6 +421,7 @@ def main():
         'models_absent_from_the_screen': absent,
         'models': chosen,
         'generator_labels': labels,
+        'validation_labels': validation_labels(chosen),
         'why': why,
         'representations': cli.reps,
         'n_pairs': n_pairs,

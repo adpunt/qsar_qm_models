@@ -520,7 +520,7 @@ fi
 rep="${{REPS[$(( i % n_rep ))]}}"
 rep_safe="${{REPS_SAFE[$(( i % n_rep ))]}}"
 dataset="${{DATASETS[$(( i / n_rep ))]}}"
-
+{runtime_selection_block}
 # The runner spells hERG 'herg_ki' on the command line and 'herg' in its output
 # directory; both spellings are load-bearing and neither can be derived from the
 # other, so the pair is carried explicitly.
@@ -807,6 +807,44 @@ def safe_name(rep):
     return rep.replace('-', '_').lower()
 
 
+# THE RUN-TIME SELECTION GATE -- the laboratory half of RERUN_PLAN.md 13.19 STEP 5.
+#
+# Same purpose as the QM9 one and the same file drives both: a queued task has
+# read nothing, so the selection can be edited up to the moment it starts. This
+# is what lets the deep run be SUBMITTED before the screen has been read.
+#
+# It matches on `validation_labels` if the file has them -- the laboratory runner
+# spells models 'RF', 'NGBoost', 'GP' where the results carry 'rf', 'ngboost',
+# 'gauche_rbf' -- and falls back to `models` so a hand-written file still works.
+RUNTIME_SELECTION_BLOCK = """
+SELECTION_FILE="{selection_file}"
+if [ ! -f "$SELECTION_FILE" ]; then
+    echo "ERROR: --runtime-selection was set at generation time but"
+    echo "       $SELECTION_FILE does not exist. This task cannot tell whether it"
+    echo "       is in the deep run, so it refuses rather than guessing."
+    exit 2
+fi
+_selected=$(python - "$SELECTION_FILE" "{model}" "$rep" <<'PYSEL'
+import json, sys
+spec = json.loads(open(sys.argv[1]).read())
+models = (spec.get('validation_labels') or spec.get('models') or [])
+reps = spec.get('representations') or spec.get('reps') or []
+# The representation is spelled 'ECFP4' here and 'ecfp4' in the results, so the
+# comparison is case-folded. Model names are not -- 'GP' and 'gp' are different
+# rosters on this side and a fold would hide that.
+reps = {{str(r).lower() for r in reps}}
+print('yes' if sys.argv[2] in models and sys.argv[3].lower() in reps else 'no')
+PYSEL
+) || {{ echo "ERROR: could not read $SELECTION_FILE"; exit 2; }}
+if [ "$_selected" != "yes" ]; then
+    echo "=== SKIPPED: {model} x $rep is not in $SELECTION_FILE"
+    echo "=== Not a failure: the task held a queue slot and the selection excluded it."
+    exit 0
+fi
+echo "=== selected: {model} x $rep is in $SELECTION_FILE"
+"""
+
+
 def main():
     ap = argparse.ArgumentParser(
         description='Generate the validation re-run job scripts.',
@@ -833,6 +871,12 @@ def main():
     ap.add_argument('--qsar-dir', default=QSAR_DIR,
                     help=f'This checkout, which the runner loads the shared spec '
                          f'from (default: {QSAR_DIR}).')
+    ap.add_argument('--runtime-selection', default=None, metavar='PATH',
+                    help='Bake a run-time check against this JSON instead of '
+                         'restricting what is generated. Every task is written; '
+                         'each reads the file when it starts and exits 0 without '
+                         'work if its model and representation are not listed. '
+                         'Read on the compute node, so make it absolute.')
     ap.add_argument('--include-depth-conditions', action='store_true',
                     help=f'The DEEP RUN: also run the depth-only conditions '
                          f'({", ".join(DEPTH_ONLY)}), on a named subset of pairs. Requires '
@@ -940,6 +984,11 @@ def main():
                               levels_json=repr(DOSE_LEVELS),
                               condition_list_py=repr(conditions))
             + SLURM_BODY.format(model=model, model_lower=model.lower(),
+                                runtime_selection_block=(
+                                    RUNTIME_SELECTION_BLOCK.format(
+                                        selection_file=args.runtime_selection,
+                                        model=model)
+                                    if args.runtime_selection else ''),
                                 reps_list=' '.join(model_reps),
                                 reps_safe_list=' '.join(safe_name(r) for r in model_reps),
                                 datasets_list=' '.join(d for d, _ in DATASETS),

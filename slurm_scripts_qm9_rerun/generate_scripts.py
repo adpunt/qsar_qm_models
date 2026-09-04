@@ -802,7 +802,7 @@ fi
 
 rep="${{REPS[$(( i % n_rep ))]}}"
 cond="${{CONDS[$(( i / n_rep ))]}}"
-
+{runtime_selection_block}
 # THE CHEMBERTA WEIGHTS MUST ALREADY BE ON DISK, for the same reason.
 #
 # get_chemberta_model calls AutoTokenizer/AutoModel.from_pretrained with a hub
@@ -946,6 +946,47 @@ def build_case_block(tags):
     return '\n'.join(lines)
 
 
+# THE RUN-TIME SELECTION GATE.
+#
+# Generated only with --runtime-selection. The point is to hold a queue position
+# before the choice is made: a queued task has read nothing yet, so the file this
+# consults can be edited at any time up to the moment the task starts. That is
+# the author's reason for wanting the selection in a JSON at all, 2026-09-04 --
+# not to avoid retyping six flags, but to submit now and decide later on a queue
+# where position is the scarce resource.
+#
+# Without it, --pairs-file is consumed by the GENERATOR and the choice is baked
+# into these scripts, so editing the file afterwards changes nothing.
+#
+# ONE-WAY. A task that has already skipped stays skipped. Widening the selection
+# later means resubmitting those indices; narrowing it costs nothing.
+RUNTIME_SELECTION_BLOCK = """
+SELECTION_FILE="{selection_file}"
+if [ ! -f "$SELECTION_FILE" ]; then
+    echo "ERROR: --runtime-selection was set at generation time but"
+    echo "       $SELECTION_FILE does not exist. This task cannot tell whether it"
+    echo "       is in the deep run. Refusing rather than guessing -- write the"
+    echo "       file (scripts/select_deep_run_pairs.py) and resubmit."
+    exit 2
+fi
+_selected=$(python - "$SELECTION_FILE" "{model}" "$rep" <<'PYSEL'
+import json, sys
+spec = json.loads(open(sys.argv[1]).read())
+models = spec.get('generator_labels') or spec.get('models') or []
+reps = spec.get('representations') or spec.get('reps') or []
+print('yes' if sys.argv[2] in models and sys.argv[3] in reps else 'no')
+PYSEL
+) || {{ echo "ERROR: could not read $SELECTION_FILE"; exit 2; }}
+if [ "$_selected" != "yes" ]; then
+    echo "=== SKIPPED: {model} x $rep is not in $SELECTION_FILE"
+    echo "=== This is not a failure. The task held a queue slot while the"
+    echo "===   selection was being decided, and the selection excluded it."
+    exit 0
+fi
+echo "=== selected: {model} x $rep is in $SELECTION_FILE"
+"""
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1017,6 +1058,15 @@ def main():
     # It does NOT make anything automatic. --stage 2 still refuses to run with no
     # selection at all; this only removes the retyping, and --models/--reps on the
     # command line still win so a one-off override needs no file edit.
+    # DEFERRED selection: generate for everything, decide at run time.
+    ap.add_argument('--runtime-selection', default=None, metavar='PATH',
+                    help='Bake a run-time check against this JSON instead of '
+                         'restricting what is generated. Every task is written '
+                         'and submitted; each one reads the file when it starts '
+                         'and exits 0 without work if its model and '
+                         'representation are not listed. Lets you hold a queue '
+                         'position before the selection is settled. The path is '
+                         'read on the COMPUTE NODE, so make it absolute.')
     ap.add_argument('--pairs-file', default=None,
                     help='JSON with "models" (or "generator_labels") and '
                          '"representations". Written by '
@@ -1075,7 +1125,14 @@ def main():
         print(f"  selection from {args.pairs_file}: "
               f"{' '.join(args.models)} x {' '.join(args.reps)}")
 
-    if args.stage == 2 and not (args.models and args.reps):
+    # --runtime-selection generates for the FULL roster on purpose: the whole
+    # point is that nothing is excluded at generation time, so a task exists to
+    # hold a queue slot for every pair the selection might land on.
+    if args.stage == 2 and args.runtime_selection and not (args.models or args.reps):
+        print(f"  run-time selection: every model and representation is generated; "
+              f"each task reads\n    {args.runtime_selection}\n  when it starts and "
+              f"exits 0 without work if it is not listed.")
+    elif args.stage == 2 and not (args.models and args.reps):
         ap.error('--stage 2 needs --models and --reps, or --pairs-file. Which models and '
                  'representations go deep is chosen from what stage 0 shows; see '
                  'RERUN_PLAN.md §13.1 item 4. scripts/select_deep_run_pairs.py reads it '
@@ -1328,6 +1385,10 @@ def main():
             last_iter=first_iter + n_reps_run - 1,
             cond_list=' '.join(conditions), cond_cases=build_case_block(conditions),
             reps=' '.join(reps),
+            runtime_selection_block=(
+                RUNTIME_SELECTION_BLOCK.format(selection_file=args.runtime_selection,
+                                               model=model)
+                if args.runtime_selection else ''),
             n_cond=len(conditions), n_rep=len(reps), n_tasks=n_tasks,
             n_lev=n_lev, runs=runs_per_task, unc_block=unc_block,
             last=n_tasks - 1, throttle=args.throttle, script_name=script_name))
