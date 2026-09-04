@@ -10449,6 +10449,24 @@ The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:
 throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
 **Nothing downstream should be planned against the mean.**
 
+#### Submission 3 — the hERG resubmits, 2026-09-04
+
+The 24 tasks lost to the missing cache, resubmitted after `val_rf_12` and `_13` proved the copy
+worked. Submitted in the order the recovery block lists them, so the ids map straight onto it.
+
+| Job ID | Script | Array | Tasks |
+|---|---|---|---|
+| 12979965 | `val_bnn-full-mve.sh` | `12-17%4` | 6 |
+| 12979966 | `val_bnn-full.sh` | `12-17%4` | 6 |
+| 12979967 | `val_dnn.sh` | `12-17%4` | 6 |
+| 12979968 | `val_lightgbm.sh` | `13-17%4` | 5 |
+| 12979969 | `val_gp-tanimoto.sh` | `2` | 1 |
+
+**24 tasks.** `val_lightgbm` index 12 is not here because it went in on its own as **12975687**
+during the 2026-09-03 confusion, which by accident is the twenty-fifth. These are the first
+submission to carry the cache guard, so a task that still cannot find hERG now exits in seconds
+naming the file rather than after importing a backend.
+
 #### 2026-09-04 — choosing from a screen that is not finished, and revising as it lands
 
 **The author's call, with the queues where they are: read the deferred choices off what has landed
