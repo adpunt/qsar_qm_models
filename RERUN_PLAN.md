@@ -10810,6 +10810,13 @@ this study bills to `stat-cadd`. An earlier version of this step read both from 
 how a job ends up on the wrong account (`slurm_scripts_qm9_rerun/RUNBOOK.md` §3 has always pinned
 it).
 
+⚠️ **`$PART` is `medium`, and only STEP 6 may use it.** `where_to_submit.sh` reports the partition
+with capacity, which on 2026-09-04 was `medium` — a 2-day ceiling. The QM9 main grid and both deep
+runs are generated with `--max-hours 720` and carry requests far past that; the generator REFUSES to
+write a script it cannot honour rather than capping it, so a `medium` submission is rejected at
+submit time. Steps 1, 4 and 5 say `--partition=long` literally, and they mean it. Step 2's partition
+is inside the laboratory scripts already. Step 6's longest wall is 47:00, which fits `medium`.
+
 #### STEP 1 — the QM9 main grid. **19 jobs.** Nothing blocks it.
 
 ```bash
