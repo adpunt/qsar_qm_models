@@ -10872,17 +10872,41 @@ sbatch --account=$ACCT --partition=long --array=0-2%4 qm9_s1_gauche.sh
 **327 tasks, 18,639 training runs**, replicates 1–9. All 19 spelled out: the "and the other two
 tiers as above" shorthand is what dropped two models on 2026-09-02.
 
-#### STEP 2 — restart the laboratory breadth grid. **19 jobs.**
+#### STEP 2 — repair the laboratory. **Do NOT cancel the grid.**
+
+**A queued task has not read the code yet.** `val_*.sh` runs
+`python alternative_data_noise_robustness.py` at RUN time out of the KIRBy checkout, so every task
+that starts after the pull already uses the new draw with no resubmission at all. Blanket-cancelling
+19 arrays throws away the queue position of everything still waiting, on a queue where that is the
+scarce resource. **The author caught this on 2026-09-04, after an earlier version of this step said
+to cancel the lot.**
+
+Only two groups are affected: tasks that FINISHED under the old code, and tasks RUNNING that started
+before the pull. Both are found the same way — the cutoff is the runner's mtime in the checkout,
+which is when the pull landed.
 
 ```bash
-for j in $(seq 12971620 12971638) 12975687 $(seq 12979965 12979969); do scancel $j; done
+python scripts/lab_tasks_on_old_noise.py
+```
 
+It prints the `scancel` for the running ones and an `sbatch --array=<indices>` per script for the
+rest, and it puts the cancelled indices in the resubmission too — cancelling alone would leave them
+never run.
+
+**Nothing has to be deleted.** The runner drops the rows for the combinations it is re-running
+before it writes (the "Merged with existing results" guard); each task is one model, one
+representation, one dataset, so both filters are set and a resubmitted task REPLACES its own rows.
+
+Regenerate the scripts first, so the resubmitted ones carry the cache guard and the `%A_%a` log
+name — this does not disturb anything queued, because SLURM copied each script at submit time:
+
+```bash
 cd ../slurm_scripts_validation_rerun
 rm -f val_*.sh smoke_test.sh submit_all.sh preflight.sh && python generate_scripts.py
 bash preflight.sh                     # must PASS: 1,415 hERG molecules
-bash submit_all.sh
 ```
 
+**Only if the grid was never submitted, or you do cancel it:** `bash submit_all.sh` — 19 arrays,
 **327 tasks**, 19 models × 6 representations × 3 datasets, three conditions.
 
 #### STEP 3 — when the QM9 screen finishes: fill the clean rows, then read the selection
