@@ -583,11 +583,27 @@ case "{model}" in
   GP-Tanimoto|GP-Tanimoto-Hetero) GP_FLAGS="--gp-kernel tanimoto --gp-reps $rep" ;;
 esac
 
-# THE MODEL AND THE REPRESENTATION ARE BOTH IN THE OUTPUT PATH. Until 2026-09-01
-# the model was not, so seven or eight scripts sharing a representation and a
-# dataset wrote into ONE directory. The runner appends with no lock, so rows were
-# lost or torn and the merge could not tell.
-OUT_ROOT="results/validation_rerun/{model_lower}_${{rep_safe}}_${{dataset}}"
+# THE MODEL, THE REPRESENTATION AND THE CONDITION SET ARE ALL IN THE OUTPUT PATH.
+#
+# Until 2026-09-01 the model was not, so seven or eight scripts sharing a
+# representation and a dataset wrote into ONE directory. Until 2026-09-05 the
+# condition set was not, so the breadth grid, the deep run and the censoring run
+# did the same -- and those three are submitted days apart and run concurrently,
+# which the models sharing a directory never did.
+#
+# The runner does a read-modify-write of all_results.csv with no lock anywhere:
+# it reads the file, drops the rows matching its own model, representation and
+# condition, concatenates its own, and writes the whole file back. Sequential
+# runs converge correctly. Two tasks whose read-to-write windows overlap lose
+# the earlier writer's rows entirely, and leave nothing behind to say so. The
+# same unlocked path regenerates summary.csv, which accumulates a duplicate of
+# every surviving key on each subset resubmission.
+#
+# One directory per (model, representation, condition set, dataset) removes the
+# overlap rather than trying to serialise it. merge_results.py globs every
+# directory ending in the dataset name and deduplicates on
+# (model, rep, condition, level, fold), so the split costs nothing downstream.
+OUT_ROOT="results/validation_rerun/{model_lower}_${{rep_safe}}{conditions_tag}_${{dataset}}"
 
 echo "=== task $i: model={model} rep=$rep dataset=$dataset"
 echo "=== out: $OUT_ROOT"
@@ -1041,6 +1057,36 @@ def main():
     reps = args.reps or ALL_REPS
     condition_args = ' '.join(conditions)
 
+    # A NON-BREADTH CONDITION SET MAY NOT BE WRITTEN INTO THIS DIRECTORY.
+    #
+    # Scripts are named by model alone -- val_rf.sh -- and so is submit_all.sh, so
+    # generating the deep run or censoring here replaces all nineteen breadth scripts
+    # AND the submitter that goes with them, exit 0, no warning, and the files are
+    # untracked so git cannot bring them back. The QM9 generator has refused this since
+    # 2026-08-27; this one did not, and the prescribed depth command writes all nineteen
+    # at full breadth, so it would have replaced the whole set rather than part of it.
+    _here = Path(__file__).resolve().parent
+    if conditions != BREADTH_GRID and \
+            Path(args.out_dir or _here).resolve() == _here:
+        ap.error(
+            f"--conditions {' '.join(conditions)} would be written into the generator's "
+            f"own directory, where the scripts are named by model alone -- it would "
+            f"overwrite the breadth grid's nineteen val_*.sh and its submit_all.sh, "
+            f"with nothing to restore them from. Pass --out-dir <somewhere else>.")
+
+    # The tag that keeps concurrent submissions out of each other's results file. The
+    # BREADTH GRID keeps the bare path it has always had, because nineteen of its arrays
+    # were already queued when this was added on 2026-09-05 and their scripts were
+    # copied at submit time -- changing the path now would split one grid across two
+    # directories. Every other condition set gets its own.
+    if conditions == BREADTH_GRID:
+        conditions_tag = ''
+    elif len(conditions) == 1:
+        conditions_tag = f'_{conditions[0]}'
+    else:
+        conditions_tag = f'_{len(conditions)}cond_' + '_'.join(
+            c[:4] for c in conditions if c not in BREADTH_GRID)
+
     print(f"Conditions ({len(conditions)}, from {NOISE_CONDITIONS_FILE.name}): "
           f"{condition_args}")
     if not args.conditions:
@@ -1093,6 +1139,7 @@ def main():
                                 reps_safe_list=' '.join(safe_name(r) for r in model_reps),
                                 datasets_list=' '.join(d for d, _ in DATASETS),
                                 dataset_cases=cases,
+                                conditions_tag=conditions_tag,
                                 conditions=condition_args)
         )
         filename = f"val_{model.lower()}.sh"

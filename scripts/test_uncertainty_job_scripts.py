@@ -102,7 +102,10 @@ def generate(tmp, *extra):
         [sys.executable, str(GENERATOR), '--out-dir', str(tmp), *extra],
         capture_output=True, text=True)
     assert result.returncode == 0, result.stderr[-2000:]
-    scripts = sorted(f for f in os.listdir(tmp) if f.endswith('.sh'))
+    # submit_all.sh is the submitter, not a job array: it has no CONDS, no REPS and no
+    # index dispatch. Every check below is about a job script.
+    scripts = sorted(f for f in os.listdir(tmp)
+                     if f.endswith('.sh') and f != 'submit_all.sh')
     assert scripts, f'the generator wrote no scripts: {result.stdout[-800:]}'
     return scripts, result.stdout
 
@@ -204,20 +207,41 @@ def conditions_come_from_the_settled_file(_runner, gen):
     assert gen.MAIN_GRID_CONDITIONS == main_grid, (
         f'{gen.MAIN_GRID_CONDITIONS} != {main_grid}')
     assert gen.DEEP_RUN_CONDITIONS == deep, f'{gen.DEEP_RUN_CONDITIONS} != {deep}'
-    # ALL SEVEN by default, the author's decision of 2026-08-28. It used to be
-    # five -- the main grid's four plus outlier_p10. The uncertainty runs now
-    # also answer whether uncertainty tracks some KINDS of noise better than
-    # others, and that question needs every kind.
-    want = main_grid + deep
+    # THE DEFAULT IS THE THREE THE QM9 SCREEN RUNS, and the other four are asked for
+    # by name. Author, 2026-09-01: "this should apply to both qm9 and lab. Lab needs to
+    # follow suit in waiting for the decision. These should be identical."
+    #
+    # This assertion said "all seven" — the decision of 2026-08-28, superseded three
+    # days later — and had FAILED ever since, so nothing here was being checked at all.
+    # What matters now is that the default is exactly the screen's three AND that the
+    # other four are still reachable, because between those two the whole settled set
+    # is covered by some command (RERUN_PLAN.md §13.19 STEPS 6 and 6b).
+    all_seven = main_grid + deep
+    want = [c for c in main_grid if c != 'censoring']
     with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp)
         got = conditions_of(Path(tmp, scripts[0]).read_text())
-        assert got == want, f'the default run is {got}, not all seven: {want}'
+        assert got == want, (
+            f'the default run is {got}, not the three the QM9 screen runs: {want}')
+
+    # The four that follow must still generate, or STEP 6b has nothing to submit and
+    # censoring — one of only two conditions with a per-molecule pattern — is lost.
+    follow = [c for c in all_seven if c not in want]
+    with tempfile.TemporaryDirectory() as tmp:
+        scripts, _ = generate(tmp, '--conditions', *follow)
+        got_follow = conditions_of(Path(tmp, scripts[0]).read_text())
+        assert got_follow == follow, (
+            f'asking for {follow} by name produced {got_follow}; STEP 6b would not run '
+            f'what it says it runs')
+    assert sorted(want + follow) == sorted(all_seven), (
+        f'the default {want} and the follow-on {follow} do not cover the settled seven '
+        f'{all_seven} between them, so some condition is in no command anywhere')
 
     # Three of the seven carry a per-molecule pattern, and only those can answer
-    # "which labels are bad". If a change ever leaves fewer than three, that
-    # question has quietly lost its evidence.
-    patterned = [c for c in got if c not in gen.FLAT_BY_DESIGN]
+    # "which labels are bad". Asked of the WHOLE set the two steps cover, not of the
+    # default alone -- the default has one, grouped_wider, and censoring is in the
+    # follow-on precisely because it is the strongest of the three.
+    patterned = [c for c in want + follow if c not in gen.FLAT_BY_DESIGN]
     assert len(patterned) >= 3, (
         f'only {patterned} give some molecules more noise than others; the '
         f'which-labels-are-bad question needs a pattern to find')
@@ -229,7 +253,8 @@ def conditions_come_from_the_settled_file(_runner, gen):
         scripts, _ = generate(tmp, '--include-deep-conditions')
         assert conditions_of(Path(tmp, scripts[0]).read_text()) == want, (
             '--include-deep-conditions changed the run; it should be a no-op')
-    print(f'    default = all seven: {want}')
+    print(f'    default = the screen\'s three: {want}')
+    print(f'    asked for by name (STEP 6b):   {follow}')
     print(f'    {len(patterned)} of them give some molecules more noise than others: {patterned}')
 
 
