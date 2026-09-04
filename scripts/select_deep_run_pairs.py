@@ -476,9 +476,34 @@ def main():
               f"can see does.")
 
     out = Path(cli.out) if cli.out else ROOT / 'deep_run_pairs.json'
+
+    # THE SAME GUARD THE CENSORING FILE HAS, AND FOR A SHARPER REASON.
+    #
+    # This used to overwrite deep_run_pairs.json unconditionally. The file is the one
+    # the already-queued deep-run tasks read when they start, and skipping is one-way:
+    # every model this reading drops is dropped for good on every array already in the
+    # queue. So an unguarded rewrite here can silently narrow a run that is days from
+    # starting -- and it narrows to --n-models, which defaults to 4 against the six the
+    # author settled. It happened in this repository on 2026-09-05.
+    _hand = False
+    if out.exists():
+        try:
+            _hand = not json.loads(out.read_text()).get('written_by_selector')
+        except ValueError:
+            _hand = True
+    if _hand:
+        _sug = out.with_name(out.stem + '.suggested.json')
+        print(f"\n  {out.name} was written by hand, so it is LEFT ALONE.")
+        print(f"  This reading goes to {_sug.name} instead -- compare them, and copy "
+              f"across what you agree with.")
+        print(f"  Widening later costs a resubmission; narrowing is free "
+              f"(RERUN_PLAN.md 13.19 STEPS 4-5).")
+        out = _sug
+
     out.write_text(json.dumps({
         'what_this_is': 'the deep-run and censoring selection, read off the screen',
         'rule': 'RERUN_PLAN.md 13.17 B',
+        'written_by_selector': True,
         'provisional': bool(absent or missing_reps or partial_conditions),
         'ranked_on_conditions': sorted(robust['strategy'].unique()),
         'conditions_dropped_for_want_of_a_clean_row':

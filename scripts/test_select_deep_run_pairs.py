@@ -110,6 +110,23 @@ def main():
         if len({tuple(p) for p in pairs}) != len(pairs):
             failures.append('censoring names the same pair twice')
 
+        # A hand-edited DEEP RUN file must survive a re-run of the selector too, and
+        # for a sharper reason: skipping is one-way, so a rewrite that drops a model
+        # drops it for good on every array already in the queue.
+        deep.write_text(json.dumps({'generator_labels': ['rf'],
+                                    'validation_labels': ['RF'],
+                                    'representations': ['ecfp4'],
+                                    'mine': True}, indent=2) + '\n')
+        run([SELECTOR, '--results-dir', results, '--out', deep])
+        if not json.loads(deep.read_text()).get('mine'):
+            failures.append('a re-run of the selector overwrote a hand-edited '
+                            'deep_run_pairs.json; every queued deep-run task reads '
+                            'that file and a dropped model can never be recovered')
+        if not (tmp / 'deep_run_pairs.suggested.json').exists():
+            failures.append('the selector left the hand-edited deep-run file alone but '
+                            'wrote no suggestion beside it, so the reading is lost')
+        deep.write_text(json.dumps(spec_deep, indent=2) + '\n')
+
         # A hand-edited censoring file must survive a re-run of the selector.
         cen.write_text(json.dumps({'generator_pairs': [['rf', 'ecfp4']],
                                    'validation_pairs': [['RF', 'ECFP4']],

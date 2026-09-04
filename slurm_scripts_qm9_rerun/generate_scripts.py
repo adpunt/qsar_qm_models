@@ -1003,6 +1003,35 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
+def warn_selection_against_uncertainty_pairs(pairs, path):
+    """Say when a selected model emits an uncertainty that nothing will cross-fit.
+
+    QM9 has no uncertainty run of its own: the out-of-fold pass happens INSIDE the grid
+    task, and only for models on `uncertainty_pairs.json`. A model that emits `-u True`
+    but is not on that list still writes an uncertainty column -- scored on the test
+    split, where no noise was injected -- so the cell exists, is finite, and answers
+    none of the uncertainty questions. Nothing downstream can tell that apart from a
+    real one.
+
+    `heteroscedastic_gp` is the live case: it is in `deep_run_pairs.json` and in
+    `censoring_pairs.json`, on neither pipeline's uncertainty list, and it is the model
+    RERUN_PLAN.md 5.5i names as one of only two that separate the two halves.
+    """
+    emits = {m for m, _ in pairs if '-u True' in MODELS.get(m, ("",))[0]}
+    absent = sorted(m for m in emits if m not in UNCERTAINTY_PAIRS)
+    if not absent:
+        return
+    print(f"\n  ⚠ {len(absent)} selected model(s) emit a per-molecule uncertainty and "
+          f"are NOT in {UNCERTAINTY_PAIRS_FILE.name}:")
+    for m in absent:
+        print(f"      {m}")
+    print(f"    Their tasks will run, exit 0 and write an uncertainty column scored on "
+          f"the TEST split only, where the injected noise is zero.")
+    print(f"    Either add them to {UNCERTAINTY_PAIRS_FILE.name} (both pipelines read "
+          f"it) or drop them from {Path(path).name}. Both are edits to a tracked JSON "
+          f"that the queued tasks pick up when they start.")
+
+
 def selection_pairs(spec, pairs_key, models_key):
     """The (model, representation) pairs a run-time selection file names.
 
@@ -1198,6 +1227,8 @@ def main():
             print(f"  note: {args.pairs_file} is marked provisional -- it was read "
                   f"off a screen that had not finished. Models it could not rank: "
                   f"{', '.join(_spec.get('models_absent_from_the_screen', [])) or 'none recorded'}")
+        warn_selection_against_uncertainty_pairs(
+            [(m, r) for m in args.models for r in args.reps], args.pairs_file)
         print(f"  selection from {args.pairs_file}: "
               f"{' '.join(args.models)} x {' '.join(args.reps)}")
 
@@ -1208,6 +1239,10 @@ def main():
         print(f"  run-time selection: every model and representation is generated; "
               f"each task reads\n    {args.runtime_selection}\n  when it starts and "
               f"exits 0 without work if it is not listed.")
+        warn_selection_against_uncertainty_pairs(
+            selection_pairs(json.loads(Path(args.runtime_selection).read_text()),
+                            'generator_pairs', 'generator_labels'),
+            args.runtime_selection)
     elif args.stage == 2 and not (args.models and args.reps):
         ap.error('--stage 2 needs --models and --reps, or --pairs-file. Which models and '
                  'representations go deep is chosen from what stage 0 shows; see '
@@ -1289,6 +1324,7 @@ def main():
               f"{args.runtime_selection}, checked when each task starts:")
         for _m, _r in _sel_pairs:
             print(f"    {_m} x {_r}")
+        warn_selection_against_uncertainty_pairs(_sel_pairs, args.runtime_selection)
     elif restricted and not (args.models and args.reps):
         first = PAIR_SUBSET_CONDITIONS[restricted[0]]
         ap.error(

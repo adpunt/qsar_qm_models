@@ -88,7 +88,13 @@ def main():
     ap.add_argument('--results', default=str(HERE.parent / 'results'),
                     help='Directory holding the anova_*.csv files.')
     ap.add_argument('--conditions', nargs='+', default=None,
-                    help='Default: the stage-1 set from noise_conditions.json.')
+                    help='Default: EVERY settled condition from noise_conditions.json, '
+                         'the stage-2 depth-only ones included. It used to be the '
+                         'stage-1 set alone, so student_t_nu5, outlier_p10 and laplace '
+                         'never got a clean row -- and auc_norm is retention against '
+                         'the clean point, so those three were dropped from every '
+                         'ranking in silence. A condition that has not run yet simply '
+                         'has nothing to copy into and is reported as such.')
     ap.add_argument('--dry-run', action='store_true',
                     help='Say what would be written and write nothing.')
     args = ap.parse_args()
@@ -96,7 +102,7 @@ def main():
     results = Path(args.results)
     if not results.is_dir():
         raise SystemExit(f'no such directory: {results}')
-    conditions = args.conditions or gen.STAGE1_CONDITIONS
+    conditions = args.conditions or gen.STAGE2_CONDITIONS
     reference = gen.REFERENCE_CONDITION
     if reference not in conditions:
         raise SystemExit(f'the reference condition {reference!r} is not in {conditions}; there is '

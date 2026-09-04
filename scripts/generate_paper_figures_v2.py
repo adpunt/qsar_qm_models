@@ -5123,7 +5123,27 @@ def main():
     parser.add_argument('--qm9-dir', type=str, default='../results',
                         help='Directory containing QM9 results')
     parser.add_argument('--validation-dir', type=str, default=None,
-                        help='Directory containing validation results from KIRBy')
+                        help='Directory containing validation results from KIRBy, in '
+                             'the shape <dir>/<dataset>/all_results.csv')
+    # THE UNCERTAINTY RUNS ARE A SEPARATE TREE AND NOTHING READ THEM.
+    #
+    # The laboratory uncertainty runs write to
+    # <KIRBy>/tests/results/uncertainty_rerun/<model>__<dataset>__<rep>__<condition>/,
+    # which is not under --validation-dir and is not shaped like it. Until
+    # 2026-09-05 there was no argument for it, so 378 tasks -- the 162 of
+    # RERUN_PLAN.md §13.19 STEP 6 and the 216 of STEP 6b -- produced output that no
+    # command in the sheet ever opened.
+    #
+    # It is NOT a second --validation-dir. load_validation_data takes the dataset name
+    # from each subdirectory, and these subdirectories are named for the whole cell, so
+    # it would invent datasets called `qrf__logd__pdv__gaussian`. Only the per-molecule
+    # loaders, which read the dataset off the row, may see this tree.
+    parser.add_argument('--uncertainty-dir', type=str, action='append', default=None,
+                        metavar='DIR',
+                        help='Directory of per-molecule uncertainty files from the '
+                             'uncertainty runs (repeatable). Searched recursively for '
+                             '*_uncertainty_values.csv, and used ONLY for the '
+                             'per-molecule statistics -- never for the accuracy grid.')
     parser.add_argument('--output-dir', type=str, default='../results/paper_figures',
                         help='Output directory for figures')
     parser.add_argument('--unc-stats-permutations', type=int, default=200,
@@ -5307,7 +5327,22 @@ def main():
 
     print("\n--- VALIDATION (GENERALISATION) ---")
     create_validation_figures(validation_df, val_auc_df, auc_df, output_dir)
-    val_unc_df = load_validation_uncertainty(args.validation_dir)
+    # The laboratory grid and the uncertainty runs write to different trees, and both
+    # carry per-molecule uncertainty files. Read every tree that was given.
+    _unc_sources = [d for d in [args.validation_dir] + list(args.uncertainty_dir or [])
+                    if d]
+    _val_unc_frames = [f for f in (load_validation_uncertainty(d) for d in _unc_sources)
+                       if f is not None and len(f)]
+    if not _val_unc_frames:
+        val_unc_df = None
+        if args.uncertainty_dir:
+            print("⚠ --uncertainty-dir was given and yielded no per-molecule files")
+    elif len(_val_unc_frames) == 1:
+        val_unc_df = _val_unc_frames[0]
+    else:
+        val_unc_df = pd.concat(_val_unc_frames, ignore_index=True)
+        print(f"  uncertainty files from {len(_val_unc_frames)} tree(s): "
+              f"{len(val_unc_df)} rows in total")
     create_validation_uncertainty_table(val_unc_df, output_dir)
 
     # Per-molecule uncertainty statistics, computed by scripts/uncertainty_stats.py
@@ -5316,8 +5351,14 @@ def main():
     run_uncertainty_statistics(args.qm9_dir, output_dir, 'qm9',
                                permutations=args.unc_stats_permutations,
                                dataset_name='QM9')
-    run_uncertainty_statistics(args.validation_dir, output_dir, 'experimental',
-                               permutations=args.unc_stats_permutations)
+    # Every tree that holds per-molecule files, not just the accuracy grid's.
+    for _i, _src in enumerate(_unc_sources):
+        _label = 'experimental' if _i == 0 else f'experimental_{_i}'
+        run_uncertainty_statistics(_src, output_dir, _label,
+                                   permutations=args.unc_stats_permutations)
+    if not _unc_sources:
+        run_uncertainty_statistics(None, output_dir, 'experimental',
+                                   permutations=args.unc_stats_permutations)
 
     print("\n--- SUPPLEMENTARY: ICC & REDUNDANCY ---")
     compute_icc_and_redundancy(auc_df, output_dir)

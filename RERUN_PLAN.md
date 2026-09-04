@@ -10425,8 +10425,24 @@ squeezed for time**, in which case say in the Methods that censoring carries a s
 
 #### The uncertainty runs, which are not on this grid at all
 
-Three validation datasets, on all seven settled conditions, one replicate plus a permutation null
-(§13.1 item 2). The model and representation lists are the **author's decision of 2026-08-28** (chat N): quantile forest, NGBoost, Gaussian process and VBLL, on ECFP4, PDV and ChemBERTa, with VBLL on ChemBERTa alone — **210 tasks**, 63 each for the first three and 21 for VBLL.
+Three laboratory datasets, one replicate plus a permutation null (§13.1 item 2), on **six models ×
+three representations** — the roster in `uncertainty_pairs.json`: quantile forest, NGBoost, the
+Gaussian process, VBLL and the two variance-head networks, each on ECFP4, PDV and ChemBERTa.
+
+**They go in as two submissions, not one, and both are needed** (§13.19 STEPS 6 and 6b):
+
+| | Conditions | Arrays | Tasks |
+|---|---|---|---|
+| the three the QM9 screen runs | gaussian, grouped-wider, grouped-shifted | 6 | **162** |
+| the four that follow | censoring, student-t, outlier, laplace | 6 | **216** |
+
+**REBUILT 2026-09-05.** This paragraph said four models, VBLL on ChemBERTa alone, and 210 tasks —
+the decision of 2026-08-28, superseded by the author on 2026-08-29 and again on 2026-09-01 (the
+ChemBERTa restriction lifted, the two variance-head networks added, the default narrowed to the
+screen's three so QM9 and the laboratory answer the same question on the same noise). The counts
+above come from running the generator twice. **Unlike the QM9 table at the top of this section,
+nothing check-locks this one** — `scripts/test_uncertainty_job_scripts.py` locks the generator's
+condition set, not this prose.
 
 **Why the training-run count is not given here.** Each job trains its model more than once. To ask
 "is the model unsure about the molecules whose labels were corrupted", every training molecule needs
@@ -11229,6 +11245,157 @@ Two more, in the merge step at the end:
    because the generated scripts `cd "$KIRBY_DIR"/tests` and pass a relative `--results-root`.
    Run from the qsar checkout, the laboratory merge would have found nothing and said so
    quietly.
+
+---
+
+### 13.21 THE MEMORY REQUEST — WHAT 96G RESTS ON, AND WHAT IT DOES NOT
+
+**Settled at 96G by the author on 2026-09-05**, after it was changed four times in one night
+(128 → 32 → 64 → 128 → 96). This section exists so the reasoning is on paper and the question does
+not have to be argued again. §13.20 item 4 is the instruction; this is the evidence.
+
+#### The one measurement from this study that anybody has looked at
+
+`flexible_dnn_512_256_valprop`: **61.2 GB actually used**, against a 128G request. Author's
+identification, 2026-09-05 — every larger row in that `sacct` sweep (`dta_*`, `nuc_*`, `pc_*`,
+`graphinity_*`, `tune_*`) is KIRBy's separate work, not this study.
+
+| | vs 61.2 GB | at 8 cores, against ARC's 8 GB/core |
+|---|---|---|
+| 32G | half the peak | 4 cores' worth |
+| 64G | 5% headroom | exactly the ratio |
+| **96G** | **1.57×** | **12 cores' worth ← chosen** |
+| 128G | 2.09× | 16 cores' worth — waits for a whole node |
+
+**The 8 GB/core figure is sourced, and it is measured rather than assumed.**
+`KIRBy/tests/slurm_scripts/where_to_submit.sh` has a `mem_per_core_mb()` that reads it off the
+partition's own nodes with `sinfo -h -N -p <partition> -o "%c %m"`, with the comment "Do not assume
+8 GB/core -- read it, because a fat node changes it." The diagnosis it came from is in that file's
+header: job 12923011, 16 cores / 256 GB / 48 h, sat PENDING for a week while the script's own
+report said "69 free 32-cpu slots" — both node types are 8 GB per core (arc-c046 48c/384G,
+arc-c312 288c/2266G), so 256 GB is 33 cores' worth of memory and the task needed a whole node.
+
+**The asymmetry is what decides it.** Asking for too much costs queue position. Asking for too
+little kills the job at the wall after days of waiting, and there is no partial credit.
+
+#### The one command that would settle it properly, and it has not been run
+
+```bash
+bash /data/stat-ecr/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --fits 8 96G
+```
+
+It reports, per partition, how many nodes can hold that shape now and how many could ever hold it,
+counting drained nodes separately so "no node is large enough" is never confused with "every node
+is busy". **`--emit` does not answer this** — its own comment says "It does NOT consider memory.
+Run `--fits` by hand before trusting it for a memory-heavy job."
+
+#### Two things in this repository still contradict each other about a MaxRSS sample
+
+Not resolved here, and neither is the basis of the 96G decision:
+
+- `slurm_scripts_qm9_rerun/generate_scripts.py` says the screen's first nine arrays — 179 completed
+  tasks across rf, xgboost, lgb, svm, dnn, mlp, qrf and the two plain Bayesian networks — peaked at
+  **4.03 GB**, with all but one task between 2.8 and 3.1 GB.
+- `slurm_scripts_validation_rerun/generate_scripts.py` says that same sample was array indices 2, 8
+  and 14 only — one representation of six, `mhg_gnn_pretrained`, one fit per level instead of six,
+  no ChemBERTa and no Gaussian process.
+
+Both cannot be true. **Neither is quoted as a reason for anything**, and the settled figure does not
+depend on which is right. What would settle it is `sacct` over the screen's own job IDs, joining the
+job name from the ALLOCATION row — on a step row `JobName` is just `batch`, which is the bug that
+made the first sweep return `batch 255.24 GB` and read as this study's:
+
+```bash
+sacct -M arc -u $USER -j 12971601-12971619 -n -P \
+      --format=JobID,JobName%60,MaxRSS,ReqMem,State \
+| awk -F'|' '
+{ id=$1; base=id; sub(/\.(batch|extern|[0-9]+)$/,"",base) }
+id == base && $2 != "" { nm[base]=$2; next }
+$3 == "" || $3 == "MaxRSS" { next }
+{ v=$3; u=substr(v,length(v),1); sub(/[KMGT]$/,"",v);
+  gb=(u=="K")?v/1048576:(u=="M")?v/1024:(u=="G")?v+0:(u=="T")?v*1024:v/1048576;
+  n=(base in nm)?nm[base]:"?";
+  if (gb>max[n]) { max[n]=gb; worst[n]=id; req[n]=$4 } c[n]++ }
+END { for (k in max) printf "%8.1f GB  %5d tasks  req %-8s %-38s worst %s\n",
+        max[k],c[k],req[k],k,worst[k] }' | sort -rn
+```
+
+**Do not cut the request on anything less than that.** What a job script *requested* is what
+somebody once guessed; only `MaxRSS` says what a job *used*.
+
+#### Where 32G still appears, on purpose
+
+The interactive `srun` lines elsewhere in this file (§1447, §1528, §1564, §1912) ask for 32G. Those
+are debugging and environment-building sessions on `short` and `interactive`, not experiments, and
+the floor the author set is about jobs that can die after days in the queue. The 64G floor is
+enforced in code in `slurm_scripts_qm9_rerun/generate_scripts.py` and applies to every generated
+job script.
+
+---
+
+### 13.22 THE KIRBy SIDE — WHAT THE 2026-09-05 AUDIT FOUND
+
+The laboratory runner, the noise draw and the submit helpers live in
+`/data/stat-ecr/scat9264/KIRBy`, not here, and three of the six defects in §13.20 were on that side.
+Fixed and committed unless marked open.
+
+✅ **The write race.** The runner does a read-modify-write of `all_results.csv` — read the file, drop
+the rows matching its own model, representation and condition, write the whole file back — with no
+lock anywhere in the runner or the job scripts. The output path carried the model and the
+representation but not the CONDITION SET, so the breadth grid, the deep run and the censoring run
+all wrote one file. Those three are submitted days apart and run concurrently, which the models
+sharing a directory never did; two tasks whose read-to-write windows overlap lose the earlier
+writer's rows entirely and leave nothing to say so. One directory per (model, representation,
+condition set, dataset) now. **The breadth grid keeps the bare path** — nineteen of its arrays were
+already queued and SLURM copied their scripts at submit time.
+
+✅ **The guard that stops a run did not stop a run.** `assert_matches_support` raises
+`DecompositionError`, whose own docstring says "never caught and turned into a blank row". The
+runner never named the class, so it fell past the narrow `except (RunIntegrityError, DoseError)`
+into `except Exception`, printed one ERROR line and continued. Bound and re-raised
+(KIRBy `88b9df9`).
+
+🔴 **OPEN — the fold-independence gate proves less than its PASS line says.** It exercises the
+TRAINING noise stream on THREE of the seven conditions, and prints "every molecule carries one
+injected noise value across all folds, in every condition". Validation labels are drawn from a
+deliberately independent stream (`base = 42` for training, `1337` for validation, with the stream
+folded into the shape and selection seeds as well), so a molecule that is training in one fold and
+validation in another carries two different corruptions — measured at 791 of hERG's 1,415
+molecules, 55.9%. **That separation is the settled design**, not a defect. What is wrong is a
+comment in the runner asserting the opposite of what the code does, and a PASS line that overclaims
+on two axes. **Methods needs a sentence**, because 56% is not a corner case.
+
+🔴 **OPEN — a partially lost out-of-fold pass cannot fail anything.** An inner fold that raises is
+caught, skipped with a printed warning, and rows are still written for every training molecule with
+NaN values. The runner's own integrity gates count rows rather than finite values, so the job exits
+0. The only detection is `merge_results.py`, which classifies the cell `TRUNCATED_OOF` — and then
+returns normally, exit 0. **Read the coverage table it prints; do not read its exit code.**
+
+⚠️ **`where_to_submit.sh --emit` breaks a fairshare tie the wrong way.** It picks the account with
+`sort -rn | head -1` and no sort key, so an exact tie falls through to a reversed whole-line byte
+comparison and the lexically last name wins — `stat-ecr` over `stat-cadd`. Latent, not observed:
+`--emit` returned `stat-cadd` on 2026-09-04. §13.19 pins the account by hand regardless, which is
+why this is a note and not a step.
+
+⚠️ **`--emit` also hard-codes the partition.** `part="${EMIT_PARTITION:-medium}"` — so `$PART` came
+back `medium` because that is the default, not because anything was measured. Setting
+`EMIT_PARTITION=long` is the override.
+
+⚠️ **`where_to_submit.sh` and `preflight_check.sh` both `git pull origin main`** into a checkout
+that sits on `similarity-metrics-study`, 261 commits ahead of `origin/main` and one behind, so the
+fast-forward cannot succeed. Harmless in `where_to_submit.sh`, where it is a comment line; in
+`preflight_check.sh` it runs inside a submitted job.
+
+⚠️ **`--clean-validation` does not exist in KIRBy.** The laboratory runner spells it
+`--no-noise-validation`; `--clean-validation` is the QM9 Rust processor's flag. Passing the wrong
+one to a `val_*.sh` job is `error: unrecognized arguments`, exit 2. Both default to noising
+validation, which is the settled behaviour.
+
+⚠️ **`slurm_scripts_uncertainty_rerun/RUNBOOK.md` still points at `/data/stat-cadd/scat9264/KIRBy`
+on six lines**, and two prose notes call that checkout "what these scripts use" — the generator it
+documents defaults to `stat-ecr`. It also tells the operator to run a `preflight.sh` that was
+deleted on 2026-08-28 and that no generator writes. Nothing guards either: the runbook lock checks
+conditions, counts and array ranges only.
 
 ---
 
