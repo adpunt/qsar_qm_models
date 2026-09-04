@@ -8971,27 +8971,29 @@ regenerated. Listing them is busywork. What matters is the half that survives, b
 regenerated number does not fix a wrong sentence about the method, a retired metric in the
 Conclusion, or a broken bibliography.
 
-### The paper rewrite is its own document — `PAPER_REVISION_GUIDE_2026-09.md` (2026-09-04)
+### The paper rewrite is its own document — `PAPER_REVISION_GUIDE_FINAL.md` (2026-09-04)
 
-Written to the format of `PAPER_REVISION_GUIDE.md` and superseding it. Part One is the **Methods,
-drafted in full**: replacement prose for every subsection, a table of the sentences the code
-contradicts with confirmed `paper.tex` line numbers, and eight open items. Part Two **outlines every
-other unit** — abstract, scientific contribution, introduction close, the four Results subsections,
-the two-mechanism synthesis, the conclusion, the limitations paragraph and the back matter — each
-saying what it must do, what is already known to break, and what it waits on. It invents no finding:
-the units that need the re-run say so. **Sourced by reading the
-code, not this document**: eight readers over the QM9 data path, the representations, the model
-roster, the noise scheme across all three injectors, the uncertainty decomposition, the QM9
-protocol, the KIRBy runner and the three job generators, then three verifiers re-opening every cited
-line. 363 claims, 42 corrected on re-check.
+Supersedes `PAPER_REVISION_GUIDE.md`. **Only what can be written before the re-run is written**:
+the Methods in full (M1-M7), and the Limitations paragraph. Everything else -- abstract, scientific
+contribution, introduction close, the four Results subsections, the synthesis passage, the
+conclusion, the figures and the additional files -- is a heading saying what it waits for. The
+author's instruction, 2026-09-04: build the whole document, fill in only what is possible now.
 
-It does NOT cover the metrics and statistics computed after a run — auc_norm, the ANOVA, Kendall's
-W, coverage, the uncertainty statistics. The author placed those elsewhere on 2026-09-04, so that
-subsection is a placeholder there.
+**`paper.tex` IS NEVER EDITED, BY ANYONE.** The copy in this repository is a read-only reference
+that is copied DOWN from the Overleaf project and never up; nothing here reaches the manuscript.
+Every change to the paper is written as replacement text in the guide and moved across by hand.
 
-Two decisions it records: the three measured datasets are called **assay datasets** in the paper
-(author, 2026-09-04), and the Methods gains a seventh subsection, **Uncertainty quantification**,
-absorbing `paper.tex:217-219`.
+Sourced by reading the code, not this document: eight readers over the QM9 data path, the
+representations, the model roster, the noise scheme across all three injectors, the uncertainty
+decomposition, the QM9 protocol, the KIRBy runner and the three job generators, then three verifiers
+re-opening every cited line. 363 claims, 42 corrected on re-check.
+
+The metrics and statistics computed after a run -- auc_norm, the ANOVA, Kendall's W, coverage, the
+uncertainty statistics -- are owned elsewhere (author, 2026-09-04). §M6 is a placeholder.
+
+Two decisions it records: the three measured datasets are called **assay datasets** in the paper,
+and the Methods gains a seventh subsection, **Uncertainty quantification**, absorbing
+`paper.tex:217-219`.
 
 Three things it found that are not listed below and that no compute fixes:
 
@@ -9000,7 +9002,6 @@ Three things it found that are not listed below and that no compute fixes:
 | `:193` | "implemented by DeepChem" — the scaffold splitter was replaced by a purpose-written one that gives each acyclic molecule its own group. DeepChem's put nearly all of them in training |
 | `:193` | "from this fixed subset" — each replicate draws its own 10,000 molecules, so the subset is not fixed across replicates |
 | `:205` | "Rust was used to perform … feature extraction" — Rust computes no representation. It does label processing, noise injection and serialization |
-
 
 ### Survives regeneration — these are wrong about the *method*, not the values
 
@@ -14297,14 +14298,39 @@ number that describes none of its levels.
 
 #### The guard
 
-One function every figure passes its data through before drawing. It is told which factors the
-figure holds fixed; it **raises and stops the run** if the frame still holds more than one value of
-any of them, and it writes those fixed values into the figure's own title so the title cannot drift
-from the data. Same shape as `assert_matches_support`, which refuses to write an uncertainty row
-whose numbers disagree with the support table — that guard corrected three model families the day it
-was wired in.
+**What it is.** Every figure is handed a table whose columns include dataset, model, representation,
+noise type, level and replicate. A figure that is *supposed* to show one representation, but is handed
+a table still containing all six, does not fail — it silently plots the average of six things, and
+the title still says one. Nothing in the code stops that today.
 
-**About a day. It goes in before the first figure, not after.**
+The guard is one small function. Before a figure draws anything, it is told which factors this figure
+holds fixed. It looks at the table. **If the table still contains more than one value of a factor the
+figure claims to hold fixed, it raises and stops the run**, naming the figure and the factor. It also
+writes the fixed values into the figure's own title, so a title cannot drift away from the data
+behind it.
+
+**The worked example is already in the paper.** `generate_paper_figures_v2.py:2494`:
+
+```python
+model_ds_c = val_auc_df.pivot_table(values='auc_norm', index='model',
+                                    columns='dataset', aggfunc='mean')
+```
+
+It groups by model and dataset only, so `aggfunc='mean'` averages over **representation and noise
+type together** — up to 36 values per bar. Lines 2511–2512 do the same for the second panel. That is
+`fig_validation_combined`, the figure the paper's cross-dataset claim rests on. **With the guard in
+place, that line raises instead of drawing**, and the fix is to pick a representation or to draw one
+bar per representation.
+
+**Same shape as `assert_matches_support`**, which refuses to write an uncertainty row whose numbers
+disagree with the support table — that guard corrected three model families the day it was wired in.
+
+**Cost: about a day.** The function itself is small; the work is one declaration line at the top of
+each of the ~15 figure and table builders saying what it holds fixed, plus a test that removing a
+declaration makes the run fail.
+
+**It belongs in the NEW figure script, written as its first module — not bolted onto the old one.**
+Retro-fitting the current script means fixing five live defects in code that is being replaced.
 
 **Where the spread across a factor is the point**, show the spread — six dots in a column, or a line
 from lowest to highest with a mark at the middle. Never its centre alone.
@@ -14422,6 +14448,9 @@ at one representation is the interaction, and you can see which representation c
 already claims exactly this — "SVM and full BNNs remain robust across all representations, while RF
 and NN-β are robust only with certain ones" — and has no figure of it.
 
+🔴 **How many noise types, and which — DEPENDS ON THE RESULTS** (author, 2026-09-04). It is
+§14.6 row 14. What can be fixed now is the rule that decides it, not the answer.
+
 **What "highlighted" should mean, and it is a rule not a taste:** the noise types shown in the main
 text are the ones whose grids differ from each other. If two noise types give the same grid, showing
 both is a repeat; if they differ, that difference is the Q2 result and both belong. **That is
@@ -14440,8 +14469,13 @@ whichever thing this panel is comparing — and that is one choice, made once:
 - **one line per model, at one noise type** — the paper's current version, or
 - **one line per noise type, for one model** — which is the Q2 picture the author asked about.
 
-*Both are the same shape and the same code. Two panels of it, one of each, costs nothing and answers
-both questions. That is the recommendation and it is the only remaining choice in this slot.*
+*Both are the same shape and the same code.*
+
+✅ **Two panels, one of each — author, 2026-09-04: "lets try with two but I'll see how it actually
+looks, make it pending."** So this is **built as two and reviewed on the rendered figure**, not
+settled on paper. If the two-panel version is cramped once the models are drawn, the fallback is one
+panel per model rather than one panel per noise type, because the noise-type panel is the one nothing
+else in the paper covers.
 
 **Bottom panel — SHAPE C.** Rows are the models, columns are the noise types, **plus one extra
 column at the far left holding the clean R², separated by a white gap so it cannot be misread as a
@@ -14568,6 +14602,7 @@ statistic that fires it, the figure it demands, and where that figure would go.
 | 11 | **Gaussian processes collapse in some folds** | `gp_collapsed` rows appear in `provenance_report` | A count per model and representation. **Nothing filters those rows today** — that has to be fixed before any figure containing a Gaussian process is trusted | — | Additional file, but the fix is not optional |
 | 12 | **The interaction term dominates the ANOVA** | the pairing share exceeds both main effects, as it did on QM9 for all six retired noise types | `run_simple_effects` — the model effect computed separately at each representation — which already exists and is currently only a supplementary table | D | Promote to a panel on F2 |
 | 13 | **A model family cannot be decomposed at all** | `aleatoric_support` or `epistemic_support` reads `constant` or `none` | No line is drawn for it. The support value is printed in the table instead | — | T6. **This is a guard, not a choice** |
+| 14 | **Two noise types give the same grid on F3** | the model-by-representation grids under two noise types agree closely once the replicate spread is allowed for | Show one of them in the main text and the other as an additional file. **If every grid differs, every grid is a main-text panel and F3 becomes the largest figure in the paper** | C | Decides F3's panel count |
 
 ---
 
@@ -14602,10 +14637,12 @@ table is new.
 
 ### 14.9 WHAT IS STILL OPEN
 
-1. **F3 — how many noise types are highlighted, and which.** Held pending results. The selection rule
-   in F3 is proposed: show the noise types whose grids differ from each other, and make the script
-   print which it chose and why.
-2. **F4's top panel — one panel or two.** One line per model, one line per noise type, or both.
+1. ~~**F3 — how many noise types are highlighted, and which.**~~ 🔴 **Settled as results-dependent,
+   2026-09-04** — §14.6 row 14. The rule is fixed now, the answer comes off the data: show the noise
+   types whose grids differ from each other, and make the script print which it chose and why.
+2. ~~**F4's top panel — one panel or two.**~~ ✅ **Two, pending a look at the rendered figure**
+   (author, 2026-09-04). Build both panels, review, and fall back to one panel per model if it is
+   cramped.
 3. **F6 — 6A, 6B or 6C.** Recommendation is 6A.
 4. **F7 — which of the three.** Depends on the results; §14.6 rows 1 to 3 say which result picks which.
 5. **Which representation is held constant.** `PRIMARY_REP` is `pdv`; the author leans **ChemBERTa**.
