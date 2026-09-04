@@ -371,9 +371,16 @@ def main():
     ap.add_argument('--reps', nargs='+', default=SPANNING_REPS,
                     help='the representations the deep run uses. Default spans '
                          'fingerprint, descriptor and learned embedding.')
-    ap.add_argument('--n-models', type=int, default=4,
-                    help='4 models x 3 representations is the dozen pairs 13.14 '
-                         'prices the deep run at.')
+    # DEFAULTS TO THE SIZE OF THE SELECTION THAT IS ALREADY QUEUED, not to a
+    # hardcoded number. It was 4 -- the dozen pairs 13.14 prices the deep run at --
+    # while the author settled on six on 2026-09-04 and the arrays went out against
+    # those six. A reading of four against a queue of six looks like a decision to drop
+    # two, and dropping is one-way: those tasks skip and stay skipped.
+    ap.add_argument('--n-models', type=int, default=None,
+                    help='How many models the reading picks. Default: as many as are in '
+                         'deep_run_pairs.json now, so the suggestion is comparable to '
+                         'what is already queued. 4 models x 3 representations is the '
+                         'dozen pairs 13.14 originally priced the deep run at.')
     # The repo root, NOT results/: results/* is gitignored, and this file has to
     # reach the cluster through git because every deep-run task reads it at run
     # time. It sits beside uncertainty_pairs.json and noise_conditions.json, which
@@ -382,6 +389,18 @@ def main():
                     help='write the selection here as JSON '
                          '(default: deep_run_pairs.json at the repo root)')
     cli = ap.parse_args()
+
+    if cli.n_models is None:
+        _queued = Path(cli.out) if cli.out else ROOT / 'deep_run_pairs.json'
+        try:
+            _spec_now = json.loads(_queued.read_text())
+            cli.n_models = len(_spec_now.get('generator_labels')
+                               or _spec_now.get('models') or []) or 4
+            print(f"=== picking {cli.n_models} model(s), the number already in "
+                  f"{_queued.name}")
+        except (OSError, ValueError):
+            cli.n_models = 4
+            print("=== picking 4 model(s) (no existing selection to match)")
 
     check_family_map()
     results_dir = Path(cli.results_dir)
@@ -494,8 +513,9 @@ def main():
     if _hand:
         _sug = out.with_name(out.stem + '.suggested.json')
         print(f"\n  {out.name} was written by hand, so it is LEFT ALONE.")
-        print(f"  This reading goes to {_sug.name} instead -- compare them, and copy "
-              f"across what you agree with.")
+        print(f"  This reading goes to {_sug.name} instead. To compare and accept:")
+        print(f"      diff {out} {_sug}")
+        print(f"      cp   {_sug} {out}      # only if you agree with all of it")
         print(f"  Widening later costs a resubmission; narrowing is free "
               f"(RERUN_PLAN.md 13.19 STEPS 4-5).")
         out = _sug
@@ -558,9 +578,11 @@ def main():
         # The whole point of these files is that the author edits them, so the script
         # that regenerates them must not silently undo that. Seeded by hand 2026-09-05.
         _sug = cen_out.with_name('censoring_pairs.suggested.json')
-        _target, _note = _sug, (f"{cen_out.name} was written by hand, so it is left "
-                                f"alone. The screen's own reading is in {_sug.name} -- "
-                                f"compare, and copy across what you agree with.")
+        _target, _note = _sug, (
+            f"{cen_out.name} was written by hand, so it is LEFT ALONE. "
+            f"To compare and accept:\n"
+            f"      diff {cen_out} {_sug}\n"
+            f"      cp   {_sug} {cen_out}      # only if you agree with all of it")
     else:
         _target, _note = cen_out, None
 
