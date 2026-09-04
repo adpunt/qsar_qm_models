@@ -101,10 +101,15 @@ Their role is in question A and as the leakage check. Preflight section 4b print
 the per-(dataset, condition) count of distinct noise scales, so a condition that
 is flat where it should not be is visible before the queue is spent.
 
-**Scope:** 3 datasets × 4 models × 3 representations × 7 conditions × 7 noise
-levels × 5 scaffold folds, with VBLL narrowed to ChemBERTa alone. 4 array
-scripts — 63 tasks each for QRF, NGBoost and the Gaussian process, 21 for VBLL —
-**210 tasks**, **44,100 model fits**.
+**Scope:** 3 datasets × 6 models × 3 representations × 3 conditions × 7 noise
+levels × 5 scaffold folds. **6 array scripts**, 27 tasks each — **162 tasks**, **34,020 model fits**.
+
+⚠️ **This paragraph said 4 scripts, 210 tasks and 44,100 fits until 2026-09-04**, from when the
+run was four models on seven conditions with VBLL narrowed to ChemBERTa. Three things changed
+under it and none of them reached this file: the two variance-head networks joined the roster
+(§2.34), the VBLL restriction was lifted, and the conditions came down to the three the screen
+runs. Rebuild these numbers by running the generator, never by editing them —
+`test_runbook_matches_generator.py` fails if they drift again.
 
 The scripts are not all the same length any more, so there is no single
 `--array=` range for the whole run. §5 and §6 give the range per script and
@@ -396,14 +401,19 @@ running and confirm they work before committing the rest of the queue.
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
 
-sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_ngboost.sh
-sbatch --account=$ACCT --partition=$PART --array=0-62%6 unc_gp.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_ngboost.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_gp.sh
 ```
 
-> `0-62` is 3 datasets × 3 representations × 7 conditions. Each script's own header prints the
+> `0-26` is 3 datasets × 3 representations × 3 conditions. Each script's own header prints the
 > range it was generated for — use that, not this line, if you regenerated with a different
 > condition or representation set.
+>
+> ⚠️ It read `0-62` until 2026-09-04, from when the uncertainty runs carried all seven
+> conditions. They carry the three the screen runs; the other four are `--include-deep-conditions`.
+> Submitting `0-62` now asks for 36 indices the script refuses — every one of them exits on the
+> generator's own out-of-range guard, after queueing.
 >
 > A range that is too SHORT is the failure to watch for, because nothing reports it: SLURM
 > runs exactly what you asked for, every task that runs succeeds, and the tasks that never
@@ -426,12 +436,20 @@ tail -40 logs/unc_ngboost_*_0.out
 ## 6. Submit tier 2
 
 ```bash
-sbatch --account=$ACCT --partition=$PART --array=0-20%4 unc_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_bnn_full_mve.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_mlp_bnn_full_mve.sh
 ```
 
-> `0-20` is 3 datasets × 1 representation × 7 conditions. VBLL runs on ChemBERTa alone, so its
-> array is a third the length of tier 1's — submitting it as `0-62` would ask for 42 indices
-> the script refuses, and submitting tier 1 as `0-20` would silently drop two datasets.
+> **Three scripts, not one.** `unc_bnn_full_mve.sh` and `unc_mlp_bnn_full_mve.sh` — the two
+> variance-head networks built on 2026-09-01 (RERUN_PLAN.md §2.34) — appeared in no `sbatch` line
+> here until 2026-09-04, so an operator following this file would have run four models of six and
+> never known. They are the only models on either pipeline whose measurement-error term varies per
+> molecule, which is what the per-molecule question needs. The identical omission happened in the
+> QM9 runbook and cost 36 tasks there.
+>
+> The VBLL restriction to ChemBERTa was lifted on 2026-09-01, so all three run on all three
+> representations and all three arrays are the same length as tier 1's.
 >
 > Tier 2 was six scripts until the decision of 2026-08-28. BNN-Full, MLP-BNN-Full and
 > MLP-VBLL-Full are not queued at all, and the two heteroscedastic variants are not on this
@@ -557,7 +575,7 @@ training rows.
 ## Cost and the one thing to decide
 
 Each task is 7 noise levels × 5 scaffold folds × (1 + 5) fits = **210 model
-fits**, against 35 without cross-fitting. 210 tasks, **44,100 fits**.
+fits**, against 35 without cross-fitting. 162 tasks, **34,020 fits**.
 
 ⚠️ **The `--time` requests are sized for a grid that no longer exists.** 36 h for
 QRF and 47 h for the rest were set when a task was 11 levels, i.e. 330 fits; it is
