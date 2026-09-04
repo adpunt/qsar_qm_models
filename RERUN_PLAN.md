@@ -10761,6 +10761,175 @@ python slurm_scripts_validation_rerun/merge_results.py
 
 ---
 
+### 13.19 EVERY EXPERIMENT COMMAND, IN ORDER — assembled 2026-09-04
+
+**Every count below came from running the generator, not from typing.** Rebuild any of them the
+same way. Three runbooks are check-locked to their generators and one section of this file is
+(§13.14); this section is the operator's path through all of them.
+
+⚠️ **EVERYTHING LABORATORY-SIDE RUN BEFORE 2026-09-04 IS SUPERSEDED.** The noise draw changed
+(§3.3b): a molecule's corruption is now a property of the molecule rather than of the fold it
+landed in. That includes the breadth grid 12971620–12971638, the hERG resubmits 12979965–12979969
+and the stray 12975687. **QM9 is untouched** — it always drew once over its training column, which
+is what the laboratory now matches.
+
+---
+
+#### STEP 0 — get both repositories to the cluster
+
+```bash
+# laptop
+git push origin additional_reps
+git -C ~/repos/KIRBy push origin similarity-metrics-study   # or the branch the cluster tracks
+
+# cluster
+cd /data/stat-cadd/scat9264/qsar_qm_models && bash scripts/pull_safely.sh && git log --oneline -1
+git -C /data/stat-ecr/scat9264/KIRBy branch --show-current   # must be the branch you pushed
+git -C /data/stat-ecr/scat9264/KIRBy pull --ff-only && git -C /data/stat-ecr/scat9264/KIRBy log --oneline -1
+python /data/stat-ecr/scat9264/KIRBy/tests/test_noise_is_a_property_of_the_molecule.py
+read -r ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
+```
+
+The gate must print PASS before any laboratory job goes in. It fits nothing and takes about a minute.
+
+#### STEP 1 — the QM9 main grid. **19 jobs.** Nothing blocks it.
+
+```bash
+cd slurm_scripts_qm9_rerun
+rm -f qm9_s1_*.sh && python generate_scripts.py --stage 1 --max-hours 720
+ls qm9_s1_*.sh | wc -l                # 19
+grep -h 'mem=' qm9_s1_rf.sh           # 32G, measured (§13.18)
+
+for s in rf xgboost lgb svm ngboost dnn mlp \
+         dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational \
+         heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero \
+         dnn_bnn_full_mve mlp_bnn_full_mve qrf gauche_rbf; do
+    sbatch --account=$ACCT --partition=long --array=0-17%5 qm9_s1_$s.sh
+done
+sbatch --account=$ACCT --partition=long --array=0-2%4 qm9_s1_gauche.sh
+```
+
+**327 tasks, 18,639 training runs**, replicates 1–9. All 19 spelled out: the "and the other two
+tiers as above" shorthand is what dropped two models on 2026-09-02.
+
+#### STEP 2 — restart the laboratory breadth grid. **19 jobs.**
+
+```bash
+for j in $(seq 12971620 12971638) 12975687 $(seq 12979965 12979969); do scancel $j; done
+
+cd ../slurm_scripts_validation_rerun
+rm -f val_*.sh smoke_test.sh submit_all.sh preflight.sh && python generate_scripts.py
+bash preflight.sh                     # must PASS: 1,415 hERG molecules
+bash submit_all.sh
+```
+
+**327 tasks**, 19 models × 6 representations × 3 datasets, three conditions.
+
+#### STEP 3 — when the QM9 screen finishes: fill the clean rows, then read the selection
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results results --dry-run
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results results
+python scripts/select_deep_run_pairs.py --results-dir results
+```
+
+**`copy_zero_rows.py` first, always.** Only gaussian runs the clean level; `auc_norm` is retention
+against it, so before the copy the two grouped conditions are dropped from the ranking in silence.
+The selector now says so, but the fix is the copy.
+
+Then **open `results/deep_run_pairs.json`, change what you disagree with, and keep it.** It is the
+input to both deep runs:
+
+```json
+{"generator_labels": ["ngboost", "rf", "heteroscedastic_gp", "svm",
+                      "gauche_rbf", "dnn_bnn_full_mve"],
+ "representations": ["ecfp4", "pdv", "chemberta"]}
+```
+
+#### STEP 4 — the QM9 deep run and censoring
+
+```bash
+cd slurm_scripts_qm9_rerun
+python generate_scripts.py --stage 2 --pairs-file ../results/deep_run_pairs.json --max-hours 720
+for f in qm9_s2_*.sh; do sbatch --account=$ACCT --partition=long --array=0-17%4 $f; done
+
+mkdir -p ../slurm_scripts_qm9_censoring
+python generate_scripts.py --stage 2 --conditions censoring \
+    --pairs-file ../results/deep_run_pairs.json --max-hours 720 \
+    --out-dir ../slurm_scripts_qm9_censoring
+cd ../slurm_scripts_qm9_censoring && for f in qm9_s2_*.sh; do
+    sbatch --account=$ACCT --partition=long --array=0-17%4 $f; done
+```
+
+**Censoring must have its own `--out-dir`** — scripts are named by model and run-design index only,
+so writing it into the generator's own directory overwrites the main-grid scripts, exits 0, and
+leaves no way back. The generator refuses this, but only if you let it.
+
+Each script's own header prints its range; use that if your selection differs in size.
+
+#### STEP 5 — the laboratory deep run and censoring, same pairs
+
+```bash
+cd ../slurm_scripts_validation_rerun
+mkdir -p ../slurm_scripts_validation_depth ../slurm_scripts_validation_censoring
+python generate_scripts.py --include-depth-conditions \
+    --models <the models> --reps ecfp4 pdv chemberta \
+    --out-dir ../slurm_scripts_validation_depth
+python generate_scripts.py --conditions censoring \
+    --models <the models> --reps ecfp4 pdv chemberta \
+    --out-dir ../slurm_scripts_validation_censoring
+```
+
+Both refuse without `--models` and `--reps`, deliberately — the same rule the QM9 generator applies.
+The laboratory takes runner-side model names (`RF`, `NGBoost`, `GP`, …), not the QM9 labels; each
+directory's `submit_all.sh` then submits it.
+
+#### STEP 6 — the uncertainty runs. **6 jobs, 162 tasks, 34,020 model fits.**
+
+```bash
+cd ../slurm_scripts_uncertainty_rerun
+rm -f unc_*.sh && python generate_scripts.py
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_qrf.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_ngboost.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_gp.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_vbll_full.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_bnn_full_mve.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_mlp_bnn_full_mve.sh
+```
+
+These are the laboratory's out-of-fold pass — the aleatoric/epistemic decomposition included, which
+is not a separate run. QM9 gets the same rows inline from its own grid, decided per task by a case
+statement on the representation, so **there is no QM9 uncertainty submission**.
+
+The two variance-head scripts had appeared in no `sbatch` line here until 2026-09-04, and the ranges
+read `0-62` against 27-task scripts. Both fixed and check-locked.
+
+#### STEP 7 — merge and regenerate
+
+```bash
+python slurm_scripts_validation_rerun/merge_results.py
+python slurm_scripts_uncertainty_rerun/merge_results.py
+sbatch slurm_scripts_analysis/run_figures_v2.sh      # NOT run_figures.sh, which is the dead NDS script
+```
+
+`scripts/uncertainty_stats.py` is not run directly — the figure script calls it, and nothing else in
+any of the three repositories computes a number from an uncertainty run.
+
+#### Job counts, in one place
+
+| Step | What | Jobs | Tasks |
+|---|---|---|---|
+| 1 | QM9 main grid | **19** | 327 |
+| 2 | laboratory breadth grid | **19** | 327 |
+| 4 | QM9 deep run + censoring | 2 × models chosen | per the generator |
+| 5 | laboratory deep run + censoring | per the generator | per the generator |
+| 6 | uncertainty runs | **6** | 162 |
+
+QM9's screen (12971601–12971619, 19 jobs) is already running and is not resubmitted.
+
+---
+
 ### 13.16 ✅ THE REPORTING LEVELS — SET 2026-08-28. Read this before quoting any accuracy number.
 
 ## QM9 1.0 · logD 1.0 · hERG 1.0 · Caco-2 0.75
