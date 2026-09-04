@@ -10449,6 +10449,39 @@ The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:
 throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
 **Nothing downstream should be planned against the mean.**
 
+#### 2026-09-04 — choosing from a screen that is not finished, and revising as it lands
+
+**The author's call, with the queues where they are: read the deferred choices off what has landed
+and confirm them as the rest arrives.** That is a reading of the rule in §13.17 B, not a new
+decision, so nothing here reopens anything.
+
+`scripts/select_deep_run_pairs.py` does the reading. It computes no statistic of its own —
+`load_anova_data` and `calculate_robustness` are imported from `generate_paper_figures_v2.py`,
+which is the one place `auc_norm` is defined. It prints one table per representation and ranks a
+model inside a representation and a condition, never on an average across them. It ends by naming
+every model that has not landed and marking the selection provisional.
+
+```bash
+python scripts/select_deep_run_pairs.py --results-dir results
+```
+
+Three things it checks that the rule implies and a person reading a table would not:
+
+- **The clean-R² floor is run both ways** (guard 8). If the selection changes when the floor is
+  lifted, it is resting on an undeclared filter and the script says so.
+- **The flags come out in the generator's own labels**, not the results-side canonical names. The
+  two differ for the variational networks — `dnn_vbll` in a results row is
+  `dnn_bnn_full_variational` to the generator — and a command with the wrong one exits on the
+  unknown-label guard, which on this queue is a wasted day.
+- **It does not price the run.** Only gaussian carries the clean level and the depth conditions
+  carry six levels rather than seven, so the obvious multiplication overstates it: the script said
+  5,880 training runs against the generator's 4,440 the first time it ran, and the arithmetic was
+  removed rather than corrected. The generator owns that number.
+
+⚠️ **NGBoost's deep-run task is 529:59** — 22 days, against the long partition's 30 and the
+guard's 540-hour ceiling. It clears both, with nothing to spare. Read that wall clock before
+submitting the deep run, not after.
+
 #### 🔴 2026-09-03 — the whole hERG third of the laboratory failed, and the cause is a gitignored file
 
 **Every failure in the launch was hERG, and only hERG.** `sacct` on 2026-09-03: 26 FAILED, all of
