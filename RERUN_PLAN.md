@@ -11512,7 +11512,7 @@ not be raised again until its trigger fires.
 
 | # | What | Owner |
 |---|---|---|
-| A5 | **hERG's label cache has no provenance stamp, so the ChEMBL release behind 1,415 of the study's molecules is unrecorded.** `preflight.sh` reports it on every run: `chembl_herg_ki.csv` is present and loads 1,415 molecules, but there is no `chembl_herg_ki.provenance.json` beside it — the cache predates the stamp. Nothing in the run depends on it and it blocks no job; **Methods cannot state which ChEMBL release the hERG labels come from until it is answered**, and a reviewer will ask. Look for the file on the older checkout or in whatever fetched it, and copy it across; if it does not exist anywhere, the release has to be established some other way or the limitation stated. Raised 2026-09-05 | **the author** — only they know where that cache came from |
+| ~~A8~~ | ✅ **CLOSED 2026-09-04 — the hERG labels are release-stable, so no stamp was ever lost.** Raised as a second "A5" by mistake; renumbered so the uncertainty-pair A5 below keeps its references. The provenance file **never existed on any copy**: the code that writes it (`fetch_chembl_herg_ki`, KIRBy `2df1a5c`, 2026-08-27) writes the stamp **only on a live fetch**, and every cached copy was written 2026-02-01. Deleting the old cluster caches lost nothing here, and there is nothing to look for on an older checkout. **Settled by re-extraction, not by inference**: re-running that function's exact query and filter against live ChEMBL_37 on 2026-09-04 returned the same **1,415 compounds — 0 added, 0 removed, all 1,415 pKi values identical**, and the regenerated file is **byte-identical** to `results/parity_tests/_cache/chembl_herg_ki.csv` (md5 `e1833295a057874fa7c252423c6181f7`). The original fetch date was 2026-02-01, when ChEMBL_36 was the only live release (ChEMBL_36 posted 2025-09-19, ChEMBL_37 2026-05-29). A reconstructed stamp is now beside the local cache, with its reconstructed status recorded in the file. Methods sentence and the two cluster copy commands: §13.17a | done — nothing left for the author |
 | A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset. 🟠 **Half answered 2026-08-30, and it needed no cluster time.** `KIRBy/tests/data_cache/openadmet_raw.csv` is one flat extraction — 7,618 rows, one value per molecule, and **no laboratory, source, site, assay or batch column at all**, so nothing in the run can condition on one and the between-laboratory variance Bentz measured is not a property of THIS data. The efflux column has 3,777 non-null values with a log10 spread of 0.599, against the 0.44 the runner records after its own filtering. So the anchor is imported from a different design and is very likely too high. **What is left is the author's: which number replaces it** | **the author** — the evidence is in, the choice of anchor is a decision |
 | ~~A2~~ | ✅ **SETTLED 2026-09-04 — the laboratory matches QM9.** Draw once over the full label column, keyed by the molecule's position in the dataset, and let each fold take its slice. The author's ruling, against the earlier recommendation to keep the per-fold draw. Diagnosis §3.3a, build and gate §3.3b | done — the build is open |
 | A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
@@ -11550,6 +11550,89 @@ sessions.
 | The QM9 runbook, and the first audit's items | ✅ verified fixed 2026-08-28 |
 | **The forest leaf size** | ✅ settled and applied 2026-08-28 — both forests at 5 (§5.5c). It appeared on the launch-blocker list for a day after it was decided |
 | **Whether the uncertainty runs inherit the settled condition set** | ✅ settled 2026-08-27, and superseded 2026-08-28: **all seven conditions, one list, both pipelines** |
+
+### 13.17a hERG's ChEMBL release — settled 2026-09-04, and what the cache clean did not cost
+
+**Verdict: nothing was lost, and the question the missing stamp was blocking is now answered
+outright.** Written after the author cleaned old caches off `stat-cadd` and asked what had gone.
+
+#### The stamp never existed anywhere
+
+`fetch_chembl_herg_ki` writes `chembl_herg_ki.provenance.json` **only on the branch that fetches
+live from ChEMBL**. Take the cached file and it prints the warning instead and writes nothing. That
+code arrived in KIRBy `2df1a5c` on **2026-08-27**; every copy of the label cache was written
+**2026-02-01**. So no copy on `stat-cadd`, on `stat-ecr`, on `kirby-stable` or on any older checkout
+could ever have carried the stamp. **Do not go looking for it, and the deletes cost nothing here.**
+
+#### The release, established by re-extraction rather than by inference
+
+Re-running that function's exact query and filter against **live ChEMBL_37 on 2026-09-04** returned
+**the same 1,415 compounds: 0 added, 0 removed, all 1,415 pKi values identical.** The regenerated
+file is **byte-identical** to `results/parity_tests/_cache/chembl_herg_ki.csv`, md5
+`e1833295a057874fa7c252423c6181f7`.
+
+The original fetch date is **2026-02-01**, and ChEMBL_36 was the only release live then — ChEMBL_36
+was posted 2025-09-19, ChEMBL_37 on 2026-05-29. So the labels were drawn under ChEMBL_36 and the
+extraction is **unchanged under ChEMBL_37**. A reviewer asking "which release?" gets a better answer
+than a stamp would have given: the extraction reproduces today, and the checksum proves it.
+
+#### Methods sentence (author's to place; this chat does not edit `paper.tex`)
+
+> hERG Ki data were extracted from ChEMBL (target CHEMBL240) on 1 February 2026, under ChEMBL
+> release 36, restricted to binding assays with a defined pChEMBL value and an exact standard
+> relation. Per compound the median pChEMBL was taken and compounds whose replicate spread exceeded
+> one log unit were discarded, giving 1,415 compounds. Re-running the same extraction against
+> ChEMBL release 37 on 4 September 2026 returned an identical set of 1,415 compounds and identical
+> labels, so the dataset is unchanged across these two releases.
+
+#### The three copies that agree, and the one that does not
+
+| Copy | Rows | Label column | Body md5 (header stripped) |
+|---|---|---|---|
+| `KIRBy/tests/data_cache/` (laptop, 2026-02-01) | 1,415 | `pChEMBL` | `b3351459f6970ba464f3061ffa359b08` |
+| `results/parity_tests/_cache/` (this repo, 2026-08-27) | 1,415 | `pKi` | `b3351459f6970ba464f3061ffa359b08` |
+| `/data/stat-ecr/.../KIRBy/tests/data_cache/` (2026-09-03) | 1,415 | — | 87,833 bytes, matches the parity copy's size |
+| ⚠️ `/Volumes/seagate/kirby_cache/` (2026-02-27) | 1,415 | `pKi` | `775ff1c9eea98b72c3ade31e0facfb74` |
+
+The first three are the same data; the two label-column spellings differ by exactly the four bytes
+in the header, and `load_chembl_herg` accepts both spellings by name.
+
+🔴 **The external-drive copy is a different SMILES form of the same measurements and must not be
+copied into a cache directory.** Only **1,156** of its 1,415 SMILES strings match the others; where
+they do match the labels are identical, so it is the same data canonicalised by a different RDKit,
+not different data. Feeding it in would silently change the scaffold split and therefore every hERG
+fold, with the row count still reading 1,415 and every preflight check still passing.
+
+#### What to run on the cluster
+
+The reconstructed stamp is beside the laptop cache. Put it beside both cluster copies, from the
+laptop:
+
+```bash
+scp ~/repos/KIRBy/tests/data_cache/chembl_herg_ki.provenance.json \
+    scat9264@arc-login.arc.ox.ac.uk:/data/stat-ecr/scat9264/KIRBy/tests/data_cache/
+scp ~/repos/KIRBy/tests/data_cache/chembl_herg_ki.provenance.json \
+    scat9264@arc-login.arc.ox.ac.uk:/data/stat-cadd/scat9264/KIRBy/tests/data_cache/
+```
+
+Then confirm on the cluster that both label caches are the file this section describes, and that the
+external-drive variant has not reached either:
+
+```bash
+md5sum /data/stat-ecr/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv \
+       /data/stat-cadd/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv
+# body must hash b3351459f6970ba464f3061ffa359b08 with the header removed:
+for f in /data/stat-{ecr,cadd}/scat9264/KIRBy/tests/data_cache/chembl_herg_ki.csv; do
+    echo -n "$f  "; tail -n +2 "$f" | md5sum
+done
+# anything hashing 775ff1c9eea98b72c3ade31e0facfb74 is the external-drive variant: replace it.
+```
+
+`preflight.sh` stops warning once the stamp is in place, and the line it prints becomes
+`fetched 2026-02-01T17:41:28 from ChEMBL release ChEMBL_36, 1415 compounds`.
+
+---
+
 
 ---
 
