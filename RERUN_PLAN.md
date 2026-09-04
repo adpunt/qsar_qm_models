@@ -10517,6 +10517,41 @@ The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:
 throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
 **Nothing downstream should be planned against the mean.**
 
+#### Submission 4 — the QM9 main grid, 2026-09-04
+
+`--stage 1 --max-hours 720`, replicates 1–9 on the same three conditions, appending to the same
+files as the screen. **19 arrays, 327 tasks, 18,639 training runs.** Submitted to `long` with
+`--account=stat-cadd`. First submission to carry the measured 32 GB request rather than 128 GB.
+
+The ids map onto the loop in §13.19 STEP 1, which submits eighteen models in order and `gauche`
+last on its own because it runs on ECFP4 alone.
+
+| Job ID | Script | Array | Tasks |
+|---|---|---|---|
+| 12980573 | `qm9_s1_rf.sh` | `0-17%5` | 18 |
+| 12980574 | `qm9_s1_xgboost.sh` | `0-17%5` | 18 |
+| 12980575 | `qm9_s1_lgb.sh` | `0-17%5` | 18 |
+| 12980576 | `qm9_s1_svm.sh` | `0-17%5` | 18 |
+| 12980577 | `qm9_s1_ngboost.sh` | `0-17%5` | 18 |
+| 12980578 | `qm9_s1_dnn.sh` | `0-17%5` | 18 |
+| 12980579 | `qm9_s1_mlp.sh` | `0-17%5` | 18 |
+| 12980580 | `qm9_s1_dnn_bnn_full.sh` | `0-17%5` | 18 |
+| 12980581 | `qm9_s1_mlp_bnn_full.sh` | `0-17%5` | 18 |
+| 12980582 | `qm9_s1_dnn_bnn_full_variational.sh` | `0-17%5` | 18 |
+| 12980583 | `qm9_s1_mlp_bnn_full_variational.sh` | `0-17%5` | 18 |
+| 12980584 | `qm9_s1_heteroscedastic_gp.sh` | `0-17%5` | 18 |
+| 12980585 | `qm9_s1_dnn_bnn_full_variational_hetero.sh` | `0-17%5` | 18 |
+| 12980586 | `qm9_s1_mlp_bnn_full_variational_hetero.sh` | `0-17%5` | 18 |
+| 12980587 | `qm9_s1_dnn_bnn_full_mve.sh` | `0-17%5` | 18 |
+| 12980588 | `qm9_s1_mlp_bnn_full_mve.sh` | `0-17%5` | 18 |
+| 12980589 | `qm9_s1_qrf.sh` | `0-17%5` | 18 |
+| 12980590 | `qm9_s1_gauche_rbf.sh` | `0-17%5` | 18 |
+| 12980591 | `qm9_s1_gauche.sh` | `0-2%4` | 3 |
+
+**This is the last QM9 submission until the screen finishes.** The deep run and censoring wait on
+the selection (§13.19 STEP 3–4); there is no QM9 uncertainty submission at all, because those rows
+come out of these same jobs.
+
 #### 2026-09-04 — the decisions the author settled, and what each one rests on
 
 **1. The deep-run and censoring models. SETTLED.** Four from the screen's reading —
