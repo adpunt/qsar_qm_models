@@ -827,13 +827,27 @@ fi
 _selected=$(python - "$SELECTION_FILE" "{model}" "$rep" <<'PYSEL'
 import json, sys
 spec = json.loads(open(sys.argv[1]).read())
-models = (spec.get('validation_labels') or spec.get('models') or [])
-reps = spec.get('representations') or spec.get('reps') or []
 # The representation is spelled 'ECFP4' here and 'ecfp4' in the results, so the
 # comparison is case-folded. Model names are not -- 'GP' and 'gp' are different
 # rosters on this side and a fold would hide that.
-reps = {{str(r).lower() for r in reps}}
-print('yes' if sys.argv[2] in models and sys.argv[3].lower() in reps else 'no')
+model, rep = sys.argv[2], sys.argv[3].lower()
+# A condition that runs on about five NAMED pairs cannot be written as a model
+# list crossed with a representation list, so a file may name them outright.
+pairs = spec.get('validation_pairs') or spec.get('pairs')
+if pairs:
+    named = []
+    for p in pairs:
+        if isinstance(p, str):
+            a, _, b = p.partition(':')
+        else:
+            a, b = p[0], p[1]
+        named.append((a.strip(), b.strip().lower()))
+    ok = (model, rep) in named
+else:
+    models = spec.get('validation_labels') or spec.get('models') or []
+    reps = [str(r).lower() for r in (spec.get('representations') or spec.get('reps') or [])]
+    ok = model in models and rep in reps
+print('yes' if ok else 'no')
 PYSEL
 ) || {{ echo "ERROR: could not read $SELECTION_FILE"; exit 2; }}
 if [ "$_selected" != "yes" ]; then
@@ -845,7 +859,32 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
-# 128G, AND IT STAYS THERE UNTIL SOMETHING MEASURES THIS PIPELINE.
+def selection_pairs(spec, pairs_key, models_key):
+    """The (model, representation) pairs a run-time selection file names.
+
+    Two shapes, and the difference matters. The DEEP RUN's file is a model list and a
+    representation list, and it means the cross product -- six models on three
+    representations is eighteen pairs, all of them wanted. CENSORING runs on about five
+    NAMED pairs (RERUN_PLAN.md 13.13), which a cross product cannot express, so its file
+    lists the pairs outright under `pairs_key`. Same reader as the QM9 generator, and the
+    same reader is embedded in every generated task so the two cannot drift apart.
+    """
+    named = spec.get(pairs_key) or spec.get('pairs')
+    if named:
+        out = []
+        for p in named:
+            if isinstance(p, str):
+                a, _, b = p.partition(':')
+            else:
+                a, b = p[0], p[1]
+            out.append((a.strip(), b.strip()))
+        return out
+    models = spec.get(models_key) or spec.get('models') or []
+    reps = spec.get('representations') or spec.get('reps') or []
+    return [(m, r) for m in models for r in reps]
+
+
+# 96G, AND IT IS NOT CUT AGAIN WITHOUT sacct EVIDENCE FROM THIS PIPELINE.
 #
 # It was cut to 64G on 2026-09-05 on a QM9 measurement that turned out to cover
 # almost nothing: every task in that MaxRSS sample was array index 2, 8 or 14 --
@@ -949,7 +988,38 @@ def main():
     # A pair-subset condition across the whole grid is the accident this guards.
     restricted = [c for c in conditions if c in PAIR_SUBSET]
     if restricted and args.runtime_selection and not (args.models or args.reps):
-        pass                       # same exemption; the file restricts it at run time
+        # Same exemption, but the exemption used to be a bare `pass` -- nothing checked
+        # the file, and with --runtime-selection the file is the ONLY restriction there
+        # is, because the scripts are generated at full breadth on purpose. Handing it
+        # the deep run's own file ran censoring on eighteen pairs instead of about five,
+        # silently and at 3.6x the settled cost. So the file gets the check the command
+        # line would have got.
+        _sel = json.loads(Path(args.runtime_selection).read_text())
+        _sel_pairs = selection_pairs(_sel, 'validation_pairs', 'validation_labels')
+        _want = PAIR_SUBSET[restricted[0]]['n_pairs']
+        if not _sel_pairs:
+            ap.error(
+                f"{args.runtime_selection} names no pairs for this side: it needs either "
+                f'"validation_pairs" (a list of [model, representation]) or '
+                f'"validation_labels" and "representations". Keys: {sorted(_sel)}')
+        if len(_sel_pairs) > 2 * _want:
+            ap.error(
+                f"{args.runtime_selection} names {len(_sel_pairs)} pairs and "
+                f"{', '.join(restricted)} is meant to run on about {_want} "
+                f"(RERUN_PLAN.md 13.13; the decision lives in {NOISE_CONDITIONS_FILE.name}). "
+                f"The deep run's own file is a cross product of six models and three "
+                f'representations, which is eighteen pairs -- give censoring its own file '
+                f'with a "validation_pairs" list, or raise n_pairs on purpose.')
+        _unknown = sorted({m for m, _ in _sel_pairs if m not in MODELS_ALL})
+        if _unknown:
+            ap.error(f"{args.runtime_selection} names models this side does not know: "
+                     f"{', '.join(_unknown)}. This side spells them RF, NGBoost, "
+                     f"GP-Hetero; the QM9 side spells the same models rf, ngboost, "
+                     f"heteroscedastic_gp. Known: {', '.join(MODELS_ALL)}.")
+        print(f"  {', '.join(restricted)}: {len(_sel_pairs)} pair(s) named in "
+              f"{args.runtime_selection}, checked when each task starts:")
+        for _m, _r in _sel_pairs:
+            print(f"    {_m} x {_r}")
     elif restricted and not (args.models and args.reps):
         n = PAIR_SUBSET[restricted[0]]['n_pairs']
         ap.error(

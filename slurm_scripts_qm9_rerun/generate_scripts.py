@@ -972,9 +972,25 @@ fi
 _selected=$(python - "$SELECTION_FILE" "{model}" "$rep" <<'PYSEL'
 import json, sys
 spec = json.loads(open(sys.argv[1]).read())
-models = spec.get('generator_labels') or spec.get('models') or []
-reps = spec.get('representations') or spec.get('reps') or []
-print('yes' if sys.argv[2] in models and sys.argv[3] in reps else 'no')
+model, rep = sys.argv[2], sys.argv[3]
+# A condition that runs on about five NAMED pairs cannot be written as a model
+# list crossed with a representation list -- six models and three
+# representations is eighteen pairs, not five. So a file may name them outright.
+pairs = spec.get('generator_pairs') or spec.get('pairs')
+if pairs:
+    named = []
+    for p in pairs:
+        if isinstance(p, str):
+            a, _, b = p.partition(':')
+        else:
+            a, b = p[0], p[1]
+        named.append((a.strip(), b.strip()))
+    ok = (model, rep) in named
+else:
+    models = spec.get('generator_labels') or spec.get('models') or []
+    reps = spec.get('representations') or spec.get('reps') or []
+    ok = model in models and rep in reps
+print('yes' if ok else 'no')
 PYSEL
 ) || {{ echo "ERROR: could not read $SELECTION_FILE"; exit 2; }}
 if [ "$_selected" != "yes" ]; then
@@ -987,7 +1003,32 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
-# MEMORY: 128G, AND IT IS NOT CUT WITHOUT sacct EVIDENCE.
+def selection_pairs(spec, pairs_key, models_key):
+    """The (model, representation) pairs a run-time selection file names.
+
+    Two shapes, and the difference matters. The DEEP RUN's file is a model list and a
+    representation list, and it means the cross product -- six models on three
+    representations is eighteen pairs, all of them wanted. CENSORING runs on about five
+    NAMED pairs (RERUN_PLAN.md 13.13), which a cross product cannot express, so its file
+    lists the pairs outright under `pairs_key`. Same reader, both shapes, and the same
+    reader is embedded in every generated task so the two cannot drift apart.
+    """
+    named = spec.get(pairs_key) or spec.get('pairs')
+    if named:
+        out = []
+        for p in named:
+            if isinstance(p, str):
+                a, _, b = p.partition(':')
+            else:
+                a, b = p[0], p[1]
+            out.append((a.strip(), b.strip()))
+        return out
+    models = spec.get(models_key) or spec.get('models') or []
+    reps = spec.get('representations') or spec.get('reps') or []
+    return [(m, r) for m in models for r in reps]
+
+
+# MEMORY: 96G, AND IT IS NOT CUT WITHOUT sacct EVIDENCE.
 #
 # The only job in THIS study with a recorded peak is
 # flexible_dnn_512_256_valprop: 61.2 GB actually used, against a 128G request
@@ -1204,11 +1245,56 @@ def main():
             f"and overwrite the main-grid scripts for the same models, which are named by "
             f"model alone. Pass --out-dir <somewhere else>.")
 
-    if restricted and not (args.models and args.reps):
+    # --runtime-selection satisfies this the way --models and --reps do, because with it
+    # the FILE is the restriction: the scripts are generated at full breadth on purpose
+    # and each task asks the file when it starts. The laboratory generator has taken
+    # --runtime-selection here since 2026-09-05 and this one did not, so
+    #   --stage 2 --conditions censoring --runtime-selection <file>
+    # -- the censoring command in RERUN_PLAN.md 13.19 STEP 5 -- exited 2 without writing
+    # anything. What changes is WHAT gets checked: the file, not the command line, since
+    # nothing else will look at it before the tasks start reading it.
+    if restricted and args.runtime_selection and not (args.models or args.reps):
+        _sel = json.loads(Path(args.runtime_selection).read_text())
+        _sel_pairs = selection_pairs(_sel, 'generator_pairs', 'generator_labels')
+        _want = PAIR_SUBSET_CONDITIONS[restricted[0]]['n_pairs']
+        if not _sel_pairs:
+            ap.error(
+                f"{args.runtime_selection} names no pairs: it needs either "
+                f'"generator_pairs" (a list of [model, representation]) or '
+                f'"generator_labels" and "representations". Keys: {sorted(_sel)}')
+        if len(_sel_pairs) > 2 * _want:
+            ap.error(
+                f"{args.runtime_selection} names {len(_sel_pairs)} pairs and "
+                f"{', '.join(restricted)} is meant to run on about {_want} "
+                f"(RERUN_PLAN.md 13.13; the decision lives in {NOISE_CONDITIONS_FILE.name}). "
+                f"The deep run's own file is a cross product of six models and three "
+                f'representations, which is eighteen pairs -- give censoring its own file '
+                f'with a "generator_pairs" list, or raise n_pairs on purpose.')
+        _need = max(int(PAIR_SUBSET_CONDITIONS[c].get('min_uncertainty_models', 0) or 0)
+                    for c in restricted)
+        if _need:
+            _unc = {m for m, _ in _sel_pairs if '-u True' in MODELS.get(m, ("",))[0]}
+            if len(_unc) < _need:
+                ap.error(
+                    f"{', '.join(restricted)} needs at least {_need} of the selected models to "
+                    f"emit a per-molecule uncertainty, and {args.runtime_selection} names "
+                    f"{len(_unc)} ({', '.join(sorted(_unc)) if _unc else 'none'}). Models that "
+                    f"emit one: {', '.join(sorted(m for m, spec in MODELS.items() if '-u True' in spec[0]))}. "
+                    f"See RERUN_PLAN.md 13.13.")
+        _unknown = sorted({m for m, _ in _sel_pairs if m not in MODELS})
+        if _unknown:
+            ap.error(f"{args.runtime_selection} names models this generator does not "
+                     f"know: {', '.join(_unknown)}. Known: {', '.join(sorted(MODELS))}.")
+        print(f"  {', '.join(restricted)}: {len(_sel_pairs)} pair(s) named in "
+              f"{args.runtime_selection}, checked when each task starts:")
+        for _m, _r in _sel_pairs:
+            print(f"    {_m} x {_r}")
+    elif restricted and not (args.models and args.reps):
         first = PAIR_SUBSET_CONDITIONS[restricted[0]]
         ap.error(
             f"{', '.join(restricted)} runs on about {first['n_pairs']} model-and-representation "
-            f"pairs on QM9, not the full grid, so it needs --models and --reps. Which pairs is "
+            f"pairs on QM9, not the full grid, so it needs --models and --reps, or "
+            f"--runtime-selection with a file that names the pairs. Which pairs is "
             f"chosen from the screen; see RERUN_PLAN.md 13.13. To run the rest of the grid "
             f"without it, pass --conditions "
             f"{' '.join(c for c in STAGE1_CONDITIONS if c not in PAIR_SUBSET_CONDITIONS)}.")
@@ -1430,7 +1516,41 @@ def main():
         (out / script_name).chmod(0o755)
         written.append((tier, script_name, model, hours, n_tasks, len(reps)))
 
-    print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total")
+    # THE SUBMITTER, SO NOBODY EVER TYPES AN ARRAY RANGE AGAIN.
+    #
+    # Every script here holds a different number of tasks -- `gauche` runs on ECFP4
+    # alone, so it is 3 where the rest are 18, 6 where the rest are 36, and 1 where the
+    # rest are 6 -- and the range is not in the script, it is on the sbatch line. A
+    # runbook loop that submits every script at one range therefore over-queues the
+    # short ones, and the out-of-range guard exits 2, so 30 of gauche's 36 indices land
+    # as FAILED with a mail-type=FAIL alert each. That has now gone wrong three times:
+    # the QM9 runbook, the uncertainty runbook at 0-62 against 27 tasks, and the deep
+    # run in RERUN_PLAN.md 13.19. The generator knows each count exactly; the operator
+    # should never have to. The laboratory generator has emitted one of these all along.
+    submit = ['#!/bin/bash',
+              f'# Submit stage {args.stage}: one array per model, each at its OWN range.',
+              f'# {len(written)} arrays, {grand} tasks. Written by generate_scripts.py --'
+              f' regenerate rather than edit.',
+              '# ACCOUNT and PARTITION are arguments because they are queue state, not run design.',
+              'ACCT=${ACCT:-stat-cadd}',
+              'PART=${PART:-long}',
+              'THROTTLE=${THROTTLE:-' + str(args.throttle) + '}',
+              'ok=0; bad=0',
+              'echo "submitting to account=$ACCT partition=$PART throttle=$THROTTLE"',
+              '']
+    for _, nm, m, h, nt, nr in written:
+        submit.append(f'# {nm}: {nt} tasks, {nr} representation(s), --time={h}:59:00')
+        submit.append(
+            f'if sbatch --account=$ACCT --partition=$PART '
+            f'--array=0-{nt - 1}%$THROTTLE {nm}; then ok=$((ok+1)); else bad=$((bad+1)); fi')
+    submit += ['',
+               f'echo "submitted $ok of {len(written)}; $bad failed"',
+               'if [ "$bad" -gt 0 ]; then exit 1; fi']
+    (out / 'submit_all.sh').write_text('\n'.join(submit) + '\n')
+    (out / 'submit_all.sh').chmod(0o755)
+
+    print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total, "
+          f"+ submit_all.sh")
     print(f"  conditions: {' '.join(conditions)}")
     print(f"  replicates: {n_reps_run}, numbered {first_iter}..{first_iter + n_reps_run - 1}")
     _spread = sorted(set(levels_by_condition.values()))

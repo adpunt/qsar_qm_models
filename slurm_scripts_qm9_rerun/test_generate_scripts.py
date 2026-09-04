@@ -131,7 +131,9 @@ def generate(out_dir: Path, stub: Path, *args):
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(f'generator failed: {cmd}\n{proc.stdout}\n{proc.stderr}')
-    return sorted(out_dir.glob('*.sh'))
+    # submit_all.sh is the submitter, not a job script: it has no CONDS, no REPS and
+    # nothing to run against the stub. Every check below is about a job array.
+    return sorted(p for p in out_dir.glob('*.sh') if p.name != 'submit_all.sh')
 
 
 def parse_header(script: Path):

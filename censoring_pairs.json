@@ -1,0 +1,41 @@
+{
+  "what_this_is": "The model-and-representation pairs CENSORING runs on, on QM9 and on all three laboratory datasets alike. Read by every censoring task WHEN IT STARTS, not when it was generated -- so this file can be edited at any time up to the moment a task begins, and that is the point of it.",
+
+  "why_it_is_not_deep_run_pairs.json": "Censoring is a five-pair condition, not a grid (RERUN_PLAN.md 13.13, settled 2026-08-27 and confirmed by the author 2026-08-28: 'Pick 5 or so interesting/well-performing model/rep pairs and run them through the circus of uncertainty on all datasets'). deep_run_pairs.json is a model list crossed with a representation list -- six models on three representations, EIGHTEEN pairs -- so pointing censoring at it runs 3.6x the settled cost. A cross product cannot express five pairs, so this file names them outright.",
+
+  "the_rule": "About five pairs, chosen from the screen on interest and clean performance, of which at least TWO must name a model that emits a per-molecule uncertainty (author, 2026-08-28: which molecules get clipped depends on their value, so censoring is one of the few conditions where 'does the model know which labels are unreliable' has an answer). Both generators refuse a file that breaks either rule.",
+
+  "one_way": "NARROWING this list later is free -- a task that is no longer listed skips and exits 0. WIDENING it means resubmitting the indices of the pairs you add, because a task that already skipped stays skipped.",
+
+  "scope": "QM9 and the three laboratory datasets. NOT the uncertainty runs -- there censoring is a full condition on the same pairs as every other condition (author, 2026-08-28), and nothing reads this file.",
+
+  "generator_pairs": [
+    ["ngboost", "pdv"],
+    ["gauche_rbf", "pdv"],
+    ["dnn_bnn_full_mve", "pdv"],
+    ["rf", "ecfp4"],
+    ["heteroscedastic_gp", "ecfp4"]
+  ],
+
+  "validation_pairs": [
+    ["NGBoost", "PDV"],
+    ["GP", "PDV"],
+    ["BNN-Full-MVE", "PDV"],
+    ["RF", "ECFP4"],
+    ["GP-Hetero", "ECFP4"]
+  ],
+
+  "why_each": {
+    "ngboost x pdv": "on the deep run's shortlist by rule (RERUN_PLAN.md 13.17 B), and emits a per-molecule aleatoric term",
+    "gauche_rbf x pdv": "the cleanest separation of the two uncertainty terms in the roster (5.5i), so the best chance of seeing whether a model knows which labels were clipped",
+    "dnn_bnn_full_mve x pdv": "the literature's flagship variance-head case, and the only network whose data-noise term varies per molecule",
+    "rf x ecfp4": "most noise-tolerant model in the screen, and emits no uncertainty -- the contrast that says how much of the censoring effect is accuracy alone",
+    "heteroscedastic_gp x ecfp4": "least noise-tolerant on two representations of three, so the pair where the effect should be largest"
+  },
+
+  "uncertainty_models_named": 4,
+  "uncertainty_models_required": 2,
+
+  "provisional": true,
+  "seeded": "2026-09-05, from the same evidence that seeded deep_run_pairs.json, BEFORE the screen finished. Re-read it against the finished screen and edit it in place -- the queued tasks pick up the edit."
+}

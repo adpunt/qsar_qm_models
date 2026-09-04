@@ -58,6 +58,14 @@ REP_KIND = {
     'mhg_gnn_pretrained': 'learned', 'mhggnn': 'learned', 'chemberta': 'learned',
 }
 
+# How the LABORATORY runner spells the same representations. Its run-time gate
+# case-folds them, so this is for the author reading the file, not for the match.
+LAB_REP_NAME = {
+    'ecfp4': 'ECFP4', 'sns': 'SNS', 'avalon': 'Avalon', 'pdv': 'PDV',
+    'chemberta': 'ChemBERTa',
+    'mhggnn': 'MHG-GNN-pretrained', 'mhg_gnn_pretrained': 'MHG-GNN-pretrained',
+}
+
 # Families, keyed on the CANONICAL names in model_names.json. A model that is in
 # no family is a model the rule cannot place, so the coverage assertion below
 # fails rather than letting it drop silently out of the selection.
@@ -196,6 +204,58 @@ def select(robust, reps, n_models, verbose=True):
             why[m] = f'one from the {fam} family, which nothing above covers'
             covered.add(fam)
     return chosen, why
+
+
+def censoring_selection(robust, chosen, reps, want, need_uncertainty):
+    """The ~5 NAMED pairs censoring runs on -- not the deep run's cross product.
+
+    Censoring is a pair-subset condition (RERUN_PLAN.md 13.13, noise_conditions.json):
+    about five model-and-representation pairs, of which at least two must name a model
+    that emits a per-molecule uncertainty. The deep run is a model list crossed with a
+    representation list -- with six models on three representations that is EIGHTEEN
+    pairs, 3.6x what censoring was costed at, and both generators now refuse it.
+
+    The rule this applies, and it is a reading rather than a new decision: the author's
+    words are "interesting/well-performing model/rep pairs" (2026-08-28). So each model
+    the deep run chose is paired with the representation it does BEST on, the deep run's
+    own order decides which models make the cut, and if fewer than two of the survivors
+    emit an uncertainty the lowest-ranked one that does not is swapped out for the
+    highest-ranked one that does.
+
+    The median is across CONDITIONS within one representation. Nothing is pooled across
+    representations -- a model is compared with itself on each representation in turn.
+    """
+    unc = set(uncertainty_models())
+    best_rep, best_score = {}, {}
+    for m in chosen:
+        sub = robust[(robust['model'] == m) & (robust['rep'].isin(reps))]
+        if sub.empty:
+            continue
+        per_rep = sub.groupby('rep')['auc_norm'].median()
+        best_rep[m] = per_rep.idxmax()
+        best_score[m] = float(per_rep.max())
+
+    ordered = [m for m in chosen if m in best_rep]
+    keep = ordered[:want]
+    if need_uncertainty:
+        while len([m for m in keep if m in unc]) < need_uncertainty:
+            spare = [m for m in ordered[want:] if m in unc and m not in keep]
+            if not spare:
+                break
+            drop = next((m for m in reversed(keep) if m not in unc), None)
+            if drop is None:
+                break
+            keep[keep.index(drop)] = spare[0]
+
+    pairs = [(m, best_rep[m]) for m in keep]
+    reasons = {f'{m} x {best_rep[m]}':
+               (f"auc_norm {best_score[m]:.4f}, its best of "
+                f"{', '.join(reps)}; emits a per-molecule uncertainty"
+                if m in unc else
+                f"auc_norm {best_score[m]:.4f}, its best of {', '.join(reps)}; "
+                f"emits no uncertainty, so it is the accuracy-only contrast")
+               for m in keep}
+    return pairs, reasons, len([m for m in keep if m in unc])
 
 
 def floor_disagrees(df, conditions, reps, n_models):
@@ -395,11 +455,12 @@ def main():
     labels = generator_labels(chosen)
     print(f"\n=== THE FLAGS, in the generator's own labels")
     print(f"  QM9:        python generate_scripts.py --stage 2 \\")
-    print(f"                --models {' '.join(labels)} \\")
-    print(f"                --reps {' '.join(cli.reps)}")
+    print(f"                --runtime-selection <repo>/deep_run_pairs.json")
     print(f"  censoring:  python generate_scripts.py --stage 2 --conditions censoring \\")
-    print(f"                --models {' '.join(labels)} \\")
-    print(f"                --reps {' '.join(cli.reps)} --out-dir <its own directory>")
+    print(f"                --runtime-selection <repo>/censoring_pairs.json \\")
+    print(f"                --out-dir <its own directory>")
+    print(f"  --runtime-selection rather than --models/--reps, so the file can still be "
+          f"edited after the jobs are queued (13.19).")
 
     if absent or missing_reps or partial_conditions:
         print(f"\n=== PROVISIONAL. This is a reading of a screen that is not finished.")
@@ -432,6 +493,77 @@ def main():
         'conditions_in_the_screen': conditions,
     }, indent=2) + '\n')
     print(f"\n  written: {out}")
+
+    # CENSORING GETS ITS OWN FILE, because it is five NAMED pairs and this one is a
+    # cross product of eighteen. Pointing censoring at deep_run_pairs.json ran 3.6x the
+    # settled cost, and since 2026-09-05 both generators refuse it outright.
+    _want = 5
+    _need = 2
+    try:
+        _settled = json.loads((ROOT / 'noise_conditions.json').read_text())
+        for _grp in ('stage_1_full_grid', 'stage_2_depth_only'):
+            for _c in _settled.get(_grp, []):
+                if _c.get('name') == 'censoring':
+                    _scope = _c.get('scope', {})
+                    _want = int(_scope.get('n_pairs', _want))
+                    _need = int(_scope.get('min_uncertainty_models', _need) or 0)
+    except (OSError, ValueError, KeyError):
+        print("  note: could not read noise_conditions.json; censoring falls back to "
+              "5 pairs and 2 uncertainty models. The file is where the decision lives.")
+
+    cen_pairs, cen_why, cen_unc = censoring_selection(
+        robust, chosen, usable, _want, _need)
+    cen_out = out.parent / 'censoring_pairs.json'
+    print(f"\n=== CENSORING, {len(cen_pairs)} named pair(s) -- NOT the deep run's "
+          f"{n_pairs}")
+    for _m, _r in cen_pairs:
+        print(f"  {_m:28s} {_r:12s} {cen_why[f'{_m} x {_r}']}")
+    if cen_unc < _need:
+        print(f"  WARNING only {cen_unc} of these emit a per-molecule uncertainty and "
+              f"the rule asks for {_need}. Edit {cen_out.name} before the tasks start; "
+              f"both generators refuse a file that breaks the rule.")
+
+    _hand_edited = False
+    if cen_out.exists():
+        try:
+            _hand_edited = not json.loads(cen_out.read_text()).get('written_by_selector')
+        except ValueError:
+            _hand_edited = True
+    if _hand_edited:
+        # The whole point of these files is that the author edits them, so the script
+        # that regenerates them must not silently undo that. Seeded by hand 2026-09-05.
+        _sug = cen_out.with_name('censoring_pairs.suggested.json')
+        _target, _note = _sug, (f"{cen_out.name} was written by hand, so it is left "
+                                f"alone. The screen's own reading is in {_sug.name} -- "
+                                f"compare, and copy across what you agree with.")
+    else:
+        _target, _note = cen_out, None
+
+    _target.write_text(json.dumps({
+        'what_this_is': 'the CENSORING pairs, read off the screen. Named pairs, not a '
+                        'cross product: censoring runs on about five of them.',
+        'rule': 'RERUN_PLAN.md 13.13; the decision lives in noise_conditions.json',
+        'written_by_selector': True,
+        'provisional': bool(absent or missing_reps or partial_conditions),
+        'scope': 'QM9 and the three laboratory datasets. NOT the uncertainty runs, '
+                 'where censoring is a full condition on the same pairs as the rest.',
+        'one_way': 'Narrowing is free -- an unlisted task skips and exits 0. Widening '
+                   'means resubmitting the indices of the pairs added.',
+        'generator_pairs': [[m, r] for m, r in cen_pairs],
+        # The laboratory runner spells the models RF/NGBoost/GP-Hetero and the
+        # representations ECFP4/PDV/ChemBERTa. Its gate case-folds representations, so
+        # the spelling here is for the author to read, not for the match to depend on.
+        'validation_pairs': [[vl, LAB_REP_NAME.get(r, r)]
+                             for vl, (_m, r) in zip(validation_labels(
+                                 [m for m, _ in cen_pairs]), cen_pairs)],
+        'why_each': cen_why,
+        'uncertainty_models_named': cen_unc,
+        'uncertainty_models_required': _need,
+        'n_pairs': len(cen_pairs),
+    }, indent=2) + '\n')
+    print(f"  written: {_target}")
+    if _note:
+        print(f"  {_note}")
     return 0
 
 
