@@ -18,8 +18,12 @@ with no resubmission at all. Only two groups are affected:
 
 Everything PENDING is fine and must not be cancelled.
 
-The cutoff is the modification time of the runner in the KIRBy checkout, which is
-when the pull landed. A task whose Start is before it read the old code.
+The cutoff is the modification time of tests/noise_column.py in the KIRBy checkout,
+which is when the noise fix landed there. A task whose Start is before it read the old
+code. It is NOT the runner's mtime: the runner is edited often, and a later pull would
+move it forward and mark the whole completed grid for resubmission. READ THE DATE THIS
+PRINTS before acting on the answer -- if it is minutes ago, a pull just touched the file
+and you want --cutoff <unix time of the pull that brought the noise fix> instead.
 
 WHY NOTHING HAS TO BE DELETED. The runner removes the rows for the combinations
 it is re-running before it writes (`alternative_data_noise_robustness.py`, the
@@ -37,10 +41,24 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 
-RUNNER = '/data/stat-ecr/scat9264/KIRBy/tests/alternative_data_noise_robustness.py'
+# THE CUTOFF FILE IS noise_column.py, NOT THE RUNNER.
+#
+# The cutoff is "when the new noise draw landed in this checkout", and a git pull sets
+# the mtime of every file the incoming commits touch. The runner is edited often -- it
+# was edited again on 2026-09-05, for the DecompositionError re-raise -- so any later
+# pull moves its mtime to that pull, and every task that ran the NEW draw in between gets
+# classified as needing a resubmission. That is the whole grid, silently.
+#
+# noise_column.py ARRIVED with the fold-independence fix and holds nothing else: it is
+# the four helpers the draw needs, extracted so the gate does not import torch. Its mtime
+# is when the fix landed and nothing since has had a reason to touch it. Point --runner
+# somewhere else, or pass --cutoff, if that ever stops being true -- and read the date
+# this prints before trusting the answer.
+RUNNER = '/data/stat-ecr/scat9264/KIRBy/tests/noise_column.py'
 # Every laboratory submission made before the change. Ranges are expanded, never
 # passed to sacct as a range -- sacct -j takes a comma-separated list and reports
 # only the first job when given a hyphen (RERUN_PLAN.md 13.18).
@@ -73,7 +91,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--runner', default=RUNNER,
-                    help='the KIRBy runner; its mtime is when the new code landed')
+                    help='the file whose mtime is when the new noise draw landed. '
+                         'Default: tests/noise_column.py, which arrived with the fix '
+                         'and nothing since has touched.')
     ap.add_argument('--cutoff', type=float, default=None,
                     help='override the cutoff, as a unix timestamp')
     ap.add_argument('--jobs', nargs='+', default=None,
@@ -96,6 +116,16 @@ def main():
     print(f"  new code landed: {datetime.fromtimestamp(cutoff)}  "
           f"({cli.runner if cli.cutoff is None else 'given'})")
     print(f"  a task that STARTED before that read the old noise draw.\n")
+
+    # A cutoff of "a few minutes ago" almost always means a pull just touched the file
+    # this reads, not that the noise draw changed minutes ago. Taken at face value it
+    # marks the entire completed grid for resubmission.
+    if cli.cutoff is None and (time.time() - cutoff) < 3600:
+        print(f"  ⚠ THAT CUTOFF IS LESS THAN AN HOUR OLD, which usually means a pull "
+              f"just\n    rewrote {os.path.basename(cli.runner)}'s mtime rather than "
+              f"that the draw changed\n    an hour ago. If a pull landed just now, pass "
+              f"--cutoff <unix time of the\n    pull that brought the noise fix> "
+              f"instead. Everything below is wrong otherwise.\n")
 
     raw = (open(cli.sacct_file).read() if cli.sacct_file
            else sacct(cli.jobs or DEFAULT_JOBS, cli.since))
