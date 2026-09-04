@@ -1009,6 +1009,19 @@ def main():
                          'RERUN_PLAN.md 2.8i. A capped request is a job that dies on the wall '
                          'clock after the queue wait, which is why this raises instead.')
     ap.add_argument('--throttle', type=int, default=5)
+    # A FILE, so the selection can be edited and kept rather than retyped. It is
+    # the shape scripts/select_deep_run_pairs.py writes -- run that, open the
+    # JSON, change what you disagree with, pass it here. The author's request,
+    # 2026-09-04: "maybe it should take a json somehow that I can modify".
+    #
+    # It does NOT make anything automatic. --stage 2 still refuses to run with no
+    # selection at all; this only removes the retyping, and --models/--reps on the
+    # command line still win so a one-off override needs no file edit.
+    ap.add_argument('--pairs-file', default=None,
+                    help='JSON with "models" (or "generator_labels") and '
+                         '"representations". Written by '
+                         'scripts/select_deep_run_pairs.py; edit it and pass it '
+                         'back. --models/--reps override it.')
     ap.add_argument('--models', nargs='+', default=None, help='Subset of model labels.')
     ap.add_argument('--reps', nargs='+', default=None, choices=ALL_REPS,
                     help='Subset of representations. The Tanimoto GP is still restricted to '
@@ -1043,9 +1056,30 @@ def main():
     # decided before stage 0 has run (RERUN_PLAN.md §13.1 item 4). Generating a
     # full stage-2 grid by default would quietly cost more than stages 0 and 1
     # together, for a question that is about a handful of cells.
+    if args.pairs_file:
+        _spec = json.loads(Path(args.pairs_file).read_text())
+        _file_models = _spec.get('generator_labels') or _spec.get('models')
+        _file_reps = _spec.get('representations') or _spec.get('reps')
+        if not _file_models or not _file_reps:
+            ap.error(f'{args.pairs_file} has no "models"/"generator_labels" and '
+                     f'"representations". It is the file '
+                     f'scripts/select_deep_run_pairs.py writes; keys: '
+                     f'{sorted(_spec)}')
+        # The command line wins, so a one-off change needs no file edit.
+        args.models = args.models or list(_file_models)
+        args.reps = args.reps or list(_file_reps)
+        if _spec.get('provisional'):
+            print(f"  note: {args.pairs_file} is marked provisional -- it was read "
+                  f"off a screen that had not finished. Models it could not rank: "
+                  f"{', '.join(_spec.get('models_absent_from_the_screen', [])) or 'none recorded'}")
+        print(f"  selection from {args.pairs_file}: "
+              f"{' '.join(args.models)} x {' '.join(args.reps)}")
+
     if args.stage == 2 and not (args.models and args.reps):
-        ap.error('--stage 2 needs --models and --reps. Which models and representations go '
-                 'deep is chosen from what stage 0 shows; see RERUN_PLAN.md §13.1 item 4.')
+        ap.error('--stage 2 needs --models and --reps, or --pairs-file. Which models and '
+                 'representations go deep is chosen from what stage 0 shows; see '
+                 'RERUN_PLAN.md §13.1 item 4. scripts/select_deep_run_pairs.py reads it '
+                 'off the screen and writes a file this accepts.')
 
     # Models the author has already put on the deep run's shortlist, before the screen is
     # read. They can still be dropped, but only on purpose. ngboost went on it 2026-08-27:
