@@ -900,23 +900,38 @@ def selection_pairs(spec, pairs_key, models_key):
     return [(m, r) for m in models for r in reps]
 
 
-# 96G, AND IT IS NOT CUT AGAIN WITHOUT sacct EVIDENCE FROM THIS PIPELINE.
+# MEMORY IS PER MODEL, AND model_memory.json IS WHERE THAT DECISION LIVES.
 #
-# It was cut to 64G on 2026-09-05 on a QM9 measurement that turned out to cover
-# almost nothing: every task in that MaxRSS sample was array index 2, 8 or 14 --
-# all the SAME representation, mhg_gnn_pretrained -- so it measured one
-# representation of six, one fit per level instead of the six an out-of-fold task
-# does, no ChemBERTa and no Gaussian process. A peak of 4.03 GB from that says
-# nothing about this pipeline, which fits five outer folds, refits per inner fold
-# on the settled pairs, and holds a per-molecule uncertainty for every training
-# molecule at every level.
+# 64G for the six tree and deterministic models, 96G for every network and every
+# Gaussian process. Read, never restated here -- the QM9 and uncertainty generators read
+# the same file, so the three cannot drift apart.
 #
-# The asymmetry decides it. Asking for too much costs queue position; asking for
-# too little kills the job at the wall after days of waiting, and there is no
-# partial credit. Nothing here is cut again without a MaxRSS measurement that
-# covers ChemBERTa and an out-of-fold task on logD, which is the biggest dataset
-# (7,309 molecules) and the one where an O(n^2) kernel is largest.
-MEM = '96G'
+# THE LOGIC. Every row in the author's sacct sweep of 2026-09-05 that belongs to THIS
+# study is a neural network, and there are nine of them, running 38.9 to 61.2 GB. Not one
+# tree, kernel or deterministic model from this study appears in that sweep, and the QM9
+# screen's completed tasks put the forests at 2.7-2.9 GB. A single number for the whole
+# roster was set by the networks and charged to everything -- the author's call on
+# 2026-09-05: "only high-compute models need the 96G limit".
+#
+# At 8 cores, 64G is exactly the 8 GB/core the nodes offer, so those tasks backfill into
+# an ordinary slot; 96G needs 12 cores' worth. The six models on the lower tier are also
+# the fastest here -- svm 3h, xgboost 6h, rf 7h -- which is where backfill pays most.
+MODEL_MEMORY_FILE = Path(__file__).resolve().parent.parent / 'model_memory.json'
+_MEMORY_SPEC = json.loads(MODEL_MEMORY_FILE.read_text())
+MEMORY_FLOOR_GB = int(_MEMORY_SPEC['the_floor'])
+MEMORY_DEFAULT = _MEMORY_SPEC['default']
+# This side spells them RF, NGBoost, GP-Hetero; model_memory.json is keyed on the
+# canonical names, and model_names.json is the one place the two are reconciled.
+_CANONICAL = json.loads(
+    (Path(__file__).resolve().parent.parent / 'model_names.json').read_text())['validation']
+MEMORY_BY_CANONICAL = {m: tier
+                       for tier, spec in _MEMORY_SPEC['tiers'].items()
+                       for m in spec['models']}
+
+
+def memory_for(model):
+    """The memory request for one of the laboratory runner's model names."""
+    return MEMORY_BY_CANONICAL.get(_CANONICAL.get(model, model), MEMORY_DEFAULT)
 
 
 def main():
@@ -1122,7 +1137,8 @@ def main():
         cases = '\n'.join(
             f'  {d}) dataset_cli="{cli}" ;;' for d, cli in DATASETS)
         content = (
-            SLURM_HEADER.format(safe_name=f'{model.lower()}'[:30], mem=MEM,
+            SLURM_HEADER.format(safe_name=f'{model.lower()}'[:30],
+                                mem=memory_for(model),
                                 partition='long', time_limit=f'{hours}:00:00')
             + PREAMBLE.format(kirby_dir=args.kirby_dir,
                               qsar_dir=args.qsar_dir,
@@ -1150,7 +1166,7 @@ def main():
     # The smoke test runs RF and SVM, so its guard has to cover both.
     herg_path, herg_cli = next(d for d in DATASETS if d[0] == 'herg')
     smoke = (
-        SLURM_HEADER.format(safe_name='smoke', mem=MEM, partition='short',
+        SLURM_HEADER.format(safe_name='smoke', mem=MEMORY_DEFAULT, partition='short',
                             time_limit='1:00:00')
         + PREAMBLE.format(kirby_dir=args.kirby_dir, qsar_dir=args.qsar_dir,
                           model='RF SVM', levels_json=repr(DOSE_LEVELS),

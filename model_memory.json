@@ -1,0 +1,43 @@
+{
+  "what_this_is": "The SLURM memory request per model, and the ONLY place it is written down. Keyed on the canonical names in model_names.json, so all three generators ask the same question and cannot drift apart. A model with no entry here gets `default`.",
+
+  "why_it_is_per_model_and_not_one_number": "Every row in the author's sacct sweep of 2026-09-05 that belongs to THIS study is a neural network, and there are nine of them: flexible_dnn_512_256_valprop 61.2 GB, fdnn_wide_hetero 53.4, flexible_dnn_512_256_hetero 45.9, fdnn_wide_quantile 45.8, mlp_full_vbll_valprop 43.3, dnn_full_vbll_hetero 43.3, mlp_full_vbll_hetero 43.2, dnn_full_vbll_valprop 43.0, dnn_full_vbll_threshold 42.5, mlp_full_vbll_threshold 38.9 -- the suffixes valprop, hetero, threshold and quantile are this study's own noise strategies and uncertainty heads. NOT ONE tree, kernel or deterministic model from this study appears anywhere in that sweep. The QM9 screen's completed tasks put the forests at 2.7-2.9 GB. So a single number for the whole roster was set by the networks and charged to everything.",
+
+  "the_floor": 64,
+  "the_floor_why": "The author's rule, 2026-09-04: 'No 32gb anywhere, min 64.' Every generator refuses a request below it, by name.",
+
+  "scheduling": "ARC nodes are 8 GB per core, measured rather than assumed by mem_per_core_mb() in KIRBy/tests/slurm_scripts/where_to_submit.sh. At 8 cores, 64G is EXACTLY that ratio, so a 64G task backfills into an ordinary slot; 96G asks for 12 cores' worth and 128G for 16. The six models on the 64G tier are also the fastest in the study (svm 3h, xgboost 6h, rf 7h on the laboratory grid), which is where backfill pays most -- a short job at the node ratio drops into almost any gap.",
+
+  "check_before_submitting": "bash <KIRBy>/tests/slurm_scripts/where_to_submit.sh --fits 8 <mem>",
+
+  "default": "96G",
+
+  "tiers": {
+    "64G": {
+      "models": ["rf", "qrf", "xgboost", "lgb", "ngboost", "svm"],
+      "why": "Trees and the one deterministic kernel model. Nothing from this study has ever been recorded near 64 GB on these; the QM9 screen's completed tasks peaked at 2.7-2.9 GB on rf and qrf, across ECFP4 and MHG-GNN. 64G is the author's floor, not a measurement -- it is roughly twenty times anything observed.",
+      "evidence": "QM9 screen, completed tasks of jobs 12971601-12971619, MaxRSS by representation: ecfp4 2.86 GB (worst qm90_qrf 12971607_0), mhggnn 2.71 GB (worst qm90_rf 12971601_2)."
+    },
+    "96G": {
+      "models": ["dnn", "mlp", "dnn_bnn_full", "dnn_bnn_last", "dnn_bnn_variational",
+                 "dnn_vbll", "dnn_vbll_hetero", "mlp_bnn_full", "mlp_bnn_last",
+                 "mlp_bnn_variational", "mlp_vbll", "mlp_vbll_hetero",
+                 "dnn_bnn_full_mve", "mlp_bnn_full_mve",
+                 "gauche", "gauche_rbf", "het_gp_rbf", "het_gp_tanimoto"],
+      "why": "Every network, and every Gaussian process. 96G is 1.57x the 61.2 GB peak and covers all nine observed network rows, which run 38.9 to 61.2 GB. The author's call of 2026-09-05: memory is not restricted to powers of two, and the middle buys most of the safety of 128G at much less of the queue cost.",
+      "why_the_gaussian_processes_are_here_too": "They are UNMEASURED -- no Gaussian process from this study appears in the sacct sweep at all. They are here on the wall clock rather than on a memory figure: gp-hetero requests 135 hours and ngboost 193 on the laboratory depth run, and a job that has already run 130 hours is the worst one in the study to lose to an out-of-memory kill. Lower them to 64G only against a MaxRSS reading from a completed Gaussian-process task, and lower them in place with `scontrol update JobId=<id> MinMemoryNode=64G` rather than by resubmitting."
+    }
+  },
+
+  "pipeline_overrides": {
+    "uncertainty_runs": {
+      "floor": "96G",
+      "why": "The author, 2026-09-04: 'are you sure about the memory? I swear to fucking god its different with uncertainty.' They are right, and it is not a matter of taste: a grid task fits a model once per level, while an uncertainty task fits it 1 + oof_folds times per level and holds a per-molecule uncertainty for every TRAINING molecule at every level. QRF stores per-molecule quantiles on top of that. Nothing has ever measured this pipeline -- it has not run once since the redesign -- so the tree tier is not carried over into it. Raise or lower it from a sacct reading of the first completed tasks, in place with scontrol; do not guess it twice.",
+      "applies_to": "slurm_scripts_uncertainty_rerun/generate_scripts.py only. The QM9 grid's own out-of-fold pass is inside a grid task and is NOT covered by this -- it runs on the settled pairs only, which are already on the 96G tier apart from qrf and ngboost."
+    }
+  },
+
+  "how_to_change_one": "Edit this file. All three generators read it, and a job already PENDING can be moved without losing its queue position: `scontrol update JobId=<id> MinMemoryNode=<mem>`. Never change it on what a job script REQUESTED -- that is what somebody once guessed. Only sacct MaxRSS says what a job used, and the name must be joined from the allocation row because on a step row JobName is just `batch` (RERUN_PLAN.md 13.21).",
+
+  "settled": "2026-09-05, by the author: 'only high-compute models need the 96G limit'."
+}

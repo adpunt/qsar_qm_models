@@ -10875,14 +10875,24 @@ is inside the laboratory scripts already. Step 6's longest wall is 47:00, which 
 #### STEP 1 — the QM9 main grid. **Already submitted. Raise its memory; do not resubmit it.**
 
 **12980573–12980591 went in on 2026-09-04 at `--mem=32G`**, from the generator as it stood at
-`87cc49c`. The floor is 64G and the settled figure is 96G (§13.21), so these nineteen arrays are
-below it. They are all PENDING, and a pending job's memory can be changed in place — which keeps
-the submit time, and therefore the queue position, that a cancel-and-resubmit throws away:
+`87cc49c`, which is below the 64G floor. They are all PENDING, and a pending job's memory can be
+changed in place — which keeps the submit time, and therefore the queue position, that a
+cancel-and-resubmit throws away. **Two tiers, not one** (§13.21): the six tree and deterministic
+arrays go to 64G, the thirteen networks and Gaussian processes to 96G.
 
 ```bash
-for j in $(seq 12980573 12980591); do scontrol update JobId=$j MinMemoryNode=96G; done
-scontrol show job 12980573 | grep -o 'mem=[0-9]*[MG]'      # must say mem=96G
+for j in 12980573 12980574 12980575 12980576 12980577 12980589; do   # rf xgboost lgb svm ngboost qrf
+    scontrol update JobId=$j MinMemoryNode=64G; done
+for j in 12980578 12980579 12980580 12980581 12980582 12980583 12980584 \
+         12980585 12980586 12980587 12980588 12980590 12980591; do   # the networks and the GPs
+    scontrol update JobId=$j MinMemoryNode=96G; done
+
+scontrol show job 12980573 | grep -o 'mem=[0-9]*[MG]'      # mem=64G
+scontrol show job 12980578 | grep -o 'mem=[0-9]*[MG]'      # mem=96G
 ```
+
+The mapping is the launch log's own table below, read against `model_memory.json`; regenerate it
+rather than retyping it if the tiers change.
 
 If `scontrol` refuses — some sites restrict it — cancel and resubmit, and only then:
 
@@ -11200,8 +11210,8 @@ session logs under `~/.claude/projects/-Users-apunt-repos-qsar-qm-models/*.jsonl
 | 1 | "I want every single experiment command done — QM9 and the laboratory datasets, full grid, uncertainty, uncertainty decomposition, the whole works plus whatever needs to be rerun." | ✅ §13.19, rewritten 2026-09-05. Four families were missing or unrunnable and are named below. |
 | 2 | The selection that decides the deep run must be a **JSON the author can edit after the jobs are queued** — "that's why I want to rely on a modifiable json to determine the pairs in 4/5 and submit now". Not a generator flag baked into the `.sh`. | ✅ `--runtime-selection` on both generators. Proved: a listed pair runs, an unlisted one exits 0, editing the file flips an already-generated script, a missing file exits 2. |
 | 3 | **Do not cancel anything that is queued.** "The ones that haven't gotten out of the queue — won't they just pull the latest changes?" They will: SLURM copies the batch script at submit time, but the Python is read at run time, so a pending task runs the new noise draw. | ✅ Honoured. Nothing in §13.19 cancels. This instruction was given, agreed, and then contradicted by a later message in the same session that said "cancel all"; the author's correction — "Did you not listen to my DIRECT FUCKING COMMAND" — stands. |
-| 4 | **No 32 GB anywhere. 64 GB is the floor.** Then, asked whether the middle was available: "wait can you not do something between 64 and 128?" | ✅ **96G** on all three generators (`a5c1100`), with a floor in the QM9 generator that refuses anything under 64G by name. See §13.21 for what the number rests on. |
-| 5 | Memory for the uncertainty runs is **not** the same question as for QM9. "I swear to fucking god it's different with uncertainty." | ✅ Correct, and the QM9 measurement that was used to cut it did not cover the uncertainty pipeline. §13.21. |
+| 4 | **No 32 GB anywhere. 64 GB is the floor.** Then, asked whether the middle was available: "wait can you not do something between 64 and 128?" And on 2026-09-05: **"only high-compute models need the 96G limit."** | ✅ **Two tiers, from `model_memory.json`**: 64G for the six tree and deterministic models, 96G for every network and Gaussian process, with the uncertainty runs held at 96G throughout. The floor is enforced by name. §13.21. |
+| 5 | Memory for the uncertainty runs is **not** the same question as for QM9. "I swear to fucking god it's different with uncertainty." | ✅ Correct, and it is now a rule rather than a remark: `model_memory.json` carries a floor for that pipeline alone, so the 64G tree tier is not applied to it. A task there fits its model `1 + oof_folds` times per level and holds a per-molecule uncertainty for every training molecule. §13.21. |
 | 6 | **Do not state a memory figure from old job scripts.** "Stop hallucinating. You don't have that knowledge, help me search IN THE SERVER." What a script *requested* is what someone once guessed; what a job *used* is in `sacct`. | ✅ §13.21 carries the sacct command that answers it, and no generator comment now quotes a requested figure as if it were measured. |
 | 7 | Most of the large `sacct` rows are **KIRBy's other experiments, not this study** — `dta_*`, `nuc_*`, `pc_*`, `graphinity_*`, `tune_*`. "flexible_dnn_512_256_valprop is the only actual one." | ✅ Recorded in §13.21. |
 | 8 | Use the `squeue` and `where_to_submit.sh` output the author pasted. "I gave you all the information on what is running/pending." | ✅ §13.18 now reconciles the pasted queue state against the launch log. |
@@ -11248,62 +11258,81 @@ Two more, in the merge step at the end:
 
 ---
 
-### 13.21 THE MEMORY REQUEST — WHAT 96G RESTS ON, AND WHAT IT DOES NOT
+### 13.21 THE MEMORY REQUEST — TWO TIERS, AND WHAT EACH RESTS ON
 
-**Settled at 96G by the author on 2026-09-05**, after it was changed four times in one night
-(128 → 32 → 64 → 128 → 96). This section exists so the reasoning is on paper and the question does
-not have to be argued again. §13.20 item 4 is the instruction; this is the evidence.
+**Per model, not one number, settled by the author on 2026-09-05: "only high-compute models need
+the 96G limit."** The decision lives in `model_memory.json`; all three generators read it and none
+of them restates it. `scripts/test_model_memory.py` checks 107 generated scripts across seven
+generator forms against that file, and fails if any generator carries a memory literal of its own.
 
-#### The one measurement from this study that anybody has looked at
-
-`flexible_dnn_512_256_valprop`: **61.2 GB actually used**, against a 128G request. Author's
-identification, 2026-09-05 — every larger row in that `sacct` sweep (`dta_*`, `nuc_*`, `pc_*`,
-`graphinity_*`, `tune_*`) is KIRBy's separate work, not this study.
-
-| | vs 61.2 GB | at 8 cores, against ARC's 8 GB/core |
+| Tier | Models | What it rests on |
 |---|---|---|
-| 32G | half the peak | 4 cores' worth |
-| 64G | 5% headroom | exactly the ratio |
-| **96G** | **1.57×** | **12 cores' worth ← chosen** |
-| 128G | 2.09× | 16 cores' worth — waits for a whole node |
+| **64G** | `rf`, `qrf`, `xgboost`, `lgb`, `ngboost`, `svm` | Nothing from this study has ever been recorded near it. The QM9 screen's completed tasks put the forests at **2.7–2.9 GB** — ECFP4 2.86 (worst `qm90_qrf` 12971607_0), MHG-GNN 2.71 (worst `qm90_rf` 12971601_2). 64G is the author's floor, roughly twenty times anything observed. |
+| **96G** | every network, and every Gaussian process | 1.57× the **61.2 GB** peak, and it covers all nine observed network rows. |
 
-**The 8 GB/core figure is sourced, and it is measured rather than assumed.**
-`KIRBy/tests/slurm_scripts/where_to_submit.sh` has a `mem_per_core_mb()` that reads it off the
-partition's own nodes with `sinfo -h -N -p <partition> -o "%c %m"`, with the comment "Do not assume
-8 GB/core -- read it, because a fat node changes it." The diagnosis it came from is in that file's
-header: job 12923011, 16 cores / 256 GB / 48 h, sat PENDING for a week while the script's own
-report said "69 free 32-cpu slots" — both node types are 8 GB per core (arc-c046 48c/384G,
-arc-c312 288c/2266G), so 256 GB is 33 cores' worth of memory and the task needed a whole node.
+#### The reading that produced the split
 
-**The asymmetry is what decides it.** Asking for too much costs queue position. Asking for too
-little kills the job at the wall after days of waiting, and there is no partial credit.
+Of the 56 rows in the author's `sacct` sweep of 2026-09-05, **nine belong to this study, and every
+one of them is a neural network**:
 
-#### The one command that would settle it properly, and it has not been run
+| GB | job | | GB | job |
+|---|---|---|---|---|
+| 61.2 | `flexible_dnn_512_256_valprop` | | 43.3 | `dnn_full_vbll_hetero` |
+| 53.4 | `fdnn_wide_hetero` | | 43.2 | `mlp_full_vbll_hetero` |
+| 45.9 | `flexible_dnn_512_256_hetero` | | 43.0 | `dnn_full_vbll_valprop` |
+| 45.8 | `fdnn_wide_quantile` | | 42.5 | `dnn_full_vbll_threshold` |
+| 43.3 | `mlp_full_vbll_valprop` | | 38.9 | `mlp_full_vbll_threshold` |
+
+The suffixes `valprop`, `hetero`, `threshold` and `quantile` are this study's own noise strategies
+and uncertainty heads, which is what identifies them. **Not one tree, kernel or deterministic model
+from this study appears anywhere in that sweep.** Everything else in it — `dta_*`, `nuc_*`, `pc_*`,
+`graphinity_*`, `tune_*`, `kirby_full`, `exp_%j` — is KIRBy's separate work, which the author said
+twice.
+
+So one number for the whole roster was set by the networks and charged to everything.
+
+#### What the split buys
+
+**ARC nodes are 8 GB per core**, and that figure is measured rather than folklore: `mem_per_core_mb()`
+in `KIRBy/tests/slurm_scripts/where_to_submit.sh` reads it off the partition with `sinfo`, under the
+comment "Do not assume 8 GB/core -- read it, because a fat node changes it." The diagnosis it came
+from is in that file's header: job 12923011, 16 cores / 256 GB / 48 h, sat PENDING for a week while
+the script's own report said "69 free 32-cpu slots".
+
+At 8 cores, **64G is exactly that ratio**, so those tasks backfill into an ordinary slot; 96G needs
+12 cores' worth and 128G 16. And the six models on the lower tier are the fastest in the study —
+`svm` 3 h, `xgboost` 6 h, `rf` 7 h on the laboratory grid — which is where backfill pays most: a
+short job at the node ratio drops into almost any gap.
+
+Six of nineteen arrays on each grid move down.
+
+#### The uncertainty runs keep 96G throughout, including the trees
+
+`model_memory.json` carries a floor for that pipeline alone, and the tree tier is deliberately not
+applied to it. The author said this before anyone checked, 2026-09-04: *"are you sure about the
+memory? I swear to fucking god its different with uncertainty."* It is. A grid task fits its model
+once per level; an uncertainty task fits it `1 + oof_folds` times per level and holds a per-molecule
+uncertainty for every TRAINING molecule at every level, and the quantile forest stores per-molecule
+quantiles on top. **Nothing has measured this pipeline, because it has not run once since the
+redesign.**
+
+#### The one command that would settle any of it, and it has not been run
 
 ```bash
+bash /data/stat-ecr/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --fits 8 64G
 bash /data/stat-ecr/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --fits 8 96G
 ```
 
 It reports, per partition, how many nodes can hold that shape now and how many could ever hold it,
-counting drained nodes separately so "no node is large enough" is never confused with "every node
-is busy". **`--emit` does not answer this** — its own comment says "It does NOT consider memory.
-Run `--fits` by hand before trusting it for a memory-heavy job."
+counting drained nodes separately so "no node is large enough" is never confused with "every node is
+busy". **`--emit` does not answer this** — its own comment says "It does NOT consider memory. Run
+`--fits` by hand before trusting it for a memory-heavy job."
 
-#### Two things in this repository still contradict each other about a MaxRSS sample
+#### Reading it off the jobs themselves
 
-Not resolved here, and neither is the basis of the 96G decision:
-
-- `slurm_scripts_qm9_rerun/generate_scripts.py` says the screen's first nine arrays — 179 completed
-  tasks across rf, xgboost, lgb, svm, dnn, mlp, qrf and the two plain Bayesian networks — peaked at
-  **4.03 GB**, with all but one task between 2.8 and 3.1 GB.
-- `slurm_scripts_validation_rerun/generate_scripts.py` says that same sample was array indices 2, 8
-  and 14 only — one representation of six, `mhg_gnn_pretrained`, one fit per level instead of six,
-  no ChemBERTa and no Gaussian process.
-
-Both cannot be true. **Neither is quoted as a reason for anything**, and the settled figure does not
-depend on which is right. What would settle it is `sacct` over the screen's own job IDs, joining the
-job name from the ALLOCATION row — on a step row `JobName` is just `batch`, which is the bug that
-made the first sweep return `batch 255.24 GB` and read as this study's:
+Once tasks have completed, this is what says whether either tier is right. The name must be joined
+from the ALLOCATION row: on a step row `JobName` is just `batch`, which is the bug that made the
+first sweep return `batch 255.24 GB` and read as this study's.
 
 ```bash
 sacct -M arc -u $USER -j 12971601-12971619 -n -P \
@@ -11320,8 +11349,19 @@ END { for (k in max) printf "%8.1f GB  %5d tasks  req %-8s %-38s worst %s\n",
         max[k],c[k],req[k],k,worst[k] }' | sort -rn
 ```
 
-**Do not cut the request on anything less than that.** What a job script *requested* is what
-somebody once guessed; only `MaxRSS` says what a job *used*.
+**Never move a tier on what a job script REQUESTED** — that is what somebody once guessed, and it is
+how a 256G tier for the Gaussian process and LightGBM got proposed on 2026-09-05 from old scripts
+that were mostly KIRBy's. Only `MaxRSS` says what a job used. And move it in place with
+`scontrol update JobId=<id> MinMemoryNode=<mem>`, which keeps the queue position.
+
+#### Two things in this repository still contradicted each other about a MaxRSS sample
+
+Recorded because it is why the number moved five times, and because neither is the basis of
+anything now. One generator said the screen's first nine arrays — 179 completed tasks across eight
+models — peaked at 4.03 GB; the other said that same sample was array indices 2, 8 and 14 only, one
+representation of six. The per-representation table printed in the same session settles it against
+the second: it lists **both** ECFP4 and MHG-GNN, on `qrf` and `rf`, at 2.86 and 2.71 GB. The sample
+was thin — three tasks — but it was not one representation, and it is the 64G tier's evidence.
 
 #### Where 32G still appears, on purpose
 

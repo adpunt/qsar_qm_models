@@ -112,7 +112,7 @@ from pathlib import Path
 # Models that emit a per-molecule uncertainty. Must match UNCERTAINTY_MODELS in
 # KIRBy/tests/alternative_data_noise_robustness.py.
 MODELS = {
-    # name          : (tier, cpus, mem,  hours, note)
+    # name          : (tier, cpus, hours, note)   -- memory is in model_memory.json
     #
     # FOUR, not seven, by the AUTHOR'S DECISION of 2026-08-28 (RERUN_PLAN.md chat N).
     # The list is chosen, not computed: quantile forest, NGBoost, Gaussian process
@@ -124,15 +124,21 @@ MODELS = {
     # which is nothing, on every representation, and are overconfident everywhere.
     # Their jobs would have produced rows nobody could read.
     #
-    # Memory matches the working reference (slurm_scripts_validation_rerun uses
-    # 128G for these same models on these same datasets); this run additionally
-    # holds the per-molecule uncertainty frames in memory, so do not go lower.
-    # Wall times are deliberately generous: the out-of-fold pass multiplies the
-    # fit count by (1 + oof_folds) and nothing here has been timed on ARC.
-    'QRF':            (1, 8,  '96G', 36, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
-    'NGBoost':        (1, 8,  '96G', 47, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
-    'GP':             (1, 8,  '96G', 47, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
-    'VBLL-Full':      (2, 8,  '96G', 47, 'the variational network. Badly overconfident -- truth inside 1 sd 0.27-0.51 against a target of 0.68 -- which is itself the finding. On ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted'),
+    # MEMORY IS NOT IN THIS TABLE ANY MORE. It comes from model_memory.json, which
+    # the other two generators read as well, and it carries a FLOOR for this
+    # pipeline specifically: the tree tier that the grid gets is deliberately not
+    # applied here. The author, 2026-09-04: "I swear to fucking god its different
+    # with uncertainty" -- and it is. A grid task fits a model once per level; a
+    # task here fits it (1 + oof_folds) times per level and holds a per-molecule
+    # uncertainty for every TRAINING molecule at every level. Nothing has measured
+    # this pipeline, because it has not run once since the redesign.
+    # Wall times are deliberately generous for the same reason: the out-of-fold
+    # pass multiplies the fit count by (1 + oof_folds) and nothing here has been
+    # timed on ARC.
+    'QRF':            (1, 8,  36, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
+    'NGBoost':        (1, 8,  47, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
+    'GP':             (1, 8,  47, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
+    'VBLL-Full':      (2, 8,  47, 'the variational network. Badly overconfident -- truth inside 1 sd 0.27-0.51 against a target of 0.68 -- which is itself the finding. On ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted'),
     # THE VARIANCE-HEAD NETWORKS, added 2026-09-01 on the author's decision.
     # Kendall & Gal eq. 6 -- one network predicts the value and its own
     # observation noise, with the weights sampled for the model term. The only
@@ -141,9 +147,39 @@ MODELS = {
     # asked the per-molecule decomposition question at all (RERUN_PLAN.md 2.32).
     # Wall clock from their plain Bayesian siblings, which is what QM9 derived
     # theirs from.
-    'BNN-Full-MVE':     (2, 8,  '96G', 47, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
-    'MLP-BNN-Full-MVE': (2, 8,  '96G', 47, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
+    'BNN-Full-MVE':     (2, 8,  47, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
+    'MLP-BNN-Full-MVE': (2, 8,  47, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
 }
+# MEMORY COMES FROM model_memory.json, WITH THIS PIPELINE'S OWN FLOOR ON TOP.
+#
+# The grid generators put the trees on a 64G tier, on the evidence that every row
+# belonging to this study in the author's sacct sweep is a neural network. That tier is
+# deliberately NOT carried into this run: an uncertainty task fits its model
+# (1 + oof_folds) times per level and holds a per-molecule uncertainty for every training
+# molecule at every level, and nothing has measured it because it has not run once since
+# the redesign. The author said so before anyone checked, 2026-09-04.
+MODEL_MEMORY_FILE = Path(__file__).resolve().parent.parent / 'model_memory.json'
+_MEMORY_SPEC = json.loads(MODEL_MEMORY_FILE.read_text())
+_CANONICAL = json.loads(
+    (Path(__file__).resolve().parent.parent / 'model_names.json').read_text())['validation']
+_BY_CANONICAL = {m: tier for tier, spec in _MEMORY_SPEC['tiers'].items()
+                 for m in spec['models']}
+_PIPELINE_FLOOR = _MEMORY_SPEC.get('pipeline_overrides', {}).get(
+    'uncertainty_runs', {}).get('floor')
+
+
+def _gb(mem):
+    return int(str(mem).upper().rstrip('G'))
+
+
+def memory_for(model):
+    """The memory request for one uncertainty-run model, never below this run's floor."""
+    tier = _BY_CANONICAL.get(_CANONICAL.get(model, model), _MEMORY_SPEC['default'])
+    if _PIPELINE_FLOOR and _gb(tier) < _gb(_PIPELINE_FLOOR):
+        return _PIPELINE_FLOOR
+    return tier
+
+
 DATASETS = ['logd', 'caco2', 'herg_ki']
 # THREE, by the author's decision of 2026-08-28 (RERUN_PLAN.md chat N): ECFP4,
 # PDV and ChemBERTa. Informed by measurement rather than
@@ -611,7 +647,8 @@ def main():
 
     written = []
     total_tasks = 0
-    for model, (tier, cpus, mem, hours, note) in MODELS.items():
+    for model, (tier, cpus, hours, note) in MODELS.items():
+        mem = memory_for(model)
         model_reps = reps_for(model)
         model_tasks = len(DATASETS) * len(model_reps) * len(conditions)
         total_tasks += model_tasks

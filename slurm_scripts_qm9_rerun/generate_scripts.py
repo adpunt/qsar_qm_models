@@ -1057,32 +1057,52 @@ def selection_pairs(spec, pairs_key, models_key):
     return [(m, r) for m in models for r in reps]
 
 
-# MEMORY: 96G, AND IT IS NOT CUT WITHOUT sacct EVIDENCE.
+# MEMORY IS PER MODEL, AND model_memory.json IS WHERE THAT DECISION LIVES.
 #
-# The only job in THIS study with a recorded peak is
-# flexible_dnn_512_256_valprop: 61.2 GB actually used, against a 128G request
-# (author's identification, 2026-09-05 -- the other large rows in that sacct
-# sweep are KIRBy's separate experiments, not this one).
+# 64G for the six tree and deterministic models, 96G for every network and every
+# Gaussian process. Read, never restated here -- the same file is read by the
+# laboratory and uncertainty generators, so the three cannot drift apart.
 #
-#   32G   half the observed peak            dies
-#   64G   5% headroom                       dies on a slightly heavier task
-#   96G   1.57x, and 12 of the 8 GB/core    <-- chosen
-#   128G  2.09x, and 16 of the 8 GB/core    waits for a whole node
+# THE LOGIC, which a single number threw away. Every row in the author's sacct
+# sweep of 2026-09-05 that belongs to THIS study is a neural network, and there
+# are nine of them, running 38.9 to 61.2 GB (the suffixes valprop, hetero,
+# threshold and quantile are this study's own noise strategies and uncertainty
+# heads). NOT ONE tree, kernel or deterministic model from this study appears in
+# that sweep at all, and the QM9 screen's completed tasks put the forests at
+# 2.7-2.9 GB. So one number for the whole roster was set by the networks and
+# charged to everything -- which the author called on 2026-09-05: "only
+# high-compute models need the 96G limit".
 #
-# 96G is the author's call, 2026-09-05: memory is not restricted to powers of two,
-# and the middle buys most of the safety of 128G at much less of the queue cost.
+# WHAT IT BUYS. At 8 cores, 64G is exactly the 8 GB/core the nodes offer, so
+# those tasks backfill into an ordinary slot; 96G needs 12 cores' worth. The six
+# models on the lower tier are also the fastest in the study, which is where
+# backfill pays most.
 #
-# It was cut to 32G and then 64G earlier that day on a MaxRSS sample that covered
-# almost nothing: every task in it was array index 2, 8 or 14 -- the SAME
-# representation, mhg_gnn_pretrained -- so one representation of six, one fit per
-# level instead of the six an out-of-fold task does, no ChemBERTa, no Gaussian
-# process. A 256G tier for the GP and LightGBM was then added from what OLD JOB
-# SCRIPTS REQUESTED, which is what someone once guessed and, on inspection, was
-# mostly KIRBy's other work. Both are removed. Uniform 128G is what every
-# generator here had before any of it.
-#
-# The asymmetry: too much costs queue position, too little kills the job at the
-# wall after days of waiting, with no partial credit.
+# The asymmetry still decides the upper tier: too much costs queue position, too
+# little kills the job at the wall after days of waiting, with no partial credit.
+MODEL_MEMORY_FILE = Path(__file__).resolve().parent.parent / 'model_memory.json'
+_MEMORY_SPEC = json.loads(MODEL_MEMORY_FILE.read_text())
+MEMORY_FLOOR_GB = int(_MEMORY_SPEC['the_floor'])
+MEMORY_DEFAULT = _MEMORY_SPEC['default']
+# canonical model name -> request. The generator's own labels are mapped through
+# model_names.json, the one place the two pipelines' spellings are reconciled.
+_CANONICAL = json.loads(
+    (Path(__file__).resolve().parent.parent / 'model_names.json').read_text())['qm9']
+MEMORY_BY_CANONICAL = {m: tier
+                       for tier, spec in _MEMORY_SPEC['tiers'].items()
+                       for m in spec['models']}
+
+
+def memory_for(model, override=None):
+    """The memory request for one of this generator's model labels.
+
+    `override` is --mem, which applies to every model at once: a deliberate
+    blanket change should not be silently narrowed to one tier.
+    """
+    if override:
+        return override
+    canonical = _CANONICAL.get(model, model)
+    return MEMORY_BY_CANONICAL.get(canonical, MEMORY_DEFAULT)
 
 
 def main():
@@ -1104,12 +1124,11 @@ def main():
     # Gaussian processes, the variational networks and the two variance-head
     # networks -- have not been measured, which is why the headroom is 8x rather
     # than 2x. Re-measure once they land and cut it again if it holds.
-    ap.add_argument('--mem', default='96G',
-                    help='memory per task. 96G is 1.57x the worst peak this study '
-                         'has on record (61.2 GB, flexible_dnn_512_256_valprop) '
-                         'and needs 12 cores-worth of the 8 GB/core the partitions '
-                         'offer, against 16 for 128G -- so it backfills where 128G '
-                         'waits for a whole node. Refuses under 64G.')
+    ap.add_argument('--mem', default=None,
+                    help='Override the memory request FOR EVERY MODEL. The default is '
+                         'per model, from model_memory.json: 64G for the trees and '
+                         'the deterministic models, 96G for the networks and the '
+                         'Gaussian processes. Refuses under 64G.')
     ap.add_argument('--stage', type=int, default=1, choices=[0, 1, 2],
                     help='0 screen (1 replicate), 1 breadth (replicates 1-9, appended to '
                          'stage 0), 2 depth (all conditions, chosen models and reps). '
@@ -1206,10 +1225,12 @@ def main():
     # decided before stage 0 has run (RERUN_PLAN.md §13.1 item 4). Generating a
     # full stage-2 grid by default would quietly cost more than stages 0 and 1
     # together, for a question that is about a handful of cells.
-    if args.mem and args.mem.upper().rstrip('G').isdigit() and int(args.mem.upper().rstrip('G')) < 64:
-        ap.error(f'--mem {args.mem} is below the 64G floor the author set on '
-                 f'2026-09-05. A job killed at the wall after days in the queue '
-                 f'has no partial credit; a job that asks too much only waits.')
+    if args.mem and args.mem.upper().rstrip('G').isdigit() \
+            and int(args.mem.upper().rstrip('G')) < MEMORY_FLOOR_GB:
+        ap.error(f'--mem {args.mem} is below the {MEMORY_FLOOR_GB}G floor the author '
+                 f'set on 2026-09-04. A job killed at the wall after days in the queue '
+                 f'has no partial credit; a job that asks too much only waits. The '
+                 f'floor lives in {MODEL_MEMORY_FILE.name}.')
 
     if args.pairs_file:
         _spec = json.loads(Path(args.pairs_file).read_text())
@@ -1536,7 +1557,7 @@ def main():
         script_name = f'qm9_s{args.stage}_{model}.sh'
         (out / script_name).write_text(TEMPLATE.format(
             model=model, note=note or model, jobslug=model, stage=args.stage,
-            cpus=8, mem=args.mem, hours=hours, flags=flags,
+            cpus=8, mem=memory_for(model, args.mem), hours=hours, flags=flags,
             qsar_dir=args.qsar_dir, sample_size=args.sample_size,
             n_reps_run=n_reps_run, first_iter=first_iter,
             last_iter=first_iter + n_reps_run - 1,
