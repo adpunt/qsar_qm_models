@@ -8971,6 +8971,33 @@ regenerated. Listing them is busywork. What matters is the half that survives, b
 regenerated number does not fix a wrong sentence about the method, a retired metric in the
 Conclusion, or a broken bibliography.
 
+### The Methods rewrite is its own document — `METHODS_REVISION_GUIDE.md` (2026-09-04)
+
+Written to the format of `PAPER_REVISION_GUIDE.md` and superseding that guide's Methods items. It
+carries draft replacement prose for every Methods subsection, a table of the sentences the code
+contradicts with confirmed `paper.tex` line numbers, and eight open items. **Sourced by reading the
+code, not this document**: eight readers over the QM9 data path, the representations, the model
+roster, the noise scheme across all three injectors, the uncertainty decomposition, the QM9
+protocol, the KIRBy runner and the three job generators, then three verifiers re-opening every cited
+line. 363 claims, 42 corrected on re-check.
+
+It does NOT cover the metrics and statistics computed after a run — auc_norm, the ANOVA, Kendall's
+W, coverage, the uncertainty statistics. The author placed those elsewhere on 2026-09-04, so that
+subsection is a placeholder there.
+
+Two decisions it records: the three measured datasets are called **assay datasets** in the paper
+(author, 2026-09-04), and the Methods gains a seventh subsection, **Uncertainty quantification**,
+absorbing `paper.tex:217-219`.
+
+Three things it found that are not listed below and that no compute fixes:
+
+| Where | Problem |
+|---|---|
+| `:193` | "implemented by DeepChem" — the scaffold splitter was replaced by a purpose-written one that gives each acyclic molecule its own group. DeepChem's put nearly all of them in training |
+| `:193` | "from this fixed subset" — each replicate draws its own 10,000 molecules, so the subset is not fixed across replicates |
+| `:205` | "Rust was used to perform … feature extraction" — Rust computes no representation. It does label processing, noise injection and serialization |
+
+
 ### Survives regeneration — these are wrong about the *method*, not the values
 
 | Where | Problem |
@@ -14177,339 +14204,562 @@ added entries.
 
 ---
 
-## 14. THE NEW FIGURE SET — options, not decisions
+## 14. THE NEW FIGURE SET — options for every slot
 
-**Written 2026-09-04 at the author's request.** *"I need to make new figures, but before that I need
-to make a new plan… I want options… roughly the same number of figures as I currently have, but
-everything will need to be replaced… take what results I will actually have into account… keep in
-mind what should be in supplementary… I would rather small quality than quantity."*
+**Written 2026-09-04, rewritten the same day after the author read the first attempt and rejected it:**
+*"I told you to give me options, you gave me 0 options… I told you to explain figures because I have
+aphantasia, you did not do that… You created new experiments which I didn't ask for."* The first
+version also asked whether the main text should hold one representation, which it should not have,
+because representation is one of the two factors the whole study decomposes.
 
-**Nothing here is decided.** Every slot below carries two or three options and a recommendation.
-When the choices are made they go into the new revision guide; the choosing happens here.
+**What this section is.** Every figure and table in `paper.tex` has a job. This section keeps the
+jobs and replaces the contents. For each job there are two or three options, and every option is
+described in words that do not require the reader to picture it: how many panels, what runs along
+the bottom, what runs up the side, what one mark is, how many marks there are, and what colour
+means. Nothing here is chosen.
 
-**This section owns the figure and table plan.** It does not restate the level grids (that is
-`NOISE_DESIGN.md` §6.4), the run design (§6), or the question set (§7.0). It maps §7.0's seven
-questions onto specific pictures, and it says which pictures the data can actually support.
+**What it does not own.** Level grids are `NOISE_DESIGN.md` §6.4. The run design is §6. The seven
+questions are §7.0. The pairs that run the deep and censoring conditions are
+`deep_run_pairs.json`, `censoring_pairs.json` and `uncertainty_pairs.json`, which are read when a
+task starts and may be edited up to that moment; **their names may change, their structure will
+not**, so every figure below refers to them by role rather than by listing their contents.
 
-**The rule every slot obeys, taken from the author's standing instructions:** one figure answers one
-question; one figure is one representation and the representation is named in the title; nothing is
-averaged across representations; retention is never printed without its clean baseline beside it.
+---
+
+### 14.0 THE AVERAGING RULES — the author's first concern, and the thing the current script gets wrong
+
+*"What I'm worried about is averaging over representations, when one is at fault and skews
+everything. Or averaging across noise types… I have SO much data and I don't want to average away
+the actual conclusions."*
+
+**The rule, in one line: a figure may average over replicates and over molecules, and over nothing
+else.** Replicates are repeats of the same thing, so their spread is the error bar. Molecules are
+the population a metric is defined on. A representation is a factor. A noise type is a factor. A
+dataset is a factor. A model is a factor. **Averaging over a factor is the thing this study exists
+to avoid**, and a mean over six representations reports a number that describes none of them.
+
+#### 14.0a Where the current figure script breaks this rule
+
+Found by reading `scripts/generate_paper_figures_v2.py` on 2026-09-04. All five are live.
+
+| # | Where | What it averages over | Why it matters |
+|---|---|---|---|
+| 1 | `fig_validation_combined`, both panels | **every representation AND every noise type**, one bar per model per dataset | This is the figure the paper's cross-dataset conclusion rests on. One weak representation drags a model's bar down and the reader cannot see it happen. **The worst offender in the script.** |
+| 2 | Kendall's W (`create_tables`) | **representation**, before the models are ranked | The concordance statistic is computed on rankings built from representation-averaged values, so "rankings are stable across noise types" is a statement about an average that does not exist |
+| 3 | `calculate_robustness` | replicates, **before** integrating the retention curve | Allowed by the rule, but it destroys the spread: integrating each replicate and then taking the median gives the same centre and a real error bar. Change the order |
+| 4 | `table4` headline columns and `table_validation_uncertainty` | **every noise level and every replicate**, for uncertainty-versus-error, coverage and mean uncertainty | Pools the ramp that the whole level axis is there to show. The within-level machinery exists next to it and these four columns do not use it |
+| 5 | `deep_analysis.py` uncertainty summaries | representation and noise type | Not in the paper's path today, but it is the script most likely to be reached for |
+
+#### 14.0b The guard, so it cannot come back
+
+**Proposed, not built.** One function that every figure and table passes its data through before it
+draws anything. It takes the frame and the list of factors the figure claims to hold fixed, and it
+**raises** if the frame still contains more than one value of any of them. A figure titled "PDV"
+that has been handed two representations stops the run instead of drawing a mean.
+
+The same function writes the fixed factors into the figure's own title, so the title cannot drift
+from the data. This is the same shape as the guard already used for the aleatoric/epistemic split,
+which refuses to write a row whose numbers disagree with what the support table claims — that one
+caught three model families the day it was wired in.
+
+**Cost: about a day, and it must be built before the first figure, not after.**
+
+#### 14.0c Where a summary across a factor is still wanted
+
+Sometimes the point *is* the spread across representations. The rule is then: **show the spread, do
+not replace it with its centre.** Six dots in a column, or a line from the lowest to the highest with
+a mark at the middle. The reader sees the range and can see when one representation is an outlier.
+Every option below that summarises a factor does it this way, and says so.
 
 ---
 
 ### 14.1 What the runs will actually give you
 
-Read off the three generators, `noise_conditions.json`, `deep_run_pairs.json`,
-`censoring_pairs.json`, `uncertainty_pairs.json` and `models/model_defaults.py` on 2026-09-04.
-**A figure can only use an axis that appears in this table.**
+Read off the three job generators, the three pair files, `noise_conditions.json` and
+`models/model_defaults.py` on 2026-09-04.
 
-| | QM9 | logD, Caco-2, hERG |
+| | QM9 | logD, Caco-2, hERG (the assay datasets) |
 |---|---|---|
-| Models | **19** | **19**, the same nineteen |
-| Representations | **6** — ECFP4, PDV, MHG-GNN, Avalon, ChemBERTa, Sort & Slice | **6**, the same six |
-| Noise types, broad grid | **3** — gaussian, grouped-wider, grouped-shifted | **3**, the same three |
-| Noise types, deep run | **+3** — Student-t, outlier, Laplace, on 18 named pairs | **+3**, on named pairs |
-| Censoring | 5 named pairs | ~5 named pairs × 3 datasets |
-| Levels | **7**, as a fraction of the clean training label spread — the grid is `NOISE_DESIGN.md` §6.4 | the same 7 |
-| Censoring levels | **7**, as a fraction of labels clipped — the grid is `NOISE_DESIGN.md` §6.4 | the same 7 |
+| Models | 19 | 19, the same nineteen |
+| Representations | 6 — ECFP4, PDV, MHG-GNN, Avalon, ChemBERTa, Sort & Slice | 6, the same six |
+| Noise types, broad grid | 3 — gaussian, grouped-wider, grouped-shifted | 3, the same three |
+| Noise types, deep run | +3 — Student-t, outlier, Laplace, on the pairs named in `deep_run_pairs.json` | +3, the same pairs |
+| Censoring | the pairs named in `censoring_pairs.json` | the same pairs, on all three datasets |
+| Levels | 7, as a fraction of the clean training label spread — `NOISE_DESIGN.md` §6.4 | the same 7 |
+| Censoring levels | 7, as a fraction of labels clipped — `NOISE_DESIGN.md` §6.4 | the same 7 |
 | Repeats | **10 replicates** | **none** — 5 scaffold folds, which are a partition, not repeats (§3.2b) |
-| Reporting level | **1.0** | logD **1.0** · Caco-2 **0.75** · hERG **1.0** |
-| Uncertainty rows | out of the same jobs: 13 of 19 models emit one; out-of-fold on ECFP4, PDV, ChemBERTa | a separate run: **6 models** (QRF, NGBoost, GP, VBLL, and the two variance-head networks) × **3 representations** × all 7 noise types |
+| Reporting level | 1.0 | logD 1.0 · Caco-2 0.75 · hERG 1.0 |
+| Uncertainty rows | out of the same jobs; 13 of the 19 models emit one; the out-of-fold pass runs on the pairs in `uncertainty_pairs.json` | a separate run, on the same pairs, all seven noise types |
 
-**Only the reference condition and censoring run the clean level.** Every other condition runs six
-levels and has its clean row filled in afterwards by `copy_zero_rows.py`. Any figure that draws a
-curve from zero is drawing a copied row, which is correct but must not be described as a measurement
-of that condition.
+**Per-molecule rows exist and are rich.** Every uncertainty row carries the predicted value, the
+predicted uncertainty raw and calibrated, the clean label, the noisy label, **the injected noise
+that was actually applied to that molecule**, the aleatoric and epistemic components, and a flag
+saying whether each component varies per molecule or is one number per fit. The `split` column takes
+three values: `test`, `validation`, `train_oof`.
 
----
-
-### 14.2 Four things that constrain the design before any option is chosen
-
-**A. The question "can uncertainty tell you which labels are bad" has ONE condition left, not three.**
-§3.1f, traced to the code: the grouped conditions key their noise to the same scaffold array the
-out-of-fold split holds out, so a molecule is always scored by a fit that saw none of its group's
-corrupted labels. Outlier is a random draw, so there is nothing to generalise either. **Censoring is
-the only condition on which the question is defined**, because censoring is keyed to the label value
-and a model can therefore know. §7.0's Q4 row still says "three" and is superseded.
-
-*What that costs:* on QM9, `censoring_pairs.json` names five pairs, and of those `rf` × ECFP4 emits
-no uncertainty at all and `heteroscedastic_gp` × ECFP4 gets no out-of-fold pass — so **three pairs
-carry the whole test on QM9**. On the laboratory side the uncertainty run covers censoring across
-its full 6 × 3 grid, so that is where the question is actually answerable at breadth. **This is the
-first decision in §14.6.**
-
-**B. The paired test that answers "does the KIND of noise matter" does not exist in any script.**
-The only signed-rank routine in the live path pairs model against model. The Q2 statistic needs the
-mirror image — each noise type paired against gaussian, on the replicate, per model. It has to be
-written. It is **QM9-only by arithmetic**: five folds are not repeats, and a two-sided signed-rank
-test on five cannot return a p below 0.0625.
-
-**C. Censoring cannot share an axis or a colour scale with anything else.** Its horizontal axis is
-the fraction of labels clipped; every other condition's is a fraction of the label spread. Today
-`calculate_robustness` integrates both into one `auc_norm` and drops them into the same heatmap
-column set. Censoring gets its own panel, or its own figure, in every slot below.
-
-**D. There are no error bars on the laboratory datasets.** One fit per cell, seed pinned. The five
-folds mix run-to-run wobble with scaffold difficulty and cannot stand in for a repeat. So: QM9
-figures may carry a spread; laboratory figures may not, and the Methods says so in words.
+⚠️ **There are no in-fold training predictions.** A model's own residual on a molecule it was fitted
+on is not written by either pipeline. That rules out the small-loss criterion in §14.2 option D
+without a code change and a re-run.
 
 ---
 
-### 14.3 The slots
+### 14.2 THE UNCERTAINTY-AND-NOISE QUESTION — the author's question, answered
 
-Each visual is described literally — horizontal axis, vertical axis, what one mark is, how many
-panels, what colour means — because the author does not visualise.
+*"Is there any other way to test this? Even if it is random noise, the models should be able to
+detect a noisy environment, no? Outside of direct noise prediction, how is this typically handled?
+Basic noise studies that involve uncertainty. Kolmar is a good one, but I want more."*
 
----
+**The author's instinct is right and my first answer was too narrow.** "Can uncertainty detect
+noise" is not one question. It is four, they are asked differently in the literature, and only one
+of the four is restricted to censoring.
 
-#### METHODS — three items, all of which already exist in some form
+#### The four, in increasing difficulty
 
-**M1. What each noise type does to the labels.**
+**A. Does the model know the ENVIRONMENT is noisy?** Average predicted uncertainty against the noise
+level. Rises = the model noticed. **Works on all seven noise types, on every model that emits an
+uncertainty, on every representation and every dataset.** This is Kolmar and Grulke's finding and it
+is §7.0's Q5. Nothing about it is in doubt and it is the cheapest thing in the study.
 
-- **Option A (recommended) — the histogram panels, rebuilt for the settled conditions.** Panels: one
-  per noise type, 7 of them, arranged 2 columns by 4 rows. Horizontal axis: label value, the same
-  bin edges in every panel. Vertical axis: how many molecules, no numbers printed. Each mark is a
-  histogram bar; two histograms are drawn on top of each other in every panel, the clean labels in
-  one colour and the noised labels in a second. Colour means: which of the two label sets. One
-  number printed in the corner of each panel: the delivered amount.
-- **Option B — a single panel instead.** Horizontal axis: the seven noise types. Vertical axis: the
-  delivered amount. Each mark is a dot with a vertical line through it showing the spread over
-  replicates. Colour means nothing. This is the dose-matching evidence in one picture and it is the
-  thing a referee will actually check; it does not show what the noise looks like.
-- **Option C — both, A in the main text and B as one extra panel on it.**
+*What can be added to it cheaply, and it is the author's point:* if a model has an aleatoric term,
+that term is the one that should rise, and the epistemic term should not. **That contrast is a
+sharper version of the same test** and it is what the aleatoric/epistemic split is for.
 
-**M2. The metrics table.** Text only, no numbers. Drop the row for the calibration-error metric,
-which is gone. Add a row for the retention area. Unchanged in kind.
+**B. Does the model's uncertainty rank its own errors?** Spearman correlation between predicted
+uncertainty and absolute error against the **clean** label. **Works on all seven noise types.** This
+is §7.0's Q6, and it is what most uncertainty papers in this field actually report.
 
-**M3. The noise conditions table.** Text only, one row per condition: its name, what it does to a
-label, and the real-world source it stands for. Replaces the retired six-strategy table entirely.
+**The field's standard picture for it is not a correlation, it is a curve, and the paper does not
+have one.** Sort the test molecules by predicted uncertainty, most uncertain first. Throw away the
+top 1%, and record the error on what is left. Throw away the top 2%, record again, and so on to
+100%. If the uncertainty is any good the error falls as you discard. Plotted, that is the
+**error-retention curve** (also called a confidence curve). Two reference curves go with it: the
+same thing done by discarding in **random** order, which is flat, and the same thing done by
+discarding in order of **true** error, which is the best any ordering could do. The gap between your
+curve and the random one is the value of the uncertainty; the gap to the oracle is what is left on
+the table. **The area between them is a single number that can go in a table and a heatmap.**
 
----
+Sources for it, none of which are in `citations.bib` yet: Scalia et al. 2020 (*J. Chem. Inf. Model.*
+60(6):2697–2717), Hirschfeld et al. 2020 (*J. Chem. Inf. Model.* 60(8):3770–3788), and Tran et al.
+2020 (*Mach. Learn.: Sci. Technol.* 1:025006) for the calibration side. **This is the strongest
+single addition available and it costs no compute** — every column it needs is already written.
 
-#### Q1 — is robustness decided by the model, the representation, or the pairing?
+**C. Does the model know WHICH LABELS are bad?** This is the hard one and it is §7.0's Q4.
+It splits again, and the split is the thing I got wrong:
 
-**Slot F1.**
+- **C1 — can the model tell from the MOLECULE which labels were corrupted?** Only answerable when
+  which molecules got hit is predictable from the input. Under gaussian, Laplace and Student-t every
+  molecule gets the same treatment, so there is nothing to predict. Under the grouped conditions the
+  noise is keyed to scaffold family and the out-of-fold split holds out whole scaffold families, so
+  the scoring model never saw a corrupted label from that molecule's family (§3.1f, traced to the
+  code). Under outlier the 10% is a random draw. **Censoring is the only one left**, because
+  censoring is keyed to the label value and high-valued molecules are the ones clipped.
+- **C2 — given the model's own error, does its uncertainty add anything?** Out of fold the residual
+  already contains the injected noise, because the scoring fit never saw that molecule's draw. So
+  ranking by residual detects corruption trivially. The real question is whether dividing the
+  residual by the predicted uncertainty ranks the corrupted labels **better than the residual
+  alone**. **This is answerable under every condition**, and it is the honest form of "is this
+  uncertainty useful for cleaning data". A flat result is a finding.
 
-- **Option A (recommended) — grouped bars, two panels.** Panels: two, stacked, the top one for
-  accuracy and the bottom one for retention. Horizontal axis on both: the noise types, one tick
-  each. Vertical axis on both: share of variance explained, 0 to 100 percent. At every tick there
-  are four bars side by side. Colour means which of the four: the model, the representation, the
-  pairing of the two, and the leftover. One legend, top panel only.
-- **Option B — stacked bars.** Same axes, but one bar per noise type instead of four, cut into four
-  coloured segments that sum to 100. Half as many marks; the eye reads "what fraction is pairing"
-  directly instead of comparing bar heights. Loses the ability to compare one term across noise
-  types at a glance.
-- **Option C — A plus a second figure, the pairing grid.** A rectangular grid of coloured squares.
-  Rows: the models. Columns: the six representations. Colour: the retention value, dark to bright.
-  A number printed on every square. This answers "which pairing" where A only answers "how much of
-  it is pairing". It is the picture the interaction term is about.
+**This is the correction that matters: C2 was in the plan already and I described it as
+censoring-only. It is not. Only C1 is.**
 
-**Recommendation: A in the main text, C's grid also in the main text, B not used.** Two figures for
-Q1 is justified only because the pairing term has been the paper's largest effect and a share-of-
-variance bar chart never names a single pairing.
+**D. Does the training procedure surface corrupted labels?** The learning-with-noisy-labels field's
+own method: a model that has memorised a corrupted label has a *small* residual on it during
+training, so the corrupted labels sit at the two tails of the training-residual distribution. This
+is the small-loss criterion behind co-teaching (Han et al. 2018) and confident learning (Northcutt
+et al. 2021) — **both already in `citations.bib` and both already cited in the Introduction's
+learning-with-noisy-labels paragraph.** It works under random noise, which is exactly what the
+author is asking for.
 
-**Table T1 — the same numbers.** One row per noise type, four columns of percentages for accuracy
-and four for retention. Bold the largest in each half of each row. QM9 in the main text; the three
-laboratory datasets in Additional files, with a stated caveat that they carry no leftover term
-because they have no repeats.
+⚠️ **It is not free.** It needs the model's predictions on the molecules it was fitted on, and
+neither pipeline writes those (§14.1). Adding it is a writer change plus a re-run of the pairs in
+`uncertainty_pairs.json`. **It is the one genuinely new experiment on this page and it is flagged as
+such rather than assumed.**
 
----
+#### What that means for the figure plan
 
-#### Q2 — does the kind of noise matter, or only the amount?
-
-**Slot F2.** This is the figure the seven-condition design exists for and it currently has nothing.
-
-- **Option A (recommended) — the spread plot.** Panels: one. Horizontal axis: accuracy at the
-  reporting level. Vertical axis: the models, one row each, ordered by their gaussian value. Each
-  mark is a dot, one per noise type, all on that model's row. Colour means which noise type. A short
-  vertical tick marks the gaussian value on each row, so the reader sees how far the other dots sit
-  from it. One representation, named in the title. Censoring is **not** on this plot.
-- **Option B — small multiples of the curves.** Panels: one per noise type, 6 of them, all sharing
-  one vertical axis. Horizontal axis: noise level. Vertical axis: accuracy. Each mark is a dot
-  joined by a line, one line per model. Colour means which model. Shows the shape of every decline,
-  which is what motivates using a retention area at all; costs a full-page figure.
-- **Option C — A, plus censoring as a separate second panel** with its own horizontal axis labelled
-  in fraction of labels clipped.
-
-**Recommendation: A with C's censoring panel.** B is the strongest supplementary figure in the
-whole plan and should go to Additional files rather than be dropped.
-
-**Table T2 — the paired test.** One row per model. One column per noise type. Each cell: the mean
-difference from gaussian across the ten replicates, and a mark when the signed-rank test clears
-0.05. QM9 only, and the table says so in its title. **This statistic has to be written; it does not
-exist.**
-
----
-
-#### Q3 — what does model choice actually buy you at a realistic amount of error?
-
-**Slot F3.**
-
-- **Option A (recommended) — the paired dot plot.** Panels: one per dataset, 4 of them stacked.
-  Horizontal axis: accuracy, 0 to 1. Vertical axis: the models, one row each, ordered by accuracy at
-  the reporting level. Each row carries **two dots joined by a horizontal line**: an open dot at the
-  clean accuracy and a filled dot at the accuracy at that dataset's reporting level. The length of
-  the joining line *is* the loss. Colour means nothing; the two dot styles do the work. This puts
-  the baseline beside the delivered number by construction, which is the standing rule, and it needs
-  no retention number at all to be read.
-- **Option B — the retention grid with a baseline column.** A grid of coloured squares. Rows:
-  models. Columns: the noise types, plus one extra column at the left holding the clean accuracy,
-  separated by a white gap so it cannot be misread as another noise type. Colour: the value. This is
-  the change already specified in §10b.5 and it keeps the existing figure's shape.
-- **Option C — the two-axis scatter.** Panels: two. Left: horizontal axis clean accuracy, vertical
-  axis retention, one dot per model. Right: horizontal axis accuracy at the reporting level,
-  vertical axis retention, one dot per model. Colour means the model family. The bottom-right corner
-  of the right panel is the flattered quadrant — retains well, delivers little. §10b.5 asks for this
-  third panel by name.
-
-**Recommendation: A in the main text as the headline result, C as a second main-text figure, B in
-Additional files.** A is a genuinely better picture than anything the paper has now: it shows both
-numbers the author insists are printed together, and it needs no metric to be explained first.
-
-⚠️ **§10b.5 asks for B, and A displaces it.** That is a change to a recorded decision and it is
-decision 3 in §14.6.
-
-**Table T3 — the numbers behind A.** One row per model. Columns: clean accuracy, accuracy at the
-reporting level, the drop between them, and the retention area. One table per dataset;
-QM9 in the main text, the other three in Additional files.
+| | Conditions it works on | Costs compute? | Currently in the plan? |
+|---|---|---|---|
+| A — the environment is noisy | all 7 | no | yes, Q5 |
+| A′ — the aleatoric term specifically | all 7 | no | yes, and the author has now put it in the headline |
+| B — ranks its own errors, as a curve | all 7 | no | the correlation yes, **the curve no** |
+| C1 — which molecule, from the structure | censoring only | no | yes, Q4 |
+| C2 — does uncertainty beat the residual | all 7 | no | yes, and I wrongly narrowed it |
+| D — small-loss criterion | all 7 | **yes** | no |
 
 ---
 
-#### Q4 — can a model's uncertainty tell you which labels are bad?
+### 14.3 THE PAIRED NOISE-TYPE TEST, in plain words
 
-**Slot F4.** Constrained to censoring by §14.2 A.
+The author: *"I don't know what you mean by the 'paired noise-type test'?"*
 
-- **Option A (recommended) — the enrichment curve.** Panels: one per dataset that has the run.
-  Horizontal axis: the fraction of molecules you look at, 0 to 1, ordered from most uncertain to
-  least. Vertical axis: the fraction of the corrupted labels you have found by that point, 0 to 1.
-  Each mark is a line. One line per model. A straight diagonal line from corner to corner is drawn
-  in grey: that is what random picking gives you. A second grey line shows what ranking by the
-  prediction error alone gives you, because the question is whether uncertainty **adds** to that.
-  Colour means which model. **This is the only proposed picture in the whole plan that is about
-  individual molecules**, and the question is literally "which labels are bad".
-- **Option B — the two-number table only, no figure.** One row per model and representation.
-  Columns: the plain correlation, the ranking improvement from dividing error by uncertainty, and
-  the permutation band beside each. Honest, small, and unreadable as a result.
-- **Option C — a per-molecule scatter.** Horizontal axis: predicted uncertainty. Vertical axis: how
-  much the label was moved. Each mark is one molecule. One panel per model. Tens of thousands of
-  overlapping dots; it shows the raw material but not the answer.
+Take one model, one representation, one noise level. Under gaussian you have ten numbers, one per
+replicate. Under Student-t you have ten more, from the same ten replicates. Line them up — replicate
+1 against replicate 1, replicate 2 against replicate 2 — and subtract. You now have ten differences.
+If the noise type makes no difference the ten differences scatter around zero; if it does, they sit
+consistently on one side. A signed-rank test asks which.
 
-**Recommendation: A, with B's numbers as the accompanying table.** C to Additional files for one
-exemplar pair if it is wanted at all.
+**Why pair rather than just compare the two averages.** The replicates differ from each other for
+reasons that have nothing to do with the noise type — a different random subset of QM9, a different
+scaffold split. Pairing subtracts that out, so what is left is the noise type.
 
-**Table T4 — the two Q4 statistics side by side, with the permutation band.** Names that cannot be
-confused, as §7.0 requires. This table must state in its title that it is censoring only, and the
-Methods must carry the sentence explaining why the other conditions are undefined rather than zero.
+**Why it is the right test for this question.** §7.0's Q2 asks whether the *kind* of noise matters
+once every kind delivers the same *amount*. Every kind delivering the same amount is the point of
+the dose solver. So the whole design turns on a comparison between noise types, and there is
+currently no statistic in any script that compares one noise type against another — the only
+signed-rank routine in the code compares one model against another model.
 
----
+**It is QM9-only, by arithmetic.** The assay datasets have five folds and no replicates, and a
+two-sided signed-rank test on five paired values cannot produce a p-value below 0.0625 whatever the
+effect size.
 
-#### Q5 and Q6 — does noise make a model less sure, and does its uncertainty still rank predictions?
-
-These are two different questions but they share one horizontal axis, so they can share a figure.
-
-**Slot F5.**
-
-- **Option A (recommended) — two panels, one axis.** Panels: two, stacked, sharing the horizontal
-  axis. Horizontal axis: noise level. Top panel vertical axis: the average predicted uncertainty.
-  Bottom panel vertical axis: the correlation between predicted uncertainty and the error measured
-  against the **clean** label, 0 to 1. Each mark in both panels is a dot joined by a line, one line
-  per model. Colour means which model, one shared legend below both. Top panel is Q5, bottom is Q6.
-- **Option B — three panels**, adding the split into a data-noise term and a model-uncertainty term
-  as a third. Only four model families can carry that split, and each would need two lines, so the
-  panel holds eight lines for four models. Busy, and it is a different claim from Q5.
-- **Option C — A, and the split as its own separate figure** restricted to the four families that
-  have it, with the support flag stated in the caption.
-
-**Recommendation: A, with C's split figure in Additional files unless the decomposition turns out to
-be a headline result, in which case it is promoted.** The four families are `gauche_rbf`,
-`dnn_vbll`, and the two variance-head networks; NGBoost is deliberately not among them because a
-single fit has no model-uncertainty term.
+**This is not a new experiment.** It is a test run on numbers the grid is already producing.
 
 ---
 
-#### Q7 — does uncertainty track some kinds of noise better than others?
+### 14.4 THE SLOTS
 
-**Slot F6.**
+Eight figure jobs and six table jobs, matching what `paper.tex` has today. Options within each.
 
-- **Option A (recommended) — a grid of coloured squares.** Rows: the six uncertainty models.
-  Columns: the seven noise types. Colour: the Q6 correlation at the reporting level, one shared
-  scale. A number printed on each square. One grid per dataset, side by side or stacked. Nothing is
-  averaged; every cell is one condition.
-- **Option B — extra lines on F5's bottom panel**, one per noise type instead of one per model.
-  Free, but it answers the question for one model at a time and Q7 is a comparison across models.
-- **Option C — a slope chart.** Horizontal axis: the seven noise types. Vertical axis: the
-  correlation. Each mark is a dot, joined left to right by a line, one line per model. Reads as
-  "which types are hard for everyone" versus "which model is unusual", which A does not.
-
-**Recommendation: A.** C is genuinely attractive and is the option to reconsider if A comes out flat.
-
-⚠️ **Q7 on the Q4 statistic is a comparison of ONE condition after §3.1f, not seven and not three.**
-Any grid of the Q4 statistic across noise types would be ranking six undefined cells against one
-real one. **Q7 is a Q5-and-Q6 figure only.** This supersedes the §7.0 Q7 row's "comparison of three".
+**How to read the visual descriptions.** Each says: how many panels; what runs along the bottom;
+what runs up the side; what one mark is; roughly how many marks there are; what colour means; and
+any reference lines.
 
 ---
 
-### 14.4 What goes to Additional files
+#### SLOT 1 — METHODS: what each noise type does to the labels
+*Replaces `fig_methods_noise_strategies`. Paper's Methods §2.5.*
 
-The journal sets no limit on the number of additional files, requires each to be cited by name in
-sequence, and requires tabular data as spreadsheets rather than as pictures of tables.
+**Option 1A — the histogram panels, rebuilt.**
+Seven panels in a block two across and four down, one per noise type. Along the bottom of each: the
+label value, the same scale in every panel. Up the side: how many molecules have that value, with no
+numbers printed. One mark is a histogram bar. Each panel has two histograms drawn over each other —
+the clean labels and the noised labels — about fifty bars each. Colour separates those two and
+nothing else. One number printed in the top corner of each panel: the amount of noise actually
+delivered. *This is what the paper has, with the retired six replaced by the settled seven.*
 
-| | |
-|---|---|
-| Every representation other than the one held constant | the main text is PDV; the other five, every figure, as files |
-| The three laboratory datasets' variance decomposition | with the stated caveat that it has no leftover term |
-| The full retention table, all models × all representations × all conditions × all four datasets | machine-readable, one file |
-| The degradation curves for every noise type (Q2 option B) | the shape evidence |
-| The retention grid with a baseline column (Q3 option B) | if option A is chosen for the main text |
-| The uncertainty split into its two terms (Q5 option C) | unless promoted |
-| Excluded configurations, and why each was excluded | already generated |
-| Completeness: which cells ran and which did not | already generated |
-| Model and representation redundancy, and the agreement between repeats | already generated |
+**Option 1B — the dose-matching check.**
+One panel. Along the bottom: the seven noise types, one position each. Up the side: the amount of
+noise actually delivered. One mark is a dot with a short vertical line through it showing the spread
+over the ten replicates — seven dots. Colour means nothing. A horizontal dashed line at the amount
+the solver was asked for. *This is the evidence that the dose solver worked, which is the premise of
+the whole comparison across noise types, and no figure shows it today.*
 
-**The journal forbids colour and shading in tables.** Any grid of coloured squares is a figure, not
-a table, without exception.
+**Option 1C — 1A with 1B as one extra panel at the bottom.** Eight panels total.
+
+*Trade-off: 1A shows what the noise looks like; 1B shows that the comparison is fair. 1B is the one
+a referee will ask for and the one the study's design depends on.*
 
 ---
 
-### 14.5 The count, against today's paper
+#### SLOT 2 — Q1: is robustness decided by the model, the representation, or the pairing?
+*Replaces `fig2_anova_decomposition`. The paper's first aim.*
+
+**Option 2A — grouped bars, the current shape.**
+Two panels, one above the other; top is predictive performance, bottom is robustness. Along the
+bottom of both: the noise types, one position each — seven positions. Up the side of both: share of
+variance explained, 0 to 100 percent. One mark is a vertical bar; at every noise-type position there
+are four bars side by side, so 28 bars per panel. Colour means which of four things the bar is: the
+model, the representation, the pairing of the two, the leftover. One key, on the top panel only.
+
+**Option 2B — stacked bars.**
+Same two panels, same axes. One mark is a vertical bar, one per noise type, seven per panel, each
+bar cut into four coloured segments stacked on top of each other that together reach 100 percent.
+Colour means the same four things. *Half as many marks. The reader reads "how much is pairing"
+straight off the segment height. Comparing one term across noise types is harder because the
+segments do not start from a common line.*
+
+**Option 2C — 2A with the ten replicates shown.**
+2A, plus a thin vertical line through the top of each bar showing how much the share moved across
+replicates. *QM9 only — the assay datasets have no repeats. It is the only way to show that a
+difference between two bars is real, and no version of this figure has ever shown it.*
+
+*Recommendation to discuss: 2C. The share-of-variance bars have never carried an error bar and the
+paper draws conclusions from differences between them.*
+
+---
+
+#### SLOT 3 — Q1 continued: WHICH model and WHICH representation
+*Replaces `fig_interaction`. This is the figure that shows the representation axis directly, and it
+is the one the author's second research aim needs.*
+
+**Option 3A — the grid of coloured squares, one per noise type.**
+Panels: one per noise type shown, up to seven. In each panel, rows are the models and columns are
+the six representations, so 19 rows by 6 columns of squares. One mark is one filled square with its
+number printed on it. Colour means how much performance that pairing retained, dark for little and
+bright for a lot, on one shared scale across all panels. Squares that were never run are left blank
+and labelled. *This is what the paper has, at one noise type. Showing more than one panel is what
+makes it answer "does the pairing depend on the noise type".*
+
+**Option 3B — the representation profile plot.**
+One panel. Along the bottom: the six representations, one position each. Up the side: retention. One
+mark is a dot; there are 19 dots at each representation position, one per model, and dots belonging
+to the same model are joined left to right by a line — so 19 lines crossing six positions. Colour
+means the model family. *A model whose line is flat is robust regardless of representation; a line
+that dives at one representation is the interaction, and you can see which representation it is.
+Nothing is averaged. It is busy with 19 lines and would need the roster cut to the decomposition
+set.*
+
+**Option 3C — 3A for the reference noise type, with 3B beside it as a second panel.**
+
+*Trade-off: 3A tells you the value of every pairing and is hard to read as a pattern. 3B tells you
+the pattern and hides the values. The paper currently claims "SVM and full BNNs are robust across
+all representations, RF and NN-β only with particular ones" — that sentence is exactly 3B and the
+paper has no figure of it.*
+
+---
+
+#### SLOT 4 — Q3 and Q2: the overview — what does model choice buy, and does the noise type change it?
+*Replaces `fig1_global_overview`. Two panels today: curves, and a model-by-noise-type grid.*
+
+**Option 4A — curves plus the grid, with a baseline column.**
+Two panels. Top: along the bottom, the noise level, seven positions; up the side, R². One mark is a
+dot joined to the next by a line, one line per model, so seven to eleven lines of seven dots.
+A vertical dashed line at the reporting level. Colour means the model. Bottom: rows are models,
+columns are the noise types, plus **one extra column at the far left holding the clean R², separated
+by a white gap so it cannot be misread as a noise type**. One mark is a filled square with its number
+on it. Colour means retention. *This is the change §10b.5 already specifies.*
+
+**Option 4B — the two-dot rows.**
+One panel, or one panel per dataset. Up the side: the models, one row each, ordered by their score
+at the reporting level — so 19 rows. Along the bottom: R², from 0 to 1. **Each row carries two dots
+joined by a horizontal line: a hollow dot at the model's clean R², and a solid dot at its R² once
+the labels carry the reporting level of noise. The length of the line between them is how much that
+model lost.** Colour means nothing; the hollow-versus-solid distinction does the work. One noise
+type, named in the title. *Both numbers the author insists are printed together are printed
+together, by construction. There is no metric to explain before the figure can be read.*
+
+**Option 4C — curves plus the two-dot rows.**
+Top panel is 4A's curves. Bottom panel is 4B. *Drops the model-by-noise-type grid from this figure;
+that grid then has to live in slot 5 or in additional files.*
+
+*Trade-off: 4A keeps the paper's shape and puts the clean baseline where the rule requires. 4B is a
+clearer picture of the same fact and does not need the retention metric at all. They can both exist —
+4B in this slot and 4A's grid in slot 5.*
+
+---
+
+#### SLOT 5 — Q2: does the kind of noise matter, or only the amount?
+*Replaces `tab:auc_ranking`'s job of showing the noise-type spread, and is the study's third aim.*
+
+**Option 5A — the spread plot.**
+One panel per representation shown. Up the side: the models, one row each. Along the bottom: R² at
+the reporting level. One mark is a dot — **six dots on each model's row, one per noise type**, plus a
+short vertical tick on the row marking the gaussian value so the eye has a reference. Colour means
+the noise type. *Nothing is averaged. A model whose six dots sit on top of each other does not care
+what kind of noise it gets; a model whose dots are spread does. That is the question, drawn.*
+
+**Option 5B — the small-multiple curves.**
+Six panels, one per noise type, all sharing one scale. Along the bottom of each: the noise level. Up
+the side: R². One mark is a dot joined by a line, one line per model. Colour means the model. *Shows
+the shape of every decline, including the ones that plateau then fall off a cliff — which is the
+reason a retention area is used instead of a straight-line fit. Costs a full page.*
+
+**Option 5C — the difference-from-gaussian plot.**
+One panel. Up the side: the models, one row each. Along the bottom: **the difference in R² from
+gaussian**, with a vertical line at zero. One mark is a dot, five per row (the other five noise
+types), each with a short horizontal line through it showing the spread over replicates. Colour
+means the noise type. A dot whose line does not touch zero is a real difference. *This is 5A with
+the reference subtracted, so the eye compares against a straight line instead of against a moving
+tick. It is the picture of the test in §14.3, and it is the only option here that shows whether a
+difference is bigger than the wobble.*
+
+**Censoring is on none of these.** Its bottom axis is a fraction of labels clipped, not a fraction of
+the label spread. It gets its own panel with its own bottom axis, in whichever option is chosen.
+
+---
+
+#### SLOT 6 — Aim 2: do probabilistic transformations help?
+*Replaces `fig_nn_family_comparison` and `tab:wilcoxon_bnn`. The paper's claim that Bayesian
+transformations improve robustness.*
+
+**Option 6A — the family curves, the current shape.**
+Three panels stacked, sharing one bottom axis. Along the bottom: the noise level. Up the side: R².
+One mark is a dot joined by a line. Top panel: the three NN-α variants. Middle: the three NN-β
+variants. Bottom: RF against QRF. Colour separates variants within a panel; marker shape repeats
+the distinction. One key below all three.
+
+**Option 6B — the paired-difference plot.**
+One panel. Up the side: the pairs being compared, one row each — NN-α against BNN-α, and so on,
+about five rows. Along the bottom: the change in retention from the plain model to the transformed
+one, with a vertical line at zero. **One mark is a dot, and there are six dots on each row, one per
+representation**, plus a longer tick at the middle of them. Colour means the representation.
+*This directly answers "does the transformation help", it shows whether the answer depends on the
+representation — which the paper claims it does — and it never averages across representations. It
+replaces a table of five numbers with a picture of thirty.*
+
+**Option 6C — 6A for one representation, 6B beside it.**
+
+*Trade-off: 6A shows the mechanism (where in the noise range the transformation helps). 6B shows
+whether it helps at all and for which representation. The paper's existing table is 6B collapsed to
+one number per row, and the collapse is an average over representations — defect 1 in §14.0a.*
+
+---
+
+#### SLOT 7 — Q5 and the aleatoric/epistemic split — **the author has put this in the headline**
+*Replaces `fig_uncertainty_combined`.*
+
+**Option 7A — two panels, total then split.**
+Two panels stacked, sharing the bottom axis. Along the bottom: the noise level, seven positions. Top
+panel up the side: mean predicted uncertainty. One mark is a dot joined by a line, one line per
+model. Bottom panel up the side: the same scale. **Each model now has two lines in the same colour —
+a solid one for the aleatoric component and a dashed one for the epistemic component.** Colour means
+the model; solid-versus-dashed means which component. *This is the paper's current figure. Its
+problem is that with four models it is eight lines and the eye cannot follow which dashed line
+belongs to which solid one.*
+
+**Option 7B — one panel per model.**
+Four panels side by side, one per model family that can split its uncertainty. Along the bottom of
+each: the noise level. Up the side: uncertainty. **Two lines per panel — aleatoric and epistemic —
+and nothing else.** Colour means the component and is the same in every panel, so the reader learns
+it once. *Four panels of two lines instead of one panel of eight. The claim is "aleatoric should
+rise and epistemic should not", and a two-line panel either shows that or does not.*
+
+**Option 7C — the ratio.**
+One panel. Along the bottom: the noise level. Up the side: **the aleatoric share of the total
+uncertainty**, 0 to 1. One mark is a dot joined by a line, one line per model family — four lines. A
+model that is doing the right thing has a line that climbs. *One number per model per level instead
+of two, and the "is it doing the right thing" question is answered by whether the line goes up. It
+hides the magnitudes, so it cannot show a model whose two components both rise — which is precisely
+the failure the paper currently reports for VBLL.*
+
+*Trade-off: 7B is the readable version and keeps both magnitudes. 7C is the sharpest single claim and
+loses the failure mode. 7A is what exists and is the hardest to read.*
+
+**Which models can carry it.** The pairs file records four: `gauche_rbf`, `dnn_vbll` and the two
+variance-head networks. NGBoost is deliberately not among them — one fit, so no epistemic term. The
+support flags on every row say whether each component varies per molecule or is one number per fit,
+and **a figure must not draw a line for a component flagged constant**, because a flat line there is
+arithmetic rather than a result.
+
+---
+
+#### SLOT 8 — Q4 and Q6: does uncertainty find the bad labels, and does it rank the errors?
+*Replaces `tab:top_unc_noise`'s figure job. This is where §14.2's menu lands.*
+
+**Option 8A — the error-retention curve** (§14.2 B).
+One panel per dataset. Along the bottom: the fraction of test molecules discarded, most uncertain
+first, 0 to 1. Up the side: the error on what is left. One mark is a line, one per model. Two grey
+reference lines: **a flat one for discarding at random, and a lower one for discarding in order of
+true error, which is the best possible.** Colour means the model. *Works under every noise type. The
+gap between a model's line and the flat grey one is what its uncertainty is worth. This is the field
+standard and the paper has nothing like it.*
+
+**Option 8B — the enrichment curve** (§14.2 C1, censoring).
+One panel per dataset. Along the bottom: the fraction of molecules you look at, ordered most
+uncertain first. Up the side: the fraction of the corrupted labels you have found by then. One mark
+is a line, one per model. **A straight diagonal from corner to corner is what random picking gives.
+A second grey line is what ranking by prediction error alone gives** — because the question is
+whether uncertainty adds to that. Colour means the model. *Censoring only, on the pairs in
+`censoring_pairs.json`. It is the only picture in the plan about individual molecules.*
+
+**Option 8C — the grid across noise types** (§14.2 C2, and Q7).
+One panel per dataset. Rows are the models in `uncertainty_pairs.json`; columns are the seven noise
+types. One mark is a filled square with its number on it. Colour means **how much dividing the error
+by the uncertainty improves the ranking of corrupted labels over the error alone** — zero means the
+uncertainty added nothing. *Works under every noise type, so it fills the seven columns honestly. It
+is the Q7 figure and the Q4 figure at once.*
+
+**Option 8D — 8A and 8B as two panels of one figure.**
+
+*Trade-off: 8A is broad and safe and answers the question a practitioner has. 8B is narrow and is
+the question the paper's title implies. 8C covers the most cells and is the least vivid. The three
+answer different questions and at most two should be in the main text.*
+
+---
+
+#### SLOT 9 — the assay datasets get their own figures
+*Replaces `fig_validation_overview` and `fig_validation_combined`. The author, 2026-09-04:
+"They 100% get their own figures, but not too many."*
+
+**Option 9A — one figure, three panels, one per dataset.**
+Three panels side by side. In each: rows are the models, columns are the noise types, one mark is a
+filled square with its number on it, colour is retention on one shared scale across all three
+panels. One representation, named in the title. *This is what the paper has. Its defect is that it
+is one representation and the caption does not say which loudly enough.*
+
+**Option 9B — the two-dot rows, four panels.**
+Four panels: QM9, logD, Caco-2, hERG. Each is slot 4's option 4B — models up the side, R² along the
+bottom, a hollow dot at clean and a solid dot at the reporting level, joined. *Puts the four datasets
+in one picture without averaging anything, and the reporting level differs per dataset, which the
+panel titles state. Directly answers "does what we learned on computed labels hold on real assay
+labels".*
+
+**Option 9C — the rank-transfer plot.**
+One panel. Along the bottom: a model's retention on QM9. Up the side: the same model's retention on
+one assay dataset. One mark is a dot, one per model per representation — so up to 19 × 6 dots, three
+times over if all three datasets are shown in three panels. Colour means the dataset. A diagonal line
+where the two agree. *Replaces `fig_validation_combined`, which averages over representations and
+noise types and is defect 1 in §14.0a. **Keeping the representation as separate dots is the whole
+point**: if one representation is why a model transfers badly, this shows it and the bar chart
+cannot.*
+
+*Trade-off: two of these three, not all three. 9B is the accuracy story, 9C is the transfer story,
+9A is the noise-type story.*
+
+---
+
+#### THE TABLES
+
+| # | Job today | Options |
+|---|---|---|
+| T1 | metrics summary (Methods) | Only one shape. Drop the calibration-error row, which is gone. Add whichever of the error-retention area or the enrichment area is chosen in slot 8 |
+| T2 | noise types (Methods) | Only one shape. One row per settled condition: its name, what it does to a label, the real-world source it stands for |
+| T3 | variance decomposition (Q1) | **A:** one row per noise type, four columns of percentages for performance and four for robustness, QM9 only. **B:** the same with a fifth column giving the spread across replicates. **C:** A, plus the three assay datasets as extra row blocks, each stating it has no leftover term because it has no repeats |
+| T4 | the retention ranking (Q2/Q3) | **A:** one row per model, one column per noise type, plus a clean-R² column at the left — **and no "Mean" column, because that is an average across noise types**. **B:** the same with the range across representations printed in each cell instead of one representation's value. **C:** A, one table per representation, in additional files, and only the reference representation in the main text |
+| T5 | probabilistic transformations (Aim 2) | **A:** one row per pair, columns are the six representations, each cell the change in retention, with a mark where the signed-rank test clears 0.05 — **no averaging**. **B:** the paired noise-type test of §14.3 instead: one row per model, one column per noise type. **C:** both, one in the main text and one in additional files |
+| T6 | uncertainty (Q4/Q5/Q6) | **A:** one row per model-and-representation pair from `uncertainty_pairs.json`, columns for the four §14.2 statistics that need no compute, each with its permutation band. **B:** the same split into two tables, one for "ranks its own errors" and one for "finds the bad labels", because they are different questions and the paper has fused them before. **C:** A with coverage at 1 and 2 standard deviations kept as two extra columns |
+
+**The journal forbids colour and shading in tables.** Every grid of coloured squares above is a
+figure. Bold is the only emphasis a table may use.
+
+---
+
+### 14.5 What goes to additional files
+
+The journal sets no limit on the number, requires each to be cited by name in sequence in the body,
+and requires tabular data as spreadsheets rather than as pictures of tables.
+
+- Every figure above, repeated for the five representations not shown in the main text.
+- The full retention table, every model by every representation by every noise type by every
+  dataset, machine-readable, one file.
+- The small-multiple degradation curves (slot 5 option 5B) if the spread plot is chosen instead.
+- The variance decomposition on the three assay datasets, with the no-repeats caveat stated.
+- Whichever of slot 8's three options do not make the main text.
+- Excluded configurations and why each was excluded; which cells ran and which did not; the model
+  and representation redundancy tables and the agreement between repeats. All three already exist.
+
+---
+
+### 14.6 The count, against `paper.tex` today
 
 | | Today | Proposed |
 |---|---|---|
-| Methods figures | 1 | 1 |
-| Methods tables | 2 | 2 |
-| Results figures | 7 | **6** — F1 plus the pairing grid, F2, F3 plus the scatter, F4, F5, F6 |
-| Results tables | 4 | **4** — T1, T2, T3, T4 |
-
-Counting the two Q1 figures and the two Q3 figures separately, the main text holds **8 figures and 6
-tables**, which is what it holds today.
+| Methods figures | 1 | 1 (slot 1) |
+| Methods tables | 2 | 2 (T1, T2) |
+| Results figures | 7 | 7 (slots 2, 3, 4, 5, 6, 7, 8) plus slot 9's one-or-two |
+| Results tables | 4 | 4 (T3, T4, T5, T6) |
 
 ---
 
-### 14.6 The decisions this needs from the author
+### 14.7 What is settled, and what is still open
 
-**Decision F1 — the "which labels are bad" question is down to censoring alone. Accept the narrowing,
-or drop the question?** Accepting it means the figure covers three model-and-representation pairs on
-QM9 and the full six-by-three grid on the laboratory datasets, and the Methods carries a sentence
-explaining why the other conditions are undefined rather than weak. My recommendation is accept —
-the laboratory coverage is real breadth, and it is the question the paper's title promises.
+**Settled by the author 2026-09-04:**
+- The aleatoric/epistemic split is a **headline figure**, not an additional file (slot 7).
+- The assay datasets **get their own figures**, and not many of them (slot 9).
+- The main text is **not restricted to one representation**. Representation is one of the two
+  factors the study decomposes and it stays visible. The author is leaning towards **ChemBERTa**
+  as the one held constant where a figure must hold one constant, rather than PDV — which is a
+  change from `PRIMARY_REP` in the figure script and needs the screen's numbers before it is fixed.
 
-**Decision F2 — is the paired noise-type test written?** It answers "does the kind of noise matter",
-it exists nowhere, and it is QM9-only. Half a day of work. My recommendation is yes; without it, Q2
-is answered by a spread with no test attached.
-
-**Decision F3 — Q3's main-text figure: the paired dot plot, or the retention grid with a baseline
-column?** §10b.5 already specifies the grid. The dot plot is the better picture and displaces a
-recorded decision. My recommendation is the dot plot, grid to Additional files.
-
-**Decision F4 — one representation in the main text, or two?** Standing practice is one, held at
-PDV. Two doubles every figure. My recommendation is one, and every other representation as files.
-
-**Decision F5 — is the split of uncertainty into its two terms a headline result or an additional
-file?** Four families can carry it. It has never been shown correctly before, which is an argument
-for promoting it, and it is a fourth uncertainty figure, which is an argument against.
-
-**Decision F6 — does the laboratory side get its own figures, or only its own columns?** Today it is
-a separate section with two figures of its own. The four-panel forms of F3 and F5 would fold it into
-the main figures instead, which shortens the paper and makes the QM9-versus-real-assay comparison
-direct. This interacts with decision 5 in §4 (whether the experimental datasets lead the Results).
+**Still open:**
+1. **Slot by slot: which option.** Fourteen choices.
+2. **Is the small-loss criterion (§14.2 D) worth a writer change and a re-run?** It is the only item
+   here that costs compute, and it is the one that answers "detect noise under random noise" the way
+   the learning-with-noisy-labels field does.
+3. **Is the paired noise-type test (§14.3) written?** No compute; QM9 only.
+4. **Is the averaging guard (§14.0b) built before the first figure?** About a day, and it is the
+   author's stated top concern.
+5. **Which representation is held constant** where a figure must hold one. The author leans
+   ChemBERTa; the screen's numbers should settle it rather than a preference.
 
