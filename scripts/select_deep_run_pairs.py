@@ -518,6 +518,35 @@ def main():
         print(f"      cp   {_sug} {out}      # only if you agree with all of it")
         print(f"  Widening later costs a resubmission; narrowing is free "
               f"(RERUN_PLAN.md 13.19 STEPS 4-5).")
+        # SAY HOW THE SUGGESTION COMPARES, because "here is a reading" does not answer
+        # the question actually being asked, which is "should I take it". The censoring
+        # rule is the one that can make a suggestion unusable rather than merely
+        # different: both generators REFUSE a selection with fewer than two models on
+        # the uncertainty roster, so a reading that drops below two cannot be accepted
+        # as it stands however good its ranking is.
+        try:
+            _now = json.loads((ROOT / 'deep_run_pairs.json').read_text())
+            _now_models = _now.get('generator_labels') or _now.get('models') or []
+            _added = [m for m in labels if m not in _now_models]
+            _dropped = [m for m in _now_models if m not in labels]
+            _canon = json.loads((ROOT / 'model_names.json').read_text())['qm9']
+            _n_now = len([m for m in _now_models if _canon.get(m, m) in unc])
+            _n_new = len([m for m in labels if _canon.get(m, m) in unc])
+            print(f"\n  how it compares with what is queued:")
+            print(f"      adds:    {', '.join(_added) or 'nothing'}")
+            print(f"      drops:   {', '.join(_dropped) or 'nothing'}")
+            print(f"      on the uncertainty roster: queued {_n_now}, suggested "
+                  f"{_n_new}   (censoring needs 2)")
+            if _n_new < 2 <= _n_now:
+                print(f"      >> TAKING THIS SUGGESTION WOULD BREAK CENSORING. Both "
+                      f"generators refuse a\n         selection with fewer than two, "
+                      f"so censoring could not be regenerated from it.")
+            if absent:
+                print(f"      >> and {len(absent)} model(s) have not landed, so the "
+                      f"family slots they would\n         fill were given to whatever "
+                      f"had: {', '.join(absent)}")
+        except (OSError, ValueError, KeyError):
+            pass
         out = _sug
 
     out.write_text(json.dumps({
