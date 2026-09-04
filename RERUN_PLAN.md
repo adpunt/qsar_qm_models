@@ -4750,7 +4750,7 @@ cross-fold joinability — and to state it in the Methods in one sentence.
 chat J must not average `injected_noise` across folds for a molecule. Under the per-fold draw that
 is averaging five different corruptions. This is failure mode 3 in §0.6 wearing a new hat.
 
-### 3.3b 🟠 THE BUILD — making the laboratory's noise a property of the molecule
+### 3.3b ✅ BUILT 2026-09-04 — the laboratory's noise is now a property of the molecule
 
 **Settled 2026-09-04: the laboratory matches QM9.** §3.3a is the diagnosis; this is what has to
 change. Recorded before the edit because it touches four call sites and one of them is easy to miss.
@@ -4786,10 +4786,29 @@ arrays, so a molecule's position in the dataset has to be threaded down to them:
 selection stream. The fold-dependence comes entirely from injecting on a different vector each time,
 not from the seed.
 
-**The gate.** A test that fits nothing: for one condition and one level, collect each molecule's
-injected noise in every fold it appears in as a training row, and assert every molecule has exactly
-one distinct value. Under the current code that fails — §3.3a measured 1,688 of 2,400 molecule-fold
-pairs disagreeing on a 600-molecule five-fold split — and under the change it must pass.
+**The gate, and it passes.** `KIRBy/tests/test_noise_is_a_property_of_the_molecule.py` fits
+nothing and needs no data files. It runs both schemes on the same folds, 600 molecules, five folds,
+60 scaffold groups, level 0.5:
+
+| condition | per fold (old) | one column (new) |
+|---|---|---|
+| gaussian | **600 of 600** molecules carry more than one value | **0 of 600** |
+| grouped_wider | **600 of 600** | **0 of 600** |
+| grouped_shifted | **600 of 600** | **0 of 600** |
+
+It also asserts the OLD scheme *does* disagree, so it cannot pass vacuously, and that `_ColumnView`
+refuses a mis-threaded index — the Gaussian-process trap — rather than accepting it. Both hold.
+
+**Built in `KIRBy` at `dd58f4f`**, on the `similarity-metrics-study` branch. ⚠️ **That is not
+necessarily the branch the cluster checkout is on.** Check before resubmitting:
+
+```bash
+git -C /data/stat-ecr/scat9264/KIRBy log --oneline -1
+git -C /data/stat-ecr/scat9264/KIRBy branch --show-current
+```
+
+**`_injector_for` needed no change**, as expected: its seed already excludes the fold. The
+fold-dependence came entirely from injecting on a different vector each time.
 
 **What it costs, and it is the reason to do it now rather than later.** Every laboratory number
 changes. The robustness curves barely move — the delivered dose is stable to 0.27% across folds —
