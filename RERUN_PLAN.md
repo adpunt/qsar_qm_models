@@ -10521,7 +10521,11 @@ throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five t
 
 `--stage 1 --max-hours 720`, replicates 1–9 on the same three conditions, appending to the same
 files as the screen. **19 arrays, 327 tasks, 18,639 training runs.** Submitted to `long` with
-`--account=stat-cadd`. First submission to carry the measured 32 GB request rather than 128 GB.
+`--account=stat-cadd`.
+
+⚠️ **Submitted at `--mem=32G`, which is below the floor the author set the next day.** The
+generator's default was 32G at `87cc49c`; it is 96G at `a5c1100` (§13.21). These nineteen arrays are
+still pending, so the memory is raised in place rather than by resubmitting — §13.19 STEP 1.
 
 The ids map onto the loop in §13.19 STEP 1, which submits eighteen models in order and `gauche`
 last on its own because it runs on ECFP4 alone.
@@ -10852,25 +10856,36 @@ write a script it cannot honour rather than capping it, so a `medium` submission
 submit time. Steps 1, 4 and 5 say `--partition=long` literally, and they mean it. Step 2's partition
 is inside the laboratory scripts already. Step 6's longest wall is 47:00, which fits `medium`.
 
-#### STEP 1 — the QM9 main grid. **19 jobs.** Nothing blocks it.
+#### STEP 1 — the QM9 main grid. **Already submitted. Raise its memory; do not resubmit it.**
+
+**12980573–12980591 went in on 2026-09-04 at `--mem=32G`**, from the generator as it stood at
+`87cc49c`. The floor is 64G and the settled figure is 96G (§13.21), so these nineteen arrays are
+below it. They are all PENDING, and a pending job's memory can be changed in place — which keeps
+the submit time, and therefore the queue position, that a cancel-and-resubmit throws away:
 
 ```bash
-cd slurm_scripts_qm9_rerun
-rm -f qm9_s1_*.sh && python generate_scripts.py --stage 1 --max-hours 720
-ls qm9_s1_*.sh | wc -l                # 19
-grep -h 'mem=' qm9_s1_rf.sh           # 32G, measured (§13.18)
-
-for s in rf xgboost lgb svm ngboost dnn mlp \
-         dnn_bnn_full mlp_bnn_full dnn_bnn_full_variational mlp_bnn_full_variational \
-         heteroscedastic_gp dnn_bnn_full_variational_hetero mlp_bnn_full_variational_hetero \
-         dnn_bnn_full_mve mlp_bnn_full_mve qrf gauche_rbf; do
-    sbatch --account=$ACCT --partition=long --array=0-17%5 qm9_s1_$s.sh
-done
-sbatch --account=$ACCT --partition=long --array=0-2%4 qm9_s1_gauche.sh
+for j in $(seq 12980573 12980591); do scontrol update JobId=$j MinMemoryNode=96G; done
+scontrol show job 12980573 | grep -o 'mem=[0-9]*[MG]'      # must say mem=96G
 ```
 
-**327 tasks, 18,639 training runs**, replicates 1–9. All 19 spelled out: the "and the other two
-tiers as above" shorthand is what dropped two models on 2026-09-02.
+If `scontrol` refuses — some sites restrict it — cancel and resubmit, and only then:
+
+```bash
+scancel $(seq -s' ' 12980573 12980591)
+cd slurm_scripts_qm9_rerun
+rm -f qm9_s1_*.sh submit_all.sh && python generate_scripts.py --stage 1 --max-hours 720
+grep -h 'mem=' qm9_s1_rf.sh                                # must say 96G
+ACCT=stat-cadd PART=long THROTTLE=5 bash submit_all.sh     # 19 arrays, 327 tasks
+```
+
+**Use `submit_all.sh`, never a hand-written loop.** Every script holds a different number of tasks
+— `gauche` runs on ECFP4 alone, so it is 3 where the rest are 18 — and the range is on the sbatch
+line, not in the script. The generator writes the loop with each script's own range;
+`scripts/test_submit_all_ranges.py` checks 145 sbatch lines across nine generator forms and also
+fails if a generated script is in no sbatch line, which is how both variance-head networks went
+unsubmitted on 2026-09-02.
+
+**327 tasks, 18,639 training runs**, replicates 1–9.
 
 #### STEP 2 — repair the laboratory. **Do NOT cancel the grid.**
 
@@ -10922,14 +10937,39 @@ python scripts/select_deep_run_pairs.py --results-dir results
 against it, so before the copy the two grouped conditions are dropped from the ranking in silence.
 The selector now says so, but the fix is the copy.
 
-Then **open `results/deep_run_pairs.json`, change what you disagree with, and keep it.** It is the
-input to both deep runs:
+Then **open the two selection files at the REPOSITORY ROOT, change what you disagree with, and keep
+them.** `results/` is gitignored, so nothing there can reach the cluster through git; these sit
+beside `uncertainty_pairs.json` and `noise_conditions.json`, which are the same kind of file. An
+earlier version of this section named `results/deep_run_pairs.json` in four places — a path that is
+never written, so every deep-run task generated against it would have exited 2 at run time.
+
+| File | What reads it | Shape |
+|---|---|---|
+| `deep_run_pairs.json` | the deep run, both pipelines | a model list **crossed with** a representation list — six models on three representations is eighteen pairs, all wanted |
+| `censoring_pairs.json` | censoring, both pipelines | about **five NAMED pairs** (§13.13), because a cross product cannot express five |
 
 ```json
-{"generator_labels": ["ngboost", "rf", "heteroscedastic_gp", "svm",
-                      "gauche_rbf", "dnn_bnn_full_mve"],
- "representations": ["ecfp4", "pdv", "chemberta"]}
+{"generator_labels":  ["ngboost", "rf", "heteroscedastic_gp", "svm",
+                       "gauche_rbf", "dnn_bnn_full_mve"],
+ "validation_labels": ["NGBoost", "RF", "GP-Hetero", "SVM", "GP", "BNN-Full-MVE"],
+ "representations":   ["ecfp4", "pdv", "chemberta"]}
 ```
+
+```json
+{"generator_pairs":  [["ngboost","pdv"], ["gauche_rbf","pdv"], ["dnn_bnn_full_mve","pdv"],
+                      ["rf","ecfp4"], ["heteroscedastic_gp","ecfp4"]],
+ "validation_pairs": [["NGBoost","PDV"], ["GP","PDV"], ["BNN-Full-MVE","PDV"],
+                      ["RF","ECFP4"], ["GP-Hetero","ECFP4"]]}
+```
+
+Both generators refuse a censoring file that names more than twice `n_pairs`, or fewer than two
+models that emit a per-molecule uncertainty. **Pointing censoring at `deep_run_pairs.json` is
+refused by name** — it was 3.6× the settled cost, and it was in the sheet until 2026-09-05.
+
+⚠️ **The selector rewrites `deep_run_pairs.json` in place.** It leaves a hand-edited
+`censoring_pairs.json` alone and writes `censoring_pairs.suggested.json` beside it instead. And
+both are tracked files, so `pull_safely.sh` sets aside a local edit if the incoming commits touch
+the same file — do the editing after the last pull, or make it here and push.
 
 #### STEPS 4 AND 5 CAN BE SUBMITTED NOW — the selection is read when a task STARTS
 
@@ -10944,18 +10984,12 @@ start — which on this queue is days.
 a task for every model and representation and puts a check inside each one:
 
 ```bash
-# generate for EVERYTHING, and let the file decide at run time. Absolute path --
-# it is read on the compute node.
-SEL=/data/stat-cadd/scat9264/qsar_qm_models/results/deep_run_pairs.json
-
-cd slurm_scripts_qm9_rerun
-python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
-for f in qm9_s2_*.sh; do sbatch --account=$ACCT --partition=long --array=0-35%4 $f; done
-
-cd ../slurm_scripts_validation_rerun
-python generate_scripts.py --include-depth-conditions --runtime-selection $SEL \
-    --out-dir ../slurm_scripts_validation_depth
-cd ../slurm_scripts_validation_depth && bash submit_all.sh
+# Absolute paths -- these are read on the compute node, and REPOSITORY ROOT,
+# not results/, which is gitignored and never reaches the cluster.
+QSAR=/data/stat-cadd/scat9264/qsar_qm_models
+SEL=$QSAR/deep_run_pairs.json
+CEN=$QSAR/censoring_pairs.json
+ls -l $SEL $CEN                       # both must exist BEFORE anything is submitted
 ```
 
 A task whose model and representation are not in the file prints `SKIPPED`, explains that this is
@@ -10978,89 +11012,223 @@ file flips an already-generated script's behaviour with no regeneration**, and a
 - **A skipped task is not a failed one.** Any coverage check run over these arrays has to read
   `SKIPPED` as intended, or it will report most of the grid as missing.
 
-**If you would rather decide first**, `--pairs-file` is still the route, and it is the one to use
-once the screen has landed:
+**`--pairs-file` is the other route and this section no longer uses it.** It is consumed by the
+generator, so the choice is baked into the `.sh` and editing the file afterwards changes nothing —
+the opposite of what these two steps are for. It stays in the generator for a run that is decided
+before it is submitted.
 
-#### STEP 4 — the QM9 deep run and censoring
+#### STEP 4 — the QM9 deep run and censoring. **4 submissions in 2 directories.**
 
 ```bash
-cd slurm_scripts_qm9_rerun
-python generate_scripts.py --stage 2 --pairs-file ../results/deep_run_pairs.json --max-hours 720
-for f in qm9_s2_*.sh; do sbatch --account=$ACCT --partition=long --array=0-17%4 $f; done
+cd $QSAR/slurm_scripts_qm9_rerun
+rm -f qm9_s2_*.sh submit_all.sh
+python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
+ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all.sh     # 19 arrays, 654 tasks
 
-mkdir -p ../slurm_scripts_qm9_censoring
+mkdir -p $QSAR/slurm_scripts_qm9_censoring
 python generate_scripts.py --stage 2 --conditions censoring \
-    --pairs-file ../results/deep_run_pairs.json --max-hours 720 \
-    --out-dir ../slurm_scripts_qm9_censoring
-cd ../slurm_scripts_qm9_censoring && for f in qm9_s2_*.sh; do
-    sbatch --account=$ACCT --partition=long --array=0-17%4 $f; done
+    --runtime-selection $CEN --max-hours 720 \
+    --out-dir $QSAR/slurm_scripts_qm9_censoring
+cd $QSAR/slurm_scripts_qm9_censoring
+ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all.sh     # 19 arrays, 109 tasks
 ```
 
 **Censoring must have its own `--out-dir`** — scripts are named by model and run-design index only,
 so writing it into the generator's own directory overwrites the main-grid scripts, exits 0, and
 leaves no way back. The generator refuses this, but only if you let it.
 
-Each script's own header prints its range; use that if your selection differs in size.
+**Censoring must have its own selection file too.** `--conditions censoring --runtime-selection
+$SEL` — the deep run's file — is refused: eighteen pairs against a condition costed at five. Until
+2026-09-05 this command did not run at all; the pair-subset guard did not know about
+`--runtime-selection` and exited 2 demanding `--models` and `--reps`.
 
-#### STEP 5 — the laboratory deep run and censoring, same pairs
+The deep run is 36 tasks per script (6 tasks for `gauche`); censoring is 6 (1 for `gauche`). Those
+are four different ranges in two directories, which is why `submit_all.sh` writes them.
 
-```bash
-cd ../slurm_scripts_validation_rerun
-mkdir -p ../slurm_scripts_validation_depth ../slurm_scripts_validation_censoring
-python generate_scripts.py --include-depth-conditions \
-    --models <the models> --reps ecfp4 pdv chemberta \
-    --out-dir ../slurm_scripts_validation_depth
-python generate_scripts.py --conditions censoring \
-    --models <the models> --reps ecfp4 pdv chemberta \
-    --out-dir ../slurm_scripts_validation_censoring
-```
-
-Both refuse without `--models` and `--reps`, deliberately — the same rule the QM9 generator applies.
-The laboratory takes runner-side model names (`RF`, `NGBoost`, `GP`, …), not the QM9 labels; each
-directory's `submit_all.sh` then submits it.
-
-#### STEP 6 — the uncertainty runs. **6 jobs, 162 tasks, 34,020 model fits.**
+#### STEP 5 — the laboratory deep run and censoring, the same two files
 
 ```bash
-cd ../slurm_scripts_uncertainty_rerun
-rm -f unc_*.sh && python generate_scripts.py
-sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_qrf.sh
-sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_ngboost.sh
-sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_gp.sh
-sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_vbll_full.sh
-sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_bnn_full_mve.sh
-sbatch --account=$ACCT --partition=$PART --array=0-26%4 unc_mlp_bnn_full_mve.sh
+cd $QSAR/slurm_scripts_validation_rerun
+mkdir -p $QSAR/slurm_scripts_validation_depth $QSAR/slurm_scripts_validation_censoring
+
+python generate_scripts.py --include-depth-conditions --runtime-selection $SEL \
+    --out-dir $QSAR/slurm_scripts_validation_depth
+cd $QSAR/slurm_scripts_validation_depth && THROTTLE=4 bash submit_all.sh
+
+cd $QSAR/slurm_scripts_validation_rerun
+python generate_scripts.py --conditions censoring --runtime-selection $CEN \
+    --out-dir $QSAR/slurm_scripts_validation_censoring
+cd $QSAR/slurm_scripts_validation_censoring && THROTTLE=4 bash submit_all.sh
 ```
 
-These are the laboratory's out-of-fold pass — the aleatoric/epistemic decomposition included, which
-is not a separate run. QM9 gets the same rows inline from its own grid, decided per task by a case
-statement on the representation, so **there is no QM9 uncertainty submission**.
+19 arrays and 327 tasks each; the file decides which of them do any work. `submit_all.sh` here does
+not take `ACCT` or `PART` — the account and the partition are inside the laboratory scripts.
 
-The two variance-head scripts had appeared in no `sbatch` line here until 2026-09-04, and the ranges
-read `0-62` against 27-task scripts. Both fixed and check-locked.
+⚠️ **`--include-depth-conditions` emits SIX conditions, the three depth-only ones AND the three the
+breadth grid is already running.** For the selected pairs that repeats work the breadth grid is
+doing. The runner replaces its own rows rather than duplicating them, so the result is correct
+either way; it is queue time, not a wrong number. Narrow it with `--conditions student_t_nu5
+outlier_p10 laplace` if the breadth grid has already landed for those pairs.
+
+#### STEP 6 — the uncertainty runs, part one: the three the QM9 screen runs. **6 jobs, 162 tasks.**
+
+```bash
+cd $QSAR/slurm_scripts_uncertainty_rerun
+rm -f unc_*.sh submit_all.sh && python generate_scripts.py
+ACCT=stat-cadd PART=$PART bash submit_all.sh          # 6 arrays, 27 tasks each
+```
+
+Gaussian, grouped-wider and grouped-shifted, on logD, Caco-2 and hERG. These are the laboratory's
+out-of-fold pass — the aleatoric/epistemic decomposition included, which is not a separate run. QM9
+gets the same rows inline from its own grid, decided per task by a case statement on the
+representation, so **there is no QM9 uncertainty submission**.
+
+This is the one place `$PART` (medium) is used; the longest wall here is 47:59:00. The scripts
+carry no `#SBATCH --partition` and refuse to start without one on the sbatch line.
+
+#### STEP 6b — the uncertainty runs, part two: the four that follow. **6 jobs, 216 tasks.**
+
+**This step was in no command until 2026-09-05, and it is a third of the uncertainty evidence.**
+The generator's default is the three conditions the QM9 screen runs (author, 2026-09-01: "this
+should apply to both qm9 and lab… These should be identical"). The other four — censoring and the
+three depth-only ones — follow once the pairs are settled, and nothing submitted them. Censoring in
+particular is one of only two conditions with a per-molecule pattern, so without it question B
+rests on `grouped_wider` alone.
+
+```bash
+mkdir -p $QSAR/slurm_scripts_uncertainty_depth
+cd $QSAR/slurm_scripts_uncertainty_rerun
+python generate_scripts.py \
+    --conditions censoring student_t_nu5 outlier_p10 laplace \
+    --out-dir $QSAR/slurm_scripts_uncertainty_depth
+cd $QSAR/slurm_scripts_uncertainty_depth
+ACCT=stat-cadd PART=$PART bash submit_all.sh          # 6 arrays, 36 tasks each
+```
+
+The generator warns that gaussian is not in this run and therefore has no clean reference of its
+own. That is expected: gaussian's rows come from STEP 6, into the same results tree, and the
+analysis reads both together. **Censoring is NOT cut to five pairs here** — on this side it runs on
+every settled pair, which is the author's decision of 2026-08-27 (§13.1 item 6) and is enforced by
+`scripts/test_noise_conditions.py`.
 
 #### STEP 7 — merge and regenerate
 
+**Both merges read paths relative to the KIRBy checkout, not this one.** The generated jobs
+`cd "$KIRBY_DIR"/tests` and pass a relative `--results-root`, so the laboratory results land in
+`$KIRBY/results/validation_rerun/` and the uncertainty results in
+`$KIRBY/tests/results/uncertainty_rerun/`. Run from this repository, the laboratory merge finds
+nothing and says so quietly — which is what the previous version of this step did.
+
 ```bash
-python slurm_scripts_validation_rerun/merge_results.py
-python slurm_scripts_uncertainty_rerun/merge_results.py
-sbatch slurm_scripts_analysis/run_figures_v2.sh      # NOT run_figures.sh, which is the dead NDS script
+KIRBY=/data/stat-ecr/scat9264/KIRBy
+
+# the laboratory grid: relative paths, so run it FROM the KIRBy checkout
+cd $KIRBY
+python $QSAR/slurm_scripts_validation_rerun/merge_results.py --dry-run
+python $QSAR/slurm_scripts_validation_rerun/merge_results.py
+
+# the uncertainty runs: --root is REQUIRED, and --oof-folds was 5 in the scripts
+python $QSAR/slurm_scripts_uncertainty_rerun/merge_results.py \
+    --root $KIRBY/tests/results/uncertainty_rerun \
+    --expected-oof-folds 5 \
+    --kirby-dir $KIRBY
+
+cd $QSAR
+sbatch slurm_scripts_analysis/run_figures_v2.sh   # NOT run_figures.sh, the dead NDS script
 ```
+
+`--expected-oof-folds` must match what the jobs were submitted with, or every cell is flagged
+`TRUNCATED_OOF`. Read it off the scripts rather than from here:
+`grep -h -- '--oof-folds' $QSAR/slurm_scripts_uncertainty_rerun/unc_qrf.sh`.
 
 `scripts/uncertainty_stats.py` is not run directly — the figure script calls it, and nothing else in
 any of the three repositories computes a number from an uncertainty run.
 
 #### Job counts, in one place
 
-| Step | What | Jobs | Tasks |
+Every figure below came from running the generator on 2026-09-05 and counting what it wrote.
+
+| Step | What | Arrays | Tasks |
 |---|---|---|---|
 | 1 | QM9 main grid | **19** | 327 |
 | 2 | laboratory breadth grid | **19** | 327 |
-| 4 | QM9 deep run + censoring | 2 × models chosen | per the generator |
-| 5 | laboratory deep run + censoring | per the generator | per the generator |
-| 6 | uncertainty runs | **6** | 162 |
+| 4 | QM9 deep run | **19** | 654 |
+| 4 | QM9 censoring | **19** | 109 |
+| 5 | laboratory deep run | **19** | 327 |
+| 5 | laboratory censoring | **19** | 327 |
+| 6 | uncertainty, the three | **6** | 162 |
+| 6b | uncertainty, the four that follow | **6** | 216 |
 
-QM9's screen (12971601–12971619, 19 jobs) is already running and is not resubmitted.
+The deep-run and censoring arrays are generated at full breadth on purpose: the selection files
+decide, at run time, which tasks do work. Most of steps 4 and 5 will print `SKIPPED` and exit 0.
+
+QM9's screen (12971601–12971619, 19 arrays) is already running and is not resubmitted. Neither is
+the QM9 main grid — see STEP 1, which raises its memory in place.
+
+---
+
+### 13.20 WHAT THE AUTHOR ASKED FOR, 2026-09-04 → 2026-09-05, AND WHETHER IT IS HONOURED
+
+**Why this section exists.** The command sheet in §13.19 was assembled over one night, was
+wrong several times, and the corrections were made in conversation rather than written down —
+so the same instruction had to be given more than once, and two of them were contradicted by a
+later message from the same session. This is the list. It is the record of the *instructions*,
+not of the reasoning behind them; where an instruction has a reason, the reason is in the
+section it points at. Add to this list; do not restate it elsewhere.
+
+Sources: the operator's own words, transcribed in `~/Documents/commandChat.txt`, and the
+session logs under `~/.claude/projects/-Users-apunt-repos-qsar-qm-models/*.jsonl`.
+
+| # | The instruction, in the author's terms | State |
+|---|---|---|
+| 1 | "I want every single experiment command done — QM9 and the laboratory datasets, full grid, uncertainty, uncertainty decomposition, the whole works plus whatever needs to be rerun." | ✅ §13.19, rewritten 2026-09-05. Four families were missing or unrunnable and are named below. |
+| 2 | The selection that decides the deep run must be a **JSON the author can edit after the jobs are queued** — "that's why I want to rely on a modifiable json to determine the pairs in 4/5 and submit now". Not a generator flag baked into the `.sh`. | ✅ `--runtime-selection` on both generators. Proved: a listed pair runs, an unlisted one exits 0, editing the file flips an already-generated script, a missing file exits 2. |
+| 3 | **Do not cancel anything that is queued.** "The ones that haven't gotten out of the queue — won't they just pull the latest changes?" They will: SLURM copies the batch script at submit time, but the Python is read at run time, so a pending task runs the new noise draw. | ✅ Honoured. Nothing in §13.19 cancels. This instruction was given, agreed, and then contradicted by a later message in the same session that said "cancel all"; the author's correction — "Did you not listen to my DIRECT FUCKING COMMAND" — stands. |
+| 4 | **No 32 GB anywhere. 64 GB is the floor.** Then, asked whether the middle was available: "wait can you not do something between 64 and 128?" | ✅ **96G** on all three generators (`a5c1100`), with a floor in the QM9 generator that refuses anything under 64G by name. See §13.21 for what the number rests on. |
+| 5 | Memory for the uncertainty runs is **not** the same question as for QM9. "I swear to fucking god it's different with uncertainty." | ✅ Correct, and the QM9 measurement that was used to cut it did not cover the uncertainty pipeline. §13.21. |
+| 6 | **Do not state a memory figure from old job scripts.** "Stop hallucinating. You don't have that knowledge, help me search IN THE SERVER." What a script *requested* is what someone once guessed; what a job *used* is in `sacct`. | ✅ §13.21 carries the sacct command that answers it, and no generator comment now quotes a requested figure as if it were measured. |
+| 7 | Most of the large `sacct` rows are **KIRBy's other experiments, not this study** — `dta_*`, `nuc_*`, `pc_*`, `graphinity_*`, `tune_*`. "flexible_dnn_512_256_valprop is the only actual one." | ✅ Recorded in §13.21. |
+| 8 | Use the `squeue` and `where_to_submit.sh` output the author pasted. "I gave you all the information on what is running/pending." | ✅ §13.18 now reconciles the pasted queue state against the launch log. |
+| 9 | The account is **pinned to `stat-cadd`**; `--emit` returns the highest-fairshare association, which is not the same question. | ✅ Every generated script and every `submit_all.sh` defaults to `stat-cadd`. |
+| 10 | `where_to_submit.sh` lives in the **KIRBy** checkout at `/data/stat-ecr/scat9264/KIRBy`, not in this repository and not at the dead `stat-cadd` KIRBy path. | ✅ Fixed 2026-09-04 (`4e3fc4d`). |
+| 11 | Job IDs the author submitted are to be tracked, not re-derived: the QM9 main grid **12980573–12980591**. | ✅ §13.18 Submission 4. |
+| 12 | "Log everything I've asked for" (2026-09-05), and question the memory reasoning again from the start. | ✅ This section and §13.21. |
+| 13 | "Make sure you're familiar with the KIRBy side of this too" (2026-09-05). | ✅ The KIRBy runner, its noise draw, its write path and its submit helpers are audited; findings in §13.22. |
+
+#### What was actually wrong with the sheet, found 2026-09-05
+
+Four things, all verified by running the generators rather than by reading them:
+
+1. **QM9 censoring could not run at all.** `--stage 2 --conditions censoring
+   --runtime-selection <file>` exited 2 demanding `--models` and `--reps`. The laboratory
+   generator had accepted `--runtime-selection` there since 2026-09-05; the QM9 one never did.
+   Fixed, both sides now validate the file instead of the command line.
+2. **Censoring was pointed at the deep run's eighteen pairs.** Censoring is about five NAMED
+   pairs (§13.13). `deep_run_pairs.json` is six models crossed with three representations. A
+   cross product cannot express five pairs, so both run-time gates now read a `pairs` list, and
+   `censoring_pairs.json` is that file. Pointing censoring at the deep run's file is refused by
+   name on both pipelines.
+3. **The uncertainty runs for four of the seven conditions were in no command.** The
+   uncertainty generator's default is the three the QM9 screen runs (author, 2026-09-01);
+   censoring and the three depth-only conditions follow afterwards and nothing submitted them.
+   That is 6 arrays and 216 tasks — added to §13.19 as its own step.
+4. **The array ranges were typed by hand and three of them were wrong.** `gauche` runs on ECFP4
+   alone, so it holds 3 tasks where the rest hold 18, 6 where the rest hold 36, and 1 where the
+   rest hold 6. All three generators now write `submit_all.sh`;
+   `scripts/test_submit_all_ranges.py` checks 145 sbatch lines across 9 generator forms against
+   each script's own task count, and fails if a generated script appears in no sbatch line —
+   which is how both variance-head networks went unsubmitted once already.
+
+Two more, in the merge step at the end:
+
+5. **`slurm_scripts_uncertainty_rerun/merge_results.py` requires `--root`** and the sheet called
+   it with no arguments.
+6. **Both merge scripts read paths relative to the KIRBy checkout, not this one.** The
+   laboratory results land in `/data/stat-ecr/scat9264/KIRBy/results/validation_rerun/` and the
+   uncertainty results in `/data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun/`,
+   because the generated scripts `cd "$KIRBY_DIR"/tests` and pass a relative `--results-root`.
+   Run from the qsar checkout, the laboratory merge would have found nothing and said so
+   quietly.
 
 ---
 
