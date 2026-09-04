@@ -10786,11 +10786,29 @@ git -C ~/repos/KIRBy push origin similarity-metrics-study   # or the branch the 
 cd /data/stat-cadd/scat9264/qsar_qm_models && bash scripts/pull_safely.sh && git log --oneline -1
 git -C /data/stat-ecr/scat9264/KIRBy branch --show-current   # must be the branch you pushed
 git -C /data/stat-ecr/scat9264/KIRBy pull --ff-only && git -C /data/stat-ecr/scat9264/KIRBy log --oneline -1
+
+# The gate. It imports numpy and noiseInject and NOT torch, so it runs here on the
+# login node -- it used to import the runner and die on libtorch_cuda.so.
 python /data/stat-ecr/scat9264/KIRBy/tests/test_noise_is_a_property_of_the_molecule.py
-read -r ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
+
+# Account and partition. where_to_submit.sh lives in KIRBy, and `--emit` returns
+# the association with the HIGHEST FAIRSHARE, which is not necessarily the one
+# these jobs bill to -- this study runs under stat-cadd. Take the partition from
+# the script and pin the account by hand.
+cd /data/stat-ecr/scat9264/KIRBy || { echo "KIRBy checkout not found"; exit 1; }
+read -r EMIT_ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
+ACCT=stat-cadd
+echo "account=$ACCT (emit suggested $EMIT_ACCT)  partition=$PART"
+cd /data/stat-cadd/scat9264/qsar_qm_models
 ```
 
-The gate must print PASS before any laboratory job goes in. It fits nothing and takes about a minute.
+The gate must print PASS before any laboratory job goes in. It fits nothing, reads no data files
+and takes about a minute.
+
+⚠️ **Do not take the account from `--emit`.** It returns the highest-fairshare association;
+this study bills to `stat-cadd`. An earlier version of this step read both from `--emit`, which is
+how a job ends up on the wrong account (`slurm_scripts_qm9_rerun/RUNBOOK.md` §3 has always pinned
+it).
 
 #### STEP 1 — the QM9 main grid. **19 jobs.** Nothing blocks it.
 

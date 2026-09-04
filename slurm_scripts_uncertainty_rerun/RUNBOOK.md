@@ -389,7 +389,11 @@ bash tests/slurm_scripts/where_to_submit.sh --emit   # prints: <account> <partit
 Bill to whichever account has the higher fair share. Use `medium`. Then:
 
 ```bash
-read -r ACCT PART < <(bash /data/stat-cadd/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --emit)
+# The live KIRBy checkout is /data/stat-ecr, NOT stat-cadd (RERUN_PLAN.md 2.8b). This line
+# named the dead one until 2026-09-04, so it returned an empty account and every sbatch
+# below would have failed on an empty --account.
+read -r EMIT_ACCT PART < <(bash /data/stat-ecr/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --emit)
+ACCT=stat-cadd   # --emit returns the highest-fairshare association, not this study's
 echo "account=$ACCT partition=$PART"
 ```
 
