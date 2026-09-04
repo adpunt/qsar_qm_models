@@ -10846,15 +10846,26 @@ git -C /data/stat-ecr/scat9264/KIRBy pull --ff-only && git -C /data/stat-ecr/sca
 # login node -- it used to import the runner and die on libtorch_cuda.so.
 python /data/stat-ecr/scat9264/KIRBy/tests/test_noise_is_a_property_of_the_molecule.py
 
-# Account and partition. where_to_submit.sh lives in KIRBy, and `--emit` returns
-# the association with the HIGHEST FAIRSHARE, which is not necessarily the one
-# these jobs bill to -- this study runs under stat-cadd. Take the partition from
-# the script and pin the account by hand.
-cd /data/stat-ecr/scat9264/KIRBy || { echo "KIRBy checkout not found"; exit 1; }
-read -r EMIT_ACCT PART < <(bash tests/slurm_scripts/where_to_submit.sh --emit)
-ACCT=stat-cadd
-echo "account=$ACCT (emit suggested $EMIT_ACCT)  partition=$PART"
-cd /data/stat-cadd/scat9264/qsar_qm_models
+# Paths and queue settings. SOURCE IT -- every step below uses $QSAR, $KIRBY,
+# $SEL, $CEN, $ACCT and $PART, and these are shell variables: they die with the
+# session, so this is the first thing after every login and after moving between
+# login nodes. It derives $QSAR from its own location and checks all four paths
+# exist before you submit anything.
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+```
+
+It prints the four paths and `ok all four paths exist`. If it says a selection file is
+MISSING, you have not pulled: every deep-run and censoring task exits 2 without them.
+
+**Do not read the account or the partition off `where_to_submit.sh --emit`.** It returns the
+highest-fairshare association and breaks an exact tie towards `stat-ecr`, which this study does not
+bill to; and it does not measure the partition at all — `part="${EMIT_PARTITION:-medium}"` is a
+hard-coded default. `runenv.sh` pins `stat-cadd` and `medium`, and `$PART` is used by the
+uncertainty runs alone. Use `--fits` for the question `--emit` cannot answer:
+
+```bash
+bash $KIRBY/tests/slurm_scripts/where_to_submit.sh --fits 8 64G
+bash $KIRBY/tests/slurm_scripts/where_to_submit.sh --fits 8 96G
 ```
 
 The gate must print PASS before any laboratory job goes in. It fits nothing, reads no data files
@@ -11020,13 +11031,12 @@ start — which on this queue is days.
 `.sh`, so editing the file afterwards changes nothing. **`--runtime-selection` does.** It generates
 a task for every model and representation and puts a check inside each one:
 
+`$SEL` and `$CEN` come from `runenv.sh` in STEP 0. They are absolute, because they are read on the
+compute node, and they are at the REPOSITORY ROOT rather than under `results/`, which is gitignored
+and so never reaches the cluster at all. If you have opened a new session since STEP 0:
+
 ```bash
-# Absolute paths -- these are read on the compute node, and REPOSITORY ROOT,
-# not results/, which is gitignored and never reaches the cluster.
-QSAR=/data/stat-cadd/scat9264/qsar_qm_models
-SEL=$QSAR/deep_run_pairs.json
-CEN=$QSAR/censoring_pairs.json
-ls -l $SEL $CEN                       # both must exist BEFORE anything is submitted
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
 ```
 
 A task whose model and representation are not in the file prints `SKIPPED`, explains that this is
