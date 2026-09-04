@@ -651,8 +651,33 @@ CACHE="$KIRBY_DIR/tests/data_cache"
 fail=0
 warn=0
 
+# ACTIVATE THE SAME ENVIRONMENT THE JOBS USE, BEFORE TESTING ANYTHING WITH PYTHON.
+#
+# This used to run whatever python was on PATH and then tell the operator to activate
+# something if the import failed. On a login node that python is the system Anaconda --
+# the one every val_*.sh refuses to run under -- so the loader check tested an
+# interpreter no job will ever use, and reported INCONCLUSIVE against a cache that was
+# fine. Every generated job script sources setup.sh and exits if CONDA_PREFIX is unset;
+# so does this now, for the same reason.
+if [ -z "${{CONDA_PREFIX:-}}" ] || [ "$(basename "${{CONDA_PREFIX:-none}}")" != "env_test" ]; then
+    if [ -f "{qsar_dir}/setup.sh" ]; then
+        echo "=== activating: . {qsar_dir}/setup.sh"
+        . "{qsar_dir}/setup.sh" || true
+    fi
+fi
+
 echo "=== KIRBy:  $KIRBY_DIR"
 echo "=== cache:  $CACHE"
+echo "=== python: $(command -v python)"
+echo "=== env:    ${{CONDA_PREFIX:-NONE}}"
+if [ -z "${{CONDA_PREFIX:-}}" ]; then
+    echo
+    echo "WARN  no environment is active, so the loader check below is about the system"
+    echo "      Anaconda and not about what the jobs run. The jobs source setup.sh"
+    echo "      themselves and refuse to start without env_test, so this does not block"
+    echo "      them -- do not read a torch error here as a problem with the data."
+    warn=$((warn+1))
+fi
 echo
 
 if [ ! -d "$KIRBY_DIR" ]; then
@@ -1180,7 +1205,8 @@ def main():
     # whole value is that it answers the hERG question on a login node, before
     # any task is queued.
     with open(os.path.join(output_dir, 'preflight.sh'), 'w') as f:
-        f.write(PREFLIGHT_BODY.format(kirby_dir=args.kirby_dir))
+        f.write(PREFLIGHT_BODY.format(kirby_dir=args.kirby_dir,
+                                      qsar_dir=args.qsar_dir))
 
     # SUBMIT SCRIPT. It used to print "Submitted N jobs" from a counter it
     # incremented itself, so it said 144 even if every sbatch had been rejected.
