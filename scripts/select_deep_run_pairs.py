@@ -55,7 +55,7 @@ SPANNING_REPS = ['ecfp4', 'pdv', 'chemberta']
 REP_KIND = {
     'ecfp4': 'fingerprint', 'sns': 'fingerprint', 'avalon': 'fingerprint',
     'pdv': 'descriptor',
-    'mhg_gnn_pretrained': 'learned', 'chemberta': 'learned',
+    'mhg_gnn_pretrained': 'learned', 'mhggnn': 'learned', 'chemberta': 'learned',
 }
 
 # Families, keyed on the CANONICAL names in model_names.json. A model that is in
@@ -246,6 +246,42 @@ def generator_labels(chosen):
     return out
 
 
+def check_conditions_survived(df, robust, conditions):
+    """A condition with no clean row is dropped by calculate_robustness in silence.
+
+    auc_norm is retention against the zero-noise point, so a configuration with
+    no row at level 0.0 is skipped -- `continue`, no message. And only gaussian
+    RUNS the clean level: the grouped conditions inherit it from
+    copy_zero_rows.py afterwards. Run the selection before that step and it ranks
+    on gaussian alone while printing three condition names at the top, which is
+    exactly what happened on 2026-09-04.
+
+    Reported here rather than left to be noticed, because the tables look
+    complete either way -- the missing conditions are absent columns, not blanks.
+    """
+    ranked = set(robust['strategy'].unique())
+    lost = [c for c in conditions if c not in ranked]
+    if not lost:
+        return False
+    print(f"\n  ################ THE SELECTION IS RESTING ON "
+          f"{len(ranked)} OF {len(conditions)} CONDITIONS ################")
+    print(f"  {', '.join(lost)} produced rows but could not be ranked, because "
+          f"auc_norm is")
+    print(f"  retention against the clean level and those conditions have no clean "
+          f"row yet.")
+    print(f"  Only gaussian runs level 0.0; the others inherit it. Fill them in "
+          f"first:")
+    print(f"      python slurm_scripts_qm9_rerun/copy_zero_rows.py --results "
+          f"<results-dir> --dry-run")
+    print(f"      python slurm_scripts_qm9_rerun/copy_zero_rows.py --results "
+          f"<results-dir>")
+    print(f"  then run this again. Everything below sees {', '.join(sorted(ranked))} "
+          f"only.")
+    print(f"  #############################################################"
+          f"#############")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -282,6 +318,8 @@ def main():
         for _, r in excluded.iterrows():
             print(f"      {r['model']:28s} {r['rep']:20s} {r['strategy']:18s} "
                   f"clean R2 {r['baseline']:.3f}")
+
+    partial_conditions = check_conditions_survived(df, robust, conditions)
 
     per_rep_tables(robust, [r for r in cli.reps if r in reps_present], conditions)
 
@@ -337,8 +375,11 @@ def main():
     print(f"                --models {' '.join(labels)} \\")
     print(f"                --reps {' '.join(cli.reps)} --out-dir <its own directory>")
 
-    if absent or missing_reps:
+    if absent or missing_reps or partial_conditions:
         print(f"\n=== PROVISIONAL. This is a reading of a screen that is not finished.")
+        if partial_conditions:
+            print(f"  AND it saw only the conditions listed above. Run "
+                  f"copy_zero_rows.py before trusting the ranking.")
         if absent:
             print(f"  {len(absent)} model(s) have not landed and could not be ranked: "
                   f"{', '.join(absent)}")
@@ -351,7 +392,10 @@ def main():
     out.write_text(json.dumps({
         'what_this_is': 'the deep-run and censoring selection, read off the screen',
         'rule': 'RERUN_PLAN.md 13.17 B',
-        'provisional': bool(absent or missing_reps),
+        'provisional': bool(absent or missing_reps or partial_conditions),
+        'ranked_on_conditions': sorted(robust['strategy'].unique()),
+        'conditions_dropped_for_want_of_a_clean_row':
+            [c for c in conditions if c not in set(robust['strategy'])],
         'models_absent_from_the_screen': absent,
         'models': chosen,
         'generator_labels': labels,

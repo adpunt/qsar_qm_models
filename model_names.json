@@ -61,7 +61,8 @@
     "dnn_bnn_full_heteroscedastic": "dnn_bnn_full_mve",
     "mlp_bnn_full_heteroscedastic": "mlp_bnn_full_mve",
     "dnn_bnn_full_mve": "dnn_bnn_full_mve",
-    "mlp_bnn_full_mve": "mlp_bnn_full_mve"
+    "mlp_bnn_full_mve": "mlp_bnn_full_mve",
+    "heteroscedastic_gp": "het_gp_rbf"
   },
   "validation": {
     "RF": "rf",
