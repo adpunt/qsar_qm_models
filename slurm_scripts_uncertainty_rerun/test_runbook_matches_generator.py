@@ -128,7 +128,9 @@ def check_counts(text, summary, ranges):
     one representation the scripts have two different lengths, and a single
     figure for all of them is exactly what mis-submits.
     """
-    head = re.search(r'Wrote (\d+) array scripts, ([\d,]+) tasks total', summary)
+    # The generator also writes submit_all.sh, so the line reads "N array scripts +
+    # submit_all.sh, M tasks total". Match the counts, not the prose between them.
+    head = re.search(r'Wrote (\d+) array scripts[^,]*, ([\d,]+) tasks total', summary)
     if not head:
         fail(f"could not read the generator's own summary:\n{summary}")
         return

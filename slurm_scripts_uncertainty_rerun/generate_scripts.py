@@ -647,7 +647,40 @@ def main():
         (out / script_name).chmod(0o755)
         written.append((tier, script_name, model, hours, model_tasks, model_reps))
 
-    print(f"\nWrote {len(written)} array scripts, {total_tasks} tasks total, "
+    # THE SUBMITTER, SO NOBODY EVER TYPES AN ARRAY RANGE AGAIN.
+    #
+    # The range is on the sbatch line, not in the script, and it CHANGES with the
+    # condition set: three conditions is 27 tasks, the four that follow are 36, and
+    # narrowing a model's representations changes its count alone. The runbook said
+    # 0-62 against scripts that held 27 for long enough to be found by accident, and
+    # 36 indices per array would have queued, started and exited on the out-of-range
+    # guard. The generator knows each count; the operator should never have to.
+    # The QM9 and laboratory generators both emit one of these.
+    submit = ['#!/bin/bash',
+              f'# Submit the uncertainty runs: one array per model, each at its OWN range.',
+              f'# {len(written)} arrays, {total_tasks} tasks, conditions:'
+              f' {" ".join(conditions)}.',
+              '# Written by generate_scripts.py -- regenerate rather than edit.',
+              '# The scripts carry no partition and refuse to run without one.',
+              'ACCT=${ACCT:-stat-cadd}',
+              'PART=${PART:-medium}',
+              'ok=0; bad=0',
+              'echo "submitting to account=$ACCT partition=$PART"',
+              '']
+    for _tier, _name, _model, _hours, _tasks, _mreps in written:
+        submit.append(f'# {_name}: {_model}, {_tasks} tasks, --time={_hours}:00:00')
+        submit.append(
+            f'if sbatch --account=$ACCT --partition=$PART '
+            f'--array=0-{_tasks - 1}%{args.throttle} {_name}; '
+            f'then ok=$((ok+1)); else bad=$((bad+1)); fi')
+    submit += ['',
+               f'echo "submitted $ok of {len(written)}; $bad failed"',
+               'if [ "$bad" -gt 0 ]; then exit 1; fi']
+    (out / 'submit_all.sh').write_text('\n'.join(submit) + '\n')
+    (out / 'submit_all.sh').chmod(0o755)
+
+    print(f"\nWrote {len(written)} array scripts + submit_all.sh, "
+          f"{total_tasks} tasks total, "
           f"oof-folds={args.oof_folds}, "
           f"oof-outer-folds={args.oof_outer_folds or 'all 5'}")
     print(f"  {len(DATASETS)} datasets x {len(conditions)} conditions, "
