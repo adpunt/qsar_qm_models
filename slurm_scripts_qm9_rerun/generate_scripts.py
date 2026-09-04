@@ -987,6 +987,34 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
+# MEMORY: 128G, AND IT IS NOT CUT WITHOUT sacct EVIDENCE.
+#
+# The only job in THIS study with a recorded peak is
+# flexible_dnn_512_256_valprop: 61.2 GB actually used, against a 128G request
+# (author's identification, 2026-09-05 -- the other large rows in that sacct
+# sweep are KIRBy's separate experiments, not this one).
+#
+#   32G   half the observed peak            dies
+#   64G   5% headroom                       dies on a slightly heavier task
+#   96G   1.57x, and 12 of the 8 GB/core    <-- chosen
+#   128G  2.09x, and 16 of the 8 GB/core    waits for a whole node
+#
+# 96G is the author's call, 2026-09-05: memory is not restricted to powers of two,
+# and the middle buys most of the safety of 128G at much less of the queue cost.
+#
+# It was cut to 32G and then 64G earlier that day on a MaxRSS sample that covered
+# almost nothing: every task in it was array index 2, 8 or 14 -- the SAME
+# representation, mhg_gnn_pretrained -- so one representation of six, one fit per
+# level instead of the six an out-of-fold task does, no ChemBERTa, no Gaussian
+# process. A 256G tier for the GP and LightGBM was then added from what OLD JOB
+# SCRIPTS REQUESTED, which is what someone once guessed and, on inspection, was
+# mostly KIRBy's other work. Both are removed. Uniform 128G is what every
+# generator here had before any of it.
+#
+# The asymmetry: too much costs queue position, too little kills the job at the
+# wall after days of waiting, with no partial credit.
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1006,11 +1034,12 @@ def main():
     # Gaussian processes, the variational networks and the two variance-head
     # networks -- have not been measured, which is why the headroom is 8x rather
     # than 2x. Re-measure once they land and cut it again if it holds.
-    ap.add_argument('--mem', default='64G',
-                    help='memory per task. 64G at 8 cores is exactly the 8 GB/core '
-                         'the partitions offer, so it backfills; 128G asks for a '
-                         'whole node. Measured peak over 179 completed tasks: '
-                         '4.03 GB.')
+    ap.add_argument('--mem', default='96G',
+                    help='memory per task. 96G is 1.57x the worst peak this study '
+                         'has on record (61.2 GB, flexible_dnn_512_256_valprop) '
+                         'and needs 12 cores-worth of the 8 GB/core the partitions '
+                         'offer, against 16 for 128G -- so it backfills where 128G '
+                         'waits for a whole node. Refuses under 64G.')
     ap.add_argument('--stage', type=int, default=1, choices=[0, 1, 2],
                     help='0 screen (1 replicate), 1 breadth (replicates 1-9, appended to '
                          'stage 0), 2 depth (all conditions, chosen models and reps). '
@@ -1107,6 +1136,11 @@ def main():
     # decided before stage 0 has run (RERUN_PLAN.md §13.1 item 4). Generating a
     # full stage-2 grid by default would quietly cost more than stages 0 and 1
     # together, for a question that is about a handful of cells.
+    if args.mem and args.mem.upper().rstrip('G').isdigit() and int(args.mem.upper().rstrip('G')) < 64:
+        ap.error(f'--mem {args.mem} is below the 64G floor the author set on '
+                 f'2026-09-05. A job killed at the wall after days in the queue '
+                 f'has no partial credit; a job that asks too much only waits.')
+
     if args.pairs_file:
         _spec = json.loads(Path(args.pairs_file).read_text())
         _file_models = _spec.get('generator_labels') or _spec.get('models')

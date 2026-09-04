@@ -845,12 +845,23 @@ echo "=== selected: {model} x $rep is in $SELECTION_FILE"
 """
 
 
-# 64G AT 8 CORES IS EXACTLY THE 8 GB/core THE PARTITIONS OFFER, so a task
-# backfills into an ordinary slot. 128G at 8 cores asks for 16 cores' worth
-# of memory and therefore waits for a whole node, which is why 29 of the
-# author's pending jobs sat on (Priority) with 5,000 CPUs idle on 2026-09-05.
-# The measured peak over 179 completed QM9 tasks was 4.03 GB.
-MEM = '64G'
+# 128G, AND IT STAYS THERE UNTIL SOMETHING MEASURES THIS PIPELINE.
+#
+# It was cut to 64G on 2026-09-05 on a QM9 measurement that turned out to cover
+# almost nothing: every task in that MaxRSS sample was array index 2, 8 or 14 --
+# all the SAME representation, mhg_gnn_pretrained -- so it measured one
+# representation of six, one fit per level instead of the six an out-of-fold task
+# does, no ChemBERTa and no Gaussian process. A peak of 4.03 GB from that says
+# nothing about this pipeline, which fits five outer folds, refits per inner fold
+# on the settled pairs, and holds a per-molecule uncertainty for every training
+# molecule at every level.
+#
+# The asymmetry decides it. Asking for too much costs queue position; asking for
+# too little kills the job at the wall after days of waiting, and there is no
+# partial credit. Nothing here is cut again without a MaxRSS measurement that
+# covers ChemBERTa and an out-of-fold task on logD, which is the biggest dataset
+# (7,309 molecules) and the one where an O(n^2) kernel is largest.
+MEM = '96G'
 
 
 def main():
