@@ -4750,6 +4750,55 @@ cross-fold joinability — and to state it in the Methods in one sentence.
 chat J must not average `injected_noise` across folds for a molecule. Under the per-fold draw that
 is averaging five different corruptions. This is failure mode 3 in §0.6 wearing a new hat.
 
+### 3.3b 🟠 THE BUILD — making the laboratory's noise a property of the molecule
+
+**Settled 2026-09-04: the laboratory matches QM9.** §3.3a is the diagnosis; this is what has to
+change. Recorded before the edit because it touches four call sites and one of them is easy to miss.
+
+**What "match QM9" means concretely.** QM9 has one train/test split, so drawing over the training
+column already makes a molecule's corruption a property of the molecule. The laboratory has five
+folds and therefore five different training sets, and there is only one fold-free equivalent: draw
+the realisation **once over the full label column, keyed by a molecule's position in the dataset**,
+and let each fold take its slice. Test rows stay clean, as they do today — a molecule that is test
+in fold 0 and training in fold 1 simply has its corruption applied in fold 1 only.
+
+Two things follow from that and are not separately negotiable, because there is no fold-free
+alternative to either:
+
+- **The dose reference becomes the full column's clean label spread**, not the fold's training
+  spread. Otherwise one realisation is scaled five different ways and the corruption is
+  fold-dependent again in magnitude if not in pattern. The two differ little — the training split is
+  80% of the same distribution — but the number moves.
+- **The cut-points for the label-keyed conditions are computed over the full column**, for the same
+  reason.
+
+**The four sites.** The injection is inside the experiment functions, which receive fold-local
+arrays, so a molecule's position in the dataset has to be threaded down to them:
+
+| # | Site | What it needs |
+|---|---|---|
+| 1 | `run_tree_experiment`, the level loop | inject over the full column, then index the training rows out of the result |
+| 2 | `run_neural_experiment`, the same loop | the same, plus the validation rows, which draw from their own stream |
+| 3 | the ordinary call site | `train_idx[train_idx_local]` and `test_idx` as dataset positions |
+| 4 | **the Gaussian-process call site** | `train_idx[train_idx_local][gp_row_idx]` — the GP path SUBSAMPLES its training rows, so passing the unsubsampled index here silently misaligns every GP molecule with someone else's noise. This is the one that is easy to miss, and it is the same shape as the QM9 defect in §2.10b |
+
+`_injector_for` needs no change: its seed already excludes the fold, and excludes the level for the
+selection stream. The fold-dependence comes entirely from injecting on a different vector each time,
+not from the seed.
+
+**The gate.** A test that fits nothing: for one condition and one level, collect each molecule's
+injected noise in every fold it appears in as a training row, and assert every molecule has exactly
+one distinct value. Under the current code that fails — §3.3a measured 1,688 of 2,400 molecule-fold
+pairs disagreeing on a 600-molecule five-fold split — and under the change it must pass.
+
+**What it costs, and it is the reason to do it now rather than later.** Every laboratory number
+changes. The robustness curves barely move — the delivered dose is stable to 0.27% across folds —
+but what a *molecule* means changes, and the uncertainty work joins on molecules. The laboratory
+breadth grid was about a fifth through when this was settled; waiting only makes that fraction
+larger.
+
+---
+
 ### 3.4 Cross-pipeline audit — the same name is not the same thing
 
 Audited 2026-08-25 by reading both codebases, with every claim independently re-checked. **29
@@ -10449,6 +10498,69 @@ The screen finishes when its slowest array does. On QM9 that is `ngboost` at 53:
 throttle of 4 concurrent tasks per array, so `val_ngboost` alone is up to five throttle rounds.
 **Nothing downstream should be planned against the mean.**
 
+#### 2026-09-04 — the decisions the author settled, and what each one rests on
+
+**1. The deep-run and censoring models. SETTLED.** Four from the screen's reading —
+`ngboost` (locked on by the rule), `rf` (most noise-tolerant on all three representations),
+`het_gp_rbf` (least noise-tolerant on two of three) and `svm` (the only kernel model) — **plus
+`gauche_rbf` and `dnn_bnn_full_mve`, added by the author for the per-molecule uncertainty
+requirement.** Six models on ECFP4, PDV and ChemBERTa: **18 pairs**.
+
+⚠️ **`het_gp_rbf` was read off ONE condition of three.** The reading was taken before
+`copy_zero_rows.py` had filled in the clean level for the two grouped conditions, so only gaussian
+survived into the ranking. Re-run `select_deep_run_pairs.py` after the copy step; that slot is the
+one that can move.
+
+**Why the two additions are those two and not the quantile forest.** The censoring rule asks for at
+least two models reporting a per-molecule uncertainty, and only NGBoost qualified of the four. The
+quantile forest was suggested first, on noise tolerance — **wrong basis, and the measurement says
+otherwise.** From the standardised level-response run (§5.5i, real QM9, 3,000 molecules, PDV, out of
+fold), what you want is the data-noise term rising with injected noise while the model term holds:
+
+| model | aleatoric | epistemic | clean R² | |
+|---|---|---|---|---|
+| `gauche_rbf` | **x17.2** | x1.5 | 0.85 | the cleanest separation in the roster |
+| `dnn_bnn_full_mve` | **x2.5** | x1.1 | 0.73 | passes; the literature's flagship case |
+| `ngboost`, single fit | x9.1 | — | 0.84 | aleatoric only, no model-uncertainty axis |
+| `het_gp_rbf` | x1.6 | x1.5 | 0.85 | weak — both terms barely move |
+| random forest | x5.7 | x5.3 | 0.84 | fails — one bootstrap drives both |
+
+The quantile forest is not in that table, but shares the random forest's mechanism and ranks with it
+at 0.996, so it would fail the same way. **`het_gp_rbf` is in the deep run for being the least
+noise-tolerant model, which is a different question — it cannot also carry the uncertainty
+requirement.**
+
+**2. Caco-2's noise anchor. SETTLED: within-laboratory error, ≈0.15 of the label spread, with 0.66
+quoted in the Methods as a declared upper bound.**
+
+| | The anchor | Fraction of the label spread | |
+|---|---|---|---|
+| what it was | 0.35 log₁₀, Bentz 2013, median across 11 laboratories | ≈0.79 | implies an R² ceiling of 0.376 against an observed clean 0.565 — impossible if both are right |
+| the upper bound | derived from that observed R² | **0.66** | consistent by construction, but a ceiling rather than an estimate |
+| **chosen** | within-lab CV 10.4% and 14.7%, Prieto et al. 2010 (*ATLA* 38(5):367–386) | **≈0.10–0.15** | the right kind of figure for data with no laboratory structure |
+
+The reason is the evidence already in §13.17 A1: the extraction is 7,618 rows, one value per
+molecule, with no laboratory, source, site, assay or batch column at all. Between-laboratory
+variance is not a property of a dataset that has no laboratories in it.
+
+**The conversion is derived here and is not from a source**: a CV of 10.4–14.7% is a log₁₀ standard
+deviation of about 0.045–0.064 (CV ÷ ln 10), against a Caco-2 label spread of 0.44–0.46. It assumes
+small, roughly multiplicative error.
+
+**This changes no runs.** Levels are set as a fraction of the label spread; the anchor only says
+where real assay error sits on that ladder. It rewrites sentences.
+
+Still outstanding and still one line: print the clean Caco-2 training label SD once. §6.4 of
+`NOISE_DESIGN.md` derives 0.76 from it and §2.12 derives 0.79, and neither records it.
+
+**3. The laboratory's per-fold noise draw. SETTLED: the laboratory changes to match QM9.**
+See §3.3a for what it does today. QM9 draws once over the training label column when the data files
+are written, before anything is split, so a molecule carries the same corruption everywhere. The
+laboratory injects inside `run_tree_experiment` / `run_neural_experiment`, which are called per
+fold with that fold's own labels — so the realisation is redrawn five times.
+
+The author's ruling on 2026-09-04: **the laboratory matches QM9.** The build is §3.3b.
+
 #### Submission 3 — the hERG resubmits, 2026-09-04
 
 The 24 tasks lost to the missing cache, resubmitted after `val_rf_12` and `_13` proved the copy
@@ -10693,7 +10805,7 @@ not be raised again until its trigger fires.
 | # | What | Owner |
 |---|---|---|
 | A1 | **The Caco-2 baseline noise figure is provably too high.** `NOISE_DESIGN.md` §6.4 says 0.76 of the label spread and §2.12 says 0.79, both derived, and either implies a ceiling of R² 0.376 against an observed clean 0.565. Bentz's 0.35 is a *between-laboratory* number and may not apply to a single-source dataset. 🟠 **Half answered 2026-08-30, and it needed no cluster time.** `KIRBy/tests/data_cache/openadmet_raw.csv` is one flat extraction — 7,618 rows, one value per molecule, and **no laboratory, source, site, assay or batch column at all**, so nothing in the run can condition on one and the between-laboratory variance Bentz measured is not a property of THIS data. The efflux column has 3,777 non-null values with a log10 spread of 0.599, against the 0.44 the runner records after its own filtering. So the anchor is imported from a different design and is very likely too high. **What is left is the author's: which number replaces it** | **the author** — the evidence is in, the choice of anchor is a decision |
-| A2 | **The experimental pipeline draws its noise per fold, not once per label column** (§3.3a). Recommendation unchanged: keep the per-fold draw and say so in the Methods in one sentence. It needs an answer because it changes what a *molecule* means across folds | **the author** |
+| ~~A2~~ | ✅ **SETTLED 2026-09-04 — the laboratory matches QM9.** Draw once over the full label column, keyed by the molecule's position in the dataset, and let each fold take its slice. The author's ruling, against the earlier recommendation to keep the per-fold draw. Diagnosis §3.3a, build and gate §3.3b | done — the build is open |
 | A3 | **Push the branch.** The cluster's only route in is `git pull --ff-only`, so a gate that passed on an unpushed commit proved nothing about what runs (§2.20) | **chat H** |
 | ~~A4~~ | ✅ **CLOSED 2026-08-30 (§2.28).** It was three things, and two were not pipeline defects: the smoke test's stub Gaussian process never recorded the aleatoric/epistemic split (it predates the split being wired in on 2026-08-28), `probe_oof` was three arguments and three return values behind `_oof_predict`, and — the real one — `assert_matches_support` was asked about a block that no inner fold produced, before the empty-block skip. `smoke_kirby_uncertainty.py` runs 80 checks now and passes all of them; it used to stop at 13 | done |
 | A5 | 🟠 **The aleatoric/epistemic split is measurable per molecule on ONE of the four settled uncertainty pairs, and the three models built for it are in neither run.** `qrf` has both halves per molecule; NGBoost has no model half; the Gaussian process and the variational network each report a data-noise term that is one number per fit. `heteroscedastic_gp` and the two variational networks with a noise head are the three that have both, they are on neither list, and the QM9 generator gives them `-u True` with no `--oof-folds` — so they write test rows only, whose injected noise is exactly zero. Traced from the code, §2.28 | **the author** — which pairs the uncertainty pass runs on is a decision, not a script's |

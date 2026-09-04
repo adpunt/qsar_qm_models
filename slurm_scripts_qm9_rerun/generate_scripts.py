@@ -949,6 +949,26 @@ def build_case_block(tags):
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # MEASURED, not guessed. The screen's first nine arrays -- 179 completed
+    # tasks across rf, xgboost, lgb, svm, dnn, mlp, qrf and the two plain
+    # Bayesian networks -- peaked at 4.03 GB, and all but one task sat between
+    # 2.8 and 3.1 GB. The one outlier was the heteroscedastic Gaussian process at
+    # 4.03 GB. Every script had been asking for 128 GB, which is 32x the worst
+    # case: a request that large cannot backfill into a small idle gap, so it
+    # sits on (Priority) while nodes are free, which is exactly what the queue
+    # was doing.
+    #
+    #   sacct -M arc -S <date> -j "$(seq -s, 12971601 12971619)" -n -P \
+    #         --format=JobName,JobID,MaxRSS,State
+    #
+    # 32 GB is 8x the measured worst case. The ten models still queued -- both
+    # Gaussian processes, the variational networks and the two variance-head
+    # networks -- have not been measured, which is why the headroom is 8x rather
+    # than 2x. Re-measure once they land and cut it again if it holds.
+    ap.add_argument('--mem', default='32G',
+                    help='memory per task. Default measured off the screen: '
+                         '4.03 GB worst case over 179 completed tasks, 8x '
+                         'headroom for the models not yet measured.')
     ap.add_argument('--stage', type=int, default=1, choices=[0, 1, 2],
                     help='0 screen (1 replicate), 1 breadth (replicates 1-9, appended to '
                          'stage 0), 2 depth (all conditions, chosen models and reps). '
@@ -1268,7 +1288,7 @@ def main():
         script_name = f'qm9_s{args.stage}_{model}.sh'
         (out / script_name).write_text(TEMPLATE.format(
             model=model, note=note or model, jobslug=model, stage=args.stage,
-            cpus=8, mem='128G', hours=hours, flags=flags,
+            cpus=8, mem=args.mem, hours=hours, flags=flags,
             qsar_dir=args.qsar_dir, sample_size=args.sample_size,
             n_reps_run=n_reps_run, first_iter=first_iter,
             last_iter=first_iter + n_reps_run - 1,
