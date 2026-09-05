@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+"""The loader rules, against figlib_load.
+
+The same eight rules `scripts/test_figure_conditions.py` pins on
+`generate_paper_figures_v2.py`. That file and its test stay on disk until the
+new script has run on real cluster data, so this is the parallel check rather
+than a replacement: both loaders are held to the same rules until one is
+retired.
+
+Every one of these is a bug that actually happened (RERUN_PLAN.md 2.11, 2.13).
+
+Run it directly:  python scripts/test_figure_loading.py
+"""
+import os
+import sys
+import tempfile
+import traceback
+
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import figlib_config as C  # noqa: E402
+import figlib_fixtures as F  # noqa: E402
+import figlib_load as L  # noqa: E402
+
+ROW = dict(sigma=0.0, iteration=0, model='rf', rep='ecfp4', sample_size=100,
+           mae=0.1, mse=0.02, rmse=0.14, r2=0.9, pearson_corr=0.95,
+           params_source='default', loss_function='mse', spec_version='1',
+           spec_hash='abc', gp_fit_method='', gp_collapsed='')
+
+
+def write(tmp, name, noise_type=None, **overrides):
+    row = dict(ROW, **overrides)
+    if noise_type is not None:
+        row['noise_type'] = noise_type
+    pd.DataFrame([row]).to_csv(os.path.join(tmp, name), index=False)
+
+
+def two_conditions_do_not_collapse_onto_one_row():
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, 'anova_gaussian_ecfp4_rf.csv', 'gaussian', r2=0.90)
+        write(tmp, 'anova_grouped_shifted_ecfp4_rf.csv', 'grouped_shifted',
+              r2=0.40)
+        df = L.load_qm9(tmp)
+        assert df is not None and len(df) == 2, (
+            f'two conditions for one (model, rep, level, replicate) came back '
+            f'as {0 if df is None else len(df)} row(s)')
+        assert sorted(df['condition']) == ['gaussian', 'grouped_shifted']
+        print(f"    two conditions, two rows: {sorted(df['condition'])}")
+
+
+def a_settled_name_is_not_read_as_the_retired_one_it_starts_with():
+    """`outlier` was the value-proportional strategy and is a PREFIX of the
+    settled `outlier_p10`. Pooling them puts two mechanisms under one name."""
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, 'anova_outlier_p10_ecfp4_rf.csv', None)
+        got = L.load_qm9(tmp)['condition'].unique().tolist()
+        assert got == ['outlier_p10'], got
+        print(f'    anova_outlier_p10_... -> {got[0]}')
+
+
+def a_file_naming_no_condition_is_never_left_blank():
+    """A blank is treated as equal to every other blank by drop_duplicates,
+    which is how six conditions became one row."""
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, 'anova_somethingelse_ecfp4_rf.csv', None)
+        got = L.load_qm9(tmp)['condition'].tolist()
+        assert all(str(v).startswith('unknown_') for v in got), got
+        print(f'    unnamed file -> {got[0]}')
+
+
+def censoring_levels_pair_into_one_condition():
+    """QM9 writes the clipped percentage INSIDE the name; the assay runner
+    writes plain `censoring` with the level in its own column. Left alone, each
+    QM9 censoring level is a condition holding a single level, so every
+    robustness function drops it for having no curve."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for pct, sigma in ((0, 0.0), (25, 0.25), (50, 0.50)):
+            write(tmp, f'anova_censoring_{pct}_ecfp4_rf.csv',
+                  f'censoring_{pct}', sigma=sigma)
+        df = L.load_qm9(tmp)
+        assert sorted(df['condition'].unique()) == ['censoring'], \
+            sorted(df['condition'].unique())
+        assert len(df) == 3, len(df)
+        print(f"    three censoring levels -> one condition, "
+              f"{len(df)} levels on its own axis")
+
+
+def sibling_files_are_not_read_as_results():
+    """`anova_*.csv` matches three siblings the same run writes, and two of them
+    carry the results columns -- so only the NAME rule rejects those."""
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, 'anova_gaussian_ecfp4_rf.csv', 'gaussian')
+        pd.DataFrame([dict(ROW, model='manifest_row', file_no=1,
+                           noise_type='gaussian')]).to_csv(
+            os.path.join(tmp, 'anova_gaussian_ecfp4_rf_noise_manifest.csv'),
+            index=False)
+        pd.DataFrame([{'epoch': 1, 'train_loss': 0.4}]).to_csv(
+            os.path.join(tmp, 'anova_gaussian_ecfp4_dnn_per_epoch.csv'),
+            index=False)
+        pd.DataFrame([{'sigma': 0.0, 'something': 1}]).to_csv(
+            os.path.join(tmp, 'anova_gaussian_ecfp4_odd.csv'), index=False)
+        df = L.load_qm9(tmp)
+        assert len(df) == 1, f'{len(df)} rows from one results file + 3 siblings'
+        assert 'manifest_row' not in set(df['model'])
+        print('    manifest, per-epoch and a column-less file all skipped')
+
+
+def the_replicate_is_in_the_deduplication_key():
+    """Without it, appended runs of one cell overwrite each other."""
+    with tempfile.TemporaryDirectory() as tmp:
+        frame = pd.DataFrame([dict(ROW, iteration=i, r2=0.9 - 0.01 * i,
+                                   noise_type='gaussian') for i in range(10)])
+        frame.to_csv(os.path.join(tmp, 'anova_gaussian_ecfp4_rf.csv'),
+                     index=False)
+        df = L.load_qm9(tmp)
+        assert len(df) == 10, f'{len(df)} of 10 replicates survived'
+        print('    ten replicates of one cell survive as ten rows')
+
+
+def the_fold_is_in_the_assay_deduplication_key():
+    """The old loader deduplicated on dataset, model, rep, condition and level
+    with NO fold, kept the first row, and discarded four fifths of the data."""
+    with tempfile.TemporaryDirectory() as tmp:
+        F.write_assay(tmp, models=['rf'], reps=['ecfp4'],
+                      conditions=['gaussian'], datasets=('logd',), folds=5)
+        df = L.load_assay_accuracy([tmp])
+        per_level = df.groupby('sigma')['replicate'].nunique()
+        assert (per_level == 5).all(), per_level.to_dict()
+        assert set(df['replicate_kind']) == {'fold'}, set(df['replicate_kind'])
+        print(f'    five folds survive at every level, labelled '
+              f'{df["replicate_kind"].iloc[0]!r} and not "replicate"')
+
+
+def the_uncertainty_column_is_the_one_the_spec_settles_on():
+    both = pd.DataFrame({'y_pred_std_uncalibrated': [1.0, 2.0],
+                         'y_pred_std_calibrated': [10.0, 20.0]})
+    picked = L.uncertainty_column(both)
+    expected = ('y_pred_std_uncalibrated' if C.UNCERTAINTY_PRIMARY == 'raw'
+                else 'y_pred_std_calibrated')
+    assert picked == expected, f'{picked!r} not {expected!r}'
+    # The assay side calls it `uncertainty` and writes no calibrated column.
+    assert L.uncertainty_column(pd.DataFrame({'uncertainty': [1.0]})) \
+        == 'uncertainty'
+    print(f'    spec settles on {C.UNCERTAINTY_PRIMARY!r}; with both columns '
+          f'present the loader reads {picked!r}')
+
+
+def the_reference_condition_is_never_the_whole_frame():
+    """Every filter used to read `frame[frame.strategy == 'legacy'] if
+    'strategy' in frame else frame`, so a frame with no condition column
+    silently became every condition pooled under one name."""
+    try:
+        L.baseline_rows(pd.DataFrame({'model': ['rf'], 'auc_norm': [0.5]}),
+                        'a test')
+    except RuntimeError as exc:
+        assert 'cannot be selected' in str(exc), str(exc)
+        print('    a frame with no condition column is refused, not pooled')
+        return
+    raise AssertionError('a frame with no condition column was accepted')
+
+
+def check(name, fn):
+    print(f'  {name}')
+    try:
+        fn()
+    except Exception as exc:  # noqa: BLE001
+        print(f'    FAIL: {type(exc).__name__}: {exc}')
+        traceback.print_exc()
+        return False
+    print('    ok')
+    return True
+
+
+def main():
+    print('figlib_load: conditions, siblings, replicates (RERUN_PLAN.md 2.11, 2.13)')
+    results = [
+        check('two conditions do not collapse onto one row',
+              two_conditions_do_not_collapse_onto_one_row),
+        check('a settled name is not read as the retired name it starts with',
+              a_settled_name_is_not_read_as_the_retired_one_it_starts_with),
+        check('a file naming no condition is never left blank',
+              a_file_naming_no_condition_is_never_left_blank),
+        check('censoring levels pair into one condition',
+              censoring_levels_pair_into_one_condition),
+        check('sibling files are not read as results',
+              sibling_files_are_not_read_as_results),
+        check('the replicate is in the deduplication key',
+              the_replicate_is_in_the_deduplication_key),
+        check('the fold is in the assay deduplication key',
+              the_fold_is_in_the_assay_deduplication_key),
+        check('the uncertainty column is the one the spec settles on',
+              the_uncertainty_column_is_the_one_the_spec_settles_on),
+        check('the reference condition is never the whole frame',
+              the_reference_condition_is_never_the_whole_frame),
+    ]
+    if not all(results):
+        print('\nFAIL: the loader can still pool or discard rows')
+        return 1
+    print('\nOK: every row keeps its condition, its replicate and its scale')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -218,6 +218,16 @@ SUPPORT_ALIASES = {
     'bnn_variational':              'dnn_bnn_variational',
     'bnn_full_variational':         'dnn_bnn_full_variational',
     'bnn_full_variational_hetero':  'dnn_bnn_full_variational_hetero',
+    # The CANONICAL spellings from model_names.json. Everything downstream of
+    # the figure loaders works in canonical names -- that is the whole point of
+    # that file -- and `uncertainty_pairs.json` names its four decomposition
+    # models canonically too. Without these, support('dnn_vbll') raised for a
+    # model the study is committed to reporting, while the identical model under
+    # its QM9 spelling resolved fine (found 2026-09-05).
+    'dnn_vbll':                     'dnn_bnn_full_variational',
+    'mlp_vbll':                     'mlp_bnn_full_variational',
+    'dnn_vbll_hetero':              'dnn_bnn_full_variational_hetero',
+    'mlp_vbll_hetero':              'mlp_bnn_full_variational_hetero',
 }
 
 # Two losses give a network a second output that predicts the observation noise

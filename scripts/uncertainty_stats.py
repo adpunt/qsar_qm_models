@@ -111,6 +111,7 @@ only ever a grouping key.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import warnings
@@ -1282,6 +1283,14 @@ STATISTICS = {
 }
 
 
+def _group_seed(name, recompute_error, seed, key):
+    """A reproducible per-group seed. See the call site for why hash() is not
+    usable here."""
+    material = '|'.join([str(name), str(recompute_error), str(seed)]
+                        + [str(k) for k in key])
+    return int(hashlib.sha256(material.encode()).hexdigest()[:16], 16)
+
+
 def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
                      recompute_error=True, seed=0, split='train_oof',
                      min_n=_DEFAULT_MIN_N, group_cols=None):
@@ -1350,8 +1359,12 @@ def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
             continue
 
         rec['observed'] = call(eps, use_cached=False)
-        rng = np.random.default_rng(
-            abs(hash((name, recompute_error, seed, tuple(map(str, key))))) % (2**32))
+        # The per-group seed must not come from the built-in hash(): Python
+        # randomises string hashing per process unless PYTHONHASHSEED is fixed,
+        # so the null band and its p-value came out different on every run of
+        # the same data. Those numbers go in the paper beside every Q4
+        # statistic. A content hash is stable across processes and machines.
+        rng = np.random.default_rng(_group_seed(name, recompute_error, seed, key))
         draws = np.empty(n_permutations, dtype=np.float64)
         for k in range(n_permutations):
             draws[k] = call(rng.permutation(eps), use_cached=not recompute_error)

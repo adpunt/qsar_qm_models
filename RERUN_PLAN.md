@@ -14603,6 +14603,8 @@ statistic that fires it, the figure it demands, and where that figure would go.
 | 12 | **The interaction term dominates the ANOVA** | the pairing share exceeds both main effects, as it did on QM9 for all six retired noise types | `run_simple_effects` — the model effect computed separately at each representation — which already exists and is currently only a supplementary table | D | Promote to a panel on F2 |
 | 13 | **A model family cannot be decomposed at all** | `aleatoric_support` or `epistemic_support` reads `constant` or `none` | No line is drawn for it. The support value is printed in the table instead | — | T6. **This is a guard, not a choice** |
 | 14 | **Two noise types give the same grid on F3** | the model-by-representation grids under two noise types agree closely once the replicate spread is allowed for | Show one of them in the main text and the other as an additional file. **If every grid differs, every grid is a main-text panel and F3 becomes the largest figure in the paper** | C | Decides F3's panel count |
+| 15 | **The rank order changes as the noise rises** — models trade places rather than holding their order | the model ranking at the reporting level differs from the ranking on clean labels, for more than a couple of models | The rank-versus-noise-level charts specified in §5.4a: noise level along the bottom, rank up the side, one line per model, lines crossing as the noise rises; then the mirror holding a model fixed and varying representation. R² printed beside the ranks | A | Main text if the order changes, additional file if it does not. **This is the only figure that does not have to pick a single noise level** |
+| 16 | **Retention really is decoupled from clean accuracy** | the correlation between AUC_norm and the clean baseline is near zero across models | The decoupling figure specified in §10b.5: retention against clean baseline, coloured by delivered accuracy, plus a third panel of delivered accuracy against retention | A | Additional file. ⚠️ §0.6 guard 4 says part of this is arithmetic — the metric divides the baseline out — so the figure must be read beside the baseline column, never alone |
 
 ---
 
@@ -14632,6 +14634,74 @@ statistic that fires it, the figure it demands, and where that figure would go.
 **Six figures and seven tables, against eight and six.** One fewer figure and one more table, because
 the probabilistic-transformation comparison moved from a figure to a table and the rank-transfer
 table is new.
+
+---
+
+
+---
+
+### 14.10 THE BUILD — settled 2026-09-05
+
+Four decisions, taken before any code was written, and what they cost.
+
+| | Decision | Why |
+|---|---|---|
+| **Layout** | Flat modules in `scripts/` — `figlib_config`, `figlib_guard`, `figlib_load`, `figlib_metrics`, `figlib_uncertainty`, `figlib_decisions`, then `figlib_shapes`, `figlib_figures`, `figlib_tables`, with `run_paper_analysis.py` as the entry point | Matches how every script in `scripts/` is already imported. ⚠️ **The plain name `generate_paper_figures.py` is TAKEN** — it is the dead v1 script (4,688 lines, 519 mentions of the retired slope metric) and §5.4 wants it deleted, which is the author's word to give. Until then the new entry point has its own name and destroys nothing. `select_deep_run_pairs.py` can take the one definition of AUC_norm from a small module instead of a 5,378-line one |
+| **The old script** | `generate_paper_figures_v2.py` **stays on disk untouched** until the new one has run on real cluster data | Six things reach into it by name and one of them is live. Nothing that works today stops working |
+| **Order** | The guard, the loaders, the metrics and the decision report **first**; the figures and tables after | F3's panel count, F7's option and the held-constant representation are inputs to drawing. §14.9 items 1, 4 and 5 cannot be answered by argument |
+| **The two figures §14 had no slot for** | Both built, both marked contingent — they are now rows 15 and 16 above | Author, 2026-09-05: *"Generate them and mark them as potentially included depending on the results"* |
+
+#### What the decision report computes
+
+Ten analyses, written so that every row of §14.6 and every item of §14.9 has a
+number behind it rather than an argument. `DECISIONS.md` plus one CSV each.
+
+| | Settles |
+|---|---|
+| **D0** | Coverage: what landed, what is thin, what the declared filters remove, and the collapsed Gaussian-process fits that **nothing filtered before** (row 11) |
+| **D1** | The evidence for which representation is held constant — coverage, clean accuracy, AUC_norm and rank agreement per representation. **§14.9 item 5 is the author's; this lays it out and stops** |
+| **D2** | F3's panel count, by the fixed rule: conditions whose grids agree on BOTH rank order and size, against the replicate wobble (row 14) |
+| **D3** | Whether the noise types separate the models — the paired signed-rank test of §14.9 item 7, plus Kendall's W recomputed per representation (rows 7, 8) |
+| **D4** | Whether the interaction dominates, which promotes simple effects to an F2 panel (row 12) |
+| **D5** | Whether one representation is an outlier — the case the averaging rules exist to catch (row 6) |
+| **D6** | AUC_norm above 1, counted beside its clean baseline (row 10) |
+| **D7** | Which of 7A, 7B, 7C runs (rows 1, 2, 3) |
+| **D8** | Whether the decomposition separates, fails, or cannot be drawn at all (rows 4, 5, 13) |
+| **D9** | Rank transfer between QM9 and the assay datasets, per representation (row 9) |
+| **D10** | The probabilistic transformations — T5's content, paired on the replicate |
+
+#### Three defects found and fixed while building it
+
+- **The permutation null was not reproducible.** `permutation_null` seeded each
+  group from Python's built-in `hash()` on a tuple of strings, which is
+  randomised per process unless `PYTHONHASHSEED` is set — so the null band and
+  its p-value came out different on every run of the same data, and those
+  numbers go in the paper beside every Q4 statistic. Now a content hash.
+  Proved by running the same frame under two hash seeds; all 22 of that module's
+  tests still pass.
+- **`uncertainty_pairs.json` names a model the support table could not resolve.**
+  Its `decomposition.models` list is canonical (`dnn_vbll`), and
+  `uncertainty_decomposition.SUPPORT` only knew the QM9 spelling
+  (`dnn_bnn_full_variational`), so `support()` raised for a model the study is
+  committed to reporting while the identical model under its other name resolved
+  fine. The canonical spellings are now aliases.
+- **A name that was already canonical did not map to itself.** Anything reading
+  an already-normalised frame — a merged table, a cache, a fixture — warned that
+  every model was unknown and then lower-cased names that were already right.
+
+#### The guard is six assertions, not one
+
+§0.6 assigns failure modes 1, 3, 4, 8, 9 and 12 to this script, and §14.2's
+averaging guard is failure mode 1 generalised. `declare()` demands a statement
+about **every** factor in the frame, not only the fixed ones — a guard that can
+be opted out of by leaving a name off a list would not have caught
+`generate_paper_figures_v2.py:2494` either, since that line gets *two* factors
+wrong at once. `scripts/test_figure_guards.py` reproduces that line and proves
+it now raises, and proves that removing a declaration fails the run.
+
+One rule that was only ever prose is now an assertion: censoring **cannot be
+used as a ranking axis**. `noise_conditions.json` says so in the condition's own
+scope block — it runs on five named pairs — and the guard quotes it.
 
 ---
 
