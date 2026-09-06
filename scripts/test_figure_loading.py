@@ -147,6 +147,49 @@ def the_uncertainty_column_is_the_one_the_spec_settles_on():
           f'present the loader reads {picked!r}')
 
 
+def a_broken_environment_explains_itself():
+    """The one environment failure this hits, answered instead of raised.
+
+    scipy's compiled parts are built against the conda environment's libstdc++,
+    which is newer than the one in /lib64 on ARC. Without the environment ahead
+    of the system, `from scipy import stats` dies forty lines deep inside
+    scipy.optimize with GLIBCXX_3.4.30 not found -- which says nothing about
+    what to do. setup.sh sets the path; a bare `conda activate` does not.
+    """
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, 'scipy.py'), 'w') as fh:
+            fh.write("raise ImportError(\"/lib64/libstdc++.so.6: version "
+                     "`GLIBCXX_3.4.30' not found\")\n")
+        env = dict(os.environ, PYTHONPATH=tmp, CONDA_PREFIX='/envs/env_test')
+        got = subprocess.run(
+            [sys.executable, os.path.join(here, 'run_paper_analysis.py'),
+             '--qm9-dir', tmp],
+            capture_output=True, text=True, env=env)
+        assert got.returncode == 3, (
+            f'exit {got.returncode}, expected 3 for an environment fault')
+        assert 'This is the environment, not the analysis' in got.stderr
+        assert '/envs/env_test/lib' in got.stderr, (
+            'the fix must name the actual environment, not a placeholder')
+        assert 'setup.sh' in got.stderr
+        assert 'Traceback' not in got.stderr, (
+            'a forty-line traceback is what this replaces')
+        print('    a GLIBCXX failure prints the fix and exits 3, no traceback')
+
+    # And an unrelated ImportError must NOT be swallowed by that handler.
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, 'scipy.py'), 'w') as fh:
+            fh.write("raise ImportError('no module named nonsense')\n")
+        env = dict(os.environ, PYTHONPATH=tmp)
+        got = subprocess.run(
+            [sys.executable, os.path.join(here, 'run_paper_analysis.py'),
+             '--qm9-dir', tmp], capture_output=True, text=True, env=env)
+        assert got.returncode != 3, 'an unrelated import error was mislabelled'
+        assert 'Traceback' in got.stderr, 'it should still raise normally'
+        print('    an unrelated import error still raises normally')
+
+
 def the_merge_step_is_not_a_prerequisite():
     """Each uncertainty task writes its own tables into its own directory.
 
@@ -234,6 +277,8 @@ def main():
               the_uncertainty_column_is_the_one_the_spec_settles_on),
         check('the reference condition is never the whole frame',
               the_reference_condition_is_never_the_whole_frame),
+        check('a broken environment explains itself',
+              a_broken_environment_explains_itself),
         check('the merge step is not a prerequisite',
               the_merge_step_is_not_a_prerequisite),
         check('partial data loads and says what is short',

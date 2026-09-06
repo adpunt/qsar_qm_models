@@ -34,9 +34,13 @@ import json
 import sys
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from run_paper_analysis import _preflight  # noqa: E402
+
+_preflight()
+
+import pandas as pd  # noqa: E402
 
 import figlib_config as C  # noqa: E402
 import figlib_load as L  # noqa: E402

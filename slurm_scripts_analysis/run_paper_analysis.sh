@@ -28,6 +28,12 @@ KIRBY=/data/stat-ecr/scat9264/KIRBy
 
 cd "$QSAR"
 . setup.sh
+
+# setup.sh:234 sets this, and every generated job script sets it again anyway.
+# Belt and braces, because without it scipy's compiled parts fail against the
+# system libstdc++ in /lib64 forty lines into an import.
+export LD_LIBRARY_PATH="${CONDA_PREFIX:-}/lib:${LD_LIBRARY_PATH:-}"
+
 python -c "import sys; print('interpreter:', sys.executable)"
 
 # Provenance in the log: which commit produced these numbers.

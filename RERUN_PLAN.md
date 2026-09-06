@@ -14716,10 +14716,18 @@ activated — it is seconds on partial data, and the permutation band is the onl
 part that ever needs a queue:
 
 ```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate env_test
+cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh
 python scripts/run_paper_analysis.py --qm9-dir results \
     --output-dir results/decisions --permutations 0
 ```
+
+⚠️ **`conda activate` on its own is not enough**, and this is the one thing that
+will bite. scipy's compiled parts are built against the environment's libstdc++,
+which is newer than `/lib64`'s, so `from scipy import stats` dies forty lines
+deep with `GLIBCXX_3.4.30 not found`. `setup.sh:234` puts the environment ahead
+of the system; a bare `conda activate` does not. Both entry points now check for
+this before importing anything and print the one-line fix instead of the
+traceback.
 
 **There is no collate step.** Every producer writes files this reads directly:
 QM9 writes one CSV per (condition, representation, model); the assay runs write

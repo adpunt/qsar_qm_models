@@ -43,13 +43,53 @@ over:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def _preflight():
+    """Turn the one environment failure this hits into a sentence.
+
+    scipy's compiled extensions are built against the conda environment's
+    libstdc++, which is newer than the one in /lib64 on ARC. Without the
+    environment's own lib directory ahead of the system one, `from scipy import
+    stats` dies forty lines deep in scipy.optimize with
+
+        ImportError: /lib64/libstdc++.so.6: version `GLIBCXX_3.4.30' not found
+
+    which says nothing about what to do. `setup.sh` sets the path and every
+    generated job script sets it again; a shell that ran `conda activate` alone
+    has not. Checked here, before any of this module's imports, so the answer
+    arrives instead of the traceback.
+    """
+    try:
+        from scipy import stats  # noqa: F401
+    except ImportError as exc:
+        text = str(exc)
+        if 'GLIBCXX' not in text and 'libstdc++' not in text:
+            raise
+        prefix = os.environ.get('CONDA_PREFIX', '<your env>')
+        sys.stderr.write(
+            '\nThis is the environment, not the analysis.\n\n'
+            f'  {text}\n\n'
+            "scipy's compiled parts need the conda environment's libstdc++, "
+            'which is newer\nthan the one in /lib64. Put the environment '
+            'ahead of the system:\n\n'
+            f'    export LD_LIBRARY_PATH="{prefix}/lib:$LD_LIBRARY_PATH"\n\n'
+            'Or source the repo\'s own setup, which does that and several '
+            'other things:\n\n'
+            '    cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh\n\n'
+            'A shell that ran `conda activate` on its own has NOT set this.\n')
+        raise SystemExit(3)
+
+
+_preflight()
+
+import pandas as pd  # noqa: E402
 
 import figlib_config as C  # noqa: E402
 import figlib_decisions as D  # noqa: E402
