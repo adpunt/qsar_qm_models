@@ -203,7 +203,9 @@ def _tidy(df, dataset, replicate_kind):
         df['dataset'] = dataset
     df['dataset'] = df['dataset'].astype(str).str.lower()
     if 'rep' in df.columns:
-        df['rep'] = df['rep'].astype(str).str.lower()
+        # Not just lower-cased: the assay runner writes `MHG-GNN-pretrained`,
+        # whose lower-cased form joins to nothing QM9 ever wrote.
+        df['rep'] = df['rep'].map(C.canonical_rep)
     for source in ('iteration', 'fold'):
         if source in df.columns and 'replicate' not in df.columns:
             df['replicate'] = df[source]

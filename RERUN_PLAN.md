@@ -14689,6 +14689,29 @@ number behind it rather than an argument. `DECISIONS.md` plus one CSV each.
   an already-normalised frame — a merged table, a cache, a fixture — warned that
   every model was unknown and then lower-cased names that were already right.
 
+#### Knowing when the runs have landed
+
+`scripts/check_runs_landed.py` answers it for all three producers at once, and
+**exits 0 only when everything is there**, so it can be waited on rather than
+watched:
+
+```bash
+until python scripts/check_runs_landed.py --stage 1 \
+        --validation-dir "$KIRBY/results/validation_rerun" \
+        --uncertainty-dir "$KIRBY/results/uncertainty_rerun"; do sleep 900; done
+```
+
+It reads every roster from the generator that queued the jobs — models,
+representations and conditions alike — because the old completeness check held a
+hand-typed list and globbed for six noise names that had been retired, so it
+reported a complete grid for conditions nothing was running.
+
+**A file existing is not a cell landing.** A task can write its file and die at
+level three of seven, and `squeue` will show it finished. The three incomplete
+states are counted separately because they need different actions: *missing*
+means resubmit that index, *partial* means the task died part-way, *thin* means
+it ran but has fewer replicates than the variance decomposition needs.
+
 #### The guard is six assertions, not one
 
 §0.6 assigns failure modes 1, 3, 4, 8, 9 and 12 to this script, and §14.2's

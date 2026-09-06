@@ -346,6 +346,38 @@ REP_LABELS = {
     'sns': 'Sort & Slice',
 }
 
+#: Every spelling of a representation either pipeline writes, mapped to the
+#: canonical one. This lived inline in the old figure script and went stale the
+#: same way the model map did. `mhggnn` is the case that matters: the assay
+#: runner writes `MHG-GNN-pretrained`, whose lower-cased form joins to nothing.
+REP_ALIASES = {
+    'ecfp4': 'ecfp4', 'pdv': 'pdv', 'sns': 'sns', 'avalon': 'avalon',
+    'chemberta': 'chemberta', 'mhggnn': 'mhggnn',
+    'mhg-gnn-pretrained': 'mhggnn', 'mhggnnpretrained': 'mhggnn',
+    'mhg_gnn_pretrained': 'mhggnn', 'mhg-gnn': 'mhggnn',
+    'sort_and_slice': 'sns', 'sortandslice': 'sns',
+    'morgan': 'ecfp4',
+}
+
+
+def canonical_rep(name):
+    """The canonical spelling of a representation, whoever wrote it."""
+    key = str(name).strip().lower()
+    return REP_ALIASES.get(key, REP_ALIASES.get(key.replace('-', ''), key))
+
+
+def canonical_model(name, pipeline='qm9'):
+    """The canonical spelling of a model name, from whichever pipeline wrote it.
+
+    An unknown name comes back lower-cased and unchanged, as it always did, so a
+    legacy file still loads -- but callers that care can compare against
+    CANONICAL_MODELS to find out.
+    """
+    mapping = QM9_MODEL_MAP if pipeline == 'qm9' else VALIDATION_MODEL_MAP
+    raw = str(name)
+    return mapping.get(raw, mapping.get(raw.lower(), raw.lower()))
+
+
 DATASET_ORDER = ['qm9', 'logd', 'caco2', 'herg']
 DATASET_LABELS = {
     'qm9': 'QM9 (HOMO–LUMO gap)',
