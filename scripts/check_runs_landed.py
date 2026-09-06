@@ -200,8 +200,12 @@ def report(results, verbose=False):
     if complete:
         print('LANDED. Everything the generators asked for is on disk.')
     else:
-        print('STILL LANDING. Re-run this when more arrives; exit code is 1 '
-              'until it is all there.')
+        print('STILL LANDING -- and the analysis does NOT wait for this.')
+        print('Run it now on what is there; D0 reports the gaps:')
+        print('    python scripts/run_paper_analysis.py --qm9-dir results \\')
+        print('        --output-dir results/decisions --permutations 0')
+        print('This exits 1 while anything is short, so it can be looped, but '
+              'nothing is blocked on it.')
     return 0 if complete else 1
 
 

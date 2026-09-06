@@ -147,6 +147,46 @@ def the_uncertainty_column_is_the_one_the_spec_settles_on():
           f'present the loader reads {picked!r}')
 
 
+def the_merge_step_is_not_a_prerequisite():
+    """Each uncertainty task writes its own tables into its own directory.
+
+    Requiring a collation pass before any number can be looked at would mean
+    waiting on housekeeping to see results already on disk. `_merged/` is read
+    when it is there and the task directories are read when it is not.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = os.path.join(tmp, 'uncertainty_rerun')
+        for task in ('qrf__logd__ecfp4__gaussian', 'gp__logd__pdv__gaussian'):
+            d = os.path.join(root, task)
+            os.makedirs(d)
+            pd.DataFrame([{'dataset': 'logd', 'model': 'QRF', 'rep': 'ECFP4',
+                           'sigma': 0.0, 'fold': 0, 'r2': 0.5}]).to_csv(
+                os.path.join(d, 'all_results.csv'), index=False)
+        assert not os.path.isdir(os.path.join(root, '_merged'))
+        got = L.load_merged_uncertainty([root])
+        assert got['all_results'] is not None, (
+            'nothing was read without a _merged/ directory')
+        assert len(got['all_results']) == 2, len(got['all_results'])
+        print('    two un-merged task directories read directly')
+
+
+def partial_data_loads_and_says_what_is_short():
+    """The screen lands in pieces. A quarter of the grid must produce a report,
+    not an error and not a silent headline over whichever cells finished."""
+    with tempfile.TemporaryDirectory() as tmp:
+        F.write_qm9(tmp, models=['rf', 'svm'], reps=['ecfp4'],
+                    conditions=['gaussian'], replicates=3)
+        df = L.load_qm9(tmp)
+        assert df is not None and len(df), 'partial data would not load'
+        cover = L.coverage(df, 'partial')
+        assert (cover['status'] == 'THIN_REPLICATES').all(), \
+            cover['status'].unique()
+        assert (cover['replicates_max'] == 3).all(), \
+            cover['replicates_max'].unique()
+        print(f'    {len(cover)} cell(s) at 3 replicates: loaded, and every '
+              f'one flagged THIN rather than passed off as complete')
+
+
 def the_reference_condition_is_never_the_whole_frame():
     """Every filter used to read `frame[frame.strategy == 'legacy'] if
     'strategy' in frame else frame`, so a frame with no condition column
@@ -194,6 +234,10 @@ def main():
               the_uncertainty_column_is_the_one_the_spec_settles_on),
         check('the reference condition is never the whole frame',
               the_reference_condition_is_never_the_whole_frame),
+        check('the merge step is not a prerequisite',
+              the_merge_step_is_not_a_prerequisite),
+        check('partial data loads and says what is short',
+              partial_data_loads_and_says_what_is_short),
     ]
     if not all(results):
         print('\nFAIL: the loader can still pool or discard rows')

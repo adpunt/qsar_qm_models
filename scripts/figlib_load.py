@@ -393,34 +393,50 @@ def load_assay_accuracy(dirs, cache_dir=None):
 # ---------------------------------------------------------------------------
 
 def load_merged_uncertainty(dirs):
-    """The `_merged/` tables written by
-    slurm_scripts_uncertainty_rerun/merge_results.py.
+    """The uncertainty runs' own tables, merged or not.
 
-    `coverage.csv` is read rather than rebuilt: it already carries a `status`
-    per (dataset, model, rep, condition) -- MISSING, NO_OOF, OOF_ALL_NAN,
-    TRUNCATED_OOF, PARTIAL_FOLDS, PARTIAL_LEVELS or OK -- computed by the code
-    that knows what each task was asked to produce.
+    THE MERGE STEP IS NOT A PREREQUISITE. Every task writes its own
+    all_results.csv and summary.csv into its own directory, and this reads those
+    directly when `_merged/` is not there. Requiring a collation pass before any
+    number could be looked at would mean waiting on a housekeeping step to see
+    results that are already on disk.
+
+    `_merged/coverage.csv` is the one thing the merge adds that cannot be
+    rebuilt here as well: it carries a `status` per cell -- MISSING, NO_OOF,
+    OOF_ALL_NAN, TRUNCATED_OOF, PARTIAL_FOLDS, PARTIAL_LEVELS or OK -- from the
+    code that knows what each task was ASKED to produce. When it is absent the
+    analysis still runs and D0 reports coverage from the rows themselves.
     """
     out = {'summary': None, 'coverage': None, 'all_results': None}
     for root in [Path(d) for d in (dirs or []) if d]:
-        merged = root / '_merged' if (root / '_merged').is_dir() else root
+        if not Path(root).is_dir():
+            continue
+        merged = root / '_merged'
+        if merged.is_dir():
+            sources = {name: [merged / name] for name in
+                       ('summary.csv', 'coverage.csv', 'all_results.csv')}
+        else:
+            # Un-merged: one directory per task, each with its own tables.
+            sources = {name: sorted(Path(root).rglob(name)) for name in
+                       ('summary.csv', 'coverage.csv', 'all_results.csv')}
         for key, name in (('summary', 'summary.csv'),
                           ('coverage', 'coverage.csv'),
                           ('all_results', 'all_results.csv')):
-            path = merged / name
-            if not path.exists():
-                continue
-            try:
-                df = pd.read_csv(path)
-            except Exception as exc:
-                print(f'  WARNING: {path} unreadable ({exc})')
-                continue
-            df = df.rename(columns={k: v for k, v in _RENAME.items()
-                                    if k in df.columns and v not in df.columns})
-            if 'dataset' in df.columns:
-                df['dataset'] = df['dataset'].map(_assay_dataset)
-            out[key] = df if out[key] is None else pd.concat(
-                [out[key], df], ignore_index=True)
+            for path in sources.get(name, []):
+                if not path.exists():
+                    continue
+                try:
+                    df = pd.read_csv(path)
+                except Exception as exc:
+                    print(f'  WARNING: {path} unreadable ({exc})')
+                    continue
+                df = df.rename(columns={
+                    k: v for k, v in _RENAME.items()
+                    if k in df.columns and v not in df.columns})
+                if 'dataset' in df.columns:
+                    df['dataset'] = df['dataset'].map(_assay_dataset)
+                out[key] = df if out[key] is None else pd.concat(
+                    [out[key], df], ignore_index=True)
     return out
 
 

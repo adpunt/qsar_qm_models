@@ -14689,89 +14689,72 @@ number behind it rather than an argument. `DECISIONS.md` plus one CSV each.
   an already-normalised frame — a merged table, a cache, a fixture — warned that
   every model was unknown and then lower-cased names that were already right.
 
-#### Knowing when the runs have landed
+#### Running it on ARC
 
-`scripts/check_runs_landed.py` answers it for all three producers at once, and
-**exits 0 only when everything is there**, so it can be waited on rather than
-watched:
-
-```bash
-until python scripts/check_runs_landed.py --stage 1 \
-        --validation-dir "$KIRBY/results/validation_rerun" \
-        --uncertainty-dir "$KIRBY/results/uncertainty_rerun"; do sleep 900; done
-```
-
-It reads every roster from the generator that queued the jobs — models,
-representations and conditions alike — because the old completeness check held a
-hand-typed list and globbed for six noise names that had been retired, so it
-reported a complete grid for conditions nothing was running.
-
-**A file existing is not a cell landing.** A task can write its file and die at
-level three of seven, and `squeue` will show it finished. The three incomplete
-states are counted separately because they need different actions: *missing*
-means resubmit that index, *partial* means the task died part-way, *thin* means
-it ran but has fewer replicates than the variance decomposition needs.
-
-#### The full sequence on ARC, once the jobs are queued
-
-`slurm_scripts_analysis/` is not tracked, so the job script goes by `scp` like
-every other one. The environment is activated by `setup.sh` and nothing else —
-the existing `run_figures_v2.sh` `eval`s a micromamba shell hook that has never
-worked on ARC, and points at `/data/stat-cadd/.../KIRBy`, the checkout KIRBy
-moved away from in May.
+**Two commands, and you do not wait for anything.** The analysis runs on
+whatever has landed and D0 says what it was short of. Measured on a quarter of
+the grid — 5 models of 19, 2 conditions of 7, 3 replicates of 10, 1 assay
+dataset of 3, no collation pass anywhere — it produced the full report in 7
+seconds and reported *"6 of 26 cells are complete. 20 are not, so no headline
+may be quoted across the whole grid yet."*
 
 ```bash
-# 1. from the laptop: send the job script, push the code
+# once: send the job script (slurm_scripts_analysis is not tracked)
 scp slurm_scripts_analysis/run_paper_analysis.sh \
     scat9264@gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/
 
-# 2. on the login node
+# then, whenever you want to look:
 ssh scat9264@gateway.arc.ox.ac.uk
-export QSAR=/data/stat-cadd/scat9264/qsar_qm_models
-export KIRBY=/data/stat-ecr/scat9264/KIRBy
-cd "$QSAR" && git checkout additional_reps && git pull
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate env_test
-python -c "import sys; print(sys.executable)"   # must NOT be under /apps/system
-
-# 3. are the jobs still going?
-squeue -u $USER -o "%.12i %.24j %.8T %.10M %.10L %R" | head -40
-
-# 4. has it landed? exit 0 only when everything is there
-python scripts/check_runs_landed.py --stage 1 \
-  --qm9-dir "$QSAR/results" \
-  --validation-dir "$KIRBY/results/validation_rerun" \
-  --validation-dir "$KIRBY/tests/results/validation_rerun" \
-  --uncertainty-dir "$KIRBY/results/uncertainty_rerun" \
-  --uncertainty-dir "$KIRBY/tests/results/uncertainty_rerun"
-
-# 5. collate the laboratory side (QM9 needs no merge step)
-python slurm_scripts_validation_rerun/merge_results.py --dry-run   # look first
-python slurm_scripts_validation_rerun/merge_results.py
-python slurm_scripts_uncertainty_rerun/merge_results.py --root "$KIRBY/results/uncertainty_rerun"
-
-# 6. the decision report
-cd "$QSAR/slurm_scripts_analysis" && sbatch run_paper_analysis.sh
+cd /data/stat-cadd/scat9264/qsar_qm_models && git pull && cd slurm_scripts_analysis
+sbatch run_paper_analysis.sh
 ```
 
-Then from the laptop:
+Small enough to run on the login node instead, once the environment is
+activated — it is seconds on partial data, and the permutation band is the only
+part that ever needs a queue:
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate env_test
+python scripts/run_paper_analysis.py --qm9-dir results \
+    --output-dir results/decisions --permutations 0
+```
+
+**There is no collate step.** Every producer writes files this reads directly:
+QM9 writes one CSV per (condition, representation, model); the assay runs write
+`all_results.csv` per task; the uncertainty runs write per-molecule CSVs and
+their own tables per task. `merge_results.py` consolidates the archive, which is
+useful housekeeping and is **not** a precondition for looking at a number.
+`_merged/coverage.csv` is read when it happens to be there because it carries a
+status per cell from the code that knows what each task was asked to produce;
+when it is not, coverage is computed from the rows. Guarded by
+`the_merge_step_is_not_a_prerequisite` in `scripts/test_figure_loading.py`.
+
+**`check_runs_landed.py` is a progress report, not a gate.** It exists to answer
+"what is still missing and which index do I resubmit", and it exits non-zero
+while anything is short so it *can* be looped — but nothing waits on it. Run the
+analysis first; run this when something looks thin.
+
+```bash
+python scripts/check_runs_landed.py --stage 1 --verbose
+```
+
+**A file existing is not a cell landing.** A task can write its file and die at
+level three of seven, and `squeue` shows it finished. The three incomplete states
+are counted separately because they need different actions: *missing* → resubmit
+that index; *partial* → the task died part-way; *thin* → it ran but has fewer
+replicates than the variance decomposition needs.
+
+Pull the report back with:
 
 ```bash
 scp -r scat9264@gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/results/decisions/ \
     /Users/apunt/repos/qsar_qm_models/results/decisions/
 ```
 
-**Waiting rather than watching.** The check exits 0 only when every cell is
-there, so it can be looped instead of eyeballed:
-
-```bash
-until python scripts/check_runs_landed.py --stage 1 --qm9-dir "$QSAR/results"; do sleep 900; done
-```
-
-⚠️ **The permutation band is the slow part** and its cost scales with the number
-of cells, not the number of molecules. `PERMUTATIONS=0 sbatch run_paper_analysis.sh`
-skips it — and then every Q4 number is unreadable against a band, so the report
-says *undecided* rather than reporting a null nothing measured. Run it once
-without to get the other nine answers quickly, then once with.
+⚠️ **The permutation band is the only slow part**, and it scales with the number
+of cells. `PERMUTATIONS=0` skips it — every Q4 number is then unreadable against
+a band, so D7 says *undecided* rather than reporting a null nothing measured.
+Nine of the ten answers do not need it.
 
 #### The guard is six assertions, not one
 
