@@ -14712,6 +14712,67 @@ states are counted separately because they need different actions: *missing*
 means resubmit that index, *partial* means the task died part-way, *thin* means
 it ran but has fewer replicates than the variance decomposition needs.
 
+#### The full sequence on ARC, once the jobs are queued
+
+`slurm_scripts_analysis/` is not tracked, so the job script goes by `scp` like
+every other one. The environment is activated by `setup.sh` and nothing else —
+the existing `run_figures_v2.sh` `eval`s a micromamba shell hook that has never
+worked on ARC, and points at `/data/stat-cadd/.../KIRBy`, the checkout KIRBy
+moved away from in May.
+
+```bash
+# 1. from the laptop: send the job script, push the code
+scp slurm_scripts_analysis/run_paper_analysis.sh \
+    scat9264@gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/
+
+# 2. on the login node
+ssh scat9264@gateway.arc.ox.ac.uk
+export QSAR=/data/stat-cadd/scat9264/qsar_qm_models
+export KIRBY=/data/stat-ecr/scat9264/KIRBy
+cd "$QSAR" && git checkout additional_reps && git pull
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate env_test
+python -c "import sys; print(sys.executable)"   # must NOT be under /apps/system
+
+# 3. are the jobs still going?
+squeue -u $USER -o "%.12i %.24j %.8T %.10M %.10L %R" | head -40
+
+# 4. has it landed? exit 0 only when everything is there
+python scripts/check_runs_landed.py --stage 1 \
+  --qm9-dir "$QSAR/results" \
+  --validation-dir "$KIRBY/results/validation_rerun" \
+  --validation-dir "$KIRBY/tests/results/validation_rerun" \
+  --uncertainty-dir "$KIRBY/results/uncertainty_rerun" \
+  --uncertainty-dir "$KIRBY/tests/results/uncertainty_rerun"
+
+# 5. collate the laboratory side (QM9 needs no merge step)
+python slurm_scripts_validation_rerun/merge_results.py --dry-run   # look first
+python slurm_scripts_validation_rerun/merge_results.py
+python slurm_scripts_uncertainty_rerun/merge_results.py --root "$KIRBY/results/uncertainty_rerun"
+
+# 6. the decision report
+cd "$QSAR/slurm_scripts_analysis" && sbatch run_paper_analysis.sh
+```
+
+Then from the laptop:
+
+```bash
+scp -r scat9264@gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/results/decisions/ \
+    /Users/apunt/repos/qsar_qm_models/results/decisions/
+```
+
+**Waiting rather than watching.** The check exits 0 only when every cell is
+there, so it can be looped instead of eyeballed:
+
+```bash
+until python scripts/check_runs_landed.py --stage 1 --qm9-dir "$QSAR/results"; do sleep 900; done
+```
+
+⚠️ **The permutation band is the slow part** and its cost scales with the number
+of cells, not the number of molecules. `PERMUTATIONS=0 sbatch run_paper_analysis.sh`
+skips it — and then every Q4 number is unreadable against a band, so the report
+says *undecided* rather than reporting a null nothing measured. Run it once
+without to get the other nine answers quickly, then once with.
+
 #### The guard is six assertions, not one
 
 §0.6 assigns failure modes 1, 3, 4, 8, 9 and 12 to this script, and §14.2's
