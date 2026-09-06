@@ -82,6 +82,55 @@ def read(path):
         return reader.fieldnames, list(reader)
 
 
+def previously_copied(results):
+    """(target file, replicate) pairs this script wrote on an earlier run.
+
+    WHY THIS IS NEEDED. A copied clean row is written into the target with the same
+    columns and the same values as a computed one and NOTHING marks it as a copy -- the
+    only record is zero_row_copies.csv beside the results. So on a second run every copy
+    was read back as a row "the job actually computed" and checked against the reference.
+
+    That is fine while the reference stands still. It does not. The DEEP RUN recomputes
+    gaussian's clean level for the pairs it selects -- `--stage 2` gives gaussian seven
+    levels, starting at 0.0, over replicates 0-9 -- into the same anova_gaussian_*.csv
+    the screen wrote. When one of those lands, the reference moves, and every copy made
+    before it is then reported as a seed divergence and stops the run. That happened on
+    2026-09-06 on chemberta/rf, nine replicates of ten, hours after the deep run's rf
+    array finished.
+
+    A copy is not evidence about anything. It gets refreshed. A row that is NOT in this
+    log and disagrees is the real thing the guard is for, and still stops the run.
+    """
+    log = Path(results) / LOG_NAME
+    if not log.exists():
+        return set()
+    try:
+        with open(log, newline='') as fh:
+            return {(r['target'], r['iteration']) for r in csv.DictReader(fh)
+                    if r.get('target') and r.get('iteration') is not None}
+    except (OSError, KeyError, ValueError):
+        return set()
+
+
+def as_copy(row, condition, header):
+    """The reference row, relabelled for the target condition."""
+    new = dict(row)
+    new['noise_type'] = condition
+    # The dose delivered at level 0 is zero whatever the condition, and the censoring
+    # axis measures a clipped fraction rather than a dose -- so the units column follows
+    # the target, not the source.
+    if 'level_units' in new and condition == 'censoring':
+        new['level_units'] = 'fraction_censored'
+    return {k: new.get(k, '') for k in header}
+
+
+def rewrite(path, header, rows):
+    with open(path, 'w', newline='') as fh:
+        writer = csv.DictWriter(fh, fieldnames=header)
+        writer.writeheader()
+        writer.writerows({k: r.get(k, '') for k in header} for r in rows)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -116,8 +165,9 @@ def main():
             condition, rep, model = parsed
             files[(rep, model)][condition] = path
 
-    copied = written = checked = disagreed = skipped = 0
+    copied = written = checked = disagreed = skipped = refreshed = 0
     log_rows = []
+    copies = previously_copied(results)
 
     for (rep, model), by_condition in sorted(files.items()):
         source = by_condition.get(reference)
@@ -149,19 +199,43 @@ def main():
             existing = {r['iteration']: r for r in target_rows if is_clean(r)}
             missing = [r for r in clean if r['iteration'] not in existing]
 
-            # A clean row the job actually computed is CHECKED, never replaced.
+            # A clean row the job actually COMPUTED is checked, never replaced. One this
+            # script copied on an earlier run is REFRESHED -- it is not evidence about
+            # anything, and the reference legitimately moves under it when the deep run
+            # recomputes gaussian's clean level. See previously_copied().
+            stale = []
             for row in clean:
                 have = existing.get(row['iteration'])
                 if have is None:
                     continue
-                checked += 1
                 differs = [c for c in ACCURACY if have.get(c) != row.get(c)]
-                if differs:
-                    disagreed += 1
-                    print(f"  DISAGREES  {target.name} replicate {row['iteration']}: "
-                          f"{', '.join(differs)} differ from {source.name}. The clean run is "
-                          f"supposed to be identical across conditions -- something adds noise "
-                          f"at level 0, or the seeds have diverged. Not copying anything here.")
+                if not differs:
+                    checked += 1
+                    continue
+                if (target.name, row['iteration']) in copies:
+                    stale.append(row['iteration'])
+                    continue
+                checked += 1
+                disagreed += 1
+                print(f"  DISAGREES  {target.name} replicate {row['iteration']}: "
+                      f"{', '.join(differs)} differ from {source.name}. The clean run is "
+                      f"supposed to be identical across conditions -- something adds noise "
+                      f"at level 0, or the seeds have diverged. Not copying anything here.")
+
+            if stale:
+                print(f"  REFRESHED  {target.name}: {len(stale)} clean row(s) this script "
+                      f"copied earlier no longer match {source.name}, which has been re-run "
+                      f"since -- the deep run recomputes gaussian's clean level. "
+                      f"Replicate(s) {', '.join(str(i) for i in stale)}. NOT a seed "
+                      f"divergence; a copy of a reference that moved.")
+                if not args.dry_run:
+                    fresh = {i: as_copy(r, condition, target_header)
+                             for i in stale for r in clean if r['iteration'] == i}
+                    rows_out = [fresh.get(r['iteration'], r)
+                                if is_clean(r) and r['iteration'] in fresh else r
+                                for r in target_rows]
+                    rewrite(target, target_header, rows_out)
+                refreshed += len(stale)
 
             if not missing:
                 continue
@@ -192,6 +266,9 @@ def main():
           f"({written} written)")
     print(f"  {checked} computed clean row(s) checked against the reference, "
           f"{disagreed} disagreed")
+    if refreshed:
+        print(f"  {refreshed} earlier copy/copies refreshed from a reference that has "
+              f"been re-run since -- listed above, none silently")
     if skipped:
         print(f"  {skipped} configuration(s) skipped -- listed above, none silently")
 

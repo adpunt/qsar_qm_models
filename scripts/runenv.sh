@@ -35,11 +35,31 @@ export ACCT="${ACCT:-stat-cadd}"
 # grids say --partition=long literally, because they carry walls past medium's ceiling.
 export PART="${PART:-medium}"
 
+# --- the environment ----------------------------------------------------------
+# EVERY python command in 13.19 needs env_test, not the system Anaconda. Sourcing this
+# without it got as far as `import scipy` and then died on
+#   /lib64/libstdc++.so.6: version `GLIBCXX_3.4.30' not found
+# -- env_test's scipy is built against a newer libstdc++ than the login node's, and
+# setup.sh is what puts the conda one on LD_LIBRARY_PATH ("Setting shared library
+# paths..."). The generated job scripts source setup.sh themselves and refuse to start
+# without it; nothing the operator types by hand did, so the same command worked in one
+# session and failed in the next.
+if [ -z "${CONDA_PREFIX:-}" ] || [ "$(basename "${CONDA_PREFIX:-none}")" != "env_test" ]; then
+    if [ -f "$QSAR/setup.sh" ]; then
+        . "$QSAR/setup.sh"
+    else
+        echo "WARN  no setup.sh at $QSAR -- python commands will run under whatever is"
+        echo "      on PATH, which on a login node is the system Anaconda."
+    fi
+fi
+
 echo "QSAR  = $QSAR"
 echo "KIRBY = $KIRBY"
 echo "SEL   = $SEL"
 echo "CEN   = $CEN"
 echo "ACCT  = $ACCT      PART = $PART   (PART is used by the uncertainty runs only)"
+echo "python= $(command -v python)"
+echo "env   = ${CONDA_PREFIX:-NONE}"
 
 _runenv_missing=0
 for _p in "$QSAR" "$KIRBY"; do
