@@ -61,6 +61,26 @@ echo "ACCT  = $ACCT      PART = $PART   (PART is used by the uncertainty runs on
 echo "python= $(command -v python)"
 echo "env   = ${CONDA_PREFIX:-NONE}"
 
+# --- the C++ runtime scipy needs -------------------------------------------
+# setup.sh already prepends $CONDA_PREFIX/lib to LD_LIBRARY_PATH, so if the loader still
+# reaches /lib64/libstdc++.so.6 it is because the environment does not carry a newer one.
+# scipy.stats pulls in scipy.optimize._highspy, which wants GLIBCXX_3.4.30, and the login
+# nodes are older than that (XGBoost warns about glibc < 2.28 on them too). The COMPUTE
+# nodes are fine -- the grid has been running against this environment for days -- so
+# this bites analysis run by hand on a login node, and nothing that is queued.
+if [ -n "${CONDA_PREFIX:-}" ] \
+   && ! grep -aqs GLIBCXX_3.4.30 "$CONDA_PREFIX/lib/libstdc++.so.6"; then
+    echo
+    echo "WARN  $CONDA_PREFIX/lib has no libstdc++ with GLIBCXX_3.4.30, so anything that"
+    echo "      imports scipy.stats will die here on a login node. It does NOT affect the"
+    echo "      queue. Two ways round, and the first is the safe one while jobs are running:"
+    echo "        srun --account=stat-cadd --partition=short --cpus-per-task=4 \\"
+    echo "             --mem=16G --time=00:30:00 --pty bash    # then re-source this"
+    echo "        conda install -n env_test -c conda-forge 'libstdcxx-ng>=12'"
+    echo "      DO NOT run that conda install while the grid is running -- it rewrites"
+    echo "      files under the environment those jobs are executing from."
+fi
+
 _runenv_missing=0
 for _p in "$QSAR" "$KIRBY"; do
     [ -d "$_p" ] || { echo "MISSING directory: $_p"; _runenv_missing=1; }
