@@ -14691,7 +14691,7 @@ number behind it rather than an argument. `DECISIONS.md` plus one CSV each.
 
 #### Running it on ARC
 
-**Two commands, and you do not wait for anything.** The analysis runs on
+**One command, and you do not wait for anything.** The analysis runs on
 whatever has landed and D0 says what it was short of. Measured on a quarter of
 the grid — 5 models of 19, 2 conditions of 7, 3 replicates of 10, 1 assay
 dataset of 3, no collation pass anywhere — it produced the full report in 7
@@ -14699,15 +14699,17 @@ seconds and reported *"6 of 26 cells are complete. 20 are not, so no headline
 may be quoted across the whole grid yet."*
 
 ```bash
-# once: send the job script (slurm_scripts_analysis is not tracked)
-scp slurm_scripts_analysis/run_paper_analysis.sh \
-    scat9264@gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/
-
-# then, whenever you want to look:
 ssh scat9264@gateway.arc.ox.ac.uk
-cd /data/stat-cadd/scat9264/qsar_qm_models && git pull && cd slurm_scripts_analysis
-sbatch run_paper_analysis.sh
+cd /data/stat-cadd/scat9264/qsar_qm_models && git pull
+sbatch slurm_scripts_analysis/run_paper_analysis.sh
 ```
+
+**No `scp`.** `.gitignore:87` excludes `slurm_scripts_*/*.sh` because the
+generators WRITE those — hundreds of per-model job arrays that would be noise in
+the history. `run_paper_analysis.sh` is hand-written and there is one of it, so
+it is force-added as a deliberate exception and `git pull` delivers it. That is a
+departure from "SLURM scripts go by scp"; it is here because it removes a step
+from something run repeatedly.
 
 Small enough to run on the login node instead, once the environment is
 activated — it is seconds on partial data, and the permutation band is the only
