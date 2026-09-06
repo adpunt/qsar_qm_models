@@ -80,9 +80,11 @@ def _preflight():
             'which is newer\nthan the one in /lib64. Put the environment '
             'ahead of the system:\n\n'
             f'    export LD_LIBRARY_PATH="{prefix}/lib:$LD_LIBRARY_PATH"\n\n'
-            'Or source the repo\'s own setup, which does that and several '
-            'other things:\n\n'
-            '    cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh\n\n'
+            'Better, source the one line that sets every path this run needs:'
+            '\n\n    . /data/stat-cadd/scat9264/qsar_qm_models/scripts/'
+            'runenv.sh\n\n'
+            'It sources setup.sh (which is what sets the library path) and '
+            'exports\nQSAR, KIRBY, SEL, CEN, ACCT and PART with it.\n\n'
             'A shell that ran `conda activate` on its own has NOT set this.\n')
         raise SystemExit(3)
 

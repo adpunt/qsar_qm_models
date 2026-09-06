@@ -14700,7 +14700,8 @@ may be quoted across the whole grid yet."*
 
 ```bash
 ssh scat9264@gateway.arc.ox.ac.uk
-cd /data/stat-cadd/scat9264/qsar_qm_models && git pull
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd "$QSAR" && git pull
 sbatch slurm_scripts_analysis/run_paper_analysis.sh
 ```
 
@@ -14716,18 +14717,24 @@ activated — it is seconds on partial data, and the permutation band is the onl
 part that ever needs a queue:
 
 ```bash
-cd /data/stat-cadd/scat9264/qsar_qm_models && . setup.sh
-python scripts/run_paper_analysis.py --qm9-dir results \
-    --output-dir results/decisions --permutations 0
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+python "$QSAR/scripts/run_paper_analysis.py" --qm9-dir "$QSAR/results" \
+    --output-dir "$QSAR/results/decisions" --permutations 0
 ```
 
-⚠️ **`conda activate` on its own is not enough**, and this is the one thing that
+⚠️ **`conda activate` on its own is not enough**, and it is the one thing that
 will bite. scipy's compiled parts are built against the environment's libstdc++,
 which is newer than `/lib64`'s, so `from scipy import stats` dies forty lines
 deep with `GLIBCXX_3.4.30 not found`. `setup.sh:234` puts the environment ahead
-of the system; a bare `conda activate` does not. Both entry points now check for
-this before importing anything and print the one-line fix instead of the
-traceback.
+of the system; a bare `conda activate` does not, and `scripts/runenv.sh` is the
+one line that does it along with every path.
+
+**Two guards for that, and they are not duplicates.** `runenv.sh` sets the shell
+up correctly; the preflight in both entry points catches the shell where nobody
+did, and prints the fix instead of the traceback. One prevents it, one explains
+it. Pinned by `a_broken_environment_explains_itself` in
+`scripts/test_figure_loading.py`, which also asserts that an unrelated import
+error still raises normally, so the handler cannot start swallowing real bugs.
 
 **There is no collate step.** Every producer writes files this reads directly:
 QM9 writes one CSV per (condition, representation, model); the assay runs write
