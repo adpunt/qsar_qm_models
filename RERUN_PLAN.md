@@ -16086,11 +16086,216 @@ are running under `c223ec3`, and `python scripts/check_runs_landed.py --stage 1 
 `--stage 2` report no `gauche_rbf` cell MISSING or PARTIAL.
 
 
-#### D3. What is on disk and must be deleted or rewritten — CHAT 3
+#### D3. The laboratory datasets — logD, Caco-2, hERG — CHAT 3, filled 2026-09-07
 
-| file or row range | why it is wrong | evidence | command |
+**Nothing on disk needs deleting.** The table this section was waiting for is empty, and that
+is the answer, not a gap. The one defect that can write a laboratory result that looks fine has
+never had a chance to fire: it lives in the cross-fitting pass, only the uncertainty runs use
+that pass, and not one uncertainty task has started. It is fixed now, before they run.
+
+##### D3a. The fifty laboratory failures — the logs are on disk, under a name no tool built
+
+**The cause is not lost.** `HANDOFF.md` says the output files are "genuinely gone, most likely
+because the scripts were rebuilt with a different output name afterwards". The second half is
+right and the first half is not.
+
+The laboratory scripts submitted on 2026-09-02 wrote `--output=val_<model>_%j.out`. For an array
+task `%j` is the task's **own internal job id**, which is `sacct`'s `JobIDRaw` and appears nowhere
+in `JobID` and nowhere in `squeue`. §13.18 records this as "a second defect, found while reading
+for this", and the scripts were changed to `%A_%a` during the recovery. So the scripts on disk
+carry the new name and the logs on disk carry the old one.
+
+`failed_tasks.py` built exactly one name, `<job name>_<array id>_<task>.out`. That file never
+existed for those tasks. **"25 log(s) NOT FOUND" was the tool, not the cluster.**
+
+**Fixed.** `slurm_jobs.py` now asks `sacct` for `JobIDRaw`, and `failed_tasks.py` tries both
+names and reports both when neither is there. An older `--sacct-file` capture is one field short
+and is padded rather than dropped.
+
+| | |
+|---|---|
+| proof | `python scripts/test_slurm_status_tools.py` — 77 checks, exit 0. Four are new: both names are offered in order, a log written under `%j` is found from the array index, its cause is read back, and a CONTROL showing that without `JobIDRaw` only one name exists, which is the behaviour that lost the logs |
+| what it does not do | it does not resubmit. Read the cause first |
+
+**What the fifty are.** Twenty-five cells, each failing twice — once in the breadth grid and once
+in the recovery that was meant to fix them.
+
+| | tasks | where |
+|---|---|---|
+| breadth grid, 2026-09-02 | 25 | `12971620` `12971621` `12971622` `12971626` indices 12–17, `12971624` index 2 |
+| the recovery, 2026-09-03 and 09-04 | 25 | `12979965`–`12979969`, plus `12975687` alone |
+
+Index 12–17 is `dataset = i / 6`, the third dataset, which is hERG; `val_gp-tanimoto` has three
+tasks rather than eighteen so its hERG one is index 2. The first 25 are the missing-cache deaths
+(§13.18, 2026-09-03) and the cache is present now, loading 1,415 molecules. **The second 25 are
+the ones nobody has a cause for**, and they are the ones the block below reads, because the
+recovery was run against an unpushed branch (§13.18 step 0) and at least one task went in under
+the script it was being recovered from.
+
+##### D3b. One bug can write a laboratory uncertainty result that looks complete
+
+**Where it is.** `_oof_predict` in the KIRBy runner catches a failed inner fold, prints a
+warning and carries on. The molecules that fold was holding keep the NaN they were initialised
+with. The block is then written with a row for **every** training molecule and a real number for
+only some of them.
+
+**Why nothing caught it.** `_assert_cell_counts` counts ROWS. The row count is full, so it
+passed, the task exited 0, and the merge marked the cell `TRUNCATED_OOF` **and also exited 0** —
+so every completeness check downstream read the run as finished.
+
+**Why it cannot be repaired by dropping the blank rows.** The inner split is scaffold-grouped, so
+a failed fold removes whole scaffold families, not a random sample of molecules.
+
+**Fixed in three places.**
+
+| where | what changed | proof |
+|---|---|---|
+| `KIRBy/tests/alternative_data_noise_robustness.py` | `_cells_short_of_real_values` counts real values per cell per column. A short count is printed as it is found and raises at the END of `run_dataset`, beside the two gates already there, so the rows survive for diagnosis and the job still exits non-zero | `cd KIRBy/tests && PYTHONPATH=$PWD python smoke/smoke_kirby_uncertainty.py` — 84 checks, exit 0 |
+| the same smoke file | forcing 2 of 3 inner folds to fail now expects a STOP. Its CONTROL prints the numbers: **120 rows written, 30 real uncertainties** — which is why counting rows reported success | same run; and with the gate removed the check goes red, run against a mutant copy through `KIRBY_PIPELINE` |
+| `slurm_scripts_uncertainty_rerun/merge_results.py` | exits 1 when any cell is not OK, and prints one `rm -r` line per unusable task directory with the reason beside it. **It deletes nothing** | `python scripts/test_uncertainty_job_scripts.py --kirby-dir <KIRBy>` — 8 checks, exit 0, the last one asserting the directory still exists after the merge ran |
+
+**The list of truncated cells is empty, and here is why that is a fact rather than an omission.**
+The breadth grid does not pass `--oof-folds`, and the runner's default is 0, so no laboratory
+accuracy task has ever written an out-of-fold row. Only the uncertainty runs pass `--oof-folds 5`,
+and none of their 378 tasks has started. **Nothing on disk can carry this defect. The fix lands
+before the run that would produce it.**
+
+##### D3c. The 378 uncertainty jobs — the reason given for withdrawing them is out of date
+
+`HANDOFF.md` says: *"Of the four models chosen, only the quantile forest reports both halves of
+its uncertainty per molecule."* §13.23 C4 says the three models that can do it are on neither
+list. **Both predate the author's decision of 2026-09-01**, and the run has been six models since.
+
+Read off `slurm_scripts_uncertainty_rerun/generate_scripts.py` and
+`scripts/uncertainty_decomposition.py` on 2026-09-07:
+
+| model in the run | data-noise half | model-uncertainty half | can it answer the per-molecule question |
 |---|---|---|---|
-| _to be filled_ | | | | |
+| QRF | per molecule | per molecule | **yes** |
+| BNN-Full-MVE | per molecule | per molecule | **yes** |
+| MLP-BNN-Full-MVE | per molecule | per molecule | **yes** |
+| NGBoost | per molecule | none | no — one fit, nothing to disagree with |
+| GP | one number per fit | per molecule | no |
+| VBLL-Full | one number per fit | per molecule | no |
+
+**Three of six, not one of four.** The two variance-head networks were added on 2026-09-01 for
+exactly this requirement, on both pipelines, and the generator's own note says so. The run as
+queued can answer the question it was submitted to answer, on two different network architectures
+plus a forest.
+
+**A second correction, to §13.27 D5.** It says *"the Gaussian process is only meant to run on PDV,
+so its ECFP4 and ChemBERTa jobs start and stop straight away"*. The generated script passes
+`--gp-reps "$rep"`, where `$rep` is the task's own representation — read it at
+`slurm_scripts_uncertainty_rerun/unc_gp.sh`, the line above `--results-root`. **No uncertainty
+task skips. All 378 do work.**
+
+**What is genuinely still open**, and it is smaller than "should they run at all": three more
+models on this roster report both halves per molecule and are in none of the 378 — `GP-Hetero`,
+`VBLL-Full-Hetero` and `MLP-VBLL-Full-Hetero`. Each is the same base model with a network
+predicting the observation noise for each molecule instead of one number per fit. The options and
+their prices are D3d.
+
+##### D3d. Whether to add a per-molecule-noise model, and what each costs
+
+One option per row. A task is one model, one dataset, one representation, one condition, sweeping
+that condition's levels; the two submissions together are seven conditions.
+
+| | what it does | what it costs |
+|---|---|---|
+| **1. Run the 378 as they are** | Three models of six answer the per-molecule question. Nothing to resubmit | The Gaussian process contributes only the model-uncertainty half. No change |
+| **2. Swap `VBLL-Full` for `VBLL-Full-Hetero`** | Same network, same cost, a noise head added, so its data half varies per molecule instead of being one number per fit | 63 tasks resubmitted, and the plain variational network's overconfidence — 0.27–0.51 of the truth inside one standard deviation against a target of 0.68 — stops being measured. That number is itself a finding |
+| **3. Swap `GP` for `GP-Hetero`** | The only Gaussian process that splits the two halves per molecule, and the cleanest separation measured in the roster | 63 tasks resubmitted. The plain Gaussian process is then absent from the uncertainty runs, and it is the one non-tree model that shows anything on the accuracy side |
+| **4. ADD `GP-Hetero` as a seventh model** | Nothing lost, the question answered on a fourth family | 63 new tasks and a seventh array per submission, on a queue where nothing has started yet |
+
+**Recommendation: 1 or 4.** Options 2 and 3 both delete a measurement to buy one, on a run whose
+whole point is that neither has been made yet. If a heteroscedastic Gaussian process is wanted,
+adding it costs 63 tasks and removes nothing.
+
+⚠️ **Whichever is chosen, this is not a `--runtime-selection` run.** The model is fixed in the
+generated script, so adding one means regenerating and submitting a new array — it cannot be
+edited into a queued task the way `deep_run_pairs.json` can.
+
+##### D3e. The walls and the partition, which is chat 1's to apply and chat 3's to answer
+
+The twelve arrays ask **1-12:59** for the quantile forest and **1-23:59** for the other five, on
+`medium`. Those are the five hand-typed constants §13.29 replaced. The generator now computes a
+wall from the fit count, and five of the six exceed `medium`'s 48 hours.
+
+| model | asks now | the generator's number | partition |
+|---|---|---|---|
+| QRF | 1-12:59 | 40:59:00 | medium |
+| BNN-Full-MVE | 1-23:59 | 51:59:00 | **long** |
+| GP | 1-23:59 | 68:59:00 | **long** |
+| MLP-BNN-Full-MVE | 1-23:59 | 78:59:00 | **long** |
+| VBLL-Full | 1-23:59 | 91:59:00 | **long** |
+| NGBoost | 1-23:59 | 193:59:00 | **long** |
+
+**Chat 3's answer: they run, and five of six need MORE wall, not less.** `scontrol` cannot raise
+a limit for its owner, so raising means regenerating and resubmitting — and that costs nothing
+here, because not one of the 378 has started. A task killed at its wall is not a clean loss
+either: `_flush_uncertainties` writes after every outer fold, so it leaves a partial cell that
+the coverage report has to catch.
+
+**The memory is not chat 3's to cut.** The 96 GB is this pipeline's own floor in
+`model_memory.json`, on the author's rule of 2026-09-04, and §13.23 B3 leaves it with them.
+
+##### D3f. Two things that are already clean
+
+- **No laboratory task ran under the old noise draw.** Checked 2026-09-07, the answer was zero.
+  §13.23 C3 is closed.
+- **The laboratory depth run repeats three conditions the breadth grid already runs.** It wastes
+  queue time and produces correct numbers, because the runner replaces its own rows.
+
+##### D3g. The completeness check could not see 654 laboratory tasks
+
+`check_runs_landed.py` is the command `HANDOFF.md` names as the only proof that nothing is
+missing. Two defects, both found and fixed on 2026-09-07:
+
+| | what it did | what it does now |
+|---|---|---|
+| `check_assay` took no stage | `--stage 1` and `--stage 2` asked the same question, the breadth grid. The laboratory depth run and censoring — 19 arrays and 327 tasks each — were counted **nowhere**: not landed, not missing | stage 2 is the depth run's three conditions on `deep_run_pairs.json`'s models crossed with its representations, plus censoring on `censoring_pairs.json`'s five named pairs. **1,026 cells at stage 1, 177 at stage 2** |
+| `check_uncertainty` expected four conditions | the main grid's four, against the seven the two submissions cover, so 216 cells of 378 — the three depth-only conditions were counted nowhere either | all seven, read from the generator's `KNOWN_CONDITIONS`. **378 cells, which is exactly the task count submitted** |
+
+Proof: `python scripts/test_check_runs_landed_selection.py` — 10 checks, exit 0. One of them
+fails if the four rosters ever stop multiplying out to 378.
+
+##### D3h. The block to paste — chat 3's questions, all of them
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+bash scripts/pull_safely.sh          # must move; a fix that is not pulled does not exist
+git log -1 --oneline
+
+# 1. THE FIFTY. The logs are under two naming schemes; this now tries both.
+python scripts/failed_tasks.py --since 2026-09-02 --width 300
+
+# 2. and if any still read as NOT FOUND, this is the raw form of the same question.
+#    JobIDRaw is the number the %j logs are named after.
+sacct -M arc -S 2026-09-02 -X -n -P \
+  --format=JobID,JobIDRaw,JobName,State,ExitCode,Elapsed \
+  | grep -E '^129(71620|71621|71622|71624|71626|75687|799[6-9])' | grep -v COMPLETED
+
+# 3. WHAT IS ON DISK for the laboratory. The path is two levels deep (13.18).
+ls /data/stat-ecr/scat9264/KIRBy/results/validation_rerun | wc -l
+wc -l /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/*/*/all_results.csv \
+  | sort -n | head -20
+
+# 4. THE UNCERTAINTY RUNS. Nothing has started, so this should say so plainly.
+squeue -u $USER -o "%.14i %.22j %.2t %.11M %.11l %.7m %R" | grep unc_
+ls /data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun 2>&1 | head
+
+# 5. PROVE NOTHING IS MISSING, laboratory side, both stages.
+python scripts/check_runs_landed.py --stage 1 --verbose \
+    --validation-dir /data/stat-ecr/scat9264/KIRBy/results/validation_rerun \
+    --uncertainty-dir /data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun
+python scripts/check_runs_landed.py --stage 2 --verbose \
+    --validation-dir /data/stat-ecr/scat9264/KIRBy/results/validation_rerun \
+    --uncertainty-dir /data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun
+```
+
+⚠️ **Confirm the two KIRBy paths before trusting an empty answer.** A wrong directory reports
+everything missing and reads like a disaster.
+
 
 #### D4. What the queued jobs are actually computing — CHAT 4
 

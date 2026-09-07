@@ -182,6 +182,21 @@ def main():
             skipped += 1
             continue
 
+        # ONE FILE, MORE THAN ONE CLEAN BLOCK. The deep run recomputes gaussian's
+        # clean level for the pairs it selects and APPENDS into the same
+        # anova_gaussian_*.csv the screen wrote, so a replicate can appear twice
+        # with slightly different numbers -- training on a different machine gives
+        # a slightly different network. Comparing a target's computed clean row
+        # against the newest block alone then calls the screen's own agreement a
+        # divergence, which is what stopped the whole copy on 2026-09-07
+        # (RERUN_PLAN.md 13.28). A target row is judged against EVERY clean row the
+        # reference holds for that replicate: matching any of them means it came
+        # from that run and agrees. Copies are still made from the newest.
+        by_iteration = defaultdict(list)
+        for r in clean:
+            by_iteration[r['iteration']].append(r)
+        clean = [rows[-1] for rows in by_iteration.values()]
+
         for condition in conditions:
             if condition == reference:
                 continue
@@ -204,23 +219,28 @@ def main():
             # anything, and the reference legitimately moves under it when the deep run
             # recomputes gaussian's clean level. See previously_copied().
             stale = []
+            refused = False
             for row in clean:
                 have = existing.get(row['iteration'])
                 if have is None:
                     continue
-                differs = [c for c in ACCURACY if have.get(c) != row.get(c)]
-                if not differs:
+                candidates = by_iteration[row['iteration']]
+                if any(all(have.get(c) == candidate.get(c) for c in ACCURACY)
+                       for candidate in candidates):
                     checked += 1
                     continue
                 if (target.name, row['iteration']) in copies:
                     stale.append(row['iteration'])
                     continue
+                differs = [c for c in ACCURACY if have.get(c) != row.get(c)]
                 checked += 1
                 disagreed += 1
+                refused = True
                 print(f"  DISAGREES  {target.name} replicate {row['iteration']}: "
-                      f"{', '.join(differs)} differ from {source.name}. The clean run is "
-                      f"supposed to be identical across conditions -- something adds noise "
-                      f"at level 0, or the seeds have diverged. Not copying anything here.")
+                      f"{', '.join(differs)} differ from every clean row {source.name} "
+                      f"holds for that replicate. The clean run is supposed to be "
+                      f"identical across conditions -- something adds noise at level 0, "
+                      f"or the seeds have diverged.")
 
             if stale:
                 print(f"  REFRESHED  {target.name}: {len(stale)} clean row(s) this script "
@@ -237,12 +257,20 @@ def main():
                     rewrite(target, target_header, rows_out)
                 refreshed += len(stale)
 
+            # A DISAGREEMENT REFUSES ITS OWN FILE, NOT THE WHOLE COPY. `disagreed`
+            # used to be one counter for the run, so the first bad file stopped
+            # every file after it -- on 2026-09-07 one neural model on ChemBERTa
+            # left every other condition without a clean row, and auc_norm is
+            # retention against that row, so those conditions produced nothing at
+            # all (RERUN_PLAN.md 13.28). The exit code is still 1, so nothing
+            # passes silently.
+            if refused:
+                print(f"  REFUSING  {target.name}: nothing copied into this file until "
+                      f"the disagreement above is explained. Every other file is "
+                      f"unaffected and is still being filled.")
+                continue
             if not missing:
                 continue
-            if disagreed:
-                print(f"  STOPPING: a computed clean row disagreed with the reference, so the "
-                      f"premise this copy rests on is false. Fix that first.")
-                return 1
 
             for row in missing:
                 new = dict(row)

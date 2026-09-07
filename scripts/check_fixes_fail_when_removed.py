@@ -336,6 +336,24 @@ CASES = [
   "    cover = _only_expected(cover, want, ('condition', 'rep', 'model'))\n",
   "",
   [sys.executable, f"{QSAR}/scripts/test_check_runs_landed_selection.py"]),
+
+ # The deep run appends a second clean block to the file the screen wrote, so a
+ # target row written by the screen matches the OLDER block. Judged against the
+ # newest block alone it reads as a seed divergence.
+ ("a clean row is judged against every block the reference holds",
+  f"{QSAR}/slurm_scripts_qm9_rerun/copy_zero_rows.py",
+  "                candidates = by_iteration[row['iteration']]\n",
+  "                candidates = [row]\n",
+  [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_copy_zero_rows.py"]),
+
+ # One counter for the whole run meant the first disagreeing file stopped every
+ # file after it, and auc_norm is retention against the clean row those files
+ # were waiting for.
+ ("a disagreement refuses its own file and no other",
+  f"{QSAR}/slurm_scripts_qm9_rerun/copy_zero_rows.py",
+  "            if refused:\n                print(f\"  REFUSING  {target.name}",
+  "            if disagreed:\n                print(f\"  REFUSING  {target.name}",
+  [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_copy_zero_rows.py"]),
 ]
 
 
