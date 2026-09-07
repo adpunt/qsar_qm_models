@@ -31,9 +31,15 @@ export CEN="$QSAR/censoring_pairs.json"
 # association, and breaks an exact tie towards stat-ecr; this study bills to stat-cadd.
 export ACCT="${ACCT:-stat-cadd}"
 # --emit does not measure the partition either -- it hard-codes medium unless
-# EMIT_PARTITION is set. The uncertainty runs are the only step that uses $PART; the
-# grids say --partition=long literally, because they carry walls past medium's ceiling.
-export PART="${PART:-medium}"
+# EMIT_PARTITION is set.
+#
+# `long`, from 2026-09-07. This said `medium` while the uncertainty walls were five
+# hand-typed constants, the largest 47:59, which fitted medium's 48-hour ceiling.
+# Computed from the fit count they are 40:59 for the quantile forest and 51 to 193
+# hours for the other five, so five of the six cannot run on medium at all
+# (RERUN_PLAN.md 13.27 D1). Every grid step already says --partition=long literally.
+# Nothing this study submits belongs on medium now.
+export PART="${PART:-long}"
 
 # --- the environment ----------------------------------------------------------
 # EVERY python command in 13.19 needs env_test, not the system Anaconda. Sourcing this
@@ -57,7 +63,7 @@ echo "QSAR  = $QSAR"
 echo "KIRBY = $KIRBY"
 echo "SEL   = $SEL"
 echo "CEN   = $CEN"
-echo "ACCT  = $ACCT      PART = $PART   (PART is used by the uncertainty runs only)"
+echo "ACCT  = $ACCT      PART = $PART   (long: five of the six uncertainty walls are past mediums 48h)"
 echo "python= $(command -v python)"
 echo "env   = ${CONDA_PREFIX:-NONE}"
 
