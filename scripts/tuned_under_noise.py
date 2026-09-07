@@ -85,6 +85,8 @@ def main():
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--condition', default='gaussian')
     ap.add_argument('--tag', default='noise')
+    ap.add_argument('--levels', nargs='+', type=float, default=None,
+                    help='Only these noise levels. Default is the whole grid.')
     ap.add_argument('--rank', type=int, default=1,
                     help='Which drawn setting to test: 1 is the winner, 3 the '
                          'third best on clean labels.')
@@ -120,7 +122,7 @@ def main():
     for rep in cli.reps:
         data0, _ = T.prepared_data(pat, rep, smiles, y, tr, va, te,
                                    cli.sample_size, cli.seed)
-        for level in LEVELS:
+        for level in (cli.levels or LEVELS):
             if level == 0.0:
                 y_tr, y_va = data0['y_train'], data0['y_val']
             else:

@@ -283,6 +283,80 @@ struct ProvRow {
     y_written: f32,
 }
 
+/// `zlib.crc32` — the reflected IEEE CRC-32, poly 0xEDB88320, init and final xor
+/// 0xFFFFFFFF. Transcribed rather than pulled in as a dependency because it is
+/// fifteen lines and this crate has no dev-dependencies.
+///
+/// It is here only to reproduce the pipeline's seed rule exactly; the numbers it
+/// returns are checked against Python's in `the_level_seed_rule_is_the_pipelines`.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for b in bytes {
+        crc ^= *b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+        }
+    }
+    !crc
+}
+
+/// The two seeds the pipeline hands the injector at one noise level, transcribed
+/// from `noise_seeds_for_level` in `scripts/process_and_train.py`:
+///
+///   shape_seed     = (iteration_seed * 1000003 + crc32(repr(float(level)))) & 0xFFFFFFFF
+///   selection_seed = iteration_seed
+///
+/// A gate about the level grid has to sweep the seeds the way the caller sweeps
+/// them, or it certifies a configuration nobody runs. This one used to hold
+/// `--seed` fixed at 42 across the whole grid, which is the one thing production
+/// never does, so the level-dependent affected set passed it green (§2.26a).
+///
+/// The level is passed as the string the injector is given. Every level literal in
+/// these gates is one Python's `repr(float(...))` returns unchanged ("0.0", "0.2",
+/// "0.25", "0.4", "0.5", "1.0"), so hashing the string is hashing what the pipeline
+/// hashes — checked case by case in `the_level_seed_rule_is_the_pipelines`.
+fn pipeline_seeds(iteration_seed: u64, level: &str) -> (u64, u64) {
+    let shape = (iteration_seed
+        .wrapping_mul(1_000_003)
+        .wrapping_add(crc32(level.as_bytes()) as u64))
+        & 0xFFFF_FFFF;
+    (shape, iteration_seed)
+}
+
+/// The transcription above is only worth anything if it returns what Python returns,
+/// so the values are pinned against `zlib.crc32` and `noise_seeds_for_level` run
+/// directly. If the pipeline's rule is ever changed this fails and says so, instead
+/// of the level-invariance gate quietly drifting onto seeds nobody uses.
+#[test]
+fn the_level_seed_rule_is_the_pipelines() {
+    // python3 -c "import zlib; print(zlib.crc32(b'0.2'))" etc.
+    for (level, want) in [
+        ("0.0", 4_143_187_202u32),
+        ("0.1", 2_180_199_828),
+        ("0.2", 419_062_830),
+        ("0.25", 1_484_774_405),
+        ("0.4", 4_053_385_499),
+        ("0.5", 2_258_563_469),
+        ("1.0", 4_147_539_765),
+    ] {
+        assert_eq!(crc32(level.as_bytes()), want, "crc32 of {level}");
+    }
+    // scripts/process_and_train.py noise_seeds_for_level(42, level).
+    for (level, want_shape) in [
+        ("0.0", 4_185_187_328u64),
+        ("0.1", 2_222_199_954),
+        ("0.2", 461_062_956),
+        ("0.25", 1_526_774_531),
+        ("0.4", 4_095_385_625),
+        ("0.5", 2_300_563_595),
+        ("1.0", 4_189_539_891),
+    ] {
+        let (shape, selection) = pipeline_seeds(42, level);
+        assert_eq!(shape, want_shape, "shape seed at level {level}");
+        assert_eq!(selection, 42, "the selection seed must not carry the level");
+    }
+}
+
 fn ok(out: &std::process::Output) {
     assert!(
         out.status.success(),
@@ -603,28 +677,45 @@ fn clean_validation_restores_untouched_validation() {
 ///
 /// So `--seed` moves here, exactly as it does in production, and only
 /// `--selection-seed` is pinned.
+///
+/// And it moves by the PIPELINE'S OWN RULE, which is the third version of this gate
+/// and the first one that gates the rule. The first held `--seed` at 42 across the
+/// whole grid. The second varied it, but through a hand-picked [42, 1042, 2042,
+/// 3042] — which exercises "some seed moved" rather than the map from level to seed
+/// that `noise_seeds_for_level` actually applies, so a change to that map would not
+/// have shown up here. This one calls the map (`pipeline_seeds`, checked digit for
+/// digit against Python in `the_level_seed_rule_is_the_pipelines`).
+///
+/// Confirmed to bite: pointing `scale_map`'s stream back at `spec.seed`, which is
+/// the state of the injector before `--selection-seed` existed, fails this gate on
+/// `grouped_wide` at the second level.
 #[test]
 fn the_noise_shape_is_bit_identical_across_levels_including_zero() {
     let f = fixture("shape");
+    // One replicate's seed, as `main()` fixes it before the level loop. Pinned rather
+    // than arbitrary: the fixture's 50-molecule validation split gives a grouped
+    // condition only ~44 effective observations, so its delivered dose is allowed a
+    // ±32% band and an occasional replicate lands a draw outside it — the binary's own
+    // dose gate then stops the run for a reason that has nothing to do with the column
+    // under test here. This one is checked to clear that band on every condition in
+    // `TYPES` at all four levels.
+    const REPLICATE_SEED: u64 = 42;
     for (name, args) in TYPES {
         let levels: &[&str] = if *name == "censoring" {
             &["0.0", "0.1", "0.25", "0.4"]
         } else {
             &["0.0", "0.2", "0.5", "1.0"]
         };
-        // Fixed constants, one per level. Fixed rather than arbitrary because the
-        // fixture's 50-molecule validation split gives a grouped condition only ~44
-        // effective observations, so its delivered dose is allowed a ±32% band and an
-        // occasional draw lands outside it — the binary's own dose gate then stops the
-        // run, for a reason that has nothing to do with the column under test here.
-        const SHAPE_SEEDS: [u64; 4] = [42, 1_042, 2_042, 3_042];
         let mut baseline: Option<HashMap<(String, usize), u32>> = None;
-        for (i, level) in levels.iter().enumerate() {
+        let mut shape_seeds: HashSet<u64> = HashSet::new();
+        for level in levels.iter() {
             let mut a = args.to_vec();
             a.extend_from_slice(&["--noise-level", level]);
-            // A different shape seed per level, as the pipeline hands out; one
-            // selection seed for the whole sweep, as the pipeline also does.
-            ok(&f.run_seeded(SHAPE_SEEDS[i], 42, &a));
+            // The pipeline's pair: a shape seed derived from the level, one selection
+            // seed for the whole sweep.
+            let (shape_seed, selection_seed) = pipeline_seeds(REPLICATE_SEED, level);
+            shape_seeds.insert(shape_seed);
+            ok(&f.run_seeded(shape_seed, selection_seed, &a));
             let shape: HashMap<(String, usize), u32> = f
                 .provenance()
                 .iter()
@@ -641,6 +732,16 @@ fn the_noise_shape_is_bit_identical_across_levels_including_zero() {
                 ),
             }
         }
+        // If the level ever stopped reaching the shape seed the loop above would be
+        // four identical runs and would pass on nothing. That is the failure the old
+        // fixed `--seed 42` was, so it is asserted rather than assumed.
+        assert_eq!(
+            shape_seeds.len(),
+            levels.len(),
+            "{}: the pipeline's rule gave the same shape seed at two different levels, \
+             so this gate is no longer sweeping anything",
+            name
+        );
     }
 }
 
