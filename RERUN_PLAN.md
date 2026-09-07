@@ -11534,7 +11534,7 @@ tell us.
 | C4 | **§13.17 A5 is open while the compute it decides is already queued.** The three models that can measure the aleatoric/epistemic split per molecule — `heteroscedastic_gp` and the two variational networks with a noise head — are on neither uncertainty run's pair list. Both uncertainty submissions are in the queue now | **the author** |
 | C5 | **§13.17 A1 is open** — which number replaces the Caco-2 anchor. The evidence is in (§13.20 decision 2); the choice is not made. Still one line outstanding: print the clean Caco-2 training label SD once | **the author** |
 | C6 | **`13033488 paper_analysis` is running against an incomplete grid.** It is `slurm_scripts_analysis/run_paper_analysis.sh`, the author's own decision report — not a mystery job. But Sort & Slice is missing from every replicate 1–9 of the main grid, so one representation of six is absent from anything it reads | **me** — `check_runs_landed.py` should be run before it, not after |
-| C7 | **Uncommitted work is sitting in the tree and cannot reach the cluster.** `rust/tests/noise_gates.rs` (the level-seed gates) and `scripts/tuned_under_noise.py` (a `--levels` flag). The cluster's only route in is `git pull --ff-only` | **me** — run the rust gates, then commit or say why not |
+| ~~C7~~ | ✅ **CLOSED 2026-09-07.** The level gates held `--seed` fixed at 42 across the whole grid, which is the one thing production never does — so the level-dependent affected set passed green on a configuration nobody runs. The gates derive both seeds the way the caller does now, and the transcribed CRC-32 is pinned against `zlib.crc32` case by case. **30 gates pass, up from 15.** Committed and pushed with the `--levels` flag | done |
 
 #### D. Stale in this document, corrected 2026-09-07
 
