@@ -13,7 +13,9 @@
     "log IS readable is matched on those alone, so a task that died on something else",
     "is never swept in by its position in the array. `task_rule` is used ONLY when the",
     "log cannot be read, which is the case on a laptop and where a rebuilt script",
-    "changed the --output name."
+    "changed the --output name. `error_source` is the file those strings are raised",
+    "from, and the test checks each one is still in it, so a reworded error message",
+    "cannot silently stop matching."
   ],
   "fixed_causes": [
     {
@@ -22,9 +24,10 @@
       "fix": "Those three are dropped from every representation, found by the property rather than by name, after the shuffle and the split, so nothing already on disk changes.",
       "commit": "62f1fe2",
       "proof": "python scripts/test_sns_zero_exclusion.py",
+      "error_source": "scripts/process_and_train.py",
       "error_matches": [
         "Sort & Slice produced an all-zero count vector",
-        "Sort & Slice produced a molecule with no enumerable substructures"
+        "A molecule with no enumerable substructures"
       ],
       "job_name_matches": "^qm9[0-9]_",
       "task_rule": {

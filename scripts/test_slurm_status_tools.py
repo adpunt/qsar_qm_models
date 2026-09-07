@@ -360,6 +360,15 @@ def main():
           err is None and bool(entries) and all(e['verified'] for e in entries),
           err or [e['why'] for e in entries if not e['verified']])
 
+    # AND THE ERROR TEXT IT MATCHES ON MUST STILL BE THE TEXT THE CODE RAISES. A
+    # reworded message would stop matching in silence, and every task would fall
+    # through to the index rule without anything saying so.
+    for e in entries:
+        src = (HERE.parent / e['error_source']).read_text()
+        for m in e['error_matches']:
+            check(f"{e['id']}: {e['error_source']} still raises {m[:44]!r}",
+                  m in src)
+
     def stub_git(rc_exists, rc_ancestor):
         class R:
             def __init__(self, rc): self.returncode = rc
