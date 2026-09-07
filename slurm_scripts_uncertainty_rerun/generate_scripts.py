@@ -156,6 +156,34 @@ MODELS = {
     # theirs from.
     'BNN-Full-MVE':     (2, 8, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
     'MLP-BNN-Full-MVE': (2, 8, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
+    # THE SEVENTH MODEL, added 2026-09-07 on the author's decision.
+    #
+    # Of the six above, three report a data-noise value AND a model-uncertainty
+    # value for each molecule separately: the quantile forest and the two
+    # variance-head networks. NGBoost has no model-uncertainty term at all -- one
+    # fit, nothing to disagree with (RERUN_PLAN.md 2.30). The plain Gaussian
+    # process and the variational network each fit ONE observation-noise number
+    # for the whole model, so their data-noise half is identical on every
+    # molecule and its correlation with per-molecule injected noise is zero
+    # however good the model is.
+    #
+    # This is the same exact Gaussian process with a small network predicting the
+    # observation noise for each molecule, so its two halves come apart. It is
+    # the only route to that in the Gaussian-process family, and it is the model
+    # whose separation measured cleanest in the roster (5.5i). Without it the
+    # per-molecule question is answered by a forest and two networks and by no
+    # kernel model.
+    #
+    # It costs nothing already queued: 3 datasets x 3 representations x the
+    # conditions of each submission, so 27 tasks in the first and 36 in the
+    # second, added as one more array to each. Nothing is removed.
+    #
+    # The wall and the memory need no new numbers. `GP-Hetero` is already in the
+    # laboratory generator's per-fit table at 2339.0 seconds per 1,000 molecules
+    # -- twice the plain Gaussian process, for the noise network and its Adam
+    # epochs -- and `gp_args` below gates it by the FAMILY, `model.startswith
+    # ('GP-')`, so it inherits --gp-reps and the RBF kernel without a change.
+    'GP-Hetero':      (1, 8, 'the same exact Gaussian process with a network predicting the observation noise per molecule, so its data-noise and model-uncertainty halves come apart. The cleanest separation measured in the roster (5.5i), and the only kernel model that can be asked the per-molecule question'),
 }
 # MEMORY COMES FROM model_memory.json, WITH THIS PIPELINE'S OWN FLOOR ON TOP.
 #
@@ -788,14 +816,28 @@ def main():
     # 36 indices per array would have queued, started and exited on the out-of-range
     # guard. The generator knows each count; the operator should never have to.
     # The QM9 and laboratory generators both emit one of these.
+    # THE DEFAULT PARTITION FOLLOWS THE WALLS THIS RUN ASKS FOR.
+    #
+    # It was `medium` whatever the walls said. The generator PRINTED a warning at
+    # the end saying to submit with PART=long, and that warning is on the screen
+    # of whoever regenerated -- not in the file the operator pastes. With any
+    # array over medium's 48 hours, every one of those sbatch lines is refused at
+    # submit time, and the run reads as "submitted 1 of 7".
+    _over = [h for _, _, _, h, _, _ in written if h > MEDIUM_PARTITION_HOURS]
+    _part = 'long' if _over else 'medium'
+    _why = (f'# PARTITION: {len(_over)} of {len(written)} arrays ask more than '
+            f"medium's {MEDIUM_PARTITION_HOURS}h, so the default here is `long`."
+            if _over else
+            f"# PARTITION: every array fits medium's {MEDIUM_PARTITION_HOURS}h.")
     submit = ['#!/bin/bash',
               f'# Submit the uncertainty runs: one array per model, each at its OWN range.',
               f'# {len(written)} arrays, {total_tasks} tasks, conditions:'
               f' {" ".join(conditions)}.',
               '# Written by generate_scripts.py -- regenerate rather than edit.',
               '# The scripts carry no partition and refuse to run without one.',
+              _why,
               'ACCT=${ACCT:-stat-cadd}',
-              'PART=${PART:-medium}',
+              'PART=${PART:-' + _part + '}',
               'ok=0; bad=0',
               'echo "submitting to account=$ACCT partition=$PART"',
               '']

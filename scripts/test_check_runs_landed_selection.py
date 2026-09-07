@@ -146,29 +146,41 @@ def check_the_laboratory_runs_are_counted():
 
 
 def check_every_uncertainty_condition_is_counted():
-    """The uncertainty runs submitted seven conditions; the check expected four.
+    """The uncertainty runs submit seven conditions; the check expected four.
 
-    Six models x three datasets x three representations x seven conditions is
-    378, which is the task count of the two submissions. Reading only the main
-    grid's four gave 216 and left the three depth-only conditions -- 162 cells --
-    neither landed nor missing.
+    Reading only the main grid's four left the three depth-only conditions
+    counted nowhere -- neither landed nor missing.
+
+    The total is not pinned to a constant. It was 378 at six models, and adding
+    `GP-Hetero` on 2026-09-07 made it 441; a number written here would have to be
+    edited every time the roster moves, which is how a check stops describing the
+    run. What IS pinned is that the two submissions add up to the whole: the
+    first runs the conditions the generator defaults to and the second runs the
+    rest, and no condition may be in both or in neither.
     """
     gen = K._generator('unc',
                        'slurm_scripts_uncertainty_rerun/generate_scripts.py')
     if gen is None:
         raise SystemExit('FAIL: could not read the uncertainty generator')
-    n_cells = (len(gen.DATASETS) * len(gen.MODELS) * len(gen.REPS)
-               * len(gen.KNOWN_CONDITIONS))
-    if n_cells != 378:
+    per_condition = len(gen.DATASETS) * len(gen.MODELS) * len(gen.REPS)
+    first = [c for c in gen.MAIN_GRID_CONDITIONS if c != 'censoring']
+    second = ['censoring'] + list(gen.DEEP_RUN_CONDITIONS)
+    if sorted(first + second) != sorted(gen.KNOWN_CONDITIONS):
         raise SystemExit(
-            f'FAIL: the uncertainty grid is {n_cells} cells, and the two '
-            f'submissions of 2026-09-06 were 162 + 216 = 378 tasks. One of the '
-            f'four rosters has moved and the completeness check no longer '
-            f'describes what was queued.')
-    if len(gen.MAIN_GRID_CONDITIONS) >= len(gen.KNOWN_CONDITIONS):
-        raise SystemExit('FAIL: this check is meaningless unless the depth-only '
-                         'conditions are outside the main grid')
-    return 2
+            f'FAIL: the two submissions run {sorted(first + second)} between '
+            f'them, against the {sorted(gen.KNOWN_CONDITIONS)} the completeness '
+            f'check expects. A condition in neither is counted nowhere.')
+    if set(first) & set(second):
+        raise SystemExit(f'FAIL: {sorted(set(first) & set(second))} is in both '
+                         f'submissions, so its cells are expected twice')
+    total = per_condition * len(gen.KNOWN_CONDITIONS)
+    if total != per_condition * len(first) + per_condition * len(second):
+        raise SystemExit('FAIL: the submissions do not add to the expected grid')
+    print(f'  uncertainty: {len(gen.MODELS)} models x {len(gen.DATASETS)} '
+          f'datasets x {len(gen.REPS)} reps = {per_condition} tasks per '
+          f'condition; {per_condition * len(first)} in the first submission, '
+          f'{per_condition * len(second)} in the second, {total} expected cells')
+    return 3
 
 
 if __name__ == '__main__':

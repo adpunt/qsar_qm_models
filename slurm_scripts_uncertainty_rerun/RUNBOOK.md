@@ -101,8 +101,16 @@ Their role is in question A and as the leakage check. Preflight section 4b print
 the per-(dataset, condition) count of distinct noise scales, so a condition that
 is flat where it should not be is visible before the queue is spent.
 
-**Scope:** 3 datasets × 6 models × 3 representations × 3 conditions × 7 noise
-levels × 5 scaffold folds. **6 array scripts**, 27 tasks each — **162 tasks**, **34,020 model fits**.
+**Scope:** 3 datasets × 7 models × 3 representations × 3 conditions × 7 noise
+levels × 5 scaffold folds. **7 array scripts**, 27 tasks each — **189 tasks**, **39,690 model fits**.
+
+⚠️ **Seven models from 2026-09-07, not six.** `GP-Hetero` was added on the author's decision. Of
+the six before it, only the quantile forest and the two variance-head networks report a
+measurement-error value AND a model-uncertainty value for each molecule separately; the plain
+Gaussian process and the variational network each fit one measurement-error number for the whole
+model. `GP-Hetero` is the same exact Gaussian process with a small network predicting that number
+per molecule, so it is the only kernel model that can be asked the per-molecule question. It adds
+27 tasks here and 36 in §6b, and removes nothing.
 
 ⚠️ **This paragraph said 4 scripts, 210 tasks and 44,100 fits until 2026-09-04**, from when the
 run was four models on seven conditions with VBLL narrowed to ChemBERTa. Three things changed
@@ -393,8 +401,9 @@ bash tests/slurm_scripts/where_to_submit.sh --emit   # prints: <account> <partit
 ```
 
 Bill to `stat-cadd`. **The partition is `long`, corrected 2026-09-07** — this run's longest wall
-is 193 hours and `medium` stops at 48. Five of the six arrays are past that; only the quantile
-forest at 40 hours would fit. The generator prints which ones every time it runs. Do not take the
+is 193 hours and `medium` stops at 48. Six of the seven arrays are past that; only the quantile
+forest at 40 hours would fit. `submit_all.sh` defaults `PART` to `long` for that reason, and says
+so in a comment at the top. The generator prints which ones every time it runs. Do not take the
 partition from `--emit`: it does not measure the partition at all, it returns a hard-coded
 `medium`.
 
@@ -418,7 +427,12 @@ cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
 sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_qrf.sh
 sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_ngboost.sh
 sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_gp.sh
+sbatch --account=$ACCT --partition=$PART --array=0-26%6 unc_gp_hetero.sh
 ```
+
+> **Four scripts in tier 1, not three.** `unc_gp_hetero.sh` was added 2026-09-07. It asks
+> `--time=135:59:00`, twice the plain Gaussian process, because it carries a noise network and its
+> Adam epochs on top of the same exact fit.
 
 > `0-26` is 3 datasets × 3 representations × 3 conditions. Each script's own header prints the
 > range it was generated for — use that, not this line, if you regenerated with a different
@@ -589,7 +603,7 @@ training rows.
 ## Cost and the one thing to decide
 
 Each task is 7 noise levels × 5 scaffold folds × (1 + 5) fits = **210 model
-fits**, against 35 without cross-fitting. 162 tasks, **34,020 fits**.
+fits**, against 35 without cross-fitting. 189 tasks, **39,690 fits**.
 
 ⚠️ **The `--time` requests are sized for a grid that no longer exists.** 36 h for
 QRF and 47 h for the rest were set when a task was 11 levels, i.e. 330 fits; it is
