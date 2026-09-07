@@ -362,6 +362,15 @@ CASES = [
   "                refusals.append((target.name, len(missing)))\n",
   "",
   [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_copy_zero_rows.py"]),
+
+ # resubmit_selected.sh is the only place in the study that writes individual array
+ # indices rather than a range, so it is the only place a typo can queue an
+ # out-of-range task -- which happened three times before submit_all.sh existed.
+ ("the widening submitter sends a model's own indices",
+  f"{QSAR}/slurm_scripts_qm9_rerun/generate_scripts.py",
+  "            idx = sorted(c * len(_rl) + _rl.index(r)",
+  "            idx = sorted(c * len(_rl) + _rl.index(r) + 1",
+  [sys.executable, f"{QSAR}/scripts/test_submit_all_ranges.py"]),
 ]
 
 

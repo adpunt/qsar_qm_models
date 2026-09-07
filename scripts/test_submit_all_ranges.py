@@ -20,6 +20,7 @@ All three generators now write submit_all.sh. This checks that what it submits m
 what each script will accept, across every form of every generator, so the operator
 never types a range again.
 """
+import json
 import re
 import subprocess
 import sys
@@ -49,6 +50,20 @@ FORMS = [
     ('uncertainty, the four that follow', UNC,
      ['--conditions', 'censoring', 'student_t_nu5', 'outlier_p10', 'laplace']),
 ]
+
+def _selected_pairs(spec):
+    """The (model, representation) pairs a selection file names — both shapes.
+
+    The deep run's file is a model list crossed with a representation list; the
+    censoring file names its pairs outright, because a cross product cannot express
+    five. Same two shapes the generator reads.
+    """
+    named = spec.get('generator_pairs') or spec.get('pairs')
+    if named:
+        return [(p[0], p[1]) for p in named]
+    return [(m, r) for m in spec.get('generator_labels', [])
+            for r in spec.get('representations', [])]
+
 
 def tasks_in(text):
     """The number of array tasks a generated script will accept.
@@ -107,7 +122,8 @@ def main():
                 failures.append(f'{label}: submit_all.sh submits nothing')
                 continue
             job_scripts = {p.name for p in out.glob('*.sh')} - {
-                'submit_all.sh', 'preflight.sh', 'smoke_test.sh'}
+                'submit_all.sh', 'preflight.sh', 'smoke_test.sh',
+                'resubmit_selected.sh'}
             submitted = {name for _, name in lines}
             for missing in sorted(job_scripts - submitted):
                 failures.append(f'{label}: {missing} is generated but in no sbatch line')
@@ -127,6 +143,60 @@ def main():
                         f'{label}: submit_all.sh submits {name} at 0-{last} '
                         f'({int(last) + 1} tasks) but the script holds {want}; '
                         f'{abs(want - int(last) - 1)} task(s) differ')
+
+            # THE WIDENING SUBMITTER, WHICH NAMES INDIVIDUAL INDICES.
+            #
+            # submit_all.sh sends a whole array and this file sends the tasks of one
+            # model that a widened selection has just added. It is the only place in
+            # the study where an index list is written out, so it is the only place a
+            # typo could queue an out-of-range task -- the failure that happened three
+            # times before submit_all.sh existed. Every index is checked against the
+            # task count the SCRIPT ITSELF computes, and against that script's own
+            # CONDS and REPS arrays, which is where the mapping actually lives.
+            widen = out / 'resubmit_selected.sh'
+            if widen.exists():
+                for arr, name in re.findall(
+                        r'--array=([0-9,]+)%\S*\s+([A-Za-z0-9_.-]+\.sh)',
+                        widen.read_text()):
+                    script = out / name
+                    if not script.exists():
+                        failures.append(f'{label}: resubmit_selected.sh submits '
+                                        f'{name}, which was not written')
+                        continue
+                    body = script.read_text()
+                    want = tasks_in(body)
+                    idx = [int(i) for i in arr.split(',')]
+                    checked += 1
+                    over = [i for i in idx if want is not None and i >= want]
+                    if over:
+                        failures.append(
+                            f'{label}: resubmit_selected.sh sends {name} task(s) '
+                            f'{over}, and the script holds {want} -- an out-of-range '
+                            f'task exits 2 and computes nothing')
+                    if len(set(idx)) != len(idx):
+                        failures.append(f'{label}: resubmit_selected.sh repeats an '
+                                        f'index for {name}')
+                    # The script maps index -> (rep, condition) itself. Rebuild that
+                    # map and check every index really is a selected representation.
+                    reps_m = re.search(r'^REPS=\((.*?)\)$', body, re.M)
+                    conds_m = re.search(r'^CONDS=\((.*?)\)$', body, re.M)
+                    sel_file = next((e for e in extra if e.endswith('.json')), None)
+                    if reps_m and conds_m and sel_file:
+                        reps_l = reps_m.group(1).split()
+                        conds_l = conds_m.group(1).split()
+                        spec = json.loads(Path(sel_file).read_text())
+                        model = name[len('qm9_s2_'):-len('.sh')] \
+                            if name.startswith('qm9_s2_') else None
+                        want_reps = {r for m, r in _selected_pairs(spec)
+                                     if m == model and r in reps_l}
+                        got = {(reps_l[i % len(reps_l)],
+                                conds_l[i // len(reps_l)]) for i in idx}
+                        expect = {(r, c) for r in want_reps for c in conds_l}
+                        if want_reps and got != expect:
+                            failures.append(
+                                f'{label}: resubmit_selected.sh decodes {name} to '
+                                f'{sorted(got - expect)} that the selection does not '
+                                f'name, and misses {sorted(expect - got)}')
 
     if failures:
         print(f'FAIL — {len(failures)} problem(s):\n')

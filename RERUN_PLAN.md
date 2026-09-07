@@ -16644,6 +16644,81 @@ move 1 fails for it too.
 many rows appended to the same nine files — which is the duplication D2f and §13.30 already
 carry. It buys tasks that this queue will actually start.
 
+#### D2u. `medium` and `long` are the same nodes. Move 1 is dead; here is move 2
+
+`sinfo` on 2026-09-07 returns the same seven rows for both partitions, node for node and CPU
+for CPU — 219 `alloc` at 10512/0/0/10512, 26 `mix` with 702 idle, one `idle` node with 48. The
+two partitions differ in their time limit and in nothing else, so moving a job between them
+changes only what wall it is allowed to ask.
+
+There is idle capacity — about 750 cores of roughly 14,900 — and an 8-core, 64 GB task fits it.
+What decides whether the scheduler puts one there is the **backfill window**: how long a gap it
+can fill without delaying a reserved higher-priority job. `13042881` at `5:59:00` was placed
+inside that window today. `18:59:00` was not, in either partition.
+
+**So make the task fit the window rather than argue with it.** Split the replicates. Every task
+reads its own `--repetitions` and `--start-iteration`, so three arrays cover the same replicates
+one third at a time, with no overlap and no gap.
+
+| | replicates per task | training runs | measured |
+|---|---|---|---|
+| main grid as queued | 9 | 63 | 3.96 h |
+| main grid split | 3 | 21 | **1.35 h** |
+| deep run as queued | 10 | 70 | 4.39 h |
+| deep run split | 4 then 3 then 3 | 28, 21, 21 | **1.85 h, 1.35, 1.35** |
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd $QSAR/slurm_scripts_qm9_rerun          # submit HERE so the .out files land where the tools look
+
+# main grid: replicates 1-3, 4-6, 7-9
+for START in 1 4 7; do
+    python generate_scripts.py --stage 1 --models gauche_rbf \
+        --replicates 3 --start-iteration $START --max-hours 48 \
+        --out-dir $QSAR/slurm_scripts_qm9_split
+    sbatch --account=stat-cadd --partition=medium --time=5:59:00 \
+        --array=0,1,4,6,7,10,12,13,16%4 \
+        $QSAR/slurm_scripts_qm9_split/qm9_s1_gauche_rbf.sh
+done
+
+# deep run: replicates 0-3, 4-6, 7-9
+for SPEC in "4 0" "3 4" "3 7"; do
+    set -- $SPEC
+    python generate_scripts.py --stage 2 --models gauche_rbf \
+        --reps ecfp4 pdv mhggnn avalon chemberta sns \
+        --replicates $1 --start-iteration $2 --drop-shortlisted \
+        --runtime-selection $SEL --max-hours 48 \
+        --out-dir $QSAR/slurm_scripts_qm9_split
+    sbatch --account=stat-cadd --partition=medium --time=5:59:00 \
+        --array=0,1,4,6,7,10,12,13%4 \
+        $QSAR/slurm_scripts_qm9_split/qm9_s2_gauche_rbf.sh
+done
+
+squeue -u $USER -o "%.14i %.20j %.2t %.11M %.11l %R" | grep gauche_rbf
+```
+
+Then, and only once all six report `Submitted batch job`:
+
+```bash
+scancel 13042879 13042880
+```
+
+**Four things that make this safe.**
+
+- **The index mapping does not move.** Both generated scripts still write
+  `REPS=(ecfp4 pdv mhggnn avalon chemberta sns)` and the deep run still writes six conditions,
+  so `0,1,4,6,7,10,12,13,16` names the same nine cells it named in `12980590`.
+- **Regenerating into one directory is fine.** SLURM copies the batch script at submit time, so
+  the next loop pass overwriting the file cannot reach a job already queued.
+- **`--drop-shortlisted` is required on the deep run** and means only what it says: this
+  invocation builds one model's script, so the generator's rule that a deep run must contain
+  `ngboost` does not apply to it. It changes nothing about what the deep run runs.
+- **`--time` on the `sbatch` line overrides the script's own `#SBATCH --time`,** which the
+  generator writes as 10:59:00 and 13:59:00 for these shapes.
+
+**What it costs.** Three startups of 164 seconds instead of one, per submission, and three times
+as many appended rows in the same nine files — the duplication D2f and §13.30 already carry.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
