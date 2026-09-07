@@ -16713,10 +16713,38 @@ from 18 to **7**, THIN from 4 to **3**, MISSING unchanged at 33.
 
 **Thirteen computed clean rows disagreed and their files were refused.** The count is in the
 summary; the thirteen names were printed several hundred SKIP lines earlier and had scrolled
-away. Fixed: every refused file is now named again at the end, beside the counts, with how
-many replicates it still lacks. Guard: the same `test_copy_zero_rows.py`, registered in
-`check_fixes_fail_when_removed.py`. **Which thirteen is not yet known** — it needs one
-`--dry-run`, which writes nothing.
+away. Fixed: every refused file is now named again at the end, beside the counts. Guard: the
+same `test_copy_zero_rows.py`, registered in `check_fixes_fail_when_removed.py`.
+
+**Answered on the cluster, 2026-09-07.** The thirteen rows sit in THREE files, and all three
+are `censoring`:
+
+| file | replicates left with no clean row |
+|---|---|
+| `anova_censoring_ecfp4_heteroscedastic_gp.csv` | 0 |
+| `anova_censoring_pdv_dnn_bnn_full_mve.csv` | 0 |
+| `anova_censoring_pdv_gauche_rbf.csv` | 0 |
+
+**The refusals cost no data.** Each of those files already holds its own computed clean row
+for every replicate, so nothing was waiting on a copy. The same run reports
+`0 clean row(s) would be copied`: **the copy step is finished.** Nothing at stage 2 is now
+blocked on a missing clean row.
+
+**Why the disagreement appears in censoring and nowhere else.** Censoring computes its OWN
+clean row as its control (§3.1f) — it is the only condition besides `gaussian` that does. So
+it is the only place where two independently computed clean rows exist for one pair, and the
+only place this script can compare two computations rather than a computation against a copy.
+Every other condition has one clean row and it came from `gaussian`.
+
+⚠ **What the disagreement means is NOT established.** At level 0 nothing is clipped, so the
+censoring clean run and the gaussian clean run train the same model on the same molecules
+under the same replicate seed and should agree to the last digit. All three files name a model
+whose fit is driven by gradient descent — the heteroscedastic Gaussian process runs 100 Adam
+epochs for its noise network, `gauche_rbf` fits its kernel the same way, `dnn_bnn_full_mve` is
+a network — while the models that agree include `rf` and `svm`, which are deterministic. That
+pattern is **unverified**: nobody has printed the two values side by side. It is the same
+question as the `29 duplicated cell-and-replicate(s) ... largest 0.0399` warning below, and
+AUC_norm divides by exactly these rows.
 
 **What is left at stage 2 after the copy.** Seven PARTIAL and three THIN, all named:
 

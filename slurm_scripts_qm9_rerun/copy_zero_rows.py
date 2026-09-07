@@ -309,11 +309,16 @@ def main():
 
     if refusals:
         print()
-        print(f"  {len(refusals)} file(s) REFUSED, and each still has no clean row to "
-              f"divide by. These are the only ones that need a decision:")
+        print(f"  {len(refusals)} file(s) REFUSED -- a clean row they COMPUTED matches "
+              f"no clean row the reference holds. These are the only ones that need a "
+              f"decision:")
         for name, still_missing in refusals:
-            print(f"      {name}   {still_missing} replicate(s) still without a "
-                  f"clean row")
+            cost = (f"{still_missing} replicate(s) left with no clean row"
+                    if still_missing else
+                    "nothing was waiting on a copy here -- every replicate already "
+                    "has its own computed clean row, so the refusal costs no data; "
+                    "the disagreement itself is the finding")
+            print(f"      {name}   {cost}")
 
     if log_rows and not args.dry_run:
         log = results / LOG_NAME
