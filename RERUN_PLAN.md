@@ -16087,7 +16087,17 @@ completed.
 down, so submitting them as they are puts `15-14:59:00` and the old memory back into the queue
 and undoes what `scontrol` achieved. One regeneration serves chat 2 and chat 5 both.
 
+⚠️ **SOURCE `runenv.sh` FIRST, and this cost a round trip on 2026-09-07.** `$QSAR` and `$SEL`
+are shell variables that die with the session, and nothing in this plan sets them except STEP 0.
+A block pasted without them ran `cd /slurm_scripts_qm9_rerun`, then `generate_scripts.py` from
+whatever directory the shell happened to be in, and every `sbatch` reported
+`Unable to open file`. Nothing was regenerated and nothing was submitted, so no harm — but
+**every block in this section that names `$QSAR`, `$SEL`, `$CEN`, `$ACCT` or `$PART` must carry
+the source line with it.**
+
 ```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+
 cd $QSAR/slurm_scripts_qm9_rerun
 rm -f qm9_s1_*.sh submit_all.sh
 python generate_scripts.py --stage 1 --max-hours 720
@@ -16128,19 +16138,37 @@ roughly thirteen hours. A job killed at its limit writes nothing.
 
 #### D2i. The last thing chat 2 owes
 
-```bash
-# censoring runs gauche_rbf on PDV, which is where the out-of-fold pass runs.
-# It was not in round one. Read its name rather than assuming the job id.
-sacct -S 2026-09-06 -X -n -P --format=JobID,JobName,State,Elapsed \
-  | grep gauche_rbf | grep -v 12980590 | grep -v 12986326 | sort
+✅ **The screen array has started.** `12971618_0` and `_1` were RUNNING at `15:59:00` and 64 GB
+on 2026-09-07, with `[2-17]` pending. That is the second of chat 2's four items closed, and
+proved from `squeue` rather than from having run `scontrol`. Both are ECFP4 and PDV, so both run
+the out-of-fold pass, and the checkout has `c223ec3`.
 
-# after the two submissions, prove the new limits went in with them
+✅ **Censoring's array for this model is `12986345`, six tasks, and only ONE does work.**
+Indices 0, 2, 3, 4 and 5 completed in 44 seconds to 3:09 — the run-time selection gate letting
+them out, because `censoring_pairs.json` names `gauche_rbf` on PDV alone. Index 1 is PDV and was
+1:15:32 in. It is not in any resubmission line above and nothing has checked whether it is
+repeating the crash.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd $QSAR
+
+# the one censoring task that does work. 0 means clean.
+printf "12986345_1: "
+grep -c "out-of-fold scoring for" \
+  slurm_scripts_qm9_censoring/qm92_gauche_rbf_12986345_1.out
+
+# after the three submissions, prove the new limits went in with them
 squeue -u $USER -o "%.14i %.22j %.2t %.11M %.11l %.7m %R" | grep gauche_rbf
 
 # and prove nothing is missing
 python scripts/check_runs_landed.py --stage 1 --verbose | grep -i gauche_rbf
 python scripts/check_runs_landed.py --stage 2 --verbose | grep -i gauche_rbf
 ```
+
+If that `grep -c` cannot find the file, censoring's scripts are in
+`slurm_scripts_qm9_rerun` rather than `slurm_scripts_qm9_censoring`; `ls */qm92_gauche_rbf_12986345_1.out`
+says which.
 
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
