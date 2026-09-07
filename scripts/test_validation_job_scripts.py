@@ -54,7 +54,15 @@ REPO = HERE.parent
 GENERATOR = REPO / 'slurm_scripts_validation_rerun' / 'generate_scripts.py'
 SETTLED = json.loads((REPO / 'noise_conditions.json').read_text())
 
-INVOCATION = 'python alternative_data_noise_robustness.py'
+# The runner call, matched by the SCRIPT NAME rather than by a fixed prefix.
+# It was `'python alternative_data_noise_robustness.py'` until 2026-09-07, and the
+# generator started emitting `python -u ...` on 2026-09-01 (commit f4c6cfb). The
+# string stopped matching, `command_line_of` raised, and four of these ten checks
+# reported "no runner invocation found" for six days while the scripts were fine.
+# A test that can be broken by an unbuffering flag was testing the wrong thing.
+INVOCATION = 'alternative_data_noise_robustness.py'
+INVOKE_RE = re.compile(r'\bpython[0-9.]*\s+(?:-\S+\s+)*'
+                       + re.escape(INVOCATION))
 
 
 def find_kirby(explicit=None):
@@ -110,10 +118,57 @@ def command_line_of(text):
     joined = text.replace('\\\n', ' ')
     for line in joined.splitlines():
         stripped = line.strip()
-        if stripped.startswith('#') or INVOCATION not in stripped:
+        if stripped.startswith('#'):
             continue
-        return stripped.split(INVOCATION, 1)[1]
+        hit = INVOKE_RE.search(stripped)
+        if hit:
+            return stripped[hit.end():]
     raise AssertionError('no runner invocation found in the generated script')
+
+
+def datasets_of(text):
+    """The command-line dataset names one array script can be given.
+
+    Since 2026-09-01 the generator writes ONE array per model and picks the
+    dataset from the task index -- `DATASETS=(logd caco2 herg)` at the top and a
+    `case` that turns each into the name argparse accepts. Before that there was
+    one script per dataset with the name written into the command line. So the
+    command line now holds `"$dataset_cli"`, and a checker that reads it literally
+    is reading a shell variable.
+    """
+    arr = re.search(r'^DATASETS=\(([^)]*)\)', text, re.M)
+    names = arr.group(1).split() if arr else []
+    cli = dict(re.findall(r'^\s*(\w+)\)\s*dataset_cli="([^"]+)"', text, re.M))
+    return [cli.get(n, n) for n in names] or ['logd']
+
+
+def expanded_command_lines(text):
+    """Every command line one array script can actually run, variables resolved.
+
+    A generated script chooses its dataset, its representation and its Gaussian
+    process flags from the task index at run time. Handing argparse the raw
+    `"$dataset_cli"` proves nothing, so each variable is replaced by a value the
+    script itself can produce.
+    """
+    line = command_line_of(text)
+    reps = re.search(r'^REPS=\(([^)]*)\)', text, re.M)
+    rep = reps.group(1).split()[0] if reps else 'ECFP4'
+    model = re.search(r'--models\s+(\S+)', line)
+    model = model.group(1) if model else ''
+    gp = ''
+    for pats, flags in re.findall(r'^\s*([\w|.-]+)\)\s*GP_FLAGS="([^"]*)"', text, re.M):
+        if model in pats.split('|'):
+            gp = flags
+            break
+    out = []
+    for ds in datasets_of(text):
+        one = line
+        one = one.replace('"$dataset_cli"', ds).replace('$dataset_cli', ds)
+        one = one.replace('$GP_FLAGS', gp)
+        one = one.replace('"$rep"', rep).replace('$rep', rep)
+        one = one.replace('"../$OUT_ROOT"', '../results/x').replace('$OUT_ROOT', 'results/x')
+        out.append(one)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -125,17 +180,21 @@ def every_emitted_command_parses(runner):
     parser = runner.build_parser()
     with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp)
+        n = 0
         for name in scripts:
-            argv = shlex.split(command_line_of(Path(tmp, name).read_text()))
-            try:
-                with contextlib.redirect_stderr(io.StringIO()) as err:
-                    parser.parse_args(argv)
-            except SystemExit:
-                raise AssertionError(
-                    f"{name} emits a command line the runner rejects:\n"
-                    f"    {' '.join(argv)}\n"
-                    f"    {err.getvalue().strip().splitlines()[-1]}")
-    return f"{len(scripts)} scripts, every command line accepted by the runner's own parser"
+            for line in expanded_command_lines(Path(tmp, name).read_text()):
+                argv = shlex.split(line)
+                n += 1
+                try:
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        parser.parse_args(argv)
+                except SystemExit:
+                    raise AssertionError(
+                        f"{name} emits a command line the runner rejects:\n"
+                        f"    {' '.join(argv)}\n"
+                        f"    {err.getvalue().strip().splitlines()[-1]}")
+    return (f"{len(scripts)} scripts, {n} command lines (one per dataset the array "
+            f"can pick), every one accepted by the runner's own parser")
 
 
 def the_smoke_test_parses_too(runner):
@@ -146,8 +205,14 @@ def the_smoke_test_parses_too(runner):
         generate(tmp)
         text = Path(tmp, 'smoke_test.sh').read_text()
         joined = text.replace('\\\n', ' ')
-        calls = [l.strip().split(INVOCATION, 1)[1] for l in joined.splitlines()
-                 if INVOCATION in l.strip() and not l.strip().startswith('#')]
+        calls = []
+        for l in joined.splitlines():
+            s = l.strip()
+            if s.startswith('#'):
+                continue
+            hit = INVOKE_RE.search(s)
+            if hit:
+                calls.append(s[hit.end():])
         assert len(calls) == 2, f'expected two runner calls in the smoke test, found {len(calls)}'
         for c in calls:
             argv = shlex.split(re.sub(r'\$TESTDIR', '/tmp/x', c))
@@ -241,7 +306,9 @@ def the_conditions_are_stated_not_inherited():
     with tempfile.TemporaryDirectory() as tmp:
         scripts, out = generate(tmp)
         for name in scripts:
-            argv = shlex.split(command_line_of(Path(tmp, name).read_text()))
+            # Expanded, because the raw line ends `--conditions ... $GP_FLAGS` and an
+            # unexpanded variable reads as a fourth condition name.
+            argv = shlex.split(expanded_command_lines(Path(tmp, name).read_text())[0])
             assert '--conditions' in argv, (
                 f"{name} states no --conditions, so it would inherit the runner's own "
                 f"NOISE_CONDITIONS literal. That literal is how outlier_p05 got in.")
@@ -268,16 +335,28 @@ def the_dataset_name_and_the_path_name_are_both_right(runner):
         "generator's two-column name table needs revisiting")
     with tempfile.TemporaryDirectory() as tmp:
         scripts, _ = generate(tmp)
-        herg = [s for s in scripts if s.endswith('_herg.sh')]
-        assert herg, 'no hERG scripts were generated'
-        for name in herg:
-            argv = shlex.split(command_line_of(Path(tmp, name).read_text()))
-            assert argv[argv.index('--datasets') + 1] == 'herg_ki', \
-                f'{name} passes the wrong dataset name'
-            root = argv[argv.index('--results-root') + 1]
-            assert root.endswith('_herg'), \
-                f'{name} writes to {root}, which merge_results.py will not match'
-    return f"{len(herg)} hERG scripts: herg_ki on the command line, _herg in the path"
+        # There are no `val_*_herg.sh` files any more -- one array per model picks
+        # its dataset from the task index (commit f4c6cfb, 2026-09-01). The property
+        # is unchanged: `herg` in the path, `herg_ki` on the command line.
+        checked = 0
+        for name in scripts:
+            text = Path(tmp, name).read_text()
+            arr = re.search(r'^DATASETS=\(([^)]*)\)', text, re.M)
+            assert arr, f'{name} names no DATASETS array, so no task can pick one'
+            names = arr.group(1).split()
+            assert 'herg' in names, (
+                f"{name} does not offer hERG at all; its datasets are {names}")
+            assert 'herg_ki' not in names, (
+                f"{name} puts herg_ki in DATASETS, so OUT_ROOT would end _herg_ki and "
+                f"merge_results.py would not match it")
+            assert re.search(r'^\s*herg\)\s*dataset_cli="herg_ki"', text, re.M), (
+                f"{name} does not turn herg into herg_ki, and argparse rejects herg")
+            assert re.search(r'^OUT_ROOT=.*_\$\{dataset\}"?\s*$', text, re.M), (
+                f"{name} does not end OUT_ROOT with the path-side dataset name")
+            checked += 1
+        assert checked, 'no scripts were generated'
+    return (f"{checked} array scripts: herg on the path side, herg_ki on the "
+            f"command line, chosen from the task index")
 
 
 def every_script_carries_all_three_guards():

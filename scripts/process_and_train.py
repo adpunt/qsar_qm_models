@@ -1185,9 +1185,16 @@ def split_qm9(qm9, args, files):
     # cross-representation tables stop comparing the same molecules. Building it is one
     # Morgan pass over the training split plus a sort; on a 10,000-molecule sample that
     # is seconds, and it is a cost every Sort & Slice job already paid.
+    #
+    # SETS, NOT LISTS. `index in train_idx` on an 8,000-entry list is a scan, and this
+    # function runs once per (noise level, replicate) -- 7 x 9 = 63 times on the main
+    # grid. Measured on a 10,000-molecule sample: 1.55 s per pass against the list,
+    # 0.005 s against the set. There are four such passes below, and every
+    # representation now pays them, not only Sort & Slice.
+    train_set, val_set, test_set = set(train_idx), set(val_idx), set(test_idx)
     ecfp_featuriser = None
     for index, data in enumerate(qm9[:args.sample_size]):
-        if index in train_idx:
+        if index in train_set:
             mols_train.append(Chem.MolFromSmiles(data.smiles))
     ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train,
                                                            max_radius = 2,
@@ -1232,18 +1239,31 @@ def split_qm9(qm9, args, files):
     # THE GUARD STAYS. It is what caught this, and it now has nothing left to catch.
     dropped_sns = []
     for index, data in enumerate(qm9[:args.sample_size]):
-        if index not in train_idx and index not in val_idx and index not in test_idx:
+        if index not in train_set and index not in val_set and index not in test_set:
             continue
         mol = Chem.MolFromSmiles(data.smiles)
         if mol is None:
             continue
-        if not np.any(np.asarray(ecfp_featuriser(mol))):
+        try:
+            vec = ecfp_featuriser(mol)
+        except RuntimeError:
+            # The featuriser itself raises for a molecule with no enumerable
+            # substructures at all -- RDKit parses '' into a valid Mol with no atoms,
+            # the case its own comment names. split_qm9 is called OUTSIDE the
+            # per-replicate try in main(), so letting that escape kills the whole task:
+            # exactly the failure this exclusion exists to remove, moved to a new line.
+            # A molecule that cannot be featurised cannot be represented, which is the
+            # same verdict as an all-zero vector.
+            dropped_sns.append((index, data.smiles))
+            continue
+        if not np.any(np.asarray(vec)):
             dropped_sns.append((index, data.smiles))
     if dropped_sns:
         drop = {i for i, _ in dropped_sns}
         train_idx = [i for i in train_idx if i not in drop]
         val_idx = [i for i in val_idx if i not in drop]
         test_idx = [i for i in test_idx if i not in drop]
+        train_set, val_set, test_set = set(train_idx), set(val_idx), set(test_idx)
         print(f"  Sort & Slice cannot represent {len(dropped_sns)} molecule(s) at "
               f"SNS_DIM={SNS_DIM}. Dropped from EVERY representation, so the "
               f"cross-representation tables compare the same molecules:")
@@ -1272,12 +1292,21 @@ def split_qm9(qm9, args, files):
         smiles_randomized = None
         mol = None
 
+        if index not in train_set and index not in val_set and index not in test_set:
+            # Dropped by the exclusion above, or never in a split at all. NOTHING below
+            # may run for such a molecule. Avalon and ECFP4 carry their own all-zero
+            # RuntimeError guards, and a raise here escapes split_qm9 and kills the
+            # whole task -- so a molecule being thrown away could still take the job
+            # down from a different featuriser. The old code featurised first and let
+            # the `category == "excluded"` test at the write decide.
+            continue
+
         category = "excluded"
-        if index in train_idx:
+        if index in train_set:
             category = "train"
-        elif index in test_idx:
+        elif index in test_set:
             category = "test"
-        elif index in val_idx:
+        elif index in val_set:
             category = "val"
 
         # The SMILES canonicalisation cache was READ here and never written --
@@ -1347,8 +1376,11 @@ def split_qm9(qm9, args, files):
             elif category == "val":
                 successful_val_idx.append(index)
 
-    if 'sns' in args.molecular_representations:
-        del mols_train
+    # Unconditional now. mols_train is built on every run, not only when Sort & Slice
+    # is asked for, because the exclusion above needs the featuriser on every run.
+    # Leaving this gated held 8,000 RDKit molecules alive on the other five
+    # representations.
+    del mols_train
 
     return (qm9, successful_train_idx, successful_test_idx, successful_val_idx,
             build_scaffold_groups(written_canonical))

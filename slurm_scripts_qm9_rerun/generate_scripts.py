@@ -225,18 +225,117 @@ for _m in _PAIRS['models']:
 # levels.
 OOF_FOLDS_SCORED = {'ngboost': 3}
 
-# THE MEASURED HOURS, AND THE MARGIN. See RERUN_PLAN.md 13.24a.
+# ===========================================================================
+# THE WALL CLOCK RULE. See RERUN_PLAN.md 13.24a.
+# ===========================================================================
 #
-# model_hours.json holds one entry per model: the hours per 110 training runs per fit,
-# read off the longest task that model actually ran on ARC, together with the task it
-# came from and how many fits that task did. It is data, not a decision -- re-run
-# scripts/measure_walls.py and raise any model whose longest observed task now exceeds
-# what the file records. Never lower one below what has been observed.
+# A wall has to do two things at once, and they pull opposite ways.
 #
-# 2.0x rather than 1.25x: a wall has to be big enough that the job does not die and
-# small enough that SLURM can backfill it. Twice the worst of fifteen real tasks does
-# both. It turns the sum of the QM9 requests from 2,244 hours into 241.
-WALL_MARGIN = 2.0
+#   Big enough that the job is not killed. A job killed at the clock loses
+#   everything it has done, after days of queueing, with no partial credit.
+#   Small enough that SLURM can backfill it into a gap. A request nobody can fit
+#   sits on (Priority) and never starts at all.
+#
+# ONE MULTIPLIER CANNOT DELIVER BOTH, because the numbers it multiplies are not
+# equally trustworthy. Measured on ARC 2026-09-07:
+#
+#   * The quantile forest's table entry was ACCURATE -- the table said 6 hours
+#     per 110 runs, ARC says 6.07. A 1.25x margin on an accurate rate leaves 29%
+#     for node-to-node variation. Its main-grid task ran 20:52 against a 1-02:59
+#     wall: 1.29x, one slow node from death.
+#   * Fourteen of the other eighteen entries were over by more than 5x, because
+#     they are LAPTOP timings taken at the model's worst representation. NGBoost
+#     asked 22 days for a task measured at hours. Those walls are safe by
+#     ACCIDENT, and they cannot backfill.
+#
+# Raising the single multiplier to 2.0 fixes the first and not the second, and it
+# introduces a third fault: it applies the same 2.0 to rates that are not
+# measurements. NGBoost's rate comes from a task that had NOT FINISHED, which is
+# a lower bound, not a measurement. gauche_rbf's comes from 4 completed tasks of
+# 18, in an array where 8 failed -- and it implies 15 seconds for an exact
+# Gaussian-process fit against 2,855 seconds for the same capped fit in
+# results/tuning_local/timing.csv, a factor of 190 that nothing here can settle.
+#
+# AND THE FOUR THAT FINISHED ARE THE CHEAP ONES. Only 3 of gauche_rbf's 6
+# representations are settled uncertainty pairs, so 9 of its 18 tasks do 6 fits
+# and 9 do one. The bug that killed the other 8 was IN the out-of-fold pass, so
+# the tasks that died are the 6-fit ones and the tasks that finished are the
+# 1-fit ones. A rate read off them, then divided by 6 as though they had done the
+# expensive pass, is about 6x too low before the 190x is even counted. This is
+# what a coverage test catches that a task count alone does not.
+#
+# SO: price the wall from the best evidence there is, and pick the MARGIN by how
+# good that evidence is. Three grades, and every run prints the grade it used.
+#
+#   measured   -- an ARC rate from at least MIN_TASKS_FOR_A_RATE finished tasks,
+#                 covering at least half the array, so the longest task in the
+#                 array has probably been seen. Margin 2.0.
+#   partial    -- an ARC rate, but from a task that has not finished, or from too
+#                 few of the array for the longest task to have been seen. The
+#                 rate is a lower bound. Margin 3.0, and see the floor below.
+#   unmeasured -- no ARC rate at all. The table's laptop number, margin 2.5.
+#
+# THE FLOOR UNDER A PARTIAL RATE, AND WHY IT IS A MEASUREMENT AND NOT A GUESS.
+# Doubling a lower bound is not a margin. For a model whose table entry is a real
+# timing row of that same model on this laptop, there is a second, independent
+# price: the laptop hours divided by the smallest speed-up ARC has ever shown
+# over this laptop. That ratio is computed below from every model where a laptop
+# row and a trusted ARC rate both exist -- ARC has never been slower -- so it
+# rests on measurement, and it tightens on its own as more tasks finish. A
+# partial model asks the LARGER of its own lower bound and that floor.
+#
+# HOW TO TIGHTEN IT. Re-run scripts/measure_walls.py once the still-running tasks
+# end and the gauche_rbf failures are re-run, then regenerate. Nothing here needs
+# editing: a model moves from `partial` to `measured` when its own array does.
+WALL_MARGIN = 2.0            # grade `measured`
+WALL_MARGIN_PARTIAL = 3.0    # grade `partial`  -- two unknowns, not one
+WALL_MARGIN_GUESS = 2.5      # grade `unmeasured`
+
+# NOTHING IS EVER ASKED FOR ONE HOUR. A one-hour request is what the laboratory
+# side gave val_svm, whose longest task ran 0:54 -- 1.13x, and that was a floor
+# rounding up, not a calculation. Two hours is the smallest wall this study asks.
+WALL_FLOOR_HOURS = 2
+
+# A rate needs three finished tasks before it is a rate, and those tasks have to
+# be enough of the array that the SLOWEST one has probably been among them. One
+# wall covers the whole array, so it has to fit the worst task in it, and the
+# representations differ by up to 29.6x within a single model
+# (results/tuning_local/timing.csv, NGBoost: PDV 183.9 s, ChemBERTa 5443.5 s).
+MIN_TASKS_FOR_A_RATE = 3
+MIN_ARRAY_FRACTION = 0.5
+
+# An exact Gaussian process factorises an n x n matrix, so an inner fold that
+# trains on (k-1)/k of the molecules costs ((k-1)/k)^3, not 1. Charging six
+# full-price fits over-prices these three by about 1.7x. Only used on a price
+# built from the table's per-fit number; a measured ARC rate keeps the accounting
+# it was measured under, or it stops reproducing its own task.
+CUBIC_MODELS = {'gauche', 'gauche_rbf', 'heteroscedastic_gp'}
+
+# MODELS WHOSE TABLE HOURS ARE A REAL TIMING ROW OF THAT SAME MODEL.
+#
+# Eleven reproduce exactly from results/tuning_local/timing.csv and
+# timing_recovered.csv as (worst representation's seconds per fit at sample size
+# 10000) / 3600 * 110. gauche_rbf's 87 is that model's own laptop fit -- 11,695.3 s
+# at 8,000 training molecules -- rescaled cubically to the 5,000 cap.
+#
+# qrf IS NOT IN THIS SET, and it is not an oversight. Its 6 is an ARC number
+# already (canary job 12925392), so it is not a second, independent opinion about
+# how fast ARC is -- putting it in would compare ARC with itself and report a
+# speed-up of 1.0, which would then be applied to every laptop number in the file.
+#
+# Everything NOT in this set says DERIVED in its own note in MODELS: its hours
+# were scaled off another model. A derivation is not a second opinion, so it is
+# never used as a floor under a measurement.
+LAPTOP_TIMED = {
+    'rf', 'xgboost', 'lgb', 'svm', 'ngboost', 'dnn', 'mlp',
+    'dnn_bnn_full', 'mlp_bnn_full',
+    'dnn_bnn_full_variational', 'mlp_bnn_full_variational',
+    'gauche_rbf',
+}
+# How each grade reads in a sentence, so the error message is English.
+ARTICLE = {'measured': 'a measured', 'partial': 'a LOWER-BOUND',
+           'unmeasured': 'an UNMEASURED'}
+
 _HOURS_FILE = Path(__file__).resolve().parent.parent / 'model_hours.json'
 try:
     MEASURED_HOURS = json.loads(_HOURS_FILE.read_text())['models']
@@ -244,6 +343,83 @@ except (OSError, ValueError, KeyError):
     # Missing or unreadable: fall back to the table's guesses rather than refusing to
     # generate. The summary below says which models had no measurement.
     MEASURED_HOURS = {}
+
+
+def wall_grade(model):
+    """How good is the evidence behind this model's rate? `measured`, `partial`
+    or `unmeasured`.
+
+    Missing metadata answers `partial`, never `measured`. A rate whose entry does
+    not say how many tasks it came from is a rate nobody has checked the coverage
+    of, and the safe reading of silence is the weaker one.
+    """
+    entry = MEASURED_HOURS.get(model) or {}
+    if not entry.get('hours_per_110'):
+        return 'unmeasured'
+    if entry.get('still_running'):
+        return 'partial'
+    done = entry.get('completed_tasks')
+    total = entry.get('tasks_in_the_measured_array')
+    if not done or not total:
+        return 'partial'
+    if done < MIN_TASKS_FOR_A_RATE or done < MIN_ARRAY_FRACTION * total:
+        return 'partial'
+    return 'measured'
+
+
+def slowest_observed_speedup(pool):
+    """The smallest speed-up ARC has ever shown over this laptop, measured.
+
+    The hours column in MODELS is a laptop timing; model_hours.json's is ARC. For
+    every model where both exist and the ARC rate is graded `measured`, divide
+    one by the other. Dividing a laptop number by the smallest of those ratios
+    is therefore an upper bound on the ARC rate that rests on measurement rather
+    than on a multiplier somebody picked.
+
+    Returns 1.0 -- assume no speed-up, which is the safe direction -- if nothing
+    has been measured both ways yet.
+    """
+    ratios = []
+    for model, spec in pool.items():
+        if model not in LAPTOP_TIMED or wall_grade(model) != 'measured':
+            continue
+        arc = (MEASURED_HOURS.get(model) or {}).get('hours_per_110') or 0.0
+        if arc > 0 and spec[2] > 0:
+            ratios.append(spec[2] / arc)
+    return min(ratios) if ratios else 1.0
+
+
+def wall_hours(model, table_hours_per_110, runs_per_task, n_inner, oof_folds,
+               speedup):
+    """Hours to request for one QM9 array, and the grade that decided it.
+
+    `n_inner` is the number of out-of-fold refits a training run does, so a run
+    costs (1 + n_inner) fits. `oof_folds` is how many folds those inner models
+    are cut from, which is what makes an inner fit cheaper than a full one for a
+    cubic model. `speedup` comes from slowest_observed_speedup().
+    """
+    grade = wall_grade(model)
+    entry = MEASURED_HOURS.get(model) or {}
+    inner = (((oof_folds - 1) / oof_folds) ** 3) if model in CUBIC_MODELS else 1.0
+    full_fits = 1 + n_inner                 # the accounting an ARC rate carries
+    cheap_fits = 1 + n_inner * inner        # what a cubic model's folds cost
+
+    if grade == 'measured':
+        hours = (entry['hours_per_110'] * runs_per_task * full_fits / 110
+                 * WALL_MARGIN)
+    elif grade == 'partial':
+        lower_bound = (entry['hours_per_110'] * runs_per_task * full_fits / 110
+                       * WALL_MARGIN_PARTIAL)
+        if model in LAPTOP_TIMED:
+            floor = (table_hours_per_110 / speedup) * runs_per_task * cheap_fits / 110
+            hours = max(lower_bound, floor)
+        else:
+            hours = lower_bound
+    else:
+        hours = (table_hours_per_110 * runs_per_task * cheap_fits / 110
+                 * WALL_MARGIN_GUESS)
+    return max(WALL_FLOOR_HOURS, math.ceil(hours)), grade
+
 
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
@@ -1451,6 +1627,9 @@ def main():
     written = []
     grand = 0
     grand_runs = 0
+    # The laptop-to-ARC ratio is a property of the whole roster, not of one
+    # model, so it is computed once here and passed into each wall.
+    speedup = slowest_observed_speedup(pool)
     for model, (flags, tier, hours_per_110, note, model_reps) in chosen.items():
         # EVERY MODEL THAT EMITS A PER-MOLECULE UNCERTAINTY IS CROSS-FITTED.
         # Settled by the author 2026-08-28.
@@ -1562,33 +1741,31 @@ def main():
         # appears in the literal command and reading the flags would size every
         # script for one fit. One wall clock covers the whole array, so it has to
         # be the worst task in it: a task on a settled pair.
-        fits_per_run = 1 + (oof_scored or args.oof_folds) if unc_reps else 1
+        n_inner = (oof_scored or args.oof_folds) if unc_reps else 0
+        fits_per_run = 1 + n_inner
 
-        # THE RATE COMES FROM MEASUREMENT WHERE THERE IS ONE, NOT FROM THE TABLE.
+        # THE WALL, AND THE GRADE OF THE EVIDENCE THAT SET IT.
         #
-        # `hours_per_110` in MODELS above is a hand-written guess, and several of its
-        # entries say DERIVED in their own comment, which means nobody timed them.
-        # Measured against real tasks on 2026-09-07 (RERUN_PLAN.md 13.24a): fourteen
-        # of nineteen are over by more than 5x and the worst -- gauche_rbf -- by 190x,
-        # so those jobs ask for weeks, fit no backfill gap and sit on (Priority).
-        #
-        # AND THE ONE ACCURATE GUESS IS THE DANGEROUS ONE. qrf's 6 is right; the
-        # measurement says 6.07. A 1.25x margin on a guess that is already 10x too big
-        # is accidentally safe, but 1.25x on an ACCURATE estimate leaves 29% of
-        # headroom on a runtime that varies with the node, and a job killed at its
-        # wall has no partial credit. qrf asked 1-02:59 against a measured 20:52.
-        #
-        # So: measured rate where model_hours.json has one, the table's guess where it
-        # does not, and a 2.0x margin either way.
-        measured = MEASURED_HOURS.get(model)
-        rate = measured['hours_per_110'] if measured else hours_per_110
-        hours = max(1, math.ceil(
-            rate * runs_per_task * fits_per_run / 110 * WALL_MARGIN))
+        # The rule is at the top of this file, beside WALL_MARGIN, with the
+        # measurements that forced it. In one line: an ARC rate from enough
+        # finished tasks gets 2.0x; an ARC rate that is only a lower bound gets
+        # 3.0x and a floor built from this model's own laptop timing divided by
+        # the smallest speed-up ARC has ever shown; no ARC rate at all gets the
+        # laptop number at 2.5x.
+        hours, grade = wall_hours(model, hours_per_110, runs_per_task, n_inner,
+                                  args.oof_folds, speedup)
         if hours > args.max_hours:
             raise SystemExit(
                 f"ERROR: {model} needs {hours}h ({runs_per_task} training runs x "
-                f"{fits_per_run} fits) but --max-hours is {args.max_hours}.\n"
-                f"       medium is 2 days, long is 30 (RERUN_PLAN.md 2.8i).\n"
+                f"{fits_per_run} fits, wall priced from {ARTICLE[grade]} rate) but "
+                f"--max-hours "
+                f"is {args.max_hours}.\n"
+                + (f"       That wall rests on the LAPTOP number in MODELS, because "
+                   f"{_HOURS_FILE} has no ARC rate for {model}.\n"
+                   f"       If the file is missing, restore it -- it is tracked, and "
+                   f"without it every wall is priced from a guess at "
+                   f"{WALL_MARGIN_GUESS}x.\n" if grade == 'unmeasured' else '')
+                + f"       medium is 2 days, long is 30 (RERUN_PLAN.md 2.8i).\n"
                 f"       Either submit this tier to long with --max-hours 720, or cut "
                 f"the replicate count.\n"
                 f"       Silently capping the request is what would get the job killed "
@@ -1610,7 +1787,7 @@ def main():
             n_lev=n_lev, runs=runs_per_task, unc_block=unc_block,
             last=n_tasks - 1, throttle=args.throttle, script_name=script_name))
         (out / script_name).chmod(0o755)
-        written.append((tier, script_name, model, hours, n_tasks, len(reps)))
+        written.append((tier, script_name, model, hours, n_tasks, len(reps), grade))
 
     # THE SUBMITTER, SO NOBODY EVER TYPES AN ARRAY RANGE AGAIN.
     #
@@ -1634,7 +1811,7 @@ def main():
               'ok=0; bad=0',
               'echo "submitting to account=$ACCT partition=$PART throttle=$THROTTLE"',
               '']
-    for _, nm, m, h, nt, nr in written:
+    for _, nm, m, h, nt, nr, _g in written:
         submit.append(f'# {nm}: {nt} tasks, {nr} representation(s), --time={h}:59:00')
         submit.append(
             f'if sbatch --account=$ACCT --partition=$PART '
@@ -1673,25 +1850,49 @@ def main():
         rows = [w for w in written if w[0] == tier]
         if rows:
             print(f"\n  Tier {tier} ({name}):")
-            for _, nm, m, h, nt, nr in rows:
-                unmeasured = 'UNMEASURED WALL' in pool[m][3]
+            for _, nm, m, h, nt, nr, grade in rows:
+                marker = {'measured': '',
+                          'partial': '   <- rate is a LOWER BOUND',
+                          'unmeasured': '   <- wall not measured'}[grade]
                 print(f"    {nm:36s} {m:26s} {nr} reps  {nt:3d} tasks  "
-                      f"--time={h}:59:00" + ("   <- wall not measured" if unmeasured else ""))
+                      f"--time={h}:59:00{marker}")
 
-    # NAME THE WALLS THAT REST ON NOTHING, EVERY TIME, AT THE END WHERE IT IS READ.
+    # NAME EVERY WALL THAT IS NOT A MEASUREMENT, EVERY RUN, AT THE END WHERE IT
+    # IS READ.
     #
-    # The four under-requested walls found on 2026-08-31 were all guesses that had
-    # been sitting in this file since its first commit, and nothing printed said
-    # so. A guess is not a defect; a guess that looks like a measurement is.
-    guessed = sorted({w[2] for w in written if 'UNMEASURED WALL' in pool[w[2]][3]})
-    if guessed:
-        print(f"\n  ⚠ {len(guessed)} of these wall clocks are NOT measured: "
-              f"{', '.join(guessed)}")
-        print(f"    Every other entry comes from results/tuning_local/timing*.csv. "
-              f"These five have no timing row at any sample size.")
-        print(f"    gauche_rbf's guess was 7.6x too small, and 'gauche' and "
-              f"'heteroscedastic_gp' are exact Gaussian processes of the same size,")
-        print(f"    so time one fit of each before trusting their walls.")
+    # The four under-requested walls found on 2026-08-31 were all guesses that
+    # had been sitting in this file since its first commit, and nothing printed
+    # said so. A guess is not a defect; a guess that looks like a measurement is.
+    #
+    # THIS BLOCK HAD NEVER PRINTED. Until 2026-09-07 it tested for the literal
+    # string 'UNMEASURED WALL' in a model's note, and no note has ever contained
+    # it -- six say 'DERIVED'. RERUN_PLAN.md 13.24 recorded "the generator names
+    # the five that are still guesses, every run" as a delivered guarantee. It
+    # did not. It now reads the grade the wall was actually priced at, which
+    # cannot go stale because it is the same value the wall came from.
+    print(f"\n  Wall clocks: ARC has been at least {speedup:.2f}x faster than the "
+          f"laptop on every model measured both ways,")
+    print(f"    so a laptop timing divided by {speedup:.2f} is an upper bound on "
+          f"the ARC rate. Margins: {WALL_MARGIN}x measured, "
+          f"{WALL_MARGIN_PARTIAL}x lower bound, {WALL_MARGIN_GUESS}x unmeasured.")
+    for label, text in [
+            ('partial',
+             'the rate is a LOWER BOUND -- the task had not finished, or too '
+             'few of the array did for the slowest task to have been seen. '
+             'Priced at the larger of that bound and this model\'s own laptop '
+             'timing. Re-run scripts/measure_walls.py and regenerate to tighten.'),
+            ('unmeasured',
+             'no ARC rate at all. Priced from the laptop number in MODELS, which '
+             'for a DERIVED entry was scaled off another model.')]:
+        named = sorted({w[2] for w in written if w[6] == label})
+        if named:
+            print(f"\n  ⚠ {len(named)} wall clock(s) graded {label}: "
+                  f"{', '.join(named)}")
+            print(f"    {text}")
+            for m in named:
+                arc = (MEASURED_HOURS.get(m) or {}).get('hours_per_110')
+                print(f"      {m:26s} table {pool[m][2]:>6} h/110   ARC "
+                      + (f"{arc:.4f} h/110" if arc else "none"))
 
 
 if __name__ == '__main__':

@@ -106,13 +106,16 @@ scripts and runs the command line each one emits through the runner's own
 argument parser.
 """
 import argparse
+import importlib.util
 import json
+import math
 from pathlib import Path
 
 # Models that emit a per-molecule uncertainty. Must match UNCERTAINTY_MODELS in
 # KIRBy/tests/alternative_data_noise_robustness.py.
 MODELS = {
-    # name          : (tier, cpus, hours, note)   -- memory is in model_memory.json
+    # name          : (tier, cpus, note)   -- memory is in model_memory.json,
+    #                                        the wall clock is COMPUTED (wall_clock below)
     #
     # FOUR, not seven, by the AUTHOR'S DECISION of 2026-08-28 (RERUN_PLAN.md chat N).
     # The list is chosen, not computed: quantile forest, NGBoost, Gaussian process
@@ -132,13 +135,17 @@ MODELS = {
     # task here fits it (1 + oof_folds) times per level and holds a per-molecule
     # uncertainty for every TRAINING molecule at every level. Nothing has measured
     # this pipeline, because it has not run once since the redesign.
-    # Wall times are deliberately generous for the same reason: the out-of-fold
-    # pass multiplies the fit count by (1 + oof_folds) and nothing here has been
-    # timed on ARC.
-    'QRF':            (1, 8,  36, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
-    'NGBoost':        (1, 8,  47, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
-    'GP':             (1, 8,  47, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
-    'VBLL-Full':      (2, 8,  47, 'the variational network. Badly overconfident -- truth inside 1 sd 0.27-0.51 against a target of 0.68 -- which is itself the finding. On ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted'),
+    # THE WALL CLOCK IS NOT IN THIS TABLE ANY MORE EITHER, from 2026-09-07. It was
+    # five hand-typed constants -- 36 for the quantile forest and 47 for the other
+    # five -- and "deliberately generous" is not what they were. Nothing scaled
+    # them: the same numbers came out for three conditions and for four, and they
+    # did not move with --oof-folds, which is the flag that multiplies the work.
+    # Priced against the laboratory generator's own per-fit table, three of the six
+    # were TOO SMALL on logD, NGBoost by a factor of three. See wall_clock below.
+    'QRF':            (1, 8, 'first on BOTH measures on all six representations, and the cheapest: tracks its error 0.25-0.35, truth inside 1 sd 0.70-0.83 against a target of 0.68'),
+    'NGBoost':        (1, 8, 'second on four representations of six (0.09-0.30), mildly overconfident (0.53-0.66). Expensive -- 7.4x the forest on the screen -- and kept because it is the noise-robust model the study highlights'),
+    'GP':             (1, 8, 'the only non-tree model that shows anything, and it depends on the representation: 0.28 on PDV, 0.19 on ChemBERTa, 0.06 on ECFP4. gauche ExactGP, RBF kernel'),
+    'VBLL-Full':      (2, 8, 'the variational network. Badly overconfident -- truth inside 1 sd 0.27-0.51 against a target of 0.68 -- which is itself the finding. On ALL THREE representations from 2026-09-01: the ChemBERTa restriction is lifted'),
     # THE VARIANCE-HEAD NETWORKS, added 2026-09-01 on the author's decision.
     # Kendall & Gal eq. 6 -- one network predicts the value and its own
     # observation noise, with the weights sampled for the model term. The only
@@ -147,8 +154,8 @@ MODELS = {
     # asked the per-molecule decomposition question at all (RERUN_PLAN.md 2.32).
     # Wall clock from their plain Bayesian siblings, which is what QM9 derived
     # theirs from.
-    'BNN-Full-MVE':     (2, 8,  47, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
-    'MLP-BNN-Full-MVE': (2, 8,  47, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
+    'BNN-Full-MVE':     (2, 8, 'a Bayesian network with a VARIANCE HEAD -- the literature flagship case, and the only network whose aleatoric term varies per molecule'),
+    'MLP-BNN-Full-MVE': (2, 8, 'the same variance head on the NN-beta base, so the finding does not rest on one architecture'),
 }
 # MEMORY COMES FROM model_memory.json, WITH THIS PIPELINE'S OWN FLOOR ON TOP.
 #
@@ -233,6 +240,81 @@ FLAT_BY_DESIGN = {'gaussian', 'laplace', 'grouped_shifted',
 # Question A needs a condition whose noise is even across molecules; dropping
 # every one of them leaves the run unable to answer it.
 QUESTION_A_CONDITION = 'gaussian'
+
+# ===========================================================================
+# THE WALL CLOCK, COMPUTED. Added 2026-09-07.
+# ===========================================================================
+#
+# WHAT WAS THERE BEFORE. Five constants typed into the MODELS table: 36 hours for
+# the quantile forest and 47 for the other five. Nothing computed them and nothing
+# scaled them. Generating the three-condition submission and the four-condition
+# one emitted IDENTICAL walls, and --oof-folds -- the flag that multiplies the fit
+# count -- did not move them at all.
+#
+# WHY THAT MATTERED. Priced against the laboratory generator's own per-fit table,
+# three of the six were TOO SMALL on logD: NGBoost needs about three times the 47
+# it asked, and the two variational and variance-head networks more than they
+# asked as well. All 378 tasks of this run have sat in the queue since 2026-09-06
+# without one starting, and the two arrays that are over-asked on hERG and Caco-2
+# are the reason a scheduler cannot fit them.
+#
+# WHAT ONE TASK DOES. One dataset, one representation, one condition, sweeping
+# that condition's levels. Each level is CV_FOLDS outer scaffold folds, and each
+# outer fold that is cross-fitted refits the model --oof-folds times more on top:
+#
+#     fits = levels x (outer_folds + cross_fitted_outer_folds x oof_folds)
+#
+# At the settled seven levels, five outer folds and five out-of-fold folds that is
+# 7 x (5 + 25) = 210 fits, against the 35 a laboratory grid task does.
+#
+# WHERE THE PER-FIT SECONDS COME FROM. The laboratory generator, imported rather
+# than retyped -- same model names, same three datasets, same cubic branch for the
+# exact Gaussian processes. A second copy of that table here is a copy that drifts.
+#
+# THE MARGIN IS THE LABORATORY GENERATOR'S OWN 1.5, imported, not a new number.
+# It multiplies the same per-fit table, on the same three datasets, for the same
+# models, and that table has been checked against real tasks: on 2026-09-07 every
+# laboratory job except one had 4.9x headroom or more between its longest task and
+# its request. What is different here is the fit COUNT, and the count is arithmetic
+# -- levels, outer folds, out-of-fold folds -- not an estimate. Inventing a wider
+# margin for a number that is counted rather than guessed would only add queue time
+# nobody can use. Re-price the per-fit table from real tasks once these have run.
+_LAB = Path(__file__).resolve().parent.parent / 'slurm_scripts_validation_rerun' / 'generate_scripts.py'
+_spec = importlib.util.spec_from_file_location('_validation_generator', _LAB)
+_lab = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_lab)
+
+WALL_MARGIN = _lab.WALL_MARGIN
+WALL_FLOOR_HOURS = _lab.WALL_FLOOR_HOURS
+
+# The wall a `medium` partition can hold, so a run that cannot start there says so
+# at generate time rather than at submit time. From the sinfo capture in
+# RERUN_PLAN.md, "`short` had no idle nodes" (2026-08-28): short 12:00:00,
+# medium 2 days, long 30 days.
+MEDIUM_PARTITION_HOURS = 48
+
+# The runner's dataset labels are the --datasets values; the laboratory tables are
+# keyed by path label, and hERG is spelled differently in the two. One map, here,
+# rather than a second TRAIN_N.
+DATASET_PATH_LABEL = {cli: path for path, cli in _lab.DATASETS}
+
+
+def wall_clock(model, dataset, oof_folds, oof_outer_folds, conditions):
+    """Hours to request for one uncertainty array, on its worst dataset.
+
+    ONE TASK RUNS ONE CONDITION -- the array index picks it -- so the wall is the
+    WORST single condition, never the sum of them. Censoring sweeps a different
+    number of levels from the dose ladder, which is why the condition list is
+    passed in at all rather than a count.
+    """
+    outer = _lab.CV_FOLDS
+    cross_fitted = min(oof_outer_folds or outer, outer)
+    fits = max(_lab.levels_for(c) for c in conditions) * (
+        outer + cross_fitted * oof_folds)
+    seconds = _lab.seconds_per_fit(model, DATASET_PATH_LABEL[dataset])
+    return max(WALL_FLOOR_HOURS,
+               math.ceil(seconds * fits / 3600.0 * WALL_MARGIN))
+
 
 # CORRECTED 2026-09-01, same as the accuracy generator. This said stat-cadd,
 # the checkout KIRBy moved AWAY from when that filesystem hit its quota; 125
@@ -647,8 +729,15 @@ def main():
 
     written = []
     total_tasks = 0
-    for model, (tier, cpus, hours, note) in MODELS.items():
+    for model, (tier, cpus, note) in MODELS.items():
         mem = memory_for(model)
+        # ONE WALL COVERS THE WHOLE ARRAY, so it is the worst dataset in it.
+        # logD is nearly four times hERG's training set and the Gaussian
+        # processes are cubic in that, so the three differ by far more than a
+        # margin absorbs.
+        hours = max(wall_clock(model, d, args.oof_folds,
+                               args.oof_outer_folds, conditions)
+                    for d in DATASETS)
         model_reps = reps_for(model)
         model_tasks = len(DATASETS) * len(model_reps) * len(conditions)
         total_tasks += model_tasks
@@ -705,7 +794,7 @@ def main():
               'echo "submitting to account=$ACCT partition=$PART"',
               '']
     for _tier, _name, _model, _hours, _tasks, _mreps in written:
-        submit.append(f'# {_name}: {_model}, {_tasks} tasks, --time={_hours}:00:00')
+        submit.append(f'# {_name}: {_model}, {_tasks} tasks, --time={_hours}:59:00')
         submit.append(
             f'if sbatch --account=$ACCT --partition=$PART '
             f'--array=0-{_tasks - 1}%{args.throttle} {_name}; '
@@ -732,7 +821,31 @@ def main():
         for t, name, model, hours, model_tasks, _ in written:
             if t == tier:
                 print(f"    {name:26s} {model:16s} --array=0-{model_tasks - 1} "
-                      f"--time={hours}:00:00")
+                      f"--time={hours}:59:00")
+
+    # SAY WHICH PARTITION THESE CAN ACTUALLY START ON.
+    #
+    # The wall clocks used to be five constants, the largest 47:59, and 47:59 fits
+    # `medium`. So the runbook sent this run to medium and nothing contradicted it.
+    # Computed against the laboratory generator's per-fit table, every one of these
+    # arrays needs more than medium's two days on logD, NGBoost by a factor of four
+    # against what it was asking. A job whose wall exceeds the partition limit is
+    # refused at submit time -- or, worse, silently capped and killed later.
+    too_big = sorted({(m, h) for _, _, m, h, _, _ in written
+                      if h > MEDIUM_PARTITION_HOURS})
+    if too_big:
+        print(f"\n  ⚠ {len(too_big)} of these cannot run on `medium` "
+              f"({MEDIUM_PARTITION_HOURS}h): "
+              + ', '.join(f'{m} {h}h' for m, h in too_big))
+        print(f"    Submit this run with PART=long. One task is one dataset, one "
+              f"representation and one condition,")
+        print(f"    sweeping {max(_lab.levels_for(c) for c in conditions)} levels "
+              f"x {_lab.CV_FOLDS} outer folds x "
+              f"(1 + {args.oof_folds}) fits = "
+              f"{max(_lab.levels_for(c) for c in conditions) * (_lab.CV_FOLDS + min(args.oof_outer_folds or _lab.CV_FOLDS, _lab.CV_FOLDS) * args.oof_folds)} fits, "
+              f"against 35 for a grid task.")
+        print(f"    --oof-outer-folds 1 cuts the out-of-fold half about threefold "
+              f"if the queue will not take these.")
 
 
 if __name__ == '__main__':

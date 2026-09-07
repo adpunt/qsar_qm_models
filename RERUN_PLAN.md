@@ -15579,3 +15579,43 @@ and the requests are what stop the scheduler fitting them into gaps.
 it was taken at four by mistake. The tool warns that only one of its six reports an
 uncertainty per molecule where the rule needs two, which is precisely why the author put
 `gauche_rbf` and `dnn_bnn_full_mve` in the file. Chat 4 owns it.
+
+### 13.29 THE FINISHED COMMAND SHEET — 2026-09-07
+
+**This supersedes the empty tables in §13.27.** §13.27's D1–D4 were never filled; the
+content they were waiting for is below. §13.27 D5 still stands and is not repeated here.
+
+**What was committed to make this sheet runnable.** Six files, all pushed on
+`additional_reps`:
+
+| file | what changed | proof |
+|---|---|---|
+| `scripts/process_and_train.py` | Sort & Slice exclusion inside `split_qm9`, after the shuffle and split, applied to EVERY representation | `python scripts/test_sns_zero_exclusion.py` — 16 checks, exit 0; fails on four broken copies of the file |
+| `scripts/test_sns_zero_exclusion.py` | new; runs the real `split_qm9` on a 40-molecule fixture | as above, 2.3 s, no cluster needed |
+| `slurm_scripts_qm9_rerun/generate_scripts.py` | wall priced by how good the evidence is: 2.0x a measured ARC rate, 3.0x a lower bound, 2.5x a laptop guess; 2-hour floor; the "wall not measured" warning now reads the grade instead of a string no note contains | `python slurm_scripts_qm9_rerun/test_generate_scripts.py` — 1120 task runs, exit 0 |
+| `slurm_scripts_validation_rerun/generate_scripts.py` | 2-hour floor; `val_svm` censoring goes 1:00:00 → 2:00:00 | `python scripts/test_validation_job_scripts.py` — 10 of 10, exit 0 |
+| `slurm_scripts_uncertainty_rerun/generate_scripts.py` | computes a wall instead of five hand-typed constants, and says which walls exceed `medium` | `python scripts/test_uncertainty_job_scripts.py` — exit 0 |
+| `model_hours.json` | ARC rates plus `completed_tasks`, `tasks_in_the_measured_array`, `still_running` so the generator can grade them | read at generate time; the generator prints every partial grade |
+| `scripts/check_runs_landed.py` | the deep run's expected set is now restricted by `deep_run_pairs.json` | measured: expected cells for the deep run fall from **654 to 113**. The 541 difference were tasks skipping by design |
+| `scripts/test_validation_job_scripts.py` | matched `python alternative_data_noise_robustness.py`; the generator has emitted `python -u …` since `f4c6cfb` (2026-09-01), so four of its ten checks reported "no runner invocation found" for six days. Now matched by script name, with the shell variables expanded | 10 of 10 pass; 57 command lines checked, one per dataset each array can pick |
+
+**Walls the new rule asks (generated 2026-09-07, not estimated).** Main grid: `qrf`
+42:59:00, `ngboost` 285:59:00, `gauche_rbf` 133:59:00, `heteroscedastic_gp` 10:59:00,
+`rf` 5:59:00. Deep run: `qrf` 47:59:00, `ngboost` 317:59:00, `gauche_rbf` 148:59:00.
+Uncertainty runs: QRF 40:59:00, NGBoost 193:59:00, GP 68:59:00, VBLL-Full 91:59:00,
+BNN-Full-MVE 51:59:00, MLP-BNN-Full-MVE 78:59:00 — **five of six exceed `medium`'s
+48 hours, so these go to `long`.** §13.19 STEP 6 still says `$PART` and is wrong.
+
+**Do not blanket-apply `scripts/measure_walls.py --emit-scontrol`.** It sizes a wall at
+2.0x the longest observed task with a minimum of three tasks. `gauche_rbf`'s four
+completed main-grid tasks did the cheap half of the work — the failure was inside the
+out-of-fold pass, so only the tasks that skip it survived — and the screen array
+`12971618` would be cut to about three hours and die. Cut walls to the GENERATOR's
+number instead, which grades that evidence as a lower bound.
+
+**Still open after this sheet:** which pairs the uncertainty runs use (§13.17 A5),
+whether `gauche_rbf` stays, the Caco-2 anchor sentence (§13.17 A1), the figure script's
+hardcoded 0.3 (§13.17 C1), the rank-versus-level charts (§13.17 C2), and the two KIRBy
+items §13.22 marks OPEN.
+
+---

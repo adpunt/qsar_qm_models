@@ -104,19 +104,36 @@ DATASETS = [
 # at all and passed none on the command line, so the laboratory ladder came from
 # a default inside the other repository and nothing here could state it. It is
 # lifted, not copied, so the two cannot drift (2026-09-01).
-def _dose_levels():
+def _levels_named(name):
     src = (Path(__file__).resolve().parent.parent
            / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py').read_text()
-    m = re.search(r"^DOSE_LEVELS\s*=\s*'([^']+)'", src, re.M)
+    m = re.search(r"^%s\s*=\s*'([^']+)'" % name, src, re.M)
     if not m:
         raise SystemExit(
-            "ERROR: cannot find DOSE_LEVELS in the QM9 generator. The two "
+            f"ERROR: cannot find {name} in the QM9 generator. The two "
             "pipelines share one ladder (NOISE_DESIGN.md 6.4) and this file "
             "reads it from there rather than holding a second copy.")
     return [float(x) for x in m.group(1).split()]
 
 
-DOSE_LEVELS = _dose_levels()
+DOSE_LEVELS = _levels_named('DOSE_LEVELS')
+
+# CENSORING SWEEPS ITS OWN AXIS -- the fraction of labels clipped, not a multiple
+# of the label spread (NOISE_DESIGN.md 6.4). Lifted from the QM9 generator for the
+# same reason DOSE_LEVELS is: so the two pipelines cannot drift.
+#
+# It is here because the wall clock has to count the level runs a script actually
+# does. Until 2026-09-07 the wall was priced at len(DOSE_LEVELS) for every
+# condition including censoring. Both lists hold seven points today, so that cost
+# nothing -- and it would have started under-pricing censoring silently on the day
+# somebody added an eighth point to one of them.
+CENSOR_LEVELS = _levels_named('CENSOR_LEVELS')
+
+
+def levels_for(condition):
+    """How many noise levels one condition sweeps."""
+    return len(CENSOR_LEVELS if condition == 'censoring' else DOSE_LEVELS)
+
 
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
@@ -192,10 +209,25 @@ TRAIN_N = {'logd': 4031, 'caco2': 1729, 'herg': 1132}
 # GroupKFold(n_splits=5) over scaffold groups.
 CV_FOLDS = 5
 
-# Margin over the computed need. The QM9 generator uses 1.25; this side uses 1.5
-# because its per-fit numbers are normalised across sample sizes rather than
-# measured at the size that will run, so they carry more uncertainty.
+# Margin over the computed need. This side uses 1.5 because its per-fit numbers
+# are normalised across sample sizes rather than measured at the size that will
+# run, so they carry more uncertainty.
+#
+# 1.5 STAYS, and here is why it is not the QM9 generator's graded rule. Every
+# number in SECONDS_PER_FIT_PER_1K is a laptop timing, so on the QM9 grading it
+# would all be `unmeasured` -- one grade, so one margin, and a graded rule would
+# only be three names for the same multiplier. And the laboratory walls have been
+# checked against real tasks: on 2026-09-07 every laboratory job except one had
+# 4.9x headroom or more between its longest task and its request. 1.5x on a
+# laptop number is already generous on this side.
+#
+# THE ONE EXCEPTION WAS NOT THE MARGIN. `val_svm` in the censoring run asked
+# 1:00:00 against a longest task of 0:54 -- 1.13x. That request was not a
+# calculation at all: the computed need was 0.91 hours and `max(1, ...)` below
+# rounded it up to the floor, so it carried NO margin of any kind. A floor of one
+# hour is not a floor. Two is.
 WALL_MARGIN = 1.5
+WALL_FLOOR_HOURS = 2
 
 
 BS = chr(92)   # one backslash: the shell's line continuation
@@ -216,8 +248,14 @@ def gp_flags_for(model, rep):
             "    --gp-reps " + rep + " " + BS + "\n")
 
 
-def wall_clock(model, dataset, n_conditions, n_levels):
-    """Hours to request for one laboratory job, from the measurements above."""
+def seconds_per_fit(model, dataset):
+    """Seconds for ONE fit of this model on this dataset, from the table above.
+
+    Split out of wall_clock 2026-09-07 so the uncertainty generator can price its
+    own walls off the same numbers instead of five hand-typed constants. That
+    file's models are the same names and its datasets are the same three, so
+    retyping the table there would have been a second copy that could drift.
+    """
     n = TRAIN_N[dataset]
     per_fit = SECONDS_PER_FIT_PER_1K[model]
     if model.startswith('GP'):
@@ -229,11 +267,20 @@ def wall_clock(model, dataset, n_conditions, n_levels):
         # An exact Gaussian process factorises an n x n matrix, so it is cubic in
         # the training set rather than linear. The basis above was measured at
         # 10,000 molecules, hence the /10 twice.
-        seconds = per_fit * (n / 1000.0) ** 3 / 100.0
-    else:
-        seconds = per_fit * n / 1000.0
-    hours = seconds * n_conditions * n_levels * CV_FOLDS / 3600.0
-    return max(1, math.ceil(hours * WALL_MARGIN))
+        return per_fit * (n / 1000.0) ** 3 / 100.0
+    return per_fit * n / 1000.0
+
+
+def wall_clock(model, dataset, conditions):
+    """Hours to request for one laboratory job, from the measurements above.
+
+    `conditions` is the list this script runs, and each one is priced on the
+    number of levels IT sweeps -- censoring runs the clipped-fraction axis, not
+    the dose ladder.
+    """
+    level_runs = sum(levels_for(c) for c in conditions)
+    hours = seconds_per_fit(model, dataset) * level_runs * CV_FOLDS / 3600.0
+    return max(WALL_FLOOR_HOURS, math.ceil(hours * WALL_MARGIN))
 
 PREAMBLE = """# GIVE THIS JOB ITS OWN KeOps CACHE AND ITS OWN SCRATCH.
 #
@@ -1157,8 +1204,7 @@ def main():
         model_reps = (['ECFP4'] if model.startswith('GP-Tanimoto')
                       else list(reps))
         n_tasks = len(model_reps) * len(DATASETS)
-        hours = max(wall_clock(model, d, len(conditions), len(DOSE_LEVELS))
-                    for d, _ in DATASETS)
+        hours = max(wall_clock(model, d, conditions) for d, _ in DATASETS)
         cases = '\n'.join(
             f'  {d}) dataset_cli="{cli}" ;;' for d, cli in DATASETS)
         content = (

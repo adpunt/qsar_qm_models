@@ -90,6 +90,20 @@ def qm9_expected(stage):
             for r in entry[4]
             for c in conditions}
 
+    # THE DEEP RUN IS A SELECTION, NOT THE WHOLE ROSTER. Every deep-run task reads
+    # deep_run_pairs.json when it STARTS, and a task whose model or representation is
+    # not listed exits 0 having fitted nothing -- that is the design, not a failure.
+    # Crossing the generator's full MODELS table with every representation therefore
+    # counts several hundred deliberate skips as missing cells and buries the handful
+    # of real gaps. Six models on three representations do the work; the rest skip.
+    if stage == 2:
+        sel = _pairs_file('deep_run_pairs.json')
+        if sel and sel.get('generator_labels') and sel.get('representations'):
+            ok_m = {C.canonical_model(m, 'qm9')
+                    for m in sel['generator_labels']}
+            ok_r = {C.canonical_rep(r) for r in sel['representations']}
+            want = {(c, r, m) for (c, r, m) in want if m in ok_m and r in ok_r}
+
     # Censoring is a pair subset, named outright rather than crossed.
     censoring = _pairs_file('censoring_pairs.json')
     if censoring:

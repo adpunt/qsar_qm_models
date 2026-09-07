@@ -1,141 +1,204 @@
 {
   "what_this_is": "The MEASURED hours per 110 training runs per fit, per model, on QM9. The generator sized every wall from a per-model GUESS before this file existed; fourteen of nineteen guesses were over by more than 5x and the worst by 190x, while the ONE guess that was accurate (qrf) is the one model about to be killed at its wall -- because a 1.25x margin on an accurate estimate is thinner than a 1.25x margin on a 10x overestimate.",
-  "the_margin": 2.0,
-  "the_margin_why": "A wall must be big enough that the job does not die and small enough that SLURM can backfill it. 2.0x the longest OBSERVED task does both: it is twice the worst of fifteen real tasks, and it turns the sum of the QM9 requests from 2244 hours into 241. The old 1.25x was too thin for an accurate estimate and irrelevant for an inaccurate one.",
-  "how_to_update": "Re-run scripts/measure_walls.py on the cluster and raise any model whose longest observed task now exceeds measured_task_hours. Never lower one below what has been observed.",
+  "the_margin": {
+    "measured": 2.0,
+    "lower_bound": 3.0,
+    "unmeasured": 2.5
+  },
+  "the_margin_why": "One margin cannot cover three qualities of evidence. A rate from enough finished tasks that the slowest in the array has probably been seen gets 2.0x. A rate from a task that had NOT finished, or from too few of the array, is a LOWER BOUND and gets 3.0x plus a floor built from that model's own laptop timing divided by the smallest speed-up ARC has ever shown -- doubling a floor is not a margin. No ARC rate at all gets the laptop number at 2.5x. The generator names the grade of every wall it writes, every run. See slurm_scripts_qm9_rerun/generate_scripts.py, beside WALL_MARGIN.",
+  "how_to_update": "Re-run scripts/measure_walls.py on the cluster and raise any model whose longest observed task now exceeds measured_task_hours. Never lower one below what has been observed. Fill completed_tasks, tasks_in_the_measured_array and still_running as well -- a model moves from a lower bound to a measurement when its own array does, and nothing in the generator has to be edited for that.",
   "models": {
     "rf": {
       "hours_per_110": 3.8995,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 2.233,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15 tasks"
+      "provenance": "completed, 15 tasks",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "xgboost": {
       "hours_per_110": 1.164,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 0.667,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "lgb": {
       "hours_per_110": 1.6878,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 0.967,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "svm": {
       "hours_per_110": 2.9974,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 1.717,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "ngboost": {
       "hours_per_110": 21.8108,
       "fits_in_the_measured_task": 4,
       "measured_task_hours": 49.967,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "STILL RUNNING, not finished"
+      "provenance": "STILL RUNNING, not finished, at 49.967 h. An unfinished task's elapsed time is a LOWER BOUND, not a measurement, so doubling it is not a margin. Longest FINISHED ngboost task on this grid is 18:03, and this one is 2.8x that with no explanation yet (RERUN_PLAN.md 13.23) -- which is the shape of the ChemBERTa representation, 29.6x PDV on this laptop's own timing. Re-read it the moment that task ends.",
+      "completed_tasks": 0,
+      "tasks_in_the_measured_array": 18,
+      "still_running": true
     },
     "dnn": {
       "hours_per_110": 1.7751,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 1.017,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "mlp": {
       "hours_per_110": 1.7169,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 0.983,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "dnn_bnn_full": {
       "hours_per_110": 3.5503,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 2.033,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "mlp_bnn_full": {
       "hours_per_110": 2.9974,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 1.717,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "dnn_bnn_full_variational": {
       "hours_per_110": 1.4502,
       "fits_in_the_measured_task": 6,
       "measured_task_hours": 4.983,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "mlp_bnn_full_variational": {
       "hours_per_110": 5.209,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 2.983,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "qrf": {
       "hours_per_110": 6.0723,
       "fits_in_the_measured_task": 6,
       "measured_task_hours": 20.867,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "gauche_rbf": {
       "hours_per_110": 0.4559,
       "fits_in_the_measured_task": 6,
       "measured_task_hours": 1.567,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 4 -- the rest failed on the GP bug"
+      "provenance": "completed, 4 of 18 -- 8 failed on the GP cap bug (fixed in c223ec3). DO NOT TRUST THIS RATE. Only 3 of gauche_rbf's 6 representations are settled uncertainty pairs (uncertainty_pairs.json), so 9 of the 18 tasks do 6 fits and 9 do one. The GP bug was IN the out-of-fold pass, so the 8 that failed are the 6-fit tasks -- which makes the 4 that finished the ONE-fit ones, and fits_in_the_measured_task below is then 6 where the truth is 1. That alone makes this rate about 6x too low, before the second problem: it implies 14.9 s for an exact Gaussian-process fit at the 5,000-molecule cap against 2,855 s for the same fit in results/tuning_local/timing.csv (11,695.3 s at 8,000 molecules, rescaled cubically), a factor of 190. Nothing here can settle that, so the generator grades this rate a lower bound and prices the wall from the laptop timing instead.",
+      "completed_tasks": 4,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false,
+      "fits_in_the_measured_task_is_probably_wrong": "Recorded as 6; the reasoning above says 1. Left as 6 rather than edited to a number nobody has checked. The generator does not read this field -- it computes the fit count itself -- so it is a note, not an input."
     },
     "gauche": {
       "hours_per_110": 1.455,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 0.833,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 3"
+      "provenance": "completed, 3",
+      "completed_tasks": 3,
+      "tasks_in_the_measured_array": 3,
+      "still_running": false
     },
     "heteroscedastic_gp": {
       "hours_per_110": 8.3228,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 4.767,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "dnn_bnn_full_variational_hetero": {
       "hours_per_110": 5.0635,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 2.9,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "mlp_bnn_full_variational_hetero": {
       "hours_per_110": 7.6243,
       "fits_in_the_measured_task": 1,
       "measured_task_hours": 4.367,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 15"
+      "provenance": "completed, 15",
+      "completed_tasks": 15,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "dnn_bnn_full_mve": {
       "hours_per_110": 2.3523,
       "fits_in_the_measured_task": 6,
       "measured_task_hours": 8.083,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 14"
+      "provenance": "completed, 14",
+      "completed_tasks": 14,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     },
     "mlp_bnn_full_mve": {
       "hours_per_110": 1.1155,
       "fits_in_the_measured_task": 6,
       "measured_task_hours": 3.833,
       "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 7"
+      "provenance": "completed, 7 of 18. Under half the array, so the slowest task in it has probably not been seen and the generator grades this a lower bound. Its table entry is DERIVED (1.5x mlp_bnn_full), not a timing row of this model, so there is no laptop floor to put under it and the wall is 3.0x the bound. Its sibling dnn_bnn_full_mve finished 14 of 18 and is graded a measurement.",
+      "completed_tasks": 7,
+      "tasks_in_the_measured_array": 18,
+      "still_running": false
     }
-  }
+  },
+  "the_three_new_fields": "completed_tasks, tasks_in_the_measured_array and still_running are what the generator reads to grade a rate. Before 2026-09-07 that information existed only as prose inside `provenance` -- 'STILL RUNNING, not finished', 'completed, 4 -- the rest failed on the GP bug' -- which no program could act on, so a rate from 4 tasks of 18 was trusted exactly as far as a rate from 15. The array size is the QM9 main grid's own: 3 conditions x 6 representations = 18 tasks, and 3 for gauche, which runs on ECFP4 alone. ngboost's completed_tasks is 0 because its rate comes from the one task still running. A model whose entry LACKS these fields is graded a lower bound, never measured."
 }
