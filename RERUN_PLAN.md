@@ -17289,7 +17289,8 @@ laboratory uncertainty runs cover all seven conditions for them.
 `dnn_vbll` and `mlp_bnn_full_mve` are NOT added to `deep_run_pairs.json`. On QM9 the
 decomposition under `student_t_nu5`, `outlier_p10` and `laplace` rests on `gauche_rbf` and
 `dnn_bnn_full_mve`; all four are covered under the other three noise types and on all three
-laboratory datasets. **Methods must say this**, and it is a sentence nobody has written.
+laboratory datasets. ✅ **Methods text written 2026-09-07**: `PAPER_REVISION_GUIDE_FINAL.md`
+§M5a-iii.
 
 #### D4m. Is the out-of-fold pass asking the right question? — read in code 2026-09-07
 
@@ -17329,7 +17330,10 @@ the old files held.
   noise is a property of the group and `GroupKFold` holds out whole groups, so within a scored
   fold the variation is between groups. §3.1d already records this for the outer split.
 
-**Nothing here is unverified except the Methods sentences, which do not exist yet.**
+✅ **Written 2026-09-07.** `PAPER_REVISION_GUIDE_FINAL.md` §M5a holds all three as replacement
+text, each with the code line it came from: the null correlation reported as a leakage check,
+the grouped conditions answering about scaffold groups, and which decomposed models the three
+shape conditions cover on QM9. `paper.tex` is untouched, as always.
 
 ⚠ **`het_gp_rbf` is now in the uncertainty runs on the laboratory side but not on QM9.**
 Commit `183cd46` made `GP-Hetero` the seventh uncertainty model, and

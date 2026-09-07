@@ -541,6 +541,67 @@ networks carry both halves per molecule.
 
 ---
 
+## M5a. Three sentences M5 still needs (append to M5)
+
+Added 2026-09-07. Each of these was verified in the code this session, and M5 as written does
+not say it. They are short and they all belong in the uncertainty subsection, after the
+out-of-fold paragraph.
+
+### M5a-i. The null correlation is reported as a check, not as a result
+
+M5 already says that under the conditions giving every molecule the same amount of noise, the
+question of which molecules are unreliable is undefined. It does not say that the number is
+computed and reported anyway, or why — and a reader who finds a near-zero correlation in a
+table without that sentence will read it as a failed result.
+
+> Under the conditions that give every molecule the same amount of noise, the correlation
+> between a model's stated uncertainty and the amount injected into that molecule's label is
+> null by construction: there is nothing in one label to distinguish it from another's. We
+> compute and report it regardless, as a check on the out-of-fold procedure rather than as a
+> result. A substantial correlation there would indicate that a molecule had been scored by a
+> model that had seen its own corrupted label.
+
+Provenance: `q4_plain_correlation`, `scripts/uncertainty_stats.py:1040`, which says this in its
+own docstring and emits `noise_size_constant` per cell.
+
+### M5a-ii. Under the grouped conditions the answer is about scaffold groups
+
+M4 says the recorded noise pattern is flat on held-out molecules for those conditions, and M5
+says training molecules are cross-fitted with `GroupKFold` on Murcko scaffolds. Put together
+those two facts mean something the paper never states: the inner division holds out whole
+scaffold groups as well, so a per-molecule result under a grouped condition separates groups,
+not molecules within a group.
+
+> Under the grouped conditions the amount of noise a molecule receives is a property of its
+> scaffold group rather than of the molecule, and the out-of-fold division holds out whole
+> scaffold groups. A per-molecule result under those conditions therefore distinguishes
+> affected groups from unaffected ones; it does not distinguish molecules within a group, and
+> should not be read as doing so.
+
+Provenance: `oof_predict` uses `GroupKFold` over the same Murcko groups as the outer split
+(`models/models.py:1584`); the grouped conditions key their noise on the group
+(`NOISE_DESIGN.md`).
+
+### M5a-iii. Which decomposed models the shape conditions cover on QM9
+
+M4 says the Student-$t$, Laplace and outlier conditions were run on a reduced set of pairings.
+It does not say which of the decomposed models fall inside that set, and on QM9 two of the four
+do not. The author settled on 2026-09-07 that this is the intended coverage and not a gap to
+fill, so the paper has to state it rather than the re-run closing it.
+
+> The Student-$t$, Laplace and outlier conditions were run on QM9 for a named subset of
+> model--representation pairings. Of the models whose uncertainty is decomposed, the Gaussian
+> process and one of the two mean-variance networks fall inside that subset; the variational
+> network and the second mean-variance network do not. QM9 decomposition results under those
+> three conditions therefore rest on two models rather than four. All four are decomposed under
+> the remaining conditions on QM9, and under every condition on the three assay datasets.
+
+Provenance: `deep_run_pairs.json`; the three conditions run at stage 2 only
+(`STAGE_DEFAULTS`, `slurm_scripts_qm9_rerun/generate_scripts.py`), and stage 2 is restricted by
+that file. `RERUN_PLAN.md` §13.27 D4l.
+
+---
+
 ## M6. Performance metrics: hold (lines 220–311)
 
 **Owned elsewhere.** Do not rewrite this subsection from this guide. Only the run-time half is fixed
