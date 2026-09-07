@@ -99,6 +99,10 @@ def main():
                          'and censoring -- the jobs that have not started and so are '
                          'the entire queue problem -- get no proposal at all.')
     ap.add_argument('--emit-scontrol', action='store_true')
+    ap.add_argument('--pending-only', action='store_true',
+                    help='propose nothing for a job that has a task RUNNING. The '
+                         'queue problem is the work that has not started; a running '
+                         'task can only lose by having its limit cut.')
     cli = ap.parse_args()
 
     rows = SJ.parse(SJ.run_sacct(cli.since, cli.sacct_file, cli.user))
@@ -213,9 +217,23 @@ def main():
             how = (f'BORROWED from the same model elsewhere, '
                    f'{SJ.hhmmss(borrowed[0])} ({borrowed[1]})' if borrowed
                    else f'longest of {n} was {SJ.hhmmss(longest)}')
-            for j in sorted(d['jobs']):
-                scontrol.append(f"scontrol update JobId={j} "
-                                f"TimeLimit={SJ.hhmmss(want_t)}   # {jname}: {how}")
+            # A JOB WITH A TASK ALREADY RUNNING IS THE ONLY LINE THAT CAN LOSE WORK.
+            # The new limit is above what that task has used -- nothing here is
+            # proposed otherwise -- so it will not die on the spot. But if the task
+            # needs MORE than the new limit it dies later, and it would not have
+            # under the old one. That risk only exists where something is running,
+            # and it is worth reading before it is worth running.
+            risk = ''
+            if longest_run:
+                over = longest_run / (longest or longest_run)
+                risk = (f'  <-- RUNNING at {SJ.hhmmss(longest_run)}'
+                        + (f", already {over:.1f}x the longest FINISHED task -- this "
+                           f"one is not understood" if over > 1.5 else ''))
+            if not (cli.pending_only and longest_run):
+                for j in sorted(d['jobs']):
+                    scontrol.append(f"scontrol update JobId={j} "
+                                    f"TimeLimit={SJ.hhmmss(want_t)}   # {jname}: "
+                                    f"{how}{risk}")
         if peak and d['req_m']:
             # model_memory.json pipeline_overrides: the uncertainty pass has its own
             # floor, because a task there fits its model 1 + oof_folds times per level

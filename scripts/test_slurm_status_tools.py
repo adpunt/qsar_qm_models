@@ -312,6 +312,21 @@ def main():
           [ln for ln in mw.stdout.splitlines()
            if str(12986314 + QM9.index('gauche_rbf')) in ln])
 
+    # 8. A line that touches a running task is marked, and --pending-only drops it.
+    marked = [ln for ln in mw.stdout.splitlines()
+              if 'scontrol' in ln and '<-- RUNNING' in ln]
+    check('a proposal that touches a RUNNING task says so on the line',
+          bool(marked), 'nothing marked, but 12980577 has a task 2.6x the longest '
+                        'finished one')
+    po = subprocess.run(
+        [sys.executable, str(HERE / 'measure_walls.py'), '--sacct-file', str(cap),
+         '--emit-scontrol', '--pending-only'], capture_output=True, text=True)
+    check('--pending-only drops every proposal that touches a running task',
+          not any('scontrol' in ln and '<-- RUNNING' in ln
+                  for ln in po.stdout.splitlines())
+          and 'scontrol update' in po.stdout,
+          po.stderr[-300:])
+
     # 6. A fast task on a grid with NO selection gate is a measurement.
     lgb = [ln for ln in mw.stdout.splitlines()
            if 'val_lightgbm' in ln and 'laboratory breadth' in ln]
