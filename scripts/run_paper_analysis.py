@@ -334,7 +334,9 @@ def draw_figures(args, tables, verdicts):
         drawn.append(FIG.f8_assay(assay, out, rep))
 
     drawn = [d for d in drawn if d]
-    print(f'  {len(drawn)} figure(s). F6 and F7 wait on the uncertainty runs.')
+    FIG.write_captions(out)
+    print(f'  {len(drawn)} figure(s) and captions.md. F6 and F7 wait on the '
+          f'uncertainty runs.')
     return drawn
 
 

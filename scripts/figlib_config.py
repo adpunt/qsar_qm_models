@@ -266,6 +266,49 @@ CONDITION_LABELS = {
     'laplace': 'Laplace',
 }
 
+#: FIXED colour anchors, so two panels of the same quantity are comparable.
+#: Deriving them from each panel's own data -- which is what I did first -- makes
+#: the same colour mean a different number in each panel, and a reader compares
+#: panels by colour before reading a single printed value.
+#:
+#: The ranges are the old script's, and its reasons hold: 0.4-1.0 on QM9 where
+#: everything survives the baseline gate; wider on the assay sets, where a model
+#: can degrade below useless (negative) or come out slightly above 1, and
+#: collapsing either into one end of the scale hides it.
+#: ONE range, shared by every AUC_norm panel in the paper, so a colour means
+#: the same number in F3, F4 and F8 alike.
+#:
+#: 0.4 to 1.0 is the old script's QM9 anchor and it is the right one: the
+#: baseline gate already removes configurations too weak to have a meaningful
+#: retention, so the surviving values sit well inside it and the map spends its
+#: whole range where the data is. The old script used -0.5 to 1.1 on the assay
+#: sets, against the possibility of a model degrading below useless -- but on
+#: the re-run those all land between 0.67 and 0.94, and that wider range paints
+#: every one of them the same green.
+#:
+#: A value outside the range is CLIPPED AND COUNTED, never silently flattened;
+#: shapes.grid says how many and by how much.
+AUC_RANGE = (0.4, 1.0)
+AUC_RANGE_QM9 = AUC_RANGE
+AUC_RANGE_ASSAY = AUC_RANGE
+
+#: Grey, not black and not the darkest end of the colour map. A missing cell
+#: rendered in the map's own dark end reads as a very low value.
+MISSING_CELL_COLOUR = '#9E9E9E'
+
+#: Inches per row of a grid, and the fixed overhead for a title and tick labels.
+#: Measured, not guessed: below this, 10pt row labels and the printed cell
+#: values overlap. Nineteen models is 5 inches of plot area before anything else.
+GRID_ROW_INCHES = 0.26
+GRID_CHROME_INCHES = 1.15
+
+
+def grid_height(n_rows, n_panels=1):
+    """How tall a stack of grids has to be to stay readable."""
+    per_panel = n_rows * GRID_ROW_INCHES + GRID_CHROME_INCHES
+    return per_panel * n_panels
+
+
 ANOVA_FACTOR_COLORS = {
     'Model': '#6BAED6',
     'Representation': '#FC8D59',

@@ -182,14 +182,21 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
 
 def grid(ax, frame, rows, columns, value, row_labeller=None,
          column_labeller=None, fmt='{:.2f}', vmin=None, vmax=None,
-         cmap='viridis', separate_first_column=False, cbar_label=None,
-         row_order=None, column_order=None, never_run='not run'):
+         cmap='viridis', separate_first_column=False, row_order=None,
+         column_order=None, never_run='not run', annotate=True):
     """A square per combination, the number printed on it.
 
-    A combination that was never run is left blank and labelled, so an absence
-    can never be read as a low value. `separate_first_column` draws a gap after
-    the first column, which is how the clean baseline sits beside the robustness
-    grid without being mistaken for another noise condition.
+    `vmin` and `vmax` are REQUIRED in practice: pass the fixed anchor for the
+    quantity (figlib_config.AUC_RANGE_*), never the panel's own range. Two
+    panels scaled to their own data make the same colour mean different numbers,
+    and a reader compares panels by colour long before reading a value.
+
+    A combination that was never run is grey and labelled, so an absence cannot
+    be read as a low value -- the colour map's own dark end is a low value.
+
+    `separate_first_column` draws a gutter after the first column, which is how
+    the clean baseline sits beside the robustness grid without being mistaken
+    for another noise condition.
     """
     row_labeller = row_labeller or C.model_label
     column_labeller = column_labeller or C.condition_label
@@ -203,40 +210,91 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
             columns=[c for c in column_order if c in table.columns])
 
     data = table.to_numpy(dtype=float)
-    vmin = np.nanmin(data) if vmin is None else vmin
-    vmax = np.nanmax(data) if vmax is None else vmax
-    image = ax.imshow(np.ma.masked_invalid(data), aspect='auto', cmap=cmap,
+    if vmin is None or vmax is None:
+        raise ValueError(
+            'grid() needs an explicit vmin and vmax. A panel scaled to its own '
+            'data makes the same colour mean a different number in the panel '
+            'beside it; use the fixed anchor for the quantity.')
+    # A REFERENCE COLUMN is a different quantity and must not share the colour
+    # scale. Clean accuracy runs 0.45-0.61 while retention runs 0.67-0.94, so
+    # putting both on one scale paints the whole reference column in the map's
+    # dark end -- and a reader sees a black column and concludes every model is
+    # terrible. It is drawn uncoloured, with black text, so it reads as what it
+    # is: the thing the other columns are a fraction OF.
+    coloured = data.copy()
+    if separate_first_column and data.shape[1] > 1:
+        coloured[:, 0] = np.nan
+
+    # Clipping is fine; clipping SILENTLY is not. A cell outside the shared
+    # range is drawn at the end of the map, and how many and how far is said out
+    # loud so nobody reads a saturated cell as an ordinary one.
+    finite = coloured[np.isfinite(coloured)]
+    if finite.size:
+        outside = int(((finite < vmin) | (finite > vmax)).sum())
+        if outside:
+            print(f'      {outside} cell(s) fall outside the shared colour '
+                  f'range [{vmin:g}, {vmax:g}] and are drawn at its end '
+                  f'(range in this panel: {finite.min():.2f} to '
+                  f'{finite.max():.2f}). Their printed values are exact.')
+
+    ax.set_facecolor(C.MISSING_CELL_COLOUR)
+    image = ax.imshow(np.ma.masked_invalid(coloured), aspect='auto', cmap=cmap,
                       vmin=vmin, vmax=vmax)
-    image.cmap.set_bad('#F0F0F0')
+    image.cmap.set_bad(C.MISSING_CELL_COLOUR)
+    if separate_first_column and data.shape[1] > 1:
+        # Paint the reference column white behind its numbers.
+        import matplotlib.patches as mpatches
+        ax.add_patch(mpatches.Rectangle(
+            (-0.5, -0.5), 1.0, data.shape[0], facecolor='white',
+            edgecolor='none', zorder=1.5))
+
+    # Cell borders. Without them a run of similar values reads as one block and
+    # the eye cannot tell which number belongs to which row.
+    ax.set_xticks(np.arange(-0.5, data.shape[1], 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, data.shape[0], 1), minor=True)
+    ax.grid(which='minor', color='white', linewidth=0.5)
+    ax.tick_params(which='minor', length=0)
 
     span = (vmax - vmin) or 1.0
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            v = data[i, j]
-            if np.isnan(v):
-                ax.text(j, i, never_run, ha='center', va='center', fontsize=6,
-                        color='#888888', style='italic')
-                continue
-            # Dark squares need light text and vice versa, or the number is
-            # unreadable on exactly the cells a reader looks hardest at.
-            light = (v - vmin) / span > 0.55
-            ax.text(j, i, fmt.format(v), ha='center', va='center', fontsize=7,
-                    color='#111111' if light else '#FFFFFF')
+    if annotate:
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                v = data[i, j]
+                if np.isnan(v):
+                    ax.text(j, i, never_run, ha='center', va='center',
+                            fontsize=6, color='#333333', style='italic',
+                            zorder=3)
+                    continue
+                reference = separate_first_column and j == 0
+                light = reference or (v - vmin) / span > 0.55
+                ax.text(j, i, fmt.format(v), ha='center', va='center',
+                        fontsize=7, zorder=3,
+                        color='#111111' if light else '#FFFFFF')
 
     ax.set_xticks(range(data.shape[1]))
     ax.set_xticklabels([column_labeller(c) for c in table.columns],
-                       rotation=35, ha='right')
+                       rotation=35, ha='right', fontsize=8)
     ax.set_yticks(range(data.shape[0]))
-    ax.set_yticklabels([row_labeller(r) for r in table.index])
+    ax.set_yticklabels([row_labeller(r) for r in table.index], fontsize=8)
     ax.tick_params(length=0)
     for spine in ax.spines.values():
         spine.set_visible(False)
 
     if separate_first_column and data.shape[1] > 1:
-        # A white gutter, so the clean baseline cannot be read as a condition.
         ax.axvline(0.5, color='white', linewidth=4)
-        ax.axvline(0.5, color='#666666', linewidth=0.8)
+        ax.axvline(0.5, color='#333333', linewidth=0.9)
     return image, table
+
+
+def title(ax, letter, text):
+    """A panel title: the letter and WHAT THE PANEL IS, and nothing else.
+
+    Why the panel matters, what to look for, what the caveats are -- all of that
+    belongs in the caption, where a reader can take it at their own pace and
+    where the journal expects it. A title carrying an explanation makes the
+    figure look crowded before a single number is read.
+    """
+    ax.set_title(f'{letter}) {text}', fontweight='bold', fontsize=9, loc='left')
 
 
 # ---------------------------------------------------------------------------

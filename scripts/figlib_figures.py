@@ -38,6 +38,36 @@ import figlib_shapes as S  # noqa: E402
 #: two of these side by side ran into each other at full length.
 LEVEL_AXIS = 'Noise level (fraction of label spread)'
 
+#: What each figure MEANS goes here, not in its title. A title carrying the
+#: caveats makes a figure look crowded before a number is read, and the journal
+#: expects the explanation in the caption anyway. write_captions() puts them in
+#: one file beside the images, ready to paste.
+CAPTIONS = {}
+
+
+def caption(name, text):
+    CAPTIONS[name] = ' '.join(text.split())
+
+
+def write_captions(output_dir):
+    if not CAPTIONS:
+        return None
+    path = Path(output_dir) / 'captions.md'
+    lines = ['# Figure captions', '',
+             'Generated with the figures. Everything here was kept OUT of the '
+             'titles on purpose.', '']
+    for name in sorted(CAPTIONS):
+        lines += [f'**{name}.** {CAPTIONS[name]}', '']
+    path.write_text('\n'.join(lines))
+    print(f'    wrote captions.md ({len(CAPTIONS)} caption(s))')
+    return path
+
+
+#: Beyond this many columns across a row of grids, the printed numbers stop
+#: being legible at 170 mm. Three assay datasets with a clean column and seven
+#: conditions is 24, which is where "text overlay nightmare" comes from.
+MAX_COLUMNS_ACROSS = 14
+
 
 def _fig(width_fraction=1.0, height=3.2, nrows=1, ncols=1, **kwargs):
     import matplotlib.pyplot as plt
@@ -94,13 +124,19 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
                        legend=(index == 0))
         ax.set_ylabel('Share of variance (%)')
         ax.set_ylim(0, 100)
-        S.panel_letter(ax, 'ab'[index] if index < 2 else str(index))
-        ax.set_title(outcome, fontsize=9, loc='right', color='#444444')
+        S.title(ax, 'abcd'[index] if index < 4 else str(index), outcome)
     axes[-1].set_xlabel('Noise condition')
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
-    fig.suptitle(f'{C.dataset_label(dataset)} — whiskers span the '
-                 f'{n_reps} replicates', fontsize=9, y=1.0)
+    caption('F2', f"""
+        How much of the variation in each outcome is explained by the choice of
+        model, the choice of representation, the pairing of the two, and what is
+        left over, on {C.dataset_label(dataset)}. Bars are the share of variance
+        from a two-way analysis with sequential sums of squares; the four shares
+        sum to 100 per cent. Whiskers span the {n_reps} replicates -- the
+        decomposition is repeated on each one separately, which no previous
+        version of this figure could do because the robustness metric was
+        computed on a curve that had already been averaged over them.""")
     fig.tight_layout()
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
 
@@ -129,23 +165,30 @@ def f3_model_by_representation(summary, output_dir, conditions,
     reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
     shown = [c for c in C.sort_conditions(frame['condition'].unique())]
 
-    height = min(C.MAX_HEIGHT_IN, 1.1 + 0.24 * len(models))
-    fig, axes = _fig(height=height, ncols=len(shown), sharey=True)
+    lo, hi = C.AUC_RANGE_QM9
+    caption('F3', f"""
+        Robustness ({G.metric_label(value)}) of every model on every
+        representation, one panel per noise condition, on
+        {C.dataset_label(dataset)}. Rows are models ordered by family, columns
+        are representations. Which conditions appear is decided from the data:
+        conditions whose grids repeat another's are held back to an additional
+        file, because showing both is showing one thing twice. Colour is on one
+        fixed range across panels. Grey cells were never run.""")
+
+    fig, axes = _fig(height=C.grid_height(len(models)), ncols=len(shown),
+                     sharey=True)
     axes = np.atleast_1d(axes)
-    lo = float(frame[value].quantile(0.02))
-    hi = float(frame[value].quantile(0.98))
     image = None
     for index, (ax, condition) in enumerate(zip(axes, shown)):
         panel = frame[frame['condition'] == condition]
         image, _ = S.grid(ax, panel, 'model', 'rep', value,
                           column_labeller=C.rep_label, vmin=lo, vmax=hi,
                           row_order=models, column_order=reps)
-        ax.set_title(C.condition_label(condition), fontsize=9)
-        S.panel_letter(ax, 'abcdefg'[index])
+        S.title(ax, 'abcdefg'[index], C.condition_label(condition))
     if image is not None:
-        bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(G.metric_label(value), fontsize=9)
-    fig.suptitle(title, fontsize=9, y=1.02)
+        bar = fig.colorbar(image, ax=list(axes), fraction=0.025, pad=0.02)
+        bar.set_label(G.metric_label(value), fontsize=8)
+        bar.ax.tick_params(labelsize=7)
     return S.save(fig, Path(output_dir) / 'F3_model_by_representation.png')
 
 
@@ -218,13 +261,11 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                  reference_label='reported at', legend=False)
     ax_a.set_xlabel(LEVEL_AXIS, fontsize=8)
     ax_a.set_ylabel(G.metric_label('r2'))
-    ax_a.set_title(f'{C.condition_label(reference_condition)}, '
-                   f'{len(keep)} most robust models', fontsize=8,
-                   color='#444444', pad=14)
+    S.title(ax_a, 'a', f'{C.condition_label(reference_condition)}, '
+            f'{len(keep)} most robust models')
     ax_a.legend(ncol=3, fontsize=6.5, loc='upper center',
                 bbox_to_anchor=(0.5, -0.46), frameon=False,
                 handlelength=1.2, columnspacing=1.0)
-    S.panel_letter(ax_a, 'a')
 
     ax_b = fig.add_subplot(spec[0, 1])
     S.line_chart(ax_b, by_condition, 'sigma', 'r2', 'condition',
@@ -232,12 +273,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                  colours=C.CONDITION_COLORS, reference_x=level, legend=False)
     ax_b.set_xlabel(LEVEL_AXIS, fontsize=8)
     ax_b.set_ylabel(G.metric_label('r2'))
-    ax_b.set_title(f'{C.model_label(focus_model)}, every condition',
-                   fontsize=8, color='#444444', pad=14)
+    S.title(ax_b, 'b', f'{C.model_label(focus_model)}, every condition')
     ax_b.legend(ncol=2, fontsize=6.5, loc='upper center',
                 bbox_to_anchor=(0.5, -0.46), frameon=False,
                 handlelength=1.2, columnspacing=1.0)
-    S.panel_letter(ax_b, 'b')
 
     ax_c = fig.add_subplot(spec[1, :])
     # The clean baseline becomes a column of its own, first, behind a gutter.
@@ -247,17 +286,27 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     both = pd.concat([baseline, summ[['model', 'condition', 'auc_norm']]],
                      ignore_index=True)
     S.grid(ax_c, both, 'model', 'condition', 'auc_norm',
+           vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1],
            row_order=order, separate_first_column=True,
            column_order=['clean R²'] + C.sort_conditions(
                [c for c in summ['condition'].unique()]),
            column_labeller=lambda c: ('Clean R²' if c == 'clean R²'
                                       else C.condition_label(c)))
-    ax_c.set_title(f'{G.metric_label("auc_norm")} by model and condition. The '
-                   f'first column is what each retains a fraction OF.',
-                   fontsize=8, color='#444444', pad=8)
-    S.panel_letter(ax_c, 'c')
+    S.title(ax_c, 'c', f'{G.metric_label("auc_norm")} by model and condition')
 
-    fig.suptitle(title, fontsize=9, y=1.005)
+    caption('F4', f"""
+        What label noise costs you, on {title}. (a) Accuracy against the amount
+        of noise for the most robust models under one condition; the shaded band
+        is the spread across replicates and the dashed line marks the level
+        every table reports at. (b) The same for one model under every
+        condition, which is the picture of whether the KIND of noise matters
+        rather than only the amount. (c) Robustness by model and condition,
+        models ordered by robustness under the reference condition. The first
+        column is clean accuracy and is deliberately uncoloured: it is the
+        quantity the rest are a fraction of. Censoring appears nowhere here --
+        its level axis is a fraction of labels clipped rather than a fraction of
+        the label spread, so it shares neither an axis nor a colour scale, and
+        it runs on a named subset of pairs that cannot rank models.""")
     return S.save(fig, Path(output_dir) / 'F4_overview.png')
 
 
@@ -266,15 +315,21 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
 # ---------------------------------------------------------------------------
 
 def f8_assay(summary, output_dir, rep, value='auc_norm'):
-    """One grid per assay dataset, on one shared colour scale so the three can
-    be read against each other, each with its clean-accuracy column at the left.
+    """One grid per assay dataset: models down the side, conditions across.
 
-    NO ERROR BARS, and the Methods has to say so: one fit per cell with the seed
-    pinned, and the five scaffold folds are a partition of one dataset rather
-    than repeats of an experiment (RERUN_PLAN.md 3.2b).
+    THE PANELS SPLIT WHEN THEY WOULD NOT BE LEGIBLE. Three datasets, each with a
+    clean column and seven conditions, is twenty-four columns across 170 mm --
+    seven millimetres per printed number. Past MAX_COLUMNS_ACROSS this writes one
+    figure per dataset instead, and says so, because an unreadable single figure
+    is worth less than three readable ones and the journal caps neither.
+
+    The clean-accuracy column is drawn UNCOLOURED. It is a different quantity
+    from the retention beside it -- on the assay sets clean accuracy runs about
+    0.45 to 0.61 while retention runs 0.67 to 0.94 -- so sharing one colour
+    scale paints the whole reference column in the map's dark end and it reads
+    as every model being terrible.
     """
-    frame = summary[(summary['rep'] == rep)
-                    & (summary['dataset'] != 'qm9')]
+    frame = summary[(summary['rep'] == rep) & (summary['dataset'] != 'qm9')]
     rankable = G.ranking_conditions(sorted(frame['condition'].dropna().unique()))
     frame = frame[frame['condition'].isin(rankable)]
     if not len(frame):
@@ -285,36 +340,59 @@ def f8_assay(summary, output_dir, rep, value='auc_norm'):
     datasets = [d for d in C.DATASET_ORDER if d in set(frame['dataset'])]
     models = C.sort_models(frame['model'].unique())
     conditions = C.sort_conditions(frame['condition'].unique())
-    lo = float(frame[value].quantile(0.02))
-    hi = float(frame[value].quantile(0.98))
+    lo, hi = C.AUC_RANGE_ASSAY
 
-    height = min(C.MAX_HEIGHT_IN, 1.2 + 0.22 * len(models))
-    fig, axes = _fig(height=height, ncols=len(datasets), sharey=True)
-    axes = np.atleast_1d(axes)
-    image = None
-    for index, (ax, dataset) in enumerate(zip(axes, datasets)):
-        panel = frame[frame['dataset'] == dataset]
-        baseline = (panel.groupby('model', as_index=False)['baseline_r2']
-                    .median().assign(condition='clean R²')
-                    .rename(columns={'baseline_r2': value}))
-        both = pd.concat([baseline, panel[['model', 'condition', value]]],
-                         ignore_index=True)
-        image, _ = S.grid(ax, both, 'model', 'condition', value,
-                          row_order=models, separate_first_column=True,
-                          column_order=['clean R²'] + conditions,
-                          column_labeller=lambda c: ('Clean R²'
-                                                     if c == 'clean R²'
-                                                     else C.condition_label(c)),
-                          vmin=lo, vmax=hi)
-        ax.set_title(C.dataset_label(dataset), fontsize=9)
-        S.panel_letter(ax, 'abc'[index] if index < 3 else str(index))
-    if image is not None:
-        bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
-        bar.set_label(G.metric_label(value), fontsize=9)
-    fig.suptitle(f'{title} — one fit per cell, five scaffold folds; the folds '
-                 f'are a partition, not repeats, so there is no error bar',
-                 fontsize=8.5, y=1.02)
-    return S.save(fig, Path(output_dir) / 'F8_assay_datasets.png')
+    caption('F8', f"""
+        Robustness ({G.metric_label(value)}) of every model on the three assay
+        datasets, on the {C.rep_label(rep)} representation. Rows are models,
+        ordered by family. The first column of each panel is clean
+        {G.metric_label('r2')} and is deliberately uncoloured: it is the
+        quantity the others are a fraction of, not a measurement on the same
+        scale. Colour is on one fixed range across all panels so they can be
+        compared directly. Grey cells were never run. There are no error bars:
+        one fit per cell with the seed pinned, and the five scaffold folds are a
+        partition of one dataset rather than repeats of an experiment.
+        Censoring is absent because it runs on a named subset of pairs and
+        cannot rank models.""")
+
+    columns_across = len(datasets) * (len(conditions) + 1)
+    split = columns_across > MAX_COLUMNS_ACROSS
+    if split:
+        print(f'    F8: {columns_across} columns across would be '
+              f'{170 / columns_across:.0f} mm per number; writing one figure '
+              f'per dataset instead')
+
+    written = []
+    panels = [[d] for d in datasets] if split else [datasets]
+    for group in panels:
+        height = C.grid_height(len(models))
+        fig, axes = _fig(height=height, ncols=len(group), sharey=True)
+        axes = np.atleast_1d(axes)
+        image = None
+        for index, (ax, dataset) in enumerate(zip(axes, group)):
+            panel = frame[frame['dataset'] == dataset]
+            baseline = (panel.groupby('model', as_index=False)['baseline_r2']
+                        .median().assign(condition='clean')
+                        .rename(columns={'baseline_r2': value}))
+            both = pd.concat([baseline, panel[['model', 'condition', value]]],
+                             ignore_index=True)
+            image, _ = S.grid(ax, both, 'model', 'condition', value,
+                              row_order=models, separate_first_column=True,
+                              column_order=['clean'] + conditions,
+                              column_labeller=lambda c: (
+                                  'Clean R²' if c == 'clean'
+                                  else C.condition_label(c)),
+                              vmin=lo, vmax=hi)
+            letter = 'abc'[datasets.index(dataset)]
+            S.title(ax, letter, C.dataset_label(dataset))
+        if image is not None:
+            bar = fig.colorbar(image, ax=list(axes), fraction=0.025, pad=0.02)
+            bar.set_label(G.metric_label(value), fontsize=8)
+            bar.ax.tick_params(labelsize=7)
+        suffix = f'_{group[0]}' if split else ''
+        written.append(S.save(
+            fig, Path(output_dir) / f'F8_assay_datasets{suffix}.png'))
+    return written[0] if written else None
 
 
 # ---------------------------------------------------------------------------
@@ -390,9 +468,16 @@ def r15_rank_against_level(accuracy, output_dir, rep, condition,
     ax.invert_yaxis()
     ax.set_xlabel(LEVEL_AXIS)
     ax.set_ylabel('Rank (1 = most accurate)')
-    ax.set_title(f'{title} — a line stops where that model falls below '
-                 f'{G.metric_label("r2")} {gate:g}', fontsize=8.5,
-                 color='#444444')
+    caption('R15', f"""
+        Where each model ranks against the others as the noise rises, on
+        {title}. Rank 1 is the most accurate. Ranks are taken within each
+        replicate and then aggregated, because ranking an averaged score answers
+        a different question. A line stops where that model falls below
+        {G.metric_label('r2')} {gate:g} rather than plunging to last place, and
+        a model that never cleared it is absent. The legend is ordered by rank
+        on clean labels, so each line starts where that model starts. This is
+        the only figure here that does not have to pick a single noise
+        level.""")
     fig.tight_layout()
     return S.save(fig, Path(output_dir)
                   / f'R15_rank_against_level_{rep}_{condition}.png')
@@ -436,12 +521,18 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9'):
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.spines[['top', 'right']].set_visible(False)
-        S.panel_letter(ax, letter)
+        S.title(ax, letter, '')
     if frame['auc_norm'].notna().sum() > 2:
         rho = frame[['baseline_r2', 'auc_norm']].corr(method='spearman').iloc[0, 1]
-        axes[0].set_title(f'Spearman ρ = {rho:.2f}', fontsize=8.5,
-                          color='#444444')
-    fig.suptitle(f'{title} — the metric divides the baseline out, so part of '
-                 f'any decoupling is arithmetic', fontsize=8.5, y=1.02)
+        S.title(axes[0], 'a', f'Spearman ρ = {rho:.2f}')
+    caption('R16', f"""
+        Is robustness decoupled from accuracy, on {title}? (a) Robustness
+        against clean accuracy, one point per model and condition. (b) Accuracy
+        delivered at the reported level against robustness; the lower right is
+        the flattered quadrant -- retains well, delivers little. Read both
+        beside the clean-accuracy axis rather than alone: the robustness metric
+        divides the clean baseline out by construction, so a model with a weak
+        baseline scores well by having less to lose, and part of any apparent
+        decoupling is arithmetic rather than a finding.""")
     fig.tight_layout()
     return S.save(fig, Path(output_dir) / f'R16_decoupling_{rep}.png')
