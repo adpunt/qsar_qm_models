@@ -15466,9 +15466,117 @@ its evidence, and the author runs it. A result deleted in error costs days.
 
 #### D4. What the queued jobs are actually computing — CHAT 4
 
-| submission | computing now | should be | author's call |
+**Filled 2026-09-07.** Three slots of six are in question, and the author has not answered
+yet. Nothing below is edited into `deep_run_pairs.json` or `censoring_pairs.json` until she
+does; both files still say `provisional: true`.
+
+| submission | computing now | the reading says | author's call |
 |---|---|---|---|
-| _to be filled_ | | | |
+| QM9 deep run, 12986314–12986332 | `ngboost`, `rf`, `het_gp_rbf`, `svm`, `gauche_rbf`, `dnn_bnn_full_mve` on ECFP4, PDV and ChemBERTa | `ngboost`, `rf`, `dnn_vbll_hetero`, `svm`, `gauche`, `dnn` | OPEN |
+| QM9 censoring | the five pairs named in `censoring_pairs.json` | five pairs, one of which emits a per-molecule uncertainty | OPEN |
+| laboratory deep run and censoring | the same two files, under `validation_labels` | as above | OPEN |
+
+**Where the queued list came from.** `deep_run_pairs.json` was seeded by hand on 2026-09-05
+from the six models the author settled on 2026-09-04, before the screen had finished.
+
+**Where the reading came from.** `scripts/select_deep_run_pairs.py`, run on the cluster.
+There were TWO runs on 2026-09-07 and they are not the same run:
+
+| run | result rows read | models asked for | what it picked |
+|---|---|---|---|
+| 01:06 | 18,811 | 6 | `ngboost`, `rf`, `dnn_vbll_hetero`, `svm`, `gauche`, `dnn` |
+| 05:12 | 20,224 | 4 | `ngboost`, `qrf`, `dnn_vbll_hetero`, `svm` |
+
+At 01:06 the tool listed `gauche_rbf` among six models it could not rank because none of its
+screen rows had landed. So the Gaussian-process slot went to `gauche` by default, not by
+comparison. By 05:12 `gauche_rbf` had one AUC_norm on each representation, and nobody has
+re-run the six-model reading since. **The six-model reading has never seen `gauche_rbf`.**
+
+#### D4a. The three slots, with the numbers they turn on
+
+AUC_norm, higher is more noise-tolerant, from the 05:12 run over 20,224 result rows. One row
+is one model on one representation under one noise type.
+
+**Slot: the least noise-tolerant model.** `het_gp_rbf` is in the file, `dnn_vbll_hetero` is
+what the reading picks. Both ran on three representations under three noise types, nine
+combinations. `dnn_vbll_hetero` is the lower of the two in all nine.
+
+| representation | noise type | `het_gp_rbf` | `dnn_vbll_hetero` |
+|---|---|---|---|
+| ECFP4 | gaussian | 0.9238 | 0.8838 |
+| ECFP4 | grouped_shifted | 0.8946 | 0.8735 |
+| ECFP4 | grouped_wider | 0.9378 | 0.8838 |
+| PDV | gaussian | 0.9184 | 0.8807 |
+| PDV | grouped_shifted | 0.8663 | 0.8619 |
+| PDV | grouped_wider | 0.9175 | 0.8881 |
+| ChemBERTa | gaussian | 0.8639 | 0.8273 |
+| ChemBERTa | grouped_shifted | 0.8657 | 0.8163 |
+| ChemBERTa | grouped_wider | 0.8819 | 0.8391 |
+
+Clean R² beside those, ECFP4 / PDV / ChemBERTa: `het_gp_rbf` 0.835 / 0.882 / 0.841,
+`dnn_vbll_hetero` 0.757 / 0.857 / 0.794.
+
+**Slot: the Gaussian process.** `gauche_rbf` is in the file, `gauche` is what the reading
+picks. `gauche` is the Tanimoto kernel and `MODELS['gauche']` in
+`slurm_scripts_qm9_rerun/generate_scripts.py:663` restricts it to binary fingerprints, so it
+generates 6 tasks on ECFP4 alone against 18 tasks on three representations for `gauche_rbf`.
+Taking it would leave the deep run with no Gaussian process on PDV or ChemBERTa. Under
+gaussian noise, the one condition all three have landed:
+
+| representation | `gauche_rbf` | `gauche` | `het_gp_rbf` |
+|---|---|---|---|
+| ECFP4 | 0.9387 | 0.9279 | 0.9238 |
+| PDV | 0.9399 | not defined | 0.9184 |
+| ChemBERTa | 0.9503 | not defined | 0.8639 |
+
+**Slot: the neural model.** `dnn_bnn_full_mve` is in the file, `dnn` is what the reading
+picks. This one is settled by a check, not by preference: censoring needs at least two of the
+selected models to emit a per-molecule uncertainty
+(`noise_conditions.json`, `min_uncertainty_models: 2`, author 2026-08-28), and the generator
+calls `ap.error` below that at `generate_scripts.py:1525`–`1535`. The queued six contain
+three that emit one — `ngboost`, `gauche_rbf`, `dnn_bnn_full_mve`. The reading's six contain
+one, `ngboost`. **The reading cannot be taken whole; the generator refuses it.**
+
+#### D4b. A defect in the queued file that no slot choice fixes
+
+Generating the deep run from `deep_run_pairs.json` as it stands prints:
+
+> ⚠ 1 selected model(s) emit a per-molecule uncertainty and are NOT in
+> `uncertainty_pairs.json`: `heteroscedastic_gp`. Their tasks will run, exit 0 and write an
+> uncertainty column scored on the TEST split only, where the injected noise is zero.
+
+Measured by running the generator on this laptop, 2026-09-07, at `332bc09`. `het_gp_rbf` is
+not on the uncertainty roster in `uncertainty_pairs.json`, whose six models are `qrf`,
+`ngboost`, `gauche_rbf`, `dnn_vbll`, `dnn_bnn_full_mve`, `mlp_bnn_full_mve`. Swapping it for
+`dnn_vbll_hetero` moves the warning rather than clearing it — `dnn_vbll_hetero` is not on
+that roster either, and neither is `gauche`. Whatever fills that slot, either it goes on the
+uncertainty roster or its uncertainty column means nothing. That is a second decision and it
+is not in front of the author yet.
+
+#### D4c. Requested wall per task, so the swap has a price
+
+From a generate run on this laptop, 2026-09-07, `--stage 2 --max-hours 720`. A model in the
+deep run holds 18 tasks that do work — three representations by six noise conditions —
+except `gauche`, which holds 6.
+
+| model | tasks that do work | requested wall per task | grade |
+|---|---|---|---|
+| `heteroscedastic_gp` | 18 | 11:59:00 | measured |
+| `dnn_bnn_full_variational_hetero` | 18 | 7:59:00 | measured |
+| `gauche_rbf` | 18 | 148:59:00 | LOWER BOUND — see below |
+| `gauche` | 6 | 2:59:00 | measured |
+| `dnn_bnn_full_mve` | 18 | 18:59:00 | measured |
+| `dnn` | 18 | 3:59:00 | measured |
+
+`gauche_rbf`'s 148:59:00 is priced from a laptop timing of 87 hours per 110 training runs at a
+three-times margin, because too few of its tasks finished for the generator to trust an ARC
+rate. The partial ARC rate in the same printout is 0.4559 hours per 110 training runs, which
+for a 70-run task is under half an hour. The truth is somewhere between and is not known.
+**Do not price a decision about `gauche_rbf` off 148 hours.**
+
+Narrowing costs nothing: all 19 model arrays were submitted, and a task whose model is no
+longer named skips and exits 0. Widening costs a resubmission of that model's 18 indices,
+which then queue behind Priority like everything else.
 
 #### D5. Settled here, 2026-09-07, so no chat re-opens it
 
@@ -15579,6 +15687,13 @@ and the requests are what stop the scheduler fitting them into gaps.
 it was taken at four by mistake. The tool warns that only one of its six reports an
 uncertainty per molecule where the rule needs two, which is precisely why the author put
 `gauche_rbf` and `dnn_bnn_full_mve` in the file. Chat 4 owns it.
+
+⚠ **Corrected 2026-09-07 by chat 4.** The line above and `HANDOFF.md` both say this reading was
+taken at six models over 20,224 rows. It was two runs, not one: six models over **18,811**
+rows at 01:06, four models over **20,224** rows at 05:12. Recovered from the session logs at
+`~/.claude/projects/-Users-apunt-repos-qsar-qm-models/*.jsonl`. It matters because at 01:06
+`gauche_rbf` had no screen rows at all and the tool listed it as unrankable, so the
+Gaussian-process slot went to `gauche` by default. §13.27 D4.
 
 ### 13.29 THE FINISHED COMMAND SHEET — 2026-09-07
 
