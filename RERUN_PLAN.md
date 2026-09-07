@@ -16583,6 +16583,67 @@ rate is graded `partial`, and `slowest_observed_speedup()` reads only models gra
 
 Proof: `python slurm_scripts_qm9_rerun/test_generate_scripts.py`.
 
+#### D2t. The wall cut was not enough. Two moves, and the second is certain
+
+Both arrays now ask `18:59:00` and `20:59:00`, and `squeue --start` still returns `N/A` with
+`(Priority)`. No start estimate at all means the backfill scheduler cannot place them, and
+18 hours is still too large for the gaps `long` is offering. The author's read, 2026-09-07:
+*"Trust me that's not going to work."*
+
+**The one job of the three that IS running asks 5:59:00.** `13042881`, same account, same 64 GB,
+same submit second, same `long` partition, both its tasks on `arc-c120`. That is the only wall
+this queue has demonstrably admitted today.
+
+**MOVE 1 — the partition, free, keeps the job id and the submit time.** `medium` is 2 days
+(§2.8i), and 18:59 and 20:59 both fit inside it with room. They are on `long` only because
+`failed_tasks.py --emit-sbatch` prints the partition the ORIGINAL submission used, and the
+original walls were 15-14:59 and 17-08:59, which needed `long`. That reason is gone.
+
+```bash
+scontrol update JobId=13042879 Partition=medium
+scontrol update JobId=13042880 Partition=medium
+squeue --start -j 13042879,13042880
+sinfo -p medium,long -o "%.10P %.6a %.11l %.6D %.6t %.15C"
+```
+
+**MOVE 2 — if `medium` does not place them either, make each task fit the wall that works.**
+A task is 7 noise levels by 9 replicates. Split the replicates across three arrays and each task
+becomes a third of the work, at a wall this queue is currently admitting:
+
+| replicates per task | training runs | measured |
+|---|---|---|
+| 9, as queued | 63 | 3.96 h |
+| **3** | 21 | **1.35 h** |
+| 2 | 14 | 0.91 h |
+
+At three replicates the generator writes `--time=10:59:00`; cut that to `5:59:00`, which is
+4.4 times the measurement and is the wall running right now.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd $QSAR/slurm_scripts_qm9_rerun
+
+for START in 1 4 7; do
+    python generate_scripts.py --stage 1 --models gauche_rbf \
+        --replicates 3 --start-iteration $START --max-hours 48 \
+        --out-dir $QSAR/slurm_scripts_qm9_split_$START
+    sbatch --account=stat-cadd --partition=medium --time=5:59:00 \
+        --array=0,1,4,6,7,10,12,13,16%4 \
+        $QSAR/slurm_scripts_qm9_split_$START/qm9_s1_gauche_rbf.sh
+done
+scancel 13042879
+```
+
+`--start-iteration 1`, `4` and `7` at three replicates each give replicates 1-3, 4-6 and 7-9 —
+the same nine the single array would have run, no overlap and no gap. `--time` on the `sbatch`
+line overrides the script's own `#SBATCH --time`. **Cancel `13042879` only after the three are
+accepted**, and only it: `13042880` is the deep run and gets the same treatment separately if
+move 1 fails for it too.
+
+**The cost of move 2** is three startups instead of one, 164 seconds each, and three times as
+many rows appended to the same nine files — which is the duplication D2f and §13.30 already
+carry. It buys tasks that this queue will actually start.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
@@ -16934,9 +16995,54 @@ does; both files still say `provisional: true`.
 
 | submission | computing now | the reading says | author's call |
 |---|---|---|---|
-| QM9 deep run, 12986314–12986332 | `ngboost`, `rf`, `het_gp_rbf`, `svm`, `gauche_rbf`, `dnn_bnn_full_mve` on ECFP4, PDV and ChemBERTa | `ngboost`, `rf`, `dnn_vbll_hetero`, `svm`, `gauche`, `dnn` | OPEN |
-| QM9 censoring | the five pairs named in `censoring_pairs.json` | five pairs, one of which emits a per-molecule uncertainty | OPEN |
-| laboratory deep run and censoring | the same two files, under `validation_labels` | as above | OPEN |
+| QM9 deep run, 12986314–12986332 | `ngboost`, `rf`, `het_gp_rbf`, `svm`, `gauche_rbf`, `dnn_bnn_full_mve` on ECFP4, PDV and ChemBERTa | `ngboost`, `rf`, `dnn_vbll_hetero`, `svm`, `gauche`, `dnn` | ✅ **KEEP ALL SIX AND ADD `dnn_vbll_hetero`** |
+| QM9 censoring | the five pairs named in `censoring_pairs.json` | five pairs, one of which emits a per-molecule uncertainty | ✅ **UNCHANGED** — the reading breaks the two-uncertainty rule |
+| laboratory deep run and censoring | the same two files, under `validation_labels` | as above | ✅ same call; the depth run needs `VBLL-Full-Hetero` resubmitted |
+
+#### D4i. SETTLED 2026-09-07 by the author: seven models, not six
+
+Asked to choose between `het_gp_rbf` and `dnn_vbll_hetero`, the author's answer was *"Let's do
+both?"* — so the deep run is **seven models on three representations, 21 pairs**. Both JSON
+files now say `provisional: false` and carry a `settled` line.
+
+`deep_run_pairs.json` gains `dnn_vbll_hetero` / `dnn_bnn_full_variational_hetero` /
+`VBLL-Full-Hetero`. `censoring_pairs.json` is unchanged in content.
+
+**What that costs, and it is the one thing that is not free.** Narrowing a selection is free
+because an unlisted task skips and exits 0. This is a WIDENING: array `12986329`'s tasks have
+already run and skipped, so the 18 that do work must go again — three representations by six
+noise conditions, at `7:59:00` each.
+
+**Nobody types the index list.** `slurm_scripts_qm9_rerun/generate_scripts.py` now writes
+`resubmit_selected.sh` beside `submit_all.sh` whenever `--runtime-selection` is given. It
+holds one line per selected model, at that model's own indices, worked out from the same
+`rep = REPS[i % n_rep]` / `cond = CONDS[i / n_rep]` map the task script uses — which differs
+per model, because `gauche` runs on fingerprints alone. For this addition:
+
+```
+bash resubmit_selected.sh dnn_bnn_full_variational_hetero
+```
+
+Guard: `scripts/test_submit_all_ranges.py` decodes every index in that file back to a
+(representation, condition) pair and fails if the set is not exactly what the selection names,
+or if any index is past the script's own task count. It goes red on a one-place shift.
+
+🔴 **THE LABORATORY DEPTH RUN NEEDS THE SAME AND CANNOT DO IT YET.** It reads the same
+`deep_run_pairs.json`, so `VBLL-Full-Hetero`'s tasks there have also already skipped.
+`slurm_scripts_validation_rerun/generate_scripts.py` has no `resubmit_selected.sh` — its
+`scripts` list carries only a name, a task count and a wall, so the model label and the
+representation list are not in scope at the point it writes the submitter. Its decode is the
+same shape (`rep = REPS[i % n_rep]`, `dataset = DATASETS[i / n_rep]`, `:587`–`:589`), so the
+same addition fits. **Left to `HANDOFF.md` chat 3, which owns that generator and is editing it
+in this checkout now.** Until it is added, that model's laboratory depth tasks are not queued.
+
+⚠ **Two models now write an uncertainty column that means nothing.** With `dnn_vbll_hetero`
+added, the generator warns for both it and `heteroscedastic_gp`: neither is in
+`uncertainty_pairs.json`, so their uncertainty is scored on the test split, where the injected
+noise is zero. The generator's own message says the remedy is NOT a JSON edit — the
+uncertainty runs read their models from the `MODELS` dict in
+`slurm_scripts_uncertainty_rerun/generate_scripts.py`, so adding one means an entry there plus
+one in `model_memory.json` and a regenerate. **Not done, and not put to the author.**
 
 **Where the queued list came from.** `deep_run_pairs.json` was seeded by hand on 2026-09-05
 from the six models the author settled on 2026-09-04, before the screen had finished.
