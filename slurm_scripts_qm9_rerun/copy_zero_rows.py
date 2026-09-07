@@ -226,6 +226,7 @@ def main():
             # recomputes gaussian's clean level. See previously_copied().
             stale = []
             refused = False
+            gaps = []
             for row in clean:
                 have = existing.get(row['iteration'])
                 if have is None:
@@ -242,11 +243,28 @@ def main():
                 checked += 1
                 disagreed += 1
                 refused = True
+                # PRINT THE NUMBERS, NOT ONLY THE COLUMN NAMES. Saying "r2 differs"
+                # sends whoever reads it away to open two CSVs by hand. The size of
+                # the gap is the whole question: a difference in the last few digits
+                # is a machine, and a difference of hundredths is not.
+                theirs = ', '.join(str(c.get('r2')) for c in candidates)
+                # WHAT ELSE MOVED. A clean run that differs is either a different
+                # sample, a different model spec, or neither -- and "neither" is the
+                # only one that is alarming. These two columns separate the three
+                # without opening the files, which on 2026-09-07 was the next thing
+                # anyone had to do by hand.
+                def _mark(r):
+                    return (f"n={r.get('sample_size')} "
+                            f"spec={str(r.get('spec_hash'))[:8]}")
+                gaps.append(f"replicate {row['iteration']}: r2 {have.get('r2')} "
+                            f"[{_mark(have)}] against {theirs} "
+                            f"[{'; '.join(_mark(c) for c in candidates)}]")
                 print(f"  DISAGREES  {target.name} replicate {row['iteration']}: "
-                      f"{', '.join(differs)} differ from every clean row {source.name} "
-                      f"holds for that replicate. The clean run is supposed to be "
-                      f"identical across conditions -- something adds noise at level 0, "
-                      f"or the seeds have diverged.")
+                      f"r2 {have.get('r2')} [{_mark(have)}] against {theirs} "
+                      f"[{'; '.join(_mark(c) for c in candidates)}] in {source.name} "
+                      f"({', '.join(differs)} differ). The clean run is supposed to be "
+                      f"identical across conditions -- nothing is added at level 0, so "
+                      f"same molecules, same seed, same model.")
 
             if stale:
                 print(f"  REFRESHED  {target.name}: {len(stale)} clean row(s) this script "
@@ -271,7 +289,7 @@ def main():
             # all (RERUN_PLAN.md 13.28). The exit code is still 1, so nothing
             # passes silently.
             if refused:
-                refusals.append((target.name, len(missing)))
+                refusals.append((target.name, len(missing), gaps))
                 print(f"  REFUSING  {target.name}: nothing copied into this file until "
                       f"the disagreement above is explained. Every other file is "
                       f"unaffected and is still being filled.")
@@ -312,13 +330,15 @@ def main():
         print(f"  {len(refusals)} file(s) REFUSED -- a clean row they COMPUTED matches "
               f"no clean row the reference holds. These are the only ones that need a "
               f"decision:")
-        for name, still_missing in refusals:
+        for name, still_missing, gaps in refusals:
             cost = (f"{still_missing} replicate(s) left with no clean row"
                     if still_missing else
                     "nothing was waiting on a copy here -- every replicate already "
                     "has its own computed clean row, so the refusal costs no data; "
                     "the disagreement itself is the finding")
             print(f"      {name}   {cost}")
+            for gap in gaps:
+                print(f"          {gap}")
 
     if log_rows and not args.dry_run:
         log = results / LOG_NAME

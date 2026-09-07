@@ -16863,15 +16863,36 @@ it is the only place where two independently computed clean rows exist for one p
 only place this script can compare two computations rather than a computation against a copy.
 Every other condition has one clean row and it came from `gaussian`.
 
-⚠ **What the disagreement means is NOT established.** At level 0 nothing is clipped, so the
-censoring clean run and the gaussian clean run train the same model on the same molecules
-under the same replicate seed and should agree to the last digit. All three files name a model
-whose fit is driven by gradient descent — the heteroscedastic Gaussian process runs 100 Adam
-epochs for its noise network, `gauche_rbf` fits its kernel the same way, `dnn_bnn_full_mve` is
-a network — while the models that agree include `rf` and `svm`, which are deterministic. That
-pattern is **unverified**: nobody has printed the two values side by side. It is the same
-question as the `29 duplicated cell-and-replicate(s) ... largest 0.0399` warning below, and
-AUC_norm divides by exactly these rows.
+🔴 **MEASURED 2026-09-07. IT IS TWO REPLICATES, AND IT IS THE SAME TWO IN ALL THREE FILES.**
+The clean R² from each censoring file, against the clean R² from the same pair's gaussian file:
+
+| pair | replicate 4 | replicate 8 | largest gap over the other eight |
+|---|---|---|---|
+| `heteroscedastic_gp` × ECFP4 | +0.002599 | +0.016800 | 6.6e-07 |
+| `dnn_bnn_full_mve` × PDV | −0.023893 | +0.016456 | 0 — bit-identical |
+| `gauche_rbf` × PDV | −0.001262 | +0.019040 | 0 — bit-identical |
+
+**An earlier guess in this section, that gradient-trained models simply do not reproduce, is
+wrong and is withdrawn.** On PDV, eight of ten replicates of a variance-head network and of an
+exact Gaussian process are BIT-IDENTICAL across two independent runs. Training reproduces.
+Gaussian's own re-run reproduces the screen the same way: for `heteroscedastic_gp` on ECFP4
+the two clean blocks differ at one replicate by 1.2e-06, and for `gauche_rbf` on PDV by
+4.4e-14.
+
+So this is not machine wobble and not non-determinism. **It is tied to the replicate index —
+4 and 8, in three files, across two representations and three models — and the direction is
+mixed, so it is not a bias either.** Nothing in this session establishes the cause. AUC_norm
+divides by exactly these rows, and censoring is the condition §3.1f says is the only one that
+can answer the which-molecules question.
+
+**Next step, and it is one command.** `copy_zero_rows.py` now prints `sample_size` and
+`spec_hash` on both sides of a disagreement, so the same `--dry-run` says whether replicates
+4 and 8 were a different sample or a different model spec. "Neither" is the answer that would
+be serious. Nobody has run it yet.
+
+This is probably the same thing as the `29 duplicated cell-and-replicate(s) ... largest
+0.0399` warning below, but that is **unverified** — nobody has checked whether those 29 are
+also replicates 4 and 8.
 
 **What is left at stage 2 after the copy.** Seven PARTIAL and three THIN, all named:
 
