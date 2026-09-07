@@ -15859,15 +15859,33 @@ ls -la results/anova_*_gauche_rbf.csv
 
 Then, once 1 says the fix is in:
 
-```bash
-# 6. cut the screen's wall and memory -- both keep the queue position
-scontrol update JobId=12971618 TimeLimit=15:59:00
-scontrol update JobId=12971618 MinMemoryNode=64G
-squeue -j 12971618 -o "%.14i %.22j %.2t %.11l %.7m %R" | head -5
+✅ **The screen array's cut was made by chat 1, not here.** `12971618` is at `15:59` and 64 GB
+and its queue reason went from `Priority` to `None`; `12980590` is at `133:59:00` and
+`12986326` at `6-04:59`. Recorded above under "What actually took". Do not run those lines
+again.
 
-# 7. the resubmission lines for the failed tasks, printed rather than typed
-python scripts/failed_tasks.py --emit-sbatch | grep -A2 gauche_rbf
+**Round two, and it is the round that puts work back.**
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models
+
+# 6. bring the fixed-cause registry in. The checkout was at 76571f3, which predates it.
+bash scripts/pull_safely.sh && git log --oneline -1
+
+# 7. are the four RUNNING deep-run tasks on the fixed code, or repeating the crash?
+#    0 means clean. Anything above 0 means that task is burning an hour for nothing.
+for t in 16 18 19 22; do
+  printf "12986326_%s: " $t
+  grep -c "out-of-fold scoring for" \
+    slurm_scripts_qm9_rerun/qm92_gauche_rbf_12986326_$t.out
+done
+
+# 8. the resubmission lines, printed rather than typed
+python scripts/failed_tasks.py --emit-sbatch | grep -B3 -A5 gauche_rbf
 ```
+
+Step 8 prints nothing for this model from a checkout without `ddb7dc6`, which is why step 6
+comes first.
 
 `scripts/fixed_causes.json` carries the entry `gp-cap-noise-length-mismatch` tied to
 `c223ec3`, so step 7 prints a resubmission line only from a checkout that has the fix, and
@@ -15880,8 +15898,8 @@ Elapsed times from the same `sacct`, main grid, 18 tasks of `qm91_gauche_rbf`. A
 
 | | tasks | shortest | longest |
 |---|---|---|---|
-| failed on the Gaussian-process cap (ECFP4, PDV, ChemBERTa) | 9 | 56:29 | 1:36:29 |
-| completed, no out-of-fold pass (MHG-GNN, Avalon, Sort & Slice) | 5 | 43:55 | 1:33:14 |
+| failed on the Gaussian-process cap (ECFP4, PDV, ChemBERTa) | 9 | 56:29 | 1:32:29 |
+| completed, no out-of-fold pass (MHG-GNN, Avalon, Sort & Slice) | 7 | 43:55 | 1:33:14 |
 
 Both groups did one fit per training run: the failed ones threw inside the out-of-fold pass
 before doing any of its extra fits. So **an exact Gaussian process at the 5,000-molecule cap
@@ -15891,7 +15909,7 @@ costs about one and a half hours for 63 training runs on ARC**, and the request 
 The out-of-fold pass adds three scored inner fits per training run (`OOF_FOLDS_SCORED` in
 `slurm_scripts_qm9_rerun/generate_scripts.py`). An inner fit is on four fifths of the capped
 set, and the fit is cubic, so it costs about half a full one. That is arithmetic, not a
-measurement: **roughly two and a half times 1:36, so about four hours.** The generator asks
+measurement: **roughly two and a half times 1:33, so about four hours.** The generator asks
 `133:59:00` because it grades this model's ARC rate a lower bound.
 
 **Do not cut the main grid or the deep run to four hours on that arithmetic.** Let one
