@@ -10824,6 +10824,38 @@ uncertainty evidence (§13.20).
 | 12986400 | `unc_bnn_full_mve.sh` | 36 |
 | 12986401 | `unc_mlp_bnn_full_mve.sh` | 36 |
 
+#### Submissions 9 and 10 were REPLACED on 2026-09-07 — `long`, and walls from the fit count
+
+12986390–12986401 went out on 2026-09-06 asking 36:59 for the quantile forest and 47:59 for the
+other five, on `medium`. Those were five hand-typed constants; computed from the fit count, five of
+the six need more than `medium`'s 48-hour ceiling. `scontrol` cannot raise a wall, so they were
+cancelled and resubmitted. Not one of the 378 tasks had started, so only queue position was lost.
+The generator prints the warning itself every run. See §13.27 D1.
+
+| Job ID | Script | Tasks | Wall | replaces |
+|---|---|---|---|---|
+| 13042975 | `unc_qrf.sh` | 27 | 40:59:00 | 12986390 |
+| 13042977 | `unc_ngboost.sh` | 27 | 193:59:00 | 12986391 |
+| 13042979 | `unc_gp.sh` | 27 | 68:59:00 | 12986392 |
+| 13042980 | `unc_vbll_full.sh` | 27 | 91:59:00 | 12986393 |
+| 13042981 | `unc_bnn_full_mve.sh` | 27 | 51:59:00 | 12986394 |
+| 13042984 | `unc_mlp_bnn_full_mve.sh` | 27 | 78:59:00 | 12986395 |
+| 13042988 | `unc_qrf.sh` | 36 | 40:59:00 | 12986396 |
+| 13042990 | `unc_ngboost.sh` | 36 | 193:59:00 | 12986397 |
+| 13042991 | `unc_gp.sh` | 36 | 68:59:00 | 12986398 |
+| 13042993 | `unc_vbll_full.sh` | 36 | 91:59:00 | 12986399 |
+| 13042995 | `unc_bnn_full_mve.sh` | 36 | 51:59:00 | 12986400 |
+| 13042997 | `unc_mlp_bnn_full_mve.sh` | 36 | 78:59:00 | 12986401 |
+
+**378 tasks, on `long`, at 96 GB.** The order the ids arrive in is `submit_all.sh`'s own, which is
+tier 1 then tier 2 — the `Submitted batch job` lines and the script list it prints are in the same
+order. Memory stays 96 GB here: this pipeline has never run, so nothing has measured it, and it is
+the one place the 64G floor is not applied (`model_memory.json`).
+
+⚠️ **Confirm the twelve old arrays are gone.** If the `scancel` did not take, 756 tasks are queued
+for 378 pieces of work. `squeue -u $USER -o "%.12i %.30j %.2t %.11l" | grep unc_` must show twelve
+arrays, all with ids beginning 130429.
+
 ⚠️ **The job ids above were read off `sacct` on 2026-09-07, not recorded at submit time**, by
 `python scripts/slurm_jobs.py --emit-launch-log`. The mapping from id to script is the job NAME
 each array carries, so it is the cluster's own record rather than an assumption about submission
@@ -15646,8 +15678,16 @@ The denominator is 3 selected representations times 6 conditions. The four that 
 finished starting: `squeue` shows pending elements on 12986318, 12986326, 12986328 and 12986331,
 and none on `rf` or `svm`, which are done. A log only exists once a task starts.
 
-**What this does NOT settle.** QM9 censoring, in `slurm_scripts_qm9_censoring`, has not been read
-this way.
+##### QM9 censoring's gate is right too — read 2026-09-07, and this closes the set
+
+Logs without `=== SKIPPED` in `slurm_scripts_qm9_censoring`: one each for `dnn_bnn_full_mve`,
+`gauche_rbf`, `heteroscedastic_gp`, `ngboost` and `rf`. Nothing else. Those five are exactly the
+five pairs in `censoring_pairs.json`, and one is the right count: a censoring array holds 6 tasks,
+one per representation, and each named pair is one specific representation. **Five tasks of 114 do
+work and 109 skip, which is the design.**
+
+**Every submission has now been read this way**, and no gate has ever let through a model that is
+not in its file, or held back one that is.
 
 ##### Where every log is
 
