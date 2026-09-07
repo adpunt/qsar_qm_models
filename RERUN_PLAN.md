@@ -17193,13 +17193,58 @@ case-sensitive match here produced a submitter with **no models in it at all** �
 generates, passes `bash -n`, and queues nothing. It now folds the same way, and
 `scripts/test_submit_all_ranges.py` fails on a submitter that names no model.
 
-⚠ **Two models now write an uncertainty column that means nothing.** With `dnn_vbll_hetero`
-added, the generator warns for both it and `heteroscedastic_gp`: neither is in
-`uncertainty_pairs.json`, so their uncertainty is scored on the test split, where the injected
-noise is zero. The generator's own message says the remedy is NOT a JSON edit — the
-uncertainty runs read their models from the `MODELS` dict in
-`slurm_scripts_uncertainty_rerun/generate_scripts.py`, so adding one means an entry there plus
-one in `model_memory.json` and a regenerate. **Not done, and not put to the author.**
+#### D4j. The two models that write a test-only uncertainty column — SETTLED, leave them out
+
+With `dnn_vbll_hetero` added, the generator warns for it and for `heteroscedastic_gp`: neither
+is on `uncertainty_pairs.json`, so `-u True` writes an uncertainty column scored on the TEST
+split, where the injected noise is zero.
+
+**The decision is to leave both off the uncertainty roster**, delegated by the author on
+2026-09-07 (*"its yours now"*). Three reasons, in order of weight:
+
+1. **It cannot produce a wrong number.** `_spearman` at `scripts/uncertainty_stats.py:398`
+   returns NaN rather than warning on a constant input, and `:1063` records
+   `noise_size_constant` per cell. A test-split cell whose injected noise is a constant zero
+   therefore comes out NaN and labelled, not as a value. The task log says it too:
+   `out-of-fold pass: <model>/<rep> is not a settled pair, test rows only`.
+2. **The cost is not small and lands on jobs already queued.** The out-of-fold pass costs
+   `1 + OOF_FOLDS_SCORED` fits per training run instead of one
+   (`build_uncertainty_block`, `slurm_scripts_qm9_rerun/generate_scripts.py:505`). Turning it
+   on for these two roughly quadruples tasks that ask `11:59:00` and `7:59:00` now, and both
+   arrays are queued — so it is a wall change plus a resubmission, twice.
+3. **Nothing is lost.** `uncertainty_pairs.json` names six models and the 378 uncertainty runs
+   are the evidence for the aleatoric-versus-epistemic question. These two are in the deep run
+   for their robustness curves, which do not need the out-of-fold pass.
+
+**This is a widening not taken, not an axis cut.** Neither model was ever on the uncertainty
+roster; the roster is unchanged at six.
+
+⚠ **What would have to change if the author reverses this.** Not a JSON edit. The uncertainty
+runs read their models from the `MODELS` dict in
+`slurm_scripts_uncertainty_rerun/generate_scripts.py`, so it means an entry there, one in
+`model_memory.json`, and a regenerate — plus the QM9 grid change above.
+
+#### D4k. Whether `gauche_rbf` stays — the numbers, for the author
+
+§13.26 C2 raised dropping it to finish sooner. **Both grounds for that are now false.**
+
+| what was said | what is measured |
+|---|---|
+| "it has never run anywhere" | it has screen results on all six representations, and its AUC_norm under gaussian noise is ECFP4 **0.9387**, PDV **0.9399**, ChemBERTa **0.9503** |
+| "it is worth 17 days of requested time" | the generator now asks **32:59:00** a task, not 148:59:00 — the earlier figure was a laptop timing at a three-times margin, priced before any of its tasks finished |
+
+**What dropping it would cost.** It is the only Gaussian process the deep run has on PDV and
+ChemBERTa: `gauche` is the Tanimoto kernel and runs on binary fingerprints alone, and
+`het_gp_rbf` is the heteroscedastic variant, which the same screen puts below it on all three
+— 0.9238, 0.9184, 0.8639. It is also one of the six models on `uncertainty_pairs.json`, so it
+is one of the models whose uncertainty is actually scored out of fold rather than on test rows.
+
+**What is still wrong with it.** §13.26 C2: twelve failed tasks, eight on the main grid and
+four on the deep run, at noise level 1.5 in the deepest replicates on all three
+representations. `c223ec3` is the fix and nobody has confirmed it holds. That is chat 2's
+thread, and it is a reason to watch it, not a reason to drop it.
+
+**Chat 4's reading: keep it.** The author decides.
 
 **Where the queued list came from.** `deep_run_pairs.json` was seeded by hand on 2026-09-05
 from the six models the author settled on 2026-09-04, before the screen had finished.
