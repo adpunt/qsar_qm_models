@@ -15537,6 +15537,24 @@ is rounding, and taking it would mean resubmitting eighteen tasks that are alrea
 `qm90_qrf` on the QM9 screen asks 3:59 against a longest task of 2:25, which is 1.66×. Whether
 anything is left to do there depends on whether that array has finished; the block below prints it.
 
+##### ✅ CLOSED 2026-09-07: three of those four need nothing. Measured on the cluster, not reasoned.
+
+**12980589, `qm91_qrf`, is finished.** All eighteen tasks ended: fifteen COMPLETED and three
+FAILED at between 4 minutes 9 seconds and 7 minutes 5 seconds, which is indices 5, 11 and 17 —
+the Sort & Slice failures chat 5 owns, not a wall. Its longest task ran **20:51:30 against the
+1-02:59 it asked**, so the 1.29× margin held. Nothing to resubmit for the wall.
+
+**12986325 and 12986344, `qm92_qrf`, do no work at all.** Every one of 12986325's thirty-six tasks
+COMPLETED in between 23 seconds and 1 minute 26 seconds. `qrf` is in neither `deep_run_pairs.json`
+nor `censoring_pairs.json`, so the run-time gate prints SKIPPED and exits 0 — the design, not a
+fault. Their wall clock is irrelevant.
+
+**Only `val_svm` censoring, 12986386, is still open**, and it was cut off the end of the `sacct`
+that would have answered it.
+
+This also confirms `model_hours.json`: it carries `qrf` at 20.867 measured task hours, and the
+longest real task was 20:51:30.
+
 ##### The uncertainty runs are queued with walls that are too short — all twelve arrays
 
 This is the largest thing found today. The 378 tasks went out on 2026-09-06 with five hand-typed
@@ -15692,10 +15710,15 @@ raise this model in `model_hours.json` from what it actually used.
 
 ##### What is left, and who owns it
 
-- **Resubmit the three `qrf` arrays and `val_svm` censoring.** They cannot be raised in place.
-  12980589, 12986325, 12986344 and 12986386. Regenerate the scripts first from the pushed commit
-  and use `submit_all.sh`, never a typed array range. Any `qrf` task already RUNNING should be
-  left alone — cancelling it throws away the hours it has done.
+- ~~Resubmit the three `qrf` arrays and `val_svm` censoring.~~ **Three of the four closed
+  2026-09-07 on cluster evidence, see above.** `qm91_qrf` finished inside its wall; the two
+  `qm92_qrf` arrays skip every task because `qrf` is in neither selection file. Only
+  **12986386 `val_svm` censoring** is unresolved, and only because the `sacct` that would have
+  said was truncated.
+- **The screen's memory change is already paying.** `val_gp` 12986357_9 and `val_mlp-bnn-full-mve`
+  12986359_5 started at 64G within minutes of the cut. On the same cluster, a 256 GB job in this
+  account sits on `ReqNodeNotAvail` naming almost every node — which is what a request too large
+  to place looks like.
 - **The twelve uncertainty arrays need cancelling and resubmitting to `long`.** Chat 3 owns
   whether they run at all; the numbers are here.
 - **`gauche_rbf`'s screen array, 12971618**, is in part 2 above at 15:59 and in part 3 at 64 GB.
