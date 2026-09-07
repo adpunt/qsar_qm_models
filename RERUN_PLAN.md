@@ -17174,6 +17174,14 @@ Guard: `scripts/test_submit_all_ranges.py` decodes every index in that file back
 (representation, condition) pair and fails if the set is not exactly what the selection names,
 or if any index is past the script's own task count. It goes red on a one-place shift.
 
+⚠ **CHAT 5's REGENERATE BLOCK CLOBBERS STAGE 1's SUBMITTER.** The block runs
+`rm -f qm9_s1_*.sh qm9_s2_*.sh submit_all.sh`, then `--stage 1`, then `--stage 2`, into one
+directory. Measured on this laptop 2026-09-07: after the second run `submit_all.sh` holds
+**38 stage-2 sbatch lines and none for stage 1**, while all 19 `qm9_s1_*.sh` scripts sit on
+disk with nothing that submits them. It does not matter if stage 1 is only ever resubmitted
+through `failed_tasks.py`, which is what that block does. It matters the moment anyone wants
+to send a stage-1 array again. Generating each stage into its own directory avoids it.
+
 ✅ **THE LABORATORY DEPTH RUN NOW HAS THE SAME SUBMITTER.** It reads the same
 `deep_run_pairs.json`, so `VBLL-Full-Hetero`'s tasks there had skipped too and there was
 nothing to send them again with. `slurm_scripts_validation_rerun/generate_scripts.py` now
@@ -17244,7 +17252,53 @@ four on the deep run, at noise level 1.5 in the deepest replicates on all three
 representations. `c223ec3` is the fix and nobody has confirmed it holds. That is chat 2's
 thread, and it is a reason to watch it, not a reason to drop it.
 
-**Chat 4's reading: keep it.** The author decides.
+**Chat 4's reading: keep it.** ✅ **The author's decision, 2026-09-07: keep `gauche_rbf`.**
+§13.26 C2's dropping option is closed.
+
+#### D4l. Are the pairs that can decompose running uncertainty properly? — checked 2026-09-07
+
+The author asked directly. **Four models can have their uncertainty split into a
+measurement-error half and a model-doubt half** — `uncertainty_pairs.json`'s `decomposition`
+list: `gauche_rbf`, `dnn_vbll`, `dnn_bnn_full_mve`, `mlp_bnn_full_mve`. Every one runs on
+ECFP4, PDV and ChemBERTa, so twelve model-and-representation pairs.
+
+**On QM9, all four get the out-of-fold pass on all three.** Read out of the generated scripts,
+not from a document: each of the four holds
+`case "$rep" in ecfp4 | pdv | chemberta) OOF_FLAGS="--oof-folds 5"`. So every training
+molecule is scored by a model that never saw it, which is what makes the split answerable at
+all — the injected noise lives in the training labels. `--oof-folds-scored` is set for
+`ngboost` alone (`OOF_FOLDS_SCORED = {'ngboost': 3}`, `:226`), so these four score all five
+folds.
+
+**On the laboratory datasets, all four are in the uncertainty runs.** `MODELS` in
+`slurm_scripts_uncertainty_rerun/generate_scripts.py` reads `QRF`, `NGBoost`, `GP`,
+`VBLL-Full`, `BNN-Full-MVE`, `MLP-BNN-Full-MVE`, `GP-Hetero`, and `REPS` reads
+`ECFP4 PDV ChemBERTa` with `MODEL_REPS` empty. `GP` is `gauche_rbf`, `VBLL-Full` is
+`dnn_vbll`, and the two MVE names are the other two.
+
+🔴 **ONE GAP, AND IT IS ON QM9.** The three depth-only noise types — `student_t_nu5`,
+`outlier_p10` and `laplace` — run at stage 2 ONLY (`STAGE_DEFAULTS`: stages 0 and 1 hold
+`gaussian`, `grouped_wider`, `grouped_shifted`; stage 2 holds all six). Stage 2 is restricted
+by `deep_run_pairs.json`, which names `gauche_rbf` and `dnn_bnn_full_mve` but **not**
+`dnn_vbll` or `mlp_bnn_full_mve`. So on QM9 those two have **no rows at all** under those
+three noise types — no decomposition, and no robustness curve either. They have their
+out-of-fold rows from the screen and the main grid under the other three noise types, and the
+laboratory uncertainty runs cover all seven conditions for them.
+
+**The author's options.** Add `dnn_vbll` and `mlp_bnn_full_mve` to `deep_run_pairs.json` —
+a widening, so `bash resubmit_selected.sh dnn_bnn_full_variational` and
+`bash resubmit_selected.sh mlp_bnn_full_mve`, 18 tasks each at `12:59:00` and `13:59:00`. Or
+leave it, and the paper says QM9's decomposition under the three depth-only noise types rests
+on two models rather than four. **Not chat 4's to take.**
+
+⚠ **`het_gp_rbf` is now in the uncertainty runs on the laboratory side but not on QM9.**
+Commit `183cd46` made `GP-Hetero` the seventh uncertainty model, and
+`scripts/uncertainty_decomposition.py:171` gives it `PER_MOLECULE` for both halves. It is
+still absent from `uncertainty_pairs.json`, which is what gates QM9's out-of-fold pass, so its
+QM9 uncertainty is test rows only — D4j above. The two pipelines therefore disagree about this
+one model. **Note before anyone re-opens it on the strength of §5.5e's rho +0.7307: that
+figure is superseded at §5.5e's own correction — it is +0.109 measured the way the pipeline
+works.**
 
 **Where the queued list came from.** `deep_run_pairs.json` was seeded by hand on 2026-09-05
 from the six models the author settled on 2026-09-04, before the screen had finished.
