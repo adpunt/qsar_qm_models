@@ -408,8 +408,9 @@ def main():
                     f"(cd {sub.directory} && sbatch {flags}"
                     f"--array={rng}%{cli.throttle} "
                     f"{script})   # {cause}, {sub.label}, was {base}")
-        print(f"\n  {len(lines)} resubmission line(s) for the safe causes. Paths are "
-              f"relative to\n  the repository root; regenerate the scripts first if "
+        print(f"\n  {len(lines)} resubmission line(s): the causes that are safe to "
+              f"resend as-is, and\n  the ones fixed in this checkout. Paths are "
+              f"relative to the repository root.\n  Regenerate the scripts first if "
               f"the fix was in the generator.")
         if cli.emit_sbatch:
             print()
