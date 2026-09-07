@@ -159,6 +159,105 @@ def check_qm9(directory, stage):
             'coverage': cover}
 
 
+def qm9_oof_expected(stage):
+    """(condition, rep, model) for the cells that run the OUT-OF-FOLD pass.
+
+    Generator labels, not canonical spellings, because these are read straight
+    off the result FILE NAME, which the generator writes as
+    `anova_<condition>_<representation>_<model>.csv`.
+
+    Only the settled pairs run the pass -- `gen.UNCERTAINTY_PAIRS`, six models on
+    three representations -- so this is a small subset of `qm9_expected`.
+    """
+    gen = _generator('qm9', 'slurm_scripts_qm9_rerun/generate_scripts.py')
+    if gen is None:
+        return set()
+    conditions = list(gen.STAGE_DEFAULTS[stage]['conditions'])
+    want = {(c, r, m)
+            for m, entry in gen.MODELS.items()
+            for r in entry[4]
+            for c in conditions
+            if r in (gen.UNCERTAINTY_PAIRS.get(m) or [])}
+    if stage == 2:
+        sel = _pairs_file('deep_run_pairs.json')
+        if sel and sel.get('generator_labels') and sel.get('representations'):
+            ok_m, ok_r = set(sel['generator_labels']), set(sel['representations'])
+            want = {t for t in want if t[2] in ok_m and t[1] in ok_r}
+    censoring = _pairs_file('censoring_pairs.json')
+    if censoring:
+        for model, rep in censoring.get('generator_pairs', []):
+            if rep in (gen.UNCERTAINTY_PAIRS.get(model) or []):
+                want.add(('censoring', rep, model))
+    return want
+
+
+def check_qm9_oof(directory, stage):
+    """Do the settled pairs actually HAVE their out-of-fold training rows?
+
+    WHY THIS IS A SEPARATE CHECK AND NOT PART OF check_qm9, ADDED 2026-09-07.
+
+    `load_qm9` globs `anova_*.csv` and excludes every sibling suffix, so the
+    accuracy file is the only thing `check_qm9` has ever counted. The two are not
+    written together: the accuracy row for a (level, replicate) is saved BEFORE
+    the out-of-fold pass runs, and the pass can then fail on its own while the
+    row it already wrote stands.
+
+    That is not hypothetical. All nine `gauche_rbf` tasks of `12980590` failed
+    inside the out-of-fold pass at every level and replicate, and `--stage 1`
+    reported not one of their cells MISSING or PARTIAL, because every accuracy row
+    was there (RERUN_PLAN.md 13.27 D2). The per-molecule uncertainty is the whole
+    reason those pairs are settled, and nothing was checking for it.
+
+    A cell is landed here when every level on its ladder, at every replicate the
+    stage asked for, has `train_oof` rows.
+    """
+    gen = _generator('qm9', 'slurm_scripts_qm9_rerun/generate_scripts.py')
+    want = qm9_oof_expected(stage)
+    if gen is None or not want:
+        return None
+    replicates = int(gen.STAGE_DEFAULTS[stage]['replicates'])
+    directory = Path(directory)
+
+    rows, ok = [], 0
+    for condition, rep, model in sorted(want):
+        path = directory / f'anova_{condition}_{rep}_{model}_uncertainty_values.csv'
+        levels = len(str(gen.CONDITIONS[condition][1]).split())
+        expected_cells = levels * replicates
+        if not path.exists():
+            status, seen = 'MISSING_FILE', 0
+        else:
+            try:
+                frame = pd.read_csv(path, usecols=['split', 'sigma', 'iteration'])
+            except Exception as exc:
+                rows.append(('UNREADABLE', condition, rep, model, str(exc)[:60]))
+                continue
+            oof = frame[frame['split'] == 'train_oof']
+            seen = len(oof.drop_duplicates(['sigma', 'iteration']))
+            if seen == 0:
+                status = 'NO_OOF_ROWS'
+            elif seen < expected_cells:
+                status = 'PARTIAL_OOF'
+            else:
+                status = 'OK'
+                ok += 1
+        if status != 'OK':
+            rows.append((status, condition, rep, model,
+                         f'{seen} of {expected_cells} (level, replicate) cells '
+                         f'have train_oof rows'))
+
+    cover = pd.DataFrame(rows, columns=['status', 'condition', 'rep', 'model',
+                                        'detail'])
+    return {'name': 'QM9 out-of-fold', 'want': len(want), 'ok': ok,
+            'missing': int((cover['status'] == 'MISSING_FILE').sum())
+                       + int((cover['status'] == 'NO_OOF_ROWS').sum()),
+            'partial': int((cover['status'] == 'PARTIAL_OOF').sum()),
+            'thin': int((cover['status'] == 'UNREADABLE').sum()),
+            'examples': [],
+            'note': (f'the settled pairs only (uncertainty_pairs.json); '
+                     f'{replicates} replicate(s) expected at stage {stage}'),
+            'coverage': cover}
+
+
 def assay_expected(stage):
     """(dataset, model, rep, condition) for one stage of the laboratory runs.
 
@@ -291,7 +390,7 @@ def report(results, verbose=False):
             bad = r['coverage'][r['coverage']['status'] != 'OK']
             for row in bad.head(20).itertuples():
                 bits = [str(getattr(row, k, '')) for k in
-                        ('dataset', 'model', 'rep', 'condition')]
+                        ('dataset', 'model', 'rep', 'condition', 'detail')]
                 print(f'    {row.status:18s} {" ".join(b for b in bits if b)}')
     print()
     if complete:
@@ -321,6 +420,7 @@ def main(argv=None):
 
     print(f'checking against the generators\' own rosters, stage {args.stage}')
     results = [check_qm9(args.qm9_dir, args.stage),
+               check_qm9_oof(args.qm9_dir, args.stage),
                check_assay(args.validation_dir, args.stage),
                check_uncertainty(args.uncertainty_dir)]
     return report(results, verbose=args.verbose)

@@ -16286,11 +16286,72 @@ python scripts/check_runs_landed.py --stage 1 --verbose | grep -i gauche_rbf
 python scripts/check_runs_landed.py --stage 2 --verbose | grep -i gauche_rbf
 ```
 
+#### D2k. The completeness check could not see the missing uncertainty rows
+
+**Read off the cluster 2026-09-07.** `--stage 1` reported these for this model:
+
+```
+PARTIAL_LEVELS     qm9 gauche_rbf pdv censoring
+PARTIAL_LEVELS     qm9 gauche_rbf sns gaussian
+THIN_REPLICATES    qm9 gauche_rbf sns grouped_shifted
+PARTIAL_LEVELS     qm9 gauche_rbf sns grouped_wider
+```
+
+**Not one ECFP4, PDV or ChemBERTa cell under `gaussian`, `grouped_wider` or
+`grouped_shifted` is named** — and those are the nine tasks that failed. They are not named
+because their accuracy rows are all there: the row for a (noise level, replicate) is saved
+BEFORE the out-of-fold pass runs, and the pass then failed on its own. `load_qm9` globs
+`anova_*.csv` and excludes every sibling suffix, so `check_runs_landed.py` had never looked at
+an uncertainty file.
+
+So the close condition this chat was given — *"`check_runs_landed.py` no longer reports this
+model as MISSING or PARTIAL anywhere"* — was very nearly satisfied while the per-molecule
+uncertainty, the entire reason this model is in the study, was absent from every cell.
+
+**Fixed.** `check_qm9_oof` is a fourth row in the report. For the settled pairs only — six
+models on ECFP4, PDV and ChemBERTa, `uncertainty_pairs.json` — it opens
+`anova_<condition>_<representation>_<model>_uncertainty_values.csv` and counts how many
+(noise level, replicate) cells have `train_oof` rows.
+
+| status | means |
+|---|---|
+| `MISSING_FILE` | no sibling file at all |
+| `NO_OOF_ROWS` | the file is there and not one training molecule was scored out of fold |
+| `PARTIAL_OOF` | some cells scored, others not |
+
+**57 cells at every stage** — 54 from the grid plus the three censoring pairs whose model is on
+the uncertainty roster, against 332 accuracy cells at stage 1 and 113 at stage 2.
+
+Proof, no cluster needed: `python scripts/test_check_runs_landed_oof.py` — 9 checks, exit 0. It
+builds the real case as a fixture, a file whose every accuracy row is present and whose
+`train_oof` rows are absent, and asserts the old behaviour would have called it landed.
+
+⚠️ **This makes the gate stricter for every chat, not just this one.** `check_runs_landed.py`
+now exits 1 until the out-of-fold rows are on disk, and they are missing for more than
+`gauche_rbf` — `qrf`, `ngboost`, `dnn_bnn_full_variational`, `dnn_bnn_full_mve` and
+`mlp_bnn_full_mve` are on the same roster and nothing has ever counted their rows either. The
+first run of `--stage 1` after this will show a number nobody has seen before. **That number is
+the honest one**; the old exit 0 was not.
+
+#### D2l. What the remaining rows mean, and every one is accounted for
+
+| row | what it is | where it is |
+|---|---|---|
+| `PARTIAL_LEVELS ... pdv censoring` | the one censoring task that does work | `12986345_1`, RUNNING, clean |
+| `PARTIAL_LEVELS ... sns gaussian` | main-grid index 5, Sort & Slice | resubmitted as `13042881` |
+| `PARTIAL_LEVELS ... sns grouped_wider` | main-grid index 11, Sort & Slice | resubmitted as `13042881` |
+| `THIN_REPLICATES ... sns grouped_shifted` | index 17 completed, so 9 replicates; replicate 0 comes from the screen | `12971618`, RUNNING on tasks 0 and 1 |
+| `still missing: laplace, ecfp4` and `laplace, chemberta` | deep-run condition 5 | `12986326_[23-35]`, PENDING |
+| `PARTIAL_LEVELS ... student_t_nu5` on all three | deep-run condition 3 | `12986326_16,18,19,22`, RUNNING |
+
+Nothing on that list is unqueued. Nothing on it is a new failure.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
-It closes when the screen array shows the new limits in `squeue`, the seventeen failed tasks
-are running under `c223ec3`, and `python scripts/check_runs_landed.py --stage 1 --verbose` and
-`--stage 2` report no `gauche_rbf` cell MISSING or PARTIAL.
+It closes when one task of 13042879 has FINISHED under `c223ec3`, and
+`check_runs_landed.py --stage 1` and `--stage 2` report no `gauche_rbf` cell MISSING or PARTIAL
+**on both rows, the accuracy one and the out-of-fold one**. The second half of that is new; see
+D2k for why the first half alone was not enough.
 
 
 #### D3. The laboratory datasets — logD, Caco-2, hERG — CHAT 3, filled 2026-09-07
@@ -16421,13 +16482,79 @@ that condition's levels; the two submissions together are seven conditions.
 | **3. Swap `GP` for `GP-Hetero`** | The only Gaussian process that splits the two halves per molecule, and the cleanest separation measured in the roster | 63 tasks resubmitted. The plain Gaussian process is then absent from the uncertainty runs, and it is the one non-tree model that shows anything on the accuracy side |
 | **4. ADD `GP-Hetero` as a seventh model** | Nothing lost, the question answered on a fourth family | 63 new tasks and a seventh array per submission, on a queue where nothing has started yet |
 
-**Recommendation: 1 or 4.** Options 2 and 3 both delete a measurement to buy one, on a run whose
-whole point is that neither has been made yet. If a heteroscedastic Gaussian process is wanted,
-adding it costs 63 tasks and removes nothing.
+**Recommendation was 1 or 4.** Options 2 and 3 both delete a measurement to buy one, on a run
+whose whole point is that neither has been made yet.
 
-⚠️ **Whichever is chosen, this is not a `--runtime-selection` run.** The model is fixed in the
-generated script, so adding one means regenerating and submitting a new array — it cannot be
-edited into a queued task the way `deep_run_pairs.json` can.
+✅ **DECIDED BY THE AUTHOR, 2026-09-07: option 4. `GP-Hetero` is added as a seventh model.**
+Nothing is removed. See D3i for what changed and what to run.
+
+⚠️ **This is not a `--runtime-selection` run.** The model is fixed in the generated script, so
+adding one means regenerating and submitting a new array — it cannot be edited into a queued task
+the way `deep_run_pairs.json` can. The 378 already in the queue therefore have to go again
+whatever else happens, which is the same conclusion the walls reach in D3e.
+
+##### D3i. `GP-Hetero` added — what changed, and what it costs
+
+**No new number was invented for it.** The memory comes from `model_memory.json` through the
+canonical name `het_gp_rbf`, and the wall from the laboratory generator's own per-fit table, where
+`GP-Hetero` has been priced at 2,339 seconds per 1,000 training molecules since 2026-09-01 —
+twice the plain Gaussian process, for the noise network and its Adam epochs.
+
+| | |
+|---|---|
+| script | `unc_gp_hetero.sh`, job name `unc_gp_hetero` |
+| asks | `--time=135:59:00`, `--mem=96G`, 8 cores |
+| tasks | 27 in the first submission, 36 in the second — 3 datasets x 3 representations x that submission's conditions |
+| partition | `long`. Six of the seven arrays are now past `medium`'s 48 hours |
+
+| file | what changed |
+|---|---|
+| `slurm_scripts_uncertainty_rerun/generate_scripts.py` | `GP-Hetero` added to `MODELS`. The Gaussian-process gate below it already matched by FAMILY — `model.startswith('GP-')` — so it inherits `--gp-reps "$rep" --gp-kernel rbf` with no change |
+| `slurm_scripts_uncertainty_rerun/generate_scripts.py` | `submit_all.sh` now defaults `PART` to the partition the walls need. It said `medium` whatever they asked, and the "submit with PART=long" warning was printed at generate time to whoever regenerated — not written into the file the operator pastes. With six arrays over 48 hours, every one of those `sbatch` lines would have been refused at submit time |
+| `KIRBy/tests/alternative_data_noise_robustness.py` | `GP-Hetero` named in `UNCERTAINTY_MODELS`. **This changes no behaviour** — `_emits_uncertainty` matches by prefix, so it has always resolved through `GP` and always been cross-fitted. It is there so the two files read in the same order, which `scripts/test_uncertainty_job_scripts.py` requires |
+| `slurm_scripts_uncertainty_rerun/RUNBOOK.md` | seven scripts, 189 tasks, 39,690 fits, and an `sbatch` line for the new one. §13.19 STEP 6 and STEP 6b updated with it |
+
+**Proof, none of it needing the cluster:**
+
+| | |
+|---|---|
+| `python scripts/test_uncertainty_job_scripts.py --kirby-dir <KIRBy>` | 8 checks, exit 0. The first one runs every emitted command line through the runner's OWN argument parser, so `--models "GP-Hetero"` is accepted by the real code and not by a string match |
+| `python slurm_scripts_uncertainty_rerun/test_generated_scripts_match_generator.py` | all 7 `unc_*.sh` on disk are byte-identical to what the generator writes |
+| `python slurm_scripts_uncertainty_rerun/test_runbook_matches_generator.py` | conditions, counts and all 7 array ranges agree with the generator |
+| `python scripts/test_submit_all_ranges.py` | 147 `sbatch` lines across 9 generator forms, every one at its own script's task count |
+| `python scripts/test_model_memory.py` | 109 generated scripts match `model_memory.json`, and no generator restates a number |
+| `python scripts/test_check_runs_landed_selection.py` | 11 checks. The uncertainty grid is 63 tasks per condition — 189 in the first submission, 252 in the second, 441 expected cells |
+
+**What to run.** The scripts on disk are regenerated and pushed. On the cluster:
+
+```bash
+cd $QSAR && bash scripts/pull_safely.sh && git log -1 --oneline
+
+# The 378 already queued ask the wrong wall on a queue that cannot hold them, and
+# none has started. Cancel them, then send all seven arrays.
+scancel 12986390 12986391 12986392 12986393 12986394 12986395
+scancel 12986396 12986397 12986398 12986399 12986400 12986401
+
+cd $QSAR/slurm_scripts_uncertainty_rerun
+rm -f unc_*.sh submit_all.sh && python generate_scripts.py
+grep -h 'job-name\|time=\|mem=' unc_gp_hetero.sh        # expect 135:59:00 and 96G
+head -8 submit_all.sh                                    # expect PART=${PART:-long}
+ACCT=stat-cadd bash submit_all.sh                        # 7 arrays, 27 tasks each
+
+# part two, the four conditions that follow
+mkdir -p $QSAR/slurm_scripts_uncertainty_depth
+python generate_scripts.py \
+    --conditions censoring student_t_nu5 outlier_p10 laplace \
+    --out-dir $QSAR/slurm_scripts_uncertainty_depth
+cd $QSAR/slurm_scripts_uncertainty_depth && ACCT=stat-cadd bash submit_all.sh
+
+# PROVE THE CHANGE TOOK — what the cluster says, not what was typed
+squeue -u $USER -o "%.14i %.22j %.2t %.11M %.11l %.7m %R" | grep unc_
+```
+
+⚠️ **`scancel` those twelve before regenerating, not after.** The scripts are overwritten in
+place, and a queued array that has not started still holds its old wall — cancelling first is what
+makes the two agree.
 
 ##### D3e. The walls and the partition, which is chat 1's to apply and chat 3's to answer
 
