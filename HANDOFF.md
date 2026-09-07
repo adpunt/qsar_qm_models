@@ -1,4 +1,4 @@
-# Handoff — four chats, one thing each
+# Handoff — five chats, one thing each
 
 Read `CLAUDE.md` first.
 
@@ -57,15 +57,11 @@ closes four questions that earlier versions of this file still asked.**
 > anything rebuilt from them carries the old guess. Fix that first, because chats 2 and 3
 > both need to resubmit.
 >
-> **5. Then resubmit the 104 Sort & Slice tasks.** They are indices 5, 11 and 17 of nearly
-> every QM9 main-grid job. The cause is fixed in commit `62f1fe2` and the fix changes no
-> result already on disk. The tool that should print the resubmission command prints nothing,
-> because it refuses to print one for anything marked failed — teach it to print when the
-> cause is fixed at a named commit, add that case to `scripts/test_slurm_status_tools.py`, and
-> then send them. Never type a job array range by hand.
+> Chats 2, 3 and 5 all have tasks to resubmit and all of them are waiting on item 4. Tell
+> them the moment it is pushed.
 >
 > Done when section 13.27 lists, per submission, what it asks now, what it should ask, and the
-> command; and the Sort & Slice tasks are running.
+> command to change it.
 
 ---
 
@@ -187,3 +183,49 @@ closes four questions that earlier versions of this file still asked.**
 > what each costs, note that removing is free and adding back is not, and let her answer.
 >
 > Done when both files say what she has decided and no longer say provisional.
+
+---
+
+## Chat 5 — Sort & Slice
+
+> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
+>
+> One representation, 104 failed tasks, and a cause that is already fixed and proved.
+>
+> **1. What went wrong.** Methane, ammonia and water each carry exactly one Morgan
+> substructure, and it occurs in exactly one molecule, so none of them can ever reach a
+> top-1024 chosen by how often a substructure appears in training. Their vector comes out all
+> zeros, and the guard refuses to train on a molecule with no features. Measured over all
+> 132,480 QM9 molecules: **3 molecules, 0.0023 per cent**.
+>
+> **2. The fix is in and tested.** Commit `62f1fe2`. Those molecules are dropped from **every**
+> representation, not just this one, so an ECFP4 job and a Sort & Slice job score the same
+> molecules. They are found by the property rather than by a list of three names, and the
+> featuriser is built on every run. Proved by `scripts/test_sns_zero_exclusion.py`. The guard
+> stays.
+>
+> **3. It changes nothing already on disk.** This was checked in code on 7 September: the
+> exclusion removes molecules from the three split lists *after* the shuffle and the split,
+> and never re-splits. So a task whose sample never drew one of the three gives exactly the
+> same answer before and after the fix, and the tasks that did draw one crashed and wrote no
+> rows. **The screen's Sort & Slice results are comparable with the main grid's. Do not
+> re-run the screen for this.**
+>
+> **4. What is left is the resubmission, and one tool stands in the way.** The 104 tasks are
+> indices 5, 11 and 17 of nearly every QM9 main-grid job. `failed_tasks.py --emit-sbatch`
+> prints nothing for them, because it refuses to print a resubmission for anything marked
+> failed, on the rule that resending an unfixed cause gets the same error. That rule is wrong
+> here. Teach it to print when the cause is fixed at a named commit, tied to the commit so it
+> cannot just be asserted, and add that case to `scripts/test_slurm_status_tools.py`. Fix it
+> once, prove it with the test, and resubmit. Do not ship the tool, run it, find a bug and
+> ship it again — that consumed a whole session.
+>
+> **5. Wait for chat 1 to push the corrected time limits**, rebuild the scripts, then send
+> them. Never type a job array range by hand; the generators write the right range for each
+> script, and typing one has queued out-of-range tasks three times.
+>
+> **6. The same tool fix unblocks chats 2 and 3.** Twenty `gauche_rbf` tasks and fifty
+> laboratory tasks are in the same position. Tell both chats when it is pushed.
+>
+> Done when the 104 tasks are running and `failed_tasks.py --emit-sbatch` prints a command for
+> a fixed cause.
