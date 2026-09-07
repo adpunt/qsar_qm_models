@@ -334,12 +334,46 @@ def load_qm9(results_dir, cache_dir=None):
                           f'want before quoting these.')
             if 'r2' in df.columns:
                 _spread = _grp['r2'].agg(lambda v: v.max() - v.min())
-                _far = int((_spread > 0.001).sum())
-                if _far:
-                    print(f'  ⚠ {_far} duplicated cell-and-replicate(s) differ by more '
-                          f'than 0.001 R2 between copies (largest '
+                _far = _spread[_spread > 0.001]
+                if len(_far):
+                    print(f'  ⚠ {len(_far)} duplicated cell-and-replicate(s) differ by '
+                          f'more than 0.001 R2 between copies (largest '
                           f'{_spread.max():.4f}). Same molecules and same seed should '
                           f'give the same number, so something else moved.')
+                    # WHAT moved. The seed is random_seed XOR (iteration * const)
+                    # and the generator never passes --random-seed, so both
+                    # copies ran at 42 and the same iteration; file_no is a
+                    # scratch-file NAME and never a seed. That leaves two
+                    # candidates, and every row already carries the column that
+                    # separates them.
+                    _differs = []
+                    for _col in ('spec_hash', 'spec_version', 'loss_function',
+                                 'sample_size'):
+                        if _col in df.columns:
+                            _n = int((_grp[_col].nunique(dropna=False) > 1).sum())
+                            if _n:
+                                _differs.append((_col, _n))
+                    if _differs:
+                        for _col, _n in _differs:
+                            print(f'      {_n} of them also differ in {_col!r} -- '
+                                  f'the copies were fitted under different code, '
+                                  f'so keeping the last written is right, and it '
+                                  f'should be the NEWER one')
+                    else:
+                        # Which models. Build the key as an index to test
+                        # membership WITHOUT set_index, which would consume the
+                        # `model` column the message needs.
+                        _sub = df.loc[_both]
+                        _keys = pd.MultiIndex.from_frame(_sub[key])
+                        _models = (_sub.loc[_keys.isin(_far.index), 'model']
+                                   .unique() if 'model' in _sub.columns else [])
+                        print(f'      and NOTHING else on the row differs -- same '
+                              f'spec_hash, same hyperparameters, same seed. That '
+                              f'is nondeterminism in the fit itself, not a '
+                              f'configuration difference. Affects: '
+                              f'{sorted(set(_models))[:8]}')
+                        print(f'      It puts a floor under the replicate spread '
+                              f'that no error bar currently accounts for.')
             # WHICH cells, not just how many. A cell appearing twice means the
             # same task ran twice -- a resubmit that was not needed, or two
             # array indices writing the same output path. Keeping the last is
