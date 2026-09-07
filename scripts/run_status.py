@@ -2,115 +2,131 @@
 """How far along is the re-run, and what is the finish date actually waiting on.
 
     python scripts/run_status.py
+    python scripts/run_status.py --sacct-file sacct.psv    # offline
 
-Reads sacct and squeue. Nothing else, and it writes nothing.
+Reads sacct. Writes nothing.
 
-WHY THIS EXISTS. "How far along is everything" was being answered by pasting squeue into
-a chat and counting by eye, which is slow and gets the important part wrong: the finish
-date is not set by how many tasks are left, it is set by the few longest ones. A grid
-that is 95% complete finishes when its 22-day job finishes.
+WHY THIS EXISTS. "How far along is everything" was being answered by pasting squeue
+into a chat and counting by eye, which is slow and gets the important part wrong: the
+finish date is not set by how many tasks are left, it is set by the few longest ones. A
+grid that is 95% complete finishes when its 22-day job finishes.
 
-WHAT IT DOES NOT KNOW. Requested wall clock is a ceiling, not a forecast -- the walls in
-this study are deliberately generous because most of them have never been timed on ARC.
-So where tasks have finished, the ELAPSED column is what to believe, and the ratio beside
-it says how far off the request was.
+WHAT THIS FIXES, 2026-09-07
+---------------------------
+  * PENDING was invisible. The old version dropped any sacct row whose id carried a
+    bracket, and a fully pending array is exactly that -- one row, `12986399_[0-35%6]`.
+    So a submission where nothing had started yet printed "not submitted, or all
+    pending", which is the one distinction that matters when you are asking whether
+    the queue is moving. Bracketed rows are now counted, and their task counts read
+    out of the bracket.
+  * There was no denominator. done/running/failed with no total cannot answer "how far
+    along"; a `to go` column and a percentage are now there.
+  * The job-id ranges were a hand-typed guess, in three tools at once. They come from
+    `slurm_jobs.py` now, which asks sacct what exists (see its header).
+  * CANCELLED was counted as a failure. A task the operator cancelled is not a task
+    that broke, and mixing them made the failure count unreadable.
+
+WHAT IT DOES NOT KNOW. Requested wall clock is a ceiling, not a forecast -- the walls
+in this study are deliberately generous because most were never timed on ARC. Where
+tasks have finished, ELAPSED is what to believe. `measure_walls.py` turns that into
+the scontrol lines; this only shows you where to look.
 """
+from __future__ import annotations
+
 import argparse
-import subprocess
 import sys
-from collections import defaultdict
+from pathlib import Path
 
-# The submissions, in the order RERUN_PLAN.md 13.19 makes them. Job ids come from
-# 13.18 LAUNCH LOG; a group that has not been submitted simply reports nothing.
-GROUPS = [
-    ('QM9 screen',              12971601, 12971619),
-    ('laboratory breadth',      12971620, 12971638),
-    ('QM9 main grid',           12980573, 12980591),
-    ('QM9 deep run',            12986314, 12986332),
-    ('QM9 censoring',           12986333, 12986351),
-    ('laboratory depth',        12986352, 12986370),
-    ('laboratory censoring',    12986371, 12986389),
-    ('uncertainty, the three',  12986390, 12986395),
-    ('uncertainty, the four',   12986396, 12986401),
-]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import slurm_jobs as SJ  # noqa: E402
 
-def seconds(elapsed):
-    """SLURM Elapsed: [DD-]HH:MM:SS."""
-    if not elapsed or elapsed in ('INVALID', 'UNKNOWN'):
-        return None
-    days, _, rest = elapsed.partition('-')
-    if not rest:
-        days, rest = '0', elapsed
-    try:
-        h, m, s = (int(x) for x in rest.split(':'))
-    except ValueError:
-        return None
-    return int(days) * 86400 + h * 3600 + m * 60 + s
-
-
-def sacct(first, last, since):
-    ids = ','.join(str(j) for j in range(first, last + 1))
-    try:
-        out = subprocess.run(
-            ['sacct', '-M', 'arc', '-S', since, '-j', ids, '-X', '-n', '-P',
-             '--format=JobID,JobName,State,Elapsed,Timelimit'],
-            capture_output=True, text=True)
-    except FileNotFoundError:
-        raise SystemExit('no sacct on this machine -- run this on the cluster.')
-    if out.returncode != 0:
-        return []
-    rows = []
-    for line in out.stdout.splitlines():
-        parts = line.split('|')
-        if len(parts) >= 5 and '_' in parts[0] and '[' not in parts[0]:
-            rows.append(parts)
-    return rows
+DONE = ('COMPLETED',)
+BAD = ('FAILED', 'TIMEOUT', 'OUT_OF_ME', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE')
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--since', default='2026-09-01', help='sacct -S')
+    ap.add_argument('--sacct-file', help='a capture from slurm_jobs.py --save')
+    ap.add_argument('--user')
     ap.add_argument('--slowest', type=int, default=8,
                     help='how many of the longest-running tasks to name')
     cli = ap.parse_args()
 
-    print(f"{'submission':26s} {'done':>6s} {'run':>5s} {'fail':>5s} "
-          f"{'longest so far':>15s}")
-    print('  ' + '-' * 68)
+    rows = SJ.parse(SJ.run_sacct(cli.since, cli.sacct_file, cli.user))
+    if not rows:
+        print(f'  sacct knows no arrays of this study since {cli.since}.')
+        return 1
+    groups = SJ.group_submissions(rows)
+
+    print(f"  {'submission':26s} {'done':>6s} {'run':>5s} {'pend':>6s} {'fail':>5s} "
+          f"{'canc':>5s} {'total':>6s} {'%':>5s}  {'longest running':>15s}")
+    print('  ' + '-' * 96)
     running_all = []
-    for name, first, last in GROUPS:
-        rows = sacct(first, last, cli.since)
-        if not rows:
-            print(f"  {name:26s} {'-- nothing in sacct; not submitted, or all pending --':>0s}")
-            continue
-        done = sum(1 for r in rows if r[2].startswith('COMPLETED'))
-        run = sum(1 for r in rows if r[2].startswith('RUNNING'))
-        fail = sum(1 for r in rows if r[2].split()[0] in
-                   ('FAILED', 'TIMEOUT', 'OUT_OF_ME', 'NODE_FAIL', 'CANCELLED'))
+    grand = [0, 0, 0, 0, 0]
+    for sub, members in groups:
+        done = run = pend = fail = canc = 0
         longest = 0
-        for r in rows:
-            if r[2].startswith('RUNNING'):
-                s = seconds(r[3])
-                if s:
-                    running_all.append((s, r[0], r[1], r[4], name))
-                    longest = max(longest, s)
-        print(f"  {name:26s} {done:6d} {run:5d} {fail:5d} "
-              f"{(str(round(longest / 3600, 1)) + ' h') if longest else '--':>15s}")
+        for rs in members.values():
+            for r in rs:
+                st = r['State'].split()[0]
+                if r['pending_array']:
+                    pend += SJ.pending_count(r['JobID'])
+                    continue
+                if st in DONE:
+                    done += 1
+                elif st == 'RUNNING':
+                    run += 1
+                    s = SJ.secs(r['Elapsed'])
+                    if s:
+                        running_all.append((s, r['JobID'], r['JobName'],
+                                            r['Timelimit'], sub.label))
+                        longest = max(longest, s)
+                elif st == 'PENDING':
+                    pend += 1
+                elif st.startswith('CANCELLED'):
+                    canc += 1
+                elif st in BAD:
+                    fail += 1
+        total = done + run + pend + fail + canc
+        for i, v in enumerate((done, run, pend, fail, canc)):
+            grand[i] += v
+        pct = f'{100.0 * done / total:.0f}%' if total else '--'
+        print(f"  {sub.label:26s} {done:6d} {run:5d} {pend:6d} {fail:5d} {canc:5d} "
+              f"{total:6d} {pct:>5s}  "
+              f"{((str(round(longest / 3600, 1)) + ' h') if longest else '--'):>15s}")
+    gt = sum(grand)
+    print('  ' + '-' * 96)
+    print(f"  {'ALL':26s} {grand[0]:6d} {grand[1]:5d} {grand[2]:6d} {grand[3]:5d} "
+          f"{grand[4]:5d} {gt:6d} "
+          f"{(f'{100.0 * grand[0] / gt:.0f}%' if gt else '--'):>5s}")
+
+    missing = [s.label for s in SJ.SUBMISSIONS
+               if s.label not in {g[0].label for g in groups}]
+    if missing:
+        print(f"\n  NOT SUBMITTED (sacct has no array of theirs since {cli.since}):"
+              f"\n      {', '.join(missing)}")
+
+    if grand[3]:
+        print(f"\n  {grand[3]} FAILED task(s). Cause, and the line to put each one "
+              f"back:\n      python scripts/failed_tasks.py")
 
     if running_all:
         running_all.sort(reverse=True)
-        print(f"\n  THE FINISH DATE IS THESE, not the task count. Longest still running:")
+        print(f"\n  THE FINISH DATE IS THESE, not the task count. Longest still "
+              f"running:")
         for s, jid, jname, limit, group in running_all[:cli.slowest]:
-            print(f"      {s / 3600:7.1f} h of {limit:>12s}   {jid:<16s} {jname:<26s} {group}")
-        print(f"\n  A task that is a long way under its limit is the normal case -- the "
-              f"walls\n  in this study are ceilings, and most were never timed on ARC. One "
-              f"CLOSE to\n  its limit is the one to worry about: it dies there with no "
-              f"partial credit.")
-
-    print(f"\n  Everything still PENDING is invisible to sacct -X by design. "
-          f"For the queue:\n      squeue -u $USER -o '%.18i %.9P %.24j %.2t %.11M %.11l %R'")
+            lim = SJ.secs(limit)
+            frac = f'{100.0 * s / lim:3.0f}% of' if lim else 'of'
+            print(f"      {s / 3600:7.1f} h {frac:>8s} {limit:>12s}   {jid:<16s} "
+                  f"{jname:<26s} {group}")
+        print("\n  A task a long way under its limit is the normal case -- the walls "
+              "in this\n  study are ceilings, and most were never timed on ARC. One "
+              "CLOSE to its limit\n  is the one to worry about: it dies there with no "
+              "partial credit.\n  Over-asked walls are the queue problem, not the "
+              "safe case:\n      python scripts/measure_walls.py")
     return 0
 
 

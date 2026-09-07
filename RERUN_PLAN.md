@@ -11492,6 +11492,80 @@ conditions, counts and array ranges only.
 
 ---
 
+### 13.23 🔴 THE OPEN REGISTER — everything known to be wrong, 2026-09-07
+
+**One list, kept here, updated in place.** Started because the work had split into
+half-finished threads: three status tools were rewritten three times in one night, each
+rewrite fixing the previous one's bug while the experiment failures they were built to
+diagnose stayed open. Nothing gets its own document. A line leaves this table when it is
+fixed AND proved, and the proof is named.
+
+Columns: **owner** is who can settle it — *me* for something a script or a document can
+answer, *the author* for a decision, *the cluster* for something only a command there can
+tell us.
+
+#### A. Fixed and proved, 2026-09-07
+
+| # | What was wrong | Proof it is fixed |
+|---|---|---|
+| A1 | **Every QM9 resubmission line `failed_tasks.py` printed was unrunnable.** It built `sbatch <jobname>.sh` from the job name, and on the QM9 side the job name is not the script name: the generator writes `qm9_s1_rf.sh` and names the job `qm91_rf` (`slurm_scripts_qm9_rerun/generate_scripts.py:591`, `:1557`). The laboratory side matched by accident. Scripts and directories are resolved through `scripts/slurm_jobs.py` now — and the directory matters, because the QM9 deep run and censoring both emit `qm92_<model>` into two different places, as do the three laboratory runs | `scripts/test_slurm_status_tools.py`, ten script-name checks, plus one that fails if the generator's naming rule changes without this changing with it |
+| A2 | **`measure_walls.py` would have set a wall below work already done.** The borrow — how the deep run and censoring get a number at all, since their tasks have not started — read only COMPLETED tasks. The completed set is the fast tail by construction: the slow ones have not finished to be counted. `ngboost`'s completed longest was 18:02 while `12980577_4` was 46.7 h in and still going, so `qm92_ngboost`, which is TEN replicates against the main grid's nine, would have been handed a 37-hour limit and died at the wall with no partial credit. The borrow takes the longest of completed AND running now, and prints which | same test: every emitted `TimeLimit` is checked against the longest task already running on that job id, and the borrow is checked to come from the running task |
+| A3 | **`run_status.py` could not tell "not submitted" from "nothing has started".** A fully pending array is a single sacct row with a bracket in its id — `12986399_[0-35%6]` — and the parser dropped every bracketed row, then printed "nothing in sacct; not submitted, or all pending". That is the one distinction that matters when the question is whether the queue is moving. Bracketed rows are counted now, with the task count read out of the bracket, and there is a `pend` column, a total and a percentage — there was no denominator before | same test: the bracketed array is counted as its 33 tasks |
+| A4 | **The job-id table was a hand-typed guess, in three tools at once.** §13.18 records three submissions. The other six — the deep run, censoring, the laboratory depth and censoring runs and both uncertainty runs — were written by assuming each submission is exactly nineteen consecutive ids. A range one job wide files tasks under the wrong submission or drops them, silently, everywhere. `slurm_jobs.py` asks sacct instead: it cuts a name prefix's arrays wherever a model name comes round again, which separates submissions exactly however close together they were sent, and names each one by its task count | same test, on a synthetic capture with the deep run and censoring ten minutes apart |
+| A5 | **`run_status.py` counted CANCELLED as a failure**, so an operator's own cancel read as something broken | own column now |
+| A6 | **The diagnosis had to go through a chat.** `failed_tasks.py` printed six rows and "READ THE .out FIRST", so the cause of 48 failures reached the author only when they pasted a traceback in. It reads the logs itself now and groups the tasks by their actual last error — "48 failed, all the same `ValueError`" in one command | exercised against a real captured traceback; falls back with a count of unreadable logs when run off the cluster |
+| A7 | **Nothing could be checked off the cluster.** `slurm_jobs.py --save` captures the sacct output and every tool takes `--sacct-file`, so an answer can be checked rather than believed | the whole test suite runs on a capture |
+
+#### B. Answered by measurement, and now a decision
+
+| # | | Owner |
+|---|---|---|
+| B1 | **The Sort & Slice failures: THREE molecules, and they are methane, ammonia and water.** 48 QM9 main-grid tasks died on `ValueError: Sort & Slice produced an all-zero count vector for N`. Counted on 2026-09-07 over the 132,480 QM9 SMILES on the laptop, `SNS_DIM = 1024`: **3 of 132,480, 0.0023%** — `[H]C([H])([H])[H]`, `[H]N([H])[H]`, `[H]O[H]`. Each has exactly ONE substructure, occurring in exactly one molecule, so it can never reach a top-1024 by training frequency under any split. This is not a bug and not a Sort & Slice weakness at 1024: it is a top-k featuriser meeting the three smallest molecules in the set. It passed the screen because replicate 0's sample did not draw them. Reproduce: `python scripts/sns_zero_molecules.py --smiles-file .decomposition_controls_qm9_smiles.txt` | **the author** — three molecules is a Methods sentence, but WHICH sentence is a decision. See §13.23a |
+| B2 | **The walls are the queue problem, and the numbers are in.** `qm92_ngboost` asks 22 days; measurement says under four. `qm92_mlp_bnn_full_mve` asks 13 days 18 h against 8:38 measured. A three-week request fits almost no backfill gap, which is why they sit on `(Priority)` while four-hour jobs run past them. Cutting a TimeLimit on a pending job keeps its submit time, so it costs no queue position | **the cluster** — `python scripts/measure_walls.py --emit-scontrol`, then read the table before running the lines |
+| B3 | **Memory was settled on one data point that does not describe this pipeline.** The 61.2 GB figure behind the tiers came from a different run. The worst peak across ~1,400 completed tasks of THIS study is 4.1 GB. 64G is already 15.6× that and is the node ratio at 8 GB a core; 96G asks for 12 and waits | **the author** — the 64G floor is theirs and is untouched; whether the 96G tier drops to it is theirs too |
+
+#### C. Open, and nobody is on them
+
+| # | | Owner |
+|---|---|---|
+| C1 | **25 laboratory tasks are still failed and unresubmitted** — all hERG, all six representations, the missing-cache deaths of 2026-09-02. The cache is confirmed present and loading 1,415 molecules. Nothing has put them back | **the cluster** — `python scripts/failed_tasks.py --emit-sbatch` |
+| C2 | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
+| C3 | **`scripts/lab_tasks_on_old_noise.py` has never been run.** The laboratory noise draw changed on 2026-09-04 (§3.3b); tasks that FINISHED before the pull wrote rows under the old draw and have to be replaced. Written for exactly this and named as outstanding in three separate messages | **the cluster** |
+| C4 | **§13.17 A5 is open while the compute it decides is already queued.** The three models that can measure the aleatoric/epistemic split per molecule — `heteroscedastic_gp` and the two variational networks with a noise head — are on neither uncertainty run's pair list. Both uncertainty submissions are in the queue now | **the author** |
+| C5 | **§13.17 A1 is open** — which number replaces the Caco-2 anchor. The evidence is in (§13.20 decision 2); the choice is not made. Still one line outstanding: print the clean Caco-2 training label SD once | **the author** |
+| C6 | **`13033488 paper_analysis` is running against an incomplete grid.** It is `slurm_scripts_analysis/run_paper_analysis.sh`, the author's own decision report — not a mystery job. But Sort & Slice is missing from every replicate 1–9 of the main grid, so one representation of six is absent from anything it reads | **me** — `check_runs_landed.py` should be run before it, not after |
+| C7 | **Uncommitted work is sitting in the tree and cannot reach the cluster.** `rust/tests/noise_gates.rs` (the level-seed gates) and `scripts/tuned_under_noise.py` (a `--levels` flag). The cluster's only route in is `git pull --ff-only` | **me** — run the rust gates, then commit or say why not |
+
+#### D. Stale in this document, corrected 2026-09-07
+
+| | |
+|---|---|
+| §13.17 A3 "push the branch" | **Done.** `additional_reps` is at `origin/additional_reps`, `git status -sb` clean of ahead/behind |
+| §13.17 C4 "`check_fixes_fail_when_removed.py` CRASHES at `:292`" | **Fixed in the code.** `_drop_backup` catches `FileNotFoundError` and `OSError` and reports rather than dying; `:292` is now an unrelated line of the fixes list |
+| §13.18 stops at Submission 4 | **Five submissions are on the cluster and in no document**: the QM9 deep run, QM9 censoring, laboratory depth, laboratory censoring, and both uncertainty runs. `python scripts/slurm_jobs.py --emit-launch-log` prints the rows to paste in |
+
+### 13.23a The three molecules Sort & Slice cannot represent — the options
+
+Measured, not argued: **3 of 132,480**, `SNS_DIM = 1024`. Methane, ammonia and water.
+Each carries exactly one Morgan substructure and that substructure occurs in exactly one
+molecule, so no split and no seed puts it in a top-1024 by training frequency.
+
+The guard is right and stays: an all-zero vector trains a real label against no features,
+and nothing downstream can tell that apart from a molecule whose substructures genuinely
+are all absent.
+
+| | What it does | What it costs |
+|---|---|---|
+| **1. Drop the three from every representation** | Excluded once, before any featuriser runs, so the cross-representation tables still compare the same molecules | Three molecules of 133,885, and one Methods sentence. Needs the exclusion in one place, not in the Sort & Slice path |
+| **2. Drop the three from Sort & Slice alone** | Smallest change | Sort & Slice is then scored on a different molecule set from the other five, which is exactly the comparison the study is making. Not recommended |
+| **3. Raise `SNS_DIM`** | 1024 → larger until frequency-one substructures survive | The top-k would have to reach ~172,000 to include a frequency-one substructure. It does not fix this, and it changes every Sort & Slice number in the study |
+| **4. Keep them, folding rather than slicing** | An ECFP4-style fold gives ammonia a non-zero bit | It is no longer Sort & Slice |
+
+**Whichever is chosen, the 48 failed QM9 tasks are resubmitted afterwards, not before** —
+resubmitting an unfixed cause gets the same exit in the same 33 seconds.
+
+---
+
 ### 13.16 ✅ THE REPORTING LEVELS — SET 2026-08-28. Read this before quoting any accuracy number.
 
 ## QM9 1.0 · logD 1.0 · hERG 1.0 · Caco-2 0.75
