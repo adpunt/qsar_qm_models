@@ -15571,14 +15571,37 @@ grep -c '^=== SKIPPED' val_svm_*.out | grep ':0$'     # any log that did NOT ski
 ```
 
 **What is on disk says whether rows were written.** Every laboratory job, breadth, depth and
-censoring, writes under one tree, one directory per (model, representation, dataset). A cell that
-ran and wrote nothing is a one-line file; a cell that skipped has no directory at all.
+censoring, writes under one tree. A cell that ran and wrote nothing is a one-line file; a cell that
+skipped has no directory at all.
+
+⚠️ **The path is TWO levels deep, not one.** The job passes
+`--results-root ../results/validation_rerun/<model>_<rep>_<tag>_<dataset>` and the runner then
+writes `<results-root>/<dataset>/all_results.csv` (`alternative_data_noise_robustness.py:4478`,
+`:4114`). So the dataset name appears twice in the path. A glob with one `*` matches nothing and
+`wc` answers `No such file or directory`, which reads exactly like an empty results tree — that
+happened on 2026-09-07.
 
 ```bash
-wc -l /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/*/all_results*.csv | sort -n | head -30
+ls /data/stat-ecr/scat9264/KIRBy/results/validation_rerun | head -20
+wc -l /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/*/*/all_results.csv | sort -n | head -30
 ```
 
-If that comes back empty the path is wrong, not the run — check it before reading anything into it.
+##### Where every log is
+
+`<job name>_<array job id>_<task>.out`, in the directory `sbatch` was run from.
+
+| submission | directory | prefix |
+|---|---|---|
+| QM9 screen, main grid, deep run | `slurm_scripts_qm9_rerun` | `qm90_`, `qm91_`, `qm92_` |
+| QM9 censoring | `slurm_scripts_qm9_censoring` | `qm92_` |
+| laboratory breadth grid | `slurm_scripts_validation_rerun` | `val_` — **`%j`, not `%A_%a`**, so find it through `JobIDRaw` (§13.18) |
+| laboratory depth run | `slurm_scripts_validation_depth` | `val_` |
+| laboratory censoring | `slurm_scripts_validation_censoring` | `val_` |
+
+A skipped task's whole log is about twenty lines and ends at `=== SKIPPED`. A task that worked
+carries the runner's own output and ends `=== finished: <date>  exit=0`. That last line was added
+because the script used to end on an `echo`, which always returns 0 — so a run whose Python died
+was recorded as COMPLETED and mailed an END.
 
 This also confirms `model_hours.json`: it carries `qrf` at 20.867 measured task hours, and the
 longest real task was 20:51:30.
@@ -15978,6 +16001,83 @@ So resubmitting adds a second copy of every noise level and replicate for those 
 traces a larger source of the same thing: the deep run repeats the three conditions the screen
 and the main grid already ran, into the same files. **The delete-or-accept decision belongs
 with §13.30's, not separately here.** Nothing is deleted by an assistant either way.
+
+#### D2g. Round two answered, 2026-09-07 — and round three, which submits
+
+**The four RUNNING deep-run tasks are clean.** `grep -c "out-of-fold scoring for"` returns 0
+for 12986326_16, _18, _19 and _22. They started after the checkout had `c223ec3` and will
+finish. Nothing to cancel.
+
+**`failed_tasks.py --emit-sbatch` prints both lines** now that `ddb7dc6` is in the checkout,
+and the indices are the ones D2 predicted:
+
+```
+--array=0,1,4,6,7,10,12,13,16%4 qm9_s1_gauche_rbf.sh   # FAILED, fixed at c223ec3, main grid
+--array=0,1,4,6,7,10,12,13%4    qm9_s2_gauche_rbf.sh   # FAILED, fixed at c223ec3, deep run
+--array=5,11%4                  qm9_s1_gauche_rbf.sh   # FAILED, fixed at 62f1fe2, Sort & Slice
+```
+
+The third is chat 5's cause on this model. It reads `5,11` and not `5,11,17` because index 17
+completed.
+
+**The scripts on disk must be regenerated first.** They were written before the walls came
+down, so submitting them as they are puts `15-14:59:00` and the old memory back into the queue
+and undoes what `scontrol` achieved. One regeneration serves chat 2 and chat 5 both.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+rm -f qm9_s1_*.sh submit_all.sh
+python generate_scripts.py --stage 1 --max-hours 720
+rm -f qm9_s2_*.sh submit_all.sh
+python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
+grep -h 'time=\|mem=' qm9_s1_gauche_rbf.sh qm9_s2_gauche_rbf.sh   # 133:59:00, 148:59:00, 64G
+```
+
+**Do not run `submit_all.sh`.** It resubmits every array. Use the printed per-index lines.
+
+#### D2h. The rate was six times too small, and the wall does not move
+
+`model_hours.json` gave `gauche_rbf` 0.4559 hours per 110 training runs. That is the measured
+task time divided by six fits, and the tasks it was read from did ONE fit each — the
+out-of-fold pass threw at the guard before any of its extra fits. The entry's own note said so
+and left the number alone.
+
+Corrected from `sacct` over all 18 main-grid tasks: **2.7132 hours per 110 training runs at
+one fit.** The two routes agree — 0.4559 × 6 = 2.7354 against 2.7132 measured directly.
+
+**Regenerating after the correction still asks `133:59:00`.** Seven completed of eighteen is
+under the generator's half-the-array rule, so the rate stays graded a lower bound and the wall
+is still priced from the laptop floor. The correction is truthfulness, not a cut.
+
+⚠️ **The laptop floor for this model is not a valid upper bound, and this is why 133 hours is
+27 times the arithmetic.** `results/tuning_local/timing.csv` times `gauche_rbf` on ECFP4 at
+11,695.3 s for one fit on 8,000 molecules, written 2026-08-27T21:29:13. `GP_DEFAULTS`' one-thread
+setting was still true then and was set false on 2026-08-28. So that row is a **single-threaded**
+fit and ARC runs the same fit on eight cores: about 88 seconds at the 5,000 cap against the
+laptop's cubically-rescaled 2,855. The 32-fold gap is a threading difference, not a machine
+speed-up, and `slowest_observed_speedup()` cannot see it because it only compares models graded
+`measured`.
+
+**Do not cut the wall on that.** Nothing has yet measured this model with the out-of-fold pass
+working, and that is the expensive path. One resubmitted ECFP4, PDV or ChemBERTa task finishing
+under `c223ec3` settles it; `scripts/measure_walls.py` then reads it and the wall comes down to
+roughly thirteen hours. A job killed at its limit writes nothing.
+
+#### D2i. The last thing chat 2 owes
+
+```bash
+# censoring runs gauche_rbf on PDV, which is where the out-of-fold pass runs.
+# It was not in round one. Read its name rather than assuming the job id.
+sacct -S 2026-09-06 -X -n -P --format=JobID,JobName,State,Elapsed \
+  | grep gauche_rbf | grep -v 12980590 | grep -v 12986326 | sort
+
+# after the two submissions, prove the new limits went in with them
+squeue -u $USER -o "%.14i %.22j %.2t %.11M %.11l %.7m %R" | grep gauche_rbf
+
+# and prove nothing is missing
+python scripts/check_runs_landed.py --stage 1 --verbose | grep -i gauche_rbf
+python scripts/check_runs_landed.py --stage 2 --verbose | grep -i gauche_rbf
+```
 
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
