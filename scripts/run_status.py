@@ -4,7 +4,7 @@
     python scripts/run_status.py
     python scripts/run_status.py --sacct-file sacct.psv    # offline
 
-Reads sacct. Writes nothing.
+Reads sacct AND squeue. Writes nothing.
 
 WHY THIS EXISTS. "How far along is everything" was being answered by pasting squeue
 into a chat and counting by eye, which is slow and gets the important part wrong: the
@@ -13,14 +13,17 @@ grid that is 95% complete finishes when its 22-day job finishes.
 
 WHAT THIS FIXES, 2026-09-07
 ---------------------------
-  * PENDING was invisible. The old version dropped any sacct row whose id carried a
-    bracket, and a fully pending array is exactly that -- one row, `12986399_[0-35%6]`.
-    So a submission where nothing had started yet printed "not submitted, or all
-    pending", which is the one distinction that matters when you are asking whether
-    the queue is moving. Bracketed rows are now counted, and their task counts read
-    out of the bracket.
+  * PENDING was invisible, and sacct is the wrong place to look for it. The old
+    version dropped any sacct row whose id carried a bracket, which is what a fully
+    pending array is -- so a submission where nothing had started printed "not
+    submitted, or all pending", the one distinction that matters when the question is
+    whether the queue is moving. But bracketed rows are not the whole answer either:
+    an array element that has NEVER STARTED is not in the accounting database at all.
+    On the real cluster that made the QM9 deep run look like 550 tasks against its 654.
+    The pending column comes from squeue now, which is the only place the queue exists,
+    and the tool says so plainly when it has no queue reading.
   * There was no denominator. done/running/failed with no total cannot answer "how far
-    along"; a `to go` column and a percentage are now there.
+    along"; a total and a percentage are now there.
   * The job-id ranges were a hand-typed guess, in three tools at once. They come from
     `slurm_jobs.py` now, which asks sacct what exists (see its header).
   * CANCELLED was counted as a failure. A task the operator cancelled is not a task
@@ -50,6 +53,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--since', default='2026-09-01', help='sacct -S')
     ap.add_argument('--sacct-file', help='a capture from slurm_jobs.py --save')
+    ap.add_argument('--squeue-file',
+                    help='the .squeue file beside it. Without a queue reading the '
+                         'pending column is blank and the percentages are a fraction '
+                         'of a moving denominator -- sacct does not know about a task '
+                         'that has never started.')
     ap.add_argument('--user')
     ap.add_argument('--slowest', type=int, default=8,
                     help='how many of the longest-running tasks to name')
@@ -60,6 +68,12 @@ def main():
         print(f'  sacct knows no arrays of this study since {cli.since}.')
         return 1
     groups = SJ.group_submissions(rows)
+    queued = SJ.squeue_pending(cli.squeue_file, cli.user)
+    if not queued:
+        print('  NOTE: no queue reading. sacct does not hold a task that has never '
+              'started,\n  so `pend` is what sacct happens to know and the '
+              'percentages are of a\n  moving denominator. Run this on the cluster, '
+              'or pass --squeue-file.\n')
 
     print(f"  {'submission':26s} {'done':>6s} {'run':>5s} {'pend':>6s} {'fail':>5s} "
           f"{'canc':>5s} {'total':>6s} {'%':>5s}  {'longest running':>15s}")
@@ -69,11 +83,15 @@ def main():
     for sub, members in groups:
         done = run = pend = fail = canc = 0
         longest = 0
+        for base in members:
+            pend += queued.get(base, 0)
         for rs in members.values():
             for r in rs:
                 st = r['State'].split()[0]
                 if r['pending_array']:
-                    pend += SJ.pending_count(r['JobID'])
+                    # squeue already counted it, and counted it right.
+                    if not queued:
+                        pend += SJ.pending_count(r['JobID'])
                     continue
                 if st in DONE:
                     done += 1
@@ -85,7 +103,8 @@ def main():
                                             r['Timelimit'], sub.label))
                         longest = max(longest, s)
                 elif st == 'PENDING':
-                    pend += 1
+                    if not queued:
+                        pend += 1
                 elif st.startswith('CANCELLED'):
                     canc += 1
                 elif st in BAD:

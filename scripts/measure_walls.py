@@ -123,7 +123,15 @@ def main():
                 st = r['State'].split()[0]
                 s = SJ.secs(r['Elapsed'])
                 if st == 'COMPLETED':
-                    if s is not None and s < cli.min_elapsed:
+                    # ONLY WHERE A GATE CAN SKIP. The deep run, censoring and the two
+                    # laboratory depth runs are generated with --runtime-selection, so
+                    # a task whose pair is not in the file exits 0 in seconds and is
+                    # not a measurement of anything. Everywhere else a task that
+                    # finished in ninety seconds IS the measurement -- LightGBM on
+                    # logD does that -- and discarding it left val_lightgbm's wall
+                    # resting on one task out of twelve.
+                    if (sub.selection_gate and s is not None
+                            and s < cli.min_elapsed):
                         d['noop'] += 1
                         continue
                     if s:
@@ -156,6 +164,7 @@ def main():
           f"{'peak GB':>8s} {'asked':>7s}")
     print('-' * 96)
     scontrol = []
+    unproposed = []
     for (sub, jname), d in sorted(per.items(), key=lambda t: (t[0][0].label, t[0][1])):
         n = len(d['elapsed'])
         longest = max(d['elapsed']) if d['elapsed'] else None
@@ -183,9 +192,19 @@ def main():
             if b and b[0] > observed:
                 borrowed = b
                 observed = b[0]
+        thin = None
         if not observed:
-            continue
-        if borrowed is None and n < cli.min_tasks:
+            thin = 'nothing has run'
+        elif borrowed is None and n < cli.min_tasks:
+            thin = (f'{n} completed task(s), fewer than the {cli.min_tasks} needed, '
+                    f'and no longer measurement to borrow')
+        if thin:
+            # NAMED, NOT SKIPPED. gauche_rbf asks 17 days on the deep run and 15 on
+            # the main grid, has never completed a full task anywhere, and got no
+            # proposal at all -- which read as "nothing to do here" when it is the one
+            # genuine unknown left in the queue.
+            if d['req_t'] and d['req_t'] > 3 * 86400:
+                unproposed.append((sub.label, jname, SJ.hhmmss(d['req_t']), thin))
             continue
 
         # Never below what a running task has already used, or scontrol kills it.
@@ -198,7 +217,12 @@ def main():
                 scontrol.append(f"scontrol update JobId={j} "
                                 f"TimeLimit={SJ.hhmmss(want_t)}   # {jname}: {how}")
         if peak and d['req_m']:
-            want_m = max(cli.floor_gb, int(peak * cli.mem_margin / 16 + 1) * 16)
+            # model_memory.json pipeline_overrides: the uncertainty pass has its own
+            # floor, because a task there fits its model 1 + oof_folds times per level
+            # and holds a per-molecule uncertainty for every training molecule. The
+            # author's rule of 2026-09-04, and not a matter of taste.
+            floor = sub.mem_floor_gb or cli.floor_gb
+            want_m = max(floor, int(peak * cli.mem_margin / 16 + 1) * 16)
             if want_m < d['req_m'] * 0.9:
                 for j in sorted(d['jobs']):
                     scontrol.append(
@@ -211,6 +235,13 @@ def main():
           f"proposed from fewer than {cli.min_tasks} observed tasks,\n  and a task "
           f"that exited in under {cli.min_elapsed}s is not counted -- that is the "
           f"selection\n  gate skipping a pair, not a model that runs in a minute.")
+    if unproposed:
+        print(f"\n  NO PROPOSAL, AND STILL ASKING FOR DAYS -- these are the unknowns:")
+        for label, jname, asked, why in unproposed:
+            print(f"      {jname:<32s} asks {asked:>12s}   {label}\n"
+                  f"      {'':<32s} {why}")
+        print(f"      Leave them, or time one by hand before cutting anything: a wall\n"
+              f"      set from too little evidence kills the job at it.")
     if scontrol:
         print(f"\n  {len(scontrol)} change(s) worth making. Cutting a TimeLimit on a "
               f"PENDING job keeps\n  its submit time, so it costs no queue position -- "

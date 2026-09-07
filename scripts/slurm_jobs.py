@@ -85,7 +85,8 @@ QSAR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class Submission:
     def __init__(self, label, prefix, directory, script_rule, tasks_per_array=None,
-                 recorded=None, note=''):
+                 recorded=None, note='', also_ids=(), selection_gate=False,
+                 mem_floor_gb=None):
         self.label = label
         self.prefix = prefix
         self.directory = directory
@@ -93,6 +94,27 @@ class Submission:
         self.tasks_per_array = tasks_per_array
         self.recorded = recorded            # (first, last) if 13.18 records it
         self.note = note
+        # Job ids that belong to this submission but sit outside its range, because
+        # they went in on their own during a recovery.
+        self.also_ids = frozenset(also_ids)
+        # WHETHER A TASK CAN LEGITIMATELY EXIT IN SECONDS. Only the runs generated
+        # with --runtime-selection have a gate that skips an unselected pair and
+        # exits 0. Everywhere else a task that finished in ninety seconds is a real
+        # measurement -- LightGBM on logD does that -- and throwing it away leaves
+        # the wall resting on one task. This was costing the breadth grid eleven of
+        # val_lightgbm's twelve measurements.
+        self.selection_gate = selection_gate
+        # The author's rule, 2026-09-04: the uncertainty pass is not the same memory
+        # question, because a task there fits its model 1 + oof_folds times per level
+        # and holds a per-molecule uncertainty for every training molecule.
+        # model_memory.json pipeline_overrides owns the number; this is where a tool
+        # reads it.
+        self.mem_floor_gb = mem_floor_gb
+
+    def owns(self, base):
+        if base in self.also_ids:
+            return True
+        return self.recorded is not None and self.recorded[0] <= base <= self.recorded[1]
 
     def script_for(self, jobname):
         return self.script_rule(jobname[len(self.prefix):])
@@ -116,38 +138,35 @@ SUBMISSIONS = [
                recorded=(12980573, 12980591),
                note='replicates 1-9, three conditions. 13.18 Submission 4'),
     Submission('QM9 deep run', 'qm92_', 'slurm_scripts_qm9_rerun',
-               _qm9_script(2), tasks_per_array=36,
+               _qm9_script(2), tasks_per_array=36, selection_gate=True,
                note='seven conditions on the selected pairs. 13.19 STEP 4'),
     Submission('QM9 censoring', 'qm92_', 'slurm_scripts_qm9_censoring',
-               _qm9_script(2), tasks_per_array=6,
+               _qm9_script(2), tasks_per_array=6, selection_gate=True,
                note='censoring on the named pairs. 13.19 STEP 4'),
     Submission('laboratory breadth', 'val_', 'slurm_scripts_validation_rerun',
                lambda m: f'val_{m}.sh', tasks_per_array=18,
                recorded=(12971620, 12971638),
                note='19 models x 6 reps x 3 datasets. 13.18 Submission 2'),
+    # 13.18 Submission 3: the hERG tasks lost to the missing cache. val_lightgbm
+    # index 12 went in on its own as 12975687 during the 2026-09-03 confusion and is
+    # the twenty-fifth task, which is why this submission is not one contiguous range.
+    Submission('laboratory hERG resubmits', 'val_', 'slurm_scripts_validation_rerun',
+               lambda m: f'val_{m}.sh', tasks_per_array=6,
+               recorded=(12979965, 12979969), also_ids=(12975687,),
+               note='the 25 tasks lost to the missing cache. 13.18 Submission 3'),
     Submission('laboratory depth', 'val_', 'slurm_scripts_validation_depth',
-               lambda m: f'val_{m}.sh', tasks_per_array=18,
+               lambda m: f'val_{m}.sh', tasks_per_array=18, selection_gate=True,
                note='--include-depth-conditions. 13.19 STEP 5'),
     Submission('laboratory censoring', 'val_', 'slurm_scripts_validation_censoring',
-               lambda m: f'val_{m}.sh', tasks_per_array=18,
+               lambda m: f'val_{m}.sh', tasks_per_array=18, selection_gate=True,
                note='censoring on the named pairs. 13.19 STEP 5'),
     Submission('uncertainty, the three', 'unc_', 'slurm_scripts_uncertainty_rerun',
-               lambda m: f'unc_{m}.sh', tasks_per_array=27,
+               lambda m: f'unc_{m}.sh', tasks_per_array=27, mem_floor_gb=96,
                note='gaussian, grouped-wider, grouped-shifted. 13.19 STEP 6'),
     Submission('uncertainty, the four', 'unc_', 'slurm_scripts_uncertainty_depth',
-               lambda m: f'unc_{m}.sh', tasks_per_array=36,
+               lambda m: f'unc_{m}.sh', tasks_per_array=36, mem_floor_gb=96,
                note='censoring, student_t_nu5, outlier_p10, laplace. 13.19 STEP 6b'),
 ]
-
-# 13.18 Submission 3: the 24 hERG tasks lost to the missing cache, resubmitted into
-# the same scripts and the same results tree as the breadth grid. A separate sbatch, so
-# a separate row -- folding it into the breadth grid would misreport that grid's range.
-HERG_RESUBMITS = Submission(
-    'laboratory hERG resubmits', 'val_', 'slurm_scripts_validation_rerun',
-    lambda m: f'val_{m}.sh', tasks_per_array=6,
-    recorded=(12979965, 12979969),
-    note='the 24 tasks lost to the missing cache. 13.18 Submission 3')
-SUBMISSIONS.insert(5, HERG_RESUBMITS)
 
 PREFIXES = tuple(sorted({s.prefix for s in SUBMISSIONS}))
 
@@ -288,30 +307,57 @@ def group_submissions(rows, gap_seconds=900):
             clusters.append(current)
 
         candidates = [s for s in SUBMISSIONS if s.prefix == prefix]
+
+        # THREE PASSES, AND THE ORDER MATTERS. Assigning cluster by cluster is what
+        # went wrong on the real data: a lone recovery job -- 12975687, one array of
+        # one task -- matched no recorded range and no task count, fell to the order
+        # fallback, and took "hERG resubmits" off the roster. The submission that
+        # really is 12979965-12979969 then found its own recorded owner already
+        # used and took "depth", and every laboratory run after it shifted one
+        # place, so censoring was reported twice and depth never at all.
+        #
+        # So: claim every recorded range across ALL clusters before any fallback
+        # runs, then the task counts, then whatever is left in submission order.
+        #
+        # A SUBMISSION MAY OWN MORE THAN ONE CLUSTER. The hERG recovery went out in two
+        # pieces on two days -- 12975687 alone on 2026-09-03, then 12979965-12979969 on
+        # the 4th -- so the time cut correctly separates them and they are still one
+        # submission into one results tree. Pass one merges every cluster the same
+        # submission owns instead of letting the first one claim it.
+        assigned = {}
         used = set()
-        for cluster in clusters:
+        owners = {}
+        for i, cluster in enumerate(clusters):
+            owner = next((s for s in candidates
+                          if any(s.owns(b) for b in cluster)), None)
+            if owner:
+                owners.setdefault(owner, []).append(i)
+                assigned[i] = owner
+                used.add(owner)
+        for i, cluster in enumerate(clusters):
+            if i in assigned:
+                continue
             counts = [_tasks_in(by_base[b]) for b in cluster]
             typical = max(set(counts), key=counts.count) if counts else None
-            pick = None
-            # A recorded range is the strongest evidence there is: 13.18 wrote it
-            # down from the submission itself.
-            for s in candidates:
-                if s in used or s.recorded is None:
-                    continue
-                if s.recorded[0] <= cluster[0] <= s.recorded[1]:
-                    pick = s
-                    break
-            if pick is None:
-                for s in candidates:
-                    if s in used or s.tasks_per_array is None:
-                        continue
-                    if s.tasks_per_array == typical:
-                        pick = s
-                        break
-            if pick is None:
-                pick = next((s for s in candidates if s not in used), candidates[-1])
-            used.add(pick)
-            out.append((pick, {b: by_base[b] for b in cluster}))
+            owner = next((s for s in candidates if s not in used
+                          and s.tasks_per_array is not None
+                          and s.tasks_per_array == typical), None)
+            if owner:
+                assigned[i] = owner
+                used.add(owner)
+        for i, cluster in enumerate(clusters):
+            if i in assigned:
+                continue
+            owner = next((s for s in candidates if s not in used), None)
+            assigned[i] = owner or candidates[-1]
+            used.add(assigned[i])
+        merged = {}
+        for i, cluster in enumerate(clusters):
+            sub = assigned[i]
+            merged.setdefault(sub, {}).update({b: by_base[b] for b in cluster})
+        for sub, members in merged.items():
+            out.append((sub, members))
+
     out.sort(key=lambda t: min(t[1]))
     return out
 
@@ -321,6 +367,45 @@ def _tasks_in(rows):
     n = sum(1 for r in rows if not r['pending_array'])
     n += sum(pending_count(r['JobID']) for r in rows if r['pending_array'])
     return n
+
+
+def squeue_pending(squeue_file=None, user=None):
+    """{base job id: tasks still queued}. SACCT DOES NOT HAVE THIS.
+
+    A pending array element that has never started is not in the accounting
+    database, so `sacct -X` reports the tasks that have run and nothing about the
+    rest. On the real cluster on 2026-09-07 that made the QM9 deep run look like 550
+    tasks rather than 654, and turned every percentage into a fraction of a moving
+    denominator. squeue is the only place the queue exists.
+
+    `12980590_[0-17%5]` is one squeue row holding eighteen tasks; `12986318_7` is one.
+    Both are counted.
+    """
+    if squeue_file:
+        lines = [ln for ln in open(squeue_file).read().splitlines() if ln.strip()]
+    else:
+        cmd = ['squeue', '-h', '-o', '%i|%j|%t', '-u',
+               user or os.environ.get('USER', '')]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            return {}                      # not on the cluster; say so, do not guess
+        if p.returncode != 0:
+            return {}
+        lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
+    out = defaultdict(int)
+    for line in lines:
+        parts = line.split('|')
+        if len(parts) < 3:
+            continue
+        jid, name, state = parts[0], parts[1], parts[2]
+        if not name.startswith(PREFIXES) or state.strip() != 'PD':
+            continue
+        base = jid.partition('_')[0]
+        if not base.isdigit():
+            continue
+        out[int(base)] += pending_count(jid) if '[' in jid else 1
+    return dict(out)
 
 
 def max_rss_by_task(since, sacct_file=None, user=None):
@@ -396,7 +481,10 @@ def main():
     ap.add_argument('--since', default='2026-09-01')
     ap.add_argument('--sacct-file')
     ap.add_argument('--user')
-    ap.add_argument('--save', help='write the raw sacct output here and stop')
+    ap.add_argument('--save', help='write the raw sacct output here and stop. '
+                    'squeue goes beside it as <name>.squeue -- sacct does not know '
+                    'about a task that has never started.')
+    ap.add_argument('--squeue-file')
     ap.add_argument('--emit-launch-log', action='store_true',
                     help='print the 13.18 rows for what was found')
     cli = ap.parse_args()
@@ -406,6 +494,14 @@ def main():
         lines += run_sacct(cli.since, cli.sacct_file, cli.user, extra=())
         with open(cli.save, 'w') as f:
             f.write('\n'.join(lines) + '\n')
+        q = subprocess.run(['squeue', '-h', '-o', '%i|%j|%t', '-u',
+                            cli.user or os.environ.get('USER', '')],
+                           capture_output=True, text=True)
+        if q.returncode == 0:
+            with open(cli.save + '.squeue', 'w') as f:
+                f.write(q.stdout)
+            print(f'  {len(q.stdout.splitlines())} squeue row(s) -> '
+                  f'{cli.save}.squeue')
         print(f'  {len(lines)} sacct row(s) -> {cli.save}')
         print(f'  scp it back, then pass --sacct-file {cli.save} to any of the '
               f'status tools.')
@@ -426,10 +522,15 @@ def main():
         rng = f'{bases[0]}-{bases[-1]}' if len(bases) > 1 else str(bases[0])
         if sub.recorded is None:
             state = 'NO -- add it'
-        elif (bases[0], bases[-1]) == sub.recorded:
-            state = 'yes'
+        elif all(sub.owns(b) for b in bases):
+            # Every id is either inside the recorded range or a known extra, so this
+            # matches even where the submission went out in two pieces.
+            extra = sorted(b for b in bases if b in sub.also_ids)
+            state = 'yes' + (f' (+{", ".join(str(b) for b in extra)})' if extra else '')
         else:
-            state = f'MISMATCH, 13.18 says {sub.recorded[0]}-{sub.recorded[1]}'
+            loose = sorted(b for b in bases if not sub.owns(b))
+            state = (f'MISMATCH, 13.18 says {sub.recorded[0]}-{sub.recorded[1]}; '
+                     f'not covered: {", ".join(str(b) for b in loose[:4])}')
         print(f"  {sub.label:24s} {rng:>21s} {len(bases):7d} {tasks:7d}  {state}")
 
     missing = [s.label for s in SUBMISSIONS

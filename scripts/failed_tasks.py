@@ -105,8 +105,8 @@ def last_error(path, keep=12):
             continue
         if ln.startswith('=== finished') or ln.startswith('+ '):
             continue
-        return '\n'.join(lines[max(0, i - 2):i + 1])[:keep * 100]
-    return '\n'.join(lines[-keep:])[:keep * 100]
+        return '\n'.join(lines[max(0, i - 3):i + 1])
+    return '\n'.join(lines[-keep:])
 
 
 def main():
@@ -119,6 +119,10 @@ def main():
     ap.add_argument('--show', type=int, default=6, help='tasks to name per cause')
     ap.add_argument('--no-logs', dest='logs', action='store_false',
                     help='do not read the .out files (they are only on the cluster)')
+    ap.add_argument('--width', type=int, default=300,
+                    help='characters of each error line to print (default 300). An '
+                         'error cut off before the part that says what went wrong is '
+                         'no better than no error.')
     ap.add_argument('--throttle', type=int, default=4,
                     help='the %% on the resubmitted array (default 4)')
     cli = ap.parse_args()
@@ -173,10 +177,13 @@ def main():
             seen = Counter()
             examples = {}
             unreadable = 0
+            missing_paths = []
             for sub, r, _peak in rows_c:
-                err = last_error(log_path(sub, r['JobName'], r['JobID']))
+                path = log_path(sub, r['JobName'], r['JobID'])
+                err = last_error(path)
                 if err is None:
                     unreadable += 1
+                    missing_paths.append(path)
                     continue
                 seen[err] += 1
                 examples.setdefault(err, r['JobID'])
@@ -184,10 +191,15 @@ def main():
                 print(f"\n      {n} of {len(rows_c)} ended on this "
                       f"(e.g. {examples[err]}):")
                 for ln in err.splitlines():
-                    print(f'        | {ln[:110]}')
+                    print(f'        | {ln[:cli.width]}')
             if unreadable:
-                print(f"\n      {unreadable} log(s) not readable from here -- run this "
-                      f"on the cluster,\n      or pass --no-logs to skip them.")
+                print(f"\n      {unreadable} log(s) NOT FOUND. This is the path it "
+                      f"looked for:")
+                for path in missing_paths[:3]:
+                    print(f'        {path}')
+                print(f"      A missing log usually means the script was regenerated "
+                      f"with a different\n      --output name after those tasks ran, "
+                      f"or you are not on the cluster.")
         print()
 
     print("  WHAT TO DO WITH EACH")

@@ -37,11 +37,15 @@ QM9 = ['rf', 'xgboost', 'lgb', 'svm', 'ngboost', 'dnn', 'mlp', 'dnn_bnn_full',
        'heteroscedastic_gp', 'dnn_bnn_full_variational_hetero',
        'mlp_bnn_full_variational_hetero', 'dnn_bnn_full_mve', 'mlp_bnn_full_mve',
        'qrf', 'gauche_rbf', 'gauche']
-LAB = ['rf', 'svm', 'xgboost', 'lightgbm', 'qrf', 'ngboost', 'dnn', 'mlp', 'bnn-full',
-       'bnn-full-mve', 'mlp-bnn-full', 'mlp-bnn-full-mve', 'vbll-full',
-       'vbll-full-hetero', 'mlp-vbll-full', 'mlp-vbll-full-hetero', 'gp', 'gp-hetero',
-       'gp-tanimoto']
-UNC = ['rf', 'ngboost', 'gp', 'vbll_full', 'bnn_full_mve', 'mlp_bnn_full_mve']
+# THE ORDER IS THE SUBMIT ORDER, off submit_all.sh, because the job ids are assigned
+# in it -- so index k here is job id first+k, exactly as on the cluster. Getting this
+# wrong is not cosmetic: the grouping cuts a cluster where a model name repeats, so a
+# model in the wrong slot splits a submission in two.
+LAB = ['bnn-full-mve', 'bnn-full', 'dnn', 'gp-hetero', 'gp-tanimoto', 'gp',
+       'lightgbm', 'mlp-bnn-full-mve', 'mlp-bnn-full', 'mlp-vbll-full-hetero',
+       'mlp-vbll-full', 'mlp', 'ngboost', 'qrf', 'rf', 'svm', 'vbll-full-hetero',
+       'vbll-full', 'xgboost']
+UNC = ['qrf', 'ngboost', 'gp', 'vbll_full', 'bnn_full_mve', 'mlp_bnn_full_mve']
 
 FAILS = []
 
@@ -73,6 +77,12 @@ def capture(path):
            '19-20:59:00', '96Gn', short_model='gauche', short_tasks=3)
     arrays(12971620, LAB, lambda m: f'val_{m}', 18, '2026-09-02T02:00:00',
            '7:00:00', '128Gn', short_model='gp-tanimoto', short_tasks=3)
+    # 12975687: val_lightgbm index 12, submitted ALONE on 2026-09-03 during the
+    # confusion. One array, one task, matching no recorded range and no task count --
+    # this is what took 'hERG resubmits' off the roster and shifted every laboratory
+    # run one place along.
+    out.append(row('12975687_12', 'val_lightgbm', 'COMPLETED', '0:04:00', '7:00:00',
+                   '128Gn', '2026-09-03T14:00:00'))
     arrays(12979965, ['bnn-full-mve', 'bnn-full', 'dnn', 'lightgbm', 'gp-tanimoto'],
            lambda m: f'val_{m}', 6, '2026-09-04T09:00:00', '7:00:00', '96Gn')
     arrays(12980573, QM9, lambda m: f'qm91_{m}', 18, '2026-09-04T18:00:00',
@@ -93,6 +103,15 @@ def capture(path):
     arrays(12986396, UNC, lambda m: f'unc_{m}', 36, '2026-09-06T01:00:00',
            '1-23:59:00', '96Gn')
 
+    # LightGBM on the laboratory datasets genuinely finishes in under three minutes.
+    # The breadth grid has no selection gate, so these must be MEASURED, not discarded
+    # as skips -- doing that left val_lightgbm's wall resting on one task of twelve.
+    lgb_id = 12971620 + LAB.index('lightgbm')                 # 12971626 on ARC
+    out = [ln for ln in out if not ln.startswith(f'{lgb_id}_')]
+    for i in range(18):
+        out.append(row(f'{lgb_id}_{i}', 'val_lightgbm', 'COMPLETED', '0:02:20',
+                       '7:00:00', '128Gn', '2026-09-02T02:00:00'))
+
     # The states that matter. ngboost: three completed short, one running long.
     out = [ln for ln in out if not ln.startswith(('12980577_', '12986318_'))]
     for i in range(3):
@@ -103,6 +122,17 @@ def capture(path):
     for i in range(3):
         out.append(row(f'12986318_{i}', 'qm92_ngboost', 'COMPLETED', '0:00:40',
                        '22-01:59:00', '96Gn', '2026-09-06T00:10:00'))
+    # gauche_rbf on the deep run: two completed short tasks, one still running, and a
+    # 17-day request. Too little to propose from -- but it must be NAMED, not skipped
+    # in silence, because it is the one model that has never finished anywhere.
+    grbf = 12986314 + QM9.index('gauche_rbf')
+    out = [ln for ln in out if not ln.startswith(f'{grbf}_')]
+    for i in range(2):
+        out.append(row(f'{grbf}_{i}', 'qm92_gauche_rbf', 'COMPLETED', '0:05:00',
+                       '17-08:59:00', '96Gn', '2026-09-06T00:10:00'))
+    out.append(row(f'{grbf}_2', 'qm92_gauche_rbf', 'RUNNING', '1:37:00',
+                   '17-08:59:00', '96Gn', '2026-09-06T00:10:00'))
+
     # A fully PENDING array: one bracketed row for 33 tasks.
     out.append(row('12986318_[3-35%5]', 'qm92_ngboost', 'PENDING', '00:00:00',
                    '22-01:59:00', '96Gn', '2026-09-06T00:10:00'))
@@ -125,6 +155,12 @@ def capture(path):
     out.append(row('12980573_0.batch', 'batch', 'COMPLETED', '0:10:00', '',
                    '64Gn', '2026-09-04T18:00:00', rss='2.86G'))
     path.write_text('\n'.join(out) + '\n')
+    # squeue: the 29 deep-run ngboost tasks that have never started, which sacct does
+    # not hold at all.
+    path.with_suffix('.squeue').write_text(
+        '12986318_[7-35%5]|qm92_ngboost|PD\n'
+        '12986331_[8-35%5]|qm92_gauche_rbf|PD\n'
+        '12986390_[0-26%6]|unc_qrf|PD\n')
 
 
 def main():
@@ -141,7 +177,9 @@ def main():
     for label, first, last in [
             ('QM9 screen', 12971601, 12971619),
             ('laboratory breadth', 12971620, 12971638),
-            ('laboratory hERG resubmits', 12979965, 12979969),
+            # Two sbatch submissions on two days, one results tree: 12975687 alone
+            # on 2026-09-03, then 12979965-12979969 on the 4th.
+            ('laboratory hERG resubmits', 12975687, 12979969),
             ('QM9 main grid', 12980573, 12980591),
             ('QM9 deep run', 12986314, 12986332),
             ('QM9 censoring', 12986333, 12986351),
@@ -154,6 +192,16 @@ def main():
               got is not None and got[0] == first and got[-1] == last,
               f'got {got[0] if got else None}-{got[-1] if got else None}')
 
+    check('the lone recovery job 12975687 is filed with the hERG resubmits, not '
+          'as a submission of its own',
+          12975687 in found.get('laboratory hERG resubmits', []),
+          f"12975687 landed in {[k for k, v in found.items() if 12975687 in v]}")
+    check('laboratory depth and censoring are one each, not censoring twice',
+          len(found.get('laboratory depth', [])) == 19
+          and len(found.get('laboratory censoring', [])) == 19,
+          f"depth {len(found.get('laboratory depth', []))}, "
+          f"censoring {len(found.get('laboratory censoring', []))}")
+
     check("KIRBy's other work is not counted as this study's",
           not any(r['JobName'].startswith(('dta_', 'nuc_', 'pc_', 'graphinity_',
                                            'tune_')) for r in rows))
@@ -164,12 +212,24 @@ def main():
           len(bracketed) == 1 and SJ.pending_count(bracketed[0]['JobID']) == 33,
           f'{len(bracketed)} bracketed row(s)')
 
+    # squeue is where the queue is. sacct has none of these 29 + 28 + 27 tasks.
+    q = SJ.squeue_pending(str(cap.with_suffix('.squeue')))
+    check('pending tasks come from squeue, which is the only place they exist',
+          q.get(12986318) == 29 and q.get(12986331) == 28 and q.get(12986390) == 27,
+          str(q))
+
     status = subprocess.run(
-        [sys.executable, str(HERE / 'run_status.py'), '--sacct-file', str(cap)],
+        [sys.executable, str(HERE / 'run_status.py'), '--sacct-file', str(cap),
+         '--squeue-file', str(cap.with_suffix('.squeue'))],
         capture_output=True, text=True)
-    check('run_status.py runs and reports pending', status.returncode == 0
-          and 'pend' in status.stdout and '  162' in status.stdout,
+    check('run_status.py runs and reports pending from the queue',
+          status.returncode == 0 and 'pend' in status.stdout
+          and 'NOTE: no queue reading' not in status.stdout,
           status.stderr[-400:] or status.stdout[:400])
+    check('run_status.py says so plainly when it has NO queue reading',
+          'NOTE: no queue reading' in subprocess.run(
+              [sys.executable, str(HERE / 'run_status.py'), '--sacct-file', str(cap)],
+              capture_output=True, text=True).stdout)
     check('run_status.py never says "not submitted" for a queued submission',
           'uncertainty, the four' not in status.stdout.split('NOT SUBMITTED')[-1]
           or 'NOT SUBMITTED' not in status.stdout)
@@ -240,6 +300,31 @@ def main():
           > 1 * 86400 + 22 * 3600 + 39 * 60 + 39,
           borrowed or 'no proposal for 12986318 at all')
     check('at least one running job was covered by the invariant', checked > 0)
+
+    check('a model with too little evidence and a multi-day request is NAMED, '
+          'not skipped in silence',
+          'NO PROPOSAL' in mw.stdout and 'gauche_rbf' in
+          mw.stdout.split('NO PROPOSAL')[1][:600],
+          mw.stdout.split('Walls proposed')[-1][:500])
+    check('and no wall is proposed for it',
+          not any(str(12986314 + QM9.index('gauche_rbf')) in ln
+                  and 'TimeLimit=' in ln for ln in mw.stdout.splitlines()),
+          [ln for ln in mw.stdout.splitlines()
+           if str(12986314 + QM9.index('gauche_rbf')) in ln])
+
+    # 6. A fast task on a grid with NO selection gate is a measurement.
+    lgb = [ln for ln in mw.stdout.splitlines()
+           if 'val_lightgbm' in ln and 'laboratory breadth' in ln]
+    check('the breadth grid has no selection gate, so its 2-minute tasks are measured',
+          bool(lgb) and 'skipped' not in lgb[0] and ' 18 ' in lgb[0],
+          lgb or 'val_lightgbm missing from the breadth grid')
+
+    # 7. The uncertainty runs keep their own memory floor (model_memory.json).
+    unc_mem = [ln for ln in mw.stdout.splitlines()
+               if 'MinMemoryNode' in ln and 'unc_' in ln]
+    check('no uncertainty job is proposed below its own 96G floor',
+          all(int(ln.split('MinMemoryNode=')[1].split()[0]) >= 96 * 1024
+              for ln in unc_mem), unc_mem)
 
     # 5. A skipped task is never measured.
     check('the deep run\'s skipped tasks are reported as skipped, not as a wall',
