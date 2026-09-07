@@ -225,6 +225,26 @@ for _m in _PAIRS['models']:
 # levels.
 OOF_FOLDS_SCORED = {'ngboost': 3}
 
+# THE MEASURED HOURS, AND THE MARGIN. See RERUN_PLAN.md 13.24a.
+#
+# model_hours.json holds one entry per model: the hours per 110 training runs per fit,
+# read off the longest task that model actually ran on ARC, together with the task it
+# came from and how many fits that task did. It is data, not a decision -- re-run
+# scripts/measure_walls.py and raise any model whose longest observed task now exceeds
+# what the file records. Never lower one below what has been observed.
+#
+# 2.0x rather than 1.25x: a wall has to be big enough that the job does not die and
+# small enough that SLURM can backfill it. Twice the worst of fifteen real tasks does
+# both. It turns the sum of the QM9 requests from 2,244 hours into 241.
+WALL_MARGIN = 2.0
+_HOURS_FILE = Path(__file__).resolve().parent.parent / 'model_hours.json'
+try:
+    MEASURED_HOURS = json.loads(_HOURS_FILE.read_text())['models']
+except (OSError, ValueError, KeyError):
+    # Missing or unreadable: fall back to the table's guesses rather than refusing to
+    # generate. The summary below says which models had no measurement.
+    MEASURED_HOURS = {}
+
 NOISE_CONDITIONS_FILE = Path(__file__).resolve().parent.parent / 'noise_conditions.json'
 _SETTLED = json.loads(NOISE_CONDITIONS_FILE.read_text())
 _SETTINGS = _SETTLED['settings_that_follow']
@@ -1543,8 +1563,27 @@ def main():
         # script for one fit. One wall clock covers the whole array, so it has to
         # be the worst task in it: a task on a settled pair.
         fits_per_run = 1 + (oof_scored or args.oof_folds) if unc_reps else 1
+
+        # THE RATE COMES FROM MEASUREMENT WHERE THERE IS ONE, NOT FROM THE TABLE.
+        #
+        # `hours_per_110` in MODELS above is a hand-written guess, and several of its
+        # entries say DERIVED in their own comment, which means nobody timed them.
+        # Measured against real tasks on 2026-09-07 (RERUN_PLAN.md 13.24a): fourteen
+        # of nineteen are over by more than 5x and the worst -- gauche_rbf -- by 190x,
+        # so those jobs ask for weeks, fit no backfill gap and sit on (Priority).
+        #
+        # AND THE ONE ACCURATE GUESS IS THE DANGEROUS ONE. qrf's 6 is right; the
+        # measurement says 6.07. A 1.25x margin on a guess that is already 10x too big
+        # is accidentally safe, but 1.25x on an ACCURATE estimate leaves 29% of
+        # headroom on a runtime that varies with the node, and a job killed at its
+        # wall has no partial credit. qrf asked 1-02:59 against a measured 20:52.
+        #
+        # So: measured rate where model_hours.json has one, the table's guess where it
+        # does not, and a 2.0x margin either way.
+        measured = MEASURED_HOURS.get(model)
+        rate = measured['hours_per_110'] if measured else hours_per_110
         hours = max(1, math.ceil(
-            hours_per_110 * runs_per_task * fits_per_run / 110 * 1.25))
+            rate * runs_per_task * fits_per_run / 110 * WALL_MARGIN))
         if hours > args.max_hours:
             raise SystemExit(
                 f"ERROR: {model} needs {hours}h ({runs_per_task} training runs x "

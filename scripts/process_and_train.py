@@ -1179,19 +1179,83 @@ def split_qm9(qm9, args, files):
 
     mols_train = deque()
 
+    # BUILT FOR EVERY RUN, NOT ONLY WHEN SORT & SLICE IS ASKED FOR. The featuriser
+    # decides which molecules this run can represent at all (the exclusion below), and
+    # that molecule set has to be IDENTICAL on every representation or the
+    # cross-representation tables stop comparing the same molecules. Building it is one
+    # Morgan pass over the training split plus a sort; on a 10,000-molecule sample that
+    # is seconds, and it is a cost every Sort & Slice job already paid.
     ecfp_featuriser = None
-    if 'sns' in args.molecular_representations:
-        for index, data in enumerate(qm9[:args.sample_size]):
-            if index in train_idx:
-                mols_train.append(Chem.MolFromSmiles(data.smiles))
-        ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train, 
-                                                               max_radius = 2, 
-                                                               pharm_atom_invs = False, 
-                                                               bond_invs = True, 
-                                                               chirality = False, 
-                                                               sub_counts = True, 
-                                                               vec_dimension = SNS_DIM, 
-                                                               print_train_set_info = args.logging)
+    for index, data in enumerate(qm9[:args.sample_size]):
+        if index in train_idx:
+            mols_train.append(Chem.MolFromSmiles(data.smiles))
+    ecfp_featuriser = create_sort_and_slice_ecfp_featuriser(mols_train = mols_train,
+                                                           max_radius = 2,
+                                                           pharm_atom_invs = False,
+                                                           bond_invs = True,
+                                                           chirality = False,
+                                                           sub_counts = True,
+                                                           vec_dimension = SNS_DIM,
+                                                           print_train_set_info = args.logging)
+
+    # DROP THE MOLECULES SORT & SLICE CANNOT REPRESENT -- FROM EVERY REPRESENTATION.
+    #
+    # WHAT HAPPENED. 51 tasks of the QM9 main grid died on
+    #     ValueError: Sort & Slice produced an all-zero count vector for N
+    # N is ammonia. Sort & Slice keeps the top SNS_DIM substructures by TRAINING
+    # frequency. Methane, ammonia and water have exactly ONE Morgan substructure each,
+    # and each of those occurs in exactly one molecule of QM9, so they can never reach
+    # a top-1024 under any split or seed. Their vector is all zeros, and the guard in
+    # write_to_mmap refuses them -- correctly, because a real label trained against no
+    # features is indistinguishable downstream from a molecule whose substructures
+    # genuinely are all absent.
+    #
+    # Counted over all 132,480 QM9 SMILES on 2026-09-07: exactly THREE molecules,
+    # 0.0023% of the dataset (scripts/sns_zero_molecules.py).
+    #
+    # WHY FROM EVERY REPRESENTATION AND NOT JUST FROM SORT & SLICE. Representation is a
+    # FACTOR in this study, so ECFP4 and Sort & Slice must be scored on the same
+    # molecules or the comparison between them carries a difference in the data as well
+    # as in the featuriser. Dropping three molecules from one representation would be a
+    # silent confound in the one table the study exists to produce.
+    #
+    # WHY NOT A LIST OF THREE SMILES. The property, not the identity: a molecule whose
+    # whole substructure set falls outside the kept top-k. A hard-coded list is wrong
+    # the moment SNS_DIM, the dataset or the sample changes. This asks the fitted
+    # featuriser, which is the same object the guard uses.
+    #
+    # WHY THE SPLIT IS NOT REDONE. Three molecules of ten thousand move the split
+    # fractions by 0.03%, and re-splitting would change which molecules are in training
+    # -- which changes the featuriser, which changes the exclusion. Removing them from
+    # the three index lists terminates; re-splitting need not.
+    #
+    # THE GUARD STAYS. It is what caught this, and it now has nothing left to catch.
+    dropped_sns = []
+    for index, data in enumerate(qm9[:args.sample_size]):
+        if index not in train_idx and index not in val_idx and index not in test_idx:
+            continue
+        mol = Chem.MolFromSmiles(data.smiles)
+        if mol is None:
+            continue
+        if not np.any(np.asarray(ecfp_featuriser(mol))):
+            dropped_sns.append((index, data.smiles))
+    if dropped_sns:
+        drop = {i for i, _ in dropped_sns}
+        train_idx = [i for i in train_idx if i not in drop]
+        val_idx = [i for i in val_idx if i not in drop]
+        test_idx = [i for i in test_idx if i not in drop]
+        print(f"  Sort & Slice cannot represent {len(dropped_sns)} molecule(s) at "
+              f"SNS_DIM={SNS_DIM}. Dropped from EVERY representation, so the "
+              f"cross-representation tables compare the same molecules:")
+        for _i, _smi in dropped_sns[:10]:
+            print(f"      {_smi}")
+        if len(dropped_sns) > 10:
+            print(f"      ... and {len(dropped_sns) - 10} more")
+        print(f"  {len(train_idx)} train / {len(val_idx)} val / {len(test_idx)} test "
+              f"after the exclusion.")
+    else:
+        print(f"  Sort & Slice represents every molecule in this sample at "
+              f"SNS_DIM={SNS_DIM}; nothing excluded.")
 
     # Load mhg-gnn
     if 'mhggnn' in args.molecular_representations:
