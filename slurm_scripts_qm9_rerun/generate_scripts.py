@@ -326,11 +326,22 @@ CUBIC_MODELS = {'gauche', 'gauche_rbf', 'heteroscedastic_gp'}
 # Everything NOT in this set says DERIVED in its own note in MODELS: its hours
 # were scaled off another model. A derivation is not a second opinion, so it is
 # never used as a floor under a measurement.
+#
+# gauche_rbf WAS IN THIS SET AND WAS REMOVED 2026-09-07. Its row in
+# results/tuning_local/timing.csv -- 11,695.3 s for one fit on 8,000 molecules --
+# was written at 2026-08-27T21:29:13, and GP_DEFAULTS' one-thread setting was
+# still true then and was set false the next day. So it timed a SINGLE-THREADED
+# Gaussian process, and ARC runs the same fit on eight cores: about 88 seconds at
+# the 5,000 cap against that row's cubically-rescaled 2,855. A floor 32x above the
+# measurement is not a second opinion about how fast ARC is, and it priced the
+# main grid at 133:59:00 against 3.96 h measured -- which squeue answered with a
+# start time six days out while the same model's 5:59:00 array ran within the
+# hour (RERUN_PLAN.md 13.27 D2p, D2q). Put it back only against a re-timing on
+# this laptop with the current threading.
 LAPTOP_TIMED = {
     'rf', 'xgboost', 'lgb', 'svm', 'ngboost', 'dnn', 'mlp',
     'dnn_bnn_full', 'mlp_bnn_full',
     'dnn_bnn_full_variational', 'mlp_bnn_full_variational',
-    'gauche_rbf',
 }
 # How each grade reads in a sentence, so the error message is English.
 ARTICLE = {'measured': 'a measured', 'partial': 'a LOWER-BOUND',
@@ -1792,7 +1803,8 @@ def main():
             n_lev=n_lev, runs=runs_per_task, unc_block=unc_block,
             last=n_tasks - 1, throttle=args.throttle, script_name=script_name))
         (out / script_name).chmod(0o755)
-        written.append((tier, script_name, model, hours, n_tasks, len(reps), grade))
+        written.append((tier, script_name, model, hours, n_tasks, len(reps), grade,
+                        list(reps)))
 
     # THE SUBMITTER, SO NOBODY EVER TYPES AN ARRAY RANGE AGAIN.
     #
@@ -1816,7 +1828,7 @@ def main():
               'ok=0; bad=0',
               'echo "submitting to account=$ACCT partition=$PART throttle=$THROTTLE"',
               '']
-    for _, nm, m, h, nt, nr, _g in written:
+    for _, nm, m, h, nt, nr, _g, _rl in written:
         submit.append(f'# {nm}: {nt} tasks, {nr} representation(s), --time={h}:59:00')
         submit.append(
             f'if sbatch --account=$ACCT --partition=$PART '
@@ -1826,6 +1838,69 @@ def main():
                'if [ "$bad" -gt 0 ]; then exit 1; fi']
     (out / 'submit_all.sh').write_text('\n'.join(submit) + '\n')
     (out / 'submit_all.sh').chmod(0o755)
+
+    # THE SUBMITTER FOR A WIDENED SELECTION, SO NOBODY TYPES AN INDEX LIST EITHER.
+    #
+    # `submit_all.sh` sends a model's WHOLE array. That is right the first time and
+    # wrong afterwards: narrowing the selection is free because a task that is no
+    # longer named skips and exits 0, but WIDENING it means the tasks of the model
+    # just added have already run and skipped, and only those have to go again
+    # (RERUN_PLAN.md 13.19). Re-sending the whole array repeats work that is already
+    # on disk; sending the wrong indices is how out-of-range tasks were queued three
+    # times.
+    #
+    # The task script computes rep = REPS[i % n_rep] and cond = CONDS[i / n_rep], so
+    # the indices a model actually works on are decided by where the selected
+    # representations sit in that model's own REPS list -- which differs per model,
+    # because `gauche` runs on fingerprints alone. This writes them out per model
+    # rather than leaving anyone to work it out.
+    if args.runtime_selection and not (args.models or args.reps):
+        _spec = json.loads(Path(args.runtime_selection).read_text())
+        _pairs = selection_pairs(_spec, 'generator_pairs', 'generator_labels')
+        _wanted = {}
+        for _m, _r in _pairs:
+            _wanted.setdefault(_m, set()).add(_r)
+        lines = ['#!/usr/bin/env bash',
+                 '# RESUBMIT ONLY THE TASKS A WIDENED SELECTION NEEDS.',
+                 '#',
+                 f'# Generated from {args.runtime_selection}. Every index below is a task',
+                 '# whose model and representation that file names. Run this ONLY for a',
+                 '# model you have just ADDED to the selection: a model that was already',
+                 '# in it has these tasks running or done, and this would duplicate them.',
+                 '#',
+                 '# Narrowing needs nothing -- an unlisted task skips and exits 0.',
+                 'set -u',
+                 'ACCT=${ACCT:-stat-cadd}',
+                 'PART=${PART:-long}',
+                 'THROTTLE=${THROTTLE:-' + str(args.throttle) + '}',
+                 'MODEL="${1:-}"',
+                 'if [ -z "$MODEL" ]; then',
+                 '    echo "usage: bash $(basename "$0") <generator label>"',
+                 '    echo "the labels this file knows:"',
+                 "    grep -o '^# ADDED [a-z0-9_]*' \"$0\" | cut -d' ' -f3",
+                 '    exit 2',
+                 'fi',
+                 '']
+        for _, nm, m, h, nt, nr, _g, _rl in written:
+            if m not in _wanted:
+                continue
+            idx = sorted(c * len(_rl) + _rl.index(r)
+                         for c in range(len(conditions))
+                         for r in _wanted[m] if r in _rl)
+            if not idx:
+                continue
+            lines += [f'# ADDED {m}',
+                      f'if [ "$MODEL" = "{m}" ]; then',
+                      f'    # {len(idx)} task(s) of {nt}: '
+                      f'{", ".join(sorted(r for r in _wanted[m] if r in _rl))} '
+                      f'x {len(conditions)} condition(s), --time={h}:59:00',
+                      f'    exec sbatch --account=$ACCT --partition=$PART '
+                      f'--array={",".join(str(i) for i in idx)}%$THROTTLE {nm}',
+                      'fi',
+                      '']
+        lines += ['echo "no such model in this selection: $MODEL"', 'exit 2']
+        (out / 'resubmit_selected.sh').write_text('\n'.join(lines) + '\n')
+        (out / 'resubmit_selected.sh').chmod(0o755)
 
     print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total, "
           f"+ submit_all.sh")
@@ -1855,7 +1930,7 @@ def main():
         rows = [w for w in written if w[0] == tier]
         if rows:
             print(f"\n  Tier {tier} ({name}):")
-            for _, nm, m, h, nt, nr, grade in rows:
+            for _, nm, m, h, nt, nr, grade, _rl in rows:
                 marker = {'measured': '',
                           'partial': '   <- rate is a LOWER BOUND',
                           'unmeasured': '   <- wall not measured'}[grade]

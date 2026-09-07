@@ -16543,6 +16543,46 @@ So D2k's warning that the new gate would show "a number nobody has seen" is answ
 57 cells are complete**, the six empty ones are this chat's, and the rest are partial because
 the grid is mid-flight. Nothing new is broken.
 
+#### D2s. The cuts took, and the trap that would have put them back
+
+```
+13042879_[0-1,...   qm91_gauche_rbf  PD  18:59:00  64G  (None)
+13042880_[0-1,...   qm92_gauche_rbf  PD  20:59:00  64G  (None)
+```
+
+**`(None)` and a `START_TIME` of `N/A` mean the scheduler has not evaluated them since the
+change, not that nothing is holding them.** That is the same transient state D2m misread. It is
+replaced on the next scheduling cycle. What says the cut worked is a `START_TIME` far earlier
+than the 2026-09-13 both carried before, or the tasks going `R`.
+
+```bash
+squeue --start -j 13042879,13042880
+squeue -j 13042879,13042880,13042881 -o "%.14i %.20j %.2t %.11M %.11l %R"
+```
+
+**The trap: regenerating would have put 133:59:00 straight back.** `scontrol` changed the two
+queued arrays and nothing else. The generator still priced this model off
+`results/tuning_local/timing.csv`, so anyone rebuilding the scripts — chat 5 needs to, for the
+Sort & Slice tasks on other models — would have resubmitted into another six-day wait.
+
+Fixed by removing `gauche_rbf` from `LAPTOP_TIMED` in
+`slurm_scripts_qm9_rerun/generate_scripts.py`. That set exists to put a floor under a
+lower-bound ARC rate, using a laptop timing of the same model as a second opinion. This model's
+row is not one: it was written 2026-08-27T21:29:13, `GP_DEFAULTS`' one-thread setting was still
+true then and was set false the next day, so it timed a **single-threaded** Gaussian process
+against ARC's eight cores — 2,855 s rescaled against about 88 measured, a factor of 32.
+
+| | before | after |
+|---|---|---|
+| main grid, generated | 133:59:00 | **28:59:00** |
+| deep run, generated | 148:59:00 | **32:59:00** |
+
+Still graded a lower bound, so still at the 3.0 margin, and still seven times the 3.96 h and
+4.39 h measured. Every other model is untouched — the set is only read for models whose ARC
+rate is graded `partial`, and `slowest_observed_speedup()` reads only models graded `measured`.
+
+Proof: `python slurm_scripts_qm9_rerun/test_generate_scripts.py`.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
@@ -16833,6 +16873,57 @@ python scripts/check_runs_landed.py --stage 2 --verbose \
 
 ⚠️ **Confirm the two KIRBy paths before trusting an empty answer.** A wrong directory reports
 everything missing and reads like a disaster.
+
+##### D3j. What the cluster returned, 2026-09-07, and what it closes
+
+Run at `183cd46`, after the log-name fix. **All three of chat 3's readings changed.**
+
+**1. The fifty have causes, and 25 of them are already recovered. CLOSED.**
+`failed_tasks.py` read 94 failed tasks and every one of them is now explained:
+
+| tasks | cause | state |
+|---|---|---|
+| 52 | `ValueError: Sort & Slice produced an all-zero count vector for N` | fixed at `62f1fe2`, in the checkout — chat 5's |
+| 17 | `RuntimeError: out-of-fold scoring for gauche_rbf: the model fits 5000 rows but the recorded noise covers 8000` | fixed at `c223ec3`, in the checkout — chat 2's |
+| 25 | `RuntimeError: .../chembl_herg_ki.csv does not exist` | the missing-cache deaths of 2026-09-02, **already recovered** |
+
+**Not one failure is unexplained**, and the 25 that have no fixed-cause entry need none: their
+cells were re-run successfully on 2026-09-04, which the breadth-grid count below proves rather
+than asserts. §13.23 C1 is closed by measurement.
+
+**2. The laboratory breadth grid is COMPLETE.** It read 981 landed of 1,026 with 45 missing, and
+the 45 were never queued. `GP-Tanimoto` runs on ECFP4 alone — a Tanimoto kernel is a ratio of set
+overlaps and is defined on binary vectors, which is why `val_gp-tanimoto.sh` holds 3 tasks where
+every other array holds 18. Five representations x three conditions x three datasets is exactly 45.
+
+The generator has always known this; the completeness check was crossing every model with every
+representation. The rule is now a named function, `reps_for`, read by both:
+
+| | |
+|---|---|
+| expected | **981 cells**, and 981 have landed. 0 missing, 0 partial, 0 thin |
+| proof | `python scripts/test_check_runs_landed_selection.py` — 13 checks. One fails if `GP-Tanimoto` is ever expected on anything but ECFP4, one if the expected total stops matching what the generator queues |
+
+**3. The laboratory depth run and censoring are still executing.** 123 landed of 177 at stage 2.
+Those two submissions went out on 2026-09-06 and sit on Priority; 54 cells not yet landed is work
+in the queue, not work that failed. Nothing there is MISSING for a reason anyone has to act on.
+
+⚠️ **The report showed six of those 54 and stopped.** Six is enough to see a pattern and never
+enough to act on one. `--verbose` prints every missing cell now, except where a whole producer is
+absent for a stated reason — the uncertainty runs read 0 of 441 under "run the merge step first",
+and 441 identical lines would bury the rest of the page.
+
+**4. The uncertainty runs read 0 of 441, which is correct and expected.** Nothing has run, so
+there is no `_merged/coverage.csv` to read. The 441 confirms the arithmetic from the other side:
+7 models x 3 datasets x 3 representations x 7 conditions.
+
+**Still open on the laboratory side, and neither is chat 3's to fix:**
+
+- The QM9 numbers on the same report — 2,364 duplicate rows, 36 cell-and-replicates differing by
+  up to 0.0399 R2 with the same seed and the same spec hash. §13.30 owns the duplicates.
+- `slurm_scripts_qm9_rerun` and `scripts/test_submit_all_ranges.py` were being edited by another
+  chat while this ran, so `test_submit_all_ranges.py` reports two QM9 problems that are theirs.
+  Every other check listed in D3i and above passes.
 
 
 #### D4. What the queued jobs are actually computing — CHAT 4
