@@ -103,7 +103,11 @@ def line_chart(ax, frame, x, y, series, spread=None, labeller=None,
     is the shape of the curve, not the value at one level.
     """
     labeller = labeller or (lambda v: str(v))
-    for name, group in frame.groupby(series, dropna=False, sort=False):
+    # observed=True: `series` is a Categorical wherever a caller fixed the
+    # line order, and without it pandas walks every unused category and
+    # warns. Only categories actually in the frame are drawn.
+    for name, group in frame.groupby(series, dropna=False, sort=False,
+                                     observed=True):
         group = group.sort_values(x)
         colour = (colours or {}).get(name, C.model_color(name))
         ax.plot(group[x], group[y], marker=(markers or {}).get(name, 'o'),
@@ -150,7 +154,8 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
                         [position[r[row]]] * 2, color=C.CLEAN_COLOR,
                         linewidth=1.2, alpha=0.5, zorder=2)
     else:
-        for name, group in frame.groupby(series, dropna=False, sort=False):
+        for name, group in frame.groupby(series, dropna=False, sort=False,
+                                         observed=True):
             ax.scatter(group[value], [position[r] for r in group[row]], s=26,
                        label=labeller(name), zorder=3,
                        color=(colours or {}).get(name, C.model_color(name)))

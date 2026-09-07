@@ -368,12 +368,36 @@ def load_qm9(results_dir, cache_dir=None):
                         _models = (_sub.loc[_keys.isin(_far.index), 'model']
                                    .unique() if 'model' in _sub.columns else [])
                         print(f'      and NOTHING else on the row differs -- same '
-                              f'spec_hash, same hyperparameters, same seed. That '
-                              f'is nondeterminism in the fit itself, not a '
-                              f'configuration difference. Affects: '
-                              f'{sorted(set(_models))[:8]}')
-                        print(f'      It puts a floor under the replicate spread '
-                              f'that no error bar currently accounts for.')
+                              f'spec_hash, same hyperparameters, same seed, and '
+                              f'both noise seeds derive from the iteration. '
+                              f'Affects: {sorted(set(_models))[:8]}')
+                        # THE DECIDING TEST, and it is free. At level zero no
+                        # noise is applied at all, so a clean row that disagrees
+                        # cannot be the noise draw -- it has to be the training
+                        # data or the split. A clean row that AGREES while the
+                        # noised ones do not points the other way.
+                        _clean_key = [k for k in key if k != 'sigma']
+                        _z = _sub[_sub['sigma'] == 0]
+                        if len(_z):
+                            _zs = (_z.groupby(_clean_key, dropna=False)['r2']
+                                   .agg(lambda v: v.max() - v.min()))
+                            _zbad = int((_zs > 0.001).sum())
+                            if _zbad:
+                                print(f'      {_zbad} of them disagree at level '
+                                      f'ZERO, where no noise is applied at all '
+                                      f'(largest {_zs.max():.4f}). That cannot '
+                                      f'be the noise draw: the training data or '
+                                      f'the scaffold split differed between the '
+                                      f'two runs.')
+                            else:
+                                print(f'      but they AGREE at level zero, so '
+                                      f'the split and the data match and it is '
+                                      f'the noise draw or the fit that moved.')
+                        _worst = _spread.idxmax()
+                        print(f'      largest single disagreement: '
+                              f'{dict(zip(key, _worst if isinstance(_worst, tuple) else (_worst,)))}')
+                        print(f'      Until this is settled, the replicate '
+                              f'spread has a floor no error bar accounts for.')
             # WHICH cells, not just how many. A cell appearing twice means the
             # same task ran twice -- a resubmit that was not needed, or two
             # array indices writing the same output path. Keeping the last is
