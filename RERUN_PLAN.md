@@ -10685,6 +10685,155 @@ during the 2026-09-03 confusion, which by accident is the twenty-fifth. These ar
 submission to carry the cache guard, so a task that still cannot find hERG now exits in seconds
 naming the file rather than after importing a backend.
 
+#### Submission 5 — the QM9 deep run, 2026-09-06
+
+`slurm_scripts_qm9_rerun`, `--stage 2 --runtime-selection $SEL --max-hours 720`. Seven conditions on
+the selected pairs. **19 arrays, 654 tasks.** Every model is generated; the run-time gate decides
+which do any work, so thirteen of the nineteen skip in seconds and that is the design, not a fault.
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986314 | `qm9_s2_rf.sh` | 36 |
+| 12986315 | `qm9_s2_xgboost.sh` | 36 |
+| 12986316 | `qm9_s2_lgb.sh` | 36 |
+| 12986317 | `qm9_s2_svm.sh` | 36 |
+| 12986318 | `qm9_s2_ngboost.sh` | 36 |
+| 12986319 | `qm9_s2_dnn.sh` | 36 |
+| 12986320 | `qm9_s2_mlp.sh` | 36 |
+| 12986321 | `qm9_s2_dnn_bnn_full.sh` | 36 |
+| 12986322 | `qm9_s2_mlp_bnn_full.sh` | 36 |
+| 12986323 | `qm9_s2_dnn_bnn_full_variational.sh` | 36 |
+| 12986324 | `qm9_s2_mlp_bnn_full_variational.sh` | 36 |
+| 12986325 | `qm9_s2_qrf.sh` | 36 |
+| 12986326 | `qm9_s2_gauche_rbf.sh` | 36 |
+| 12986327 | `qm9_s2_gauche.sh` | 6 |
+| 12986328 | `qm9_s2_heteroscedastic_gp.sh` | 36 |
+| 12986329 | `qm9_s2_dnn_bnn_full_variational_hetero.sh` | 36 |
+| 12986330 | `qm9_s2_mlp_bnn_full_variational_hetero.sh` | 36 |
+| 12986331 | `qm9_s2_dnn_bnn_full_mve.sh` | 36 |
+| 12986332 | `qm9_s2_mlp_bnn_full_mve.sh` | 36 |
+
+#### Submission 6 — QM9 censoring, 2026-09-06
+
+`slurm_scripts_qm9_censoring`, `--stage 2 --conditions censoring --runtime-selection $CEN`.
+**19 arrays, 109 tasks.** Its own `--out-dir`, because scripts are named by model and run-design
+index only and would otherwise overwrite the deep run's.
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986333 | `qm9_s2_rf.sh` | 6 |
+| 12986334 | `qm9_s2_xgboost.sh` | 6 |
+| 12986335 | `qm9_s2_lgb.sh` | 6 |
+| 12986336 | `qm9_s2_svm.sh` | 6 |
+| 12986337 | `qm9_s2_ngboost.sh` | 6 |
+| 12986338 | `qm9_s2_dnn.sh` | 6 |
+| 12986339 | `qm9_s2_mlp.sh` | 6 |
+| 12986340 | `qm9_s2_dnn_bnn_full.sh` | 6 |
+| 12986341 | `qm9_s2_mlp_bnn_full.sh` | 6 |
+| 12986342 | `qm9_s2_dnn_bnn_full_variational.sh` | 6 |
+| 12986343 | `qm9_s2_mlp_bnn_full_variational.sh` | 6 |
+| 12986344 | `qm9_s2_qrf.sh` | 6 |
+| 12986345 | `qm9_s2_gauche_rbf.sh` | 6 |
+| 12986346 | `qm9_s2_gauche.sh` | 1 |
+| 12986347 | `qm9_s2_heteroscedastic_gp.sh` | 6 |
+| 12986348 | `qm9_s2_dnn_bnn_full_variational_hetero.sh` | 6 |
+| 12986349 | `qm9_s2_mlp_bnn_full_variational_hetero.sh` | 6 |
+| 12986350 | `qm9_s2_dnn_bnn_full_mve.sh` | 6 |
+| 12986351 | `qm9_s2_mlp_bnn_full_mve.sh` | 6 |
+
+#### Submission 7 — the laboratory depth run, 2026-09-06
+
+`slurm_scripts_validation_depth`, `--include-depth-conditions --runtime-selection $SEL`.
+**19 arrays, 327 tasks.**
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986352 | `val_bnn-full-mve.sh` | 18 |
+| 12986353 | `val_bnn-full.sh` | 18 |
+| 12986354 | `val_dnn.sh` | 18 |
+| 12986355 | `val_gp-hetero.sh` | 18 |
+| 12986356 | `val_gp-tanimoto.sh` | 3 |
+| 12986357 | `val_gp.sh` | 18 |
+| 12986358 | `val_lightgbm.sh` | 18 |
+| 12986359 | `val_mlp-bnn-full-mve.sh` | 18 |
+| 12986360 | `val_mlp-bnn-full.sh` | 18 |
+| 12986361 | `val_mlp-vbll-full-hetero.sh` | 18 |
+| 12986362 | `val_mlp-vbll-full.sh` | 18 |
+| 12986363 | `val_mlp.sh` | 18 |
+| 12986364 | `val_ngboost.sh` | 18 |
+| 12986365 | `val_qrf.sh` | 18 |
+| 12986366 | `val_rf.sh` | 18 |
+| 12986367 | `val_svm.sh` | 18 |
+| 12986368 | `val_vbll-full-hetero.sh` | 18 |
+| 12986369 | `val_vbll-full.sh` | 18 |
+| 12986370 | `val_xgboost.sh` | 18 |
+
+#### Submission 8 — laboratory censoring, 2026-09-06
+
+`slurm_scripts_validation_censoring`, `--conditions censoring --runtime-selection $CEN`.
+**19 arrays, 327 tasks.**
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986371 | `val_bnn-full-mve.sh` | 18 |
+| 12986372 | `val_bnn-full.sh` | 18 |
+| 12986373 | `val_dnn.sh` | 18 |
+| 12986374 | `val_gp-hetero.sh` | 18 |
+| 12986375 | `val_gp-tanimoto.sh` | 3 |
+| 12986376 | `val_gp.sh` | 18 |
+| 12986377 | `val_lightgbm.sh` | 18 |
+| 12986378 | `val_mlp-bnn-full-mve.sh` | 18 |
+| 12986379 | `val_mlp-bnn-full.sh` | 18 |
+| 12986380 | `val_mlp-vbll-full-hetero.sh` | 18 |
+| 12986381 | `val_mlp-vbll-full.sh` | 18 |
+| 12986382 | `val_mlp.sh` | 18 |
+| 12986383 | `val_ngboost.sh` | 18 |
+| 12986384 | `val_qrf.sh` | 18 |
+| 12986385 | `val_rf.sh` | 18 |
+| 12986386 | `val_svm.sh` | 18 |
+| 12986387 | `val_vbll-full-hetero.sh` | 18 |
+| 12986388 | `val_vbll-full.sh` | 18 |
+| 12986389 | `val_xgboost.sh` | 18 |
+
+#### Submission 9 — the uncertainty runs, part one, 2026-09-06
+
+`slurm_scripts_uncertainty_rerun`. Gaussian, grouped-wider and grouped-shifted, on logD, Caco-2 and
+hERG. **6 arrays, 162 tasks.**
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986390 | `unc_qrf.sh` | 27 |
+| 12986391 | `unc_ngboost.sh` | 27 |
+| 12986392 | `unc_gp.sh` | 27 |
+| 12986393 | `unc_vbll_full.sh` | 27 |
+| 12986394 | `unc_bnn_full_mve.sh` | 27 |
+| 12986395 | `unc_mlp_bnn_full_mve.sh` | 27 |
+
+#### Submission 10 — the uncertainty runs, part two, 2026-09-06
+
+`slurm_scripts_uncertainty_depth`, `--conditions censoring student_t_nu5 outlier_p10 laplace`.
+**6 arrays, 216 tasks.** This step was in no command until 2026-09-05 and is a third of the
+uncertainty evidence (§13.20).
+
+| Job ID | Script | Tasks |
+|---|---|---|
+| 12986396 | `unc_qrf.sh` | 36 |
+| 12986397 | `unc_ngboost.sh` | 36 |
+| 12986398 | `unc_gp.sh` | 36 |
+| 12986399 | `unc_vbll_full.sh` | 36 |
+| 12986400 | `unc_bnn_full_mve.sh` | 36 |
+| 12986401 | `unc_mlp_bnn_full_mve.sh` | 36 |
+
+⚠️ **The job ids above were read off `sacct` on 2026-09-07, not recorded at submit time**, by
+`python scripts/slurm_jobs.py --emit-launch-log`. The mapping from id to script is the job NAME
+each array carries, so it is the cluster's own record rather than an assumption about submission
+order. Task counts are the run design's, not the sacct snapshot — a task that has never started is
+in no accounting record (§13.23 A9).
+
+⚠️ **Submission 3 is 25 tasks in TWO sbatch calls, not one range.** `val_lightgbm` index 12 went in
+alone as **12975687** on 2026-09-03; the other 24 are 12979965–12979969. Both write into
+`slurm_scripts_validation_rerun` and the same results tree.
+
 #### 2026-09-04 — choosing from a screen that is not finished, and revising as it lands
 
 **The author's call, with the queues where they are: read the deferred choices off what has landed
@@ -11520,6 +11669,7 @@ tell us.
 | A11 | **A model with too little evidence got no proposal AND no mention.** `gauche_rbf` asks 17 days on the deep run and 15 on the main grid, has never completed a full task anywhere, and was silently absent from the output — which reads as "nothing to do here" for the one genuine unknown in the queue. It is now named, with what it asks and why nothing was proposed | same test |
 | A12 | **The uncertainty runs could have been cut below their own memory floor.** `model_memory.json` holds 96G for that pipeline alone, on the author's rule of 2026-09-04, because a task there fits its model `1 + oof_folds` times per level. The tool used a flat 64G floor. Latent — no uncertainty task has completed, so nothing was proposed — but it would have fired the day one did | same test |
 | A13 | **The error text was cut off before the part that says what went wrong.** 110 characters reaches `RuntimeError: out-of-fold scoring for gauche_rbf: the model fits 5` and stops. And "25 logs not readable" did not say where it looked, which is the whole diagnosis when a script has been regenerated under a different log name | widened to 300 with `--width`, and the paths it tried are printed |
+| A14 | 🔴 **A FAILED PULL PRODUCED A CONFIDENT ANSWER FROM OLD CODE, and this is the worst of the lot.** On 2026-09-07 `pull_safely.sh` died on `error: fetching ref refs/remotes/origin/additional_reps failed: incorrect old value provided` — git's ref transaction refusing to move the remote-tracking pointer because a loose ref and `packed-refs` disagreed, usually left by an interrupted fetch. The commits downloaded; only the pointer would not move. The script said "fetch failed; nothing changed" and exited 1 — and the next command ran anyway, producing a full 172-line scontrol list **from the previous version of the tool**, which read as current because nothing in the output said otherwise. Two fixes: `pull_safely.sh` clears the stale remote-tracking ref and refetches (derived data, nothing of the author's is in it), and shouts the commit you are still on if it cannot; and **every tool now prints the commit it is running from as its first line**, so a stale checkout can never again be mistaken for a finding | run any of the four tools: the first line is `[<tool> at <commit> <subject>]` |
 | A7 | **Nothing could be checked off the cluster.** `slurm_jobs.py --save` captures the sacct output and every tool takes `--sacct-file`, so an answer can be checked rather than believed | the whole test suite runs on a capture |
 
 #### B. Answered by measurement, and now a decision
@@ -11552,7 +11702,8 @@ tell us.
 |---|---|
 | §13.17 A3 "push the branch" | **Done.** `additional_reps` is at `origin/additional_reps`, `git status -sb` clean of ahead/behind |
 | §13.17 C4 "`check_fixes_fail_when_removed.py` CRASHES at `:292`" | **Fixed in the code.** `_drop_backup` catches `FileNotFoundError` and `OSError` and reports rather than dying; `:292` is now an unrelated line of the fixes list |
-| §13.18 stops at Submission 4 | **Six submissions are on the cluster and in no document**, read off sacct on 2026-09-07: QM9 deep run **12986314–12986332**, QM9 censoring **12986333–12986351**, laboratory depth **12986352–12986370**, laboratory censoring **12986371–12986389**, uncertainty part one **12986390–12986395**, uncertainty part two **12986396–12986401**. `python scripts/slurm_jobs.py --emit-launch-log` prints the rows to paste in |
+| ~~§13.18 stops at Submission 4~~ | ✅ **CLOSED 2026-09-07 — Submissions 5 to 10 are written in**, one row per array, read off sacct by job name rather than assumed from submission order |
+| §13.18 stopped at Submission 4 | **Six submissions are on the cluster and in no document**, read off sacct on 2026-09-07: QM9 deep run **12986314–12986332**, QM9 censoring **12986333–12986351**, laboratory depth **12986352–12986370**, laboratory censoring **12986371–12986389**, uncertainty part one **12986390–12986395**, uncertainty part two **12986396–12986401**. `python scripts/slurm_jobs.py --emit-launch-log` prints the rows to paste in |
 | §13.18 Submission 3 is "24 tasks, 12979965–12979969" | **It is 25 tasks in TWO submissions.** `val_lightgbm` index 12 went in alone as **12975687** on 2026-09-03, which §13.18 already says in prose but not in the table. `slurm_jobs.py` carries it as an extra id so the recovery reads as one submission |
 
 ### 13.23a The three molecules Sort & Slice cannot represent — the options

@@ -115,6 +115,8 @@ def main():
     ap.add_argument('--emit-scontrol', action='store_true')
     cli = ap.parse_args()
 
+    print(SJ.provenance())
+
     rows = SJ.parse(SJ.run_sacct(cli.since, cli.sacct_file, cli.user))
     if not rows:
         print(f'  sacct knows no arrays of this study since {cli.since}.')

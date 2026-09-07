@@ -171,6 +171,26 @@ SUBMISSIONS = [
 PREFIXES = tuple(sorted({s.prefix for s in SUBMISSIONS}))
 
 
+def provenance():
+    """The commit this code is, printed by every tool before its answer.
+
+    On 2026-09-07 `pull_safely.sh` failed on a stale remote-tracking ref, said so,
+    and exited 1 -- and the next command ran anyway. It worked, and produced a
+    hundred and seventy scontrol lines from the PREVIOUS version of the tool, which
+    were read as current. Nothing in the output said which code wrote it.
+
+    A tool that reports on a moving system has to say what it is, or a stale checkout
+    is indistinguishable from a finding.
+    """
+    try:
+        p = subprocess.run(['git', '-C', QSAR, 'log', '-1', '--format=%h %s'],
+                           capture_output=True, text=True)
+        head = p.stdout.strip() if p.returncode == 0 else 'unknown'
+    except OSError:
+        head = 'unknown'
+    return f'  [{os.path.basename(sys.argv[0])} at {head}]'
+
+
 # ---------------------------------------------------------------------------
 # sacct
 # ---------------------------------------------------------------------------
@@ -519,6 +539,8 @@ def main():
     ap.add_argument('--emit-launch-log', action='store_true',
                     help='print the 13.18 rows for what was found')
     cli = ap.parse_args()
+
+    print(provenance())
 
     if cli.save:
         lines = run_sacct(cli.since, cli.sacct_file, cli.user, extra=('-X',))

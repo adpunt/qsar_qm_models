@@ -29,7 +29,51 @@ echo "backup: $BK"
 [ "$DRY" = "1" ] && echo "DRY RUN -- nothing will be changed"
 echo ""
 
-git fetch origin "$BRANCH" || { echo "fetch failed; nothing changed."; exit 1; }
+# THE FETCH, WITH ONE SELF-HEAL.
+#
+# On 2026-09-07 this failed with:
+#
+#   error: fetching ref refs/remotes/origin/additional_reps failed:
+#          incorrect old value provided
+#   fetch failed; nothing changed.
+#
+# That is git's ref transaction refusing to move the remote-tracking ref because
+# what it found there was not what it expected -- a loose ref and a packed-refs
+# entry disagreeing, usually left by a fetch that was interrupted. The objects
+# download fine; only the pointer will not move. So the checkout silently stays on
+# the old commit, and the next command runs OLD CODE and prints a confident answer
+# from it. That happened: a whole scontrol list was produced by the previous version
+# after this exact failure.
+#
+# A remote-tracking ref is derived data -- nothing of yours is in it -- so deleting
+# it and fetching again is safe, and it is the fix.
+fetch_once() { git fetch origin "$BRANCH" 2>&1; }
+
+out="$(fetch_once)"; rc=$?
+printf '%s\n' "$out"
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'incorrect old value provided'; then
+    echo ""
+    echo "   The remote-tracking ref is stale -- git downloaded the commits but"
+    echo "   would not move the pointer. Clearing it and fetching again; this"
+    echo "   touches no work of yours."
+    git update-ref -d "refs/remotes/origin/$BRANCH" 2>/dev/null
+    git pack-refs --all 2>/dev/null
+    out="$(fetch_once)"; rc=$?
+    printf '%s\n' "$out"
+fi
+if [ "$rc" -ne 0 ]; then
+    echo ""
+    echo "=============================================================="
+    echo " FETCH FAILED. NOTHING CHANGED, AND YOU ARE STILL ON:"
+    echo "     $(git rev-parse --short HEAD) $(git log -1 --format=%s)"
+    echo ""
+    echo " DO NOT RUN THE STATUS TOOLS YET. They will work, and they will"
+    echo " answer from the code that is on disk, which is not the code you"
+    echo " were told to pull. That is how a scontrol list from an older"
+    echo " version got produced on 2026-09-07."
+    echo "=============================================================="
+    exit 1
+fi
 
 echo "1. locally modified files that the pull would overwrite"
 while IFS= read -r f; do

@@ -127,6 +127,8 @@ def main():
                     help='the %% on the resubmitted array (default 4)')
     cli = ap.parse_args()
 
+    print(SJ.provenance())
+
     rows = SJ.parse(SJ.run_sacct(cli.since, cli.sacct_file, cli.user))
     if not rows:
         print(f'  sacct knows no arrays of this study since {cli.since}.')
