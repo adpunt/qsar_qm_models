@@ -16742,6 +16742,49 @@ scancel 13042879 13042880
 **What it costs.** Three startups of 164 seconds instead of one, per submission, and three times
 as many appended rows in the same nine files — the duplication D2f and §13.30 already carry.
 
+#### D2v. The six split arrays are in. Cancel the two they replace
+
+| job | script | replicates | wall |
+|---|---|---|---|
+| 13049860, 13049861, 13049862 | `qm9_s1_gauche_rbf.sh` | 1-3, 4-6, 7-9 | 5:59:00 |
+| 13049863, 13049869, 13049875 | `qm9_s2_gauche_rbf.sh` | 0-3, 4-6, 7-9 | 5:59:00 |
+
+```bash
+scancel 13042879 13042880
+squeue -u $USER -o "%.14i %.20j %.2t %.11M %.11l %R" | grep gauche_rbf
+```
+
+All six read `(None)`, which means the scheduler has not evaluated them yet, not that they are
+placed. The test of whether the split worked is one of them going `R`.
+
+**No overlap with what is already running.** `12986326` has tasks 24, 25, 28 and 30 running and
+31-35 pending; those are indices under `outlier_p10` and `laplace`, conditions 4 and 5. The
+split arrays cover indices 0, 1, 4, 6, 7, 10, 12 and 13, which are conditions 0, 1 and 2. The
+two sets do not touch.
+
+#### D2w. The backfill window is between 6 and 19 hours, and that is not this model's problem
+
+Measured today on this account, both partitions, same nodes: `5:59:00` was placed, `18:59:00`
+was not, and `squeue --start` could not produce an estimate for the second at all.
+
+**Every long-walled array in this study is stuck for the same reason**, and the walls chat 1
+generated are honest rather than wrong — the queue simply will not take them:
+
+| submission | wall | what the queue is admitting |
+|---|---|---|
+| `qm92_ngboost` 12986318 | 13-05:59 | 5:59 |
+| `qm91_ngboost` 12980577 | 11-21:59 | 5:59 |
+| `qm92_qrf`, `qm91_qrf` | 47:59, 42:59 | 5:59 |
+
+Splitting the replicates is the general fix and it needs no code change: `--replicates` and
+`--start-iteration` are already generator flags, every task reads its own, and the result rows
+carry the replicate number so nothing downstream can tell a split run from a whole one. The
+arithmetic is in D2q's shape — a task is startup plus (levels × replicates) training runs, so
+thirds of the replicates are roughly thirds of the wall.
+
+**This is chat 1's to decide, not chat 2's.** The numbers are here because chat 2 measured them
+on `gauche_rbf`; whether `ngboost` and `qrf` get the same treatment is a wall decision.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
