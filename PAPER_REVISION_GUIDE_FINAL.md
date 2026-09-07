@@ -199,7 +199,19 @@ none.
 > We retain the substructure \emph{counts} rather than reducing them to presence bits, so SNS is a
 > small-integer count vector rather than a binary one. The vocabulary is fitted on training
 > molecules only; on the assay datasets it is refitted within each cross-validation fold, so that no
-> held-out structure enters the feature basis.
+> held-out structure enters the feature basis. Three QM9 molecules -- methane, ammonia and water --
+> each contain a single Morgan substructure that occurs in only one molecule, so none of them can
+> enter a top-$L$ vocabulary selected by training prevalence and their SNS vector is identically
+> zero. These three were excluded from every representation rather than from SNS alone, so that all
+> six representations are compared on the same molecules. Part of the QM9 grid completed before this
+> exclusion was applied; since each replicate draws 10{,}000 molecules from 132{,}480, approximately
+> one replicate in five contains one or two of the three, and in those replicates the earlier runs
+> trained on 10{,}000 molecules where the later ones trained on 9{,}999 or 9{,}998. Measured on three
+> matched pairs of runs, the resulting difference in clean $R^2$ ranged from 0.0013 to 0.0239. Across
+> the 351 combinations of a model, a representation and a noise type, the clean $R^2$ range between
+> replicates of the same combination has a median of 0.062 and exceeds 0.0239 in 314 of them, so the
+> effect of the exclusion is smaller than the replicate-to-replicate variation already present and
+> runs from either side are reported together.
 >
 > We also used 200-dimensional physicochemical descriptor vectors (PDVs) computed from RDKit
 > molecular descriptors (\texttt{MolecularDescriptorCalculator}), encompassing molecular weight,
@@ -229,8 +241,18 @@ none.
 > model unscaled. Representations were precomputed in Python using \texttt{RDKit} and the two
 > pretrained encoders; a Rust component performs label processing, noise injection and serialization.
 
-**Two notes.**
+**Three notes.**
 
+- **The Sort & Slice exclusion sentence is the author's decision, taken 2026-09-07**, between
+  re-running every QM9 task that ran before the exclusion and stating the difference. She chose to
+  state it. The numbers in it are measured, not asserted: the 0.0013 to 0.0239 shift is from three
+  matched pairs of runs (`RERUN_PLAN.md` §13.27 D4g), and the replicate range comes from
+  `python scripts/sns_exclusion_cost.py --results results` over 3,191 clean rows. Re-run that
+  command and update the median and the 314 if more replicates land before submission.
+  ⚠️ Part of that replicate range is refit nondeterminism rather than sampling: the loader reports
+  145 repeated combination-and-replicate pairs differing by more than 0.001 $R^2$ with the same
+  seed and hyperparameters, largest 0.1621. That is tracked in `RERUN_PLAN.md` §13.28 and §13.30 and
+  does not change the comparison, because both numbers are measured on the same rows.
 - The ChemBERTa caveat is not optional. The tokenizer collapses the checkpoint's chemical vocabulary
   to single characters, so two chemically distinct molecules can receive one vector. The counting
   code exists (`scripts/crosscheck_chemberta.py`, gate 4) but **has not been run**, so the two

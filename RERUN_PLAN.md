@@ -17698,6 +17698,33 @@ python scripts/check_runs_landed.py --stage 1 --verbose
 cell MISSING or PARTIAL.** Nothing above proves a result landed; it proves the code is
 fixed and the tasks were sent.
 
+#### D6b. ✅ SETTLED BY THE AUTHOR, 2026-09-07 — the Sort & Slice exclusion is stated, not re-run
+
+The question in §13.27 D4h was whether to re-run every QM9 task that ran before `62f1fe2` or
+to state the difference in Methods. **The author chose to state it.** Nothing is re-run for
+this, and no QM9 result is deleted or refused because of which side of the pull it ran on.
+
+**The numbers the decision was taken on**, all measured, none from memory:
+
+| quantity | value | where it came from |
+|---|---|---|
+| molecules Sort & Slice cannot represent | 3 of 132,480 QM9 molecules | `scripts/sns_zero_molecules.py` |
+| replicates affected | about 1 in 5, from a 10,000-molecule sample | 1 − (1 − 10000/132480)³ = 0.21, §13.27 D4g |
+| shift in clean R² | 0.001262 to 0.023893 | three matched pairs of runs, §13.27 D4g |
+| R² range between replicates of one combination | lowest 0.006344, lower quarter 0.038659, median 0.062219, upper quarter 0.099739, highest 0.390783 | `python scripts/sns_exclusion_cost.py --results results`, 3,191 clean rows over 351 combinations of a model, a representation and a noise type |
+| where the shift is smaller than that range | 314 of 351 combinations | same command |
+
+The replacement Methods text is in `PAPER_REVISION_GUIDE_FINAL.md` §M2, inside the Sort &
+Slice paragraph, with a note recording that this was the author's call and how to refresh the
+two numbers if more replicates land before submission.
+
+⚠️ **One caveat carried into the guide.** Part of that replicate range is the fit being
+nondeterministic rather than the sample changing: `figlib_load` reports 145 repeated
+combination-and-replicate pairs whose copies differ by more than 0.001 R² at the same seed and
+hyperparameters, the largest 0.1621. That is §13.28's finding and §13.30's duplicate rows, not
+a new thread. It does not change the comparison, because the shift and the range are measured
+on the same rows.
+
 #### D5. Settled here, 2026-09-07, so no chat re-opens it
 
 - **The QM9 sample is identical across conditions at a given replicate.**
