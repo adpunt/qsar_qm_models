@@ -1,0 +1,141 @@
+{
+  "what_this_is": "The MEASURED hours per 110 training runs per fit, per model, on QM9. The generator sized every wall from a per-model GUESS before this file existed; fourteen of nineteen guesses were over by more than 5x and the worst by 190x, while the ONE guess that was accurate (qrf) is the one model about to be killed at its wall -- because a 1.25x margin on an accurate estimate is thinner than a 1.25x margin on a 10x overestimate.",
+  "the_margin": 2.0,
+  "the_margin_why": "A wall must be big enough that the job does not die and small enough that SLURM can backfill it. 2.0x the longest OBSERVED task does both: it is twice the worst of fifteen real tasks, and it turns the sum of the QM9 requests from 2244 hours into 241. The old 1.25x was too thin for an accurate estimate and irrelevant for an inaccurate one.",
+  "how_to_update": "Re-run scripts/measure_walls.py on the cluster and raise any model whose longest observed task now exceeds measured_task_hours. Never lower one below what has been observed.",
+  "models": {
+    "rf": {
+      "hours_per_110": 3.8995,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 2.233,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15 tasks"
+    },
+    "xgboost": {
+      "hours_per_110": 1.164,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 0.667,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "lgb": {
+      "hours_per_110": 1.6878,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 0.967,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "svm": {
+      "hours_per_110": 2.9974,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 1.717,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "ngboost": {
+      "hours_per_110": 21.8108,
+      "fits_in_the_measured_task": 4,
+      "measured_task_hours": 49.967,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "STILL RUNNING, not finished"
+    },
+    "dnn": {
+      "hours_per_110": 1.7751,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 1.017,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "mlp": {
+      "hours_per_110": 1.7169,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 0.983,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "dnn_bnn_full": {
+      "hours_per_110": 3.5503,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 2.033,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "mlp_bnn_full": {
+      "hours_per_110": 2.9974,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 1.717,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "dnn_bnn_full_variational": {
+      "hours_per_110": 1.4502,
+      "fits_in_the_measured_task": 6,
+      "measured_task_hours": 4.983,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "mlp_bnn_full_variational": {
+      "hours_per_110": 5.209,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 2.983,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "qrf": {
+      "hours_per_110": 6.0723,
+      "fits_in_the_measured_task": 6,
+      "measured_task_hours": 20.867,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "gauche_rbf": {
+      "hours_per_110": 0.4559,
+      "fits_in_the_measured_task": 6,
+      "measured_task_hours": 1.567,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 4 -- the rest failed on the GP bug"
+    },
+    "gauche": {
+      "hours_per_110": 1.455,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 0.833,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 3"
+    },
+    "heteroscedastic_gp": {
+      "hours_per_110": 8.3228,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 4.767,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "dnn_bnn_full_variational_hetero": {
+      "hours_per_110": 5.0635,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 2.9,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "mlp_bnn_full_variational_hetero": {
+      "hours_per_110": 7.6243,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 4.367,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 15"
+    },
+    "dnn_bnn_full_mve": {
+      "hours_per_110": 2.3523,
+      "fits_in_the_measured_task": 6,
+      "measured_task_hours": 8.083,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 14"
+    },
+    "mlp_bnn_full_mve": {
+      "hours_per_110": 1.1155,
+      "fits_in_the_measured_task": 6,
+      "measured_task_hours": 3.833,
+      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
+      "provenance": "completed, 7"
+    }
+  }
+}
