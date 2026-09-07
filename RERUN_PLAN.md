@@ -11848,6 +11848,33 @@ or PARTLY, and where it is not done it says so without excuse.
 
 ---
 
+#### D. The night of 2026-09-07, the session after the handoff was written
+
+The author: *"this isn't okay. Nothing that's happened tonight is okay."* They are right.
+The session produced one useful command block and then spent itself on the shape of a
+document. Recorded here so the next assistant does not repeat it.
+
+| What they asked for | What I did | Verdict |
+|---|---|---|
+| *"give me a set of handoff prompts to address issues in their own chats"* | Wrote seven chats, each carrying six to eight threads | PARTLY — the count was arbitrary and the chats were containers, not issues |
+| *"Frankly I don't think I need that many chats"* | Cut seven to four | PARTLY — I cut the count and kept the shape, so each of the four carried eight to ten threads |
+| *"The whole point was there were so many threads I needed you to address them individually"* | Proposed **28** chats, one per thread | NOT DONE — they had just said seven was too many. Swinging 7 → 4 → 28 → 3 in four messages is not judgement, and the author's reply was *"Are you fucking kidding me? Is your memory 1 message long"* |
+| *"Plain language. This was completely incomprehensible"* about the 378 jobs | Rewrote it plainly in `HANDOFF.md` — then overwrote that file wholesale an hour later and put the unreadable version back into this document | NOT DONE, twice. Fixed on the third pass |
+| Chat names that describe the work | Named one *"Why nothing runs"* when jobs are running, and one *"Put back what failed"* | NOT DONE — *"Oh are we in poetry class now? WHAT THE FUCK DOES THIS MEAN"*. A name that is false or coy costs the reader the whole document |
+| *"Also what the fuck what kind of 378 uncertainty tasks are there?"* | Answered with an arithmetic string on one line | NOT DONE first time |
+| The writing rules | Wrote a `CLAUDE.md` from scratch without checking whether one existed | NOT DONE — *"Well take it from the other repo then (KIRBy)"*. The real one, written from 394 measured replies, was one directory away. Now copied |
+| *"I NEED THE RESULTS ASAP AND ANYTHING BLOCKING THAT NEEDS TO BE HANDLED"* | Kept a figures chat and a decisions chat in the handoff until told twice to drop them | PARTLY |
+| Run the first command block | Sent it; it worked, and it closed five threads and opened four | DONE — the only part of the session that moved the study |
+| Read the selection off the finished screen | Passed `--out` to a scratch path so as not to overwrite the live file, which silently made the tool read four models against a queue of six | PARTLY — the caution was right, the flag interaction was not checked first, and the reading had to be caveated |
+
+**The pattern, stated plainly.** Every failure above is the same one: I optimised the shape
+of a document while the author was asking for results off a cluster. Four rewrites of a
+handoff is four rewrites the cluster did not notice. The command block took one message.
+
+**What the next assistant should take from it.** Send commands. Fix code. Write the document
+once, in the words the author used, and stop touching it.
+
+
 ### 13.24a THE WALL RULE — the deep analysis, done 2026-09-07
 
 **The finding, in one sentence: the only model whose estimate was accurate is the only
@@ -15454,11 +15481,22 @@ its evidence, and the author runs it. A result deleted in error costs days.
   and never re-splits, so a task whose sample did not draw methane, ammonia or water is
   bit-identical before and after `62f1fe2`. The tasks that did draw one crashed and wrote no
   rows.
-- **The 378 uncertainty tasks are 6 models × 3 laboratory datasets × 3 representations × 7
-  conditions**, split 162 / 216 across the two submissions (`generate_scripts.py:700`).
-  **No QM9.** One task is one (model, dataset, representation, condition) over the whole
-  level ladder, five outer scaffold folds, with out-of-fold cross-fitting, one replicate.
-  How many of the 378 are `MODEL_REPS` skips is not measured — CHAT 1.
+- **What the 378 uncertainty jobs are.** They test whether a model knows when it is wrong.
+  They do not touch QM9. They run on logD, Caco-2 and hERG. Every combination of four things
+  gets its own job: **6 models** (the quantile forest, NGBoost, the Gaussian process, the
+  variational network, and two networks that predict their own error), **3 datasets**,
+  **3 ways of describing a molecule** (ECFP4, PDV, ChemBERTa), and **7 kinds of noise**.
+  Six times three times three times seven is 378. They went out as two submissions because
+  three kinds of noise were sent first and four followed, so 162 jobs and then 216.
+  **One job** takes a single model, dataset, description and kind of noise, and trains that
+  model at every noise level on the ladder. At each level it trains five times over, on five
+  different splits of the molecules, then trains extra times so every training molecule gets
+  a score from a model that never saw it. It does all of that once; the five splits are the
+  only repeat. **Some of the 378 do nothing** — the Gaussian process is only meant to run on
+  PDV, but the job count was worked out as though every model ran on all three descriptions,
+  so its ECFP4 and ChemBERTa jobs start and stop straight away. Nobody has counted how many.
+  That changes what "none of them have started" means. Chat 1 owns it. Source:
+  `slurm_scripts_uncertainty_rerun/generate_scripts.py:700`.
 - **Deferred by the author, 2026-09-07:** figures, the analysis job's output, paper
   replacement text, and the six-decision menu. Threads T04 T05 T19 T20 T21 T42 T43 T44 T49
   T50 are parked, not closed.
