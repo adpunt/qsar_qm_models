@@ -18,6 +18,54 @@ closes four questions that earlier versions of this file still asked.**
 
 ---
 
+## Every chat owes two round trips to the cluster
+
+The author, 2026-09-07: *"By the end of this not only does everything have to be fixed code
+wise, every single result has to be queued up correctly."* Fixing the cause is not the job.
+The job is the task running.
+
+**The middle one: prove the change took.** After you change a time limit, a memory request or
+a generator, and after you resubmit anything, send one block that shows it on the cluster.
+Not the command you ran — what the cluster now says. A resubmitted task that fails again in
+thirty seconds looks exactly like a resubmitted task that is working, for the first thirty
+seconds.
+
+```bash
+squeue -u $USER -o "%.12i %.28j %.2t %.11M %.11l %.7m %R" | head -40
+sacct -S today -X -n -P --format=JobID,JobName,State,Elapsed,ExitCode | grep -v COMPLETED | head -30
+```
+
+**The end one: prove nothing is missing.** This is the only command that answers the author's
+question, because it checks what is on disk against what the generators asked for, rather than
+against anything anyone typed.
+
+```bash
+python scripts/check_runs_landed.py --stage 1 --verbose      # the QM9 main grid
+python scripts/check_runs_landed.py --stage 2 --verbose      # the deep run and censoring
+python scripts/check_runs_landed.py --stage 0 --verbose      # the screen
+```
+
+It exits 0 when everything has landed. Three states, and each needs a different action:
+**MISSING** — resubmit that index. **PARTIAL** — the task wrote a file and died part-way
+through the noise levels, so squeue showed it finished; resubmit it. **THIN** — it ran but has
+fewer replicates than the variance work needs.
+
+For the laboratory and uncertainty results, point it at the KIRBy checkout, because those
+jobs change into the `tests` directory and write there. **Confirm the path before trusting an
+empty answer** — a wrong directory reports everything missing and looks like a disaster.
+
+```bash
+python scripts/check_runs_landed.py --stage 1 --verbose \
+    --validation-dir <KIRBy>/results/validation_rerun \
+    --uncertainty-dir <KIRBy>/tests/results/uncertainty_rerun
+```
+
+**No chat is finished while its part of that output is not clean.** Say so plainly if it is
+not, rather than closing on the code being fixed. And say which of MISSING, PARTIAL or THIN
+is left, because they are three different amounts of work.
+
+---
+
 ## Chat 1 — how long and how much memory every job asks for
 
 > Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
@@ -61,7 +109,8 @@ closes four questions that earlier versions of this file still asked.**
 > them the moment it is pushed.
 >
 > Done when section 13.27 lists, per submission, what it asks now, what it should ask, and the
-> command to change it.
+> command to change it — **and `squeue` shows the new limits in place**, not just the
+> `scontrol` lines having been printed.
 
 ---
 
@@ -94,7 +143,8 @@ closes four questions that earlier versions of this file still asked.**
 > before anyone offers dropping it again.
 >
 > Done when the twenty tasks are either running clean or their remaining cause is written
-> down, and its screen jobs have started.
+> down, its screen jobs have started, and `check_runs_landed.py` no longer reports this model
+> as MISSING or PARTIAL anywhere.
 
 ---
 
@@ -139,8 +189,9 @@ closes four questions that earlier versions of this file still asked.**
 > laboratory depth run repeats three conditions the breadth grid already runs, which wastes
 > queue time but produces correct numbers, because the runner replaces its own rows.
 >
-> Done when the fifty failures have a cause, the truncated cells are listed, and the 378 jobs
-> are either running or withdrawn on the author's word.
+> Done when the fifty failures have a cause, the truncated cells are listed, the 378 jobs are
+> either running or withdrawn on the author's word, and `check_runs_landed.py` pointed at the
+> KIRBy checkout reports nothing MISSING or PARTIAL for logD, Caco-2 or hERG.
 
 ---
 
@@ -182,7 +233,8 @@ closes four questions that earlier versions of this file still asked.**
 > **This is the author's decision, not yours.** Put the three differences in front of her with
 > what each costs, note that removing is free and adding back is not, and let her answer.
 >
-> Done when both files say what she has decided and no longer say provisional.
+> Done when both files say what she has decided, no longer say provisional, and
+> `check_runs_landed.py --stage 2` accounts for every combination those files name.
 
 ---
 
@@ -227,5 +279,18 @@ closes four questions that earlier versions of this file still asked.**
 > **6. The same tool fix unblocks chats 2 and 3.** Twenty `gauche_rbf` tasks and fifty
 > laboratory tasks are in the same position. Tell both chats when it is pushed.
 >
-> Done when the 104 tasks are running and `failed_tasks.py --emit-sbatch` prints a command for
-> a fixed cause.
+> Done when the 104 tasks are running, `failed_tasks.py --emit-sbatch` prints a command for a
+> fixed cause, and `check_runs_landed.py --stage 1` reports no Sort & Slice cell MISSING or
+> PARTIAL.
+
+---
+
+## The last thing, after all five chats
+
+Whoever gets there last runs the three completeness commands above and posts the output. If
+every one exits 0, every result the generators asked for is on disk. If any does not, the
+remaining work is named cell by cell and goes into section 13.27 as MISSING, PARTIAL or THIN
+with the resubmission line beside it.
+
+**Nobody declares this finished from a code change, a commit, or a job having been submitted.**
+Only from that output.
