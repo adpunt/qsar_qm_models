@@ -11994,6 +11994,82 @@ answers it. **code** = I fix it.
 
 ---
 
+### 13.26 THE CHAT SPLIT — every thread has an ID, an owner chat, and a close condition
+
+**Why this exists.** The author asked, 2026-09-07: *"How can I be sure that when I give you
+this response all the threads will be properly addressed?"* A promise is not an answer. This
+is the answer: every thread in §13.25 has an **ID**, exactly **one owner chat**, and a
+**close condition** that is a command output or a commit. A chat is finished when every one
+of its IDs is ✅ here with the evidence beside it. Nothing may be closed with a summary.
+
+**A thread is closed only by: a command output pasted into the chat, or a commit hash.**
+Not by "should be fine", not by "the cause is fixed in code" — the cause being fixed is a
+different thread from the tasks being put back.
+
+#### What the 2026-09-07 command block actually settled
+
+Run against ARC at `09ff59e`. These are closed with evidence, not with reasoning.
+
+| ID | Thread | Evidence |
+|---|---|---|
+| ✅ T16 / T31 | Laboratory tasks on the old noise draw | `lab_tasks_on_old_noise.py`: *"8384 task(s) already run or will run the NEW draw. Nothing to do: no task ran under the old draw."* **No laboratory row is on the old draw. This thread cost three sessions and the answer was zero.** |
+| ✅ T09 / T48 | The Sort & Slice failed-task count | `failed_tasks.py`: **104**, live. Not 48, 51 or 58 — those were the same number earlier. |
+| ✅ T34 | Both variance-head networks in the screen | The selector reports 19 models present including `dnn_bnn_full_mve` and `mlp_bnn_full_mve`, with auc_norm rows on all three representations. |
+| ✅ T14 | `gauche_rbf` has never started a task on the screen | It has now. auc_norm under gaussian: ecfp4 0.9387, pdv 0.9399, chemberta 0.9503. Its failures are confined to level 1.5, replicates 7–9. |
+| ✅ T01 | The corrected selector has never been run | It has now been run, at `09ff59e`, on 20,224 rows from 342 files. **The reading it produced is not the queued selection — see T02.** |
+| ✅ T45 T46 T47 | Branch pushed; `check_fixes_fail_when_removed.py`; `NOISE_DESIGN.md` §7 | Unchanged from §13.25. |
+
+#### What the same block newly broke open — four threads that did not exist yesterday
+
+| ID | Thread | Owner |
+|---|---|---|
+| 🔴 **T52** | **`copy_zero_rows.py` stopped and copied nothing.** The clean row for `chemberta / dnn_bnn_full_mve` under `grouped_wider` and under `grouped_shifted` differs from the same model's clean row under `gaussian` on all five accuracy columns, replicate 1. The script is right to stop: its whole premise is that the clean run is bit-identical whichever condition labels it. **Leading hypothesis, not yet confirmed:** nothing in `models/models.py` or `scripts/process_and_train.py` sets `torch.use_deterministic_algorithms` or `torch.backends.cudnn.deterministic`, so a torch model is not bit-identical across two nodes even at the same seed, while every tree model is. The docstring's four-way agreement proof was measured on random forest only. **What settles it is the size of the difference** — 1e-7 is nondeterminism, 1e-2 is a noise leak at level 0. Both readings are one command. | code |
+| 🔴 **T53** | **The selector picks its model count from the file named by `--out`.** Sending it to a scratch path made `--n-models` fall back to **4** while the queue runs **6**, which is precisely the mistake the script's own comment warns about: *"A reading of four against a queue of six looks like a decision to drop two."* The reading below is therefore not comparable to the queue and must be re-run at `--n-models 6`. | code |
+| 🔴 **T54** | **`failed_tasks.py --emit-sbatch` printed no resubmission line for any of the 174 tasks.** Every one classes as `FAILED`, and the tool prints no sbatch for `FAILED` on the rule that resubmitting an unfixed cause gets the same exit. That rule is now wrong for 124 of them: Sort & Slice is fixed in `62f1fe2` and `gauche_rbf` in `c223ec3`. The tool cannot express *"cause fixed at commit X, put these back"*. **This is the only thing standing between the fixes and the tasks.** | code |
+| 🔴 **T55** | **50 of the 174 have no cause at all, because the log path is wrong.** It looked in `slurm_scripts_validation_rerun/val_bnn-full-mve_12971620_12.out`. Laboratory jobs `cd tests` inside the KIRBy checkout, so their logs are not there. **The 25 hERG tasks (T17) are inside those 50 and are still unclassified.** | code |
+
+#### What the reading says versus what is queued — T02, unresolved
+
+Read at `--n-models 4` (see T53), so the model count is not comparable. What *is* comparable
+is which models the screen now puts in each slot, and it is not what the queue was seeded with.
+
+| slot | queued 2026-09-05 | the screen now says |
+|---|---|---|
+| locked | `ngboost` | `ngboost` — unchanged, the generator refuses to build without it |
+| most noise-tolerant | `rf`, "on all three representations" | `ngboost` tops 7 of the 9 representation-and-condition cells; `qrf` takes the "most" slot only because `ngboost` is already locked |
+| least noise-tolerant | `het_gp_rbf`, marked READ OFF ONE CONDITION | `dnn_vbll_hetero`, least in **8 of 9** cells |
+| kernel family | `svm` | `svm` — unchanged |
+| author's additions | `gauche_rbf`, `dnn_bnn_full_mve` | not reachable by the rule; these were the author's own picks |
+
+**`rf` is no longer the most noise-tolerant model on any of the three representations.**
+That sentence is the one the earlier broken selector produced and it does not survive the
+corrected reading. Nothing has been changed in `deep_run_pairs.json` — it still says
+`provisional: true` and the deep run is executing against it.
+
+⚠️ Also unchecked: `mlp_bnn_full_mve` on chemberta reads auc_norm **0.9958**, the highest
+number in the whole screen, from a cell holding **2 of 7 conditions**. Whether auc_norm is
+being computed over a short level ladder there is a separate question and it feeds the
+ranking. New thread **T56**, owner code, chat C-SELECT.
+
+#### The seven chats
+
+Every ID below appears in exactly one chat. `HANDOFF.md` holds the prompt for each.
+
+| chat | what it owns | thread IDs |
+|---|---|---|
+| **C-SELECT** | The deep-run and censoring selection, and the clean-row copy it depends on | T02 T03 T08 T11 T33 T52 T53 T56 |
+| **C-RESUB** | Putting the 174 failed tasks back | T12 T15 T17 T24 T25 T54 T55 |
+| **C-QUEUE** | Walls and memory — queue throughput, nothing scientific | T06 T07 T18 T26 T27 T28 T35 T36 |
+| **C-UNC** | The uncertainty runs: 378 tasks, none started, and the pair list | T22 T23 |
+| **C-KIRBY** | The KIRBy checkout and the roster question | T10 T37 T38 T39 T40 T41 |
+| **C-FIG** | Figures, the analysis job, and paper replacement text | T13 T21 T42 T43 T44 |
+| **C-DECIDE** | The author's decisions, each put in a form that can be answered in one word | T04 T05 T19 T20 T49 T50 |
+
+**Total: 51 threads. 12 closed. 39 open across seven chats.** A chat that ends with an open
+ID and no new evidence has failed, whatever else it produced.
+
+---
+
 ### 13.16 ✅ THE REPORTING LEVELS — SET 2026-08-28. Read this before quoting any accuracy number.
 
 ## QM9 1.0 · logD 1.0 · hERG 1.0 · Caco-2 0.75
