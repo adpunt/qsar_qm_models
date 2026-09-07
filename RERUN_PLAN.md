@@ -10852,9 +10852,11 @@ tier 1 then tier 2 — the `Submitted batch job` lines and the script list it pr
 order. Memory stays 96 GB here: this pipeline has never run, so nothing has measured it, and it is
 the one place the 64G floor is not applied (`model_memory.json`).
 
-⚠️ **Confirm the twelve old arrays are gone.** If the `scancel` did not take, 756 tasks are queued
-for 378 pieces of work. `squeue -u $USER -o "%.12i %.30j %.2t %.11l" | grep unc_` must show twelve
-arrays, all with ids beginning 130429.
+✅ **Confirmed 2026-09-07.** `squeue | grep unc_` returns twelve arrays, every id beginning 130429
+and not one beginning 129863, so the `scancel` took and nothing is queued twice. Every wall reads
+back as generated: `unc_qrf` 1-16:59, `unc_bnn_full_mve` 2-03:59, `unc_gp` 2-20:59,
+`unc_mlp_bnn_full_mve` 3-06:59, `unc_vbll_full` 3-19:59, `unc_ngboost` 8-01:59. All twelve at 96 GB
+and all PENDING.
 
 ⚠️ **The job ids above were read off `sacct` on 2026-09-07, not recorded at submit time**, by
 `python scripts/slurm_jobs.py --emit-launch-log`. The mapping from id to script is the job NAME
@@ -11337,12 +11339,12 @@ doing. The runner replaces its own rows rather than duplicating them, so the res
 either way; it is queue time, not a wrong number. Narrow it with `--conditions student_t_nu5
 outlier_p10 laplace` if the breadth grid has already landed for those pairs.
 
-#### STEP 6 — the uncertainty runs, part one: the three the QM9 screen runs. **6 jobs, 162 tasks.**
+#### STEP 6 — the uncertainty runs, part one: the three the QM9 screen runs. **7 jobs, 189 tasks.**
 
 ```bash
 cd $QSAR/slurm_scripts_uncertainty_rerun
 rm -f unc_*.sh submit_all.sh && python generate_scripts.py
-ACCT=stat-cadd PART=long bash submit_all.sh          # 6 arrays, 27 tasks each
+ACCT=stat-cadd PART=long bash submit_all.sh          # 7 arrays, 27 tasks each
 ```
 
 Gaussian, grouped-wider and grouped-shifted, on logD, Caco-2 and hERG. These are the laboratory's
@@ -11350,11 +11352,16 @@ out-of-fold pass — the aleatoric/epistemic decomposition included, which is no
 gets the same rows inline from its own grid, decided per task by a case statement on the
 representation, so **there is no QM9 uncertainty submission**.
 
-`PART=long`, not `$PART`. The longest wall here is 193:59:00 and five of the six run past
+`PART=long`, not `$PART`. The longest wall here is 193:59:00 and six of the seven run past
 `medium`'s 48 hours (§13.27 D1). The scripts carry no `#SBATCH --partition` and refuse to start
-without one on the sbatch line.
+without one on the sbatch line, and `submit_all.sh` now defaults `PART` to `long` itself rather
+than to `medium`, which would have had every one of those arrays refused at submit time.
 
-#### STEP 6b — the uncertainty runs, part two: the four that follow. **6 jobs, 216 tasks.**
+**Seven arrays from 2026-09-07, not six.** `GP-Hetero` was added on the author's decision — see
+§13.27 D3c and D3d for what it buys. It asks `--time=135:59:00` and 96G, from the same per-fit
+table and the same fit-count arithmetic as the other six; no new number was invented for it.
+
+#### STEP 6b — the uncertainty runs, part two: the four that follow. **7 jobs, 252 tasks.**
 
 **This step was in no command until 2026-09-05, and it is a third of the uncertainty evidence.**
 The generator's default is the three conditions the QM9 screen runs (author, 2026-09-01: "this
@@ -11370,7 +11377,7 @@ python generate_scripts.py \
     --conditions censoring student_t_nu5 outlier_p10 laplace \
     --out-dir $QSAR/slurm_scripts_uncertainty_depth
 cd $QSAR/slurm_scripts_uncertainty_depth
-ACCT=stat-cadd PART=long bash submit_all.sh          # 6 arrays, 36 tasks each
+ACCT=stat-cadd PART=long bash submit_all.sh          # 7 arrays, 36 tasks each
 ```
 
 The generator warns that gaussian is not in this run and therefore has no clean reference of its
@@ -15491,7 +15498,16 @@ this section is a sheet the author pastes into a terminal.
 **Nothing may be deleted by an assistant.** A delete line is written here with its reason and
 its evidence, and the author runs it. A result deleted in error costs days.
 
-#### D1. What is asking for the wrong wall or memory — CHAT 1, filled 2026-09-07
+#### D1. What is asking for the wrong wall or memory — CHAT 1, ✅ CLOSED 2026-09-07
+
+**Every job in the study now asks what the measurement says.** Nine arrays took a smaller wall in
+place, every pending row on both grid pipelines is at 64 GB, and the twelve uncertainty arrays were
+cancelled and resubmitted to `long` at walls computed from the fit count. All of it is confirmed
+from `squeue`, not from a command having been run. **One thing is left and it is a watch, not a
+task:** `12980588`, `qm91_mlp_bnn_full_mve`, was cut to 12:59 on a rate from 7 finished tasks of 18
+and could hit that wall. If an element returns TIMEOUT, raise the model's rate in
+`model_hours.json` from what it used and resubmit that element.
+
 
 **How the "asks" column was got.** Not typed, and not read off a document. Each generator was
 run twice: once from the commit that was live when that submission went out, and once from the
