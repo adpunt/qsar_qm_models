@@ -189,6 +189,7 @@ def main():
     scontrol = []
     unproposed = []
     unsafe = []
+    tight = []
     for (sub, jname), d in sorted(per.items(), key=lambda t: (t[0][0].label, t[0][1])):
         n = len(d['elapsed'])
         longest = max(d['elapsed']) if d['elapsed'] else None
@@ -216,6 +217,21 @@ def main():
             if b and b[0] > observed:
                 borrowed = b
                 observed = b[0]
+        # TOO LITTLE HEADROOM. This tool only ever proposes CUTS, so a job that needs
+        # MORE than it asked comes out nowhere -- and that is the only kind that dies
+        # at the wall with no partial credit. The author asked "what may fail on time"
+        # on 2026-09-06 and nothing was answering it.
+        #
+        # The threshold is the tool's own margin, which keeps it honest: if 2x the
+        # longest observed task is what we would REQUEST, then less than 2x headroom
+        # is what we should WARN about. On 2026-09-07 that is qm91_qrf at 1.29x --
+        # 20:52 measured against a 26:59 request, with three replicates still to run.
+        if observed and d['req_t'] and d['req_t'] < observed * cli.wall_margin:
+            tight.append((sub.label, jname, sorted(d['jobs']),
+                          SJ.hhmmss(observed), SJ.hhmmss(d['req_t']),
+                          d['req_t'] / observed,
+                          SJ.hhmmss(int(observed * cli.wall_margin) + 3600)))
+
         thin = None
         if not observed:
             thin = 'nothing has run'
@@ -332,6 +348,19 @@ def main():
             else:
                 print(f"      {'':<30s} and this model has run NOWHERE, so there is "
                       f"nothing to size it from")
+
+    if tight:
+        print(f"\n  🔴 TOO LITTLE HEADROOM -- THESE ARE WHAT MAY FAIL ON TIME.")
+        print(f"  A cut is reversible; a job killed at its wall is not, and there is "
+              f"no\n  partial credit. scontrol CANNOT raise a limit for you, so these "
+              f"need the\n  generator's wall raised and those indices resubmitted.\n")
+        print(f"      {'job':<34s} {'longest':>11s} {'asked':>11s} {'head':>6s}  "
+              f"{'should ask':>11s}")
+        for label, jname, jobs, obs, asked, ratio, want in sorted(tight,
+                                                                 key=lambda t: t[5]):
+            print(f"      {jname[:34]:<34s} {obs:>11s} {asked:>11s} "
+                  f"{ratio:5.2f}x  {want:>11s}   {label}")
+            print(f"      {'':<34s} {', '.join(str(j) for j in jobs)}")
 
     if unsafe:
         print(f"\n  NOT PROPOSED -- a task is running and there is no queue reading, "

@@ -122,6 +122,14 @@ def capture(path):
     for i in range(3):
         out.append(row(f'12986318_{i}', 'qm92_ngboost', 'COMPLETED', '0:00:40',
                        '22-01:59:00', '96Gn', '2026-09-06T00:10:00'))
+    # qm91_qrf: 20:52 measured against a 1-02:59 request. 1.29x headroom, and three
+    # replicates still to run. Only ever CUTS were proposed, so this came out nowhere.
+    qrf = 12980573 + QM9.index('qrf')
+    out = [ln for ln in out if not ln.startswith(f'{qrf}_')]
+    for i in range(15):
+        out.append(row(f'{qrf}_{i}', 'qm91_qrf', 'COMPLETED', '20:52:00',
+                       '1-02:59:00', '64Gn', '2026-09-04T18:00:00'))
+
     # The screen's gauche_rbf: queued since 2026-09-02, not one task ever started, so
     # sacct holds nothing for it at all. It must still be named.
     screen_grbf = 12971601 + QM9.index('gauche_rbf')
@@ -328,6 +336,18 @@ def main():
           'NOTHING HAS EVER STARTED' in mw.stdout
           and str(screen_grbf) in mw.stdout.split('NOTHING HAS EVER STARTED')[1][:500],
           mw.stdout[-1500:])
+
+    # 9. A job with too little headroom is what may fail on time, and only ever
+    #    proposing cuts means it comes out nowhere.
+    check('a job whose request is under 2x its longest task is named as at risk',
+          'TOO LITTLE HEADROOM' in mw.stdout
+          and 'qm91_qrf' in mw.stdout.split('TOO LITTLE HEADROOM')[1][:800],
+          mw.stdout.split('Walls proposed')[-1][:700])
+    check('and no CUT is proposed for it, because it needs more not less',
+          not any(str(12980573 + QM9.index('qrf')) in ln and 'TimeLimit=' in ln
+                  for ln in mw.stdout.splitlines()),
+          [ln for ln in mw.stdout.splitlines()
+           if str(12980573 + QM9.index('qrf')) in ln and 'TimeLimit' in ln])
 
     # 6. A fast task on a grid with NO selection gate is a measurement.
     lgb = [ln for ln in mw.stdout.splitlines()
