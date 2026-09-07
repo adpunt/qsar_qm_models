@@ -17800,6 +17800,36 @@ python scripts/check_runs_landed.py --stage 1 --verbose
 cell MISSING or PARTIAL.** Nothing above proves a result landed; it proves the code is
 fixed and the tasks were sent.
 
+#### D6a. ✅ THE TASKS ARE ON THE QUEUE, 2026-09-07 — jobs 13051647 to 13051666
+
+Twenty arrays went in from `failed_tasks.py --emit-sbatch`, none of them typed: **52 Sort &
+Slice tasks** fixed at `62f1fe2` and **17 `gauche_rbf` tasks** fixed at `c223ec3`. All twenty
+are PENDING at the walls the regenerated scripts ask and at 64 GB.
+
+⚠️ **`submit_all.sh` was being overwritten, and my own command block is what ran it.** Stages
+0, 1 and 2 all write into `slurm_scripts_qm9_rerun`, and a single `submit_all.sh` held whichever
+stage was generated last. Regenerating stage 1 and then stage 2 — which a repair does, because
+both stages have to pick up a fix in `process_and_train.py` — left 19 stage-2 arrays listed,
+none for stage 1, and all 19 `qm9_s1_*.sh` on disk with nothing to submit them. It did not cost
+anything, because stage 1 went back through `failed_tasks.py`, which writes its own indices.
+Found by chat 4 on the cluster.
+
+**Fixed in `edb4fb5`.** The submitter is `submit_all_s<stage>.sh`, one per stage, and no other
+stage can overwrite it. `submit_all.sh` stays as a dispatcher: with no stage it lists the
+per-stage files present with their task counts and exits 2, rather than submitting 654 tasks of
+the wrong stage. **Every QM9 command in this document now says `submit_all_s1.sh` or
+`submit_all_s2.sh`**; the laboratory and uncertainty generators are unaffected, because each of
+their runs has its own directory.
+
+Guard: `scripts/test_submit_all_ranges.py` generates both stages into ONE directory and checks
+each submitter names only its own scripts and every script on disk. Every other check there uses
+a fresh directory, which is why none of them saw this. Putting the single shared file back makes
+it fail on four counts.
+
+**Chat 5 is not closed.** It closes when `python scripts/check_runs_landed.py --stage 1
+--verbose` reports no Sort & Slice combination MISSING or PARTIAL, and those twenty jobs have to
+run first.
+
 #### D6b. ✅ SETTLED BY THE AUTHOR, 2026-09-07 — the Sort & Slice exclusion is stated, not re-run
 
 The question in §13.27 D4h was whether to re-run every QM9 task that ran before `62f1fe2` or
