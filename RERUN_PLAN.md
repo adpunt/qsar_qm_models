@@ -15586,6 +15586,36 @@ ls /data/stat-ecr/scat9264/KIRBy/results/validation_rerun | head -20
 wc -l /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/*/*/all_results.csv | sort -n | head -30
 ```
 
+##### ✅ 2026-09-07: the laboratory censoring run is COMPLETE, and the one-minute tasks are the gate
+
+The author asked why tasks were completing in a minute and whether the skip was the whole story.
+Three readings from the cluster, and they agree.
+
+**The logs.** `grep -L '=== SKIPPED'` over every log in `slurm_scripts_validation_censoring`
+returns three logs each for exactly five models: `val_bnn-full-mve`, `val_gp`, `val_gp-hetero`,
+`val_ngboost`, `val_rf`. Every other log carries the SKIPPED line. Five models times three
+datasets is fifteen tasks that did work; the other 327 held a queue slot and exited 0.
+
+**Those five are the five in `censoring_pairs.json`** — NGBoost on PDV, GP on PDV, BNN-Full-MVE on
+PDV, RF on ECFP4, GP-Hetero on ECFP4. The gate let through exactly what the file names and nothing
+else.
+
+**The files on disk are complete.** Fifteen `*_censoring_*` directories, one per pair per dataset,
+and every one holds an `all_results.csv` of **36 lines**. One row is one (clipped fraction, fold):
+censoring sweeps 7 clipped fractions across 5 scaffold folds, which is 35 rows, plus the header.
+Not one is short. The breadth grid's cells hold 106 lines on the same arithmetic — 3 conditions
+times 7 noise levels times 5 folds is 105 rows, plus the header.
+
+**Why the gate fires at all.** Censoring was submitted with
+`--conditions censoring --runtime-selection censoring_pairs.json`. That is the author's decision of
+2026-08-27, confirmed 2026-08-28 (§13.13): censoring answers how big the effect is, not which model
+resists it best, so it runs on about five named pairs rather than the whole grid. The generator
+still emits all 19 arrays and 342 tasks, because the check lives inside each task — which is what
+lets the file be edited after submitting. A skipped task is the design working, not a fault.
+
+**What this does NOT settle.** It is the laboratory censoring submission only. The QM9 deep run and
+QM9 censoring use the same mechanism and their skip counts have not been read the same way.
+
 ##### Where every log is
 
 `<job name>_<array job id>_<task>.out`, in the directory `sbatch` was run from.
@@ -16156,9 +16186,13 @@ a failed fold removes whole scaffold families, not a random sample of molecules.
 
 **The list of truncated cells is empty, and here is why that is a fact rather than an omission.**
 The breadth grid does not pass `--oof-folds`, and the runner's default is 0, so no laboratory
-accuracy task has ever written an out-of-fold row. Only the uncertainty runs pass `--oof-folds 5`,
-and none of their 378 tasks has started. **Nothing on disk can carry this defect. The fix lands
-before the run that would produce it.**
+accuracy task has ever written an out-of-fold row. Only the uncertainty runs pass `--oof-folds 5` —
+checked across all 19 `val_*.sh`, none of them carries the flag.
+
+The 378 have never started, which §13.23 C0b records and item 4 of the block below re-asks rather
+than assumes. **If that holds, nothing on disk can carry this defect and the fix lands before the
+run that would produce it.** If any uncertainty directory does exist, run the merge over it: it
+now names every unusable cell with an `rm -r` line and a reason, and exits 1.
 
 ##### D3c. The 378 uncertainty jobs — the reason given for withdrawing them is out of date
 

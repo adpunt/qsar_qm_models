@@ -129,15 +129,16 @@
       "still_running": false
     },
     "gauche_rbf": {
-      "hours_per_110": 0.4559,
-      "fits_in_the_measured_task": 6,
-      "measured_task_hours": 1.567,
-      "measured_on": "QM9 main grid, 9 replicates, 63 training runs per task, 2026-09-07",
-      "provenance": "completed, 4 of 18 -- 8 failed on the GP cap bug (fixed in c223ec3). DO NOT TRUST THIS RATE. Only 3 of gauche_rbf's 6 representations are settled uncertainty pairs (uncertainty_pairs.json), so 9 of the 18 tasks do 6 fits and 9 do one. The GP bug was IN the out-of-fold pass, so the 8 that failed are the 6-fit tasks -- which makes the 4 that finished the ONE-fit ones, and fits_in_the_measured_task below is then 6 where the truth is 1. That alone makes this rate about 6x too low, before the second problem: it implies 14.9 s for an exact Gaussian-process fit at the 5,000-molecule cap against 2,855 s for the same fit in results/tuning_local/timing.csv (11,695.3 s at 8,000 molecules, rescaled cubically), a factor of 190. Nothing here can settle that, so the generator grades this rate a lower bound and prices the wall from the laptop timing instead.",
-      "completed_tasks": 4,
+      "hours_per_110": 2.7132,
+      "fits_in_the_measured_task": 1,
+      "measured_task_hours": 1.5539,
+      "measured_on": "QM9 main grid 12980590, sacct 2026-09-07 07:20, all 18 tasks. A task is 7 noise levels x 9 replicates = 63 training runs.",
+      "provenance": "CORRECTED 2026-09-07 by chat 2. The old rate of 0.4559 was this same task time divided by 6 fits, and the tasks it was read from did ONE fit each: the out-of-fold pass threw at the guard before doing any of its extra fits (RERUN_PLAN.md 13.27 D2). 0.4559 x 6 = 2.7354 against 2.7132 measured directly, which is the same number twice. All 18 tasks now agree on it: the 9 that failed on the Gaussian-process cap ran 56:29 to 1:32:29 and the 7 that completed without an out-of-fold pass ran 43:55 to 1:33:14, and both groups did one fit per training run. The rate here is 110 training runs at ONE fit, which is the accounting wall_hours() applies its own fit count to.",
+      "completed_tasks": 7,
       "tasks_in_the_measured_array": 18,
       "still_running": false,
-      "fits_in_the_measured_task_is_probably_wrong": "Recorded as 6; the reasoning above says 1. Left as 6 rather than edited to a number nobody has checked. The generator does not read this field -- it computes the fit count itself -- so it is a note, not an input."
+      "still_a_lower_bound_why": "7 completed of 18 is under the generator's half-the-array rule, so this stays graded `partial` and the wall is still priced from the laptop floor. Nothing has yet measured this model WITH the out-of-fold pass working, and that is the expensive path -- so the margin is doing real work and must not be cut on arithmetic. One resubmitted ECFP4, PDV or ChemBERTa task finishing under c223ec3 settles it.",
+      "do_not_use_the_laptop_row_as_a_floor": "results/tuning_local/timing.csv times gauche_rbf on ECFP4 at 11,695.3 s for one fit on 8,000 molecules, written 2026-08-27T21:29:13. GP_DEFAULTS' one-thread setting was still TRUE then and was set FALSE on 2026-08-28, so that row is a single-threaded fit and ARC runs it on eight cores. ARC does the same fit at the 5,000 cap in about 88 seconds against the laptop's rescaled 2,855. That 32x is a threading difference, not a machine speed-up, so the laptop row is not a valid upper bound on the ARC rate for THIS model. Re-time it on this laptop with the current setting before using it as a floor again."
     },
     "gauche": {
       "hours_per_110": 1.455,
