@@ -369,6 +369,27 @@ def main():
             check(f"{e['id']}: {e['error_source']} still raises {m[:44]!r}",
                   m in src)
 
+    # The fallback numbers, against the generator. rep_positions reads REPS off the
+    # generated script wherever it is on disk; the two numbers in the registry are for
+    # a laptop, where the scripts are not checked in, and they have to agree with what
+    # the generator would write or an offline run names the wrong indices.
+    all_reps = gen.split('ALL_REPS = [')[1].split(']')[0]
+    all_reps = [x.strip().strip("'\"") for x in all_reps.split(',') if x.strip()]
+    check('the generated script still picks its representation with REPS[i % n_rep]',
+          "REPS=({reps})" in gen and 'rep="${{REPS[$(( i % n_rep ))]}}"' in gen)
+    for e in entries:
+        rule = e.get('task_rule') or {}
+        if rule.get('kind') != 'qm9_representation':
+            continue
+        want = rule['representation']
+        check(f"{e['id']}: the offline fallback matches what the QM9 generator "
+              f"would write for {want}",
+              rule['assumed_modulus'] == len(all_reps)
+              and rule['assumed_residues'] == [all_reps.index(want)],
+              f"generator writes {all_reps}, so {want} is "
+              f"{all_reps.index(want) if want in all_reps else 'absent'} of "
+              f"{len(all_reps)}")
+
     def stub_git(rc_exists, rc_ancestor):
         class R:
             def __init__(self, rc): self.returncode = rc
