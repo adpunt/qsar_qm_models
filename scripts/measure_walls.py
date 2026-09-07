@@ -99,11 +99,17 @@ def main():
     ap.add_argument('--floor-gb', type=int, default=64, help="the author's 64G floor")
     ap.add_argument('--min-tasks', type=int, default=3,
                     help='do not propose anything from fewer completed tasks than this')
+    ap.add_argument('--min-elapsed', type=int, default=180,
+                    help='ignore completed tasks shorter than this many seconds '
+                         '(default 180). A deep-run or censoring task whose pair is not '
+                         'in the selection SKIPS and exits 0 in seconds -- it is not a '
+                         'measurement of anything, and a wall set from it would kill the '
+                         'same task the day that pair is added.')
     ap.add_argument('--emit-scontrol', action='store_true')
     cli = ap.parse_args()
 
     per = defaultdict(lambda: dict(elapsed=[], rss=[], req_t=None, req_m=None,
-                                   jobs=set(), bad=defaultdict(list)))
+                                   jobs=set(), noop=0, bad=defaultdict(list)))
     for name, first, last in GROUPS:
         ids = ','.join(str(j) for j in range(first, last + 1))
         rss = {}
@@ -128,6 +134,13 @@ def main():
             st = state.split()[0]
             if st == 'COMPLETED':
                 s = secs(elapsed)
+                # A task that exited in seconds did no work -- almost always the
+                # run-time selection gate skipping a pair that is not in the file.
+                # Measuring it would propose a one-hour wall for a model that needs
+                # days the moment it IS selected.
+                if s is not None and s < cli.min_elapsed:
+                    d['noop'] += 1
+                    continue
                 if s:
                     d['elapsed'].append(s)
                 if jid in rss:
@@ -148,7 +161,8 @@ def main():
               f"{(hhmmss(longest) if longest else '--'):>10s} "
               f"{(hhmmss(d['req_t']) if d['req_t'] else '--'):>11s} "
               f"{(f'{peak:.1f}' if peak else '--'):>8s} "
-              f"{(f'{req_m_gb:.0f}' if req_m_gb else '--'):>7s}")
+              f"{(f'{req_m_gb:.0f}' if req_m_gb else '--'):>7s}"
+              + (f"   ({d['noop']} skipped)" if d['noop'] else ''))
         for st, jids in sorted(d['bad'].items()):
             print(f"{'':46s} !! {len(jids):d} {st}: {', '.join(jids[:4])}"
                   + (' ...' if len(jids) > 4 else ''))
@@ -169,7 +183,9 @@ def main():
     print(f"\n  Walls proposed at {cli.wall_margin}x the LONGEST completed task plus an "
           f"hour;\n  memory at {cli.mem_margin}x the peak, rounded up to 16 GB, never "
           f"below {cli.floor_gb}G.\n  Nothing is proposed from fewer than "
-          f"{cli.min_tasks} completed tasks.")
+          f"{cli.min_tasks} completed tasks, and a task that\n  exited in under "
+          f"{cli.min_elapsed}s is not counted -- that is the selection gate skipping a "
+          f"pair,\n  not a model that runs in a minute.")
     if scontrol:
         print(f"\n  {len(scontrol)} change(s) worth making. Cutting a TimeLimit on a "
               f"PENDING job keeps\n  its submit time, so it costs no queue position -- "
