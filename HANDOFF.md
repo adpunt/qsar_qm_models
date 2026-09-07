@@ -53,28 +53,39 @@ It is one command to know which. Do it first, in CHAT 3.
 
 ## B. WHAT THE 378 UNCERTAINTY TASKS ACTUALLY ARE
 
-From `slurm_scripts_uncertainty_rerun/generate_scripts.py`, not from memory.
-`n_tasks = len(DATASETS) * len(reps) * len(conditions)` at `:700`, one array per model.
+These are the jobs that test whether a model knows when it is wrong. They have nothing to do
+with QM9. They run on the three laboratory datasets only.
 
-- **6 models** — QRF, NGBoost, GP, VBLL-Full, and the two variance-head networks added
-  2026-09-01.
-- **3 datasets** — logD, Caco-2, hERG. **No QM9 at all.**
-- **3 representations** — ECFP4, PDV, ChemBERTa.
-- **7 conditions**, split across two submissions: 3 conditions → 3×3×3 = 27 tasks per model
-  → **162**; the other 4 → 3×3×4 = 36 per model → **216**. 162 + 216 = **378**.
+There are 378 of them because every combination gets its own job. The combinations are:
 
-One task is one (model, dataset, representation, condition), sweeping the whole level ladder,
-five outer scaffold folds, with out-of-fold cross-fitting on top. One replicate — the five
-folds are the only repeat.
+- **6 models** — the quantile forest, NGBoost, the Gaussian process, the variational
+  network, and the two networks that predict their own error.
+- **3 datasets** — logD, Caco-2 and hERG.
+- **3 ways of describing a molecule** — ECFP4, PDV and ChemBERTa.
+- **7 kinds of noise.**
 
-⚠️ **Not all 378 are real work.** The array size is computed from the full representation
-list for every model, but GP is narrowed to PDV by `MODEL_REPS` / `--gp-reps`. Those tasks
-start and skip. **How many of the 378 are skips has not been measured** — CHAT 1 owns it,
-because it changes what "none have started" means.
+Six times three times three times seven is 378.
 
----
+They went to the cluster as two separate submissions because three of the seven kinds of
+noise were sent on their own and the other four followed. That is 162 jobs and then 216.
+
+**What one job does.** It takes one model, one dataset, one way of describing a molecule and
+one kind of noise. It then trains that model at every noise level on the ladder. At each
+level it trains five times over, on five different splits of the molecules. On top of that it
+trains extra times so that every training molecule gets a score from a model that never saw
+it. It does all of that once — there are no repeat runs, the five splits are the only repeat.
+
+**Some of the 378 do nothing at all.** The Gaussian process is only meant to run on PDV, but
+the number of jobs was worked out as though every model ran on all three ways of describing a
+molecule. So the Gaussian process jobs for ECFP4 and ChemBERTa start and immediately stop.
+Nobody has counted how many of the 378 are those. That matters, because it changes what
+"none of them have started" actually means.
 
 ## C. THE RULES EVERY CHAT INHERITS
+
+**`CLAUDE.md` in the repository root is the full set and every chat must read it.**
+It is loaded automatically, but read it anyway — the plain-English rules at the top of
+it are the ones that have been broken most. What follows is the short version.
 
 - **Fixes, not findings.** Never advise stopping, pausing or deferring.
 - **Ask the server freely, but batch.** You cannot see the cluster. Send one block covering
@@ -108,7 +119,9 @@ wrote*.
 
 ## PROMPT 1 — WHY NOTHING RUNS
 
-> Read `RERUN_PLAN.md` §13.26 and §13.27, and `HANDOFF.md` sections A–C.
+> **Read `CLAUDE.md` first and follow it, especially the plain-English rules — the
+> author has to be able to read what you send.** Then `RERUN_PLAN.md` §13.26 and
+> §13.27, and `HANDOFF.md` sections A–C.
 >
 > You own **T06 T07 T15 T18 T23 T26 T27 T28 T35 T36**. Nothing here is scientific. All of it
 > is why the cluster is idle while the author waits, and one item of it destroys work.
@@ -161,7 +174,9 @@ wrote*.
 
 ## PROMPT 2 — PUT BACK WHAT FAILED
 
-> Read `RERUN_PLAN.md` §13.26 and §13.27, and `HANDOFF.md` sections A–C.
+> **Read `CLAUDE.md` first and follow it, especially the plain-English rules — the
+> author has to be able to read what you send.** Then `RERUN_PLAN.md` §13.26 and
+> §13.27, and `HANDOFF.md` sections A–C.
 >
 > You own **T12 T17 T24 T25 T54 T55**. **174 failed tasks and not one resubmission line has
 > ever been emitted for any of them.** 104 Sort & Slice, 20 `gauche_rbf`, 50 with no cause
@@ -210,7 +225,9 @@ wrote*.
 
 ## PROMPT 3 — WHAT IS ON DISK AND WRONG
 
-> Read `RERUN_PLAN.md` §13.26 and §13.27, and `HANDOFF.md` sections A–C.
+> **Read `CLAUDE.md` first and follow it, especially the plain-English rules — the
+> author has to be able to read what you send.** Then `RERUN_PLAN.md` §13.26 and
+> §13.27, and `HANDOFF.md` sections A–C.
 >
 > You own **T11 T13 T38 T52 T56**, and you produce the **delete list**. Nothing else in this
 > handoff can tell the author which rows already on disk are not to be trusted.
@@ -255,7 +272,9 @@ wrote*.
 
 ## PROMPT 4 — WHAT THE RUNNING JOBS ARE RUNNING
 
-> Read `RERUN_PLAN.md` §13.26 and §13.27, and `HANDOFF.md` sections A–C.
+> **Read `CLAUDE.md` first and follow it, especially the plain-English rules — the
+> author has to be able to read what you send.** Then `RERUN_PLAN.md` §13.26 and
+> §13.27, and `HANDOFF.md` sections A–C.
 >
 > You own **T02 T03 T22 T33**. These are the two files that decide what the queued work
 > actually computes, and both still say `provisional: true` while the jobs execute against
