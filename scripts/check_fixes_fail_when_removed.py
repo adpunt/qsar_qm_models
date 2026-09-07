@@ -371,6 +371,15 @@ CASES = [
   "            idx = sorted(c * len(_rl) + _rl.index(r)",
   "            idx = sorted(c * len(_rl) + _rl.index(r) + 1",
   [sys.executable, f"{QSAR}/scripts/test_submit_all_ranges.py"]),
+
+ # Same submitter, laboratory side. Its REPS list is spelled ECFP4 / ChemBERTa where
+ # the selection file is lower case, so this is also where a case-sensitive match
+ # once produced a submitter with no models in it at all.
+ ("the laboratory widening submitter sends a model's own indices",
+  f"{QSAR}/slurm_scripts_validation_rerun/generate_scripts.py",
+  "            idx = sorted(d * len(model_reps) + model_reps.index(r)",
+  "            idx = sorted(d * len(model_reps) + model_reps.index(r) + 1",
+  [sys.executable, f"{QSAR}/scripts/test_submit_all_ranges.py"]),
 ]
 
 

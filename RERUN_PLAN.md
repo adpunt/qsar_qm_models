@@ -17174,14 +17174,24 @@ Guard: `scripts/test_submit_all_ranges.py` decodes every index in that file back
 (representation, condition) pair and fails if the set is not exactly what the selection names,
 or if any index is past the script's own task count. It goes red on a one-place shift.
 
-🔴 **THE LABORATORY DEPTH RUN NEEDS THE SAME AND CANNOT DO IT YET.** It reads the same
-`deep_run_pairs.json`, so `VBLL-Full-Hetero`'s tasks there have also already skipped.
-`slurm_scripts_validation_rerun/generate_scripts.py` has no `resubmit_selected.sh` — its
-`scripts` list carries only a name, a task count and a wall, so the model label and the
-representation list are not in scope at the point it writes the submitter. Its decode is the
-same shape (`rep = REPS[i % n_rep]`, `dataset = DATASETS[i / n_rep]`, `:587`–`:589`), so the
-same addition fits. **Left to `HANDOFF.md` chat 3, which owns that generator and is editing it
-in this checkout now.** Until it is added, that model's laboratory depth tasks are not queued.
+✅ **THE LABORATORY DEPTH RUN NOW HAS THE SAME SUBMITTER.** It reads the same
+`deep_run_pairs.json`, so `VBLL-Full-Hetero`'s tasks there had skipped too and there was
+nothing to send them again with. `slurm_scripts_validation_rerun/generate_scripts.py` now
+writes its own `resubmit_selected.sh`, decoding `rep = REPS[i % n_rep]` and
+`dataset = DATASETS[i / n_rep]` from each script's own arrays:
+
+```
+# ADDED VBLL-Full-Hetero
+    # 9 task(s) of 18: ChemBERTa, ECFP4, PDV x 3 dataset(s), --time=137:00:00
+    exec sbatch --array=0,3,5,6,9,11,12,15,17%$THROTTLE val_vbll-full-hetero.sh
+```
+
+⚠ **The representations are spelled differently on the two sides.** The laboratory runner's
+`REPS` reads `ECFP4 SNS MHG-GNN-pretrained PDV Avalon ChemBERTa`; the selection file says
+`ecfp4`, `pdv`, `chemberta`. The run-time gate inside each task case-folds, and a
+case-sensitive match here produced a submitter with **no models in it at all** — which
+generates, passes `bash -n`, and queues nothing. It now folds the same way, and
+`scripts/test_submit_all_ranges.py` fails on a submitter that names no model.
 
 ⚠ **Two models now write an uncertainty column that means nothing.** With `dnn_vbll_hetero`
 added, the generator warns for both it and `heteroscedastic_gp`: neither is in

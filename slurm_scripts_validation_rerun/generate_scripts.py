@@ -1251,7 +1251,7 @@ def main():
         filename = f"val_{model.lower()}.sh"
         with open(os.path.join(output_dir, filename), 'w') as f:
             f.write(content)
-        scripts.append((filename, n_tasks, hours))
+        scripts.append((filename, n_tasks, hours, model, list(model_reps)))
 
     # The smoke test runs RF and SVM, so its guard has to cover both.
     herg_path, herg_cli = next(d for d in DATASETS if d[0] == 'herg')
@@ -1277,14 +1277,14 @@ def main():
     # incremented itself, so it said 144 even if every sbatch had been rejected.
     # It now reads sbatch's own exit status and refuses to claim a submission
     # that did not happen.
-    total = sum(n for _, n, _ in scripts)
+    total = sum(n for _, n, _, _, _ in scripts)
     lines = ["#!/bin/bash",
              "# Submit the laboratory accuracy grid: one array per model.",
              f"# {len(scripts)} arrays, {total} tasks. The account and the wall clock",
              "# are in the scripts; the throttle is here because it is queue state.",
              "THROTTLE=${THROTTLE:-4}",
              "ok=0; bad=0", ""]
-    for name, n, hours in sorted(scripts):
+    for name, n, hours, _m, _r in sorted(scripts):
         lines.append(f"# {name}: {n} tasks, --time={hours}:00:00")
         lines.append(f'if sbatch --array=0-{n - 1}%$THROTTLE {name}; then '
                      f'ok=$((ok+1)); else bad=$((bad+1)); fi')
@@ -1296,9 +1296,80 @@ def main():
     with open(os.path.join(output_dir, 'submit_all.sh'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
+    # THE SUBMITTER FOR A WIDENED SELECTION. Same problem and same shape as the QM9
+    # one (slurm_scripts_qm9_rerun/generate_scripts.py).
+    #
+    # Narrowing a run-time selection is free -- a task whose model or representation
+    # is no longer named skips and exits 0. WIDENING is not: the tasks of the model
+    # just added have already run and skipped, and only those have to go again. On
+    # 2026-09-07 dnn_vbll_hetero was added to deep_run_pairs.json and its laboratory
+    # depth tasks had nothing to resubmit them with, so they were simply not queued
+    # (RERUN_PLAN.md 13.27 D4i).
+    #
+    # The task script computes rep = REPS[i % n_rep] and dataset = DATASETS[i / n_rep],
+    # so the indices a model works on depend on where the selected representations sit
+    # in THAT model's own REPS list, which differs per model. Nobody works that out by
+    # hand: typing an array range is how out-of-range tasks were queued three times.
+    if args.runtime_selection:
+        spec = json.loads(Path(args.runtime_selection).read_text())
+        named = spec.get('validation_pairs') or spec.get('pairs')
+        if named:
+            wanted = {}
+            for pair in named:
+                wanted.setdefault(pair[0], set()).add(pair[1])
+        else:
+            wanted = {m: set(spec.get('representations') or spec.get('reps') or [])
+                      for m in (spec.get('validation_labels')
+                                or spec.get('models') or [])}
+        n_ds = len(DATASETS)
+        widen = ['#!/bin/bash',
+                 '# RESUBMIT ONLY THE TASKS A WIDENED SELECTION NEEDS.',
+                 '#',
+                 f'# Generated from {args.runtime_selection}. Every index below is a',
+                 '# task whose model and representation that file names. Run this ONLY',
+                 '# for a model you have just ADDED: one that was already in the',
+                 '# selection has these tasks running or done, and this duplicates them.',
+                 '#',
+                 '# Narrowing needs nothing -- an unlisted task skips and exits 0.',
+                 'set -u',
+                 'THROTTLE=${THROTTLE:-4}',
+                 'MODEL="${1:-}"',
+                 'if [ -z "$MODEL" ]; then',
+                 '    echo "usage: bash $(basename "$0") <model as the runner spells it>"',
+                 '    echo "the models this file knows:"',
+                 "    grep -o '^# ADDED .*' \"$0\" | cut -d' ' -f3-",
+                 '    exit 2',
+                 'fi',
+                 '']
+        # The runner spells representations ECFP4 / PDV / ChemBERTa and the selection
+        # file spells them ecfp4 / pdv / chemberta. The run-time gate inside each task
+        # case-folds them, so this matches the same way -- a case-sensitive match here
+        # silently produced a submitter with no models in it.
+        for name, n, hours, model, model_reps in sorted(scripts):
+            fold = {r.lower(): r for r in model_reps}
+            reps_wanted = {fold[r.lower()] for r in wanted.get(model, set())
+                           if r.lower() in fold}
+            if not reps_wanted:
+                continue
+            idx = sorted(d * len(model_reps) + model_reps.index(r)
+                         for d in range(n_ds) for r in reps_wanted)
+            widen += [f'# ADDED {model}',
+                      f'if [ "$MODEL" = "{model}" ]; then',
+                      f'    # {len(idx)} task(s) of {n}: '
+                      f'{", ".join(sorted(reps_wanted))} x {n_ds} dataset(s), '
+                      f'--time={hours}:00:00',
+                      f'    exec sbatch --array={",".join(str(i) for i in idx)}'
+                      f'%$THROTTLE {name}',
+                      'fi',
+                      '']
+        widen += ['echo "no such model in this selection: $MODEL"', 'exit 2']
+        with open(os.path.join(output_dir, 'resubmit_selected.sh'), 'w') as f:
+            f.write('\n'.join(widen) + '\n')
+        os.chmod(os.path.join(output_dir, 'resubmit_selected.sh'), 0o755)
+
     print(f"Generated {len(scripts)} array scripts, {total} tasks total, "
           f"+ submit_all.sh")
-    for name, n, hours in sorted(scripts):
+    for name, n, hours, _m, _r in sorted(scripts):
         print(f"    {name:24s} --array=0-{n - 1}  --time={hours}:00:00")
 
 

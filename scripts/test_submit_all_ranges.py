@@ -58,11 +58,18 @@ def _selected_pairs(spec):
     censoring file names its pairs outright, because a cross product cannot express
     five. Same two shapes the generator reads.
     """
-    named = spec.get('generator_pairs') or spec.get('pairs')
-    if named:
-        return [(p[0], p[1]) for p in named]
-    return [(m, r) for m in spec.get('generator_labels', [])
-            for r in spec.get('representations', [])]
+    out = []
+    for pairs_key, models_key in (('generator_pairs', 'generator_labels'),
+                                  ('validation_pairs', 'validation_labels')):
+        named = spec.get(pairs_key)
+        if named:
+            out += [(p[0], p[1]) for p in named]
+        else:
+            out += [(m, r) for m in spec.get(models_key, [])
+                    for r in spec.get('representations', [])]
+    for p in spec.get('pairs', []):
+        out.append((p[0], p[1]))
+    return out
 
 
 def tasks_in(text):
@@ -146,22 +153,28 @@ def main():
 
             # THE WIDENING SUBMITTER, WHICH NAMES INDIVIDUAL INDICES.
             #
-            # submit_all.sh sends a whole array and this file sends the tasks of one
-            # model that a widened selection has just added. It is the only place in
-            # the study where an index list is written out, so it is the only place a
-            # typo could queue an out-of-range task -- the failure that happened three
-            # times before submit_all.sh existed. Every index is checked against the
-            # task count the SCRIPT ITSELF computes, and against that script's own
-            # CONDS and REPS arrays, which is where the mapping actually lives.
+            # submit_all.sh sends a whole array; this file sends the tasks of one model
+            # that a widened selection has just added. It is the only place in the
+            # study where an index list is written out, so it is the only place a typo
+            # could queue an out-of-range task -- the failure that happened three times
+            # before submit_all.sh existed. Every index is checked against the task
+            # count the SCRIPT ITSELF computes, and decoded back through that script's
+            # own arrays: REPS by CONDS on QM9, REPS by DATASETS on the laboratory.
             widen = out / 'resubmit_selected.sh'
-            if widen.exists():
-                for arr, name in re.findall(
-                        r'--array=([0-9,]+)%\S*\s+([A-Za-z0-9_.-]+\.sh)',
-                        widen.read_text()):
+            sel_file = next((e for e in extra if e.endswith('.json')), None)
+            if widen.exists() and sel_file:
+                spec = json.loads(Path(sel_file).read_text())
+                blocks = re.findall(
+                    r'^# ADDED (.+?)$.*?--array=([0-9,]+)%\S*\s+([A-Za-z0-9_.-]+\.sh)',
+                    widen.read_text(), re.M | re.S)
+                if not blocks:
+                    failures.append(f'{label}: resubmit_selected.sh names no model, so '
+                                    f'a widened selection has nothing to submit with')
+                for model, arr, name in blocks:
                     script = out / name
                     if not script.exists():
-                        failures.append(f'{label}: resubmit_selected.sh submits '
-                                        f'{name}, which was not written')
+                        failures.append(f'{label}: resubmit_selected.sh submits {name}, '
+                                        f'which was not written')
                         continue
                     body = script.read_text()
                     want = tasks_in(body)
@@ -176,27 +189,36 @@ def main():
                     if len(set(idx)) != len(idx):
                         failures.append(f'{label}: resubmit_selected.sh repeats an '
                                         f'index for {name}')
-                    # The script maps index -> (rep, condition) itself. Rebuild that
-                    # map and check every index really is a selected representation.
                     reps_m = re.search(r'^REPS=\((.*?)\)$', body, re.M)
-                    conds_m = re.search(r'^CONDS=\((.*?)\)$', body, re.M)
-                    sel_file = next((e for e in extra if e.endswith('.json')), None)
-                    if reps_m and conds_m and sel_file:
-                        reps_l = reps_m.group(1).split()
-                        conds_l = conds_m.group(1).split()
-                        spec = json.loads(Path(sel_file).read_text())
-                        model = name[len('qm9_s2_'):-len('.sh')] \
-                            if name.startswith('qm9_s2_') else None
-                        want_reps = {r for m, r in _selected_pairs(spec)
-                                     if m == model and r in reps_l}
-                        got = {(reps_l[i % len(reps_l)],
-                                conds_l[i // len(reps_l)]) for i in idx}
-                        expect = {(r, c) for r in want_reps for c in conds_l}
-                        if want_reps and got != expect:
-                            failures.append(
-                                f'{label}: resubmit_selected.sh decodes {name} to '
-                                f'{sorted(got - expect)} that the selection does not '
-                                f'name, and misses {sorted(expect - got)}')
+                    outer_m = (re.search(r'^CONDS=\((.*?)\)$', body, re.M)
+                               or re.search(r'^DATASETS=\((.*?)\)$', body, re.M))
+                    if not (reps_m and outer_m):
+                        failures.append(f'{label}: cannot read REPS and its partner out '
+                                        f'of {name}; this check has gone blind')
+                        continue
+                    reps_l = reps_m.group(1).split()
+                    outer_l = outer_m.group(1).split()
+                    # The selection spells representations in lower case and the
+                    # laboratory runner spells them ECFP4 / ChemBERTa. The run-time
+                    # gate case-folds, so this does too.
+                    fold = {r.lower(): r for r in reps_l}
+                    want_reps = {fold[r.lower()] for m, r in _selected_pairs(spec)
+                                 if m == model and r.lower() in fold}
+                    # Only decode what is in range: an out-of-range index is already
+                    # reported above, and indexing outer_l with it would raise here
+                    # instead of failing the check.
+                    got = {(reps_l[i % len(reps_l)], outer_l[i // len(reps_l)])
+                           for i in idx if i // len(reps_l) < len(outer_l)}
+                    expect = {(r, o) for r in want_reps for o in outer_l}
+                    if not want_reps:
+                        failures.append(
+                            f'{label}: resubmit_selected.sh has a block for {model!r}, '
+                            f'which {Path(sel_file).name} does not name')
+                    elif got != expect:
+                        failures.append(
+                            f'{label}: resubmit_selected.sh decodes {name} to '
+                            f'{sorted(got - expect)} that the selection does not name, '
+                            f'and misses {sorted(expect - got)}')
 
     if failures:
         print(f'FAIL — {len(failures)} problem(s):\n')
