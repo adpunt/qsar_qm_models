@@ -17035,10 +17035,41 @@ the other after, then exactly the replicates whose sample drew methane, ammonia 
 on 9,999 molecules on one side and 10,000 on the other. `sample_size` is the REQUESTED count
 and stays 10000 either way, which is why that column shows no difference.
 
-⚠ **This is a mechanism that fits, not a cause that has been shown.** `split_qm9` prints
-either `Sort & Slice cannot represent N molecule(s)` or
-`Sort & Slice represents every molecule in this sample; nothing excluded`, so the task logs
-settle it: `qm92_*_%A_%a.out` in `slurm_scripts_qm9_rerun`.
+✅ **CONFIRMED FROM THE TASK LOGS, 2026-09-07.** The three logs that say
+`Sort & Slice cannot represent N molecule(s)` under censoring are exactly the three pairs
+whose clean row disagrees:
+
+| log | pair |
+|---|---|
+| `slurm_scripts_qm9_censoring/qm92_heteroscedastic_gp_12986347_0.out` | `heteroscedastic_gp` × ECFP4 |
+| `slurm_scripts_qm9_censoring/qm92_gauche_rbf_12986345_1.out` | `gauche_rbf` × PDV |
+| `slurm_scripts_qm9_censoring/qm92_dnn_bnn_full_mve_12986350_1.out` | `dnn_bnn_full_mve` × PDV |
+
+`split_qm9` is called once per (level, replicate) at `:3496`, inside the loop and after the
+replicate seed is set, so the sample is redrawn every replicate and the exclusion fires only
+on the replicates that drew one of the three molecules. Across every log: **372 splits
+excluded nothing, 37 excluded one molecule, 37 excluded two** — 74 of 446, against the 0.21
+the arithmetic predicts. The 52 `ValueError: Sort & Slice produced an all-zero count vector`
+lines are the crashes from before the fix.
+
+🔴 **SO THIS IS A STUDY-WIDE COMPARABILITY QUESTION, NOT A CENSORING ONE, AND IT IS THE
+AUTHOR'S CALL.** A QM9 row written before `62f1fe2` trained on 10,000 molecules. A row written
+after it trained on 9,999 or 9,998 whenever the sample drew methane, ammonia or water, which
+is about one replicate in five. Measured difference in clean R² on this pair of runs: 0.001262
+to 0.023893. AUC_norm divides a condition's curve by that condition's own clean row, so a
+curve and its denominator agree when they come from one task — the mismatch is between tasks
+that started on opposite sides of the pull, and task start time is what decides it, not the
+submission.
+
+**§13.27 D5 is wrong on this point and is corrected here.** It says the exclusion "invalidates
+nothing already on disk" because "the tasks that did draw one crashed and wrote no rows". That
+holds for Sort & Slice, whose guard refuses an all-zero vector. It does not hold for ECFP4,
+PDV, ChemBERTa, Avalon or MHG-GNN: methane has a perfectly good vector under all five, so
+before the fix the run trained on it, and after the fix it does not.
+
+**How many rows are affected is not yet known.** A task that ran after the fix prints one of
+the two `Sort & Slice` lines for every split; a task that ran before it prints neither. So
+`grep -L` over the logs counts the pre-fix side. Nobody has run it.
 
 🔴 **If it holds, it is not about censoring.** Every QM9 cell whose task ran on one side of
 that pull and is compared with a cell that ran on the other differs on roughly one replicate
@@ -17154,11 +17185,16 @@ fixed and the tasks were sent.
   `torch.manual_seed(iteration_seed)` at `scripts/process_and_train.py:3450`, nothing
   consumes torch randomness before `split_qm9`'s `torch.randperm` at `:1160`, and
   `iteration_seed` is a function of `--random-seed` and the replicate number only.
-- **The Sort & Slice exclusion invalidates nothing already on disk (T08 CLOSED).** It
-  removes indices from the three split lists after the shuffle and split (`:1261`–`:1265`)
-  and never re-splits, so a task whose sample did not draw methane, ammonia or water is
-  bit-identical before and after `62f1fe2`. The tasks that did draw one crashed and wrote no
-  rows.
+- ~~**The Sort & Slice exclusion invalidates nothing already on disk (T08 CLOSED).**~~
+  🔴 **WRONG ON ITS SECOND HALF, corrected 2026-09-07 — see §13.27 D4g.** The first half
+  holds: it removes indices from the three split lists after the shuffle and split
+  (`:1261`–`:1265`) and never re-splits, so a task whose sample did not draw methane, ammonia
+  or water is bit-identical before and after `62f1fe2`. **"The tasks that did draw one
+  crashed and wrote no rows" is true only of Sort & Slice**, whose guard refuses an all-zero
+  vector. Under ECFP4, PDV, ChemBERTa, Avalon and MHG-GNN methane has a perfectly good vector:
+  before the fix the run trained on it, after the fix it does not, and it wrote rows either
+  way. Measured on three pairs, the clean R² moves by 0.001262 to 0.023893 on about one
+  replicate in five.
 - **What the 378 uncertainty jobs are.** They test whether a model knows when it is wrong.
   They do not touch QM9. They run on logD, Caco-2 and hERG. Every combination of four things
   gets its own job: **6 models** (the quantile forest, NGBoost, the Gaussian process, the
