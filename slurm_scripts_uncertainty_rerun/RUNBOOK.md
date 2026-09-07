@@ -386,14 +386,18 @@ bash tests/slurm_scripts/where_to_submit.sh          # full diagnostic — read 
 bash tests/slurm_scripts/where_to_submit.sh --emit   # prints: <account> <partition>
 ```
 
-Bill to whichever account has the higher fair share. Use `medium`. Then:
+Bill to `stat-cadd`. **The partition is `long`, corrected 2026-09-07** — this run's longest wall
+is 193 hours and `medium` stops at 48. Five of the six arrays are past that; only the quantile
+forest at 40 hours would fit. The generator prints which ones every time it runs. Do not take the
+partition from `--emit`: it does not measure the partition at all, it returns a hard-coded
+`medium`.
 
 ```bash
 # The live KIRBy checkout is /data/stat-ecr, NOT stat-cadd (RERUN_PLAN.md 2.8b). This line
 # named the dead one until 2026-09-04, so it returned an empty account and every sbatch
 # below would have failed on an empty --account.
-read -r EMIT_ACCT PART < <(bash /data/stat-ecr/scat9264/KIRBy/tests/slurm_scripts/where_to_submit.sh --emit)
 ACCT=stat-cadd   # --emit returns the highest-fairshare association, not this study's
+PART=long        # 193h longest wall; medium's ceiling is 48h (RERUN_PLAN.md 13.27 D1)
 echo "account=$ACCT partition=$PART"
 ```
 

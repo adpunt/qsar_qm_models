@@ -341,17 +341,23 @@ TEMPLATE = '''#!/bin/bash
 # Levels are NOT passed: the runner anchors them per dataset to published assay
 # error, and sweeps censoring on its own axis (the fraction of labels clipped).
 #
-# --account and --partition are LIVE STATE: pass them at submit time. Confirm
-# with  bash tests/slurm_scripts/where_to_submit.sh  in the KIRBy repo first.
+# --account and --partition are LIVE STATE: pass them at submit time.
 #
-#   sbatch --account=<acct> --partition=medium --array=0-{last}%{throttle} \\
+# THE PARTITION IS `long`, corrected 2026-09-07. This run asks {hours} hours, and
+# `medium` stops at 48. Five of the six models in this pipeline are past that
+# once the wall is computed from the fit count rather than typed: NGBoost 193,
+# VBLL-Full 91, MLP-BNN-Full-MVE 78, GP 68, BNN-Full-MVE 51. Only the quantile
+# forest at 40 would fit. The twelve arrays submitted on 2026-09-06 went to
+# `medium` under the old hand-typed 47:59 (RERUN_PLAN.md 13.27 D1).
+#
+#   sbatch --account=<acct> --partition=long --array=0-{last}%{throttle} \\
 #          {script_name}
 #
 # Every task writes its own --results-root, so tasks never race on a shared
 # file. Run merge_results.py afterwards.
 #
 # Resubmit only the failed indices, e.g.:
-#   sbatch --account=<acct> --partition=medium --array=3,17,40 {script_name}
+#   sbatch --account=<acct> --partition=long --array=3,17,40 {script_name}
 # ============================================================================
 #SBATCH --job-name=unc_{jobslug}
 #SBATCH --output=unc_{jobslug}_%A_%a.out
@@ -574,7 +580,7 @@ rep_slug=$(echo "$rep" | tr 'A-Z' 'a-z' | tr -d '-')
 OUT="{results_root}/{model_slug}__${{ds}}__${{rep_slug}}__${{cond}}"
 
 if [ -z "${{SLURM_JOB_PARTITION:-}}" ]; then
-    echo "ERROR: no partition. Submit with --partition=medium (see RUNBOOK step 4)."; exit 2
+    echo "ERROR: no partition. Submit with --partition=long (see RUNBOOK step 4)."; exit 2
 fi
 
 echo "=== task $i: model={model} dataset=$ds rep=$rep condition=$cond"

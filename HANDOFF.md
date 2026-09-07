@@ -108,6 +108,17 @@ is left, because they are three different amounts of work.
 > Chats 2, 3 and 5 all have tasks to resubmit and all of them are waiting on item 4. Tell
 > them the moment it is pushed.
 >
+> **✅ 2026-09-07, chat 1: item 4 was already done and nobody is waiting on it.** All three
+> generators price their walls from measurement — the QM9 one from `model_hours.json`, the
+> laboratory one from its own seconds-per-fit table, the uncertainty one by importing that
+> table rather than keeping a second copy. It was fixed at `eb08bb8`, before this file was
+> written. Checked by generating each submission twice: once from the commit that was live
+> when it went out, once from the branch tip. **Chats 2, 3 and 5 can regenerate and resubmit
+> now.** Items 1, 2 and 3 are done and are in `RERUN_PLAN.md` §13.27 D1 with the paste block.
+> Two things there that those chats need: memory is 64 GB everywhere on both grid pipelines
+> now, and the twelve uncertainty arrays are queued with walls too short for five of their six
+> models, on a partition that cannot hold the right ones.
+>
 > Done when section 13.27 lists, per submission, what it asks now, what it should ask, and the
 > command to change it — **and `squeue` shows the new limits in place**, not just the
 > `scontrol` lines having been printed.

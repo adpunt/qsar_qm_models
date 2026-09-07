@@ -11057,12 +11057,19 @@ this study bills to `stat-cadd`. An earlier version of this step read both from 
 how a job ends up on the wrong account (`slurm_scripts_qm9_rerun/RUNBOOK.md` §3 has always pinned
 it).
 
-⚠️ **`$PART` is `medium`, and only STEP 6 may use it.** `where_to_submit.sh` reports the partition
-with capacity, which on 2026-09-04 was `medium` — a 2-day ceiling. The QM9 main grid and both deep
-runs are generated with `--max-hours 720` and carry requests far past that; the generator REFUSES to
-write a script it cannot honour rather than capping it, so a `medium` submission is rejected at
-submit time. Steps 1, 4 and 5 say `--partition=long` literally, and they mean it. Step 2's partition
-is inside the laboratory scripts already. Step 6's longest wall is 47:00, which fits `medium`.
+⚠️ **`$PART` is `medium`, and nothing may use it any more.** `where_to_submit.sh` reports the
+partition with capacity, which on 2026-09-04 was `medium` — a 2-day ceiling. The QM9 main grid and
+both deep runs are generated with `--max-hours 720` and carry requests far past that; the generator
+REFUSES to write a script it cannot honour rather than capping it, so a `medium` submission is
+rejected at submit time. Steps 1, 4 and 5 say `--partition=long` literally, and they mean it. Step
+2's partition is inside the laboratory scripts already.
+
+⚠️ **STEP 6 no longer fits `medium` either, corrected 2026-09-07.** Its longest wall was 47:00
+while the walls were five hand-typed constants. Computed from the fit count, five of the six
+uncertainty arrays run past `medium`'s 48 hours — NGBoost 193:59, VBLL-Full 91:59,
+MLP-BNN-Full-MVE 78:59, GP 68:59, BNN-Full-MVE 51:59 — and only the quantile forest at 40:59 fits.
+**Steps 6 and 6b say `PART=long`.** The generator prints the same warning every time it runs.
+See §13.27 D1.
 
 #### STEP 1 — the QM9 main grid. **Already submitted. Raise its memory; do not resubmit it.**
 
@@ -11303,7 +11310,7 @@ outlier_p10 laplace` if the breadth grid has already landed for those pairs.
 ```bash
 cd $QSAR/slurm_scripts_uncertainty_rerun
 rm -f unc_*.sh submit_all.sh && python generate_scripts.py
-ACCT=stat-cadd PART=$PART bash submit_all.sh          # 6 arrays, 27 tasks each
+ACCT=stat-cadd PART=long bash submit_all.sh          # 6 arrays, 27 tasks each
 ```
 
 Gaussian, grouped-wider and grouped-shifted, on logD, Caco-2 and hERG. These are the laboratory's
@@ -11311,8 +11318,9 @@ out-of-fold pass — the aleatoric/epistemic decomposition included, which is no
 gets the same rows inline from its own grid, decided per task by a case statement on the
 representation, so **there is no QM9 uncertainty submission**.
 
-This is the one place `$PART` (medium) is used; the longest wall here is 47:59:00. The scripts
-carry no `#SBATCH --partition` and refuse to start without one on the sbatch line.
+`PART=long`, not `$PART`. The longest wall here is 193:59:00 and five of the six run past
+`medium`'s 48 hours (§13.27 D1). The scripts carry no `#SBATCH --partition` and refuse to start
+without one on the sbatch line.
 
 #### STEP 6b — the uncertainty runs, part two: the four that follow. **6 jobs, 216 tasks.**
 
@@ -11330,7 +11338,7 @@ python generate_scripts.py \
     --conditions censoring student_t_nu5 outlier_p10 laplace \
     --out-dir $QSAR/slurm_scripts_uncertainty_depth
 cd $QSAR/slurm_scripts_uncertainty_depth
-ACCT=stat-cadd PART=$PART bash submit_all.sh          # 6 arrays, 36 tasks each
+ACCT=stat-cadd PART=long bash submit_all.sh          # 6 arrays, 36 tasks each
 ```
 
 The generator warns that gaussian is not in this run and therefore has no clean reference of its
@@ -11742,6 +11750,11 @@ measured on the same data by the depth run.
 submission asks 1-05:59 again.
 
 ### 13.23c `gauche_rbf` — fix or drop
+
+⚠️ **SUPERSEDED 2026-09-07 by §13.27 D2.** The cause is one bug, fixed at `c223ec3` and
+proved by running the pipeline; it is not a property of the model at noise level 1.5, and the
+three options below are no longer the choice. The re-priced walls are in D2c. Read D2 first;
+what is left here is the record of what was believed before it.
 
 **What is known, all measured:**
 
@@ -15446,17 +15459,361 @@ this section is a sheet the author pastes into a terminal.
 **Nothing may be deleted by an assistant.** A delete line is written here with its reason and
 its evidence, and the author runs it. A result deleted in error costs days.
 
-#### D1. What is asking for the wrong wall or memory — CHAT 1
+#### D1. What is asking for the wrong wall or memory — CHAT 1, filled 2026-09-07
 
-| submission | asks | measured | verdict | command |
+**How the "asks" column was got.** Not typed, and not read off a document. Each generator was
+run twice: once from the commit that was live when that submission went out, and once from the
+branch tip. The two `.sh` files were then compared. The commits are `f52bdab` for the QM9 screen
+of 2026-09-02, `87cc49c` for the QM9 main grid of 2026-09-04 — the commit §13.18 names for it —
+and `0f9d89d` for everything submitted on 2026-09-06, which is the last commit that touched any
+generator before 2026-09-07.
+
+**Memory is one number now: 64 GB on both grid pipelines.** The highest memory any task in this
+study has ever recorded is 4.2 GB, over roughly 1,400 completed tasks (§13.28, sacct MaxRSS,
+2026-09-07 — measured then, not re-measured today). The 96G tier in `model_memory.json` is empty
+from today and the eighteen models on it moved to 64G, which is the author's floor and about
+fifteen times the worst reading. 64 GB is also exactly the ARC nodes' 8 GB per core at 8 cores, so
+a task this size drops into an ordinary idle slot; 96 GB asks for 12 cores' worth and 128 GB for
+16. **The uncertainty runs did not move and stay at 96 GB** — not one of their tasks has started,
+so that pipeline still has no reading of its own. To put a model back: `scontrol update
+JobId=<id> MinMemoryNode=98304`, in place, keeping the queue position.
+
+**All three generators price their walls from measurement.** The QM9 one reads `model_hours.json`;
+the laboratory one computes from its own seconds-per-fit table; the uncertainty one imports that
+table rather than keeping a second copy. HANDOFF item 4 — "two of the three still use times typed
+by hand" — was true before `eb08bb8` and is not true now. **Chats 2, 3 and 5 are not waiting on
+this chat for anything.**
+
+##### The wall clock, per submission
+
+One row is one array, which is one model. The wall covers every task in the array, so it is the
+worst task in it. Hours are wall clock.
+
+| submission | job ids | model | asks | new | change |
+|---|---|---|---|---|---|
+| QM9 screen | 12971618 | `gauche_rbf` | 42:59 | **15:59** | cut |
+| QM9 main grid | 12980577 | `ngboost` | 476:59 | **285:59** | cut |
+| QM9 main grid | 12980582 | `dnn_bnn_full_variational` | 348:59 | **10:59** | cut |
+| QM9 main grid | 12980588 | `mlp_bnn_full_mve` | 297:59 | **12:59** | cut |
+| QM9 main grid | 12980587 | `dnn_bnn_full_mve` | 194:59 | **17:59** | cut |
+| QM9 main grid | 12980590 | `gauche_rbf` | 374:59 | **133:59** | cut |
+| QM9 main grid | 12980584 | `heteroscedastic_gp` | 125:59 | **10:59** | cut |
+| QM9 main grid | 12980585 | `dnn_bnn_full_variational_hetero` | 88:59 | **6:59** | cut |
+| QM9 main grid | 12980586 | `mlp_bnn_full_variational_hetero` | 86:59 | **9:59** | cut |
+| QM9 main grid | 12980591 | `gauche` | 63:59 | **2:59** | cut |
+| QM9 main grid | 12980583 | `mlp_bnn_full_variational` | 57:59 | **6:59** | cut |
+| QM9 main grid | 12980581 | `mlp_bnn_full` | 33:59 | **4:59** | cut |
+| QM9 main grid | 12980580 | `dnn_bnn_full` | 22:59 | **5:59** | cut |
+| QM9 main grid | 12980573 12980574 12980575 12980578 12980579 | `rf` `xgboost` `lgb` `dnn` `mlp` | 3:59–9:59 | **2:59–5:59** | cut |
+| QM9 deep run | 12986318 | `ngboost` | 529:59 | **317:59** | cut |
+| QM9 deep run | 12986323 | `dnn_bnn_full_variational` | 387:59 | **12:59** | cut |
+| QM9 deep run | 12986326 | `gauche_rbf` | 416:59 | **148:59** | cut |
+| QM9 deep run | 12986332 | `mlp_bnn_full_mve` | 330:59 | **13:59** | cut |
+| QM9 deep run | 12986331 | `dnn_bnn_full_mve` | 215:59 | **18:59** | cut |
+| QM9 deep run | 12986328 | `heteroscedastic_gp` | 139:59 | **11:59** | cut |
+| QM9 deep run | the other twelve arrays | | 4:59–98:59 | **2:59–10:59** | cut |
+| QM9 censoring | 12986333–12986351 | the same nineteen models | same as the deep run | same as the deep run | cut |
+| laboratory breadth grid | 12971620–12971638 | all nineteen | 3:00–97:00 | **unchanged** | memory only |
+| laboratory depth run | 12986352–12986370 | all nineteen | 3:00–193:00 | **unchanged** | memory only |
+| laboratory censoring | 12986371–12986389 | all nineteen except `svm` | 2:00–33:00 | **unchanged** | memory only |
+| uncertainty runs | 12986390–12986401 | all six, both submissions | 36:59 and 47:59 | **40:59–193:59** | ⚠️ every one too small |
+
+##### Three arrays ask for LESS than the rule now says, and `scontrol` cannot raise a limit
+
+Lowering a limit is allowed to the owner and keeps the submit time. Raising one is not, so these
+are cancel-and-resubmit or nothing.
+
+| job | model | asks | longest task measured | margin | rule now says |
+|---|---|---|---|---|---|
+| 12980589 | `qrf`, QM9 main grid | 26:59 | 20:52 | 1.29× | 42:59 |
+| 12986325 | `qrf`, QM9 deep run | 29:59 | 20:52 | 1.44× | 47:59 |
+| 12986344 | `qrf`, QM9 censoring | 29:59 | 20:52 | 1.44× | 47:59 |
+| 12986386 | `val_svm`, laboratory censoring | 1:00 | 0:54 | 1.13× | 2:00 |
+
+A fifth, `12980576` `svm` on the QM9 main grid, asks 3:59 where the rule now says 4:59. Its
+longest measured task is 1:43, so 3:59 is already 2.3× that. **Leave it.** The rule's extra hour
+is rounding, and taking it would mean resubmitting eighteen tasks that are already in the queue.
+
+`qm90_qrf` on the QM9 screen asks 3:59 against a longest task of 2:25, which is 1.66×. Whether
+anything is left to do there depends on whether that array has finished; the block below prints it.
+
+##### The uncertainty runs are queued with walls that are too short — all twelve arrays
+
+This is the largest thing found today. The 378 tasks went out on 2026-09-06 with five hand-typed
+constants: 36 hours for the quantile forest and 47 for the other five. Nothing computed them.
+Generating the three-condition submission and the four-condition one produced the same numbers, and
+`--oof-folds` — the flag that multiplies the fit count — did not move them at all.
+
+One uncertainty task is one dataset, one representation and one condition. It sweeps seven noise
+levels; each level is five outer scaffold folds, and each outer fold refits the model five more
+times so every training molecule gets a score from a model that never saw it. That is
+7 × 5 × (1 + 5) = **210 fits**, against 35 for one laboratory grid task.
+
+| array | model | asks | needs | worst dataset |
 |---|---|---|---|---|
-| _to be filled_ | | | | |
+| 12986391, 12986397 | NGBoost | 47:59 | **193:59** | logD |
+| 12986393, 12986399 | VBLL-Full | 47:59 | **91:59** | logD |
+| 12986395, 12986401 | MLP-BNN-Full-MVE | 47:59 | **78:59** | logD |
+| 12986392, 12986398 | GP | 47:59 | **68:59** | logD |
+| 12986394, 12986400 | BNN-Full-MVE | 47:59 | **51:59** | logD |
+| 12986390, 12986396 | QRF | 36:59 | **40:59** | logD |
+
+**And five of the six cannot run on `medium` at all**, whose ceiling is 48 hours. They were
+submitted to `medium`. §13.19 STEP 6 and STEP 6b say `PART=$PART`, which `runenv.sh` sets to
+`medium`; that is now wrong and is corrected in those steps.
+
+Nothing is lost by cancelling them: not one of the 378 has started. What is lost is queue
+position, and a wall this short buys a task that dies at it with no partial credit.
+
+`--oof-outer-folds 1` cuts the out-of-fold half roughly threefold and is the lever if `long` will
+not take a 194-hour request. That changes what the run measures, so it is the author's call, not a
+scheduling detail.
+
+##### None of the 378 uncertainty tasks is a no-op. §13.27 D5 is wrong on this.
+
+D5 says the Gaussian process runs on PDV alone, so its ECFP4 and ChemBERTa jobs start and stop
+straight away, and nobody had counted how many. Read today: `MODEL_REPS` in
+`slurm_scripts_uncertainty_rerun/generate_scripts.py` is **empty** — the author lifted the one
+restriction it held on 2026-09-01 — and every generated Gaussian-process task passes
+`--gp-reps "$rep"`, naming its own representation. The runner's default of PDV only applies when
+that flag is absent (`alternative_data_noise_robustness.py:3267`). The representation strings match
+on both sides, `ECFP4`, `PDV`, `ChemBERTa`. **All 378 do real work.** So "none of them have
+started" means what it says.
+
+##### The one thing on disk that was stale
+
+The six `unc_*.sh` in `slurm_scripts_uncertainty_rerun` were the hand-typed version, and
+`preflight.sh` and `merge_results.py` both read the run design out of those files rather than out
+of the generator. `test_generated_scripts_match_generator.py` reported all six as disagreeing.
+Regenerated; the check passes.
+
+##### THE BLOCK. Three parts, in order.
+
+Part 1 prints what the cluster says before anything changes, and it is also the safety check: a
+`TimeLimit` cut below what a running task has already used ends that task on the spot. If the last
+command prints any row, do not run part 2 for that job — tell me which.
+
+```bash
+squeue -u $USER -o "%.12i %.30j %.2t %.11M %.11l %.7m %R" | head -60
+
+sacct -S 2026-09-02 -X -n -P --format=JobID,JobName,State,Elapsed,ReqMem,MaxRSS \
+  | awk -F'|' '$3=="RUNNING"' | sort -t'|' -k4,4r | head -20
+```
+
+Part 2 cuts every wall that comes down. Free: a lower limit keeps the submit time, and therefore
+the queue position.
+
+```bash
+for j in 12980574 12980575 12980579 12980591 12986315 12986327 12986334 12986346; do scontrol update JobId=$j TimeLimit=2:59:00; done
+for j in 12980578 12986316 12986319 12986320 12986335 12986338 12986339; do scontrol update JobId=$j TimeLimit=3:59:00; done
+for j in 12980581 12986322 12986341; do scontrol update JobId=$j TimeLimit=4:59:00; done
+for j in 12980573 12980580 12986314 12986321 12986333 12986340; do scontrol update JobId=$j TimeLimit=5:59:00; done
+for j in 12980583 12980585; do scontrol update JobId=$j TimeLimit=6:59:00; done
+for j in 12986324 12986329 12986343 12986348; do scontrol update JobId=$j TimeLimit=7:59:00; done
+for j in 12980586; do scontrol update JobId=$j TimeLimit=9:59:00; done
+for j in 12980582 12980584 12986330 12986349; do scontrol update JobId=$j TimeLimit=10:59:00; done
+for j in 12986328 12986347; do scontrol update JobId=$j TimeLimit=11:59:00; done
+for j in 12980588 12986323 12986342; do scontrol update JobId=$j TimeLimit=12:59:00; done
+for j in 12986332 12986351; do scontrol update JobId=$j TimeLimit=13:59:00; done
+for j in 12971618; do scontrol update JobId=$j TimeLimit=15:59:00; done
+for j in 12980587; do scontrol update JobId=$j TimeLimit=17:59:00; done
+for j in 12986331 12986350; do scontrol update JobId=$j TimeLimit=18:59:00; done
+for j in 12980590; do scontrol update JobId=$j TimeLimit=133:59:00; done
+for j in 12986326 12986345; do scontrol update JobId=$j TimeLimit=148:59:00; done
+for j in 12980577; do scontrol update JobId=$j TimeLimit=285:59:00; done
+for j in 12986318 12986337; do scontrol update JobId=$j TimeLimit=317:59:00; done
+```
+
+Part 3 is memory, and it is one loop because the answer is now the same everywhere: 64 GB on both
+grid pipelines. `MinMemoryNode` takes megabytes as a plain integer — `MinMemoryNode=64G` is
+rejected. 65536 is 64 GB. The range stops at 12986389 on purpose: 12986390 upwards are the
+uncertainty arrays and they keep 96 GB.
+
+```bash
+for j in $(seq 12971601 12971638) 12975687 $(seq 12979965 12979969) \
+         $(seq 12980573 12980591) $(seq 12986314 12986389); do
+    scontrol update JobId=$j MinMemoryNode=65536 2>/dev/null
+done
+```
+
+##### Prove it took
+
+```bash
+squeue -u $USER -o "%.12i %.30j %.2t %.11M %.11l %.7m %R" | head -60
+for j in 12980577 12980590 12986318 12986326 12971618; do
+    printf "%s  " $j; scontrol show job $j | grep -o 'TimeLimit=[^ ]*'; done
+```
+
+Every row of `%.7m` must read `64G`, and no `%.11l` in the QM9 rows may still show a figure in
+days except `ngboost` and `gauche_rbf`.
+
+##### What is left, and who owns it
+
+- **Resubmit the three `qrf` arrays and `val_svm` censoring.** They cannot be raised in place.
+  12980589, 12986325, 12986344 and 12986386. Regenerate the scripts first from the pushed commit
+  and use `submit_all.sh`, never a typed array range. Any `qrf` task already RUNNING should be
+  left alone — cancelling it throws away the hours it has done.
+- **The twelve uncertainty arrays need cancelling and resubmitting to `long`.** Chat 3 owns
+  whether they run at all; the numbers are here.
+- **`gauche_rbf`'s screen array, 12971618**, is in part 2 above at 15:59 and in part 3 at 64 GB.
+  Chat 2 owns the rest of that model.
 
 #### D2. What failed, why, and the line that puts it back — CHAT 2
 
+**Filled 2026-09-07.** One model, `gauche_rbf`. One cause behind every failure, already fixed
+and now proved by running the real pipeline on this laptop.
+
 | submission | tasks | cause | cause fixed at | command |
 |---|---|---|---|---|
-| _to be filled_ | | | | |
+| QM9 main grid, 12980590 `qm91_gauche_rbf` | 8 failed | the out-of-fold pass was handed 5,000 fitted molecules while the noise record still described all 8,000, and the guard refused | `c223ec3`, pushed on `additional_reps` | pull, then `python scripts/failed_tasks.py --emit-sbatch` and paste what it prints |
+| QM9 deep run, 12986326 `qm92_gauche_rbf` | 4 in §13.23c, 12 in `HANDOFF.md` — **not confirmed either way**, the count needs `sacct` | same cause | `c223ec3` | as above |
+| QM9 screen, 12971618 `qm90_gauche_rbf` | 18, none started since 2026-09-02 | not a code fault: the request is too large to backfill | — | `scontrol update JobId=12971618 TimeLimit=15:59:00` and `MinMemoryNode=64G` |
+
+#### D2a. The cause, and the proof that the fix holds
+
+`cap_gp_training_set` subsamples an exact Gaussian process to 5,000 training molecules,
+because the fit is cubic in that count. QM9 trains on 8,000, so it fires on every task, at
+every noise level. It used to return only the count and throw away which molecules it kept,
+so the out-of-fold pass asked the noise record for 8,000 rows to go with 5,000 fitted ones and
+the guard refused rather than pairing them by position. `c223ec3` returns the kept indices and
+both Gaussian-process fitters pass them as the row selection.
+
+**Run twice on this laptop, 2026-09-07, on real QM9 through `process_and_train.py`.** 400
+molecules, 320 of them training, with the cap lowered from 5,000 to 120 so the subsample fires
+at that size. Everything else is the pipeline as it runs on the cluster: the real splitter,
+the real Rust injector, the real per-molecule provenance file, the real out-of-fold pass.
+
+| | with the argument the code used before `c223ec3` | as the code stands now |
+|---|---|---|
+| exit code | 1 | 0 |
+| accuracy rows written | 2 | 2 |
+| R² at noise level 0.0 | 0.647856 | 0.647856 |
+| R² at noise level 1.5 | 0.549632 | 0.549632 |
+| test uncertainty rows | 80 | 80 |
+| out-of-fold training rows | **0** | **240** (120 molecules at each of two levels, 5 of 5 inner folds) |
+
+The pre-fix run raised the cluster's error verbatim: *"out-of-fold scoring for gauche_rbf: the
+model fits 120 rows but the recorded noise covers 320."* Scripts:
+`scripts/test_gp_cap_matches_noise.py` is the committed test, 13 checks, no cluster needed.
+
+**Three things this corrects.**
+
+1. **It is not a level-1.5 failure.** The pre-fix run failed at noise level 0.0 as well.
+   `process_and_train.py` catches the error per (noise level, replicate), records it and exits
+   1 at the end, so the *"level 1.5, replicates 8 and 9"* in §13.23c is the tail of a list of
+   every cell, not the only cells that broke.
+2. **The accuracy rows were NOT lost.** Both runs wrote the same two rows, to the last digit.
+   `c223ec3`'s message says those tasks lost their accuracy rows too; they did not. What was
+   lost is the out-of-fold uncertainty rows for the training molecules, and nothing else.
+3. **Only `gauche_rbf` is affected on QM9.** `c223ec3` describes the defect as reaching
+   `gauche` and `heteroscedastic_gp` as well. It does in the code, but neither ever runs the
+   out-of-fold pass in a generated job: both write `OOF_FLAGS=""`, because neither is in
+   `uncertainty_pairs.json`. Read off scripts generated on this laptop at `332bc09`.
+
+**Which tasks should have failed on the main grid.** The generated script picks
+`rep=REPS[i % 6]` with `REPS=(ecfp4 pdv mhggnn avalon chemberta sns)`, and the out-of-fold
+pass runs on ECFP4, PDV and ChemBERTa. So the tasks that can carry this cause are the nine
+indices 0, 1, 4, 6, 7, 10, 12, 13 and 16. Eight are reported failed. Which of the nine is not
+is a `sacct` question, in the block below.
+
+**A resubmission appends, it does not replace.** `save_results` opens the file in append mode
+(`scripts/utils.py:161`), and every stage writes to the same
+`results/anova_<condition>_<representation>_gauche_rbf.csv`. The failed tasks already wrote
+their accuracy rows, so resubmitting gives that file a second copy of every (noise level,
+replicate) row for that pair. The loader keeps the later row, so no number changes — but it is
+the same shape as the duplicate no-noise row §13.28 found, and it will trip `copy_zero_rows.py`
+the same way. Two ways to take it, and it is the author's call:
+
+- **Resubmit as is.** Costs nothing now; leaves duplicate accuracy rows that `copy_zero_rows.py`
+  reads as a divergence until §13.28's fix to that script lands.
+- **Delete this model's rows from those files first, then resubmit.** A row-level delete, not a
+  file delete — the same files hold the screen's rows. Nothing is deleted by an assistant; the
+  line goes here with its reason and the author runs it.
+
+#### D2b. The screen array, and the order it has to happen in
+
+`qm90_gauche_rbf`, job 12971618, eighteen tasks, queued since 2026-09-02 on Priority. The
+generator at `332bc09` now asks **15:59:00 and 64G**; §13.23c and `HANDOFF.md` record the
+queued request as 1-18:59 and 128G, **neither of which has been read off the cluster in this
+session** — the block below reads them.
+
+**Pull before cutting the wall.** Nine of those eighteen tasks run on ECFP4, PDV or ChemBERTa,
+which is where the out-of-fold pass runs. A task reads the checkout when it starts. If the cut
+lets them start before `bash scripts/pull_safely.sh` has brought `c223ec3` in, those nine die
+the way the main grid's did.
+
+#### D2c. What `gauche_rbf` actually costs, now that it has been re-priced
+
+Its case for staying rests on the largest separation of the two uncertainty terms in the
+roster: aleatoric ×17.2 against epistemic ×1.5, on PDV at 3,000 molecules, from the
+standardised re-measurement of 2026-08-31 (§5.5i). Both grounds ever offered for dropping it
+are now false.
+
+- *"It has never run."* It has four completed tasks on the QM9 main grid (`model_hours.json`,
+  measured 2026-09-07).
+- *"It is worth 17 days."* 17 days was the request, not the cost. Generated on this laptop at
+  `332bc09`:
+
+| submission | requested when queued (per §13.23c, unverified) | the generator asks now |
+|---|---|---|
+| screen | 1-18:59 | 15:59:00 |
+| main grid | 15-14:59 | 133:59:00 |
+| deep run | 17-08:59 | 148:59:00 |
+| censoring | 17-08:59 | 148:59:00 |
+
+The 133 and 148 hours are still priced off a laptop fit at a three-times margin, because
+nothing has yet measured the expensive path: the out-of-fold pass costs six fits per training
+run and the four tasks that completed are the cheap ones. The first task that finishes under
+`c223ec3` measures it, and `scripts/measure_walls.py` then tightens both.
+
+On chat 4's Gaussian-process slot, one fact from the generated scripts rather than from the
+roster: `gauche` writes `OOF_FLAGS=""`, so it scores no training molecule out of fold at all.
+Swapping it in for `gauche_rbf` does not move the per-molecule uncertainty to a different
+Gaussian process — it removes it. See §13.27 D4a.
+
+#### D2d. The block to paste — chat 2's questions, all of them
+
+```bash
+# 1. Is the fix in the checkout the jobs read?
+cd /data/stat-cadd/scat9264/qsar_qm_models && git log --oneline -1 && \
+  git merge-base --is-ancestor c223ec3 HEAD && echo "c223ec3 IS in" || echo "c223ec3 IS NOT in"
+
+# 2. What did gauche_rbf's tasks actually do, on all three submissions?
+sacct -j 12971618,12980590,12986326 -X -n -P \
+  --format=JobID,JobName,State,Elapsed,Timelimit,ReqMem,MaxRSS | sort
+
+# 3. The failure text, from one main-grid task and one deep-run task
+tail -25 slurm_scripts_qm9_rerun/qm91_gauche_rbf_12980590_0.out
+tail -25 slurm_scripts_qm9_rerun/qm92_gauche_rbf_12986326_0.out
+
+# 4. What the screen array is asking for, and why it has not started
+squeue -j 12971618 -o "%.14i %.22j %.2t %.11l %.7m %R" | head -5
+
+# 5. What those tasks already wrote, so the append question can be answered
+ls -la results/anova_*_gauche_rbf.csv
+```
+
+Then, once 1 says the fix is in:
+
+```bash
+# 6. cut the screen's wall and memory -- both keep the queue position
+scontrol update JobId=12971618 TimeLimit=15:59:00
+scontrol update JobId=12971618 MinMemoryNode=64G
+squeue -j 12971618 -o "%.14i %.22j %.2t %.11l %.7m %R" | head -5
+
+# 7. the resubmission lines for the failed tasks, printed rather than typed
+python scripts/failed_tasks.py --emit-sbatch | grep -A2 gauche_rbf
+```
+
+`scripts/fixed_causes.json` carries the entry `gp-cap-noise-length-mismatch` tied to
+`c223ec3`, so step 7 prints a resubmission line only from a checkout that has the fix, and
+prints a refusal from one that does not.
+
+**Chat 2 is not finished.** Nothing above has been read off the cluster in this session. It
+closes when the screen array shows the new limits in `squeue`, the failed tasks are running
+under `c223ec3`, and `python scripts/check_runs_landed.py --stage 1 --verbose` and `--stage 2`
+report no `gauche_rbf` cell MISSING or PARTIAL.
+
 
 #### D3. What is on disk and must be deleted or rewritten — CHAT 3
 
