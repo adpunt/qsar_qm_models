@@ -65,6 +65,68 @@ def save(fig, path, dpi=300):
     return path
 
 
+#: Reserve this much of the figure height for a legend placed below it.
+#: `plt.tight_layout(rect=[0, LEGEND_MARGIN, 1, 1])` in the old script, with the
+#: comment that 6% overlapped the x-axis ticks and the axis title.
+LEGEND_MARGIN = 0.09
+
+
+def shared_legend(fig, sources, ncol=4, extra=None, margin=None):
+    """ONE legend, below the whole figure, reading left to right.
+
+    Per-panel legends inside the axes cover the data -- with nineteen models
+    they cover most of it -- and repeating the same models in three panels eats
+    the plot area three times. The old script says so in as many words: "single
+    shared legend below all three panels (per-panel legends were redundant and
+    ate plot area)".
+
+    matplotlib fills a multi-column legend column-major, so the handles are
+    permuted first or the list reads down instead of across.
+    """
+    handles, labels = [], []
+    for ax in (sources if isinstance(sources, (list, tuple)) else [sources]):
+        h, l = ax.get_legend_handles_labels()
+        for handle, label in zip(h, l):
+            if label not in labels:
+                handles.append(handle)
+                labels.append(label)
+    if extra:
+        handles += [h for h, _ in extra]
+        labels += [l for _, l in extra]
+    if not handles:
+        return None
+    ncol = min(ncol, len(labels))
+    rows = -(-len(handles) // ncol) if ncol > 1 else len(handles)
+
+    def colmajor(items):
+        if ncol <= 1:
+            return list(items)
+        out = []
+        for c in range(ncol):
+            for r in range(rows):
+                i = r * ncol + c
+                if i < len(items):
+                    out.append(items[i])
+        return out
+
+    legend = fig.legend(colmajor(handles), colmajor(labels), loc='lower center',
+                        bbox_to_anchor=(0.5, 0.005), ncol=ncol, frameon=False,
+                        fontsize=8, columnspacing=1.2, handletextpad=0.4)
+    # Reserve exactly the band the legend occupies, and no more. Reserving a
+    # fixed fraction per row left a hand's width of white between the axes and
+    # a five-row key.
+    used = margin if margin is not None else 0.032 * max(rows, 1) + 0.03
+    fig.tight_layout(rect=[0, min(used, 0.34), 1, 1])
+    return legend
+
+
+def stat_box(ax, text, x=0.03, y=0.95):
+    """A statistic printed ON a panel, in a box so it stays readable over data."""
+    ax.text(x, y, text, transform=ax.transAxes, fontsize=8, va='top',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85,
+                      edgecolor='#CCCCCC'))
+
+
 def _order_legend(ax, ncol, **kwargs):
     """matplotlib fills legends column-major, which scrambles a logically
     ordered list. This restores reading order."""
@@ -110,8 +172,12 @@ def line_chart(ax, frame, x, y, series, spread=None, labeller=None,
                                      observed=True):
         group = group.sort_values(x)
         colour = (colours or {}).get(name, C.model_color(name))
-        ax.plot(group[x], group[y], marker=(markers or {}).get(name, 'o'),
-                markersize=3.5, color=colour, label=labeller(name))
+        # A marker per model, not a colour alone. Variants of one family SHARE a
+        # colour on purpose, so with nineteen models the marker is what tells
+        # two lines apart -- and it survives being printed in greyscale.
+        marker = (markers or {}).get(name, C.model_marker(name))
+        ax.plot(group[x], group[y], marker=marker, markersize=4,
+                linewidth=1.4, alpha=0.85, color=colour, label=labeller(name))
         if spread and spread in group.columns:
             band = group[spread].to_numpy(dtype=float)
             ax.fill_between(group[x], group[y] - band, group[y] + band,
@@ -147,7 +213,7 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
 
     if series is None:
         ax.scatter(frame[value], [position[r] for r in frame[row]],
-                   s=26, color=C.CLEAN_COLOR, zorder=3)
+                   s=50, alpha=0.7, color=C.CLEAN_COLOR, zorder=3)
         if spread_low and spread_high:
             for _, r in frame.iterrows():
                 ax.plot([r[spread_low], r[spread_high]],
@@ -156,8 +222,8 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
     else:
         for name, group in frame.groupby(series, dropna=False, sort=False,
                                          observed=True):
-            ax.scatter(group[value], [position[r] for r in group[row]], s=26,
-                       label=labeller(name), zorder=3,
+            ax.scatter(group[value], [position[r] for r in group[row]], s=50,
+                       alpha=0.7, label=labeller(name), zorder=3,
                        color=(colours or {}).get(name, C.model_color(name)))
         _order_legend(ax, legend_ncol, loc='best', fontsize=8)
 

@@ -309,6 +309,17 @@ def draw_figures(args, tables, verdicts):
     """
     out = Path(args.output_dir) / 'figures'
     print(f'[3/3] drawing into {out}')
+    # Clear first. A figure that stopped being produced -- because the panels
+    # were split, or a slot was renamed -- otherwise sits there from the last
+    # run and gets pulled and read as current. That happened: F8 was split into
+    # three files and the old single-panel version was still on disk beside them.
+    if out.is_dir():
+        stale = sorted(out.glob('*.png'))
+        for path in stale:
+            path.unlink()
+        if stale:
+            print(f'  removed {len(stale)} figure(s) from the previous run, so '
+                  f'nothing that is no longer produced is left behind')
     qm9 = tables.get('auc_norm_qm9')
     assay = tables.get('auc_norm_assay')
     accuracy = tables.get('_qm9_accuracy')
