@@ -35,8 +35,24 @@
         "representation": "sns",
         "why": "The generated script picks the representation with REPS[i % n_rep] (slurm_scripts_qm9_rerun/generate_scripts.py, the `rep=` line), so the tasks this cause touches are every index whose remainder is Sort & Slice's position in REPS. The position is read off the generated script where it is on disk; the two numbers below are used only when it is not, and they are the six representations in their generated order with Sort & Slice last.",
         "assumed_modulus": 6,
-        "assumed_residues": [5]
+        "assumed_residues": [
+          5
+        ]
       }
+    },
+    {
+      "id": "gp-cap-noise-length-mismatch",
+      "what": "An exact Gaussian process is cubic in its training count, so cap_gp_training_set subsamples to GP_DEFAULTS['max_train_n'] -- 5,000 of QM9's 8,000 training molecules, on every representation and at every noise level. It returned only the COUNT and threw the selection away, so the caller handed the out-of-fold pass 5,000 rows while the noise record still described all 8,000, and the guard refused rather than pairing them by position. The whole (noise level, replicate) cell was then lost, accuracy rows included, and the task exited non-zero.",
+      "fix": "The cap returns the indices it kept and both Gaussian-process fitters pass them to the out-of-fold scorer as train_slice, so the rows scored and the noise recorded for them are the same molecules in the same order.",
+      "commit": "c223ec3",
+      "proof": "python scripts/test_gp_cap_matches_noise.py",
+      "error_source": "models/models.py",
+      "error_matches": [
+        "out-of-fold scoring for"
+      ],
+      "job_name_matches": "^qm9[0-9]_(gauche|gauche_rbf|heteroscedastic_gp)$",
+      "no_task_rule_why": "There is deliberately no position fallback. The cause touches whichever representations run the out-of-fold pass, which is three of the main grid's six and all three of the deep run's -- more than one remainder, which the qm9_representation rule cannot express. The QM9 .out files are on disk and readable, which is the case this entry is for; a Gaussian-process task whose log cannot be read gets no resubmission line, and that is the safe answer rather than a guess at its index.",
+      "not_the_laboratory_pipeline": "KIRBy's runner does not call cap_gp_training_set at all -- it loads models/model_defaults.py only for the shared parameter spec -- so its GP fits the whole training set and never had this failure. val_gp, val_gp-hetero and val_gp-tanimoto are therefore NOT matched here."
     }
   ]
 }
