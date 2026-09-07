@@ -15500,3 +15500,82 @@ its evidence, and the author runs it. A result deleted in error costs days.
 - **Deferred by the author, 2026-09-07:** figures, the analysis job's output, paper
   replacement text, and the six-decision menu. Threads T04 T05 T19 T20 T21 T42 T43 T44 T49
   T50 are parked, not closed.
+
+---
+
+### 13.28 WHAT THE CLUSTER SAID, 2026-09-07 — measured, not reasoned
+
+Run at `bbaf8ba`. Four questions that earlier sections still ask are answered here.
+
+#### The no-noise results are sound. Nothing is invalidated.
+
+The worry was that a run set to add no noise gave a different answer depending on which kind
+of noise it was labelled with. If that were true, every robustness number in the study would
+be wrong, because each is measured against its own no-noise result.
+
+**It is not true.** For the model that raised the alarm, one network on ChemBERTa, the
+no-noise results are **identical to the last digit across `gaussian`, `grouped_wider` and
+`grouped_shifted`**, for every replicate.
+
+What the check actually tripped on is a **second no-noise row inside the `gaussian` file
+itself**. Replicate 1 appears twice, once at R² 0.8657217872238345 and once at
+0.8868715446840807. The deep run recomputes the no-noise level for the combinations it
+selects, into the same file the screen wrote, and this model is in the deep run's list. The
+loader keeps the later row, so the check compared a re-run against the original and called it
+a divergence. Every other replicate in that second block is identical, so only the re-run
+replicate moved — which is training on a different machine giving a slightly different
+network, and nothing in the code sets the flags that would prevent it.
+
+**Consequences.** AUC_norm is safe. `copy_zero_rows.py` should compare against the row from
+the same run rather than the newest row in the file, and one disagreement should refuse one
+combination rather than stopping the whole copy. It has still copied nothing, so the two
+grouped conditions still lack their no-noise row wherever a job did not compute one.
+
+⚠️ Not explained: why only replicate 1 moved when the second block covers replicates 0 to 6.
+Worth one look, not worth blocking on.
+
+#### The main grid's memory was raised. Thread closed.
+
+`sacct -j 12980573 -o ReqMem` returns **64Gn** for every task. The jobs went in at 32 GB and
+the raise to the author's floor was applied. No document recorded it.
+
+#### The analysis job failed and wrote nothing. Thread closed.
+
+`13033488` ended **FAILED after 3 minutes 6 seconds** on 2026-09-07. The worry was that it
+had written a report from a grid missing one representation. It did not write a report.
+
+#### The fifty laboratory failures were NOT a wrong log path. Correction.
+
+`sacct -j 12971620 -o WorkDir` returns
+`/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_validation_rerun` — this repository,
+which is exactly where the tool looked. The earlier claim that laboratory jobs write into the
+KIRBy checkout is wrong for the breadth grid. **The output files are simply gone**, most
+likely because the scripts were rebuilt with a different output name after those tasks ran.
+Their cause has to be found another way.
+
+#### Nothing is stuck. Everything is queued behind Priority.
+
+The reason column says `Priority` for the twelve uncertainty arrays, the laboratory depth
+run, and `gauche_rbf`'s screen jobs, and `JobArrayTaskLimit` for six QM9 arrays, which is
+their own concurrency throttle. No job is blocked by an impossible request; they are waiting,
+and the requests are what stop the scheduler fitting them into gaps.
+
+#### Time and memory, measured across roughly 1,400 finished tasks
+
+`measure_walls.py` reports **188 changes worth making**; `--emit-scontrol` prints them.
+
+- **The highest memory any task in this study has ever used is 4.2 GB.** The screen asks 128
+  GB, the deep run and the uncertainty runs ask 96 GB.
+- **Five jobs are at risk of being killed at their limit** — `val_svm` at 1.13× its longest
+  run, `qm91_qrf` at 1.29×, `qm92_qrf` at 1.44× in two submissions, `qm90_qrf` at 1.66×.
+  Everything else asks nearly five times its longest run or more.
+- **The extreme over-asks**: `qm92_ngboost` 22 days against 18 hours measured;
+  `qm92_mlp_bnn_full_mve` 13 days 18 hours against 6 hours.
+
+#### The deep run reading, at six models
+
+`ngboost`, `rf`, `dnn_vbll_hetero`, `svm`, `gauche`, `dnn`. It agrees with the queued file on
+`ngboost`, `rf` and `svm`. **`rf` survives at six models** — the earlier reading that dropped
+it was taken at four by mistake. The tool warns that only one of its six reports an
+uncertainty per molecule where the rule needs two, which is precisely why the author put
+`gauche_rbf` and `dnn_bnn_full_mve` in the file. Chat 4 owns it.

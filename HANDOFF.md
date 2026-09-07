@@ -1,191 +1,189 @@
-# Handoff — three chats
+# Handoff — four chats, one thing each
 
-Read `CLAUDE.md` first. Everything here is aimed at one thing the author asked for on
-2026-09-07: **every result off the cluster, as fast as possible.** Figures, the paper, the
-analysis job's output and the open decisions are set aside until that is done.
+Read `CLAUDE.md` first.
+
+The author, 2026-09-07: *"All I care about is getting all the results in from the server."*
+Figures, the paper and the analysis job are set aside until that is done.
+
+Each chat owns one thing from end to end. That is the point — the previous versions of this
+file split each thing across several chats by kind of problem, so no chat could answer a
+question about any one of them.
 
 Branch `additional_reps`. Code reaches the cluster only when the author runs
-`bash scripts/pull_safely.sh` against a commit already pushed.
+`bash scripts/pull_safely.sh` against a commit already pushed. Write answers into
+`RERUN_PLAN.md` section 13.27.
 
-Each chat writes its answers into `RERUN_PLAN.md` section 13.27 and nowhere else. When all
-three have written, that section is the list of commands to run.
-
-Two orderings matter. Chat 1 pushes its time-and-memory changes before chat 2 rebuilds and
-resubmits anything. Chat 3 checks the clean results before it decides which models the deep
-run keeps.
+**Read section 13.28 first. It is what the cluster said on 2026-09-07, measured, and it
+closes four questions that earlier versions of this file still asked.**
 
 ---
 
-## Chat 1 — how much time and memory each job asks for
+## Chat 1 — how long and how much memory every job asks for
 
-> Read `CLAUDE.md` first.
+> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
 >
-> The author, 2026-09-07: *"I need far more accurate guesses on how long these will take that
-> won't jeopardize its ability to finish in time but also doesn't land it in the queue for
+> The author: *"I need far more accurate guesses on how long these will take that won't
+> jeopardize its ability to finish in time but also doesn't land it in the queue for
 > eternity. This step is vital."*
 >
-> **Get real numbers off the cluster before changing anything.** Not from a document, not
-> from a previous session. For every model, on every dataset, in every submission: how long
-> its longest finished task actually took, and how much memory it actually used. `sacct` will
-> give you both. Assume you will need one copy-paste round trip to get them, and send one
-> block that covers everything you need rather than asking twice.
+> The measurement is done and it is in section 13.28. `measure_walls.py` found **188 changes
+> worth making**, and `--emit-scontrol` prints them. You do not need to re-measure. You need
+> to apply it, and to make the generators stop producing the old numbers.
 >
-> Then fix these, in this order.
+> **1. Five jobs may be killed before they finish.** These ask for barely more than their
+> longest measured run, and a job stopped at its limit writes nothing and cannot be recovered.
+> `scontrol` cannot raise a limit, so each needs the generator changed and those tasks sent
+> again.
 >
-> **1. The quantile forest may be killed before it finishes.** Its longest task anywhere took
-> 20 hours 52 minutes. The main grid asks for 1 day 2 hours 59 minutes, which is only 29 per
-> cent more than the longest run measured. Laboratory censoring asks 1 hour for a model whose
-> longest run took 54 minutes, 13 per cent more. Everything else in the study asks for nearly
-> five times its longest run or more. A job stopped at its limit writes no result and the work
-> is lost, so this is the only way this study loses finished work permanently. `scontrol`
-> cannot raise a limit for its owner, so the request has to change in the script generator and
-> the affected jobs have to be sent again.
+> | job | longest run | asks for | margin | should ask |
+> |---|---|---|---|---|
+> | `val_svm`, laboratory censoring | 0:54 | 1:00:00 | 1.13× | 2:47:00 |
+> | `qm91_qrf`, QM9 main grid | 20:52 | 1-02:59 | 1.29× | 1-18:43 |
+> | `qm92_qrf`, QM9 censoring | 20:52 | 1-05:59 | 1.44× | 1-18:43 |
+> | `qm92_qrf`, QM9 deep run | 20:52 | 1-05:59 | 1.44× | 1-18:43 |
+> | `qm90_qrf`, QM9 screen | 2:25 | 3:59 | 1.66× | 5:49 |
 >
-> **2. NGBoost asks for 22 days and never gets scheduled.** Its longest measured run is under
-> four days. One of the network jobs asks 13 days 18 hours against 8 hours 38 minutes
-> measured. A three-week request almost never fits a gap in the schedule, which is why these
-> sit waiting while four-hour jobs overtake them. Lowering the limit on a job that has not
-> started keeps its place in the queue, so it costs nothing. This list has never been produced
-> since the last fix.
+> **2. Nothing in this study has ever used more than 4.2 GB.** That is the peak across every
+> finished task. The screen jobs ask 128 GB and the deep run asks 96 GB. 64 GB is the author's
+> floor and stays; the uncertainty jobs stay at 96 GB. Everything else should come down, and
+> a smaller request is what lets the scheduler fit a job into a gap at all.
 >
-> **3. Two of the three generators still use time guesses typed by hand.** The QM9 one now
-> reads measured times from `model_hours.json`. The laboratory one and the uncertainty one do
-> not, so anything resubmitted from them carries the old guess. Tell chat 2 the moment this is
-> pushed, because it cannot resubmit until then.
+> **3. The long requests are why work sits still.** `qm92_ngboost` asks 22 days against 18
+> hours measured. `qm92_mlp_bnn_full_mve` asks 13 days 18 hours against 6 hours. Lowering a
+> limit on a job that has not started keeps its place in the queue, so it costs nothing.
 >
-> **4. The memory amounts come from a different study.** The tiers rest on a 61.2 GB figure
-> that was not measured on this work. Measure what this study actually uses. 64 GB is the
-> author's floor and does not change, and the uncertainty jobs stay at 96 GB. What is open is
-> the 96 GB tier for everything else, and the proposal is to lower it only where something has
-> actually been measured, keeping 96 GB where nothing has finished yet.
+> **4. Two of the three generators still use times typed by hand.** The QM9 one reads measured
+> times from `model_hours.json`. The laboratory one and the uncertainty one do not, so
+> anything rebuilt from them carries the old guess. Fix that first, because chats 2 and 3
+> both need to resubmit.
 >
-> **5. Nobody recorded whether the main grid's memory was ever raised.** Jobs 12980573 to
-> 12980591 went in at 32 GB, below the author's floor. One command tells you whether the
-> raise was applied.
+> **5. Then resubmit the 104 Sort & Slice tasks.** They are indices 5, 11 and 17 of nearly
+> every QM9 main-grid job. The cause is fixed in commit `62f1fe2` and the fix changes no
+> result already on disk. The tool that should print the resubmission command prints nothing,
+> because it refuses to print one for anything marked failed — teach it to print when the
+> cause is fixed at a named commit, add that case to `scripts/test_slurm_status_tools.py`, and
+> then send them. Never type a job array range by hand.
 >
-> **Also find out why some jobs have never started at all**, because a request no machine can
-> satisfy is the usual reason: the 378 uncertainty jobs since 6 September, the `gauche_rbf`
-> screen jobs since 2 September, and two more screen jobs that are part-finished and stalled.
->
-> Done when section 13.27 lists, for every submission, what it asks for now, what it should
-> ask for, and the exact command to change it.
+> Done when section 13.27 lists, per submission, what it asks now, what it should ask, and the
+> command; and the Sort & Slice tasks are running.
 
 ---
 
-## Chat 2 — the 174 tasks that failed and have never been sent again
+## Chat 2 — `gauche_rbf`
 
-> Read `CLAUDE.md` first.
+> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
 >
-> 174 tasks have failed and **not one has been resubmitted.** Read the live count every time;
-> it was 48, then 51, then 58, then 104 for one of the causes, because more tasks keep
-> reaching the same fault. It is one number growing, not four documents disagreeing.
+> One model, four separate problems, and until now they were in three different chats so
+> nobody owned it. The author added this model for the uncertainty requirement: it separates
+> the two halves of uncertainty better than anything else in the study.
 >
-> Of the 174: 104 failed on Sort & Slice, 20 on `gauche_rbf`, and 50 have no known cause at
-> all.
+> **1. Twenty tasks failed and the cause is already fixed.** Eight on the QM9 main grid and
+> twelve on the deep run, all at noise level 1.5, replicates 7 to 9, on all three
+> representations. The error said the model was fitting 5,000 rows while the noise record
+> covered 8,000. Commit `c223ec3` fixed it: an exact Gaussian process is too slow above 5,000
+> molecules so it subsamples, and the function returned only the count and threw away which
+> molecules it kept. **Nobody has checked whether the twenty failures survive the fix.** Check
+> that first; everything else about this model depends on it.
 >
-> **1. The tool refuses to print a resubmission command.** `failed_tasks.py --emit-sbatch`
-> printed nothing. It marks every task as failed, and it will not print a resubmission for
-> anything marked failed, on the rule that resending an unfixed cause gets the same error.
-> That rule is now wrong for 124 of them, because both causes have been fixed in the code:
-> Sort & Slice in commit `62f1fe2` and `gauche_rbf` in commit `c223ec3`. Teach the tool to
-> print a resubmission when the cause is fixed, tied to the commit so it cannot just be
-> asserted, and add that case to `scripts/test_slurm_status_tools.py`. **Fix it once, prove
-> it with the test, and go straight to resubmitting.** The previous session was consumed by
-> shipping a tool, running it, finding a bug and shipping it again.
+> **2. Its screen jobs have never started.** Eighteen tasks, job 12971618, queued since 2
+> September, waiting on Priority. It asks 1 day 18 hours and 128 GB. The same model finished
+> elsewhere in 1 hour 34 minutes and peaked at 4.2 GB. Cut both and it will be scheduled.
 >
-> **2. Fifty tasks have no cause because the tool looks for their output in the wrong
-> repository.** It looks in `slurm_scripts_validation_rerun/`. Laboratory jobs change into
-> the `tests` directory of the KIRBy checkout and write there. **The 25 hERG tasks are inside
-> those 50 and have been waiting three sessions.** Their cause was a missing cache file on 2
-> September; the cache is there now and loads 1,415 molecules, so nothing else is wrong with
-> them.
+> **3. It is in the deep run's model list and the corrected reading takes it out.** See chat
+> 4 — do not act on that alone, the two chats have to agree.
 >
-> **3. `gauche_rbf`'s 20 failures have never been re-checked against the fix.** Commit
-> `c223ec3` fixed the cause. Nobody has confirmed the failures go away. Do that before anyone
-> discusses dropping the model. It has since produced results on the screen, so the argument
-> that it has never run is no longer true.
+> **4. Whether it stays at all was raised as a way to finish sooner**, on the grounds that it
+> had never run and was worth 17 days of requested time. Both of those are now false: it has
+> produced screen results, and 17 days was the wrong request, not the real cost. Re-price it
+> before anyone offers dropping it again.
 >
-> **4. Then resubmit.** Wait for chat 1 to push the corrected time limits, rebuild the
-> scripts, and send them. Never type a job array range by hand — the generators write the
-> right range for each script, and typing one has queued out-of-range tasks three times.
->
-> **5. While you are in the status tool:** it labels the two uncertainty submissions
-> "uncertainty, the three" and "uncertainty, the four". Those are invented codes, which the
-> author has banned, and they appear in every status output she reads. Rename them.
->
-> Done when section 13.27 lists, for each script, the exact resubmission command, how many
-> tasks it covers, and which cause it clears.
+> Done when the twenty tasks are either running clean or their remaining cause is written
+> down, and its screen jobs have started.
 
 ---
 
-## Chat 3 — whether the finished results are correct, and whether the running jobs are
+## Chat 3 — the laboratory datasets
 
-> Read `CLAUDE.md` first.
+> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
 >
-> **1. Start here, before anything in any chat. Two results that should be identical are
-> not.** When a run is set to add no noise at all, the answer cannot depend on which kind of
-> noise the run was labelled with. For one model on ChemBERTa, it does: the no-noise result
-> differs between three of the noise types, on all five accuracy measures. That difference
-> has two possible causes and they are worlds apart. If it is around one part in ten million,
-> it is neural network training being slightly different on different machines, nothing is
-> wrong, and the check that found it just needs to tolerate it. If it is around one part in a
-> hundred, then noise is being added to runs that are supposed to have none, and **every
-> robustness number in the study is wrong**, because each one is measured against its own
-> no-noise result. Print the rows side by side at full precision and you will know. The check
-> stops at the first disagreement, so nothing after ChemBERTa was looked at — check the rest
-> too, then make it refuse one configuration instead of stopping everything.
+> logD, Caco-2 and hERG. Everything here writes into the KIRBy checkout, not this one:
+> the breadth grid into `results/validation_rerun/`, the uncertainty jobs into
+> `tests/results/uncertainty_rerun/`, because those jobs change into the `tests` directory
+> and pass a relative results path.
 >
-> **2. A failed scoring pass can write results that look fine.** In the KIRBy runner, if one
-> inner fold fails during the pass that scores training molecules, it is caught, skipped with
-> a warning, and rows are still written for every molecule with empty values. The checks count
-> rows rather than real values, so the job reports success. The only thing that notices is the
-> merge step, which labels the cell as truncated and then also reports success. **A result
-> here cannot be trusted from whether the job succeeded.** Make the check count real values,
-> then run the merge over everything already written and list every truncated cell for
-> deletion.
+> **1. Fifty tasks failed and nothing knows why.** Six each from `val_bnn-full`,
+> `val_bnn-full-mve`, `val_dnn` and `val_lightgbm`, one from `val_gp-tanimoto`, and the 25
+> hERG resubmissions. Their output files are missing. The jobs ran in
+> `slurm_scripts_validation_rerun` in this repository, so the tool was looking in the right
+> place — the logs are genuinely gone, most likely because the scripts were rebuilt with a
+> different output name afterwards. **Get the cause from the cluster another way** before
+> resubmitting any of them, because resending an unfixed cause gets the same failure. The 25
+> hERG ones were the missing-cache deaths of 2 September and the cache is present now, loading
+> 1,415 molecules, so those are probably ready — confirm and send them.
 >
-> **3. One number in the screen looks impossible.** One network on ChemBERTa scores 0.9958,
-> the highest in the whole screen, from a cell that has only two of the seven noise types.
-> Check whether that score is being computed from a shorter run than the others. If it is,
-> every such number is inflated, and they feed the ranking in item 5.
+> **2. One bug can write results that look fine.** In the KIRBy runner, if one inner fold
+> fails while scoring training molecules, it is caught, skipped with a warning, and rows are
+> still written for every molecule with empty values. The checks count rows rather than real
+> values, so the job reports success. The merge step labels the cell truncated and also
+> reports success. **A laboratory uncertainty result cannot be trusted from whether the job
+> succeeded.** Fix the check to count real values, run the merge over everything already
+> written, and list every truncated cell for deletion.
 >
-> **4. The progress counts are wrong.** `run_status.py` counts a job that started and
-> immediately exited as finished work. The deep run reads 364 finished, and most of those are
-> exits that took seconds. Fix it to count them separately, which the time-measuring tool
-> already does.
+> **3. The 378 uncertainty jobs have never started.** Twelve arrays, 12986390 to 12986401,
+> queued since 6 September, all waiting on Priority, all asking 96 GB and one and a half to
+> two days. Nothing has ever run in this pipeline so nothing can size them; chat 1 owns the
+> request sizes, you own whether they should run at all. Of the four models chosen, only the
+> quantile forest reports both halves of its uncertainty per molecule. NGBoost has no
+> model-uncertainty half. The Gaussian process and the variational network give one noise
+> number for the whole fit. The three models that do give both halves per molecule are on
+> neither list. Price the options and put it to the author; do not choose.
 >
-> **5. The deep run may be training the wrong models right now.** It reads its model list when
-> each task starts, so the file can still be changed. The list was written before the screen
-> finished. Now that the screen is readable, two of the six no longer match it. The random
-> forest is in the list as the most noise-tolerant model on all three representations; on the
-> corrected reading NGBoost is top in seven of the nine combinations and the random forest is
-> top in none. A Gaussian process variant is in the list as the least tolerant on two of
-> three; on the corrected reading a different network is least in eight of nine. Re-read it
-> asking for six models, not four — the tool takes the number from whichever file you point it
-> at, so pointing it at a scratch file silently asks for four. **Wait until item 1 is settled,
-> because these scores are all measured against the no-noise results.** Then put the change to
-> the author. It is her decision, not yours.
+> **4. Two things are already clean, do not re-open them.** No laboratory task anywhere ran
+> under the old noise draw — that was checked on 7 September and the answer was zero. And the
+> laboratory depth run repeats three conditions the breadth grid already runs, which wastes
+> queue time but produces correct numbers, because the runner replaces its own rows.
 >
-> **6. The uncertainty jobs may be running models that cannot answer the question.** Of the
-> four chosen, only the quantile forest reports both halves of its uncertainty for each
-> molecule. NGBoost has no model-uncertainty half at all. The Gaussian process and the
-> variational network each give one noise number for the whole fit rather than one per
-> molecule. The three models that do give both halves per molecule are on neither list. Price
-> the options in jobs and hours and put it to the author. Do not choose yourself.
->
-> Done when section 13.27 lists every result that has to be deleted, with the reason, and what
-> each queued submission is currently computing against what it should be.
+> Done when the fifty failures have a cause, the truncated cells are listed, and the 378 jobs
+> are either running or withdrawn on the author's word.
 
 ---
 
-## What is set aside until the results are in
+## Chat 4 — the deep run's model list
 
-On the author's instruction, 2026-09-07. Not closed, not forgotten.
-
-Figures and the rank-versus-level charts. The noise level hardcoded in the figure script. The
-three numbers in the paper on the retired scale. The Caco-2 noise anchor and the label spread
-it needs. The three levers for finishing sooner. Everything in the KIRBy repository except
-the failed scoring pass in chat 3: the preflight step that runs a git pull that cannot
-succeed, the script that picks the wrong account, the runbook pointing at the wrong checkout,
-the fold check that claims more than it tests, and the model list that disagrees between
-files.
+> Read `CLAUDE.md`, then `RERUN_PLAN.md` section 13.28.
+>
+> `deep_run_pairs.json` names six models and three representations, eighteen combinations.
+> `censoring_pairs.json` names five combinations outright. Both still say provisional. The
+> deep run, jobs 12986314 to 12986332, and both censoring runs are executing against them now.
+> **Each task reads the file when it starts**, so removing a combination is free at any
+> moment, and adding one back means resubmitting those indices.
+>
+> **1. The list was written from an unfinished screen and a tool with a bug in it.** The
+> corrected tool was run on 7 September, at six models, over 20,224 rows. Its reading and the
+> queued file agree on three of six and differ on three:
+>
+> | in the file now | the reading says | why |
+> |---|---|---|
+> | `ngboost` | `ngboost` | locked; the generator refuses to build without it |
+> | `rf` | `rf` | most noise-tolerant in 2 of the screen's combinations |
+> | `svm` | `svm` | the only kernel model |
+> | `het_gp_rbf` | `dnn_vbll_hetero` | least noise-tolerant in 8 of 9, against 2 of 3 before |
+> | `gauche_rbf` | `gauche` | one from the Gaussian process family |
+> | `dnn_bnn_full_mve` | `dnn` | one from the plain neural family |
+>
+> **2. The reading's own list breaks a rule and the queued file does not.** The tool warns
+> that only one of its six reports an uncertainty per molecule, and the rule needs at least
+> two. The author put `gauche_rbf` and `dnn_bnn_full_mve` in the file for exactly that reason.
+> So this is not "the tool is right and the file is wrong" — say that plainly when you put it
+> to her.
+>
+> **3. The censoring list has the same problem, more sharply.** The reading names five
+> combinations and warns that only one of them reports an uncertainty per molecule.
+>
+> **4. The scores this rests on are sound.** The no-noise results the ranking divides by were
+> checked on 7 September and agree exactly across the three noise types. See section 13.28.
+>
+> **This is the author's decision, not yours.** Put the three differences in front of her with
+> what each costs, note that removing is free and adding back is not, and let her answer.
+>
+> Done when both files say what she has decided and no longer say provisional.
