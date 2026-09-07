@@ -504,18 +504,33 @@ def cap_gp_training_set(X, y, seed, n_max=None):
     would differ by their training sets as well as by their noise model, and the
     comparison between them would mean nothing.
 
-    Returns (X, y, n_fitted). Passing fewer molecules than the cap is a no-op.
+    Returns (X, y, n_fitted, kept) where `kept` are the indices of the molecules
+    that survived, into the ORIGINAL training order. Passing fewer molecules than
+    the cap is a no-op and `kept` is every index.
+
+    WHY `kept` IS RETURNED, ADDED 2026-09-07.
+    It used to return only the count, and that silently broke the out-of-fold
+    uncertainty pass for EVERY Gaussian process in the study. The caller went on to
+    hand `score_training_molecules_out_of_fold` the capped 5,000 rows while the
+    noise record still described all 8,000 training molecules, and the guard there
+    refused -- correctly, because pairing them by position would attribute one
+    molecule's noise to another, which is the original QM9 defect. The job then
+    exited non-zero and lost its accuracy rows too.
+
+    Nothing could reconstruct the selection after the fact: it is a seeded draw made
+    inside this function and thrown away. So it is returned, and the callers pass it
+    to the noise record as the row selection.
     """
     import numpy as np
     if n_max is None:
         n_max = GP_DEFAULTS['max_train_n']
     n = len(y)
     if not n_max or n <= n_max:
-        return X, y, n
+        return X, y, n, np.arange(n)
     idx = np.random.RandomState(int(seed) & 0x7FFFFFFF).choice(
         n, size=int(n_max), replace=False)
     idx.sort()                       # keep the original molecule order
-    return X[idx], y[idx], int(n_max)
+    return X[idx], y[idx], int(n_max), idx
 
 
 def is_sparse_count_matrix(X):

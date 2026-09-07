@@ -2832,7 +2832,7 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
     # molecules, on every dataset, at every noise level, and records how many.
     # Seeded on the run, so the heteroscedastic Gaussian process below picks the
     # SAME molecules and the two differ only by their noise model.
-    x_train_full, y_train_full, gp_n_train = cap_gp_training_set(
+    x_train_full, y_train_full, gp_n_train, gp_kept = cap_gp_training_set(
         x_train_full, y_train_full, iteration_seed)
 
     x_train_tensor = torch.from_numpy(x_train_full).double()
@@ -3027,7 +3027,13 @@ def train_gauche_model(x_train, y_train, x_test, y_test, x_val, y_val, args, s, 
         # result is what it would have been without the out-of-fold pass.
         score_training_molecules_out_of_fold(
             _fp, x_train_full, y_train_full, train_noise, args, s, rep, iteration,
-            iteration_seed, file_no, model_name, val_slice=None,
+            iteration_seed, file_no, model_name,
+            # THE CAPPED SELECTION, NOT slice(None). An exact GP fits at most
+            # GP_DEFAULTS['max_train_n'] molecules, so on QM9 it holds 5,000 of the
+            # 8,000 training rows -- and the noise record describes all 8,000. The
+            # guard refuses a length mismatch rather than pairing them by position,
+            # which is why every GP's out-of-fold pass died until 2026-09-07.
+            train_slice=gp_kept, val_slice=None,
             restore_torch_rng=True)
 
         # The VALIDATION molecules, from the fitted process. This is the family
@@ -8386,7 +8392,7 @@ def train_heteroscedastic_gp(
     # CAP THE TRAINING SET -- same rule, same seed, same molecules as the ordinary
     # Gaussian process above, so the two differ only by their noise model
     # (GP_DEFAULTS['max_train_n'], RERUN_PLAN.md 2.31).
-    x_train, y_train, gp_n_train = cap_gp_training_set(
+    x_train, y_train, gp_n_train, gp_kept = cap_gp_training_set(
         x_train, y_train, iteration_seed)
 
     # Prepare data
@@ -8604,7 +8610,8 @@ def train_heteroscedastic_gp(
 
         score_training_molecules_out_of_fold(
             _fp, x_train, y_train, train_noise, args, s, rep, iteration,
-            iteration_seed, file_no, model_name, val_slice=None,
+            iteration_seed, file_no, model_name,
+            train_slice=gp_kept, val_slice=None,      # the capped selection; see above
             restore_torch_rng=True)
 
         # The VALIDATION molecules, already scored by the outer fit above.
