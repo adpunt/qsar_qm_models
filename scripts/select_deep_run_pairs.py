@@ -84,6 +84,26 @@ FAMILIES = {
 FAMILY_OF = {m: f for f, members in FAMILIES.items() for m in members}
 
 # 13.17 B: "NGBoost is locked on by a check that refuses to build without it."
+# CONDITIONS THAT CAN RANK THE ROSTER, AND THE ONES THAT CANNOT.
+#
+# The rule says "the most and least noise-tolerant model", which only means something in
+# a condition every model has run. The screen runs three across the whole roster;
+# censoring is a pair-subset condition by design, and student_t, outlier and laplace are
+# DEEP-RUN ONLY -- they run on the models the deep run already selected. So as the deep
+# run lands, those conditions fill up with exactly the models that were chosen, and
+# ranking on them asks which of the winners won.
+#
+# Measured on 2026-09-07, hours into the deep run: student_t_nu5 held rf and svm alone --
+# so "most tolerant" and "least tolerant" in that condition were the same two models,
+# and both scored a point. laplace, outlier_p10 and censoring held rf alone. The reading
+# that came out swapped three of the six models on the strength of it.
+#
+# So: every condition is SHOWN in the tables, because watching the deep run land is
+# useful. Only these are RANKED.
+_SETTLED = json.loads((ROOT / 'noise_conditions.json').read_text())
+RANKING_CONDITIONS = [c['name'] for c in _SETTLED['stage_1_full_grid']
+                      if c.get('scope', {}).get('mode') != 'pair_subset']
+
 LOCKED_ON = ['ngboost']
 
 
@@ -173,8 +193,24 @@ def extremes(robust, reps, verbose=True):
     return most, least
 
 
+def rankable(robust, verbose=True):
+    """The rows a ranking may use: the conditions the whole roster runs."""
+    present = sorted(set(robust['strategy']))
+    usable = [c for c in present if c in RANKING_CONDITIONS]
+    ignored = [c for c in present if c not in RANKING_CONDITIONS]
+    if ignored and verbose:
+        counts = {c: robust[robust['strategy'] == c]['model'].nunique() for c in ignored}
+        print(f"\n  NOT RANKED, because these run on the pairs the deep run already "
+              f"chose --\n  ranking on them asks which of the winners won:")
+        for c in ignored:
+            print(f"      {c:18s} {counts[c]} model(s) present")
+        print(f"  They are still in the tables above. Ranked on: {', '.join(usable)}.")
+    return robust[robust['strategy'].isin(usable)]
+
+
 def select(robust, reps, n_models, verbose=True):
     """Apply the rule. Returns the chosen models and why each one is there."""
+    robust = rankable(robust, verbose=verbose)
     most, least = extremes(robust, reps, verbose=verbose)
     chosen, why = [], {}
 
@@ -554,7 +590,12 @@ def main():
         'rule': 'RERUN_PLAN.md 13.17 B',
         'written_by_selector': True,
         'provisional': bool(absent or missing_reps or partial_conditions),
-        'ranked_on_conditions': sorted(robust['strategy'].unique()),
+        # What the ranking ACTUALLY used, not what is present. The depth-only
+        # conditions are in the frame as the deep run lands and are excluded.
+        'ranked_on_conditions': sorted(
+            set(robust['strategy'].unique()) & set(RANKING_CONDITIONS)),
+        'present_but_not_ranked': sorted(
+            set(robust['strategy'].unique()) - set(RANKING_CONDITIONS)),
         'conditions_dropped_for_want_of_a_clean_row':
             [c for c in conditions if c not in set(robust['strategy'])],
         'models_absent_from_the_screen': absent,
@@ -585,8 +626,12 @@ def main():
         print("  note: could not read noise_conditions.json; censoring falls back to "
               "5 pairs and 2 uncertainty models. The file is where the decision lives.")
 
+    # Rankable rows only, for the same reason the selection uses them: "its best
+    # representation" is a comparison, and censoring's own rows would decide it. rf on
+    # ECFP4 scores 0.79 under censoring against 0.96+ under everything else, so including
+    # it moved rf off ECFP4 -- ranking a model on the very condition being chosen for.
     cen_pairs, cen_why, cen_unc = censoring_selection(
-        robust, chosen, usable, _want, _need)
+        rankable(robust, verbose=False), chosen, usable, _want, _need)
     cen_out = out.parent / 'censoring_pairs.json'
     print(f"\n=== CENSORING, {len(cen_pairs)} named pair(s) -- NOT the deep run's "
           f"{n_pairs}")

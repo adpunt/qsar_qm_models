@@ -47,6 +47,18 @@ def synthetic_screen(path: Path):
     """
     rng = np.random.default_rng(0)
     rows = []
+    # THE DEEP RUN LANDING INTO THE SAME DIRECTORY. student_t_nu5 is a depth-only
+    # condition, so it holds ONLY the models the deep run already selected -- here two.
+    # Ranking "most and least noise-tolerant" on it asks which of the winners won, and on
+    # 2026-09-07 that swapped three of six models in the real reading. Both of these are
+    # given deliberately extreme values so that a ranking which used them could not
+    # possibly agree with one that did not.
+    for model, clean, decay in [('rf', 0.90, 0.01), ('svm', 0.90, 0.60)]:
+        for rep in REPS:
+            for lvl in LEVELS:
+                rows.append(dict(model=model, rep=rep, noise_type='student_t_nu5',
+                                 sigma=lvl, r2=clean - decay * lvl, iteration=0,
+                                 rmse=1.0, mae=0.8, dataset='qm9'))
     for i, model in enumerate(MODELS):
         decay = 0.10 + 0.05 * i                     # how fast this model loses R2
         for j, rep in enumerate(REPS):
@@ -73,6 +85,8 @@ def main():
         results.mkdir()
         synthetic_screen(results)
 
+        # The ranking must ignore student_t_nu5 entirely: it is depth-only and holds
+        # two models. If it were ranked, svm would be "least tolerant" everywhere on it.
         deep = tmp / 'deep_run_pairs.json'
         proc = run([SELECTOR, '--results-dir', results, '--out', deep])
         if proc.returncode != 0:
@@ -89,6 +103,15 @@ def main():
 
         spec_deep = json.loads(deep.read_text())
         spec_cen = json.loads(cen.read_text())
+
+        if 'student_t_nu5' in spec_deep.get('ranked_on_conditions', []):
+            failures.append(
+                'student_t_nu5 is a depth-only condition holding only the models the '
+                'deep run already picked, and the reading ranked on it -- that asks '
+                'which of the winners won')
+        for _c in spec_deep.get('ranked_on_conditions', []):
+            if _c not in ('gaussian', 'grouped_wider', 'grouped_shifted'):
+                failures.append(f'ranked on {_c!r}, which the whole roster does not run')
 
         n_deep = len(spec_deep['generator_labels']) * len(spec_deep['representations'])
         pairs = spec_cen['generator_pairs']
