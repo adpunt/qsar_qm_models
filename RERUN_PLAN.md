@@ -16170,6 +16170,66 @@ If that `grep -c` cannot find the file, censoring's scripts are in
 `slurm_scripts_qm9_rerun` rather than `slurm_scripts_qm9_censoring`; `ls */qm92_gauche_rbf_12986345_1.out`
 says which.
 
+#### D2j. Submitted 2026-09-07. What went in, and what is left to prove
+
+| job | script | indices | wall asked | `squeue` shows | memory | reason |
+|---|---|---|---|---|---|---|
+| 13042879 | `qm9_s1_gauche_rbf.sh` | 0,1,4,6,7,10,12,13,16 | 133:59:00 | `5-13:59:00` | 64G | `(None)` |
+| 13042880 | `qm9_s2_gauche_rbf.sh` | 0,1,4,6,7,10,12,13 | 148:59:00 | `6-04:59:00` | 64G | `(None)` |
+| 13042881 | `qm9_s1_gauche_rbf.sh` | 5,11 | 133:59:00 | `5-13:59:00` | 64G | `(None)` |
+
+`(None)` rather than `Priority` — the scheduler records no reason for holding them. That is what
+the wall and memory cuts were for.
+
+**Both fixed causes are confirmed present in the checkout, by the tool rather than by assertion.**
+`failed_tasks.py` refuses to print a resubmission line unless the commit named in
+`fixed_causes.json` is an ancestor of HEAD. It printed lines for `c223ec3` and for `62f1fe2`, so
+both are in.
+
+✅ **Censoring is clean.** `12986345_1`, the one censoring task that does work for this model,
+returns 0 for the guard's error text and was 1:19:27 in. No censoring resubmission is needed.
+
+**No two of these write the same file at the same time as each other.** 13042879 and 13042881 are
+disjoint indices of the same script, and 13042880 is the deep run's six conditions against the
+main grid's three.
+
+⚠️ **13042879 and 12986326 DO overlap on nine files, and that is not new.** The main grid and the
+deep run have always written to `results/anova_<condition>_<representation>_gauche_rbf.csv`
+together, with no lock in `save_results`. §13.30 traced 2,155 duplicate rows to exactly this and
+found rows duplicated, not corrupted, so the evidence is that the appends survive intact.
+`figlib_load.py` now reports how many duplicated keys have copies differing by more than 0.001 R².
+
+**The resubmission choice in D2f is now made by action.** 13042879 re-runs all 63 cells of nine
+tasks that had already written their accuracy rows, so those nine files gain a second copy of
+every noise level and replicate. That is the "resubmit as is" option, and it joins §13.30's
+larger pile rather than making a new problem.
+
+**Optional cut, and it is the only one left worth making.** 13042881's two tasks are Sort & Slice,
+which is on no settled uncertainty pair, so they do one fit per training run and no out-of-fold
+pass. The seven main-grid tasks that did exactly that work ran 43:55 to 1:33:14, and the Sort &
+Slice one of them was the fastest at 43:55. They are asking `133:59:00`, which this model's
+generator writes per model and not per index.
+
+```bash
+scontrol update JobId=13042881 TimeLimit=5:59:00
+squeue -j 13042881 -o "%.14i %.22j %.2t %.11l %.7m %R"
+```
+
+`5:59:00` is about four times the longest task of that kind ever measured here. Leave 13042879
+and 13042880 alone: nothing has yet measured this model with the out-of-fold pass working.
+
+**What is left.** One task of 13042879 finishing is the proof the fix holds on ARC, and it is also
+what lets `measure_walls.py` price this model honestly for the first time.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+cd $QSAR
+sacct -j 13042879,13042880,13042881 -X -n -P \
+  --format=JobID,JobName,State,Elapsed,ExitCode | sort
+python scripts/check_runs_landed.py --stage 1 --verbose | grep -i gauche_rbf
+python scripts/check_runs_landed.py --stage 2 --verbose | grep -i gauche_rbf
+```
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when the screen array shows the new limits in `squeue`, the seventeen failed tasks
