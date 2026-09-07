@@ -119,6 +119,20 @@ def uncertainty_models():
     return [m['canonical'] for m in spec.get('models', [])]
 
 
+def qm9_roster():
+    """The canonical names the QM9 generator actually runs -- 19, not the file's 24."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'qm9_gen', ROOT / 'slurm_scripts_qm9_rerun' / 'generate_scripts.py')
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        return canonical_names()
+    qm9 = json.loads((ROOT / 'model_names.json').read_text())['qm9']
+    return [qm9.get(m, m) for m in mod.MODELS]
+
+
 def check_family_map():
     missing = [m for m in canonical_names() if m not in FAMILY_OF]
     if missing:
@@ -134,7 +148,11 @@ def coverage(df, conditions):
     models = sorted(df['model'].unique())
     reps = sorted(df['rep'].unique())
     print(f"\n  models present: {len(models)} -- {', '.join(models)}")
-    absent = [m for m in canonical_names() if m not in models]
+    # AGAINST WHAT QM9 ACTUALLY RUNS, not the canonical roster. model_names.json
+    # lists 24 names across both pipelines; the QM9 generator runs 19. Reporting the
+    # difference as 'has not landed' named five models QM9 never runs -- so a screen
+    # with one genuine gap looked like a screen with six.
+    absent = [m for m in qm9_roster() if m not in models]
     if absent:
         print(f"  models ABSENT:  {len(absent)} -- {', '.join(absent)}")
     print(f"  representations present: {', '.join(reps)}")
