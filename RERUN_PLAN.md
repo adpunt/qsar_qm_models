@@ -16404,6 +16404,72 @@ A screen task is 7 noise levels at 1 replicate, so **7** is a finished ladder. A
 The four deep-run tasks `12986326_16, _18, _19, _22` are the same pass over 70 training runs
 and give the full wall when they finish.
 
+#### D2o. ✅ THE FIX WORKS ON ARC. Measured 2026-09-07 by the new out-of-fold check
+
+`--stage 1` reports `QM9 out-of-fold 39/57`, and four `gauche_rbf` cells that held **no**
+out-of-fold rows before now hold them:
+
+| condition | representation | (noise level, replicate) cells with `train_oof` rows | what is writing them |
+|---|---|---|---|
+| gaussian | PDV | **7** of 63 | `12971618_1`, the screen — 7 levels at 1 replicate is a COMPLETE ladder |
+| gaussian | ECFP4 | 6 of 63 | `12971618_0`, the screen, one level still to go |
+| grouped_shifted | ChemBERTa | 27 of 54 | `12986326_16`, the deep run, mid-ladder |
+| censoring | PDV | 28 of 63 | `12986345_1`, censoring, mid-ladder |
+
+**`12971618_1` is the proof.** A screen task is 7 noise levels at 1 replicate, and all 7 have
+out-of-fold rows. Under the old code that task would have written none and exited 1. Nothing
+else was needed: the fix, `c223ec3`, is the only thing that changed between the tasks that
+failed and this one.
+
+**The six cells still at zero are exactly the nine failed tasks' work**, and every one is
+inside `13042879`:
+
+| condition | representation | main-grid index |
+|---|---|---|
+| gaussian | ChemBERTa | 4 |
+| grouped_wider | ECFP4, PDV, ChemBERTa | 6, 7, 10 |
+| grouped_shifted | ECFP4, PDV | 12, 13 |
+
+`gaussian` ECFP4 and PDV are at 6 and 7 rather than 0 because the screen has filled replicate
+0; their replicates 1 to 9 are indices 0 and 1 of the same resubmission. `grouped_shifted`
+ChemBERTa is index 16, and the deep run is filling it in parallel.
+
+⚠️ **The header says 18 short cells and 10 are visible.** `39 + 7 + 11 = 57`, so eight cells
+are short that the pasted listing does not show, and every visible one is `gauche_rbf`. The
+full listing is in the block below. Those eight belong to models chat 2 does not own —
+`qrf`, `ngboost`, `dnn_bnn_full_variational`, `dnn_bnn_full_mve`, `mlp_bnn_full_mve` — and
+nothing has ever counted their out-of-fold rows before today.
+
+**The nondeterminism warning naming `gauche_rbf` is the duplicate rows, and it is expected.**
+`figlib_load` reports duplicated keys whose copies differ by more than 0.001 R² with the same
+spec hash, hyperparameters and seed. §13.28 found the same thing for a network and traced it to
+training on a different node; nothing in the code sets the flags that would prevent it. §13.30
+traces the duplicates themselves to the deep run repeating the main grid's three conditions
+into the same file. `13042879` will add more of them, which is what D2f said resubmitting costs.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh && cd $QSAR
+
+# 1. the eight short cells the paste cut off
+python scripts/check_runs_landed.py --stage 1 --verbose 2>&1 \
+  | sed -n '/QM9 out-of-fold/,/^$/p'
+
+# 2. what the out-of-fold pass COSTS, now that a screen task has run one
+sacct -j 12971618 -X -n -P --format=JobID,State,Elapsed | sort
+
+# 3. why the three resubmissions are pending. sacct has no reason column.
+squeue -j 13042879,13042880,13042881 -o "%.14i %.20j %.2t %.11l %.7m %.20V %R"
+squeue --start -j 13042879,13042880,13042881
+sacctmgr -n show assoc user=$USER \
+    format=Account,Partition,MaxJobs,MaxSubmit,GrpTRESRunMins,GrpTRES
+echo "pending: $(squeue -u $USER -h -t PD | wc -l)  running: $(squeue -u $USER -h -t R | wc -l)"
+```
+
+Step 2 is the number that lets the walls come down. A finished screen task is 7 training runs
+with the pass; the same model without it took 88.8 seconds per training run, and the arithmetic
+says 3.56 times that. Whatever `sacct` says divided by 7 settles it against a measurement
+rather than against a laptop row taken under different threading.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
