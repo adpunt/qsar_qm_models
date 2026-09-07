@@ -113,6 +113,26 @@ def qm9_expected(stage):
     return want, replicates
 
 
+def _only_expected(cover, want, keys):
+    """Drop coverage rows for combinations nobody asked for.
+
+    WHY: `want` is restricted -- the deep run is a selection of six models on
+    three representations, and everything else on disk is the screen, whose gaps
+    are not this stage's problem. The counts of PARTIAL and THIN were taken over
+    the WHOLE coverage frame while `landed` and `missing` were taken against
+    `want`, so one line of output mixed two different questions. On 2026-09-07 a
+    `--stage 2` run reported 59 landed of 113 expected beside 36 partial and 77
+    thin, and the thin list named Sort & Slice combinations that no deep-run pair
+    contains. Restricting here fixes the counts and the --verbose listing at once,
+    because both read this frame.
+    """
+    if cover is None or len(cover) == 0:
+        return cover
+    keep = [tuple(getattr(row, k, '') for k in keys) in want
+            for row in cover.itertuples()]
+    return cover[keep]
+
+
 def check_qm9(directory, stage):
     want, replicates = qm9_expected(stage)
     if not want:
@@ -123,6 +143,7 @@ def check_qm9(directory, stage):
                 'partial': 0, 'thin': 0, 'examples': sorted(want)[:6],
                 'note': f'nothing in {directory}'}
     cover = L.coverage(frame, 'QM9')
+    cover = _only_expected(cover, want, ('condition', 'rep', 'model'))
     have = {(row.condition, row.rep, row.model) for row in cover.itertuples()}
     landed = {(row.condition, row.rep, row.model) for row in cover.itertuples()
               if row.status == 'OK'}
@@ -154,6 +175,8 @@ def check_assay(directories):
                 'note': 'nothing found -- these land in the KIRBy checkout, '
                         'not this one'}
     cover = L.coverage(frame, 'assay')
+    cover = _only_expected(cover, want,
+                           ('dataset', 'model', 'rep', 'condition'))
     have = {(row.dataset, row.model, row.rep, row.condition)
             for row in cover.itertuples()}
     landed = {(row.dataset, row.model, row.rep, row.condition)

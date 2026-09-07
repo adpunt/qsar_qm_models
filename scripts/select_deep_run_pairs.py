@@ -248,14 +248,33 @@ def select(robust, reps, n_models, verbose=True):
                 why[m] = f'{label} in {pool[m]} of the screen\'s cells'
                 break
 
+    # A FAMILY SLOT IS NOT A COMPARISON, AND THE OUTPUT USED TO READ LIKE ONE.
+    # The rule says "plus one from each remaining family" and does not say WHICH
+    # one, so this takes the first in `MODEL_ORDER` -- the list the figure script
+    # sorts legends by. On 2026-09-07 that put `gauche` in the Gaussian-process
+    # slot ahead of `gauche_rbf` and `het_gp_rbf` on list position alone, while
+    # `gauche_rbf` was in fact higher on every representation it had landed. The
+    # pick is left exactly as it was; what changes is that it now SAYS the
+    # tie-break was roster order, and prints what it passed over.
     covered = {FAMILY_OF.get(m) for m in chosen}
-    for m in fig.sort_models_by_family(list(robust['model'].unique())):
+    order = fig.sort_models_by_family(list(robust['model'].unique()))
+    best_in = robust.groupby('model')['auc_norm'].max()
+    for m in order:
         if len(chosen) >= n_models:
             break
         fam = FAMILY_OF.get(m)
         if fam not in covered:
+            passed = [o for o in order
+                      if o != m and FAMILY_OF.get(o) == fam]
+            note = ''
+            if passed:
+                beside = ', '.join(
+                    f'{o} {best_in.get(o, float("nan")):.4f}' for o in passed)
+                note = (f' -- TAKEN ON ROSTER ORDER, NOT ON SCORE: best auc_norm '
+                        f'{m} {best_in.get(m, float("nan")):.4f} against {beside}')
             chosen.append(m)
-            why[m] = f'one from the {fam} family, which nothing above covers'
+            why[m] = (f'one from the {fam} family, which nothing above '
+                      f'covers{note}')
             covered.add(fam)
     return chosen, why
 

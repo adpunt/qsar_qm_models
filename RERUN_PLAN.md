@@ -11711,7 +11711,7 @@ Everything below is either fixed, or waiting on one of these six. Nothing else i
 |---|---|---|
 | C0 | 🔴 **FIVE JOBS MAY RUN OUT OF WALL CLOCK. Measured 2026-09-07, and this is the only irreversible failure in the study.** `scontrol` cannot raise a limit for its owner, so each needs the generator's wall raised and the unrun indices resubmitted — never a cut. Four of the five are the **quantile forest**, whose longest task is 20:52 across the whole study, and the generator is asking barely more than that.<br><br>`val_svm` **1.13×** — 0:54 against 1:00:00, laboratory censoring, `12986386`<br>`qm91_qrf` **1.29×** — 20:52 against 1-02:59, main grid, `12980589`, three replicates still to run<br>`qm92_qrf` **1.44×** — 20:52 against 1-05:59, deep run `12986325` AND censoring `12986344`<br>`qm90_qrf` **1.66×** — 2:25 against 3:59, screen, `12971607`<br><br>Everything else in the study has 4.9× or more. **The generator's wall rule for `qrf` is what is wrong, not these five job ids** — fix it there or the next submission repeats it | **the author** — see §13.23b |
 | C0b | 🔴 **THE ENTIRE UNCERTAINTY EVIDENCE IS QUEUED AND HAS NEVER STARTED.** All twelve arrays, **378 tasks**, `12986390`–`12986401`, submitted 2026-09-06. Not one task has begun, and `unc_*` is its own pipeline so no other run can size its walls — the tool says "this model has run NOWHERE" for all twelve. Nothing about aleatoric-versus-epistemic exists yet, on either dataset. It is also the run whose pair list is still an open author decision (C4) | **the author** — C4 first, then let one array through to time it |
-| C1 | **25 laboratory tasks are still failed and unresubmitted** — all hERG, all six representations, the missing-cache deaths of 2026-09-02. The cache is confirmed present and loading 1,415 molecules. Nothing has put them back | **the cluster** — `python scripts/failed_tasks.py --emit-sbatch` |
+| C1 | ✅ **CORRECTED 2026-09-07 — they were put back on 2026-09-04.** 25 laboratory tasks, all hERG, all six representations, from the missing-cache deaths of 2026-09-02. `scripts/slurm_jobs.py` labels `12975687` plus `12979965`–`12979969` "the 25 jobs lost to the missing cache", and the script-by-script list adds to exactly 25. The old FAILED rows under `12971620`–`12971638` can never change state; they are a record, not a queue, and resubmitting them would duplicate live work. **Check, do not resubmit:** `sacct -S 2026-09-03 -j 12975687,12979965,12979966,12979967,12979968,12979969 -X -n -P --format=JobID,JobName,State,Elapsed` | **the cluster** — the check above, §13.29a STEP 11 |
 | C2 | 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
 | ~~C2b~~ | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
 | C3 | **`scripts/lab_tasks_on_old_noise.py` has never been run.** The laboratory noise draw changed on 2026-09-04 (§3.3b); tasks that FINISHED before the pull wrote rows under the old draw and have to be replaced. Written for exactly this and named as outstanding in three separate messages | **the cluster** |
@@ -11977,7 +11977,7 @@ answers it. **code** = I fix it.
 | 🔴 | **gauche_rbf has never started a task on the screen and has no wall or memory to borrow** — 12971618, eighteen tasks, queued since 2026-09-02, not one started. It is the one model still missing from the screen, and because it has never completed a task anywhere, no measurement can size its wall or its memory. It also fails wherever it does run. | The screen's completeness, and 15 to 17 days of wall on three submissions. | **author** |
 | 🔴 | **Two other screen arrays are part-stuck and no lever covers them** — Besides gauche_rbf, qm90_mlp_bnn_full_mve has 16 of 18 tasks still queued and qm90_dnn_bnn_full_variational has 10 of 18. Both appear in the transcript's squeue paste. The register records them inside the gauche_rbf row rather than as their own item, and nothing addresses them. | The screen reading the pair-file confirmation depends on. dnn_bnn_full_variational is also on the uncertainty pair list. | cluster |
 | 🔴 | **lab_tasks_on_old_noise.py has still never been run** — The laboratory noise draw changed on 2026-09-04. Tasks that finished before that pull wrote rows under the old draw and have to be replaced. The script was written for exactly this and the transcript names it as still outstanding. | Every laboratory result predating the pull is on the wrong noise draw and nobody knows which rows those are. | cluster |
-| 🔴 | **25 hERG tasks are still failed and unresubmitted** — All 25 are hERG, on all six representations, from the missing-cache deaths of 2026-09-02. The cache is confirmed present and loading 1,415 molecules. Nothing has put them back. | One of three laboratory datasets in the breadth grid. Command: python scripts/failed_tasks.py --emit-sbatch | cluster |
+| ✅ | **CORRECTED 2026-09-07 — put back on 2026-09-04 as `12975687` and `12979965`–`12979969`.** All 25 are hERG, on all six representations, from the missing-cache deaths of 2026-09-02. Do NOT resubmit; check with `sacct` (§13.29a STEP 11). | One of three laboratory datasets in the breadth grid. | cluster |
 | 🔴 **NEW** | **The scontrol list has not been run since the last fix, so no wall has actually been cut** — The transcript's last technical message tells the author not to run the previous list, gives them commit 1570378, and says to pull and re-run. The author's reply is the message about being overwhelmed. Nothing shows the corrected list being emitted or applied, so qm92_ngboost is presumably still asking 22 days and qm92_mlp_bnn_full_mve 13 days 18 hours. | Backfill on every long-wall job in the queue. The transcript calls this single change "your week". | cluster |
 | 🔴 **NEW** | **The author's last message is unanswered** — The transcript ends with the author saying they are overwhelmed, that threads are being created and dropped and mistakes fixed all at once, and asking for the plain-language rules to be followed. No reply follows. The register was written in response to the situation but is itself over a hundred lines of tables, and it neither records the request nor answers it with a short list of what to do next. | Everything downstream. Six decisions are waiting on the author and none has been put in front of them in a form they can answer. | **author** |
 
@@ -15935,6 +15935,57 @@ Narrowing costs nothing: all 19 model arrays were submitted, and a task whose mo
 longer named skips and exits 0. Widening costs a resubmission of that model's 18 indices,
 which then queue behind Priority like everything else.
 
+#### D4d. What the cluster returned, 2026-09-07, and the one correction it forces
+
+The author re-ran `scripts/select_deep_run_pairs.py` at six models on the current results.
+The reading is unchanged: it adds `dnn_bnn_full_variational_hetero`, `gauche` and `dnn`, and
+drops `heteroscedastic_gp`, `gauche_rbf` and `dnn_bnn_full_mve`. Its own output says
+`on the uncertainty roster: queued 3, suggested 1` and
+`TAKING THIS SUGGESTION WOULD BREAK CENSORING`.
+
+**`gauche_rbf` has landed rows now and the reading still passes it over. That is not a
+score.** `select()` fills a family slot with the first model of that family in
+`MODEL_ORDER`, the list `generate_paper_figures_v2.py:359` keeps for sorting figure legends.
+It reads `svm, gauche, gauche_rbf, het_gp_rbf`, so `gauche` takes the Gaussian-process slot
+ahead of the other two whatever any of them scored. The same applies to `dnn`, which takes
+the plain-neural slot on list position. **Of the three differences, one comes from a
+measurement — the least noise-tolerant slot — and two come from the order of a display
+list.**
+
+The earlier note in D4 that `gauche` won that slot because `gauche_rbf` had not landed is
+half the story and is superseded by this. Not landing was true at 01:06; list order is why it
+is still true now.
+
+The pick is LEFT AS IT WAS. What changed is that the tool now says so — a family slot filled
+where another model of that family was rankable prints
+`TAKEN ON ROSTER ORDER, NOT ON SCORE` with both best AUC_norm values beside it. Guarded by
+`scripts/test_select_deep_run_pairs.py`, which fails without it.
+
+#### D4e. The completeness check was counting two different questions on one line
+
+`python scripts/check_runs_landed.py --stage 2 --verbose` returned, 2026-09-07:
+
+```
+                               landed  missing  partial   thin
+QM9                            59/113       33       36     77
+```
+
+113 is the number of combinations the deep run's six models on three representations ask
+for, restricted by `deep_run_pairs.json`. **36 and 77 were not.** They were counted over
+every combination present on disk, which is why the listing under them named
+`qm9 dnn sns gaussian` and five more Sort & Slice rows — no deep-run pair contains `sns` or
+`dnn`. So the two halves of that line answered different questions, and the half that says
+how much work is left was the wrong one.
+
+Fixed: `_only_expected` in `scripts/check_runs_landed.py` restricts the coverage frame to
+the expected set before the counts and before the `--verbose` listing, on QM9 and on the
+assay grid alike. Guard: `python scripts/test_check_runs_landed_selection.py` — 4 checks,
+and it is registered in `scripts/check_fixes_fail_when_removed.py`, where removing the one
+line turns it red. **The 33 MISSING are unaffected; they were always counted against the
+selection.** The named ones so far are `laplace` on ChemBERTa for `dnn_bnn_full_mve`,
+`gauche_rbf`, `het_gp_rbf` and `ngboost`, and `laplace` on ECFP4 for `dnn_bnn_full_mve` and
+`gauche_rbf`. The full list needs the check re-run after this fix.
+
 #### D6. Sort & Slice — the 104 tasks, and the tool that would not print them — CHAT 5
 
 **The three molecules.** Methane, ammonia and water each carry exactly one Morgan
@@ -16157,7 +16208,8 @@ content they were waiting for is below. §13.27 D5 still stands and is not repea
 `rf` 5:59:00. Deep run: `qrf` 47:59:00, `ngboost` 317:59:00, `gauche_rbf` 148:59:00.
 Uncertainty runs: QRF 40:59:00, NGBoost 193:59:00, GP 68:59:00, VBLL-Full 91:59:00,
 BNN-Full-MVE 51:59:00, MLP-BNN-Full-MVE 78:59:00 — **five of six exceed `medium`'s
-48 hours, so these go to `long`.** §13.19 STEP 6 still says `$PART` and is wrong.
+48 hours, so these go to `long`.** (§13.19 STEP 6 and 6b already say `PART=long`; an earlier
+draft of this section claimed they still said `$PART`, which was itself stale.)
 
 **Do not blanket-apply `scripts/measure_walls.py --emit-scontrol`.** It sizes a wall at
 2.0x the longest observed task with a minimum of three tasks. `gauche_rbf`'s four
@@ -16644,4 +16696,82 @@ Each one is a choice, not a task. None of them blocks Steps 0–12.
    the repaired main grid uses — the screen ran before the exclusion. Either re-run the screen's
    three Sort & Slice tasks, or state in Methods that the screen used a molecule set three
    molecules larger. Nothing else in the study is affected.
+
+
+### 13.30 THE 2,155 DUPLICATE QM9 ROWS — traced 2026-09-07
+
+**Not two array indices sharing an output path. Nothing is overwriting anything.** The deep
+run recomputes, from scratch, every replicate of the three conditions the screen and the main
+grid already ran.
+
+Read off `slurm_scripts_qm9_rerun/generate_scripts.py` today:
+
+| part of the run | replicates | conditions |
+|---|---|---|
+| the screen (`--stage 0`) | 1, numbered 0 | gaussian, grouped_wider, grouped_shifted |
+| the main grid (`--stage 1`) | 9, numbered 1–9 | gaussian, grouped_wider, grouped_shifted |
+| the deep run (`--stage 2`) | **10, numbered 0–9** | those same three **plus** student_t_nu5, outlier_p10, laplace |
+
+`STAGE_DEFAULTS` gives the deep run `replicates=10, start=0`, and its condition list is
+`STAGE2_CONDITIONS` minus censoring — which still contains all three of the earlier ones. The
+level grid is a property of the condition, not of which part of the run asks for it, so the
+levels are identical too: gaussian 7 levels, the other two 6 each.
+
+The output path is `../results/anova_${cond}_${rep}_${model}.csv`, keyed by condition,
+representation and model only. So the deep run appends a second complete copy of each cell into
+the file the screen and main grid wrote.
+
+**The numbers land exactly.** gaussian is 7 levels × 10 replicates = **70 rows**, which is the
+count reported for `dnn_bnn_full_mve / ecfp4 / gaussian`, and `dnn_bnn_full_mve` × `ecfp4` is a
+selected pair in `deep_run_pairs.json`. The overlap is 6 models × 3 representations × 3
+conditions = **54 cells**; 53 were reported, so one cell has not yet written both copies —
+consistent with the Gaussian-process failures. At completion the duplication is
+18 × (70 + 60 + 60) = **3,420 rows**, which is 3,420 training runs recomputing a number already
+on disk.
+
+**Which array indices they are.** A deep-run task's condition is `index / 3` and its
+representation is `index % 3`, over the six conditions in the order gaussian, grouped_wider,
+grouped_shifted, student_t_nu5, outlier_p10, laplace. So **indices 0–8 of every deep-run array
+are the duplicates and indices 9–17 are the new work.** Cancelling the still-pending elements
+0–8 removes a third of that submission — but only if the copies agree; see the caveat below.
+
+**The caveat, and it is the reason this is worth reading before cancelling anything.** The two
+copies of a cell need not be the same computation. `--use-best-params` makes
+`load_best_hyperparameters` re-read the tuned files inside *every* training run, and the plan
+was deliberately to submit while the tuning sweep was still going. A task that ran before those
+files landed fitted at the shared defaults; one that ran after fitted at the tuned setting. The
+results carry `params_source` per row (`scripts/utils.py:124`, one of the three provenance
+columns added 2026-08-26), so the copies can be told apart. `figlib_load.py` keeps the LAST
+written, which is file append order, not the better number.
+
+There is already one measured disagreement: gaussian replicate 1 appears at R²
+0.8657217872238345 and again at 0.8868715446840807 in the same file. Same molecules, same seed,
+two different numbers. **Not explained.** `params_source` is the first thing to look at.
+
+`scripts/figlib_load.py` now prints, whenever it drops duplicates, how many duplicated
+cell-and-replicate keys have copies with different `params_source`, and how many differ by more
+than 0.001 R². Run the figure script and read those two lines before deciding.
+
+```bash
+# What the copies disagree about, straight from the files.
+cd $QSAR && python - <<'PY'
+import glob, pandas as pd
+key = ['noise_type', 'rep', 'model', 'sigma', 'iteration']
+f = [p for p in glob.glob('results/anova_*.csv') if 'uncertainty_values' not in p]
+d = pd.concat([pd.read_csv(p) for p in f], ignore_index=True)
+d = d[[c for c in key + ['r2', 'params_source'] if c in d.columns]]
+g = d[d.duplicated(subset=[k for k in key if k in d], keep=False)]
+print(f'{len(g)} rows in {g.groupby([k for k in key if k in d]).ngroups} duplicated keys')
+if 'params_source' in g:
+    print(g.groupby([k for k in key if k in d])['params_source']
+           .nunique().value_counts().rename('keys by number of distinct params_source'))
+print(g.groupby([k for k in key if k in d])['r2']
+       .agg(lambda v: v.max() - v.min()).sort_values(ascending=False).head(10))
+PY
+```
+
+**What to decide.** If every duplicated key has one `params_source` and an R² spread of zero,
+the duplication is pure waste and the pending deep-run indices 0–8 can be cancelled. If the
+copies disagree, the run has two hyperparameter regimes mixed inside one file and the choice of
+which to keep is an author decision, not an append order.
 

@@ -113,6 +113,24 @@ def main():
             if _c not in ('gaussian', 'grouped_wider', 'grouped_shifted'):
                 failures.append(f'ranked on {_c!r}, which the whole roster does not run')
 
+        # A FAMILY SLOT IS FILLED BY ROSTER ORDER, AND THE OUTPUT MUST SAY SO.
+        # `gauche` sits before `gauche_rbf` before `het_gp_rbf` in MODEL_ORDER,
+        # which is the list the figure script sorts legends by, so the model that
+        # takes the Gaussian-process slot is the first of the three present --
+        # never the highest-scoring one. Read as a comparison, that swapped a
+        # model in the real reading on 2026-09-07. It stays a roster-order pick;
+        # what it may not do is stay silent about it.
+        six = tmp / 'deep_run_pairs.six.json'
+        proc6 = run([SELECTOR, '--results-dir', results, '--n-models', '6',
+                     '--out', six])
+        if proc6.returncode != 0:
+            failures.append(f'the selector exited {proc6.returncode} at six models')
+        elif 'TAKEN ON ROSTER ORDER' not in proc6.stdout:
+            failures.append(
+                'gauche_rbf and het_gp_rbf are both in the gaussian_process family '
+                'and both are in this screen, so the family slot passed one over on '
+                'list position alone -- the reading must say that, and it did not')
+
         n_deep = len(spec_deep['generator_labels']) * len(spec_deep['representations'])
         pairs = spec_cen['generator_pairs']
         if len(pairs) >= n_deep:

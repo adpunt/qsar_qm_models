@@ -327,6 +327,15 @@ CASES = [
   'RESULT_COLUMNS = ["sigma", "iteration", "model",',
   'RESULT_COLUMNS = ["sigma", "iteration", "fold", "model",',
   [sys.executable, f"{QSAR}/scripts/test_replicate_is_not_a_fold.py"]),
+
+ # The completeness check restricted its EXPECTED set to deep_run_pairs.json but
+ # counted PARTIAL and THIN over everything on disk, so one line of output mixed
+ # "what the deep run still owes" with "what the screen has not finished".
+ ("the completeness check counts only what the generators asked for",
+  f"{QSAR}/scripts/check_runs_landed.py",
+  "    cover = _only_expected(cover, want, ('condition', 'rep', 'model'))\n",
+  "",
+  [sys.executable, f"{QSAR}/scripts/test_check_runs_landed_selection.py"]),
 ]
 
 
