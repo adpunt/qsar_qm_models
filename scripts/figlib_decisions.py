@@ -666,6 +666,8 @@ def write_report(verdicts, tables, output_dir, context=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, table in tables.items():
+        if name.startswith('_'):
+            continue          # carried between steps, not an output table
         if table is not None and len(table):
             table.to_csv(output_dir / f'{name}.csv', index=False)
 

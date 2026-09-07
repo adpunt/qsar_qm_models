@@ -98,6 +98,7 @@ import figlib_decisions as D  # noqa: E402
 import figlib_guard as G  # noqa: E402
 import figlib_load as L  # noqa: E402
 import figlib_metrics as M  # noqa: E402
+import figlib_figures as FIG  # noqa: E402
 import figlib_uncertainty as U  # noqa: E402
 
 STAGE_2_MESSAGE = (
@@ -278,7 +279,50 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
     collect(D.d10_probabilistic(qm9_per))
+    # Carried for the figures, not written out: the leading underscore keeps
+    # them out of the CSV sweep in write_report.
+    tables['_qm9_accuracy'] = qm9
+    tables['_primary_rep'] = primary
     return tables, verdicts
+
+
+def draw_figures(args, tables, verdicts):
+    """The figures that need only the accuracy results.
+
+    F6 and F7 need the uncertainty runs; they are drawn when those land. Each
+    builder declares what it holds fixed and RAISES if the data still carries a
+    factor it has not accounted for, so a failure here is a real one and is not
+    caught.
+    """
+    out = Path(args.output_dir) / 'figures'
+    print(f'[3/3] drawing into {out}')
+    qm9 = tables.get('auc_norm_qm9')
+    assay = tables.get('auc_norm_assay')
+    accuracy = tables.get('_qm9_accuracy')
+    anova = tables.get('anova_eta2')
+    rep = args.primary_rep or tables.get('_primary_rep')
+
+    said = {v['id']: v for v in verdicts}
+    # D2 chose which conditions differ from each other; F3 shows those and the
+    # rest become an additional file. The choice is the data's, not a taste.
+    conditions = said.get('D2', {}).get('main_text') or []
+
+    drawn = []
+    if anova is not None and len(anova):
+        drawn.append(FIG.f2_variance_decomposition(anova, out))
+    if qm9 is not None and len(qm9) and conditions:
+        drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
+    if accuracy is not None and len(accuracy) and qm9 is not None and rep:
+        drawn.append(FIG.f4_overview(accuracy, qm9, out, rep))
+        drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
+                                                'gaussian'))
+        drawn.append(FIG.r16_decoupling(qm9, out, rep))
+    if assay is not None and len(assay) and rep:
+        drawn.append(FIG.f8_assay(assay, out, rep))
+
+    drawn = [d for d in drawn if d]
+    print(f'  {len(drawn)} figure(s). F6 and F7 wait on the uncertainty runs.')
+    return drawn
 
 
 def main(argv=None):
@@ -292,7 +336,7 @@ def main(argv=None):
         pass
     C.apply_style()
 
-    if args.only in ('figures', 'tables'):
+    if args.only == 'tables':
         print(STAGE_2_MESSAGE)
         return 2
 
@@ -303,6 +347,9 @@ def main(argv=None):
         return 1
 
     tables, verdicts = run_decisions(args, qm9, assay, merged, per_molecule)
+
+    if args.only in ('figures', 'all'):
+        draw_figures(args, tables, verdicts)
 
     print('[3/3] writing')
     context = dict(C.provenance())
