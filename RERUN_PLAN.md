@@ -15403,3 +15403,62 @@ scope block — it runs on five named pairs — and the guard quotes it.
    in `citations.bib` and already cited in the Introduction. It needs in-fold training predictions,
    which neither pipeline writes. **The only item in this section that costs compute.**
 
+
+---
+
+### 13.27 THE COMMAND SHEET — what failed, what gets deleted, what gets resubmitted
+
+**Opened 2026-09-07** on the author's instruction: *"All I care about is getting all the
+results in from the server... I NEED THE RESULTS ASAP AND ANYTHING BLOCKING THAT NEEDS TO BE
+HANDLED."*
+
+This section is the single deliverable of the four chats in `HANDOFF.md`. It is not a
+report. Each chat appends its rows here and nowhere else, and when all four have written,
+this section is a sheet the author pastes into a terminal.
+
+**Nothing may be deleted by an assistant.** A delete line is written here with its reason and
+its evidence, and the author runs it. A result deleted in error costs days.
+
+#### D1. What is asking for the wrong wall or memory — CHAT 1
+
+| submission | asks | measured | verdict | command |
+|---|---|---|---|---|
+| _to be filled_ | | | | |
+
+#### D2. What failed, why, and the line that puts it back — CHAT 2
+
+| submission | tasks | cause | cause fixed at | command |
+|---|---|---|---|---|
+| _to be filled_ | | | | |
+
+#### D3. What is on disk and must be deleted or rewritten — CHAT 3
+
+| file or row range | why it is wrong | evidence | command |
+|---|---|---|---|
+| _to be filled_ | | | | |
+
+#### D4. What the queued jobs are actually computing — CHAT 4
+
+| submission | computing now | should be | author's call |
+|---|---|---|---|
+| _to be filled_ | | | |
+
+#### D5. Settled here, 2026-09-07, so no chat re-opens it
+
+- **The QM9 sample is identical across conditions at a given replicate.**
+  `torch.manual_seed(iteration_seed)` at `scripts/process_and_train.py:3450`, nothing
+  consumes torch randomness before `split_qm9`'s `torch.randperm` at `:1160`, and
+  `iteration_seed` is a function of `--random-seed` and the replicate number only.
+- **The Sort & Slice exclusion invalidates nothing already on disk (T08 CLOSED).** It
+  removes indices from the three split lists after the shuffle and split (`:1261`–`:1265`)
+  and never re-splits, so a task whose sample did not draw methane, ammonia or water is
+  bit-identical before and after `62f1fe2`. The tasks that did draw one crashed and wrote no
+  rows.
+- **The 378 uncertainty tasks are 6 models × 3 laboratory datasets × 3 representations × 7
+  conditions**, split 162 / 216 across the two submissions (`generate_scripts.py:700`).
+  **No QM9.** One task is one (model, dataset, representation, condition) over the whole
+  level ladder, five outer scaffold folds, with out-of-fold cross-fitting, one replicate.
+  How many of the 378 are `MODEL_REPS` skips is not measured — CHAT 1.
+- **Deferred by the author, 2026-09-07:** figures, the analysis job's output, paper
+  replacement text, and the six-decision menu. Threads T04 T05 T19 T20 T21 T42 T43 T44 T49
+  T50 are parked, not closed.
