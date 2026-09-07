@@ -394,22 +394,55 @@ def d5_representation_outlier(summary, condition=None):
 # D6 -- AUC_norm above 1
 # ---------------------------------------------------------------------------
 
-def d6_auc_above_one(summary):
+def d6_auc_above_one(summaries, per_replicates=None):
     """RERUN_PLAN.md 14.6 row 10. Counted beside its clean baseline, never
-    patched: 7.3 says this is structural and will reappear."""
-    if summary is None or not len(summary):
+    patched: 7.3 says this is structural and will reappear.
+
+    BOTH GRANULARITIES, because they disagree and the disagreement is the
+    finding. A cell's MEDIAN can sit under 1.05 while several of its replicates
+    are over it -- the first run on real data warned about 67 replicate values
+    and then reported "0 of 317 cells", which is two true numbers that read as a
+    contradiction. Reporting one without the other is failure mode 12.
+
+    And on every dataset, not just QM9: the assay side had 59 of the 67.
+    """
+    frames = [f for f in (summaries if isinstance(summaries, (list, tuple))
+                          else [summaries]) if f is not None and len(f)]
+    if not frames:
         return {}, _verdict('D6', 'Does AUC_norm exceed 1?', False,
                             'no robustness numbers yet')
+    summary = pd.concat(frames, ignore_index=True)
     hits = summary[summary['auc_norm'] > C.AUC_NORM_IMPLAUSIBLE_HIGH].copy()
-    fired = bool(len(hits))
-    says = (f'{len(hits)} of {len(summary)} cells score above '
-            f'{C.AUC_NORM_IMPLAUSIBLE_HIGH} -- retaining more than they started '
-            f'with. ' + ('Their clean baselines are printed beside them; this '
-                         'gets an additional file and a Methods sentence, not a '
-                         'patched metric (row 10).' if fired else ''))
-    return ({'d6_auc_above_one': hits.sort_values('auc_norm', ascending=False)},
-            _verdict('D6', 'Does AUC_norm exceed 1?', fired=fired, says=says,
-                     n_cells=int(len(hits))))
+
+    reps = [f for f in (per_replicates or []) if f is not None and len(f)]
+    rep_hits = pd.DataFrame()
+    n_rep_total = 0
+    if reps:
+        allreps = pd.concat(reps, ignore_index=True)
+        n_rep_total = int(len(allreps))
+        rep_hits = allreps[
+            allreps['auc_norm'] > C.AUC_NORM_IMPLAUSIBLE_HIGH].copy()
+
+    fired = bool(len(hits) or len(rep_hits))
+    says = (f'{len(hits)} of {len(summary)} cell medians and '
+            f'{len(rep_hits)} of {n_rep_total} individual replicates score '
+            f'above {C.AUC_NORM_IMPLAUSIBLE_HIGH} -- retaining more than they '
+            f'started with. ')
+    if len(rep_hits) and not len(hits):
+        says += ('The medians are all under the line and some replicates are '
+                 'over it, so this is run-to-run spread rather than a model '
+                 'that improves under noise. ')
+    if fired:
+        says += ('Clean baselines are printed beside them; this gets an '
+                 'additional file and a Methods sentence, not a patched metric '
+                 '(row 10).')
+    tables = {'d6_auc_above_one': hits.sort_values('auc_norm', ascending=False)}
+    if len(rep_hits):
+        tables['d6_auc_above_one_replicates'] = rep_hits.sort_values(
+            'auc_norm', ascending=False)
+    return tables, _verdict(
+        'D6', 'Does AUC_norm exceed 1?', fired=fired, says=says,
+        n_cell_medians=int(len(hits)), n_replicates=int(len(rep_hits)))
 
 
 # ---------------------------------------------------------------------------

@@ -147,13 +147,43 @@ def d6_counts_cells_above_one_beside_their_baseline():
     s = flat_summary()
     s.loc[0, 'auc_norm'] = 1.21
     tables, v = D.d6_auc_above_one(s)
-    assert v['fired'] and v['n_cells'] == 1, v
+    assert v['fired'] and v['n_cell_medians'] == 1, v
     assert 'baseline_r2' in tables['d6_auc_above_one'].columns, (
         'a value above 1 must be printed beside what it started from')
     print(f"    1 cell above {C.AUC_NORM_IMPLAUSIBLE_HIGH}, with its baseline")
     _, v2 = D.d6_auc_above_one(flat_summary())
     assert not v2['fired'], v2['says']
     print('    nothing above 1 -> not fired')
+
+
+def d6_does_not_report_zero_while_the_replicates_say_otherwise():
+    """On the first real run the loader warned about 67 replicate values over
+    the line and D6 reported "0 of 317 cells". Both were true -- one counts cell
+    medians, the other counts replicates -- and together they read as a
+    contradiction. That is failure mode 12 with two granularities instead of two
+    names."""
+    medians = flat_summary()                       # every median well under 1.05
+    per_replicate = pd.concat(
+        [medians.assign(replicate=i) for i in range(10)], ignore_index=True)
+    per_replicate.loc[:6, 'auc_norm'] = 1.4        # a few replicates over it
+    _, v = D.d6_auc_above_one([medians], [per_replicate])
+    assert v['n_cell_medians'] == 0, v
+    assert v['n_replicates'] == 7, v
+    assert v['fired'], 'replicates over the line must still fire'
+    assert 'run-to-run spread' in v['says'], v['says']
+    print(f"    0 cell medians but {v['n_replicates']} replicates over the "
+          f"line: both reported, and named as spread")
+
+
+def d6_covers_every_dataset_not_only_qm9():
+    """The assay side held 59 of the 67, and D6 was only ever handed QM9."""
+    qm9 = flat_summary()
+    assay = flat_summary()
+    assay['dataset'] = 'logd'
+    assay.loc[0, 'auc_norm'] = 1.30
+    _, v = D.d6_auc_above_one([qm9, assay])
+    assert v['n_cell_medians'] == 1, v
+    print('    a cell over the line on an assay dataset is counted')
 
 
 def a_missing_permutation_band_is_not_reported_as_a_null():
@@ -309,6 +339,10 @@ def main():
               d5_finds_a_representation_outlier_and_ignores_a_baseline_one),
         check('D6 counts cells above 1 beside their baseline',
               d6_counts_cells_above_one_beside_their_baseline),
+        check('D6 does not report zero while the replicates say otherwise',
+              d6_does_not_report_zero_while_the_replicates_say_otherwise),
+        check('D6 covers every dataset, not only QM9',
+              d6_covers_every_dataset_not_only_qm9),
         check('a missing permutation band is NOT reported as a null',
               a_missing_permutation_band_is_not_reported_as_a_null),
         check('D7 picks the censoring figure when censoring fires',

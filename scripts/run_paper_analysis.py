@@ -259,7 +259,8 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
         tables['anova_eta2'] = anova
     collect(D.d4_interaction(anova))
     collect(D.d5_representation_outlier(qm9_summary))
-    collect(D.d6_auc_above_one(qm9_summary))
+    collect(D.d6_auc_above_one([qm9_summary, assay_summary],
+                              [qm9_per, assay_per]))
 
     support = slopes = q4 = q6 = None
     if args.skip_uncertainty:

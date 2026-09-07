@@ -420,10 +420,18 @@ def load_assay_accuracy(dirs, cache_dir=None):
         # rep, condition and level with no fold, kept the first row, and
         # silently discarded four fifths of the data.
         key = ['dataset', 'model', 'rep', 'condition', 'sigma', 'replicate']
-        before = len(df)
-        df = df.drop_duplicates(subset=key, keep='last')
-        if before != len(df):
-            print(f'  {before - len(df)} duplicate assay row(s) dropped')
+        duplicated = df.duplicated(subset=key, keep='last')
+        if duplicated.any():
+            where = (df.loc[duplicated, ['dataset', 'model', 'rep', 'condition']]
+                     .value_counts())
+            print(f'  {int(duplicated.sum())} duplicate assay row(s) dropped, '
+                  f'across {len(where)} cell(s). Keeping the last written:')
+            for keys, count in list(where.items())[:6]:
+                print('      ' + ' / '.join(str(k) for k in keys)
+                      + f': {count} row(s)')
+            if len(where) > 6:
+                print(f'      ... and {len(where) - 6} more cell(s)')
+            df = df[~duplicated]
         return df.reset_index(drop=True)
 
     return _cached(cache_dir, 'assay', paths, build)
