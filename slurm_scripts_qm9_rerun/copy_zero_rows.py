@@ -166,6 +166,12 @@ def main():
             files[(rep, model)][condition] = path
 
     copied = written = checked = disagreed = skipped = refreshed = 0
+    # WHY THIS IS COLLECTED RATHER THAN ONLY PRINTED. A refusal is the one line in
+    # this output that needs an action, and it is printed in the middle of several
+    # hundred SKIP lines for configurations that have not run yet. On 2026-09-07
+    # the run reported "13 disagreed" in its summary and every one of the thirteen
+    # names had scrolled away. They are now repeated at the end, beside the counts.
+    refusals = []
     log_rows = []
     copies = previously_copied(results)
 
@@ -265,6 +271,7 @@ def main():
             # all (RERUN_PLAN.md 13.28). The exit code is still 1, so nothing
             # passes silently.
             if refused:
+                refusals.append((target.name, len(missing)))
                 print(f"  REFUSING  {target.name}: nothing copied into this file until "
                       f"the disagreement above is explained. Every other file is "
                       f"unaffected and is still being filled.")
@@ -299,6 +306,14 @@ def main():
               f"been re-run since -- listed above, none silently")
     if skipped:
         print(f"  {skipped} configuration(s) skipped -- listed above, none silently")
+
+    if refusals:
+        print()
+        print(f"  {len(refusals)} file(s) REFUSED, and each still has no clean row to "
+              f"divide by. These are the only ones that need a decision:")
+        for name, still_missing in refusals:
+            print(f"      {name}   {still_missing} replicate(s) still without a "
+                  f"clean row")
 
     if log_rows and not args.dry_run:
         log = results / LOG_NAME

@@ -354,6 +354,14 @@ CASES = [
   "            if refused:\n                print(f\"  REFUSING  {target.name}",
   "            if disagreed:\n                print(f\"  REFUSING  {target.name}",
   [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_copy_zero_rows.py"]),
+
+ # A refusal is printed among several hundred SKIP lines, and it is the only line
+ # in that output that needs a decision.
+ ("every refused file is named again in the summary",
+  f"{QSAR}/slurm_scripts_qm9_rerun/copy_zero_rows.py",
+  "                refusals.append((target.name, len(missing)))\n",
+  "",
+  [sys.executable, f"{QSAR}/slurm_scripts_qm9_rerun/test_copy_zero_rows.py"]),
 ]
 
 

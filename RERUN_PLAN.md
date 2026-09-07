@@ -16651,6 +16651,32 @@ their line removed.
 **Not yet run on the real results.** The command is in §13.29a's step list; until it runs,
 those 13 combinations still have nothing to divide by.
 
+**RUN ON THE REAL RESULTS, 2026-09-07.** 248 clean rows written from
+`zero_row_copies.csv`. QM9 stage 2 went from 59 landed of 113 to **70 of 113**; PARTIAL fell
+from 18 to **7**, THIN from 4 to **3**, MISSING unchanged at 33.
+
+**Thirteen computed clean rows disagreed and their files were refused.** The count is in the
+summary; the thirteen names were printed several hundred SKIP lines earlier and had scrolled
+away. Fixed: every refused file is now named again at the end, beside the counts, with how
+many replicates it still lacks. Guard: the same `test_copy_zero_rows.py`, registered in
+`check_fixes_fail_when_removed.py`. **Which thirteen is not yet known** — it needs one
+`--dry-run`, which writes nothing.
+
+**What is left at stage 2 after the copy.** Seven PARTIAL and three THIN, all named:
+
+| rows | what they are | whose |
+|---|---|---|
+| `censoring` on `dnn_bnn_full_mve`×PDV, `gauche_rbf`×PDV, `het_gp_rbf`×ECFP4, `ngboost`×PDV | four of the censoring submission's five pairs, still landing | the queue |
+| `student_t_nu5` on `gauche_rbf` × ECFP4, PDV and ChemBERTa | `gauche_rbf` is short of levels, not short of a clean row | §13.26 C2, `gauche_rbf` |
+| `gaussian`, `grouped_shifted`, `grouped_wider` on `ngboost` × ChemBERTa | short of replicates | the queue |
+| 33 MISSING, mostly `laplace` | never ran | the queue |
+
+⚠ **Unexplained and NOT chased here.** The loader reported `29 duplicated cell-and-replicate(s)
+differ by more than 0.001 R2 between copies (largest 0.0399)`. §13.28 saw the same thing at one
+replicate of one model and left it as worth one look. 0.0399 in R² is larger than run-to-run
+wobble should be, and nobody has established what moves. It does not block the copy, which
+now judges a row against every block the reference holds.
+
 #### D6. Sort & Slice — the 104 tasks, and the tool that would not print them — CHAT 5
 
 **The three molecules.** Methane, ammonia and water each carry exactly one Morgan

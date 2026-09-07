@@ -126,6 +126,14 @@ def main():
             failures.append('a genuine disagreement did not refuse its own file')
         if len(clean_rows(other)) != 1:
             failures.append('the refused file was written into anyway')
+        # The refusal is printed among several hundred SKIP lines. It is the only
+        # line in the output that needs a decision, so it is repeated at the end.
+        tail = p.stdout[p.stdout.rfind('clean row(s)'):]
+        if other.name not in tail:
+            failures.append(
+                f'{other.name} was refused and is not named in the summary at the '
+                f'end, so a run with hundreds of SKIP lines reports a count and no '
+                f'names')
         if len(clean_rows(innocent)) != 3:
             failures.append(
                 f'one file disagreed and a DIFFERENT file was left with '
