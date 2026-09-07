@@ -248,6 +248,26 @@ def gp_flags_for(model, rep):
             "    --gp-reps " + rep + " " + BS + "\n")
 
 
+def reps_for(model, reps):
+    """The representations ONE model runs on, out of the run's list.
+
+    A Tanimoto kernel is a ratio of set overlaps, defined on BINARY vectors.
+    Sort & Slice is built with sub_counts=True so its features are small
+    integers, and the other four are continuous; the fit is refused at run time.
+    Without this, 5 of every 6 tasks queue, start, raise on every noise level and
+    write an empty file -- the identical defect the QM9 generator carried until
+    2026-08-31 (RERUN_PLAN.md 2.33c), and QM9 restricts it the same way.
+
+    NAMED, not inlined, from 2026-09-07. `scripts/check_runs_landed.py` built its
+    expected set by crossing every model with every representation, so it invented
+    45 laboratory cells that were never queued -- `GP-Tanimoto` on the five
+    representations it cannot run on, times three conditions and three datasets --
+    and reported them MISSING. A complete grid read as 981 of 1,026. The rule now
+    lives here and both callers read it.
+    """
+    return ['ECFP4'] if model.startswith('GP-Tanimoto') else list(reps)
+
+
 def seconds_per_fit(model, dataset):
     """Seconds for ONE fit of this model on this dataset, from the table above.
 
@@ -1201,8 +1221,7 @@ def main():
         # every 6 tasks queue, start, raise on every noise level and write an
         # empty file -- the identical defect the QM9 generator carried until
         # 2026-08-31 (RERUN_PLAN.md 2.33c), and QM9 restricts it the same way.
-        model_reps = (['ECFP4'] if model.startswith('GP-Tanimoto')
-                      else list(reps))
+        model_reps = reps_for(model, reps)
         n_tasks = len(model_reps) * len(DATASETS)
         hours = max(wall_clock(model, d, conditions) for d, _ in DATASETS)
         cases = '\n'.join(

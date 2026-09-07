@@ -140,7 +140,7 @@ def check_qm9(directory, stage):
     frame = L.load_qm9(directory)
     if frame is None:
         return {'name': 'QM9', 'want': len(want), 'ok': 0, 'missing': len(want),
-                'partial': 0, 'thin': 0, 'examples': sorted(want)[:6],
+                'partial': 0, 'thin': 0, 'examples': sorted(want),
                 'note': f'nothing in {directory}'}
     cover = L.coverage(frame, 'QM9')
     cover = _only_expected(cover, want, ('condition', 'rep', 'model'))
@@ -154,7 +154,7 @@ def check_qm9(directory, stage):
     missing = sorted(want - have)
     return {'name': 'QM9', 'want': len(want), 'ok': len(want & landed),
             'missing': len(missing), 'partial': int(len(partial)),
-            'thin': int(len(thin)), 'examples': missing[:6],
+            'thin': int(len(thin)), 'examples': missing,
             'note': f'{replicates} replicate(s) expected at stage {stage}',
             'coverage': cover}
 
@@ -277,11 +277,19 @@ def assay_expected(stage):
     if gen is None:
         return set(), None
     datasets = [short for short, _ in gen.DATASETS]
+    # NOT every model crossed with every representation. `reps_for` is the
+    # generator's own rule and is read, never restated: a Tanimoto kernel is
+    # defined on binary vectors, so `GP-Tanimoto` is queued on ECFP4 alone and
+    # `val_gp-tanimoto.sh` holds 3 tasks where every other array holds 18.
+    # Crossing blindly invented 45 cells nobody submitted -- five representations
+    # x three conditions x three datasets -- and reported a complete breadth grid
+    # as 981 landed of 1,026 missing 45, on 2026-09-07.
     if stage != 2:
         want = {(d, C.canonical_model(m, 'validation'), C.canonical_rep(r), c)
                 for d in datasets for m in gen.MODELS_ALL
-                for r in gen.ALL_REPS for c in gen.BREADTH_GRID}
-        return want, 'the breadth grid: every model on every representation'
+                for r in gen.reps_for(m, gen.ALL_REPS) for c in gen.BREADTH_GRID}
+        return want, ('the breadth grid, on the pairs the generator queues '
+                      '(GP-Tanimoto is ECFP4 only)')
 
     want = set()
     deep = _pairs_file('deep_run_pairs.json')
@@ -289,7 +297,7 @@ def assay_expected(stage):
         want |= {(d, C.canonical_model(m, 'validation'), C.canonical_rep(r), c)
                  for d in datasets
                  for m in deep['validation_labels']
-                 for r in deep['representations']
+                 for r in gen.reps_for(m, deep['representations'])
                  for c in gen.DEPTH_ONLY}
     censoring = _pairs_file('censoring_pairs.json')
     if censoring:
@@ -313,7 +321,7 @@ def check_assay(directories, stage=1):
     if frame is None:
         return {'name': 'assay accuracy', 'want': len(want), 'ok': 0,
                 'missing': len(want), 'partial': 0, 'thin': 0,
-                'examples': sorted(want)[:6],
+                'examples': sorted(want),
                 'note': 'nothing found -- these land in the KIRBy checkout, '
                         'not this one'}
     cover = L.coverage(frame, 'assay')
@@ -328,7 +336,7 @@ def check_assay(directories, stage=1):
                                           'NO_CLEAN_BASELINE'])]
     return {'name': 'assay accuracy', 'want': len(want),
             'ok': len(want & landed), 'missing': len(missing),
-            'partial': int(len(partial)), 'thin': 0, 'examples': missing[:6],
+            'partial': int(len(partial)), 'thin': 0, 'examples': missing,
             'note': f'five folds, no replicates -- a partition, not repeats; {note}',
             'coverage': cover}
 
@@ -354,7 +362,7 @@ def check_uncertainty(directories):
     if cover is None or not len(cover):
         return {'name': 'uncertainty runs', 'want': len(want), 'ok': 0,
                 'missing': len(want), 'partial': 0, 'thin': 0,
-                'examples': sorted(want)[:6],
+                'examples': sorted(want),
                 'note': 'no _merged/coverage.csv -- run the merge step first'}
     status = cover['status'] if 'status' in cover.columns else pd.Series(dtype=str)
     ok = int((status == 'OK').sum())
@@ -384,8 +392,17 @@ def report(results, verbose=False):
               f'{r["partial"]:>8d} {r["thin"]:>6d}   {r["note"]}')
         if r['ok'] < r['want'] or r['partial'] or r['thin']:
             complete = False
-        for example in r['examples']:
-            print(f'    still missing: {example}')
+        # EVERY missing cell, not the first six. Six is enough to recognise a
+        # pattern and never enough to act on one: on 2026-09-07 the laboratory
+        # depth run showed six het_gp_rbf rows out of 54, so what the other 48
+        # were could not be read at all. The one case that stays a summary is a
+        # producer that is missing ENTIRELY -- listing 441 identical lines under
+        # "run the merge step first" buries everything else on the page.
+        if r['missing'] and r['missing'] == r['want']:
+            print(f'    all {r["want"]} cells missing -- {r["note"]}')
+        else:
+            for example in r['examples']:
+                print(f'    still missing: {example}')
         if verbose and 'coverage' in r:
             bad = r['coverage'][r['coverage']['status'] != 'OK']
             for row in bad.head(20).itertuples():

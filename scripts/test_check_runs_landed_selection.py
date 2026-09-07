@@ -133,6 +133,27 @@ def check_the_laboratory_runs_are_counted():
                          f'three depth-only ones plus censoring')
     n += 1
 
+    # A model the generator queues on ONE representation must not be expected on
+    # six. GP-Tanimoto is ECFP4 only -- a Tanimoto kernel is defined on binary
+    # vectors -- and crossing blindly invented 45 laboratory cells nobody
+    # submitted, so a complete breadth grid read as 981 landed of 1,026.
+    pairs = {(m, r) for _, m, r, _ in breadth}
+    tanimoto = {r for m, r in pairs
+                if m == C.canonical_model('GP-Tanimoto', 'validation')}
+    if tanimoto != {C.canonical_rep('ECFP4')}:
+        raise SystemExit(
+            f'FAIL: GP-Tanimoto is expected on {sorted(tanimoto)}; the generator '
+            f'queues it on ECFP4 alone (its reps_for), so every other '
+            f'representation is a cell nobody submitted')
+    n += 1
+    queued = sum(len(gen.reps_for(m, gen.ALL_REPS)) for m in gen.MODELS_ALL)
+    if len(breadth) != queued * len(gen.BREADTH_GRID) * len(gen.DATASETS):
+        raise SystemExit(
+            f'FAIL: the breadth grid expects {len(breadth)} cells against the '
+            f'{queued * len(gen.BREADTH_GRID) * len(gen.DATASETS)} the generator '
+            f'queues')
+    n += 1
+
     # Censoring is five NAMED pairs, so it must not be a cross product.
     censoring = json.loads((ROOT / 'censoring_pairs.json').read_text())
     named = {(C.canonical_model(m, 'validation'), C.canonical_rep(r))
