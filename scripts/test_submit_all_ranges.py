@@ -118,9 +118,14 @@ def main():
                 failures.append(f'{label}: the generator exited {proc.returncode}\n'
                                 f'      {proc.stderr.strip()[-400:]}')
                 continue
-            sub = out / 'submit_all.sh'
+            # THE QM9 GENERATOR NAMES ITS SUBMITTER FOR THE STAGE, because stages 0,
+            # 1 and 2 share one directory and a single `submit_all.sh` was overwritten
+            # by whichever ran last. `submit_all.sh` is now the dispatcher and holds no
+            # sbatch line at all, so the real one is `submit_all_s<stage>.sh`.
+            staged = sorted(out.glob('submit_all_s*.sh'))
+            sub = staged[0] if staged else out / 'submit_all.sh'
             if not sub.exists():
-                failures.append(f'{label}: wrote no submit_all.sh, so the ranges are '
+                failures.append(f'{label}: wrote no submitter, so the ranges are '
                                 f'left to whoever types the sbatch line')
                 continue
             lines = re.findall(r'--array=0-(\d+)%\S*\s+([A-Za-z0-9_.-]+\.sh)',
@@ -128,9 +133,9 @@ def main():
             if not lines:
                 failures.append(f'{label}: submit_all.sh submits nothing')
                 continue
-            job_scripts = {p.name for p in out.glob('*.sh')} - {
-                'submit_all.sh', 'preflight.sh', 'smoke_test.sh',
-                'resubmit_selected.sh'}
+            job_scripts = {p.name for p in out.glob('*.sh')
+                           if not p.name.startswith('submit_all')} - {
+                'preflight.sh', 'smoke_test.sh', 'resubmit_selected.sh'}
             submitted = {name for _, name in lines}
             for missing in sorted(job_scripts - submitted):
                 failures.append(f'{label}: {missing} is generated but in no sbatch line')
@@ -219,6 +224,55 @@ def main():
                             f'{label}: resubmit_selected.sh decodes {name} to '
                             f'{sorted(got - expect)} that the selection does not name, '
                             f'and misses {sorted(expect - got)}')
+
+        # TWO STAGES IN ONE DIRECTORY, which is what actually happens: the QM9 repair
+        # regenerates stage 1 and then stage 2 into `slurm_scripts_qm9_rerun` so both
+        # pick up a fix in process_and_train.py. Until 2026-09-07 the second run
+        # overwrote the first's submitter, leaving 19 stage-2 arrays listed, none for
+        # stage 1, and all 19 `qm9_s1_*.sh` on disk with nothing to submit them. Every
+        # other check here generates into a fresh directory, so none of them saw it.
+        shared = Path(tmp) / 'both_stages'
+        shared.mkdir(parents=True)
+        for extra in (['--stage', '1', '--max-hours', '720'],
+                      ['--stage', '2', '--max-hours', '720',
+                       '--runtime-selection', str(DEEP)]):
+            proc = subprocess.run(
+                [sys.executable, str(QM9), *extra, '--out-dir', str(shared)],
+                capture_output=True, text=True)
+            if proc.returncode != 0:
+                failures.append(f'two stages in one directory: the generator exited '
+                                f'{proc.returncode}\n      '
+                                f'{proc.stderr.strip()[-300:]}')
+        for stage, n_tasks in (('1', 18), ('2', 36)):
+            sub = shared / f'submit_all_s{stage}.sh'
+            if not sub.exists():
+                failures.append(f'two stages in one directory: no submit_all_s{stage}'
+                                f'.sh, so stage {stage} cannot be submitted at all')
+                continue
+            names = re.findall(r'--array=0-\d+%\S*\s+([A-Za-z0-9_.-]+\.sh)',
+                               sub.read_text())
+            wrong = [n for n in names if not n.startswith(f'qm9_s{stage}_')]
+            checked += len(names)
+            if wrong:
+                failures.append(f'two stages in one directory: submit_all_s{stage}.sh '
+                                f'submits {wrong}, which belong to another stage')
+            on_disk = sorted(p.name for p in shared.glob(f'qm9_s{stage}_*.sh'))
+            for missing in sorted(set(on_disk) - set(names)):
+                failures.append(f'two stages in one directory: {missing} is on disk '
+                                f'and in no sbatch line')
+        # And the dispatcher must refuse rather than pick one.
+        disp = shared / 'submit_all.sh'
+        if disp.exists():
+            ran = subprocess.run(['bash', 'submit_all.sh'], cwd=str(shared),
+                                 capture_output=True, text=True)
+            if ran.returncode == 0:
+                failures.append('two stages in one directory: submit_all.sh with no '
+                                'stage exited 0, so it submitted one of them')
+            for stage in ('1', '2'):
+                if f'submit_all_s{stage}.sh' not in ran.stdout:
+                    failures.append(f'two stages in one directory: submit_all.sh does '
+                                    f'not name submit_all_s{stage}.sh, so the operator '
+                                    f'is not told what to run')
 
     if failures:
         print(f'FAIL — {len(failures)} problem(s):\n')

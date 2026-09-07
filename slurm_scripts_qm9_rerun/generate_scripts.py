@@ -1836,7 +1836,43 @@ def main():
     submit += ['',
                f'echo "submitted $ok of {len(written)}; $bad failed"',
                'if [ "$bad" -gt 0 ]; then exit 1; fi']
-    (out / 'submit_all.sh').write_text('\n'.join(submit) + '\n')
+    # ONE SUBMITTER PER STAGE, BECAUSE THREE STAGES SHARE THIS DIRECTORY.
+    #
+    # Stages 0, 1 and 2 all write into `slurm_scripts_qm9_rerun`, and a single
+    # `submit_all.sh` is overwritten by whichever stage was generated last. Running
+    # stage 1 and then stage 2 -- which is what a repair does, because the fix is in
+    # process_and_train.py and both stages have to pick it up -- left 38 stage-2 lines
+    # and none for stage 1, with all 19 `qm9_s1_*.sh` on disk and nothing to submit
+    # them. It did not bite while stage 1 went back through `failed_tasks.py`, which
+    # writes its own indices, and it would have the moment anyone sent a stage-1 array
+    # whole. Found on the cluster 2026-09-07.
+    #
+    # So the real submitter is named for its stage and nothing else can clobber it.
+    stage_file = f'submit_all_s{args.stage}.sh'
+    (out / stage_file).write_text('\n'.join(submit) + '\n')
+    (out / stage_file).chmod(0o755)
+
+    # AND `submit_all.sh` REFUSES TO GUESS. Every runbook and every command sheet in
+    # this study says `bash submit_all.sh`, so it still exists -- but it now asks which
+    # stage rather than submitting whichever was generated last. Exiting 2 with the
+    # right file named is recoverable in one line; submitting 654 tasks of the wrong
+    # stage is not.
+    dispatch = ['#!/usr/bin/env bash',
+                '# WHICH STAGE? Stages 0, 1 and 2 share this directory, so this file',
+                '# cannot know which one you mean and does not guess.',
+                'set -u',
+                'stage="${1:-}"',
+                'if [ -n "$stage" ] && [ -x "submit_all_s${stage}.sh" ]; then',
+                '    exec ./submit_all_s${stage}.sh',
+                'fi',
+                'echo "usage: bash submit_all.sh <stage>"',
+                'echo "the submitters in this directory:"',
+                'for f in submit_all_s*.sh; do',
+                '    [ -e "$f" ] || continue',
+                '    printf "    %s   %s\\n" "$f" "$(sed -n "3s/^# //p" "$f")"',
+                'done',
+                'exit 2']
+    (out / 'submit_all.sh').write_text('\n'.join(dispatch) + '\n')
     (out / 'submit_all.sh').chmod(0o755)
 
     # THE SUBMITTER FOR A WIDENED SELECTION, SO NOBODY TYPES AN INDEX LIST EITHER.
@@ -1903,7 +1939,7 @@ def main():
         (out / 'resubmit_selected.sh').chmod(0o755)
 
     print(f"Stage {args.stage}: {len(written)} array scripts, {grand} tasks total, "
-          f"+ submit_all.sh")
+          f"+ {stage_file}")
     print(f"  conditions: {' '.join(conditions)}")
     print(f"  replicates: {n_reps_run}, numbered {first_iter}..{first_iter + n_reps_run - 1}")
     _spread = sorted(set(levels_by_condition.values()))

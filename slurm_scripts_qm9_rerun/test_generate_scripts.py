@@ -131,9 +131,12 @@ def generate(out_dir: Path, stub: Path, *args):
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(f'generator failed: {cmd}\n{proc.stdout}\n{proc.stderr}')
-    # submit_all.sh is the submitter, not a job script: it has no CONDS, no REPS and
-    # nothing to run against the stub. Every check below is about a job array.
-    return sorted(p for p in out_dir.glob('*.sh') if p.name != 'submit_all.sh')
+    # The submitters are not job scripts: they have no CONDS, no REPS and nothing to
+    # run against the stub. Every check below is about a job array. `submit_all.sh` is
+    # the dispatcher and `submit_all_s<stage>.sh` is the real one per stage, because
+    # stages 0, 1 and 2 share this directory.
+    return sorted(p for p in out_dir.glob('*.sh')
+                  if not p.name.startswith('submit_all'))
 
 
 def parse_header(script: Path):

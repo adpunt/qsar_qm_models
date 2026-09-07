@@ -11170,12 +11170,16 @@ If `scontrol` refuses — some sites restrict it — cancel and resubmit, and on
 ```bash
 scancel $(seq -s' ' 12980573 12980591)
 cd slurm_scripts_qm9_rerun
-rm -f qm9_s1_*.sh submit_all.sh && python generate_scripts.py --stage 1 --max-hours 720
+rm -f qm9_s1_*.sh submit_all_s1.sh && python generate_scripts.py --stage 1 --max-hours 720
 grep -h 'mem=' qm9_s1_rf.sh                                # must say 96G
-ACCT=stat-cadd PART=long THROTTLE=5 bash submit_all.sh     # 19 arrays, 327 tasks
+ACCT=stat-cadd PART=long THROTTLE=5 bash submit_all_s1.sh  # 19 arrays, 327 tasks
 ```
 
-**Use `submit_all.sh`, never a hand-written loop.** Every script holds a different number of tasks
+**Use the generator's submitter, never a hand-written loop.** ⚠️ **On the QM9 side it is
+`submit_all_s<stage>.sh`, one per stage**, because stages 0, 1 and 2 all write into
+`slurm_scripts_qm9_rerun` and a single file was overwritten by whichever stage was generated
+last (found on the cluster 2026-09-07). `submit_all.sh` is still there, now as a dispatcher
+that lists the stages present and exits 2 rather than guessing. Every script holds a different number of tasks
 — `gauche` runs on ECFP4 alone, so it is 3 where the rest are 18 — and the range is on the sbatch
 line, not in the script. The generator writes the loop with each script's own range;
 `scripts/test_submit_all_ranges.py` checks 145 sbatch lines across nine generator forms and also
@@ -11317,16 +11321,16 @@ before it is submitted.
 
 ```bash
 cd $QSAR/slurm_scripts_qm9_rerun
-rm -f qm9_s2_*.sh submit_all.sh
+rm -f qm9_s2_*.sh submit_all_s2.sh
 python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
-ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all.sh     # 19 arrays, 654 tasks
+ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all_s2.sh  # 19 arrays, 654 tasks
 
 mkdir -p $QSAR/slurm_scripts_qm9_censoring
 python generate_scripts.py --stage 2 --conditions censoring \
     --runtime-selection $CEN --max-hours 720 \
     --out-dir $QSAR/slurm_scripts_qm9_censoring
 cd $QSAR/slurm_scripts_qm9_censoring
-ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all.sh     # 19 arrays, 109 tasks
+ACCT=stat-cadd PART=long THROTTLE=4 bash submit_all_s2.sh  # 19 arrays, 109 tasks
 ```
 
 **Censoring must have its own `--out-dir`** — scripts are named by model and run-design index only,
