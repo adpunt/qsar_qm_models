@@ -16885,10 +16885,44 @@ mixed, so it is not a bias either.** Nothing in this session establishes the cau
 divides by exactly these rows, and censoring is the condition §3.1f says is the only one that
 can answer the which-molecules question.
 
-**Next step, and it is one command.** `copy_zero_rows.py` now prints `sample_size` and
-`spec_hash` on both sides of a disagreement, so the same `--dry-run` says whether replicates
-4 and 8 were a different sample or a different model spec. "Neither" is the answer that would
-be serious. Nobody has run it yet.
+**RUN 2026-09-07. THE ANSWER IS "NEITHER".** Every disagreeing row reports `n=10000` and
+`spec=26163cc3` on BOTH sides. Same requested sample size, same model spec, same replicate
+seed, different clean R².
+
+The same run also shows the 13 are not 13 replicates. `heteroscedastic_gp` on ECFP4 lists
+nine, because seven of them differ only in the seventh decimal and string equality counts that
+as a disagreement. The two PDV pairs list two each. **The real signal is replicates 4 and 8,
+and nothing else.**
+
+#### D4g. What replicates 4 and 8 most likely are — mechanism verified in code, cause NOT yet
+
+`split_qm9` drops any molecule whose ECFP4 vector is all zeros from the training, validation
+and test lists — **for every representation, not only Sort & Slice**
+(`scripts/process_and_train.py:1261`–`1265`, landed in `62f1fe2` on 2026-09-07). Three QM9
+molecules qualify: methane, ammonia and water.
+
+A sample of 10,000 drawn from 132,480 contains at least one of three named molecules with
+probability 1 − (1 − 10000/132480)³ = **0.21**. Over ten replicates that is about two. **Two
+is what the files show.**
+
+One task holds one code version and all ten replicates, so this cannot differ within a task —
+it differs between the censoring task and the gaussian task. If one ran before `62f1fe2` and
+the other after, then exactly the replicates whose sample drew methane, ammonia or water train
+on 9,999 molecules on one side and 10,000 on the other. `sample_size` is the REQUESTED count
+and stays 10000 either way, which is why that column shows no difference.
+
+⚠ **This is a mechanism that fits, not a cause that has been shown.** `split_qm9` prints
+either `Sort & Slice cannot represent N molecule(s)` or
+`Sort & Slice represents every molecule in this sample; nothing excluded`, so the task logs
+settle it: `qm92_*_%A_%a.out` in `slurm_scripts_qm9_rerun`.
+
+🔴 **If it holds, it is not about censoring.** Every QM9 cell whose task ran on one side of
+that pull and is compared with a cell that ran on the other differs on roughly one replicate
+in five. §13.27 D5 says the exclusion "invalidates nothing already on disk" because the tasks
+that drew one of the three crashed and wrote no rows — **that is true of Sort & Slice, whose
+guard refuses an all-zero vector, and not of ECFP4, PDV or ChemBERTa, where methane has a
+perfectly good vector and the run simply trains on one molecule fewer.** D5 needs correcting
+if the logs confirm this.
 
 This is probably the same thing as the `29 duplicated cell-and-replicate(s) ... largest
 0.0399` warning below, but that is **unverified** — nobody has checked whether those 29 are
