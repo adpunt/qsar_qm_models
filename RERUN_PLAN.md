@@ -15804,3 +15804,476 @@ hardcoded 0.3 (§13.17 C1), the rank-versus-level charts (§13.17 C2), and the t
 items §13.22 marks OPEN.
 
 ---
+
+### 13.29a THE ORDERED COMMAND SHEET — paste top to bottom, 2026-09-07
+
+The tables above say what was fixed. This says what to run. Every command was checked
+against the scripts in this checkout on 2026-09-07; where something could not be checked
+from the laptop it says **not checked**.
+
+Five commands in the first draft of this sheet did not do what the sheet claimed. They are
+corrected here and the correction is named where it matters, so nothing has to be
+re-derived: the memory raise, the stuck screen array, the quantile forest's cancel, the
+uncertainty cancel, and the remedy for adding a model to the uncertainty runs.
+
+`--stage` below is the spelling of a command-line flag, nothing more. `--stage 1` is the
+main grid, `--stage 2` is the deep run.
+
+---
+
+#### STEP 0 — Get the cluster onto the pushed commit. READ THE OUTPUT.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models && bash scripts/pull_safely.sh && git log --oneline -1
+```
+
+**Good result:** the last line prints `332bc09` or later, and `git log --oneline | grep -c eb08bb8`
+prints 1. If the pull did not land, nothing below is valid.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+```
+
+**Good result: it PRINTS.** It echoes `QSAR`, `KIRBY`, `SEL`, `CEN`, `ACCT` and `PART`, and
+sources `setup.sh`, which prints too. Silence would mean it did not run. (The first draft of
+this sheet said "no output" and was wrong.) Source it again after every login and after
+moving between login nodes.
+
+**This one pull repairs every job that has not yet started, in every submission, with no
+resubmission at all.** A queued job reads the repository when it starts. Only jobs that have
+already run and failed need an sbatch line.
+
+---
+
+#### STEP 1 — Prove the fixes are live. SAFE.
+
+```bash
+cd $QSAR && python scripts/test_sns_zero_exclusion.py && \
+    python scripts/test_config_isolation.py --end-to-end && python scripts/check_environment.py
+```
+
+**Good result:** `all checks passed`, then the isolation gate's end-to-end half passes under
+`env_test` — it only runs on the cluster and is owed before the first submission (§13.12 D10)
+— then `check_environment.py` exits 0. If the first fails, the pull did not carry the fix.
+
+---
+
+#### STEP 2 — Capture the queue once, so every later answer comes from one reading. SAFE.
+
+```bash
+cd $QSAR && python scripts/slurm_jobs.py --save /tmp/sacct_0907.psv
+python scripts/slurm_jobs.py --sacct-file /tmp/sacct_0907.psv
+```
+
+⚠️ **Its "done" column overstates the deep run and censoring.** A task whose pair is not
+selected exits 0 in seconds and is counted as done. `check_runs_landed.py` in Step 16 is the
+one that counts results rather than exits.
+
+---
+
+#### STEP 3 — Read what actually failed. READ THE OUTPUT.
+
+```bash
+cd $QSAR && python scripts/failed_tasks.py --sacct-file /tmp/sacct_0907.psv --show 60
+```
+
+Write down the total under FAILED for the main grid. Three sections of this document give
+three different numbers for Sort & Slice — 48, 51 and 58 — and this command is the only thing
+that measures it. **It prints no sbatch lines** by design: it refuses to resubmit an unfixed
+cause, and these causes are now fixed. Step 6 derives the lines instead.
+
+---
+
+#### STEP 4 — Regenerate all four sets of job scripts. SAFE, but do not run `submit_all.sh`.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+rm -f qm9_s1_*.sh submit_all.sh
+python generate_scripts.py --stage 1 --max-hours 720
+grep -h 'SBATCH --time' qm9_s1_qrf.sh qm9_s1_gauche_rbf.sh qm9_s1_ngboost.sh
+```
+**Good result:** `42:59:00`, `133:59:00`, `285:59:00`, plus
+`⚠ 3 wall clock(s) graded partial: gauche_rbf, mlp_bnn_full_mve, ngboost`. That warning is the
+point, not a problem.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+rm -f qm9_s2_*.sh
+python generate_scripts.py --stage 2 --runtime-selection $SEL --max-hours 720
+python generate_scripts.py --stage 2 --conditions censoring --runtime-selection $CEN \
+    --max-hours 720 --out-dir $QSAR/slurm_scripts_qm9_censoring
+cd $QSAR/slurm_scripts_validation_rerun && python generate_scripts.py
+python generate_scripts.py --conditions censoring --runtime-selection $CEN \
+    --out-dir $QSAR/slurm_scripts_validation_censoring
+grep -h 'SBATCH --time' $QSAR/slurm_scripts_validation_censoring/val_svm.sh
+```
+**Good result:** the last line prints `2:00:00`, not `1:00:00`.
+
+**Do not run `submit_all.sh` for a resubmission.** Regenerating rewrites it and it submits all
+19 arrays at full range. Running it to put three jobs back would queue 327.
+
+---
+
+#### STEP 5a — Raise the main grid's memory to the 64G floor. READ THE OUTPUT.
+
+**`measure_walls.py --emit-scontrol` will NOT print these lines.** It emits a memory line only
+when the new figure is *smaller* than the request (`scripts/measure_walls.py:296`,
+`if want_m < d['req_m'] * 0.9`). The main grid asks 32G and the floor is 64G, so it prints
+nothing for those nineteen arrays and the raise would silently not happen. The lines are
+explicit, in two tiers (§13.21), and are the ones already written at §13.19 STEP 1:
+
+⚠️ **`MinMemoryNode` takes MEGABYTES as a plain integer.** `MinMemoryNode=96G` is rejected
+with `error: Invalid MinMemoryNode value: 96G`. 64G = **65536**, 96G = **98304**.
+
+```bash
+for j in 12980573 12980574 12980575 12980576 12980577 12980589; do   # rf xgboost lgb svm ngboost qrf
+    scontrol update JobId=$j MinMemoryNode=65536; done
+for j in 12980578 12980579 12980580 12980581 12980582 12980583 12980584 \
+         12980585 12980586 12980587 12980588 12980590 12980591; do   # the networks and the GPs
+    scontrol update JobId=$j MinMemoryNode=98304; done
+for j in 12980573 12980578; do
+    printf "%s  " $j; scontrol show job $j | grep -o 'MinMemoryNode=[0-9]*[A-Z]*'; done
+```
+**Good result:** the last loop prints `65536M` and `98304M` (some builds print `64G`/`96G`).
+
+Whether the 96G tier should instead be 64G is an open decision — the peak ever measured on
+this study is 4.2 GB. It is listed under DECISIONS below. Do not lower `gauche_rbf` or the deep
+run's `ngboost` either way: neither has completed a single task, so there is no measurement to
+lower them from.
+
+#### STEP 5b — Cut the pending walls that are too big. READ THE OUTPUT.
+
+**Take only the MEMORY lines from `measure_walls.py`, never its wall lines.** It sizes a wall at
+2.0x the longest observed task, and `gauche_rbf`'s four completed tasks did the cheap half of
+the work, so its line would cut the array to about three hours and kill it.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+for f in qm9_s1_*.sh; do
+  m=${f#qm9_s1_}; m=${m%.sh}
+  w=$(grep -m1 'SBATCH --time' "$f" | sed 's/.*=//')
+  squeue -h -u $USER -o '%i %j %T %l' | awk -v n="qm91_$m" -v w="$w" \
+    '$2==n && $3=="PENDING" { spec=$1; sub(/%.*\]/,"]",spec);
+       print "scontrol update JobId="spec" TimeLimit="w"   # was "$4 }'
+done
+```
+Then the same with `qm9_s2_` and the job-name prefix `qm92_`.
+
+**Run only the lines where the new limit is SMALLER than the one in the comment.** SLURM refuses
+a raise from the job's owner; those arrays are handled by cancel-and-resubmit in Steps 8 and 10.
+
+#### STEP 5c — The screen array that has never started. READ THE OUTPUT.
+
+The screen's job names begin `qm90_`, so the loop above never prints a line for them. Two screen
+arrays are part-stuck: `qm90_gauche_rbf` (`12971618`, eighteen tasks queued since 2026-09-02, not
+one started), `qm90_mlp_bnn_full_mve` (16 of 18 queued) and `qm90_dnn_bnn_full_variational`
+(10 of 18) — the last is the model the uncertainty runs call VBLL-Full.
+
+```bash
+for j in 12971618 12971617 12971616; do
+  printf '%s  ' $j; scontrol show job $j | grep -o 'JobName=[^ ]*\|TimeLimit=[^ ]*\|MinMemoryNode=[0-9A-Z]*' | tr '\n' ' '; echo
+done
+squeue -j 12971618 -o '%i %T %R' | head
+```
+**Read this before changing anything.** The job ids for the second and third are **not checked** —
+confirm the names printed match before acting. `measure_walls.py` does emit a wall line for
+`12971618` from its never-started branch, borrowing a rate from the same model elsewhere: that is
+exactly the line not to run. If its wall needs cutting, cut it to the generator's `133:59:00`.
+
+---
+
+#### STEP 6 — Put back the Sort & Slice failures. READ THE OUTPUT BEFORE RUNNING THE LINES.
+
+The cause is fixed and pushed. Derive the indices; do not type them.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+sacct -S 2026-09-02 -j "$(seq -s, 12980573 12980591)" -X -n -P --format=JobID,JobName,State \
+| awk -F'|' '$3 ~ /^FAILED/ {split($1,a,"_"); m=$2; sub(/^qm91_/,"",m);
+      s[m]=(s[m]==""?a[2]:s[m]","a[2])}
+     END {for (m in s) printf "sbatch --account=stat-cadd --partition=long --array=%s%%5 qm9_s1_%s.sh\n", s[m], m}'
+```
+
+**Good result:** one sbatch line per model, and almost every index is 5, 11 or 17 —
+representation is `index mod 6` and Sort & Slice is position 5. Read them, then run them.
+
+A failed job wrote rows for every replicate that did not draw one of the three molecules, and a
+resubmission appends more. The figure script keeps the last row per combination, so the
+resubmitted numbers win — but both copies sit in the file, which is why Step 13 runs
+`copy_zero_rows.py` with `--dry-run` first.
+
+**Which replicates drew one of the three is not checked** — it was derived on a laptop copy of
+129,428 molecules against 132,480 on the cluster, and a different dataset length gives a
+different permutation. The code prints what it dropped on every run; read that line on the first
+resubmitted job rather than assuming three.
+
+---
+
+#### STEP 7 — Put back the Gaussian-process failures. READ THE OUTPUT.
+
+Fixed in `c223ec3`, which is in the pull. It affected `gauche`, `gauche_rbf` and
+`heteroscedastic_gp` alike.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+sacct -S 2026-09-06 -j 12986326 -X -n -P --format=JobID,State \
+| awk -F'|' '$2 ~ /^FAILED/ {split($1,a,"_"); printf "%s,", a[2]}'; echo
+sbatch --account=stat-cadd --partition=long --array=<indices>%4 qm9_s2_gauche_rbf.sh
+
+sacct -S 2026-09-02 -j 12980584,12980591,12986327,12986328,12986346,12986347 \
+      -X -n -P --format=JobID,JobName,State | grep -E 'FAILED|TIMEOUT' || echo 'none failed'
+```
+**Good result:** `none failed` on the last line. Those are `gauche` and `heteroscedastic_gp`; the
+pull repairs their unstarted jobs in place.
+
+Whether `gauche_rbf`'s twelve failures survive `c223ec3` has **not been re-checked**, and decision
+C below is being asked without it. This step is the check.
+
+---
+
+#### STEP 8 — The quantile forest's wall. CANCEL THE PENDING ELEMENTS ONLY.
+
+**Do not `scancel 12980589`.** That kills the whole array including any RUNNING task, and the
+point of this step is that those tasks are near their wall — up to 21 hours of work thrown away.
+Cancel the pending elements by index and leave a running one to finish or die on its own.
+
+```bash
+squeue -h -j 12971607 -o '%i %T %M %l'
+squeue -h -j 12980589 -o '%i %T %M %l'
+squeue -h -j 12980589 -t PENDING -o '%i' | sed 's/.*_//' | tr '\n' ' '   # the index list
+```
+Write those indices down. Then, with them:
+```bash
+scancel 12980589_[<indices>]
+cd $QSAR/slurm_scripts_qm9_rerun
+sbatch --account=stat-cadd --partition=long --array=<indices>%5 qm9_s1_qrf.sh
+```
+`12971607` is the screen's quantile forest; if its `squeue` printed nothing, the screen finished
+it and there is nothing to do there.
+
+Leave `12986325`, `12986344` and `12986386` alone — the quantile forest and SVM are in neither
+selection file, so those jobs skip in seconds and cannot die at a wall. Their 20:52 and 0:54 were
+borrowed from other runs.
+
+---
+
+#### STEP 9 — Laboratory censoring: `val_svm`. CANCEL AND RESUBMIT.
+
+```bash
+squeue -h -j 12986386 -o '%i %T'
+```
+If nothing prints, skip. Otherwise cancel the pending elements the same way as Step 8, then:
+```bash
+cd $QSAR/slurm_scripts_validation_censoring
+grep -h 'SBATCH --time' val_svm.sh          # must say 2:00:00
+sbatch --array=<indices>%4 val_svm.sh
+```
+
+---
+
+#### STEP 10 — The uncertainty runs. CANCEL AND RESUBMIT TO `long`.
+
+Five of the six ask more than `medium`'s 48 hours, which is why 378 tasks have sat since
+6 September without one starting. **Check nothing has started before cancelling** — the "not one
+of the 378 has started" reading is from 2026-09-07 and this step may be run later.
+
+```bash
+squeue -j 12986390,12986391,12986392,12986393,12986394,12986395,12986396,12986397,12986398,12986399,12986400,12986401 -t RUNNING -o '%i %j %M'
+```
+**If that prints anything, stop and read it** — cancelling would throw the work away.
+Otherwise:
+```bash
+scancel 12986390 12986391 12986392 12986393 12986394 12986395
+scancel 12986396 12986397 12986398 12986399 12986400 12986401
+cd $QSAR/slurm_scripts_uncertainty_rerun
+rm -f unc_*.sh submit_all.sh && python generate_scripts.py
+ACCT=stat-cadd PART=long bash submit_all.sh
+```
+**Good result:** 6 arrays, 162 tasks, and `⚠ 5 of these cannot run on medium (48h)`.
+
+```bash
+mkdir -p $QSAR/slurm_scripts_uncertainty_depth
+cd $QSAR/slurm_scripts_uncertainty_rerun
+python generate_scripts.py --conditions censoring student_t_nu5 outlier_p10 laplace \
+    --out-dir $QSAR/slurm_scripts_uncertainty_depth
+cd $QSAR/slurm_scripts_uncertainty_depth
+ACCT=stat-cadd PART=long bash submit_all.sh
+```
+**Good result:** 6 arrays, 216 tasks, each `--array=0-35`.
+
+⚠️ **Adding a model here is not a JSON edit.** `slurm_scripts_uncertainty_rerun/generate_scripts.py`
+never reads any pairs file — its models are the `MODELS` dict at lines 116–158 and its
+representations are `REPS` at line 201. Adding `heteroscedastic_gp` means a `GP-Hetero` entry in
+that dict plus one in `model_memory.json`. The generator already handles the name: its
+`--gp-reps` gate tests `model.startswith('GP-')` (line 757), so it would inherit the PDV-only
+default unless told otherwise. The warning at
+`slurm_scripts_qm9_rerun/generate_scripts.py:1226` saying "both pipelines read it" is wrong.
+
+---
+
+#### STEP 11 — Check the hERG jobs rather than resubmitting them. READ THE OUTPUT.
+
+```bash
+sacct -S 2026-09-03 -j 12975687,12979965,12979966,12979967,12979968,12979969 \
+      -X -n -P --format=JobID,JobName,State,Elapsed
+```
+**Good result:** 25 tasks, all COMPLETED or RUNNING, and this class is closed. **Do not resubmit
+blind** — they were put back on 4 September and a second submission would duplicate live work.
+§13.23 C1 saying "nothing has put them back" is stale. Only if one is FAILED or missing:
+```bash
+cd $QSAR/slurm_scripts_validation_rerun
+sbatch --array=12-17%4 val_<model>.sh       # hERG is dataset index 2, so tasks 12-17
+sbatch --array=2       val_gp-tanimoto.sh   # that array has 3 tasks; hERG is index 2
+```
+
+---
+
+#### STEP 12 — Replace the laboratory rows written on the old noise draw. READ THE OUTPUT.
+
+The laboratory noise draw changed on 4 September so a molecule's corruption is a property of the
+molecule rather than of the fold it landed in. Anything that finished before that pull is on the
+old draw. This has never been run.
+
+```bash
+cd $QSAR && python scripts/lab_tasks_on_old_noise.py --sacct-file /tmp/sacct_0907.psv
+```
+It names the affected jobs, prints a `scancel` for the running ones and one `sbatch --array=` per
+script for the rest, with the cancelled indices folded in. Read it, then run its lines. Until this
+runs, any laboratory table mixes two noise draws.
+
+---
+
+#### STEP 13 — Fill in the clean level, then read the corrected ranking. **This is decision A.**
+
+Order matters. AUC_norm measures retention against the clean level, so before the clean rows are
+copied the two grouped noise types drop out of the ranking in silence — which is how `het_gp_rbf`
+came to be chosen from one noise type of three.
+
+Run Step 16's `--stage 1` check first: the corrected ranking is what decides whether `het_gp_rbf`
+keeps its slot, and `heteroscedastic_gp` and `gauche_rbf` are exactly the models whose main-grid
+cells died. Read the ranking only once their cells are present. (The missing Sort & Slice rows do
+not affect it — `scripts/select_deep_run_pairs.py:54` ranks over ECFP4, PDV and ChemBERTa.)
+
+```bash
+cd $QSAR
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results ../results --dry-run
+python slurm_scripts_qm9_rerun/copy_zero_rows.py --results ../results
+python scripts/select_deep_run_pairs.py --results-dir results
+```
+**Good result:** a ranking table plus a `NOT RANKED` block naming the noise types that run only on
+already-chosen pairs. That block is the fix; its absence means the old selector.
+
+⚠️ **Pass `--n-models` explicitly if you write the suggestion to a file.** The script takes its
+model count from the file named by `--out`; pointed at a new path it read 4 models against a queue
+of 6 and dropped `rf`, which does survive at six.
+
+**Both selection files still say `provisional: true`** — `deep_run_pairs.json` and
+`censoring_pairs.json`, and censoring's carries its own instruction to be re-read against the
+finished screen. Re-read both here and clear both flags.
+
+Then, if a slot moves: **edit the file in place.** Narrowing is free and queued tasks pick it up
+when each starts. Widening means resubmitting the indices of whatever is added.
+
+---
+
+#### STEP 14 — Settle `gauche_rbf`'s timing. **This is decision C.**
+
+```bash
+cd $QSAR
+sacct -j 12980590 --format=JobID,State,Elapsed,End -P | grep -v '\.batch\|\.extern'
+for f in results/anova_*gauche_rbf*.csv; do printf '%-70s %s\n' "$f" "$(wc -l < "$f")"; done
+tail -40 slurm_scripts_qm9_rerun/qm91_gauche_rbf_12980590_0.out
+```
+This shows whether the four finished tasks ran an out-of-fold pass. If they did not, their rate is
+not the array's rate and 133:59 stands. Once the eight that failed have re-run under Step 7 and
+three or more finish:
+```bash
+python scripts/measure_walls.py --since 2026-09-07
+```
+then put `hours_per_110`, `completed_tasks` and `tasks_in_the_measured_array` for `gauche_rbf` into
+`model_hours.json`, regenerate, and the wall falls on its own. No code change.
+
+---
+
+#### STEP 15 — Confirm the screen is complete and both variance-head networks are in it. SAFE.
+
+```bash
+sacct -j 12971601-12971619 -X --format=JobID%12,JobName%42,State,Elapsed | sort -k2
+```
+**Good result:** all 19 model names appear and `mve` appears twice. `dnn_bnn_full_mve` and
+`mlp_bnn_full_mve` are the only models giving a network with a variance head a per-molecule
+measurement-error term on QM9. If either is absent it is 36 tasks to put back.
+
+---
+
+#### STEP 16 — Coverage, then merge. SAFE.
+
+```bash
+cd $QSAR
+python scripts/check_runs_landed.py --stage 0 --verbose
+python scripts/check_runs_landed.py --stage 1 --verbose
+python scripts/check_runs_landed.py --stage 2 --verbose
+python scripts/check_runs_landed.py --stage 1 --verbose \
+    --validation-dir $KIRBY/results/validation_rerun \
+    --uncertainty-dir $KIRBY/tests/results/uncertainty_rerun
+```
+MISSING means resubmit that index. PARTIAL means the task wrote a file and died part-way through
+the noise levels, so the queue showed it finished. THIN means it ran but has too few replicates
+for the variance work. `--stage 2` now checks 113 cells, not 654 — before the fix it reported
+about 541 missing cells that were tasks skipping by design.
+
+⚠️ **A wrong directory reports everything missing**, which reads like a catastrophe. Confirm
+`$KIRBY` before believing an empty answer.
+
+Then merge. `--expected-oof-folds` must match what the jobs were actually submitted with, read off
+the scripts, or every merged cell is flagged TRUNCATED_OOF (§13.19 STEP 7). Both the generator and
+the merge default to 5.
+
+```bash
+grep -h 'oof-folds' $QSAR/slurm_scripts_uncertainty_rerun/unc_*.sh | sort -u
+python $QSAR/slurm_scripts_uncertainty_rerun/merge_results.py --expected-oof-folds <that number>
+python $QSAR/slurm_scripts_validation_rerun/merge_results.py --kirby-dir $KIRBY
+```
+**Read the merge coverage table, never the exit code.** An inner fold that raises is caught and
+skipped, rows are written with missing values, the integrity check counts rows rather than finite
+values, and both the runner and the merge return 0.
+
+---
+
+#### STEP 17 — The analysis, and the figures. READ THE OUTPUT.
+
+```bash
+sacct -j 13033488 --format=JobID,JobName,State,Elapsed,End -P | grep -v '\.batch\|\.extern'
+ls -la $QSAR/results/paper_figures_v2/ | head -20
+```
+Job 13033488 FAILED after 3:06 and is believed to have written no report. It reads the main grid,
+and Sort & Slice was missing from replicates 1–9 of it, so anything it did write is on five
+representations rather than six. Once Step 16 reports the grid complete:
+```bash
+cd $QSAR && sbatch slurm_scripts_analysis/run_paper_analysis.sh
+sbatch slurm_scripts_analysis/run_figures_v2.sh
+```
+`run_figures_v2.sh` is the live figure script; `run_figures.sh` is the dead NDS one.
+
+---
+
+#### DECISIONS ONLY THE AUTHOR CAN MAKE
+
+Each one is a choice, not a task. None of them blocks Steps 0–12.
+
+1. **Does `deep_run_pairs.json` narrow after the corrected ranking?** Step 13 prints it.
+2. **Does `heteroscedastic_gp` go onto the uncertainty runs?** It is the one model on the roster
+   added specifically to separate the two halves of an uncertainty. Cost: one more array per
+   submission. The remedy is a code entry, not a JSON edit — see Step 10.
+3. **Does `gauche_rbf` stay?** Step 14 prints what its wall really is.
+4. **Do the 96G arrays drop to 64G?** Peak memory ever measured on this study is 4.2 GB against
+   96–128 GB requested, and a smaller request starts sooner. The carve-out is `gauche_rbf` and the
+   deep run's `ngboost`, neither of which has completed a task to measure.
+5. **Censoring replicates, 10 or 3.** §13.14 already recommends keeping 10; the saving is 270 runs
+   of 22,140, which is 1.2%. Two earlier accounts disagree about this. It is written here so it
+   stops being reopened.
+6. **The screen's Sort & Slice rows were made on a slightly different molecule set** from the one
+   the repaired main grid uses — the screen ran before the exclusion. Either re-run the screen's
+   three Sort & Slice tasks, or state in Methods that the screen used a molecule set three
+   molecules larger. Nothing else in the study is affected.
+
