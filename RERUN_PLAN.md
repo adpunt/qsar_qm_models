@@ -15604,24 +15604,26 @@ Part 2 cuts every wall that comes down. Free: a lower limit keeps the submit tim
 the queue position.
 
 ```bash
-for j in 12980574 12980575 12980579 12980591 12986315 12986327 12986334 12986346; do scontrol update JobId=$j TimeLimit=2:59:00; done
-for j in 12980578 12986316 12986319 12986320 12986335 12986338 12986339; do scontrol update JobId=$j TimeLimit=3:59:00; done
-for j in 12980581 12986322 12986341; do scontrol update JobId=$j TimeLimit=4:59:00; done
-for j in 12980573 12980580 12986314 12986321 12986333 12986340; do scontrol update JobId=$j TimeLimit=5:59:00; done
-for j in 12980583 12980585; do scontrol update JobId=$j TimeLimit=6:59:00; done
-for j in 12986324 12986329 12986343 12986348; do scontrol update JobId=$j TimeLimit=7:59:00; done
-for j in 12980586; do scontrol update JobId=$j TimeLimit=9:59:00; done
-for j in 12980582 12980584 12986330 12986349; do scontrol update JobId=$j TimeLimit=10:59:00; done
-for j in 12986328 12986347; do scontrol update JobId=$j TimeLimit=11:59:00; done
-for j in 12980588 12986323 12986342; do scontrol update JobId=$j TimeLimit=12:59:00; done
-for j in 12986332 12986351; do scontrol update JobId=$j TimeLimit=13:59:00; done
-for j in 12971618; do scontrol update JobId=$j TimeLimit=15:59:00; done
-for j in 12980587; do scontrol update JobId=$j TimeLimit=17:59:00; done
-for j in 12986331 12986350; do scontrol update JobId=$j TimeLimit=18:59:00; done
-for j in 12980590; do scontrol update JobId=$j TimeLimit=133:59:00; done
-for j in 12986326 12986345; do scontrol update JobId=$j TimeLimit=148:59:00; done
-for j in 12980577; do scontrol update JobId=$j TimeLimit=285:59:00; done
-for j in 12986318 12986337; do scontrol update JobId=$j TimeLimit=317:59:00; done
+# 2>/dev/null: an array that has already finished is gone from the controller and
+# reports "Invalid job id". It needed no change.
+for j in 12980574 12980575 12980579 12980591 12986315 12986327 12986334 12986346; do scontrol update JobId=$j TimeLimit=2:59:00 2>/dev/null; done
+for j in 12980578 12986316 12986319 12986320 12986335 12986338 12986339; do scontrol update JobId=$j TimeLimit=3:59:00 2>/dev/null; done
+for j in 12980581 12986322 12986341; do scontrol update JobId=$j TimeLimit=4:59:00 2>/dev/null; done
+for j in 12980573 12980580 12986314 12986321 12986333 12986340; do scontrol update JobId=$j TimeLimit=5:59:00 2>/dev/null; done
+for j in 12980583 12980585; do scontrol update JobId=$j TimeLimit=6:59:00 2>/dev/null; done
+for j in 12986324 12986329 12986343 12986348; do scontrol update JobId=$j TimeLimit=7:59:00 2>/dev/null; done
+for j in 12980586; do scontrol update JobId=$j TimeLimit=9:59:00 2>/dev/null; done
+for j in 12980582 12980584 12986330 12986349; do scontrol update JobId=$j TimeLimit=10:59:00 2>/dev/null; done
+for j in 12986328 12986347; do scontrol update JobId=$j TimeLimit=11:59:00 2>/dev/null; done
+for j in 12980588 12986323 12986342; do scontrol update JobId=$j TimeLimit=12:59:00 2>/dev/null; done
+for j in 12986332 12986351; do scontrol update JobId=$j TimeLimit=13:59:00 2>/dev/null; done
+for j in 12971618; do scontrol update JobId=$j TimeLimit=15:59:00 2>/dev/null; done
+for j in 12980587; do scontrol update JobId=$j TimeLimit=17:59:00 2>/dev/null; done
+for j in 12986331 12986350; do scontrol update JobId=$j TimeLimit=18:59:00 2>/dev/null; done
+for j in 12980590; do scontrol update JobId=$j TimeLimit=133:59:00 2>/dev/null; done
+for j in 12986326 12986345; do scontrol update JobId=$j TimeLimit=148:59:00 2>/dev/null; done
+for j in 12980577; do scontrol update JobId=$j TimeLimit=285:59:00 2>/dev/null; done
+for j in 12986318 12986337; do scontrol update JobId=$j TimeLimit=317:59:00 2>/dev/null; done
 ```
 
 Part 3 is memory, and it is one loop because the answer is now the same everywhere: 64 GB on both
@@ -15639,13 +15641,54 @@ done
 ##### Prove it took
 
 ```bash
-squeue -u $USER -o "%.12i %.30j %.2t %.11M %.11l %.7m %R" | head -60
-for j in 12980577 12980590 12986318 12986326 12971618; do
-    printf "%s  " $j; scontrol show job $j | grep -o 'TimeLimit=[^ ]*'; done
+squeue -u $USER -o "%.12i %.30j %.2t %.11M %.11l %.7m %R"
 ```
+
+**No `head`.** The first run of this was piped through `head -60` and cut the answer off, which
+hid whether the four arrays that cannot be raised in place are still queued.
 
 Every row of `%.7m` must read `64G`, and no `%.11l` in the QM9 rows may still show a figure in
 days except `ngboost` and `gauche_rbf`.
+
+##### ✅ RUN 2026-09-07. What actually took, and the three things the output says that are not failures
+
+The author ran the block. Every pending row now asks 64 GB, including the QM9 screen's three
+surviving arrays, which had been asking 128 GB since 2 September. Nine arrays took a smaller wall:
+
+| job | model | was | now |
+|---|---|---|---|
+| 12971618 | `qm90_gauche_rbf` | 1-18:59 | 15:59 |
+| 12980577 | `qm91_ngboost` | 19-20:59 | 11-21:59 |
+| 12980588 | `qm91_mlp_bnn_full_mve` | 12-09:59 | 12:59 |
+| 12986318 | `qm92_ngboost` | 22-01:59 | 13-05:59 |
+| 12986326 | `qm92_gauche_rbf` | 17-08:59 | 6-04:59 |
+| 12986328 | `qm92_heteroscedastic_gp` | 5-19:59 | 11:59 |
+| 12986331 | `qm92_dnn_bnn_full_mve` | 8-23:59 | 18:59 |
+| 12986337, 12986345, 12986347, 12986350 | the censoring copies of the same four | as above | as above |
+
+**Ten arrays changed their queue reason from `Priority` to `None`** — the seven laboratory depth
+arrays 12986355–12986369 and the three QM9 screen arrays 12971611, 12971614, 12971618. The
+scheduler no longer records a reason for holding them.
+
+Three kinds of line in that output are not failures:
+
+- **`Invalid job id specified for job <n>`, 35 of them.** Those arrays have finished. A completed
+  job leaves the controller's memory, so `scontrol` cannot find it — and it needed no change. Add
+  `2>/dev/null` to the wall loops as the memory loop already has.
+- **`No error`.** That is `scontrol` reporting success on the elements it updated. `12980577_4,10,14,16: No error` means four running tasks took the new limit.
+- **`Job has already finished`** on a single element, e.g. `12986347_5`. The array is partly done;
+  the finished element cannot be updated and does not need to be.
+
+**Running tasks still show their old memory.** `12980588_15` reads 96G while the pending elements
+of the same array read 64G. A task keeps the allocation it was admitted with; only what has not
+started can move.
+
+⚠️ **One cut carries a risk I introduced.** `12980588`, `qm91_mlp_bnn_full_mve`, went from
+12 days 9:59 to 12:59. Its longest FINISHED task is 3:50 and only 7 of its 18 tasks have finished,
+so that rate is a lower bound; one of its running tasks is already 6:43 in. If a task passes 12:59
+it dies at the wall and writes nothing, where under the old limit it would not have. Nothing can
+raise a limit in place. If any element of 12980588 comes back TIMEOUT, resubmit that element and
+raise this model in `model_hours.json` from what it actually used.
 
 ##### What is left, and who owns it
 
@@ -15663,11 +15706,29 @@ days except `ngboost` and `gauche_rbf`.
 **Filled 2026-09-07.** One model, `gauche_rbf`. One cause behind every failure, already fixed
 and now proved by running the real pipeline on this laptop.
 
-| submission | tasks | cause | cause fixed at | command |
+**Counts read off `sacct` on 2026-09-07 at 07:20, not from any document.** Every earlier
+count in this plan was wrong: §13.23c said 8 on the main grid and 4 on the deep run,
+`HANDOFF.md` said 8 and 12.
+
+| submission | tasks carrying this cause | cause | cause fixed at | command |
 |---|---|---|---|---|
-| QM9 main grid, 12980590 `qm91_gauche_rbf` | 8 failed | the out-of-fold pass was handed 5,000 fitted molecules while the noise record still described all 8,000, and the guard refused | `c223ec3`, pushed on `additional_reps` | pull, then `python scripts/failed_tasks.py --emit-sbatch` and paste what it prints |
-| QM9 deep run, 12986326 `qm92_gauche_rbf` | 4 in §13.23c, 12 in `HANDOFF.md` — **not confirmed either way**, the count needs `sacct` | same cause | `c223ec3` | as above |
-| QM9 screen, 12971618 `qm90_gauche_rbf` | 18, none started since 2026-09-02 | not a code fault: the request is too large to backfill | — | `scontrol update JobId=12971618 TimeLimit=15:59:00` and `MinMemoryNode=64G` |
+| QM9 main grid, 12980590 `qm91_gauche_rbf` | **9 failed**: indices 0, 1, 4, 6, 7, 10, 12, 13, 16 | the out-of-fold pass was handed 5,000 fitted molecules while the noise record still described all 8,000, and the guard refused | `c223ec3`, in the cluster's checkout since 2026-09-07 | `python scripts/failed_tasks.py --emit-sbatch` and paste what it prints |
+| QM9 deep run, 12986326 `qm92_gauche_rbf` | **8 failed**: indices 0, 1, 4, 6, 7, 10, 12, 13. Indices 16, 18, 19, 22 were RUNNING at 07:20 and 23–35 had not started | same cause | `c223ec3` | as above |
+| QM9 main grid, 12980590 — **not this cause** | 2 failed: indices 5 and 11, both Sort & Slice, dead in 5:23 and 4:11 | the all-zero count vector, §13.27 D6 | `62f1fe2` | chat 5's |
+| QM9 screen, 12971618 `qm90_gauche_rbf` | 18, none started since 2026-09-02 | not a code fault: `1-18:59:00` and `128G` is too large to backfill | — | `scontrol update JobId=12971618 TimeLimit=15:59:00` and `MinMemoryNode=64G` |
+
+**The index prediction held exactly.** The generated script picks `rep=REPS[i % 6]` with
+`REPS=(ecfp4 pdv mhggnn avalon chemberta sns)`, and the out-of-fold pass runs on ECFP4, PDV
+and ChemBERTa — remainders 0, 1 and 4. Those nine main-grid indices are precisely the nine
+that failed on this cause. On the deep run the same nine remainders are the tasks that do
+work at all: every fast COMPLETED task there (1 to 5 minutes) has remainder 2, 3 or 5, which
+is the run-time selection gate letting it exit.
+
+**Sort & Slice on this model, for chat 5's count.** Index 5 (gaussian) and index 11
+(grouped_wider) died in about five minutes. Index 17 (grouped_shifted), the third Sort &
+Slice task, COMPLETED in 43:55 and its file is 15,265 bytes against 1,005 and 1,065 for the
+other two. That is exactly §13.27 D6's reading: only a task whose sample drew methane,
+ammonia or water crashed.
 
 #### D2a. The cause, and the proof that the fix holds
 
@@ -15773,6 +15834,9 @@ Gaussian process — it removes it. See §13.27 D4a.
 
 #### D2d. The block to paste — chat 2's questions, all of them
 
+**Answered 2026-09-07 at 07:20.** The checkout was at `76571f3` and `c223ec3 IS in` it. The
+screen array reported `PD ... 1-18:59:00 128G (Priority)`. The counts are in the table above.
+
 ```bash
 # 1. Is the fix in the checkout the jobs read?
 cd /data/stat-cadd/scat9264/qsar_qm_models && git log --oneline -1 && \
@@ -15809,10 +15873,48 @@ python scripts/failed_tasks.py --emit-sbatch | grep -A2 gauche_rbf
 `c223ec3`, so step 7 prints a resubmission line only from a checkout that has the fix, and
 prints a refusal from one that does not.
 
-**Chat 2 is not finished.** Nothing above has been read off the cluster in this session. It
-closes when the screen array shows the new limits in `squeue`, the failed tasks are running
-under `c223ec3`, and `python scripts/check_runs_landed.py --stage 1 --verbose` and `--stage 2`
-report no `gauche_rbf` cell MISSING or PARTIAL.
+#### D2e. What one task actually costs, measured on ARC
+
+Elapsed times from the same `sacct`, main grid, 18 tasks of `qm91_gauche_rbf`. A task there is
+7 noise levels by 9 replicates, 63 training runs.
+
+| | tasks | shortest | longest |
+|---|---|---|---|
+| failed on the Gaussian-process cap (ECFP4, PDV, ChemBERTa) | 9 | 56:29 | 1:36:29 |
+| completed, no out-of-fold pass (MHG-GNN, Avalon, Sort & Slice) | 5 | 43:55 | 1:33:14 |
+
+Both groups did one fit per training run: the failed ones threw inside the out-of-fold pass
+before doing any of its extra fits. So **an exact Gaussian process at the 5,000-molecule cap
+costs about one and a half hours for 63 training runs on ARC**, and the request of
+`15-14:59:00` is roughly 250 times that.
+
+The out-of-fold pass adds three scored inner fits per training run (`OOF_FOLDS_SCORED` in
+`slurm_scripts_qm9_rerun/generate_scripts.py`). An inner fit is on four fifths of the capped
+set, and the fit is cubic, so it costs about half a full one. That is arithmetic, not a
+measurement: **roughly two and a half times 1:36, so about four hours.** The generator asks
+`133:59:00` because it grades this model's ARC rate a lower bound.
+
+**Do not cut the main grid or the deep run to four hours on that arithmetic.** Let one
+resubmitted ECFP4 task finish under `c223ec3`, then re-run `scripts/measure_walls.py` and
+regenerate. Until then the generator's `133:59:00` and `148:59:00` are the numbers to request.
+
+#### D2f. The duplicate accuracy rows, and where that question now lives
+
+Confirmed on the cluster: the nine failed main-grid tasks wrote their accuracy rows before
+they died. `results/anova_gaussian_ecfp4_gauche_rbf.csv` is 36,287 bytes against 17,398 for
+`anova_gaussian_avalon_gauche_rbf.csv`, and ECFP4 is in the deep run's selection while Avalon
+is not — screen plus main grid plus deep run against screen plus main grid.
+
+So resubmitting adds a second copy of every noise level and replicate for those pairs. §13.30
+traces a larger source of the same thing: the deep run repeats the three conditions the screen
+and the main grid already ran, into the same files. **The delete-or-accept decision belongs
+with §13.30's, not separately here.** Nothing is deleted by an assistant either way.
+
+**Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
+checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
+It closes when the screen array shows the new limits in `squeue`, the seventeen failed tasks
+are running under `c223ec3`, and `python scripts/check_runs_landed.py --stage 1 --verbose` and
+`--stage 2` report no `gauche_rbf` cell MISSING or PARTIAL.
 
 
 #### D3. What is on disk and must be deleted or rewritten — CHAT 3
