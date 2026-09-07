@@ -172,12 +172,26 @@ def apply_declared_filters(frame, where, skip=False):
     if frame is None or not len(frame) or skip:
         return frame, pd.DataFrame()
     log = []
+    keys = [c for c in ('dataset', 'model', 'rep', 'condition', 'replicate')
+            if c in frame.columns]
     for filt in (L.catastrophic_filter(), L.collapsed_gp_filter()):
         frame, dropped = filt.apply(frame)
+        cells = (dropped[keys].drop_duplicates() if len(dropped)
+                 else pd.DataFrame(columns=keys))
         log.append({'source': where, 'filter': filt.name, 'reason': filt.reason,
-                    'rows_dropped': int(len(dropped))})
+                    'rows_dropped': int(len(dropped)),
+                    'cells_dropped': int(len(cells))})
         if len(dropped):
-            print(f'  {where}: {filt.name} dropped {len(dropped)} rows')
+            # WHICH, not just how many. "dropped 7 rows" on a seven-level ladder
+            # is one whole replicate of one cell, and knowing which one is the
+            # difference between "a network diverged once" and "a model is
+            # failing everywhere".
+            print(f'  {where}: {filt.name} dropped {len(dropped)} row(s) '
+                  f'= {len(cells)} whole replicate(s) of:')
+            for row in cells.head(6).itertuples(index=False):
+                print('      ' + ' / '.join(str(v) for v in row))
+            if len(cells) > 6:
+                print(f'      ... and {len(cells) - 6} more')
     return frame, pd.DataFrame(log)
 
 

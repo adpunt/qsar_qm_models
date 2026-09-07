@@ -132,20 +132,35 @@ def d1_representation(summary, qm9=None):
     # Does this representation ORDER the models the way the others do? A
     # representation that ranks them differently is not a neutral place to
     # stand.
+    #
+    # WITHIN ONE CONDITION, always. A model has one row per condition here, so
+    # correlating two representations across the whole frame would compare a
+    # pooled mixture of seven conditions and call it a profile -- and with an
+    # uneven number of conditions per representation it does not even line up.
+    # profile_spearman refuses a pooled index rather than doing it quietly.
     agreement = []
-    for a in reps:
-        for b in reps:
-            if a >= b:
-                continue
-            got = M.profile_spearman(summary, 'auc_norm', 'model', 'rep', a, b)
-            agreement.append(got)
+    for condition in sorted(summary['condition'].dropna().unique()):
+        inside = summary[summary['condition'] == condition]
+        for i, a in enumerate(reps):
+            for b in reps[i + 1:]:
+                got = M.profile_spearman(
+                    inside, 'auc_norm', 'model', 'rep', a, b,
+                    where=f'D1 rank agreement, {condition}')
+                agreement.append(dict(got, condition=condition))
     agree = pd.DataFrame(agreement)
     if len(agree):
-        mean_rho = (agree.groupby('a')['rho'].mean().add(
-            agree.groupby('b')['rho'].mean(), fill_value=0)
-            / agree.groupby('a')['rho'].count().add(
-                agree.groupby('b')['rho'].count(), fill_value=0))
-        table['mean_rank_agreement'] = table['rep'].map(mean_rho)
+        # Each pair contributes to both of its representations. Median and range
+        # across conditions -- never one pooled number, which is what hides a
+        # representation that agrees under one condition and not another.
+        both = pd.concat([
+            agree.rename(columns={'a': 'rep', 'b': 'against'}),
+            agree.rename(columns={'b': 'rep', 'a': 'against'}),
+        ], ignore_index=True)[['rep', 'against', 'condition', 'rho', 'n']]
+        per_rep = both.groupby('rep')['rho'].agg(['median', 'min', 'max'])
+        table['rank_agreement_median'] = table['rep'].map(per_rep['median'])
+        table['rank_agreement_min'] = table['rep'].map(per_rep['min'])
+        table['rank_agreement_max'] = table['rep'].map(per_rep['max'])
+        agree = both
 
     complete = table[table['n_models'] == table['n_models'].max()]
     says = ('The choice is the author\'s. Complete coverage on '

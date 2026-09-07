@@ -242,6 +242,40 @@ def censoring_cannot_rank_models():
     print(f'    conditions a ranking may use: {kept}')
 
 
+def a_profile_correlation_refuses_a_pooled_index():
+    """A robustness summary has one row per (model, condition), so taking a
+    model profile across the whole frame gives each model seven index entries.
+
+    `.loc` then returns seven rows for one key, the two sides of the correlation
+    come out different lengths, and scipy raises something about array
+    dimensions. Before it crashed it was correlating a pooled mixture of noise
+    conditions and calling it a profile -- failure mode 1, with a crash attached
+    rather than a wrong number, which is the lucky version.
+    """
+    import figlib_metrics as M
+    pooled = _val_frame().rename(columns={'auc_norm': 'auc_norm'})
+    pooled = pooled[pooled['dataset'] == 'logd']       # still 3 conditions
+    try:
+        M.profile_spearman(pooled, 'auc_norm', 'model', 'rep', 'ecfp4', 'pdv',
+                           where='a pooled profile')
+    except AssertionError as exc:
+        text = str(exc)
+        assert 'not unique' in text, text
+        assert 'condition' in text, (
+            'the message must name what is still varying')
+        print('    a frame spanning three conditions is refused, not pooled')
+    else:
+        raise AssertionError(
+            'a model profile was correlated across three noise conditions')
+
+    one = pooled[pooled['condition'] == 'gaussian']
+    got = M.profile_spearman(one, 'auc_norm', 'model', 'rep', 'ecfp4', 'pdv',
+                             where='one condition')
+    assert got['n'] == one['model'].nunique(), got
+    print(f"    narrowed to one condition: {got['n']} models, rho "
+          f"{got['rho']:.3f}")
+
+
 def one_number_never_gets_two_names():
     assert G.metric_label('auc_norm') == 'AUC$_{norm}$'
     try:
@@ -286,6 +320,8 @@ def main():
         check('a filter that flips the sign is refused',
               a_filter_that_flips_the_sign_is_refused),
         check('censoring cannot rank models', censoring_cannot_rank_models),
+        check('a profile correlation refuses a pooled index',
+              a_profile_correlation_refuses_a_pooled_index),
         check('one number never gets two names', one_number_never_gets_two_names),
     ]
     if not all(results):

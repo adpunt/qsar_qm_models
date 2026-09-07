@@ -360,14 +360,51 @@ def wilcoxon_paired(frame, value, group_col, a, b, pair_on, where='a paired test
     return record
 
 
-def profile_spearman(frame, value, profile_over, compare, a, b):
+def _one_row_per(series, frame, profile_over, compare, level, where):
+    """A profile must have ONE value per key, or it is not a profile.
+
+    This is failure mode 1 with a crash attached. A robustness summary carries
+    one row per (dataset, model, rep, condition), so `set_index('model')` on a
+    frame spanning seven conditions gives a model seven index entries; `.loc`
+    then returns seven rows for one key and the two sides of the correlation
+    come out different lengths. Before it crashed it would have been correlating
+    a pooled mixture of conditions, which is the thing the averaging rules
+    exist to stop.
+    """
+    if not series.index.has_duplicates:
+        return series
+    extra = sorted(set(frame.columns) - {profile_over, compare, 'auc_norm',
+                                         'auc_norm_lo', 'auc_norm_hi',
+                                         'auc_norm_spread', 'baseline_r2',
+                                         'n_replicates'})
+    counts = series.index.value_counts()
+    worst = counts.index[0]
+    raise GuardishError(
+        f'{where}: {profile_over!r} is not unique within {compare}={level!r} '
+        f'-- {worst!r} appears {int(counts.iloc[0])} times.\n'
+        f'The frame still varies over {extra}, so this would correlate a '
+        f'mixture of them and call it a profile.\n'
+        f'Hold those fixed first: a rank agreement between two '
+        f'{compare}s is computed WITHIN one noise condition, never across '
+        f'several (RERUN_PLAN.md 14.2).')
+
+
+class GuardishError(AssertionError):
+    """A statistic asked for at a granularity the data does not have."""
+
+
+def profile_spearman(frame, value, profile_over, compare, a, b,
+                     where='a profile correlation'):
     """Rank correlation between two levels of `compare`, over a shared profile.
 
-    Used for the representation-redundancy screen before the ANOVA and for the
-    rank-transfer question between QM9 and the assay datasets.
+    `frame` must already be narrowed so that `profile_over` is unique within
+    each level of `compare` -- one row per model, not one per model per
+    condition. It raises rather than pooling.
     """
     left = frame[frame[compare] == a].set_index(profile_over)[value]
     right = frame[frame[compare] == b].set_index(profile_over)[value]
+    left = _one_row_per(left, frame, profile_over, compare, a, where)
+    right = _one_row_per(right, frame, profile_over, compare, b, where)
     shared = sorted(set(left.index) & set(right.index))
     if len(shared) < 3:
         return {'a': a, 'b': b, 'rho': np.nan, 'p_value': np.nan,
@@ -386,6 +423,8 @@ def icc_1_1(frame, value, subject, rater, a, b):
     """
     left = frame[frame[rater] == a].set_index(subject)[value]
     right = frame[frame[rater] == b].set_index(subject)[value]
+    left = _one_row_per(left, frame, subject, rater, a, 'ICC(1,1)')
+    right = _one_row_per(right, frame, subject, rater, b, 'ICC(1,1)')
     shared = sorted(set(left.index) & set(right.index))
     if len(shared) < 3:
         return {'a': a, 'b': b, 'icc': np.nan, 'n': len(shared)}
