@@ -84,8 +84,9 @@ Nobody has counted how many of the 378 are those. That matters, because it chang
 ## C. THE RULES EVERY CHAT INHERITS
 
 **`CLAUDE.md` in the repository root is the full set and every chat must read it.**
-It is loaded automatically, but read it anyway — the plain-English rules at the top of
-it are the ones that have been broken most. What follows is the short version.
+It is the file from the KIRBy repository, which was written from 394 real replies and
+the six ways they went wrong, with this study's own rules added underneath. What
+follows is the short version.
 
 - **Fixes, not findings.** Never advise stopping, pausing or deferring.
 - **Ask the server freely, but batch.** You cannot see the cluster. Send one block covering
