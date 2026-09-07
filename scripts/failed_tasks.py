@@ -93,10 +93,39 @@ def classify(state, elapsed, limit, rss, req):
     return 'FAILED'
 
 
-def log_path(sub, jobname, jid):
-    """`qm91_rf_12980573_5.out` -- the generators all use `<jobname>_%A_%a.out`."""
+def log_paths(sub, jobname, jid, raw=''):
+    """Every name this task's log could have, most likely first.
+
+    TWO NAMING SCHEMES ARE IN PLAY AND ONLY ONE WAS EVER TRIED.
+
+      `<jobname>_<array id>_<task>.out`   from `--output=<jobname>_%A_%a.out`
+      `<jobname>_<JobIDRaw>.out`          from `--output=<jobname>_%j.out`
+
+    For an ARRAY task `%j` is the task's own internal job id. It appears nowhere
+    in sacct's JobID and nowhere in squeue, so a log written under it cannot be
+    found from the array index at all. The laboratory scripts submitted on
+    2026-09-02 used `%j`; it was changed to `%A_%a` when the failures were being
+    diagnosed, and the scripts on disk carry the new name while the logs on disk
+    carry the old one (RERUN_PLAN.md 13.18).
+
+    That is the whole of "50 laboratory tasks have no cause and their output
+    files are missing". The files are there. This looked for one name.
+    """
     base, _, task = jid.partition('_')
-    return Path(SJ.QSAR) / sub.directory / f'{jobname}_{base}_{task}.out'
+    directory = Path(SJ.QSAR) / sub.directory
+    names = [f'{jobname}_{base}_{task}.out']
+    if raw and raw != jid:
+        names.append(f'{jobname}_{raw}.out')
+    return [directory / n for n in names]
+
+
+def log_path(sub, jobname, jid, raw=''):
+    """The first candidate that exists, else the first candidate."""
+    candidates = log_paths(sub, jobname, jid, raw)
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
 
 
 def last_error(path, keep=12):
@@ -278,7 +307,9 @@ def main():
     if cli.logs:
         for cause in ('FAILED', 'TIMEOUT'):
             for sub, r, _peak in causes.get(cause, []):
-                errs[r['JobID']] = last_error(log_path(sub, r['JobName'], r['JobID']))
+                errs[r['JobID']] = last_error(
+                    log_path(sub, r['JobName'], r['JobID'],
+                             r.get('JobIDRaw', '')))
 
     total = sum(len(v) for v in causes.values())
     print(f"  {total} failed task(s), by cause:\n")
@@ -309,7 +340,9 @@ def main():
                 err = errs.get(r['JobID'])
                 if err is None:
                     unreadable += 1
-                    missing_paths.append(log_path(sub, r['JobName'], r['JobID']))
+                    missing_paths.extend(
+                        log_paths(sub, r['JobName'], r['JobID'],
+                                  r.get('JobIDRaw', '')))
                     continue
                 seen[err] += 1
                 examples.setdefault(err, r['JobID'])
@@ -319,9 +352,9 @@ def main():
                 for ln in err.splitlines():
                     print(f'        | {ln[:cli.width]}')
             if unreadable:
-                print(f"\n      {unreadable} log(s) NOT FOUND. This is the path it "
-                      f"looked for:")
-                for path in missing_paths[:3]:
+                print(f"\n      {unreadable} log(s) NOT FOUND. These are the "
+                      f"names it looked for, both schemes:")
+                for path in missing_paths[:4]:
                     print(f'        {path}')
                 print(f"      A missing log usually means the script was regenerated "
                       f"with a different\n      --output name after those tasks ran, "

@@ -37,6 +37,7 @@ import csv
 import json
 import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -403,6 +404,41 @@ def main():
         print(bad.head(20).to_string(index=False))
     print(f"\nMerged into {out}")
 
+    # THE CELLS THAT ARE ON DISK AND CANNOT BE USED, named one per line.
+    #
+    # TRUNCATED_OOF and OOF_ALL_NAN are not gaps. They are directories holding a
+    # row for every training molecule and a real number for only some of them,
+    # because an inner fold of the cross-fitting pass failed. The inner split is
+    # scaffold-grouped, so the molecules that went missing are whole scaffold
+    # families rather than a random sample, and the cell cannot be repaired by
+    # dropping the blank rows.
+    #
+    # NOTHING IS DELETED HERE. The command is printed with the reason beside it
+    # and the author runs it. A result deleted in error costs days.
+    unusable = covdf[covdf['status'].isin(['TRUNCATED_OOF', 'OOF_ALL_NAN'])]
+    if len(unusable):
+        print(f"\n{len(unusable)} cell(s) hold rows that cannot be used. The task "
+              f"directory for each, with the reason. READ BEFORE RUNNING; nothing "
+              f"here is deleted for you:")
+        for row in unusable.itertuples():
+            slug = str(row.model).lower().replace('-', '_')
+            task_dir = f"{slug}__{row.dataset}__{row.rep}__{row.condition}"
+            if row.status == 'TRUNCATED_OOF':
+                why = (f"{row.oof_folds_min} of {expected_oof} inner folds "
+                       f"succeeded, so part of the training set carries no value")
+            else:
+                why = "every out-of-fold value is blank"
+            print(f"    rm -r {root / task_dir}    # {why}")
+        print(f"    then resubmit those indices and run this merge again.")
+
+    # A merge that finds unusable cells and exits 0 is how one gets read as a
+    # complete run. The coverage report said so from the start; nothing acted on
+    # it, because the exit code said everything was fine.
+    if len(bad):
+        print(f"\nNOT COMPLETE: {len(bad)} of {len(covdf)} cells are not OK.")
+        return 1
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

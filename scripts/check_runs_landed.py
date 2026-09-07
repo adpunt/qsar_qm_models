@@ -159,14 +159,57 @@ def check_qm9(directory, stage):
             'coverage': cover}
 
 
-def check_assay(directories):
+def assay_expected(stage):
+    """(dataset, model, rep, condition) for one stage of the laboratory runs.
+
+    STAGE 1 is the breadth grid: every model on every representation, on the
+    three conditions that are not a pair subset.
+
+    STAGE 2 is the two runs that went out on 2026-09-06 and that nothing has
+    ever checked. `check_assay` took no stage at all, so `--stage 2` reported
+    the breadth grid a second time and the laboratory depth run and censoring
+    were counted nowhere -- neither present nor missing, which is the state the
+    coverage report exists to make impossible. Both are run-time selections:
+    the depth run is `deep_run_pairs.json`'s models crossed with its
+    representations, censoring is `censoring_pairs.json`'s five named pairs, and
+    every task outside them skips by design.
+    """
+    gen = _generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')
+    if gen is None:
+        return set(), None
+    datasets = [short for short, _ in gen.DATASETS]
+    if stage != 2:
+        want = {(d, C.canonical_model(m, 'validation'), C.canonical_rep(r), c)
+                for d in datasets for m in gen.MODELS_ALL
+                for r in gen.ALL_REPS for c in gen.BREADTH_GRID}
+        return want, 'the breadth grid: every model on every representation'
+
+    want = set()
+    deep = _pairs_file('deep_run_pairs.json')
+    if deep and deep.get('validation_labels') and deep.get('representations'):
+        want |= {(d, C.canonical_model(m, 'validation'), C.canonical_rep(r), c)
+                 for d in datasets
+                 for m in deep['validation_labels']
+                 for r in deep['representations']
+                 for c in gen.DEPTH_ONLY}
+    censoring = _pairs_file('censoring_pairs.json')
+    if censoring:
+        for model, rep in censoring.get('validation_pairs', []):
+            for d in datasets:
+                want.add((d, C.canonical_model(model, 'validation'),
+                          C.canonical_rep(rep), 'censoring'))
+    note = (f'{len(gen.DEPTH_ONLY)} depth condition(s) on the deep run pairs, '
+            f'censoring on its own named pairs')
+    return want, note
+
+
+def check_assay(directories, stage=1):
     gen = _generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')
     if gen is None or not directories:
         return None
-    datasets = [short for short, _ in gen.DATASETS]
-    want = {(d, C.canonical_model(m, 'validation'), C.canonical_rep(r), c)
-            for d in datasets for m in gen.MODELS_ALL
-            for r in gen.ALL_REPS for c in gen.BREADTH_GRID}
+    want, note = assay_expected(stage)
+    if not want:
+        return None
     frame = L.load_assay_accuracy(directories)
     if frame is None:
         return {'name': 'assay accuracy', 'want': len(want), 'ok': 0,
@@ -187,7 +230,7 @@ def check_assay(directories):
     return {'name': 'assay accuracy', 'want': len(want),
             'ok': len(want & landed), 'missing': len(missing),
             'partial': int(len(partial)), 'thin': 0, 'examples': missing[:6],
-            'note': 'five folds, no replicates -- a partition, not repeats',
+            'note': f'five folds, no replicates -- a partition, not repeats; {note}',
             'coverage': cover}
 
 
@@ -196,8 +239,17 @@ def check_uncertainty(directories):
                      'slurm_scripts_uncertainty_rerun/generate_scripts.py')
     if gen is None or not directories:
         return None
+    # ALL SEVEN CONDITIONS, not the main grid's four. The uncertainty runs went
+    # out as two submissions -- the three the QM9 screen runs, then censoring and
+    # the three depth-only ones -- so together they cover exactly
+    # MAIN_GRID_CONDITIONS + DEEP_RUN_CONDITIONS, which is what the generator
+    # calls KNOWN_CONDITIONS. Reading MAIN_GRID_CONDITIONS expected 216 cells of
+    # the 378 submitted and left the 162 depth-only ones counted nowhere at all:
+    # neither landed nor missing. Same failure the merge's own docstring warns
+    # about, in the tool that decides whether the run is finished.
+    conditions = list(gen.KNOWN_CONDITIONS)
     want = {(d, m, r, c) for d in gen.DATASETS for m in gen.MODELS
-            for r in gen.REPS for c in gen.MAIN_GRID_CONDITIONS}
+            for r in gen.REPS for c in conditions}
     merged = L.load_merged_uncertainty(directories)
     cover = merged.get('coverage')
     if cover is None or not len(cover):
@@ -212,7 +264,11 @@ def check_uncertainty(directories):
             'partial': int(status.isin(['TRUNCATED_OOF', 'PARTIAL_FOLDS',
                                         'PARTIAL_LEVELS']).sum()),
             'thin': int(status.isin(['NO_OOF', 'OOF_ALL_NAN']).sum()),
-            'examples': [], 'note': "the merge step's own coverage.csv",
+            'examples': [],
+            'note': (f"the merge step's own coverage.csv; "
+                     f"{len(gen.MODELS)} models x {len(gen.DATASETS)} datasets x "
+                     f"{len(gen.REPS)} representations x {len(conditions)} "
+                     f"conditions"),
             'coverage': cover}
 
 
@@ -265,7 +321,7 @@ def main(argv=None):
 
     print(f'checking against the generators\' own rosters, stage {args.stage}')
     results = [check_qm9(args.qm9_dir, args.stage),
-               check_assay(args.validation_dir),
+               check_assay(args.validation_dir, args.stage),
                check_uncertainty(args.uncertainty_dir)]
     return report(results, verbose=args.verbose)
 

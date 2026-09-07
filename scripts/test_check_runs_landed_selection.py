@@ -92,9 +92,83 @@ def main():
                 f'be 0, not {result["partial"]}')
         checks += 1
 
+    checks += check_the_laboratory_runs_are_counted()
+    checks += check_every_uncertainty_condition_is_counted()
+
     print(f'OK: {checks} checks. The completeness check counts only the '
-          f'combinations deep_run_pairs.json names.')
+          f'combinations deep_run_pairs.json names, and it counts every '
+          f'laboratory and uncertainty cell that was submitted.')
     return 0
+
+
+def check_the_laboratory_runs_are_counted():
+    """`--stage 2` must ask about the laboratory depth run and censoring.
+
+    WHAT THIS CATCHES. `check_assay` took no stage argument at all, so both
+    `--stage 1` and `--stage 2` asked the same question -- the breadth grid --
+    and the two laboratory runs submitted on 2026-09-06, 19 arrays and 327 tasks
+    each, were counted NOWHERE. Not landed, not missing. The command HANDOFF.md
+    names as the only proof that nothing is missing could not see 654 tasks.
+    """
+    gen = K._generator('val', 'slurm_scripts_validation_rerun/generate_scripts.py')
+    breadth, _ = K.assay_expected(1)
+    depth, _ = K.assay_expected(2)
+    if not breadth or not depth:
+        raise SystemExit('FAIL: the laboratory expected sets came back empty')
+
+    n = 0
+    if breadth == depth:
+        raise SystemExit('FAIL: stage 1 and stage 2 ask the same question, which '
+                         'is what left the laboratory depth run uncounted')
+    n += 1
+
+    conds_1 = {c for _, _, _, c in breadth}
+    conds_2 = {c for _, _, _, c in depth}
+    if conds_1 != set(gen.BREADTH_GRID):
+        raise SystemExit(f'FAIL: stage 1 conditions are {sorted(conds_1)}, not the '
+                         f'breadth grid {gen.BREADTH_GRID}')
+    n += 1
+    if conds_2 != set(gen.DEPTH_ONLY) | {'censoring'}:
+        raise SystemExit(f'FAIL: stage 2 conditions are {sorted(conds_2)}, not the '
+                         f'three depth-only ones plus censoring')
+    n += 1
+
+    # Censoring is five NAMED pairs, so it must not be a cross product.
+    censoring = json.loads((ROOT / 'censoring_pairs.json').read_text())
+    named = {(C.canonical_model(m, 'validation'), C.canonical_rep(r))
+             for m, r in censoring['validation_pairs']}
+    got = {(m, r) for _, m, r, c in depth if c == 'censoring'}
+    if got != named:
+        raise SystemExit(f'FAIL: censoring expects {sorted(got)}, not the five '
+                         f'pairs {sorted(named)} the file names')
+    n += 1
+    return n
+
+
+def check_every_uncertainty_condition_is_counted():
+    """The uncertainty runs submitted seven conditions; the check expected four.
+
+    Six models x three datasets x three representations x seven conditions is
+    378, which is the task count of the two submissions. Reading only the main
+    grid's four gave 216 and left the three depth-only conditions -- 162 cells --
+    neither landed nor missing.
+    """
+    gen = K._generator('unc',
+                       'slurm_scripts_uncertainty_rerun/generate_scripts.py')
+    if gen is None:
+        raise SystemExit('FAIL: could not read the uncertainty generator')
+    n_cells = (len(gen.DATASETS) * len(gen.MODELS) * len(gen.REPS)
+               * len(gen.KNOWN_CONDITIONS))
+    if n_cells != 378:
+        raise SystemExit(
+            f'FAIL: the uncertainty grid is {n_cells} cells, and the two '
+            f'submissions of 2026-09-06 were 162 + 216 = 378 tasks. One of the '
+            f'four rosters has moved and the completeness check no longer '
+            f'describes what was queued.')
+    if len(gen.MAIN_GRID_CONDITIONS) >= len(gen.KNOWN_CONDITIONS):
+        raise SystemExit('FAIL: this check is meaningless unless the depth-only '
+                         'conditions are outside the main grid')
+    return 2
 
 
 if __name__ == '__main__':

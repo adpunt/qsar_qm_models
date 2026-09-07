@@ -11715,7 +11715,7 @@ Everything below is either fixed, or waiting on one of these six. Nothing else i
 | C2 | 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
 | ~~C2b~~ | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
 | C3 | **`scripts/lab_tasks_on_old_noise.py` has never been run.** The laboratory noise draw changed on 2026-09-04 (§3.3b); tasks that FINISHED before the pull wrote rows under the old draw and have to be replaced. Written for exactly this and named as outstanding in three separate messages | **the cluster** |
-| C4 | **§13.17 A5 is open while the compute it decides is already queued.** The three models that can measure the aleatoric/epistemic split per molecule — `heteroscedastic_gp` and the two variational networks with a noise head — are on neither uncertainty run's pair list. Both uncertainty submissions are in the queue now | **the author** |
+| C4 | **NARROWED 2026-09-07 (§13.27 D3c), and smaller than it reads.** This said the models that can measure the aleatoric/epistemic split per molecule are on neither list. **Three of the six queued models do measure it** — the quantile forest and the two variance-head networks, which the author added on 2026-09-01 for exactly this. The run as queued answers the question on two network architectures and a forest. What is still open is whether to ALSO run a model whose data-noise half varies per molecule from a noise head: `GP-Hetero`, `VBLL-Full-Hetero`, `MLP-VBLL-Full-Hetero`. Four options with their task counts are in §13.27 D3d; the recommendation is to run the 378 as they are, or to ADD `GP-Hetero` as a seventh model at 63 tasks, because the two swap options delete a measurement to buy one | **the author** |
 | C5 | **§13.17 A1 is open** — which number replaces the Caco-2 anchor. The evidence is in (§13.20 decision 2); the choice is not made. Still one line outstanding: print the clean Caco-2 training label SD once | **the author** |
 | C6 | **`13033488 paper_analysis` is running against an incomplete grid.** It is `slurm_scripts_analysis/run_paper_analysis.sh`, the author's own decision report — not a mystery job. But Sort & Slice is missing from every replicate 1–9 of the main grid, so one representation of six is absent from anything it reads | **me** — `check_runs_landed.py` should be run before it, not after |
 | ~~C7~~ | ✅ **CLOSED 2026-09-07.** The level gates held `--seed` fixed at 42 across the whole grid, which is the one thing production never does — so the level-dependent affected set passed green on a configuration nobody runs. The gates derive both seeds the way the caller does now, and the transcribed CRC-32 is pinned against `zlib.crc32` case by case. **30 gates pass, up from 15.** Committed and pushed with the `--levels` flag | done |
@@ -16147,8 +16147,8 @@ and is padded rather than dropped.
 | proof | `python scripts/test_slurm_status_tools.py` — 77 checks, exit 0. Four are new: both names are offered in order, a log written under `%j` is found from the array index, its cause is read back, and a CONTROL showing that without `JobIDRaw` only one name exists, which is the behaviour that lost the logs |
 | what it does not do | it does not resubmit. Read the cause first |
 
-**What the fifty are.** Twenty-five cells, each failing twice — once in the breadth grid and once
-in the recovery that was meant to fix them.
+**What the fifty are.** Twenty-five cells, appearing twice in `sacct` — once in the breadth grid
+and once in the recovery.
 
 | | tasks | where |
 |---|---|---|
@@ -16157,10 +16157,13 @@ in the recovery that was meant to fix them.
 
 Index 12–17 is `dataset = i / 6`, the third dataset, which is hERG; `val_gp-tanimoto` has three
 tasks rather than eighteen so its hERG one is index 2. The first 25 are the missing-cache deaths
-(§13.18, 2026-09-03) and the cache is present now, loading 1,415 molecules. **The second 25 are
-the ones nobody has a cause for**, and they are the ones the block below reads, because the
-recovery was run against an unpushed branch (§13.18 step 0) and at least one task went in under
-the script it was being recovered from.
+(§13.18, 2026-09-03) and the cache is present now, loading 1,415 molecules.
+
+⚠️ **Whether the recovery's 25 are still failed is not settled from here, and §13.23 C1 now says
+they are not** — that they went in on 2026-09-04 and are live work that must not be resubmitted.
+The old FAILED rows under `12971620`–`12971638` can never change state; they are a record. What
+this section fixes is that neither set could be READ. Item 1 of the block below is what tells the
+two apart, and it is a read, not a resubmission.
 
 ##### D3b. One bug can write a laboratory uncertainty result that looks complete
 
@@ -16630,11 +16633,11 @@ fixed and the tasks were sent.
   model at every noise level on the ladder. At each level it trains five times over, on five
   different splits of the molecules, then trains extra times so every training molecule gets
   a score from a model that never saw it. It does all of that once; the five splits are the
-  only repeat. **Some of the 378 do nothing** — the Gaussian process is only meant to run on
-  PDV, but the job count was worked out as though every model ran on all three descriptions,
-  so its ECFP4 and ChemBERTa jobs start and stop straight away. Nobody has counted how many.
-  That changes what "none of them have started" means. Chat 1 owns it. Source:
-  `slurm_scripts_uncertainty_rerun/generate_scripts.py:700`.
+  only repeat. ~~**Some of the 378 do nothing**~~ — **CORRECTED 2026-09-07 (§13.27 D3c):
+  all 378 do work.** The generated script passes `--gp-reps "$rep"`, where `$rep` is the
+  task's own representation, so the Gaussian process runs on each of the three rather than
+  skipping two of them. Read it in `slurm_scripts_uncertainty_rerun/unc_gp.sh`, the line
+  above `--results-root`. "None of them have started" means what it says.
 - **Deferred by the author, 2026-09-07:** figures, the analysis job's output, paper
   replacement text, and the six-decision menu. Threads T04 T05 T19 T20 T21 T42 T43 T44 T49
   T50 are parked, not closed.

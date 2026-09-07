@@ -62,8 +62,24 @@ from collections import defaultdict
 from datetime import datetime
 
 # The fields every tool asks for, in one order, so a saved file feeds all of them.
+# JobIDRaw is LAST on purpose. It was added on 2026-09-07 and a capture taken
+# before that has one field fewer; `parse` pads rather than dropping the row, so
+# an older `--sacct-file` still reads, with the new column empty.
+#
+# WHY IT IS HERE AT ALL. An array task's log name depends on what the script
+# asked for. `%A_%a` is the array job id and the task index, which is what
+# `JobID` says. `%j` is the task's OWN job id, which appears nowhere in JobID and
+# nowhere in squeue -- it is JobIDRaw. The laboratory scripts submitted on
+# 2026-09-02 used `%j` (RERUN_PLAN.md 13.18, "a second defect, found while
+# reading for this"), so the logs of their 25 failed tasks are on disk under
+# names no tool could build. That is the whole of "50 laboratory tasks have no
+# cause".
 FIELDS = ('JobID,JobName,State,Elapsed,Timelimit,ReqMem,ExitCode,Submit,Start,'
-          'MaxRSS,NNodes')
+          'MaxRSS,NNodes,JobIDRaw')
+
+# How many trailing fields a capture is allowed to be missing. One, for the
+# JobIDRaw added on 2026-09-07.
+_OPTIONAL_TAIL = 1
 
 # ---------------------------------------------------------------------------
 # What each submission is, and where its scripts live.
@@ -251,8 +267,13 @@ def parse(lines):
     rows = []
     for line in lines:
         p = line.split('|')
-        if len(p) < len(names):
+        # A capture taken before a field was added is SHORT, not broken. Dropping
+        # it silently would report an empty cluster from a file that holds the
+        # whole run. Pad the tail instead; the missing column reads as empty,
+        # which is what it is.
+        if len(p) < len(names) - _OPTIONAL_TAIL:
             continue
+        p = p + [''] * (len(names) - len(p))
         r = dict(zip(names, p))
         jid = r['JobID']
         if '.' in jid:                      # a step row (.batch/.extern), not a task
@@ -485,9 +506,11 @@ def max_rss_by_task(since, sacct_file=None, user=None):
     out = {}
     for line in run_sacct(since, sacct_file, user, extra=()):
         p = line.split('|')
-        if len(p) < len(FIELDS.split(',')):
+        names = FIELDS.split(',')
+        if len(p) < len(names) - _OPTIONAL_TAIL:
             continue
-        r = dict(zip(FIELDS.split(','), p))
+        p = p + [''] * (len(names) - len(p))
+        r = dict(zip(names, p))
         jid = r['JobID']
         if '.' not in jid:
             continue

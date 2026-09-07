@@ -367,6 +367,95 @@ def the_array_dispatch_covers_every_task_once(_runner, _gen):
           f'{sum(n for _, n, _ in totals)} tasks in total')
 
 
+def _merge_module():
+    path = REPO / 'slurm_scripts_uncertainty_rerun' / 'merge_results.py'
+    spec = importlib.util.spec_from_file_location('unc_merge', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules['unc_merge'] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_cell(root, model, dataset, rep, condition, n_molecules,
+                n_real, folds_ok, expected_oof=5):
+    """One task directory, laid out the way a real task lays it out.
+
+    `<results-root>/<dataset>/<model>_<rep>_uncertainty_values.csv`, where the
+    results-root is `<root>/<model>__<dataset>__<rep>__<condition>` — the name
+    the generated script builds and the name the merge splits back apart on the
+    double underscore.
+    """
+    import pandas as pd
+    slug = model.lower().replace('-', '_')
+    task = root / f'{slug}__{dataset}__{rep}__{condition}' / dataset
+    task.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for fold in range(5):
+        for i in range(n_molecules):
+            rows.append({'split': 'test', 'noise_type': condition, 'sigma': 0.5,
+                         'fold': fold, 'uncertainty': 1.0, 'oof_folds_ok': -1,
+                         'model': model, 'rep': rep, 'dataset': dataset})
+        for i in range(n_molecules):
+            rows.append({'split': 'train_oof', 'noise_type': condition,
+                         'sigma': 0.5, 'fold': fold,
+                         'uncertainty': 1.0 if i < n_real else float('nan'),
+                         'oof_folds_ok': folds_ok,
+                         'model': model, 'rep': rep, 'dataset': dataset})
+    name = f"{model.replace('-', '')}_{rep.replace('-', '')}_uncertainty_values.csv"
+    pd.DataFrame(rows).to_csv(task / name, index=False)
+    return task.parent
+
+
+def a_truncated_cell_is_named_for_deletion_and_the_merge_exits_1(_runner, _gen):
+    """The failure this guards is a merge that finds the fault and exits 0.
+
+    A cross-fitting pass whose inner folds partly failed writes a row for every
+    training molecule and a real value for only some of them. The coverage
+    report has called that TRUNCATED_OOF since it was written; the merge then
+    printed the table and exited 0, so every completeness check downstream read
+    the run as finished. It now exits 1 and prints the task directory with the
+    reason beside it — printed, never run, because nothing here may delete a
+    result.
+    """
+    merge = _merge_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / 'uncertainty_rerun'
+        # One cell where every training molecule was scored, and one where a
+        # failed inner fold left two thirds of them blank.
+        _write_cell(root, 'QRF', 'logd', 'pdv', 'gaussian',
+                    n_molecules=30, n_real=30, folds_ok=5)
+        bad_dir = _write_cell(root, 'QRF', 'caco2', 'pdv', 'gaussian',
+                              n_molecules=30, n_real=10, folds_ok=2)
+        buf = io.StringIO()
+        argv = sys.argv
+        sys.argv = ['merge_results.py', '--root', str(root),
+                    '--expected-oof-folds', '5']
+        try:
+            with contextlib.redirect_stdout(buf):
+                status = merge.main()
+        finally:
+            sys.argv = argv
+        out = buf.getvalue()
+        import pandas as pd
+        cov = pd.read_csv(root / '_merged' / 'coverage.csv')
+        row = cov[(cov.dataset == 'caco2') & (cov.model == 'QRF')
+                  & (cov.rep == 'pdv') & (cov.condition == 'gaussian')]
+        assert len(row) == 1 and row.iloc[0]['status'] == 'TRUNCATED_OOF', (
+            f'the short cell was reported as {list(row["status"])}')
+        good = cov[(cov.dataset == 'logd') & (cov.model == 'QRF')
+                   & (cov.rep == 'pdv') & (cov.condition == 'gaussian')]
+        assert len(good) == 1 and good.iloc[0]['status'] == 'OK', (
+            f'the complete cell was reported as {list(good["status"])}')
+        assert status == 1, 'the merge exited 0 with a truncated cell present'
+        assert f'rm -r {bad_dir}' in out, (
+            f'no deletion line for {bad_dir}. Printed:\n{out[-1500:]}')
+        assert 'inner folds succeeded' in out, 'the reason was not printed'
+        assert bad_dir.exists(), 'the merge DELETED a result directory'
+        n_named = out.count('    rm -r ')
+    print(f'    truncated cell reported TRUNCATED_OOF, {n_named} directory named '
+          f'for deletion, nothing deleted, merge exited 1')
+
+
 CHECKS = [
     ('every command line the generator emits parses', every_emitted_command_parses),
     ('no deleted strategy name or flag survives', no_deleted_name_survives),
@@ -375,6 +464,8 @@ CHECKS = [
     ('the model, rep and dataset rosters match the runner', the_rosters_match_the_runner),
     ('the generated scripts are valid bash', the_scripts_are_valid_bash),
     ('the array dispatch covers every task once', the_array_dispatch_covers_every_task_once),
+    ('a truncated out-of-fold cell is named for deletion and the merge exits 1',
+     a_truncated_cell_is_named_for_deletion_and_the_merge_exits_1),
 ]
 
 

@@ -38,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import failed_tasks as FT  # noqa: E402
 import slurm_jobs as SJ  # noqa: E402
 
 QM9 = ['rf', 'xgboost', 'lgb', 'svm', 'ngboost', 'dnn', 'mlp', 'dnn_bnn_full',
@@ -64,9 +65,19 @@ def check(name, ok, detail=''):
                                                      if detail and not ok else ''))
 
 
-def row(jid, name, state, elapsed, limit, mem, submit, rss=''):
-    return '|'.join([jid, name, state, elapsed, limit, mem, '0:0', submit, submit,
-                     rss, '1'])
+def row(jid, name, state, elapsed, limit, mem, submit, rss='', raw=None):
+    """One sacct line.
+
+    `raw` is JobIDRaw, the task's OWN job id, and it is deliberately LEFT OFF by
+    default: a capture taken before that field was added is one field short, and
+    parsing has to pad it rather than drop the row. Everything below therefore
+    exercises the short form, and the check that needs a JobIDRaw passes one.
+    """
+    fields = [jid, name, state, elapsed, limit, mem, '0:0', submit, submit,
+              rss, '1']
+    if raw is not None:
+        fields.append(raw)
+    return '|'.join(fields)
 
 
 def capture(path):
@@ -194,6 +205,53 @@ def capture(path):
         '12980577_12|qm91_ngboost|PD\n'
         '12980577_13|qm91_ngboost|PD\n'
         '12986390_[0-26%6]|unc_qrf|PD\n')
+
+
+def check_both_log_names_are_tried():
+    """A log written under `%j` must still be found from the array index.
+
+    THE FAILURE THIS GUARDS. `--output=<jobname>_%j.out` names the file after the
+    task's own internal job id, which is sacct's JobIDRaw and appears nowhere in
+    JobID or in squeue. The laboratory scripts submitted on 2026-09-02 used it.
+    `failed_tasks.py` built one name, `<jobname>_<array id>_<task>.out`, so it
+    reported "25 log(s) NOT FOUND" for tasks whose logs were on disk the whole
+    time -- and that report is the whole of "50 laboratory tasks have no cause"
+    in HANDOFF.md.
+    """
+    import shutil
+    import tempfile
+    tmp = Path(tempfile.mkdtemp(prefix='logname_'))
+    saved = SJ.QSAR
+    try:
+        sub = next(s for s in SJ.SUBMISSIONS if s.label == 'laboratory breadth')
+        (tmp / sub.directory).mkdir(parents=True, exist_ok=True)
+        # Written under the OLD scheme only, which is the state on the cluster.
+        old_name = tmp / sub.directory / 'val_lightgbm_12971700.out'
+        old_name.write_text('=== task 12\nTraceback (most recent call last):\n'
+                            '  File "x.py", line 1, in <module>\n'
+                            'FileNotFoundError: chembl_herg_ki.csv\n')
+        SJ.QSAR = str(tmp)
+        names = FT.log_paths(sub, 'val_lightgbm', '12971626_12', '12971700')
+        check('both log names are offered, %A_%a first then %j',
+              [n.name for n in names] == ['val_lightgbm_12971626_12.out',
+                                          'val_lightgbm_12971700.out'],
+              f'got {[n.name for n in names]}')
+        found = FT.log_path(sub, 'val_lightgbm', '12971626_12', '12971700')
+        check('a log written under %j is found from the array index',
+              found == old_name, f'picked {found}')
+        err = FT.last_error(found)
+        check('and its cause is read back',
+              err is not None and 'FileNotFoundError' in err,
+              repr(err))
+        # CONTROL: with no JobIDRaw -- an older capture -- only the one name is
+        # offered, which is the behaviour that lost the 25 logs.
+        blind = FT.log_paths(sub, 'val_lightgbm', '12971626_12', '')
+        check('CONTROL: with no JobIDRaw only the %A_%a name exists, which is '
+              'why those logs read as missing',
+              len(blind) == 1, f'got {[n.name for n in blind]}')
+    finally:
+        SJ.QSAR = saved
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main():
@@ -515,6 +573,8 @@ def main():
     check('no wall is proposed from the deep run\'s own 40-second tasks',
           not any('TimeLimit=1:00:00' in ln or 'TimeLimit=0:' in ln
                   for ln in mw.stdout.splitlines()))
+
+    check_both_log_names_are_tried()
 
     print(f"\n  {len(FAILS)} failure(s)" if FAILS else '\n  all checks passed.')
     return 1 if FAILS else 0
