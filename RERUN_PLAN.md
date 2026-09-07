@@ -10858,6 +10858,29 @@ back as generated: `unc_qrf` 1-16:59, `unc_bnn_full_mve` 2-03:59, `unc_gp` 2-20:
 `unc_mlp_bnn_full_mve` 3-06:59, `unc_vbll_full` 3-19:59, `unc_ngboost` 8-01:59. All twelve at 96 GB
 and all PENDING.
 
+#### Submission 11 — `dnn_vbll_hetero` joins the deep run, 2026-09-07
+
+The author settled the deep run's seventh model (§13.27 D4i), and a widening is the one edit
+to `deep_run_pairs.json` that is not free: array `12986329`'s 36 tasks had already run and
+skipped, so the 18 that do work had to be sent again.
+
+| | |
+|---|---|
+| Job ID | **13049903** |
+| Script | `qm9_s2_dnn_bnn_full_variational_hetero.sh` |
+| Tasks | 18 of that array's 36 — indices 0,1,4,6,7,10,12,13,16,18,19,22,24,25,28,30,31,34 |
+| What that is | ECFP4, PDV and ChemBERTa × six noise conditions, at `7:59:00` each |
+| Submitted by | `bash resubmit_selected.sh dnn_bnn_full_variational_hetero`, written by the generator |
+
+**No index was typed.** `slurm_scripts_qm9_rerun/generate_scripts.py` writes
+`resubmit_selected.sh` from the same `rep = REPS[i % n_rep]` / `cond = CONDS[i / n_rep]` map
+the task script uses, and `scripts/test_submit_all_ranges.py` decodes every index back to a
+(representation, condition) pair and fails if the set is not what the selection names.
+
+⏳ **Not yet confirmed on the cluster.** `squeue` has not been read since. The wall it went out
+with comes from the scripts already in `slurm_scripts_qm9_rerun`, which were generated before
+this session, not from the `/tmp/deep7` run used to write the submitter.
+
 ⚠️ **The job ids above were read off `sacct` on 2026-09-07, not recorded at submit time**, by
 `python scripts/slurm_jobs.py --emit-launch-log`. The mapping from id to script is the job NAME
 each array carries, so it is the cluster's own record rather than an assumption about submission
@@ -17097,6 +17120,8 @@ per model, because `gauche` runs on fingerprints alone. For this addition:
 ```
 bash resubmit_selected.sh dnn_bnn_full_variational_hetero
 ```
+
+✅ **Run 2026-09-07: `Submitted batch job 13049903`.** Launch log §13.18, submission 11.
 
 Guard: `scripts/test_submit_all_ranges.py` decodes every index in that file back to a
 (representation, condition) pair and fails if the set is not exactly what the selection names,
