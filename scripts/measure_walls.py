@@ -35,7 +35,20 @@ THE THREE WAYS THIS TOOL HAS BEEN WRONG, AND WHAT STOPS EACH ONE NOW
    ends it immediately. Running tasks are part of the measurement now, and nothing is
    ever proposed below one.
 
-3. THE BORROW STILL IGNORED RUNNING TASKS -- fixed 2026-09-07. The deep run and
+3. IT WAS SILENT ABOUT THE JOB STUCK LONGEST. The table is built from sacct rows, so
+   a job where NOTHING has ever started has no row -- and that is the job that has
+   been queued longest, by definition. `qm90_gauche_rbf` sat with eighteen tasks
+   unstarted from 2026-09-02 while every tool said nothing and the screen was being
+   called one model short. Those come from squeue now and are named first.
+
+4. A CUT ON A PARTLY-RUNNING ARRAY WAS ALL-OR-NOTHING. Nothing was ever proposed
+   below what a running task had used, so no line killed a job on the spot -- but if
+   that task then needed more than the new limit it died at it, and would not have
+   under the old one. The answer is not to skip those jobs, which leaves the worst
+   queue offenders untouched: it is to cut only the elements that have not started,
+   `JobId=12986318_[7-35]`. The running task keeps the limit it was admitted under.
+
+5. THE BORROW STILL IGNORED RUNNING TASKS -- fixed 2026-09-07. The deep run and
    censoring have not started, so their walls are borrowed from the same model in
    another submission. That borrow read only COMPLETED tasks, and the completed set is
    the FAST TAIL by construction: the slow ones have not finished to be counted. On
@@ -81,6 +94,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--since', default='2026-09-01')
     ap.add_argument('--sacct-file', help='a capture from slurm_jobs.py --save')
+    ap.add_argument('--squeue-file', help='the .squeue file beside it')
     ap.add_argument('--user')
     ap.add_argument('--wall-margin', type=float, default=2.0,
                     help='multiply the LONGEST observed task by this (default 2.0). '
@@ -99,10 +113,6 @@ def main():
                          'and censoring -- the jobs that have not started and so are '
                          'the entire queue problem -- get no proposal at all.')
     ap.add_argument('--emit-scontrol', action='store_true')
-    ap.add_argument('--pending-only', action='store_true',
-                    help='propose nothing for a job that has a task RUNNING. The '
-                         'queue problem is the work that has not started; a running '
-                         'task can only lose by having its limit cut.')
     cli = ap.parse_args()
 
     rows = SJ.parse(SJ.run_sacct(cli.since, cli.sacct_file, cli.user))
@@ -110,6 +120,13 @@ def main():
         print(f'  sacct knows no arrays of this study since {cli.since}.')
         return 1
     rss = SJ.max_rss_by_task(cli.since, cli.sacct_file, cli.user)
+    queued = SJ.pending_specs(cli.squeue_file, cli.user)
+    if not queued:
+        print('  NOTE: no queue reading. A job whose tasks have never started is not '
+              'in sacct at\n  all, so it cannot appear below -- and on a job that is '
+              'partly running, only the\n  whole array can be cut rather than just '
+              'the queued elements. Run this on the\n  cluster, or pass '
+              '--squeue-file.\n')
 
     per = {}
     for sub, members in SJ.group_submissions(rows):
@@ -169,6 +186,7 @@ def main():
     print('-' * 96)
     scontrol = []
     unproposed = []
+    unsafe = []
     for (sub, jname), d in sorted(per.items(), key=lambda t: (t[0][0].label, t[0][1])):
         n = len(d['elapsed'])
         longest = max(d['elapsed']) if d['elapsed'] else None
@@ -223,17 +241,32 @@ def main():
             # needs MORE than the new limit it dies later, and it would not have
             # under the old one. That risk only exists where something is running,
             # and it is worth reading before it is worth running.
-            risk = ''
-            if longest_run:
-                over = longest_run / (longest or longest_run)
-                risk = (f'  <-- RUNNING at {SJ.hhmmss(longest_run)}'
-                        + (f", already {over:.1f}x the longest FINISHED task -- this "
-                           f"one is not understood" if over > 1.5 else ''))
-            if not (cli.pending_only and longest_run):
-                for j in sorted(d['jobs']):
+            for j in sorted(d['jobs']):
+                if not longest_run:
                     scontrol.append(f"scontrol update JobId={j} "
                                     f"TimeLimit={SJ.hhmmss(want_t)}   # {jname}: "
-                                    f"{how}{risk}")
+                                    f"{how}")
+                    continue
+                # SOMETHING IS RUNNING ON THIS ARRAY. Cutting the whole array is not
+                # unsafe today -- nothing is proposed below what a running task has
+                # already used -- but it is unsafe TOMORROW: if that task turns out
+                # to need more than the new limit it dies at it, and would not have
+                # under the old one. qm91_ngboost's task _4 is the live case, 49.7 h
+                # against a longest FINISHED task of 18:03 and still going.
+                #
+                # So cut only the elements that have not started. The running task
+                # keeps the limit it was admitted under; the queued work gets a
+                # request the scheduler can backfill. That is the whole benefit with
+                # none of the risk, and it is why this needs squeue.
+                spec = queued.get(int(j))
+                if spec:
+                    scontrol.append(
+                        f"scontrol update JobId={j}_[{spec[0]}] "
+                        f"TimeLimit={SJ.hhmmss(want_t)}   # {jname}: {how}; "
+                        f"THE {spec[1]} QUEUED TASKS ONLY -- a task is running at "
+                        f"{SJ.hhmmss(longest_run)} and keeps its own limit")
+                elif not queued:
+                    unsafe.append((jname, j, SJ.hhmmss(want_t), SJ.hhmmss(longest_run)))
         if peak and d['req_m']:
             # model_memory.json pipeline_overrides: the uncertainty pass has its own
             # floor, because a task there fits its model 1 + oof_folds times per level
@@ -246,6 +279,63 @@ def main():
                     scontrol.append(
                         f"scontrol update JobId={j} MinMemoryNode={want_m * 1024}"
                         f"   # {jname}: peak of {len(d['rss'])} was {peak:.1f} GB")
+
+    # ARRAYS WITH NO SACCT ROWS AT ALL. This table is built from what has run, so a
+    # job where NOTHING has ever started has no row -- and that is the job that has
+    # been stuck longest, by definition. On 2026-09-07 that was `qm90_gauche_rbf`:
+    # eighteen tasks queued since 2026-09-02, not one started, and every tool silent
+    # about it while the screen was being called "one model short".
+    seen_bases = {int(j) for d in per.values() for j in d['jobs']}
+    groups = SJ.group_submissions(rows)
+
+    def submission_for(base, jname):
+        """Which submission a job id belongs to when sacct has never heard of it.
+
+        Discovery works off sacct rows, so a job where nothing has started is in no
+        group -- which is exactly the job this section is about. Fall back to the
+        neighbouring ids in the same submission, then to a recorded range, then to
+        the prefix where it names only one submission.
+        """
+        for sub, members in groups:
+            if members and min(members) <= base <= max(members):
+                return sub
+        prefix = next((pf for pf in SJ.PREFIXES if jname.startswith(pf)), None)
+        cands = [sb for sb in SJ.SUBMISSIONS if sb.prefix == prefix]
+        return next((sb for sb in cands if sb.owns(base)),
+                    cands[0] if len(cands) == 1 else None)
+
+    never = []
+    for base, (spec, count, jname) in sorted(queued.items()):
+        if base in seen_bases:
+            continue
+        sub = submission_for(base, jname)
+        borrow = best.get(model_of(sub, jname)) if sub else None
+        never.append((base, jname, count, sub.label if sub else 'unknown', borrow))
+    if never:
+        print(f"\n  NOTHING HAS EVER STARTED on these -- no sacct row, so they are in "
+              f"no table\n  above. A job queued for days with nothing to show is the "
+              f"one to look at first:")
+        for base, jname, count, label, borrow in never:
+            print(f"      {jname:<30s} {count:3d} task(s) queued   {label}   "
+                  f"({base})")
+            if borrow:
+                want = int(borrow[0] * cli.wall_margin) + 3600
+                print(f"      {'':<30s} the same model elsewhere took "
+                      f"{SJ.hhmmss(borrow[0])} ({borrow[1]}), so "
+                      f"{SJ.hhmmss(want)} would do it")
+                scontrol.append(
+                    f"scontrol update JobId={base} TimeLimit={SJ.hhmmss(want)}"
+                    f"   # {jname}: NOTHING HAS STARTED; borrowed "
+                    f"{SJ.hhmmss(borrow[0])} from the same model elsewhere")
+            else:
+                print(f"      {'':<30s} and this model has run NOWHERE, so there is "
+                      f"nothing to size it from")
+
+    if unsafe:
+        print(f"\n  NOT PROPOSED -- a task is running and there is no queue reading, "
+              f"so the\n  queued elements cannot be cut on their own:")
+        for jname, j, want, run in unsafe:
+            print(f"      {jname:<30s} {j}   would be {want}, running at {run}")
 
     print(f"\n  Walls proposed at {cli.wall_margin}x the LONGEST OBSERVED task "
           f"(completed or\n  running) plus an hour; memory at {cli.mem_margin}x the "

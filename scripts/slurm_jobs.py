@@ -369,17 +369,19 @@ def _tasks_in(rows):
     return n
 
 
-def squeue_pending(squeue_file=None, user=None):
-    """{base job id: tasks still queued}. SACCT DOES NOT HAVE THIS.
+def squeue_arrays(squeue_file=None, user=None):
+    """Every PENDING piece of this study that is in the queue.
 
-    A pending array element that has never started is not in the accounting
-    database, so `sacct -X` reports the tasks that have run and nothing about the
-    rest. On the real cluster on 2026-09-07 that made the QM9 deep run look like 550
-    tasks rather than 654, and turned every percentage into a fraction of a moving
-    denominator. squeue is the only place the queue exists.
+    [(base job id, job name, element spec, task count)] -- where the element spec is
+    what goes inside `JobId=<base>_[...]`: `7-35` for the bracketed remainder of an
+    array, `7` for a single expanded element.
 
-    `12980590_[0-17%5]` is one squeue row holding eighteen tasks; `12986318_7` is one.
-    Both are counted.
+    SACCT DOES NOT HAVE THIS. An array element that has never started is not in the
+    accounting database, so sacct reports the tasks that have run and nothing about
+    the rest. On the real cluster that made the QM9 deep run look like 550 tasks
+    against its 654, and left the screen's gauche_rbf -- eighteen tasks, not one of
+    which has ever started -- invisible to every tool. squeue is the only place the
+    queue exists.
     """
     if squeue_file:
         lines = [ln for ln in open(squeue_file).read().splitlines() if ln.strip()]
@@ -389,11 +391,11 @@ def squeue_pending(squeue_file=None, user=None):
         try:
             p = subprocess.run(cmd, capture_output=True, text=True)
         except FileNotFoundError:
-            return {}                      # not on the cluster; say so, do not guess
+            return []                      # not on the cluster; say so, do not guess
         if p.returncode != 0:
-            return {}
+            return []
         lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
-    out = defaultdict(int)
+    out = []
     for line in lines:
         parts = line.split('|')
         if len(parts) < 3:
@@ -401,11 +403,40 @@ def squeue_pending(squeue_file=None, user=None):
         jid, name, state = parts[0], parts[1], parts[2]
         if not name.startswith(PREFIXES) or state.strip() != 'PD':
             continue
-        base = jid.partition('_')[0]
+        base, _, tail = jid.partition('_')
         if not base.isdigit():
             continue
-        out[int(base)] += pending_count(jid) if '[' in jid else 1
+        if '[' in tail:
+            spec = tail[tail.index('[') + 1:tail.index(']')].split('%')[0]
+            out.append((int(base), name, spec, pending_count(jid)))
+        elif tail.isdigit():
+            out.append((int(base), name, tail, 1))
+    return out
+
+
+def squeue_pending(squeue_file=None, user=None):
+    """{base job id: tasks still queued}."""
+    out = defaultdict(int)
+    for base, _name, _spec, n in squeue_arrays(squeue_file, user):
+        out[base] += n
     return dict(out)
+
+
+def pending_specs(squeue_file=None, user=None):
+    """{base job id: (element spec for scontrol, task count, job name)}.
+
+    `scontrol update JobId=12986318_[7-35] TimeLimit=...` changes only the elements
+    that have not started. That is what makes a cut on a partly-running array safe:
+    the running task keeps the limit it was admitted under and cannot be shortened
+    out from under itself, while the queued work gets a request the scheduler can
+    actually backfill.
+    """
+    specs, counts, names = defaultdict(list), defaultdict(int), {}
+    for base, name, spec, n in squeue_arrays(squeue_file, user):
+        specs[base].append(spec)
+        counts[base] += n
+        names[base] = name
+    return {b: (','.join(v), counts[b], names[b]) for b, v in specs.items()}
 
 
 def max_rss_by_task(since, sacct_file=None, user=None):

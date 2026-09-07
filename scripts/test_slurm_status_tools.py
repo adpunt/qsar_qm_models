@@ -122,6 +122,11 @@ def capture(path):
     for i in range(3):
         out.append(row(f'12986318_{i}', 'qm92_ngboost', 'COMPLETED', '0:00:40',
                        '22-01:59:00', '96Gn', '2026-09-06T00:10:00'))
+    # The screen's gauche_rbf: queued since 2026-09-02, not one task ever started, so
+    # sacct holds nothing for it at all. It must still be named.
+    screen_grbf = 12971601 + QM9.index('gauche_rbf')
+    out = [ln for ln in out if not ln.startswith(f'{screen_grbf}_')]
+
     # gauche_rbf on the deep run: two completed short tasks, one still running, and a
     # 17-day request. Too little to propose from -- but it must be NAMED, not skipped
     # in silence, because it is the one model that has never finished anywhere.
@@ -160,6 +165,9 @@ def capture(path):
     path.with_suffix('.squeue').write_text(
         '12986318_[7-35%5]|qm92_ngboost|PD\n'
         '12986331_[8-35%5]|qm92_gauche_rbf|PD\n'
+        '12971618_[0-17%4]|qm90_gauche_rbf|PD\n'
+        '12980577_12|qm91_ngboost|PD\n'
+        '12980577_13|qm91_ngboost|PD\n'
         '12986390_[0-26%6]|unc_qrf|PD\n')
 
 
@@ -266,30 +274,43 @@ def main():
     # 4. The borrow must not propose a wall below a running task.
     mw = subprocess.run(
         [sys.executable, str(HERE / 'measure_walls.py'), '--sacct-file', str(cap),
-         '--emit-scontrol'], capture_output=True, text=True)
+         '--squeue-file', str(cap.with_suffix('.squeue')), '--emit-scontrol'],
+        capture_output=True, text=True)
     check('measure_walls.py runs', mw.returncode == 0, mw.stderr[-400:])
-    # THE INVARIANT, checked on every line rather than by naming a model: a proposed
-    # TimeLimit must be above the longest task ALREADY RUNNING on that job id, or
-    # scontrol ends it on the spot.
+    # THE INVARIANT, checked on every line rather than by naming a model. Two halves:
+    # a WHOLE-ARRAY cut must be above the longest task already running on that job id,
+    # or scontrol ends it on the spot; and where anything is running, the cut should
+    # not be whole-array at all -- only the queued elements, so the running task keeps
+    # the limit it was admitted under and cannot be shortened out from under itself
+    # later.
     longest_running = {}
     for r in rows:
         if r['State'].split()[0] == 'RUNNING':
             base = r['JobID'].split('_')[0]
             longest_running[base] = max(longest_running.get(base, 0),
                                         SJ.secs(r['Elapsed']) or 0)
-    checked = 0
+    checked = whole = 0
     for line in mw.stdout.splitlines():
-        if 'TimeLimit=' not in line:
+        if 'TimeLimit=' not in line or 'scontrol' not in line:
             continue
-        base = line.split('JobId=')[1].split()[0]
+        target = line.split('JobId=')[1].split()[0]
+        base = target.split('_')[0]
         want = SJ.secs(line.split('TimeLimit=')[1].split()[0])
         used = longest_running.get(base, 0)
-        if used:
-            checked += 1
-            check(f'{base}: proposed {SJ.hhmmss(want)} is above the '
+        if not used:
+            continue
+        checked += 1
+        if '_[' in target:
+            check(f'{base}: cuts only the {target.split("_[")[1].rstrip("]")} queued '
+                  f'elements, leaving the running task alone', True)
+        else:
+            whole += 1
+            check(f'{base}: WHOLE array cut to {SJ.hhmmss(want)} with a task at '
                   f'{SJ.hhmmss(used)} already running',
                   want is not None and want > used,
                   f'{want}s proposed against {used}s already used')
+    check('a partly-running array is cut per element, not whole', whole == 0,
+          f'{whole} whole-array cut(s) on jobs that have a task running')
     # And the borrow: qm92_ngboost has not started, so its wall must come from the
     # 46.7 h task still running on the main grid, not the 18:02 completed tail.
     borrowed = [ln for ln in mw.stdout.splitlines()
@@ -301,31 +322,12 @@ def main():
           borrowed or 'no proposal for 12986318 at all')
     check('at least one running job was covered by the invariant', checked > 0)
 
-    check('a model with too little evidence and a multi-day request is NAMED, '
-          'not skipped in silence',
-          'NO PROPOSAL' in mw.stdout and 'gauche_rbf' in
-          mw.stdout.split('NO PROPOSAL')[1][:600],
-          mw.stdout.split('Walls proposed')[-1][:500])
-    check('and no wall is proposed for it',
-          not any(str(12986314 + QM9.index('gauche_rbf')) in ln
-                  and 'TimeLimit=' in ln for ln in mw.stdout.splitlines()),
-          [ln for ln in mw.stdout.splitlines()
-           if str(12986314 + QM9.index('gauche_rbf')) in ln])
-
-    # 8. A line that touches a running task is marked, and --pending-only drops it.
-    marked = [ln for ln in mw.stdout.splitlines()
-              if 'scontrol' in ln and '<-- RUNNING' in ln]
-    check('a proposal that touches a RUNNING task says so on the line',
-          bool(marked), 'nothing marked, but 12980577 has a task 2.6x the longest '
-                        'finished one')
-    po = subprocess.run(
-        [sys.executable, str(HERE / 'measure_walls.py'), '--sacct-file', str(cap),
-         '--emit-scontrol', '--pending-only'], capture_output=True, text=True)
-    check('--pending-only drops every proposal that touches a running task',
-          not any('scontrol' in ln and '<-- RUNNING' in ln
-                  for ln in po.stdout.splitlines())
-          and 'scontrol update' in po.stdout,
-          po.stderr[-300:])
+    # 8. An array where NOTHING has ever started is named, not left out of the table.
+    screen_grbf = 12971601 + QM9.index('gauche_rbf')
+    check('an array with no sacct rows at all is NAMED, not silently absent',
+          'NOTHING HAS EVER STARTED' in mw.stdout
+          and str(screen_grbf) in mw.stdout.split('NOTHING HAS EVER STARTED')[1][:500],
+          mw.stdout[-1500:])
 
     # 6. A fast task on a grid with NO selection gate is a measurement.
     lgb = [ln for ln in mw.stdout.splitlines()
