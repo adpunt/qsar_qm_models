@@ -419,8 +419,30 @@ def load_qm9(results_dir, cache_dir=None):
                         _worst = _spread.idxmax()
                         print(f'      largest single disagreement: '
                               f'{dict(zip(key, _worst if isinstance(_worst, tuple) else (_worst,)))}')
-                        print(f'      Until this is settled, the replicate '
-                              f'spread has a floor no error bar accounts for.')
+                        # HOW MUCH IT MATTERS, not just that it happens. The
+                        # replicate spread is supposed to measure variation
+                        # between independent noise draws. If re-running the
+                        # SAME nominal replicate moves the number by as much as
+                        # a different replicate does, then the error bar is
+                        # partly training jitter and does not mean what the
+                        # caption says.
+                        _rep_key = [k for k in key if k != 'replicate']
+                        _wobble = (df.groupby(_rep_key, dropna=False)['r2']
+                                   .agg(lambda v: v.max() - v.min()))
+                        _rerun = float(_far.median())
+                        _between = float(_wobble.median())
+                        _share = (_rerun / _between) if _between else float('inf')
+                        print(f'      Re-running the same replicate moves R2 by '
+                              f'{_rerun:.4f} at the median; DIFFERENT replicates '
+                              f'of the same cell differ by {_between:.4f}. '
+                              f'Re-run jitter is {_share:.0%} of the spread the '
+                              f'error bars are drawn from.')
+                        if _share > 0.5:
+                            print(f'      That is not a floor under the error '
+                                  f'bar, it is most of it. A replicate spread '
+                                  f'quoted from this data is largely measuring '
+                                  f'the fit being re-run, not the noise draw '
+                                  f'changing.')
             # WHICH cells, not just how many. A cell appearing twice means the
             # same task ran twice -- a resubmit that was not needed, or two
             # array indices writing the same output path. Keeping the last is
