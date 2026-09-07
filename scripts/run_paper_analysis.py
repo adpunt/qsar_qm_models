@@ -157,6 +157,19 @@ def load_everything(args):
     per_molecule = [args.qm9_dir] + list(args.uncertainty_dir or []) \
         + list(args.validation_dir or [])
 
+    # Anything the loader flagged as needing a human decision travels on the
+    # frame; write it where it can be opened rather than leaving it in a log.
+    for label, frame in (('qm9', qm9), ('assay', assay)):
+        detail = (frame.attrs.get('duplicate_disagreements')
+                  if frame is not None else None)
+        if detail is not None and len(detail):
+            path = Path(args.output_dir) / f'd0_duplicate_disagreements_{label}.csv'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            detail.to_csv(path, index=False)
+            print(f'  {len(detail)} row(s) from disagreeing duplicate cells '
+                  f'written to {path.name} -- both copies of each, side by '
+                  f'side, so the cause can be chased')
+
     for name, frame in (('QM9', qm9), ('assay', assay)):
         print(f'  {name}: '
               + ('nothing' if frame is None else

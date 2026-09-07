@@ -310,6 +310,7 @@ def load_qm9(results_dir, cache_dir=None):
                 f'cannot be told apart and would silently overwrite each other.')
         before = len(df)
         duplicated = df.duplicated(subset=key, keep='last')
+        _disagreements = None
         if duplicated.any():
             # WHETHER THE TWO COPIES AGREE. Keeping the last is only safe if the
             # copies are the same computation. They need not be: the deep run
@@ -336,6 +337,12 @@ def load_qm9(results_dir, cache_dir=None):
                 _spread = _grp['r2'].agg(lambda v: v.max() - v.min())
                 _far = _spread[_spread > 0.001]
                 if len(_far):
+                    # Carried out on the frame, because six lines of log cannot
+                    # be chased and 275 disagreeing cells is a thing to look at.
+                    _sub_all = df.loc[_both]
+                    _all_keys = pd.MultiIndex.from_frame(_sub_all[key])
+                    _disagreements = (_sub_all[_all_keys.isin(_far.index)]
+                                      .sort_values(key + ['r2']))
                     print(f'  ⚠ {len(_far)} duplicated cell-and-replicate(s) differ by '
                           f'more than 0.001 R2 between copies (largest '
                           f'{_spread.max():.4f}). Same molecules and same seed should '
@@ -348,17 +355,33 @@ def load_qm9(results_dir, cache_dir=None):
                     # separates them.
                     _differs = []
                     for _col in ('spec_hash', 'spec_version', 'loss_function',
-                                 'sample_size'):
+                                 'sample_size', 'gp_collapsed', 'gp_fit_method',
+                                 'params_source', 'standardisation_sd'):
                         if _col in df.columns:
                             _n = int((_grp[_col].nunique(dropna=False) > 1).sum())
                             if _n:
                                 _differs.append((_col, _n))
                     if _differs:
                         for _col, _n in _differs:
-                            print(f'      {_n} of them also differ in {_col!r} -- '
-                                  f'the copies were fitted under different code, '
-                                  f'so keeping the last written is right, and it '
-                                  f'should be the NEWER one')
+                            if _col == 'gp_collapsed':
+                                print(f'      {_n} of them differ in '
+                                      f'gp_collapsed -- the process returned its '
+                                      f'PRIOR in one copy and fitted in the '
+                                      f'other. That is not two measurements of '
+                                      f'one thing; the collapsed copy answered '
+                                      f'nothing and is filtered anyway.')
+                            elif _col == 'standardisation_sd':
+                                print(f'      {_n} of them differ in '
+                                      f'standardisation_sd -- the labels were '
+                                      f'scaled by different amounts, so the two '
+                                      f'copies are not on one scale and their '
+                                      f'errors are not comparable.')
+                            else:
+                                print(f'      {_n} of them also differ in '
+                                      f'{_col!r} -- the copies were fitted under '
+                                      f'different code or settings, so keeping '
+                                      f'the last written is right, and it should '
+                                      f'be the NEWER one')
                     else:
                         # Which models. Build the key as an index to test
                         # membership WITHOUT set_index, which would consume the
@@ -412,7 +435,12 @@ def load_qm9(results_dir, cache_dir=None):
             if len(where) > 6:
                 print(f'      ... and {len(where) - 6} more cell(s)')
             df = df[~duplicated]
-        return df.reset_index(drop=True)
+        out = df.reset_index(drop=True)
+        if _disagreements is not None and len(_disagreements):
+            # Carried on the frame so the entry point can write it
+            # somewhere it can be opened.
+            out.attrs['duplicate_disagreements'] = _disagreements
+        return out
 
     return _cached(cache_dir, 'qm9', paths, build)
 
