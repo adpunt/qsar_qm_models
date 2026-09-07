@@ -45,6 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slurm_jobs as SJ  # noqa: E402
 
 DONE = ('COMPLETED',)
+# A run-time selection gate exits 0 within seconds. Same threshold as
+# measure_walls.py --min-elapsed, which defaults to 180.
+GATE_EXIT_SECS = 180
 BAD = ('FAILED', 'TIMEOUT', 'OUT_OF_ME', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE')
 
 
@@ -77,13 +80,13 @@ def main():
               'percentages are of a\n  moving denominator. Run this on the cluster, '
               'or pass --squeue-file.\n')
 
-    print(f"  {'submission':26s} {'done':>6s} {'run':>5s} {'pend':>6s} {'fail':>5s} "
-          f"{'canc':>5s} {'total':>6s} {'%':>5s}  {'longest running':>15s}")
-    print('  ' + '-' * 96)
+    print(f"  {'submission':26s} {'done':>6s} {'skip':>5s} {'run':>5s} {'pend':>6s} "
+          f"{'fail':>5s} {'canc':>5s} {'total':>6s} {'%':>5s}  {'longest running':>15s}")
+    print('  ' + '-' * 104)
     running_all = []
-    grand = [0, 0, 0, 0, 0]
+    grand = [0, 0, 0, 0, 0, 0]
     for sub, members in groups:
-        done = run = pend = fail = canc = 0
+        done = skip = run = pend = fail = canc = 0
         longest = 0
         for base in members:
             pend += queued.get(base, 0)
@@ -96,7 +99,18 @@ def main():
                         pend += SJ.pending_count(r['JobID'])
                     continue
                 if st in DONE:
-                    done += 1
+                    # A TASK THAT SKIPPED IS NOT A TASK THAT RAN. The deep run,
+                    # censoring and the two laboratory depth runs are generated with
+                    # --runtime-selection: a task whose pair is not in the file exits
+                    # 0 in seconds. sacct calls that COMPLETED, so it used to land in
+                    # `done` and most of the deep run's progress was gate exits.
+                    # Same threshold measure_walls.py uses, and only where a gate
+                    # exists -- elsewhere a ninety-second task IS the measurement.
+                    el = SJ.secs(r['Elapsed'])
+                    if sub.selection_gate and el is not None and el < GATE_EXIT_SECS:
+                        skip += 1
+                    else:
+                        done += 1
                 elif st == 'RUNNING':
                     run += 1
                     s = SJ.secs(r['Elapsed'])
@@ -111,18 +125,25 @@ def main():
                     canc += 1
                 elif st in BAD:
                     fail += 1
-        total = done + run + pend + fail + canc
-        for i, v in enumerate((done, run, pend, fail, canc)):
+        total = done + skip + run + pend + fail + canc
+        for i, v in enumerate((done, skip, run, pend, fail, canc)):
             grand[i] += v
-        pct = f'{100.0 * done / total:.0f}%' if total else '--'
-        print(f"  {sub.label:26s} {done:6d} {run:5d} {pend:6d} {fail:5d} {canc:5d} "
-              f"{total:6d} {pct:>5s}  "
+        # The percentage counts a skip as settled, because it is: that pair was
+        # deliberately not selected and no result is owed for it.
+        pct = f'{100.0 * (done + skip) / total:.0f}%' if total else '--'
+        print(f"  {sub.label:26s} {done:6d} {skip:5d} {run:5d} {pend:6d} {fail:5d} "
+              f"{canc:5d} {total:6d} {pct:>5s}  "
               f"{((str(round(longest / 3600, 1)) + ' h') if longest else '--'):>15s}")
     gt = sum(grand)
-    print('  ' + '-' * 96)
-    print(f"  {'ALL':26s} {grand[0]:6d} {grand[1]:5d} {grand[2]:6d} {grand[3]:5d} "
-          f"{grand[4]:5d} {gt:6d} "
-          f"{(f'{100.0 * grand[0] / gt:.0f}%' if gt else '--'):>5s}")
+    print('  ' + '-' * 104)
+    print(f"  {'ALL':26s} {grand[0]:6d} {grand[1]:5d} {grand[2]:5d} {grand[3]:6d} "
+          f"{grand[4]:5d} {grand[5]:5d} {gt:6d} "
+          f"{(f'{100.0 * (grand[0] + grand[1]) / gt:.0f}%' if gt else '--'):>5s}")
+    if grand[1]:
+        print(f"\n  `skip` is a task that exited 0 in under {GATE_EXIT_SECS}s because "
+              f"its model-and-representation pair is not in the selection file it "
+              f"read when it started. It computed nothing, and no result is owed for "
+              f"it. Before 2026-09-07 these were counted as done.")
 
     missing = [s.label for s in SJ.SUBMISSIONS
                if s.label not in {g[0].label for g in groups}]

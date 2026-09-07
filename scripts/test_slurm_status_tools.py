@@ -218,8 +218,8 @@ def main():
             ('QM9 censoring', 12986333, 12986351),
             ('laboratory depth', 12986352, 12986370),
             ('laboratory censoring', 12986371, 12986389),
-            ('uncertainty, the three', 12986390, 12986395),
-            ('uncertainty, the four', 12986396, 12986401)]:
+            ('uncertainty, breadth', 12986390, 12986395),
+            ('uncertainty, depth', 12986396, 12986401)]:
         got = found.get(label)
         check(f'{label} is {first}-{last}',
               got is not None and got[0] == first and got[-1] == last,
@@ -264,7 +264,7 @@ def main():
               [sys.executable, str(HERE / 'run_status.py'), '--sacct-file', str(cap)],
               capture_output=True, text=True).stdout)
     check('run_status.py never says "not submitted" for a queued submission',
-          'uncertainty, the four' not in status.stdout.split('NOT SUBMITTED')[-1]
+          'uncertainty, depth' not in status.stdout.split('NOT SUBMITTED')[-1]
           or 'NOT SUBMITTED' not in status.stdout)
 
     # 3. Every resubmission line names a script the generator actually writes.

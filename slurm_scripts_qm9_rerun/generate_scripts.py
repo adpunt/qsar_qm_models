@@ -1223,9 +1223,14 @@ def warn_selection_against_uncertainty_pairs(pairs, path):
         print(f"      {m}")
     print(f"    Their tasks will run, exit 0 and write an uncertainty column scored on "
           f"the TEST split only, where the injected noise is zero.")
-    print(f"    Either add them to {UNCERTAINTY_PAIRS_FILE.name} (both pipelines read "
-          f"it) or drop them from {Path(path).name}. Both are edits to a tracked JSON "
-          f"that the queued tasks pick up when they start.")
+    print(f"    Drop them from {Path(path).name} -- a JSON edit the queued tasks pick "
+          f"up when they start.")
+    print(f"    ADDING one to the uncertainty runs is NOT a JSON edit. "
+          f"slurm_scripts_uncertainty_rerun/generate_scripts.py reads no pairs file at "
+          f"all: its models are the MODELS dict in that file and its representations "
+          f"are REPS. Adding one means an entry in that dict plus one in "
+          f"model_memory.json, and regenerating. This message used to say 'both "
+          f"pipelines read it', which was never true.")
 
 
 def selection_pairs(spec, pairs_key, models_key):

@@ -311,6 +311,35 @@ def load_qm9(results_dir, cache_dir=None):
         before = len(df)
         duplicated = df.duplicated(subset=key, keep='last')
         if duplicated.any():
+            # WHETHER THE TWO COPIES AGREE. Keeping the last is only safe if the
+            # copies are the same computation. They need not be: the deep run
+            # recomputes every replicate of gaussian, grouped_wider and
+            # grouped_shifted that the screen and the main grid already ran
+            # (generate_scripts.py STAGE_DEFAULTS -- stage 2 is replicates 0-9 on
+            # STAGE2_CONDITIONS, which contains all three), and `--use-best-params`
+            # re-reads the tuned hyperparameter files inside every training run. A
+            # task that ran before those files landed fitted at the shared defaults;
+            # one that ran after fitted at the tuned setting. `params_source` says
+            # which, per row. "Last written" is file append order, not the better
+            # number, so a disagreement has to be visible.
+            _both = df.duplicated(subset=key, keep=False)
+            _grp = df.loc[_both].groupby(key, dropna=False)
+            if 'params_source' in df.columns:
+                _mixed = int((_grp['params_source'].nunique(dropna=False) > 1).sum())
+                if _mixed:
+                    print(f'  ⚠ {_mixed} duplicated cell-and-replicate(s) have copies '
+                          f'fitted under DIFFERENT hyperparameters (params_source '
+                          f'differs between the copies). Keeping the last written is '
+                          f'file append order, not a choice. Decide which source you '
+                          f'want before quoting these.')
+            if 'r2' in df.columns:
+                _spread = _grp['r2'].agg(lambda v: v.max() - v.min())
+                _far = int((_spread > 0.001).sum())
+                if _far:
+                    print(f'  ⚠ {_far} duplicated cell-and-replicate(s) differ by more '
+                          f'than 0.001 R2 between copies (largest '
+                          f'{_spread.max():.4f}). Same molecules and same seed should '
+                          f'give the same number, so something else moved.')
             # WHICH cells, not just how many. A cell appearing twice means the
             # same task ran twice -- a resubmit that was not needed, or two
             # array indices writing the same output path. Keeping the last is

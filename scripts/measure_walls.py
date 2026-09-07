@@ -292,11 +292,23 @@ def main():
             # author's rule of 2026-09-04, and not a matter of taste.
             floor = sub.mem_floor_gb or cli.floor_gb
             want_m = max(floor, int(peak * cli.mem_margin / 16 + 1) * 16)
-            if want_m < d['req_m'] * 0.9:
+            # BOTH DIRECTIONS. This used to emit only when the new figure was
+            # SMALLER, so a request BELOW the floor produced no line at all and the
+            # raise silently did not happen. The QM9 main grid went in at 32G against
+            # a 64G floor on 2026-09-04 and this tool said nothing about it for three
+            # days, while the operator was told to take its memory lines as the answer.
+            #
+            # A raise and a cut are not the same action, so they are labelled
+            # differently: a cut is backfill, a raise is the floor being enforced.
+            if want_m < d['req_m'] * 0.9 or want_m > d['req_m']:
+                direction = ('cut, so the scheduler can backfill it'
+                             if want_m < d['req_m'] else
+                             f'RAISE to the {floor} GB floor -- the request is below it')
                 for j in sorted(d['jobs']):
                     scontrol.append(
                         f"scontrol update JobId={j} MinMemoryNode={want_m * 1024}"
-                        f"   # {jname}: peak of {len(d['rss'])} was {peak:.1f} GB")
+                        f"   # {jname}: peak of {len(d['rss'])} was {peak:.1f} GB, "
+                        f"asked {d['req_m']} GB -- {direction}")
 
     # ARRAYS WITH NO SACCT ROWS AT ALL. This table is built from what has run, so a
     # job where NOTHING has ever started has no row -- and that is the job that has

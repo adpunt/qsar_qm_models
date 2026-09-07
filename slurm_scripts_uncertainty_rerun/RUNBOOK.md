@@ -263,7 +263,7 @@ ssh arc-login
 cd /data/stat-cadd/scat9264/NoiseInject
 git fetch origin && git checkout main && git pull --ff-only origin main
 
-cd /data/stat-cadd/scat9264/KIRBy
+cd /data/stat-ecr/scat9264/KIRBy
 git fetch origin && git checkout similarity-metrics-study \
   && git pull --ff-only origin similarity-metrics-study
 
@@ -276,7 +276,7 @@ Confirm you have the right commits before going further:
 
 ```bash
 cd /data/stat-cadd/scat9264/NoiseInject      && git log --oneline -1   # 42b5fac
-cd /data/stat-cadd/scat9264/KIRBy            && git log --oneline -1   # 00166dd
+cd /data/stat-ecr/scat9264/KIRBy            && git log --oneline -1   # 00166dd
 cd /data/stat-cadd/scat9264/qsar_qm_models   && git log --oneline -1   # 9d7db67
 ```
 
@@ -323,10 +323,10 @@ python generate_scripts.py            # add --kirby-dir if stat-ecr is the live 
 python test_generated_scripts_match_generator.py
 ```
 
-That last line is the check, and it is worth more than it looks: `preflight.sh` section 4b
-takes the run's condition list off the first `unc_*.sh` it finds, and `merge_results.py` takes
-the expected condition list off them too. A stale script does not only run — it decides what
-the coverage report expects to see.
+That last line is the check, and it is worth more than it looks: `merge_results.py` takes the
+expected condition list off the generated scripts. A stale script does not only run — it decides
+what the coverage report expects to see. (`preflight.sh`, which read them the same way, was
+deleted on 2026-08-28.)
 
 On a laptop, prove they work before they are copied anywhere. The first runs each generated
 command line through the runner's own argument parser; the second **executes** a generated script
@@ -344,19 +344,25 @@ python ~/repos/qsar_qm_models/scripts/test_uncertainty_job_scripts.py --kirby-di
 bash   ~/repos/qsar_qm_models/scripts/smoke_uncertainty_job_scripts.sh --kirby-dir ~/repos/KIRBy
 ```
 
-Two of the preflight's checks caught real failures locally.
+⚠️ **`preflight.sh` was deleted on 2026-08-28 and there is nothing to run in its place.**
+This section used to tell the operator to run it, and this page is the instruction set for the
+378 uncertainty tasks, so the first thing anyone following it hit was a missing file.
+
+The one check it made that still matters is whether **QRF is usable**: locally
+`quantile_forest` and `scikit-learn` are incompatible and every QRF fit raises
+`Invalid parameter 'monotonic_cst'`. Ask that directly, in the environment the jobs use:
 
 ```bash
-cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
-mkdir -p logs
-bash preflight.sh 2>&1 | tee logs/preflight.log
+cd /data/stat-ecr/scat9264/KIRBy && . setup.sh
+python -c "
+from quantile_forest import RandomForestQuantileRegressor as Q
+import numpy as np
+Q(n_estimators=5).fit(np.random.rand(50, 4), np.random.rand(50))
+print('QRF usable')"
 ```
 
-It must end with `ALL PREFLIGHT CHECKS PASSED`. In particular it will tell you
-whether **QRF is usable** — locally `quantile_forest` and `scikit-learn` are
-incompatible and every QRF fit raises `Invalid parameter 'monotonic_cst'`. If
-that reproduces on the cluster, fix the environment before submitting `unc_qrf.sh`
-(`pip install -U quantile-forest`), or submit the other six scripts first.
+If that raises, fix the environment before submitting `unc_qrf.sh`
+(`pip install -U quantile-forest`), or submit the other five scripts first.
 
 **Each array also checks itself.** Since 2026-08-27 every generated script runs
 
@@ -381,7 +387,7 @@ knows.
 ## 4. Choose account and partition
 
 ```bash
-cd /data/stat-cadd/scat9264/KIRBy
+cd /data/stat-ecr/scat9264/KIRBy
 bash tests/slurm_scripts/where_to_submit.sh          # full diagnostic — read §2, §3, §5
 bash tests/slurm_scripts/where_to_submit.sh --emit   # prints: <account> <partition>
 ```
@@ -484,8 +490,8 @@ sbatch --account=$ACCT --partition=$PART --array=3,17,40 unc_ngboost.sh
 
 ```bash
 cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_uncertainty_rerun
-python merge_results.py --root /data/stat-cadd/scat9264/KIRBy/tests/results/uncertainty_rerun \
-    --kirby-dir /data/stat-cadd/scat9264/KIRBy
+python merge_results.py --root /data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun \
+    --kirby-dir /data/stat-ecr/scat9264/KIRBy
 ```
 
 **Read `coverage.csv` first** — it lists all 210 expected cells and marks each
@@ -499,7 +505,7 @@ what it actually ran. Without `--kirby-dir` it reports each cell's level count w
 From your laptop:
 
 ```bash
-scp -r 'gateway.arc.ox.ac.uk:/data/stat-cadd/scat9264/KIRBy/tests/results/uncertainty_rerun/_merged' \
+scp -r 'gateway.arc.ox.ac.uk:/data/stat-ecr/scat9264/KIRBy/tests/results/uncertainty_rerun/_merged' \
     ~/repos/qsar_qm_models/results/uncertainty_rerun_merged
 ```
 
