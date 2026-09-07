@@ -17067,9 +17067,44 @@ holds for Sort & Slice, whose guard refuses an all-zero vector. It does not hold
 PDV, ChemBERTa, Avalon or MHG-GNN: methane has a perfectly good vector under all five, so
 before the fix the run trained on it, and after the fix it does not.
 
-**How many rows are affected is not yet known.** A task that ran after the fix prints one of
-the two `Sort & Slice` lines for every split; a task that ran before it prints neither. So
-`grep -L` over the logs counts the pre-fix side. Nobody has run it.
+#### D4h. Which side of the fix each deep-run model is on, 2026-09-07
+
+`grep -L "Sort & Slice"` over the logs — a task that ran after `62f1fe2` prints one of the two
+lines for every split, a task that ran before it prints neither.
+
+**Read it with two cautions.** The `slurm_scripts_validation_rerun` rows in that output mean
+nothing here: `split_qm9` is QM9's function and the laboratory runner never calls it. And an
+array whose model is not in `deep_run_pairs.json` prints no line because its tasks skip and
+exit 0 without splitting anything — that is `xgboost`, `lgb`, `qrf`, `mlp`, `dnn`, the four
+plain Bayesian networks, both VBLL-hetero networks and `mlp_bnn_full_mve`, all showing 36 of
+36 logs without a line.
+
+For the six models the deep run actually runs, the same output says which side they are on:
+
+| model | logs with no `Sort & Slice` line | side of `62f1fe2` |
+|---|---|---|
+| `rf` (`12986314`) | 36 of 36 | **before** — trained on all 10,000 |
+| `svm` (`12986317`) | 36 of 36 | **before** |
+| `gauche_rbf` (`12986326`) | 19 of 36 | **straddles the pull** |
+| `ngboost`, `heteroscedastic_gp`, `dnn_bnn_full_mve` | none listed | after |
+
+That is the pattern the mechanism predicts and it is not a coincidence: the fast models
+finished on 6 September, before the pull, and the slow ones started after it.
+
+🔴 **THE AUTHOR'S DECISION. Two options, and I am not choosing.**
+
+**Re-run the pre-fix cells.** `rf` and `svm` are the two cheapest models in the deep run —
+the generator asks `5:59:00` and `4:59:00` a task, 18 tasks each that do work — plus whichever
+of `gauche_rbf`'s straddle. Every deep-run row is then on one training set.
+
+**Accept it and say so in Methods.** About one replicate in five trained on one or two
+molecules fewer out of 10,000. Measured on three pairs, that moved the clean R² by 0.001262 to
+0.023893. **What that is against the replicate spread has not been computed**, and it is the
+number the decision turns on.
+
+**Not established here:** whether the screen (`12971601`–`12971619`) and the main grid
+(`12980573`, `12980589`, `12980590`) straddle the same way. The listing was cut at twenty
+rows. `grep -L "Sort & Slice" slurm_scripts_qm9_*/*.out` without the cut answers it.
 
 🔴 **If it holds, it is not about censoring.** Every QM9 cell whose task ran on one side of
 that pull and is compared with a cell that ran on the other differs on roughly one replicate
