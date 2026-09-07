@@ -16470,6 +16470,79 @@ with the pass; the same model without it took 88.8 seconds per training run, and
 says 3.56 times that. Whatever `sacct` says divided by 7 settles it against a measurement
 rather than against a laptop row taken under different threading.
 
+#### D2p. The wall IS the hold. Correcting D2m, and the cut that follows
+
+**D2m said the wall was not what was holding the three resubmissions. That was wrong.**
+It rested on a `squeue` taken before the scheduler had run a cycle, when all three still read
+`(None)`. Read again after a cycle, with the same submit time of `2026-09-07T07:48:18` on all
+three, the same account and the same 64 GB:
+
+| job | wall asked | state | when |
+|---|---|---|---|
+| `13042881` | **5:59:00** | **RUNNING** on `arc-c120`, both tasks | within the hour |
+| `13042879` | 5-13:59:00 | PENDING `(Priority)` | `squeue --start` says **2026-09-13T11:38:33** |
+| `13042880` | 6-04:59:00 | PENDING `(Priority)` | **2026-09-13T11:38:33** |
+
+The wall is the only thing that differs, and it is worth six days. It is not the partition:
+`13042881` is on `long` too.
+
+#### D2q. The out-of-fold pass is MEASURED now, and the walls can come down
+
+The screen array finished five tasks. A screen task is 7 training runs, one replicate at seven
+noise levels.
+
+| task | representation | out-of-fold pass | elapsed |
+|---|---|---|---|
+| `12971618_0` | ECFP4 | yes | 28:39 |
+| `12971618_1` | PDV | yes | 28:58 |
+| `12971618_2` | MHG-GNN | no | 14:32 |
+| `12971618_3` | Avalon | no | 12:22 |
+| `12971618_5` | Sort & Slice | no | 12:23 |
+
+Against the main grid's 88.8 seconds per training run at one fit, the three without the pass
+give a startup cost of **164 seconds** per task, and the two with it give **223.5 seconds per
+training run — 2.52 times one fit**, not the 3.56 the arithmetic predicted.
+
+| | measured task | ×3 |
+|---|---|---|
+| main grid, 63 training runs | 3.96 h | 11.9 h |
+| deep run, 70 training runs | 4.39 h | 13.2 h |
+
+**Cut to the generator's number, not to that.** §13.29's rule stands. The generator prices six
+FULL fits per training run where the real cost is 2.52, and it applies a 2.0 margin on top —
+so once `gauche_rbf`'s rate is graded `measured` it will ask 18.6 hours on the main grid and
+20.7 on the deep run. Those are the numbers to request, and they are still a **seven-fold** cut.
+
+```bash
+scontrol update JobId=13042879 TimeLimit=18:59:00
+scontrol update JobId=13042880 TimeLimit=20:59:00
+squeue -j 13042879,13042880 -o "%.14i %.20j %.2t %.11l %.7m %R"
+squeue --start -j 13042879,13042880
+```
+
+Both are cuts, so both keep the submit time and the queue position. Neither job has started, so
+neither can be killed by the new limit.
+
+**Why not 11:59:00 and 13:59:00.** They would very likely hold — `13042881` runs at 5:59:00 and
+the pass is measured at 3.96 hours. But the measurement extrapolates one replicate at seven
+levels to nine replicates, nothing has yet run a full main-grid task with the pass, and a job
+killed at its limit writes nothing. 18:59 is 4.7 times the measurement and still schedules.
+
+#### D2r. The other models on the uncertainty roster are NOT missing their rows
+
+The full listing shows eighteen short cells and only six are `NO_OOF_ROWS`, all `gauche_rbf`.
+Everything else is `PARTIAL_OOF` on a grid that is still running:
+
+| model | worst cell | best cell |
+|---|---|---|
+| `ngboost` | ChemBERTa grouped_shifted, 13 of 54 | ChemBERTa gaussian, 61 of 63 |
+| `mlp_bnn_full_mve` | ChemBERTa grouped_shifted, 1 of 54 | ChemBERTa gaussian, 51 of 63 |
+| `dnn_bnn_full_mve` | PDV censoring, 24 of 63 | — |
+
+So D2k's warning that the new gate would show "a number nobody has seen" is answered: **39 of
+57 cells are complete**, the six empty ones are this chat's, and the rest are partial because
+the grid is mid-flight. Nothing new is broken.
+
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
 It closes when one task of 13042879 has FINISHED under `c223ec3`, and
@@ -17102,9 +17175,21 @@ molecules fewer out of 10,000. Measured on three pairs, that moved the clean R²
 0.023893. **What that is against the replicate spread has not been computed**, and it is the
 number the decision turns on.
 
+**3,112 log files carry no `Sort & Slice` line, and that number is not a count of pre-fix
+QM9 tasks.** It counts every laboratory and uncertainty log, which never call `split_qm9`, and
+every QM9 task that skipped because its model is not in the selection. Only the QM9 arrays in
+the table above are evidence.
+
 **Not established here:** whether the screen (`12971601`–`12971619`) and the main grid
-(`12980573`, `12980589`, `12980590`) straddle the same way. The listing was cut at twenty
-rows. `grep -L "Sort & Slice" slurm_scripts_qm9_*/*.out` without the cut answers it.
+(`12980573`, `12980589`, `12980590`) straddle the same way. Both listings so far were cut at
+twenty rows and both times the cut fell inside the deep run. `grep -L "Sort & Slice"
+slurm_scripts_qm9_*/*.out | sed 's/_[0-9]*\.out//' | sort | uniq -c | sort -rn` without a
+`head` answers it.
+
+**This thread belongs to Sort & Slice (`HANDOFF.md` chat 5), not to the deep run's model
+list.** It surfaced here because censoring is the only condition that computes a second clean
+row, so it is the only place the difference is visible without going looking. Everything
+measured is in D4g and D4h; the decision above is the author's and is not chat 4's to take.
 
 🔴 **If it holds, it is not about censoring.** Every QM9 cell whose task ran on one side of
 that pull and is compared with a cell that ran on the other differs on roughly one replicate
