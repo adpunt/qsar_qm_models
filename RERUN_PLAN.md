@@ -14719,8 +14719,24 @@ part that ever needs a queue:
 ```bash
 . /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
 python "$QSAR/scripts/run_paper_analysis.py" --qm9-dir "$QSAR/results" \
-    --output-dir "$QSAR/results/decisions" --permutations 0
+    --output-dir "$QSAR/results/decisions" --skip-uncertainty
 ```
+
+`--skip-uncertainty` gets eight of the ten answers in seconds and says so; D7
+and D8 report that nothing was measured rather than reporting a null. Drop the
+flag for the other two — the statistics are then computed **one per-molecule
+file at a time**, because every row is one molecule at one level in one fold and
+the whole set is hundreds of millions of them. Loading it first is what a login
+node kills: the cap is reached long before the allocation that actually fails,
+so the traceback names a few megabytes. `--max-uncertainty-files N` caps it
+further and marks the answers partial.
+
+Splitting by file changes no number, and that is worth stating because it is not
+obvious: a statistic is computed inside one cell — dataset, model,
+representation, condition, level, fold, split — and one file holds every level
+and every fold for one (condition, representation, model), so no cell spans two
+files. Pinned by
+`streaming_gives_the_same_numbers_as_loading_everything`.
 
 ⚠️ **`conda activate` on its own is not enough**, and it is the one thing that
 will bite. scipy's compiled parts are built against the environment's libstdc++,

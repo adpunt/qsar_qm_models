@@ -35,6 +35,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import gc
+
 import numpy as np
 import pandas as pd
 
@@ -255,14 +257,41 @@ def component_slopes(q5_frame):
     return out
 
 
-def load(sources, dataset_name=None, strict=True, where='per-molecule rows'):
-    """Read the per-molecule rows through the module that owns the schema."""
-    paths = [str(s) for s in (sources or []) if s]
-    if not paths:
+def discover(sources, pattern='*_uncertainty_values.csv'):
+    """Every per-molecule file under the given roots, de-duplicated."""
+    from pathlib import Path as _Path
+    found, seen = [], set()
+    for source in (sources or []):
+        if not source:
+            continue
+        path = _Path(source)
+        candidates = ([path] if path.is_file()
+                      else sorted(path.rglob(pattern)) if path.is_dir() else [])
+        for c in candidates:
+            key = str(c.resolve())
+            if key not in seen:
+                seen.add(key)
+                found.append(c)
+    return found
+
+
+def load(sources, dataset_name=None, strict=True, where='per-molecule rows',
+         paths=None):
+    """Read per-molecule rows into ONE frame.
+
+    ⚠️ Only for a handful of files. The whole set does not fit in memory: every
+    row is one molecule at one noise level in one fold, so the real grid is
+    hundreds of millions of them and a login node's per-user cap is reached
+    while allocating a few megabytes. Use `statistics()` for anything larger --
+    it never holds more than one file at a time.
+    """
+    targets = paths if paths is not None else [str(s) for s in (sources or [])
+                                               if s]
+    if not targets:
         return None
     try:
         df = unc.load_uncertainty(
-            paths, strict=strict,
+            [str(t) for t in targets], strict=strict,
             uncertainty_column=('uncalibrated'
                                 if C.UNCERTAINTY_PRIMARY == 'raw'
                                 else 'calibrated'),
@@ -270,12 +299,91 @@ def load(sources, dataset_name=None, strict=True, where='per-molecule rows'):
     except unc.UncertaintySchemaError as exc:
         print(f'  {where}: NOT loaded -- {exc}')
         return None
+    return df
+
+
+def statistics(sources, permutations=200, dataset_name=None, strict=True,
+               max_files=None, where='per-molecule rows', progress_every=10):
+    """Every uncertainty statistic, computed ONE FILE AT A TIME.
+
+    WHY IT STREAMS
+    --------------
+    Loading the whole set first is what a login node kills. Every row is one
+    molecule at one noise level in one fold; the real grid is hundreds of
+    millions of them, and pandas dies while allocating a few megabytes because
+    the cap was reached long before.
+
+    IT IS SAFE TO SPLIT THIS WAY, AND THAT IS NOT OBVIOUS
+    -----------------------------------------------------
+    A statistic here is computed inside one cell -- dataset, model, rep,
+    condition, sigma, fold, split (uncertainty_stats.CELL_COLS) -- and one file
+    holds every level and every fold for one (condition, representation, model).
+    So no cell spans two files, and the zero-level subtraction that
+    q4_plain_correlation and confound_controlled_effect need finds its sigma = 0
+    rows in the same file it is already holding. Splitting by file therefore
+    changes no number. Splitting by anything coarser would.
+
+    Returns the small statistic tables, never the rows.
+    """
+    files = discover(sources)
+    if not files:
+        print(f'  {where}: no *_uncertainty_values.csv found')
+        return {}
+    if max_files is not None and len(files) > max_files:
+        print(f'  {where}: {len(files)} files, reading the first {max_files} '
+              f'(--max-uncertainty-files). The rest are NOT included and the '
+              f'uncertainty answers are partial.')
+        files = files[:max_files]
+
+    print(f'  {where}: {len(files)} file(s), one at a time so the whole set '
+          f'never has to fit in memory')
+    parts = {'support': [], 'q4': [], 'q5': [], 'q6': []}
+    skipped = []
+    for index, path in enumerate(files, 1):
+        try:
+            df = load(None, dataset_name=dataset_name, strict=strict,
+                      where=str(path.name), paths=[path])
+        except Exception as exc:  # noqa: BLE001
+            skipped.append((path.name, f'{type(exc).__name__}: {exc}'))
+            continue
+        if df is None or not len(df):
+            skipped.append((path.name, 'no usable rows'))
+            continue
+        try:
+            parts['support'].append(support_table(df))
+            got = q4(df, permutations=permutations, where=path.name)
+            if len(got):
+                parts['q4'].append(got)
+            got = q5(df)
+            if len(got):
+                parts['q5'].append(got)
+            got = q6(df)
+            if len(got):
+                parts['q6'].append(got)
+        except Exception as exc:  # noqa: BLE001
+            skipped.append((path.name, f'{type(exc).__name__}: {exc}'))
+        finally:
+            del df
+            gc.collect()
+        if progress_every and index % progress_every == 0:
+            print(f'    {index}/{len(files)}')
+
+    if skipped:
+        print(f'  {where}: {len(skipped)} file(s) contributed nothing:')
+        for name, why in skipped[:5]:
+            print(f'      {name}: {why}')
+        if len(skipped) > 5:
+            print(f'      ... and {len(skipped) - 5} more')
+
     unmapped = unc.unmapped_model_names()
     if unmapped:
-        print(f'  WARNING: {where}: model name(s) unknown to model_names.json: '
-              f'{unmapped}')
-    coverage = unc.scale_check_coverage(df)
-    if not coverage.get('all_checked', True):
-        print(f'  {where}: {coverage["n_unchecked"]} file(s) could not be '
-              f'scale-checked')
-    return df
+        print(f'  WARNING: {where}: model name(s) unknown to model_names.json '
+              f'and joining to nothing: {unmapped}')
+
+    out = {}
+    for key, frames in parts.items():
+        out[key] = (pd.concat(frames, ignore_index=True) if frames
+                    else pd.DataFrame())
+    out['slopes'] = component_slopes(out['q5'])
+    out['n_files'] = len(files)
+    return out

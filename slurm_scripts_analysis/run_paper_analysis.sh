@@ -51,9 +51,13 @@ python scripts/check_runs_landed.py \
   --uncertainty-dir "$KIRBY/tests/results/uncertainty_rerun" \
   --stage "${STAGE:-1}" || true
 
-# The permutation band is the slow part. --permutations 0 skips it, and every
-# Q4 number is then unreadable against a band, so the report says undecided
-# rather than reporting a null nothing measured.
+# The uncertainty statistics read every per-molecule file, one at a time -- the
+# whole set is hundreds of millions of rows and will not fit in memory. Set
+# SKIP_UNCERTAINTY=1 for the accuracy half alone.
+#
+# The permutation band is the slow part. PERMUTATIONS=0 skips it, and every Q4
+# number is then unreadable against a band, so the report says undecided rather
+# than reporting a null nothing measured.
 python scripts/run_paper_analysis.py \
   --qm9-dir "$QSAR/results" \
   --validation-dir "$KIRBY/results/validation_rerun" \
@@ -63,6 +67,7 @@ python scripts/run_paper_analysis.py \
   --output-dir "$QSAR/results/decisions" \
   --cache-dir "$QSAR/results/.figcache" \
   --permutations "${PERMUTATIONS:-200}" \
+  ${SKIP_UNCERTAINTY:+--skip-uncertainty} \
   --only decisions
 
 echo "done. read $QSAR/results/decisions/DECISIONS.md"

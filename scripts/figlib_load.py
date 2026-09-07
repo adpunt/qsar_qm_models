@@ -309,10 +309,22 @@ def load_qm9(results_dir, cache_dir=None):
                 f'QM9 rows are missing {missing}, so duplicate runs of one cell '
                 f'cannot be told apart and would silently overwrite each other.')
         before = len(df)
-        df = df.drop_duplicates(subset=key, keep='last')
-        if before != len(df):
-            print(f'  {before - len(df)} duplicate QM9 row(s) dropped '
-                  f'(same model, rep, condition, level and replicate)')
+        duplicated = df.duplicated(subset=key, keep='last')
+        if duplicated.any():
+            # WHICH cells, not just how many. A cell appearing twice means the
+            # same task ran twice -- a resubmit that was not needed, or two
+            # array indices writing the same output path. Keeping the last is
+            # right either way, but the count alone hides which.
+            where = (df.loc[duplicated, ['model', 'rep', 'condition']]
+                     .value_counts())
+            print(f'  {int(duplicated.sum())} duplicate QM9 row(s) dropped '
+                  f'(same model, rep, condition, level and replicate), across '
+                  f'{len(where)} cell(s). Keeping the last written:')
+            for (model, rep, condition), count in list(where.items())[:6]:
+                print(f'      {model} / {rep} / {condition}: {count} row(s)')
+            if len(where) > 6:
+                print(f'      ... and {len(where) - 6} more cell(s)')
+            df = df[~duplicated]
         return df.reset_index(drop=True)
 
     return _cached(cache_dir, 'qm9', paths, build)

@@ -147,6 +147,49 @@ def the_uncertainty_column_is_the_one_the_spec_settles_on():
           f'present the loader reads {picked!r}')
 
 
+def streaming_gives_the_same_numbers_as_loading_everything():
+    """Reading one file at a time must change no number.
+
+    Loading every per-molecule row first is what a login node kills: each row is
+    one molecule at one level in one fold, so the real grid is hundreds of
+    millions and pandas dies allocating a few megabytes long after the cap was
+    reached. Splitting by FILE is safe because a statistic is computed inside
+    one cell -- dataset, model, rep, condition, sigma, fold, split -- and one
+    file holds every level and fold for one (condition, representation, model),
+    so no cell spans two files. This proves that rather than asserting it.
+    """
+    import figlib_uncertainty as U
+    with tempfile.TemporaryDirectory() as tmp:
+        F.write_per_molecule(tmp, models=['qrf', 'gauche_rbf'], reps=['ecfp4'],
+                             conditions=['gaussian'], n_molecules=150, folds=2)
+        files = U.discover([tmp])
+        assert len(files) == 2, files
+
+        whole = U.load(None, dataset_name='qm9', paths=files)
+        batch_q6 = U.q6(whole).set_index(['model', 'rep', 'condition', 'sigma',
+                                          'fold'])['rho_unc_vs_clean_error']
+        batch_slopes = U.component_slopes(U.q5(whole))
+
+        streamed = U.statistics([tmp], permutations=0, dataset_name='qm9',
+                                progress_every=0)
+        stream_q6 = streamed['q6'].set_index(
+            ['model', 'rep', 'condition', 'sigma',
+             'fold'])['rho_unc_vs_clean_error']
+
+        shared = batch_q6.index.intersection(stream_q6.index)
+        assert len(shared) == len(batch_q6), (
+            f'{len(shared)} of {len(batch_q6)} cells survived streaming')
+        worst = float((batch_q6.loc[shared] - stream_q6.loc[shared]).abs().max())
+        assert worst < 1e-12, f'streaming moved a Q6 value by {worst}'
+
+        key = ['model', 'rep', 'condition']
+        b = batch_slopes.set_index(key)['verdict'].sort_index()
+        s = streamed['slopes'].set_index(key)['verdict'].sort_index()
+        assert b.equals(s), f'verdicts differ:\n{b}\n{s}'
+        print(f'    {len(shared)} cells identical to {worst:.1e}, and every '
+              f'decomposition verdict unchanged')
+
+
 def a_broken_environment_explains_itself():
     """The one environment failure this hits, answered instead of raised.
 
@@ -277,6 +320,8 @@ def main():
               the_uncertainty_column_is_the_one_the_spec_settles_on),
         check('the reference condition is never the whole frame',
               the_reference_condition_is_never_the_whole_frame),
+        check('streaming gives the same numbers as loading everything',
+              streaming_gives_the_same_numbers_as_loading_everything),
         check('a broken environment explains itself',
               a_broken_environment_explains_itself),
         check('the merge step is not a prerequisite',

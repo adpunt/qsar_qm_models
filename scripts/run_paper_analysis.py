@@ -132,6 +132,13 @@ def parse_args(argv=None):
                    help='permutations for the Q4 null band; 0 skips it')
     p.add_argument('--no-filters', action='store_true',
                    help='skip the declared filters, to see what they carry')
+    p.add_argument('--skip-uncertainty', action='store_true',
+                   help='the accuracy half only. The uncertainty statistics '
+                        'read every per-molecule file, which is the expensive '
+                        'part; this gets the other eight answers in seconds')
+    p.add_argument('--max-uncertainty-files', type=int, default=None,
+                   help='read only the first N per-molecule files. Makes the '
+                        'uncertainty answers PARTIAL, and the run says so')
     return p.parse_args(argv)
 
 
@@ -142,9 +149,12 @@ def load_everything(args):
                                   cache_dir=args.cache_dir)
     merged = L.load_merged_uncertainty(args.uncertainty_dir)
 
-    sources = [args.qm9_dir] + list(args.uncertainty_dir or []) \
+    # NOT loaded here. Every row is one molecule at one noise level in one
+    # fold, so the whole set is hundreds of millions of rows and reading it into
+    # one frame is what a login node kills. The statistics are computed one file
+    # at a time, in run_decisions.
+    per_molecule = [args.qm9_dir] + list(args.uncertainty_dir or []) \
         + list(args.validation_dir or [])
-    per_molecule = U.load(sources, where='per-molecule rows')
 
     for name, frame in (('QM9', qm9), ('assay', assay)):
         print(f'  {name}: '
@@ -152,8 +162,8 @@ def load_everything(args):
                  f'{len(frame)} rows, {frame["model"].nunique()} models, '
                  f'{frame["rep"].nunique()} representations, '
                  f'{frame["condition"].nunique()} conditions'))
-    print('  per-molecule: '
-          + ('nothing' if per_molecule is None else f'{len(per_molecule)} rows'))
+    found = U.discover(per_molecule)
+    print(f'  per-molecule: {len(found)} file(s), read one at a time')
     return qm9, assay, merged, per_molecule
 
 
@@ -238,24 +248,17 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     collect(D.d6_auc_above_one(qm9_summary))
 
     support = slopes = q4 = q6 = None
-    if per_molecule is not None and len(per_molecule):
-        support = U.support_table(per_molecule)
-        if args.permutations:
-            # Every Q4 number is read against this band, so it is not optional
-            # -- but it is by far the most expensive thing here, and a run that
-            # goes quiet for an hour looks identical to a hung one.
-            cells = per_molecule.groupby(
-                [c for c in ('dataset', 'model', 'rep', 'condition', 'sigma',
-                             'fold') if c in per_molecule.columns],
-                dropna=False).ngroups
-            print(f'  permutation null: {args.permutations} draws over {cells} '
-                  f'cells. This is the slow part; --permutations 0 skips it, '
-                  f'and every Q4 number is then unreadable against a band.')
-        q4 = U.q4(per_molecule, permutations=args.permutations)
-        print(f'  Q4 done ({len(q4)} cells)')
-        q6 = U.q6(per_molecule)
-        slopes = U.component_slopes(U.q5(per_molecule))
-        print(f'  Q5/Q6 done')
+    if args.skip_uncertainty:
+        print('  uncertainty skipped (--skip-uncertainty); D7 and D8 will say '
+              'so rather than report a null nothing measured')
+    else:
+        stats = U.statistics(per_molecule, permutations=args.permutations,
+                             max_files=args.max_uncertainty_files)
+        if stats:
+            support = stats.get('support')
+            q4 = stats.get('q4')
+            q6 = stats.get('q6')
+            slopes = stats.get('slopes')
     collect(D.d7_uncertainty_option(q4, q6, support))
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
