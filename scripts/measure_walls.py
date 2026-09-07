@@ -105,11 +105,17 @@ def main():
                          'in the selection SKIPS and exits 0 in seconds -- it is not a '
                          'measurement of anything, and a wall set from it would kill the '
                          'same task the day that pair is added.')
+    ap.add_argument('--no-borrow', dest='borrow', action='store_false',
+                    help='do not carry a measurement across from the same model in '
+                         'another submission. Off by default: without it the deep run '
+                         'and censoring -- the jobs that have not started and so are '
+                         'the entire queue problem -- get no proposal at all.')
     ap.add_argument('--emit-scontrol', action='store_true')
     cli = ap.parse_args()
 
-    per = defaultdict(lambda: dict(elapsed=[], rss=[], req_t=None, req_m=None,
-                                   jobs=set(), noop=0, bad=defaultdict(list)))
+    per = defaultdict(lambda: dict(elapsed=[], running=[], rss=[], req_t=None,
+                                   req_m=None, jobs=set(), noop=0,
+                                   bad=defaultdict(list)))
     for name, first, last in GROUPS:
         ids = ','.join(str(j) for j in range(first, last + 1))
         rss = {}
@@ -145,8 +151,43 @@ def main():
                     d['elapsed'].append(s)
                 if jid in rss:
                     d['rss'].append(rss[jid])
+            elif st == 'RUNNING':
+                # A TASK THAT IS STILL GOING IS THE MEASUREMENT, TOO -- and the
+                # dangerous half of it. Cutting a TimeLimit below what a running task
+                # has ALREADY used kills it on the spot: 12980577_4 was 46.7 h in when
+                # the completed tasks suggested 37 h. And the completed set is the FAST
+                # TAIL by construction, because the slow ones have not finished to be
+                # counted, so a running task longer than every completed one says the
+                # measurement is biased and not that the job is stuck.
+                r = secs(elapsed)
+                if r:
+                    d['running'].append(r)
             elif st in BAD:
                 d['bad'][st].append(jid)
+
+    # THE DEEP RUN AND CENSORING HAVE NO MEASUREMENT OF THEIR OWN, AND THEY ARE THE
+    # QUEUE PROBLEM. Their tasks have not started -- that is the whole point -- so every
+    # proposal below skips exactly the jobs that need one: qm92_ngboost asks 22 days and
+    # qm92_gauche_rbf 17, and neither gets touched.
+    #
+    # But a deep-run task is one condition over 10 replicates and a main-grid task is one
+    # condition over 9, on the same sample. Measured: qm92_rf 2:02 against qm91_rf 2:13,
+    # qm92_svm 2:00 against qm91_svm 1:42. Near enough to borrow, and the 2x margin
+    # covers the rest. Only within a pipeline -- QM9 from QM9, laboratory from laboratory
+    # -- because the datasets are different sizes.
+    def model_of(jname):
+        for pre in ('qm90_', 'qm91_', 'qm92_'):
+            if jname.startswith(pre):
+                return 'qm9', jname[len(pre):]
+        if jname.startswith('val_'):
+            return 'lab', jname[4:]
+        return None, jname
+
+    best = {}
+    for (_g, jn), dd in per.items():
+        if dd['elapsed']:
+            key = model_of(jn)
+            best[key] = max(best.get(key, 0), max(dd['elapsed']))
 
     print(f"{'group / job':46s} {'ok':>4s} {'longest':>10s} {'asked':>11s} "
           f"{'peak GB':>8s} {'asked':>7s}")
@@ -166,15 +207,29 @@ def main():
         for st, jids in sorted(d['bad'].items()):
             print(f"{'':46s} !! {len(jids):d} {st}: {', '.join(jids[:4])}"
                   + (' ...' if len(jids) > 4 else ''))
-        if n < cli.min_tasks or not longest:
+        longest_run = max(d['running']) if d['running'] else 0
+        if longest_run > (longest or 0):
+            print(f"{'':46s} .. a task is STILL RUNNING at {hhmmss(longest_run)}, past "
+                  f"every completed one -- the completed set is the fast tail")
+        borrowed = None
+        if (n < cli.min_tasks or not longest) and cli.borrow:
+            b = best.get(model_of(jname))
+            if b:
+                borrowed, longest = b, b
+        if not longest:
             continue
-        want_t = int(longest * cli.wall_margin) + 3600
+        if borrowed is None and n < cli.min_tasks:
+            continue
+        # Never below what a running task has already used, or scontrol kills it.
+        want_t = int(max(longest, longest_run) * cli.wall_margin) + 3600
         want_m = max(cli.floor_gb,
                      int((peak or 0) * cli.mem_margin / 16 + 1) * 16) if peak else None
         if d['req_t'] and want_t < d['req_t'] * 0.75:
             for j in sorted(d['jobs']):
+                how = (f"BORROWED from the same model elsewhere, {hhmmss(borrowed)}"
+                       if borrowed else f"longest of {n} was {hhmmss(longest)}")
                 scontrol.append(f"scontrol update JobId={j} TimeLimit={hhmmss(want_t)}"
-                                f"   # {jname}: longest of {n} was {hhmmss(longest)}")
+                                f"   # {jname}: {how}")
         if want_m and d['req_m'] and want_m < d['req_m'] * 0.9:
             for j in sorted(d['jobs']):
                 scontrol.append(f"scontrol update JobId={j} MinMemoryNode={want_m * 1024}"
