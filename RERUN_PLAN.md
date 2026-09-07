@@ -11653,6 +11653,19 @@ Columns: **owner** is who can settle it — *me* for something a script or a doc
 answer, *the author* for a decision, *the cluster* for something only a command there can
 tell us.
 
+#### THE DECISIONS, IN ONE PLACE
+
+Everything below is either fixed, or waiting on one of these six. Nothing else is blocking.
+
+| # | The decision | What it unblocks | Where |
+|---|---|---|---|
+| 1 | **The three molecules Sort & Slice cannot represent** — methane, ammonia, water | **58 failed QM9 tasks**, and one representation of six in every replicate 1–9 | §13.23a |
+| 2 | **`gauche_rbf`: fix it or drop it** | 12 failed tasks, 15–17 days of wall on three submissions, and the screen's last missing model | §13.23c |
+| 3 | **The quantile forest's wall rule** | 5 jobs that may die at their limit with no partial credit | §13.23b |
+| 4 | **Which pairs the uncertainty runs use** (§13.17 A5) | 378 queued tasks — all of the uncertainty evidence | C0b |
+| 5 | **The Caco-2 noise anchor** (§13.17 A1) | Methods text only; no compute | C5 |
+| 6 | **Whether the 96G tier drops to 64G** | Backfill on every network and Gaussian process | B3 |
+
 #### A. Fixed and proved, 2026-09-07
 
 | # | What was wrong | Proof it is fixed |
@@ -11688,7 +11701,8 @@ tell us.
 
 | # | | Owner |
 |---|---|---|
-| C0 | 🔴 **`qm91_qrf` may run out of wall clock, and it is the only thing in the study that might.** 20:52 measured against 1-02:59 requested (A15). `scontrol` cannot raise it. The fix is the generator's wall for `qrf` and a resubmit of the indices that have not run — not a cut | **the cluster** |
+| C0 | 🔴 **FIVE JOBS MAY RUN OUT OF WALL CLOCK. Measured 2026-09-07, and this is the only irreversible failure in the study.** `scontrol` cannot raise a limit for its owner, so each needs the generator's wall raised and the unrun indices resubmitted — never a cut. Four of the five are the **quantile forest**, whose longest task is 20:52 across the whole study, and the generator is asking barely more than that.<br><br>`val_svm` **1.13×** — 0:54 against 1:00:00, laboratory censoring, `12986386`<br>`qm91_qrf` **1.29×** — 20:52 against 1-02:59, main grid, `12980589`, three replicates still to run<br>`qm92_qrf` **1.44×** — 20:52 against 1-05:59, deep run `12986325` AND censoring `12986344`<br>`qm90_qrf` **1.66×** — 2:25 against 3:59, screen, `12971607`<br><br>Everything else in the study has 4.9× or more. **The generator's wall rule for `qrf` is what is wrong, not these five job ids** — fix it there or the next submission repeats it | **the author** — see §13.23b |
+| C0b | 🔴 **THE ENTIRE UNCERTAINTY EVIDENCE IS QUEUED AND HAS NEVER STARTED.** All twelve arrays, **378 tasks**, `12986390`–`12986401`, submitted 2026-09-06. Not one task has begun, and `unc_*` is its own pipeline so no other run can size its walls — the tool says "this model has run NOWHERE" for all twelve. Nothing about aleatoric-versus-epistemic exists yet, on either dataset. It is also the run whose pair list is still an open author decision (C4) | **the author** — C4 first, then let one array through to time it |
 | C1 | **25 laboratory tasks are still failed and unresubmitted** — all hERG, all six representations, the missing-cache deaths of 2026-09-02. The cache is confirmed present and loading 1,415 molecules. Nothing has put them back | **the cluster** — `python scripts/failed_tasks.py --emit-sbatch` |
 | C2 | 🔴 **`gauche_rbf` FAILS, and now we know how — and it is getting worse, not better.** By 2026-09-07 it is **twelve failed tasks**: eight on `12980590` (the main grid) and four on `12986326` (the deep run), so it fails on both. Five tasks of `12980590` died with `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5, replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa**, and the runner exited non-zero saying the results file is incomplete. So it fails at the top of the level ladder, in the deepest replicates, on every representation — which is a property of the model at high noise, not of one task or one node. It is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each, and there is nothing to borrow a wall from | **the author** — read the full error, then decide whether it is fixed or dropped. Dropping it takes 17 days off both the deep run and censoring |
 | ~~C2b~~ | **`gauche_rbf` has never completed a task anywhere.** It is the one model still missing from the screen, and it is on the critical path of the main grid, the deep run and censoring, asking 15–17 days on each. There is nothing to borrow a wall from, so it is the only genuine unknown left in the queue | **the cluster** first — find out whether any of its tasks have ever started |
@@ -11707,6 +11721,49 @@ tell us.
 | ~~§13.18 stops at Submission 4~~ | ✅ **CLOSED 2026-09-07 — Submissions 5 to 10 are written in**, one row per array, read off sacct by job name rather than assumed from submission order |
 | §13.18 stopped at Submission 4 | **Six submissions are on the cluster and in no document**, read off sacct on 2026-09-07: QM9 deep run **12986314–12986332**, QM9 censoring **12986333–12986351**, laboratory depth **12986352–12986370**, laboratory censoring **12986371–12986389**, uncertainty part one **12986390–12986395**, uncertainty part two **12986396–12986401**. `python scripts/slurm_jobs.py --emit-launch-log` prints the rows to paste in |
 | §13.18 Submission 3 is "24 tasks, 12979965–12979969" | **It is 25 tasks in TWO submissions.** `val_lightgbm` index 12 went in alone as **12975687** on 2026-09-03, which §13.18 already says in prose but not in the table. `slurm_jobs.py` carries it as an extra id so the recovery reads as one submission |
+
+### 13.23b The quantile forest's wall, and why it is a rule and not five job ids
+
+**Measured:** `qrf`'s longest task anywhere in the study is **20:52** (`qm91_qrf`, main grid). The
+generator asks 1-02:59 on the main grid, 1-05:59 on the deep run and censoring, and 3:59 on the
+screen. That is 1.29×, 1.44× and 1.66× headroom against a measurement that is already the worst of
+fifteen tasks — and the remaining replicates are not going to be faster.
+
+`val_svm` in laboratory censoring is the same shape at 1.13×: 1:00:00 requested against 0:54
+measured on the same data by the depth run.
+
+| | What it does | What it costs |
+|---|---|---|
+| **1. Raise the generator's wall for `qrf` to 2× measured and resubmit the unrun indices** | 1-18:43 on the QM9 side. Fixes the rule, so the next submission does not repeat it | The indices lose their queue position. On `qrf` that is three replicates of the main grid and the whole of the deep run and censoring |
+| **2. Leave them and accept the losses** | Nothing to do now | A task killed at the wall writes no row and gets no partial credit, so the cell is simply missing and has to be resubmitted anyway — later, with less warning |
+| **3. Raise only the two that have not started** (`12986325`, `12986344`, `12986386`) | Cheapest; those have no queue position to lose that a resubmit does not restore | Leaves `qm91_qrf`'s three remaining replicates and `qm90_qrf` exposed |
+
+**The wall rule is the fix.** Options 1 and 3 both need the generator changed, or the next
+submission asks 1-05:59 again.
+
+### 13.23c `gauche_rbf` — fix or drop
+
+**What is known, all measured:**
+
+- **Twelve failed tasks**: eight on the main grid (`12980590`), four on the deep run (`12986326`).
+- The error is `RuntimeError: out-of-fold scoring for gauche_rbf`, at **noise level 1.5,
+  replicates 8 and 9, on all three of ECFP4, PDV and ChemBERTa** — so it is a property of the model
+  at the top of the level ladder, not one task or one node.
+- **It has never completed a task on the screen.** `12971618`, eighteen tasks, queued since
+  2026-09-02, not one started.
+- It asks 15-14:59 on the main grid, 17-08:59 on the deep run, and is in censoring too.
+- It is in the deep run because the **author added it** for the per-molecule uncertainty
+  requirement (§13.18, 2026-09-04), not because the selection rule chose it. Its case rests on the
+  cleanest aleatoric separation in the roster — x17.2 against x1.5 epistemic (§5.5i).
+
+| | What it does | What it costs |
+|---|---|---|
+| **1. Drop it** | Edit `deep_run_pairs.json` and `censoring_pairs.json`; narrowing is free and needs no resubmission | **17 days off the deep run and censoring each.** Loses the strongest aleatoric/epistemic separation measured, leaving `dnn_bnn_full_mve` at x2.5 to carry the case with NGBoost |
+| **2. Fix it** | Read one `.out`, find why out-of-fold scoring fails at level 1.5, repair, resubmit | Unknown until the error is read. The failure is systematic, so it is likely one cause |
+| **3. Keep it but drop the top level** | Its failures are all at 1.5 | The level ladder then differs between models, which no table in the study can express |
+
+**Nothing can be decided here without the full error text.** One file settles it:
+`tail -40 slurm_scripts_qm9_rerun/qm91_gauche_rbf_12980590_0.out`
 
 ### 13.23a The three molecules Sort & Slice cannot represent — the options
 
