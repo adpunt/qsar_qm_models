@@ -16099,11 +16099,16 @@ before doing any of its extra fits. So **an exact Gaussian process at the 5,000-
 costs about one and a half hours for 63 training runs on ARC**, and the request of
 `15-14:59:00` is roughly 250 times that.
 
-The out-of-fold pass adds three scored inner fits per training run (`OOF_FOLDS_SCORED` in
-`slurm_scripts_qm9_rerun/generate_scripts.py`). An inner fit is on four fifths of the capped
-set, and the fit is cubic, so it costs about half a full one. That is arithmetic, not a
-measurement: **roughly two and a half times 1:33, so about four hours.** The generator asks
+The out-of-fold pass adds **five** inner fits per training run. `OOF_FOLDS_SCORED` names
+NGBoost only; the generated script for this model reads
+`ecfp4 | pdv | chemberta) OOF_FLAGS="--oof-folds 5"` with no `--oof-folds-scored`, so every
+fold that is cut is scored. An inner fit is on four fifths of the capped set and the fit is
+cubic, so it costs 0.512 of a full one. That is arithmetic, not a measurement:
+**3.56 times 1:33, so 5.5 hours on the main grid and 6.1 on the deep run.** The generator asks
 `133:59:00` because it grades this model's ARC rate a lower bound.
+
+⚠️ An earlier version of this section said "about four hours". That assumed three scored folds,
+which is NGBoost's setting and not this model's.
 
 **Do not cut the main grid or the deep run to four hours on that arithmetic.** Let one
 resubmitted ECFP4 task finish under `c223ec3`, then re-run `scripts/measure_walls.py` and
@@ -16190,7 +16195,8 @@ speed-up, and `slowest_observed_speedup()` cannot see it because it only compare
 **Do not cut the wall on that.** Nothing has yet measured this model with the out-of-fold pass
 working, and that is the expensive path. One resubmitted ECFP4, PDV or ChemBERTa task finishing
 under `c223ec3` settles it; `scripts/measure_walls.py` then reads it and the wall comes down to
-roughly thirteen hours. A job killed at its limit writes nothing.
+roughly eleven hours on the main grid and twelve on the deep run. A job killed at its limit
+writes nothing.
 
 #### D2i. The last thing chat 2 owes
 
@@ -16345,6 +16351,58 @@ the honest one**; the old exit 0 was not.
 | `PARTIAL_LEVELS ... student_t_nu5` on all three | deep-run condition 3 | `12986326_16,18,19,22`, RUNNING |
 
 Nothing on that list is unqueued. Nothing on it is a new failure.
+
+#### D2m. Why the three resubmissions are still pending, and how to tell
+
+**The wall is not what is holding them, and there is a control that says so.**
+`13042881` was cut to `5:59:00` and sits pending exactly as long as `13042879` at
+`133:59:00`. A five-hour job and a five-day job waiting the same length of time is not a
+backfill problem.
+
+**`sacct` cannot answer this question.** It has no reason column. The reason lives in
+`squeue`, and `(None)` in the output taken straight after submission is not a reason — it is
+the scheduler not having evaluated the job yet. It is replaced on the next scheduling cycle.
+
+```bash
+. /data/stat-cadd/scat9264/qsar_qm_models/scripts/runenv.sh
+
+# 1. the reason, and when SLURM thinks each will start
+squeue -j 13042879,13042880,13042881 -o "%.14i %.20j %.2t %.11l %.7m %.20V %R"
+squeue --start -j 13042879,13042880,13042881
+
+# 2. is it a limit rather than priority? how much is already queued under this account
+squeue -u $USER -h -t PD | wc -l
+squeue -u $USER -h -t R  | wc -l
+sacctmgr -n show assoc user=$USER \
+    format=Account,Partition,MaxJobs,MaxSubmit,GrpTRESRunMins,GrpTRES
+
+# 3. what the scheduler ranks it on
+sprio -j 13042879 2>/dev/null || echo "sprio not available here"
+```
+
+**`GrpTRESRunMins` is the one worth looking for.** It caps cores times minutes REMAINING across
+everything a user has running, so a job's requested wall counts against it in full whether or
+not the job uses it. At 8 cores and `133:59:00` one task books 64,320 core-minutes before it
+computes anything. If that limit is set, cutting walls is the whole fix and it is free.
+
+#### D2n. The measurement that lets the walls come down honestly is already running
+
+Nothing needs to finish for the FIRST half of the proof. `12971618_0` and `_1` are the screen
+on ECFP4 and PDV, which is where the out-of-fold pass runs, and they started under `c223ec3`.
+The pass prints a line per (noise level, replicate) as it writes.
+
+```bash
+cd $QSAR/slurm_scripts_qm9_rerun
+grep -c "train_oof rows" qm90_gauche_rbf_12971618_0.out
+grep    "train_oof rows" qm90_gauche_rbf_12971618_0.out | tail -3
+grep -c "out-of-fold scoring for" qm90_gauche_rbf_12971618_0.out    # 0 = the guard never fired
+```
+
+A screen task is 7 noise levels at 1 replicate, so **7** is a finished ladder. Any number above
+0 is the fix working on ARC, which is the thing this chat has been unable to prove from here.
+
+The four deep-run tasks `12986326_16, _18, _19, _22` are the same pass over 70 training runs
+and give the full wall when they finish.
 
 **Chat 2 is not finished.** The cluster has answered the first round: the fix is in its
 checkout, the counts are above, and the screen array is confirmed at `1-18:59:00` and `128G`.
