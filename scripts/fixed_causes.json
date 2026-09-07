@@ -1,0 +1,39 @@
+{
+  "what_this_is": [
+    "Failed tasks whose cause has since been fixed, so a resubmission is not a repeat",
+    "of the same crash. failed_tasks.py prints a resubmission line for a FAILED task",
+    "ONLY when its cause appears here AND the commit named below is an ancestor of the",
+    "HEAD of the checkout the tool runs in. On the cluster that checkout is what the",
+    "jobs run, so the claim 'the cause is fixed' is checked against the code rather",
+    "than asserted in a document. A commit that is not there prints a refusal, not a",
+    "resubmission line.",
+    "",
+    "Fields. `commit` is the fix. `proof` is the command that demonstrates it and needs",
+    "no cluster. `error_matches` are substrings of the log's last error; a task whose",
+    "log IS readable is matched on those alone, so a task that died on something else",
+    "is never swept in by its position in the array. `task_rule` is used ONLY when the",
+    "log cannot be read, which is the case on a laptop and where a rebuilt script",
+    "changed the --output name."
+  ],
+  "fixed_causes": [
+    {
+      "id": "sns-all-zero-vector",
+      "what": "Methane, ammonia and water each carry one Morgan substructure, and it occurs in exactly one molecule, so none of them can reach a top-1024 chosen by how often a substructure appears in training. Their Sort & Slice vector is all zeros and the featuriser guard refuses to train on a molecule with no features.",
+      "fix": "Those three are dropped from every representation, found by the property rather than by name, after the shuffle and the split, so nothing already on disk changes.",
+      "commit": "62f1fe2",
+      "proof": "python scripts/test_sns_zero_exclusion.py",
+      "error_matches": [
+        "Sort & Slice produced an all-zero count vector",
+        "Sort & Slice produced a molecule with no enumerable substructures"
+      ],
+      "job_name_matches": "^qm9[0-9]_",
+      "task_rule": {
+        "kind": "qm9_representation",
+        "representation": "sns",
+        "why": "The generated script picks the representation with REPS[i % n_rep] (slurm_scripts_qm9_rerun/generate_scripts.py, the `rep=` line), so the tasks this cause touches are every index whose remainder is Sort & Slice's position in REPS. The position is read off the generated script where it is on disk; the two numbers below are used only when it is not, and they are the six representations in their generated order with Sort & Slice last.",
+        "assumed_modulus": 6,
+        "assumed_residues": [5]
+      }
+    }
+  ]
+}

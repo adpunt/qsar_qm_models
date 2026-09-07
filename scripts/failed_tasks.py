@@ -19,9 +19,10 @@ says.
   TIMEOUT         Elapsed at the limit. Resubmitting UNCHANGED burns the wall again --
                   raise the TimeLimit first, which means regenerating and resubmitting
                   because scontrol cannot raise a limit for the job's owner.
-  FAILED          Ran and exited non-zero. The one class where resubmitting is not the
-                  answer -- so this reads the .out files and groups the tasks by their
-                  actual last error, rather than telling you to go and read them.
+  FAILED          Ran and exited non-zero. Resubmitting an unfixed cause gets the same
+                  exit -- so this reads the .out files and groups the tasks by their
+                  actual last error, rather than telling you to go and read them. Where
+                  the cause IS fixed, see `fixed_causes.json` below.
   CANCELLED       The operator, or a node going down. Safe to resubmit.
 
 WHAT IT FIXES, 2026-09-07
@@ -37,6 +38,15 @@ WHAT IT FIXES, 2026-09-07
     stalled: the cause reached the author by pasting a traceback into a chat. It reads
     the logs itself now and prints one block per distinct error with the count.
   * The job-id ranges were guessed. See `slurm_jobs.py`.
+  * A FAILED TASK WHOSE CAUSE IS ALREADY FIXED GOT NO LINE EITHER. 104 Sort & Slice
+    tasks were fixed at `62f1fe2` and this printed nothing for them, on the blanket
+    rule that a FAILED cause is unfixed. `fixed_causes.json` is the exception, and it
+    is not taken on trust: each entry names a commit, and a line is printed only when
+    `git merge-base --is-ancestor` puts that commit behind the HEAD of the checkout
+    this tool is running in. On the cluster that checkout is what the jobs run, so the
+    claim is checked against the code. A commit that is not there prints a refusal.
+    Where a log can be read the match is on the error text alone, so a task that died
+    on something else is never swept in by its position in the array.
 
 WHAT IT STILL DOES NOT DO. It does not resubmit anything. Nothing is deleted either:
 the runner drops the rows for the combination it re-runs before it writes, so a
@@ -45,8 +55,10 @@ resubmitted task replaces its own rows.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -57,6 +69,8 @@ import slurm_jobs as SJ  # noqa: E402
 
 BAD = ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL', 'BOOT_FAIL', 'DEADLINE',
        'PREEMPTED')
+
+FIXED_CAUSES_FILE = Path(__file__).resolve().parent / 'fixed_causes.json'
 
 # Lines that are the error rather than the frame it happened in. A traceback's last
 # line is the exception; a job killed by the shell says so with `set -euo pipefail`.
@@ -109,6 +123,109 @@ def last_error(path, keep=12):
     return '\n'.join(lines[-keep:])
 
 
+# ---------------------------------------------------------------------------
+# FAILED, BUT THE CAUSE IS FIXED
+#
+# The rule this replaces was right in general and wrong in one case, and the wrong
+# case cost the study 104 tasks: a cause fixed in code is not the same as an unfixed
+# one, and refusing to print a line for it left the only way forward as typing an
+# array range by hand, which has queued out-of-range tasks three times.
+#
+# A DOCUMENT CANNOT DECLARE A FIX. `fixed_causes.json` names a commit, and this
+# checks that commit against the history of the checkout it is running in before
+# anything is printed. On the cluster that checkout is what the jobs run, so the
+# check is on the code and not on the claim. Three answers, all of them said out
+# loud: the commit is behind HEAD, the commit exists but is not an ancestor of HEAD
+# (a checkout that has not pulled), or git does not know it at all (a typo, or a
+# commit that only ever existed on a laptop).
+# ---------------------------------------------------------------------------
+def _git(*args):
+    try:
+        return subprocess.run(['git', '-C', SJ.QSAR, *args],
+                              capture_output=True, text=True)
+    except OSError:
+        return None
+
+
+def load_fixed_causes(path=FIXED_CAUSES_FILE, git=_git):
+    """The registry, every entry carrying whether its commit is in this checkout."""
+    try:
+        raw = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        return [], f'{path}: {exc}'
+    out = []
+    for entry in raw.get('fixed_causes', []):
+        e = dict(entry)
+        commit = e.get('commit', '')
+        exists = git('cat-file', '-e', f'{commit}^{{commit}}') if commit else None
+        if exists is None or exists.returncode != 0:
+            e['verified'] = False
+            e['why'] = (f'git does not know commit {commit or "(none named)"} -- so '
+                        f'nothing here can say the cause is fixed')
+        else:
+            behind = git('merge-base', '--is-ancestor', commit, 'HEAD')
+            if behind is None or behind.returncode != 0:
+                e['verified'] = False
+                e['why'] = (f'commit {commit} exists but is NOT an ancestor of HEAD. '
+                            f'This checkout would run code without the fix -- run '
+                            f'bash scripts/pull_safely.sh')
+            else:
+                e['verified'] = True
+                e['why'] = f'commit {commit} is in this checkout, behind HEAD'
+        out.append(e)
+    return out, None
+
+
+def rep_positions(rule, sub, jobname):
+    """(how many representations an array cycles through, which of them this is).
+
+    The QM9 script picks its representation with `REPS[$(( i % n_rep ))]`, so the
+    tasks one representation owns are the indices with one remainder. The position is
+    READ OFF the generated script wherever it is on disk -- `--reps` can change both
+    numbers, and a script regenerated with four representations would make a typed 5
+    point at the wrong one. The two numbers in the registry are the fallback for a
+    laptop, where the generated scripts are not checked in.
+    """
+    if rule.get('kind') != 'qm9_representation':
+        return None, set()
+    want = rule.get('representation')
+    try:
+        text = (Path(SJ.QSAR) / sub.directory / sub.script_for(jobname)).read_text()
+    except OSError:
+        text = ''
+    m = re.search(r'^REPS=\(([^)]*)\)', text, re.M)
+    if m:
+        reps = m.group(1).replace('"', '').replace("'", '').split()
+        if want not in reps:
+            return None, set()          # this script does not build it at all
+        return len(reps), {reps.index(want)}
+    return rule.get('assumed_modulus'), set(rule.get('assumed_residues', ()))
+
+
+def fixed_cause_for(entries, sub, jobname, task, err):
+    """The registry entry that explains one failed task, and how it was matched.
+
+    A READABLE LOG IS MATCHED ON ITS ERROR TEXT AND NOTHING ELSE. Position in the
+    array is the fallback for a log that cannot be read, so a task that died on
+    something new is never resubmitted because it sits at an index that used to fail.
+    """
+    for e in entries:
+        if not e.get('verified'):
+            continue
+        pattern = e.get('job_name_matches')
+        if pattern and not re.search(pattern, jobname):
+            continue
+        if err is not None:
+            if any(s in err for s in e.get('error_matches', ())):
+                return e, 'its own log says so'
+            continue
+        mod, residues = rep_positions(e.get('task_rule') or {}, sub, jobname)
+        if mod and task is not None and task % mod in residues:
+            return e, (f'no log to read, so by position: one task in every {mod} is '
+                       f'that representation')
+    return None, ''
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -155,6 +272,14 @@ def main():
         print('  No failed tasks in any submission. Nothing to do.')
         return 0
 
+    # The logs are read ONCE, here, because two things need them: the grouped error
+    # text printed below, and the match against fixed_causes.json.
+    errs = {}
+    if cli.logs:
+        for cause in ('FAILED', 'TIMEOUT'):
+            for sub, r, _peak in causes.get(cause, []):
+                errs[r['JobID']] = last_error(log_path(sub, r['JobName'], r['JobID']))
+
     total = sum(len(v) for v in causes.values())
     print(f"  {total} failed task(s), by cause:\n")
     order = ['OUT OF MEMORY', 'TIMEOUT', 'FAILED', 'NODE / PREEMPTED', 'CANCELLED']
@@ -181,11 +306,10 @@ def main():
             unreadable = 0
             missing_paths = []
             for sub, r, _peak in rows_c:
-                path = log_path(sub, r['JobName'], r['JobID'])
-                err = last_error(path)
+                err = errs.get(r['JobID'])
                 if err is None:
                     unreadable += 1
-                    missing_paths.append(path)
+                    missing_paths.append(log_path(sub, r['JobName'], r['JobID']))
                     continue
                 seen[err] += 1
                 examples.setdefault(err, r['JobID'])
@@ -204,6 +328,46 @@ def main():
                       f"or you are not on the cluster.")
         print()
 
+    # Which FAILED tasks have a cause that is fixed in this checkout.
+    entries, registry_error = load_fixed_causes()
+    if registry_error:
+        print(f"  fixed_causes.json could not be read: {registry_error}\n"
+              f"  No FAILED task will get a resubmission line.\n")
+    by_fixed = defaultdict(lambda: defaultdict(set))
+    matched_how = defaultdict(Counter)
+    still_unfixed = 0
+    for sub, r, _peak in causes.get('FAILED', []):
+        entry, how = fixed_cause_for(entries, sub, r['JobName'], r['task'],
+                                     errs.get(r['JobID']))
+        if entry is None or r['task'] is None:
+            still_unfixed += 1
+            continue
+        by_fixed[entry['id']][(sub, r['JobName'], r['base'])].add(r['task'])
+        matched_how[entry['id']][how] += 1
+
+    refused = [e for e in entries if not e.get('verified')]
+    if refused:
+        print("  A FIXED CAUSE IS CLAIMED BUT NOT IN THIS CHECKOUT")
+        for e in refused:
+            print(f"    {e['id']}: {e['why']}")
+        print("    No resubmission line is printed for it. Pull, then run this again.\n")
+
+    if by_fixed:
+        n = sum(len(t) for m in by_fixed.values() for t in m.values())
+        print(f"  === FAILED, CAUSE FIXED: {n} task(s)")
+        for cid, members in by_fixed.items():
+            e = next(x for x in entries if x['id'] == cid)
+            count = sum(len(t) for t in members.values())
+            print(f"    {cid}: {count} task(s)")
+            for how, k in matched_how[cid].most_common():
+                print(f"      {k} matched because {how}")
+            print(f"      what went wrong: {e['what']}")
+            if e.get('fix'):
+                print(f"      what changed:    {e['fix']}")
+            print(f"      fixed at:        {e['why']}")
+            print(f"      proved by:       {e['proof']}")
+        print()
+
     print("  WHAT TO DO WITH EACH")
     if 'OUT OF MEMORY' in causes:
         print("    OUT OF MEMORY  -- resubmit. The scripts on disk carry the settled "
@@ -214,14 +378,24 @@ def main():
               "again. scontrol\n                      cannot RAISE a limit for you, so "
               "these must be regenerated\n                      and resubmitted.")
     if 'FAILED' in causes:
-        print("    FAILED         -- the error text is above. Resubmitting an "
-              "unfixed cause gets\n                      the same exit, which is why "
-              "no sbatch line is printed for it.")
+        if still_unfixed:
+            print(f"    FAILED         -- {still_unfixed} of them have no fixed cause. "
+                  f"The error text is\n                      above; resubmitting an "
+                  f"unfixed cause gets the same exit, which\n                      is "
+                  f"why no sbatch line is printed for those.")
+        if by_fixed:
+            print("    FAILED, FIXED  -- the lines below regenerate nothing. Rebuild "
+                  "the scripts from\n                      the generator FIRST, so the "
+                  "task runs the fixed code at the\n                      current wall "
+                  "and memory request.")
     if 'CANCELLED' in causes or 'NODE / PREEMPTED' in causes:
         print("    CANCELLED / NODE -- safe to resubmit as-is.")
 
     resub = {c: by_script[c] for c in ('OUT OF MEMORY', 'CANCELLED', 'NODE / PREEMPTED')
              if c in by_script}
+    for cid, members in by_fixed.items():
+        resub[f'FAILED, fixed at {next(x for x in entries if x["id"] == cid)["commit"]}'
+              ] = members
     if resub:
         lines = []
         for cause, scripts in resub.items():
@@ -229,8 +403,10 @@ def main():
                                                   key=lambda t: (t[0][0].label, t[0][1])):
                 rng = ','.join(str(i) for i in sorted(idx))
                 script = sub.script_for(jname)
+                flags = (sub.submit_flags + ' ') if sub.submit_flags else ''
                 lines.append(
-                    f"(cd {sub.directory} && sbatch --array={rng}%{cli.throttle} "
+                    f"(cd {sub.directory} && sbatch {flags}"
+                    f"--array={rng}%{cli.throttle} "
                     f"{script})   # {cause}, {sub.label}, was {base}")
         print(f"\n  {len(lines)} resubmission line(s) for the safe causes. Paths are "
               f"relative to\n  the repository root; regenerate the scripts first if "

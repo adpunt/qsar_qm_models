@@ -86,7 +86,7 @@ QSAR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 class Submission:
     def __init__(self, label, prefix, directory, script_rule, tasks_per_array=None,
                  recorded=None, note='', also_ids=(), selection_gate=False,
-                 mem_floor_gb=None):
+                 mem_floor_gb=None, submit_flags=''):
         self.label = label
         self.prefix = prefix
         self.directory = directory
@@ -110,6 +110,17 @@ class Submission:
         # model_memory.json pipeline_overrides owns the number; this is where a tool
         # reads it.
         self.mem_floor_gb = mem_floor_gb
+        # WHAT A BARE `sbatch <script>` IS MISSING. The account and the partition are
+        # queue state, not run design, so the QM9 and uncertainty generators keep them
+        # OFF the script and put them on the sbatch line their submit_all.sh writes
+        # (slurm_scripts_qm9_rerun/generate_scripts.py, the `sbatch --account=$ACCT`
+        # line). A QM9 script submitted without a partition exits 2 at run time saying
+        # so, and one submitted without an account bills the wrong project. The
+        # laboratory generator writes `#SBATCH --account=stat-cadd` and its partition
+        # into the script itself, so those need nothing added --
+        # test_slurm_status_tools.py checks both halves of that against the
+        # generators, so this cannot quietly go stale.
+        self.submit_flags = submit_flags
 
     def owns(self, base):
         if base in self.also_ids:
@@ -118,6 +129,12 @@ class Submission:
 
     def script_for(self, jobname):
         return self.script_rule(jobname[len(self.prefix):])
+
+
+# The account this study bills to, and the partition its walls need. `long` and not
+# `medium`: the QM9 walls are days (13.29) and five of the six uncertainty walls are
+# past medium's 48 hours. submit_all.sh defaults to the same pair.
+ONTO_LONG = '--account=stat-cadd --partition=long'
 
 
 def _qm9_script(stage):
@@ -131,17 +148,19 @@ def _same(model):
 SUBMISSIONS = [
     Submission('QM9 screen', 'qm90_', 'slurm_scripts_qm9_rerun',
                _qm9_script(0), tasks_per_array=None,
-               recorded=(12971601, 12971619),
+               recorded=(12971601, 12971619), submit_flags=ONTO_LONG,
                note='replicate 0, three conditions. 13.18 Submission 1'),
     Submission('QM9 main grid', 'qm91_', 'slurm_scripts_qm9_rerun',
                _qm9_script(1), tasks_per_array=None,
-               recorded=(12980573, 12980591),
+               recorded=(12980573, 12980591), submit_flags=ONTO_LONG,
                note='replicates 1-9, three conditions. 13.18 Submission 4'),
     Submission('QM9 deep run', 'qm92_', 'slurm_scripts_qm9_rerun',
                _qm9_script(2), tasks_per_array=36, selection_gate=True,
+               submit_flags=ONTO_LONG,
                note='seven conditions on the selected pairs. 13.19 STEP 4'),
     Submission('QM9 censoring', 'qm92_', 'slurm_scripts_qm9_censoring',
                _qm9_script(2), tasks_per_array=6, selection_gate=True,
+               submit_flags=ONTO_LONG,
                note='censoring on the named pairs. 13.19 STEP 4'),
     Submission('laboratory breadth', 'val_', 'slurm_scripts_validation_rerun',
                lambda m: f'val_{m}.sh', tasks_per_array=18,
@@ -162,9 +181,11 @@ SUBMISSIONS = [
                note='censoring on the named pairs. 13.19 STEP 5'),
     Submission('uncertainty, the three', 'unc_', 'slurm_scripts_uncertainty_rerun',
                lambda m: f'unc_{m}.sh', tasks_per_array=27, mem_floor_gb=96,
+               submit_flags=ONTO_LONG,
                note='gaussian, grouped-wider, grouped-shifted. 13.19 STEP 6'),
     Submission('uncertainty, the four', 'unc_', 'slurm_scripts_uncertainty_depth',
                lambda m: f'unc_{m}.sh', tasks_per_array=36, mem_floor_gb=96,
+               submit_flags=ONTO_LONG,
                note='censoring, student_t_nu5, outlier_p10, laplace. 13.19 STEP 6b'),
 ]
 

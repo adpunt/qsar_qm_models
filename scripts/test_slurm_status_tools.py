@@ -4,8 +4,8 @@
     python scripts/test_slurm_status_tools.py
 
 Nothing here touches the cluster. It builds an sacct capture shaped like the real one
-and checks the five things that were actually wrong on 2026-09-06, each of which
-produced a confident wrong answer rather than an error:
+and checks the seven things that were actually wrong, each of which produced a
+confident wrong answer rather than an error:
 
   1. THE JOB-ID RANGES WERE GUESSED. Three tools carried the same hand-typed table of
      nine ranges and six of them were assumptions -- 13.18 records only three
@@ -20,6 +20,14 @@ produced a confident wrong answer rather than an error:
      kills the job at the wall.
   5. A SKIPPED TASK IS NOT A MEASUREMENT. The selection gate exits 0 in seconds, and a
      wall set from that kills the same task the day its pair is added.
+  6. A FAILED TASK WHOSE CAUSE IS FIXED GOT NO RESUBMISSION LINE (2026-09-07). 104
+     Sort & Slice tasks were fixed at 62f1fe2 and the tool printed nothing for them,
+     which left typing an array range by hand as the only way forward. So: the fix is
+     claimed in fixed_causes.json, and the claim is checked against git rather than
+     believed. A task with a readable log is matched on its error text alone.
+  7. THE RESUBMISSION LINES CARRIED NO ACCOUNT AND NO PARTITION (2026-09-07). The QM9
+     and uncertainty generators keep both off the script on purpose, so a bare
+     `sbatch qm9_s1_rf.sh` exits 2 at run time on the missing partition.
 """
 from __future__ import annotations
 
@@ -151,6 +159,8 @@ def capture(path):
                    '22-01:59:00', '96Gn', '2026-09-06T00:10:00'))
 
     # Sort & Slice: indices 5, 11 and 17 of every main-grid array, dead in seconds.
+    # Those are the indices where `i % 6` is Sort & Slice's place in REPS, which is
+    # how the generated script picks a representation.
     fixed = []
     for ln in out:
         p = ln.split('|')
@@ -158,6 +168,13 @@ def capture(path):
             p[2], p[3] = 'FAILED', '00:01:12'
         fixed.append('|'.join(p))
     out = fixed
+
+    # AND ONE FAILED TASK WITH NO FIXED CAUSE, at an index Sort & Slice does not own.
+    # Without it, "every FAILED task got a line" and "the registry is matching the
+    # right tasks" look the same.
+    out = [ln for ln in out if not ln.startswith(f'{12980573 + QM9.index("dnn")}_2|')]
+    out.append(row(f'{12980573 + QM9.index("dnn")}_2', 'qm91_dnn', 'FAILED',
+                   '0:03:00', '19-20:59:00', '96Gn', '2026-09-04T18:00:00'))
 
     # KIRBy's other experiments, which must be dropped (13.20 item 7).
     for k, n in enumerate(('dta_esm', 'nuc_grid', 'pc_scan', 'graphinity_a', 'tune_x')):
@@ -268,16 +285,115 @@ def main():
           and '--job-name=qm9{stage}_{jobslug}' in gen,
           'the naming rule changed -- slurm_jobs.py must change with it')
 
+    # 11. THE ACCOUNT AND THE PARTITION. A QM9 script exits 2 at run time if it is
+    #     submitted without a partition, and one submitted without an account bills a
+    #     project this study does not use. The QM9 and uncertainty generators keep
+    #     both off the script deliberately; the laboratory one writes them in. Both
+    #     halves are checked against the generators, so a resubmission line cannot go
+    #     stale against them.
+    unc_gen = (HERE.parent / 'slurm_scripts_uncertainty_rerun'
+               / 'generate_scripts.py').read_text()
+    lab_gen = (HERE.parent / 'slurm_scripts_validation_rerun'
+               / 'generate_scripts.py').read_text()
+    check('the QM9 and uncertainty generators still put the account and the '
+          'partition on the sbatch line, not in the script',
+          'sbatch --account=$ACCT --partition=$PART ' in gen
+          and 'sbatch --account=$ACCT --partition=$PART ' in unc_gen
+          and '#SBATCH --account' not in gen and '#SBATCH --account' not in unc_gen)
+    check('the laboratory generator still writes them into the script itself',
+          '#SBATCH --account=stat-cadd' in lab_gen
+          and '#SBATCH --partition=' in lab_gen)
+    for sub in SJ.SUBMISSIONS:
+        needs = sub.prefix.startswith(('qm9', 'unc_'))
+        check(f'{sub.label}: a resubmission line '
+              f'{"carries" if needs else "needs no"} account and partition',
+              bool(sub.submit_flags) == needs
+              and (not needs or ('--account=' in sub.submit_flags
+                                 and '--partition=' in sub.submit_flags)),
+              repr(sub.submit_flags))
+
     ft = subprocess.run(
         [sys.executable, str(HERE / 'failed_tasks.py'), '--sacct-file', str(cap),
          '--no-logs', '--emit-sbatch'], capture_output=True, text=True)
+    check('every QM9 resubmission line names an account and a partition',
+          all('--account=stat-cadd' in ln and '--partition=' in ln
+              for ln in ft.stdout.splitlines()
+              if 'sbatch ' in ln and '--array=' in ln and 'qm9_s' in ln),
+          [ln for ln in ft.stdout.splitlines()
+           if 'qm9_s' in ln and 'sbatch' in ln and '--account=' not in ln])
     check('failed_tasks.py runs', ft.returncode == 0, ft.stderr[-400:])
     check('failed_tasks.py never emits a bare job name as a script',
-          'sbatch --array' not in ft.stdout or 'qm91_rf.sh' not in ft.stdout,
+          '--array=' not in ft.stdout or 'qm91_rf.sh' not in ft.stdout,
           [ln for ln in ft.stdout.splitlines() if 'qm91_rf.sh' in ln])
-    check('failed_tasks.py prints no resubmission line for a FAILED cause',
-          'FAILED' in ft.stdout and 'the error text is above' in ft.stdout,
-          ft.stdout[-600:])
+    # 10. FAILED, BUT THE CAUSE IS FIXED. The old rule -- never print a line for a
+    #     FAILED task -- was right in general and wrong for the 104 Sort & Slice
+    #     tasks fixed at 62f1fe2, and the only way forward it left was typing an
+    #     array range by hand, which has queued out-of-range tasks three times.
+    dnn_id = str(12980573 + QM9.index('dnn'))
+    sns_lines = [ln for ln in ft.stdout.splitlines()
+                 if 'sbatch ' in ln and '--array=' in ln and 'fixed at' in ln]
+    check('failed_tasks.py prints a resubmission line for a FAILED cause that is '
+          'fixed at a commit in this checkout',
+          bool(sns_lines) and all('5' in ln.split('--array=')[1].split('%')[0]
+                                  for ln in sns_lines),
+          ft.stdout[-900:])
+    check('and every one of those lines names only the indices that representation '
+          'owns',
+          all(set(ln.split('--array=')[1].split('%')[0].split(',')) <= {'5', '11', '17'}
+              for ln in sns_lines),
+          [ln for ln in sns_lines
+           if not set(ln.split('--array=')[1].split('%')[0].split(',')) <= {'5', '11', '17'}])
+    # qm91_dnn index 2 failed on something the registry does not know. Its array is
+    # resubmitted for Sort & Slice, so the test is that index 2 is not in that line.
+    dnn_lines = [ln for ln in ft.stdout.splitlines()
+                 if dnn_id in ln and 'sbatch ' in ln and '--array=' in ln]
+    check('a FAILED task whose cause is NOT in the registry still gets no line',
+          all('2' not in ln.split('--array=')[1].split('%')[0].split(',')
+              for ln in dnn_lines) and 'no fixed cause' in ft.stdout,
+          dnn_lines)
+
+    # The registry itself, against the real repository: an entry that names a commit
+    # this checkout does not carry must be refused, not believed.
+    import failed_tasks as FT                                          # noqa: E402
+    entries, err = FT.load_fixed_causes()
+    check('every entry in fixed_causes.json names a commit that IS in this checkout',
+          err is None and bool(entries) and all(e['verified'] for e in entries),
+          err or [e['why'] for e in entries if not e['verified']])
+
+    def stub_git(rc_exists, rc_ancestor):
+        class R:
+            def __init__(self, rc): self.returncode = rc
+        return lambda *a: R(rc_exists if a[0] == 'cat-file' else rc_ancestor)
+
+    reg = Path('/tmp/test_fixed_causes.json')
+    reg.write_text('{"fixed_causes": [{"id": "x", "commit": "deadbee", "what": "w", '
+                   '"proof": "p", "error_matches": ["boom"]}]}')
+    unknown, _ = FT.load_fixed_causes(reg, stub_git(1, 1))
+    notpulled, _ = FT.load_fixed_causes(reg, stub_git(0, 1))
+    present, _ = FT.load_fixed_causes(reg, stub_git(0, 0))
+    check('a commit git does not know is refused',
+          not unknown[0]['verified'] and 'does not know' in unknown[0]['why'])
+    check('a commit that exists but is not behind HEAD is refused, because that '
+          'checkout would run code without the fix',
+          not notpulled[0]['verified'] and 'NOT an ancestor' in notpulled[0]['why'])
+    check('a commit behind HEAD is accepted', present[0]['verified'])
+
+    # The match itself. A log that CAN be read is matched on its error text alone.
+    sub_main = next(s for s in SJ.SUBMISSIONS if s.label == 'QM9 main grid')
+    sns_err = 'ValueError: Sort & Slice produced an all-zero count vector for N'
+    hit, how = FT.fixed_cause_for(entries, sub_main, 'qm91_rf', 5, sns_err)
+    check('a failed task whose log carries the fixed error is matched on the text',
+          hit is not None and 'log' in how, how)
+    miss, _ = FT.fixed_cause_for(entries, sub_main, 'qm91_rf', 5,
+                                 'RuntimeError: CUDA out of memory')
+    check('a task at the SAME index that died on something else is not swept in',
+          miss is None)
+    idx_hit, how2 = FT.fixed_cause_for(entries, sub_main, 'qm91_rf', 17, None)
+    idx_miss, _ = FT.fixed_cause_for(entries, sub_main, 'qm91_rf', 3, None)
+    check('with no log at all, the index rule matches that representation only',
+          idx_hit is not None and idx_miss is None, how2)
+    check('and a laboratory job is never matched by a QM9 cause',
+          FT.fixed_cause_for(entries, sub_main, 'val_rf', 5, sns_err)[0] is None)
 
     # 4. The borrow must not propose a wall below a running task.
     mw = subprocess.run(

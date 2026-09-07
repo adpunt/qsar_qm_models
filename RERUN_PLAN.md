@@ -15578,6 +15578,76 @@ Narrowing costs nothing: all 19 model arrays were submitted, and a task whose mo
 longer named skips and exits 0. Widening costs a resubmission of that model's 18 indices,
 which then queue behind Priority like everything else.
 
+#### D6. Sort & Slice — the 104 tasks, and the tool that would not print them — CHAT 5
+
+**The three molecules.** Methane, ammonia and water each carry exactly one Morgan
+substructure, and it occurs in exactly one molecule, so none of them can reach a
+top-1024 chosen by how often a substructure appears in training. Their Sort & Slice
+vector is all zeros. The featuriser guard refuses to train on a molecule with no
+features, which is why the tasks died. Counted over all 132,480 QM9 molecules:
+**3 molecules of 132,480, 0.0023 per cent**.
+
+**Fixed at `62f1fe2`, and nothing on disk is invalidated.** Those three are dropped from
+EVERY representation, so an ECFP4 task and a Sort & Slice task score the same molecules.
+They are found by the property rather than by a list of three names. The drop happens
+after the shuffle and the split and never re-splits, so a task whose sample never drew
+one of the three gives the same answer before and after. Proof, no cluster needed:
+`python scripts/test_sns_zero_exclusion.py` — 16 checks, exit 0. **Do not re-run the
+screen for this.**
+
+**What was in the way, and what changed 2026-09-07.** `failed_tasks.py --emit-sbatch`
+printed nothing for these tasks, because it refused a resubmission line for anything
+marked FAILED. That rule is right in general and was wrong here, and what it left was
+typing an array range by hand, which has queued out-of-range tasks three times.
+
+Two things changed, both on `additional_reps`:
+
+| file | what changed | proof |
+|---|---|---|
+| `scripts/fixed_causes.json` | new. One entry per failed cause that is fixed, each naming the commit that fixed it and the command that proves it | read by the tool at run time |
+| `scripts/failed_tasks.py` | prints a resubmission line for a FAILED task when its cause is in that file AND `git merge-base --is-ancestor` puts the named commit behind the HEAD of the checkout it is running in | `python scripts/test_slurm_status_tools.py` — 68 checks, exit 0 |
+| `scripts/slurm_jobs.py` | every resubmission line for a QM9 or uncertainty script now carries `--account=stat-cadd --partition=long` | as above |
+
+**A document cannot declare a fix.** On the cluster, the checkout the tool reads is the
+one the jobs run, so the check is on the code. A commit that is not there prints a
+refusal and no resubmission line. Where a task's log can be read the match is on the
+error text alone, so a task that died on something else is never swept in by its
+position in the array; the position rule is the fallback for a log that is gone.
+
+**The account and the partition were missing from every QM9 resubmission line it has
+ever printed.** The QM9 and uncertainty generators keep both off the script on purpose —
+they are queue state, not run design — so `sbatch qm9_s1_rf.sh` on its own exits 2 at
+run time saying it has no partition. The laboratory generator writes them into the
+script, so laboratory lines need nothing added. Both halves are now checked against the
+generators by the test, so this cannot go stale.
+
+**The order on the cluster.** Pull, rebuild the stage-1 scripts so the tasks run the
+fixed code at the walls §13.29 settled, then let the tool write the ranges.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models && bash scripts/pull_safely.sh
+git log --oneline -1                      # must be at or past the Sort & Slice commit
+python scripts/test_sns_zero_exclusion.py # 16 checks, exit 0, no cluster needed
+
+cd slurm_scripts_qm9_rerun
+rm -f qm9_s1_*.sh submit_all.sh && python generate_scripts.py --stage 1 --max-hours 720
+cd ..
+python scripts/failed_tasks.py --emit-sbatch | tee /tmp/failed_tasks.txt
+```
+
+Every line under `FAILED, CAUSE FIXED` is one array with its own indices, written from
+what actually failed. Run those lines. Then, in the same session:
+
+```bash
+squeue -u $USER -o "%.12i %.28j %.2t %.11M %.11l %.7m %R" | head -40
+sacct -S today -X -n -P --format=JobID,JobName,State,Elapsed,ExitCode | grep -v COMPLETED | head -30
+python scripts/check_runs_landed.py --stage 1 --verbose
+```
+
+**This is not finished until `check_runs_landed.py --stage 1` reports no Sort & Slice
+cell MISSING or PARTIAL.** Nothing above proves a result landed; it proves the code is
+fixed and the tasks were sent.
+
 #### D5. Settled here, 2026-09-07, so no chat re-opens it
 
 - **The QM9 sample is identical across conditions at a given replicate.**
