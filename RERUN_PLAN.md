@@ -10877,9 +10877,13 @@ skipped, so the 18 that do work had to be sent again.
 the task script uses, and `scripts/test_submit_all_ranges.py` decodes every index back to a
 (representation, condition) pair and fails if the set is not what the selection names.
 
-⏳ **Not yet confirmed on the cluster.** `squeue` has not been read since. The wall it went out
-with comes from the scripts already in `slurm_scripts_qm9_rerun`, which were generated before
-this session, not from the `/tmp/deep7` run used to write the submitter.
+✅ **Confirmed on the cluster 2026-09-07.** `squeue -j 13049903` returns the array PENDING on
+`Priority`, at **`7:59:00` and 64G** — the wall the generator computes and the author's memory
+floor, so the script in `slurm_scripts_qm9_rerun` already carries chat 1's numbers and the
+`/tmp/deep7` copy was needed only for the submitter.
+
+⏳ **The task COUNT is still unread.** `squeue`'s job-id column truncated at `13049903_[0-`, so
+the 18 indices have not been seen back. `squeue -j 13049903 -r | wc -l` counts them.
 
 ⚠️ **The job ids above were read off `sacct` on 2026-09-07, not recorded at submit time**, by
 `python scripts/slurm_jobs.py --emit-launch-log`. The mapping from id to script is the job NAME
