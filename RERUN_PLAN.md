@@ -15613,8 +15613,41 @@ resists it best, so it runs on about five named pairs rather than the whole grid
 still emits all 19 arrays and 342 tasks, because the check lives inside each task — which is what
 lets the file be edited after submitting. A skipped task is the design working, not a fault.
 
-**What this does NOT settle.** It is the laboratory censoring submission only. The QM9 deep run and
-QM9 censoring use the same mechanism and their skip counts have not been read the same way.
+**The two logs, read in full 2026-09-07.** The skipped one, `val_svm_12986386_6.out`, is **49
+lines**: the environment check, the package list, the roster line `OK SVM (sklearn.svm)`, the
+noiseInject version, then `=== SKIPPED` and `=== Not a failure`. Nothing else. The selected one,
+`val_rf` on ECFP4 and logD, carries the same header and then `=== selected: RF x ECFP4 is in
+censoring_pairs.json`, loads 5,039 molecules, builds a 5,039 × 2,048 ECFP4 matrix, and runs
+`1 model-rep config x 1 condition (censoring) x 7 levels x 5 folds`. Its checkpoints read 7, 14,
+21, 28 and 35 rows after folds 1 to 5. It ends `COMPLETE — Results saved to
+../results/validation_rerun/rf_ecfp4_censoring_logd` and `=== finished: ... exit=0`, with
+`auc_norm=0.8148, baseline=0.647±0.015`.
+
+⚠️ **It started 04:49:53 and finished 04:52:33 — two minutes and forty seconds.** A laboratory
+censoring task that does its whole job takes under three minutes, because logD is 5,039 molecules
+and a random forest on ECFP4 is quick. **So a short elapsed time is not the signal.** One minute
+and three minutes look the same in `sacct`; the log line is the only thing that separates them.
+
+##### The QM9 deep run's gate is selecting the right six models
+
+Read the same way on 2026-09-07. Logs without `=== SKIPPED` in `slurm_scripts_qm9_rerun`:
+
+| model | logs that did not skip | of |
+|---|---|---|
+| `rf` | 18 | 18 |
+| `svm` | 18 | 18 |
+| `gauche_rbf` | 12 | 18 |
+| `dnn_bnn_full_mve` | 5 | 18 |
+| `heteroscedastic_gp` | 4 | 18 |
+| `ngboost` | 4 | 18 |
+
+Those six are exactly `deep_run_pairs.json`, and **no other model has a single non-skipped log**.
+The denominator is 3 selected representations times 6 conditions. The four that are short have not
+finished starting: `squeue` shows pending elements on 12986318, 12986326, 12986328 and 12986331,
+and none on `rf` or `svm`, which are done. A log only exists once a task starts.
+
+**What this does NOT settle.** QM9 censoring, in `slurm_scripts_qm9_censoring`, has not been read
+this way.
 
 ##### Where every log is
 
