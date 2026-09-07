@@ -60,6 +60,74 @@ def flat_summary(auc_of=None, spread=0.01):
 
 # ---------------------------------------------------------------------------
 
+def d1_never_averages_over_models():
+    """The model is the dominant source of variance, so a median over models
+    describes the roster and not the representation.
+
+    The first version of this table reported median_clean_r2 and
+    median_auc_norm per representation, over DIFFERENT numbers of models and
+    conditions -- 16 x 3 for one representation against 19 x 7 for another, in
+    the same column.
+    """
+    rows = []
+    for rep, models, conditions in (('ecfp4', MODELS, CONDITIONS),
+                                    ('pdv', MODELS, CONDITIONS),
+                                    ('sns', MODELS[:3], CONDITIONS[:1])):
+        for condition in conditions:
+            for i, model in enumerate(models):
+                rows.append({'dataset': 'qm9', 'model': model, 'rep': rep,
+                             'condition': condition,
+                             'auc_norm': 0.95 - 0.03 * i,
+                             'auc_norm_spread': 0.01, 'baseline_r2': 0.8})
+    tables, v = D.d1_representation(summary(rows))
+    table = tables['d1_representations']
+
+    banned = [c for c in table.columns
+              if c.startswith('median_') or 'mean' in c]
+    assert not banned, (
+        f'{banned} averages over models, which is what this test exists to '
+        f'stop')
+    assert 'NOT a median over models' in v['says'], v['says']
+    print('    no column averages over models, and the verdict says why')
+
+    # The paired evidence must be over ONE roster, or it compares different
+    # experiments. sns has 3 models and 1 condition, so that is the common set.
+    paired = tables['d1_auc_norm_by_model']
+    assert set(paired['model']) == set(MODELS[:3]), sorted(set(paired['model']))
+    assert set(paired['condition']) == set(CONDITIONS[:1]), \
+        sorted(set(paired['condition']))
+    assert {'ecfp4', 'pdv', 'sns'} <= set(paired.columns), list(paired.columns)
+    print(f'    paired on the common roster only: {len(paired)} rows, '
+          f'{paired["model"].nunique()} models every representation has')
+
+    # And the coverage difference is stated rather than hidden inside a median.
+    sns_row = table[table['rep'] == 'sns'].iloc[0]
+    assert sns_row['n_models'] == 3 and sns_row['n_conditions'] == 1, dict(sns_row)
+    assert sns_row['models_missing_vs_widest'] == len(MODELS) - 3
+    print('    coverage is a column, not something folded into an average')
+
+
+def d1_flags_replicates_that_do_not_vary():
+    """A cell whose replicates are identical is a run that did not vary, not a
+    model that is stable. On the first real table one representation reported a
+    replicate spread of exactly 0.0."""
+    rows = []
+    for rep in ('ecfp4', 'sns'):
+        for condition in CONDITIONS:
+            for i, model in enumerate(MODELS):
+                rows.append({'dataset': 'qm9', 'model': model, 'rep': rep,
+                             'condition': condition,
+                             'auc_norm': 0.95 - 0.03 * i,
+                             'auc_norm_spread': 0.0 if rep == 'sns' else 0.02,
+                             'baseline_r2': 0.8})
+    tables, v = D.d1_representation(summary(rows))
+    table = tables['d1_representations']
+    assert int(table[table['rep'] == 'sns']['replicate_spread_zero_cells']) > 0
+    assert int(table[table['rep'] == 'ecfp4']['replicate_spread_zero_cells']) == 0
+    assert 'did not vary' in v['says'], v['says']
+    print('    a zero replicate spread is named, not read as stability')
+
+
 def d2_merges_identical_grids_and_keeps_different_ones():
     def auc(model, rep, condition):
         base = {'rf': 0.92, 'svm': 0.88, 'ngboost': 0.93, 'xgboost': 0.85,
@@ -329,6 +397,9 @@ def main():
     results = [
         check('D0 says when the grid is incomplete',
               d0_says_when_the_grid_is_incomplete),
+        check('D1 never averages over models', d1_never_averages_over_models),
+        check('D1 flags replicates that do not vary',
+              d1_flags_replicates_that_do_not_vary),
         check('D2 merges identical grids, keeps different ones',
               d2_merges_identical_grids_and_keeps_different_ones),
         check('D3 fires when the conditions differ and not when they do not',

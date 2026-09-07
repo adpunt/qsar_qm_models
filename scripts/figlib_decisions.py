@@ -100,44 +100,80 @@ def d0_coverage(qm9, assay, merged_coverage=None):
 # ---------------------------------------------------------------------------
 
 def d1_representation(summary, qm9=None):
-    """Evidence for the choice; the choice itself is the author's.
+    """Evidence for which representation is held constant; the choice is the
+    author's.
 
-    RERUN_PLAN.md 14.9 item 5: PRIMARY_REP is `pdv` in the code and the author
-    leans ChemBERTa. It is to be settled from the screen, not from preference,
-    so this lays out what the screen says about each and stops there.
+    ⚠️ THERE IS NO MEDIAN OVER MODELS HERE, AND THAT IS THE POINT.
+
+    The first version of this table reported `median_clean_r2` and
+    `median_auc_norm` per representation. Both were wrong twice over.
+
+    First, the variance decomposition says the choice of MODEL is the dominant
+    source of variance. A median over models is therefore a median over the very
+    thing that explains most of the spread: it describes which models happened
+    to run, not the representation.
+
+    Second, the medians were over DIFFERENT SETS. On the first real run `sns`
+    had 16 models and 3 conditions while `ecfp4` had 19 and 7, so the two
+    numbers in one column were not comparable at all. That is exactly the defect
+    recorded against the paper's own Kendall's W -- a model present on six
+    representations ranked against one present on two, on differently
+    constituted means.
+
+    What is reported instead:
+
+      COVERAGE      -- how much of the grid each representation actually has.
+                       A hard constraint, not a preference.
+      RANK AGREEMENT-- computed WITHIN each condition, then summarised as a
+                       median and a range ACROSS conditions. A representation
+                       that orders the models the way the others do is a neutral
+                       place to stand; one that does not, is not.
+      A PAIRED TABLE-- one row per (model, condition), one column per
+                       representation, nothing collapsed. That is the evidence,
+                       and it is what to read before choosing.
     """
     if summary is None or not len(summary):
         return {}, _verdict('D1', 'Which representation is held constant?',
                             False, 'no robustness numbers yet')
-    rows = []
+
     reps = sorted(summary['rep'].dropna().unique())
+    tables = {}
+
+    # The common roster: the models and conditions EVERY representation has.
+    # Anything compared outside it is comparing different experiments.
+    per_rep_models = {r: set(summary[summary['rep'] == r]['model'])
+                      for r in reps}
+    per_rep_conditions = {r: set(summary[summary['rep'] == r]['condition'])
+                          for r in reps}
+    common_models = set.intersection(*per_rep_models.values()) if reps else set()
+    common_conditions = (set.intersection(*per_rep_conditions.values())
+                         if reps else set())
+
+    rows = []
     for rep in reps:
         sub = summary[summary['rep'] == rep]
         record = {
             'rep': rep,
-            'n_cells': int(len(sub)),
             'n_models': int(sub['model'].nunique()),
             'n_conditions': int(sub['condition'].nunique()),
-            'median_clean_r2': float(sub['baseline_r2'].median()),
-            'median_auc_norm': float(sub['auc_norm'].median()),
-            'median_replicate_spread': float(sub['auc_norm_spread'].median()),
+            'n_cells': int(len(sub)),
+            'models_missing_vs_widest': int(
+                max(len(m) for m in per_rep_models.values())
+                - sub['model'].nunique()),
+            'in_common_roster': bool(
+                per_rep_models[rep] >= common_models
+                and per_rep_conditions[rep] >= common_conditions),
         }
+        spread = sub['auc_norm_spread']
+        record['replicate_spread_zero_cells'] = int((spread == 0).sum())
         if qm9 is not None and 'gp_collapsed' in qm9.columns:
-            in_rep = qm9[qm9['rep'] == rep]
             record['gp_collapsed_rows'] = int(pd.to_numeric(
-                in_rep['gp_collapsed'], errors='coerce').fillna(0).sum())
+                qm9[qm9['rep'] == rep]['gp_collapsed'],
+                errors='coerce').fillna(0).sum())
         rows.append(record)
     table = pd.DataFrame(rows)
 
-    # Does this representation ORDER the models the way the others do? A
-    # representation that ranks them differently is not a neutral place to
-    # stand.
-    #
-    # WITHIN ONE CONDITION, always. A model has one row per condition here, so
-    # correlating two representations across the whole frame would compare a
-    # pooled mixture of seven conditions and call it a profile -- and with an
-    # uneven number of conditions per representation it does not even line up.
-    # profile_spearman refuses a pooled index rather than doing it quietly.
+    # Rank agreement, WITHIN one condition, then summarised across conditions.
     agreement = []
     for condition in sorted(summary['condition'].dropna().unique()):
         inside = summary[summary['condition'] == condition]
@@ -149,9 +185,6 @@ def d1_representation(summary, qm9=None):
                 agreement.append(dict(got, condition=condition))
     agree = pd.DataFrame(agreement)
     if len(agree):
-        # Each pair contributes to both of its representations. Median and range
-        # across conditions -- never one pooled number, which is what hides a
-        # representation that agrees under one condition and not another.
         both = pd.concat([
             agree.rename(columns={'a': 'rep', 'b': 'against'}),
             agree.rename(columns={'b': 'rep', 'a': 'against'}),
@@ -160,16 +193,55 @@ def d1_representation(summary, qm9=None):
         table['rank_agreement_median'] = table['rep'].map(per_rep['median'])
         table['rank_agreement_min'] = table['rep'].map(per_rep['min'])
         table['rank_agreement_max'] = table['rep'].map(per_rep['max'])
-        agree = both
+        tables['d1_rank_agreement'] = both
 
-    complete = table[table['n_models'] == table['n_models'].max()]
-    says = ('The choice is the author\'s. Complete coverage on '
-            + ', '.join(complete['rep']) + '. '
-            + '; '.join(f'{r.rep}: clean R2 {r.median_clean_r2:.3f}, '
-                        f'AUC_norm {r.median_auc_norm:.3f}, '
-                        f'{r.n_models} models'
-                        for r in table.itertuples()))
-    return {'d1_representations': table, 'd1_rank_agreement': agree}, _verdict(
+    # THE EVIDENCE: one row per (model, condition), one column per
+    # representation. Nothing collapsed, so the choice is made by looking at
+    # models rather than at an average over them.
+    paired = summary[summary['model'].isin(common_models)
+                     & summary['condition'].isin(common_conditions)]
+    if len(paired):
+        wide = paired.pivot_table(index=['model', 'condition'], columns='rep',
+                                  values='auc_norm').reset_index()
+        wide.insert(2, 'best_rep', wide[list(reps)].idxmax(axis=1)
+                    if set(reps) <= set(wide.columns) else '')
+        tables['d1_auc_norm_by_model'] = wide
+        clean = paired.pivot_table(index=['model', 'condition'], columns='rep',
+                                   values='baseline_r2').reset_index()
+        tables['d1_clean_r2_by_model'] = clean
+
+        # How often each representation is the best one FOR A MODEL. A count of
+        # wins over a fixed roster, which a median over models cannot give.
+        wins = wide['best_rep'].value_counts()
+        table['times_best_for_a_model'] = table['rep'].map(wins).fillna(0).astype(int)
+        table['of_paired_cells'] = int(len(wide))
+
+    tables['d1_representations'] = table
+    complete = table[table['n_models'] == table['n_models'].max()]['rep'].tolist()
+    widest_conditions = table[
+        table['n_conditions'] == table['n_conditions'].max()]['rep'].tolist()
+    typical = (table.sort_values('rank_agreement_median', ascending=False)
+               ['rep'].tolist() if 'rank_agreement_median' in table else [])
+
+    says = (
+        f'The choice is the author\'s, and it is NOT a median over models -- '
+        f'the model is the dominant source of variance, so an average over '
+        f'models describes the roster and not the representation. '
+        f'Widest model coverage: {", ".join(complete)}. '
+        f'Widest condition coverage: {", ".join(widest_conditions)}. ')
+    if typical:
+        says += (f'Orders the models most like the others: {typical[0]}; least '
+                 f'like them: {typical[-1]}. ')
+    says += (f'The paired evidence is d1_auc_norm_by_model.csv -- '
+             f'{len(common_models)} model(s) and {len(common_conditions)} '
+             f'condition(s) that every representation has, one row each, '
+             f'nothing collapsed.')
+    zero = table[table['replicate_spread_zero_cells'] > 0]
+    if len(zero):
+        says += (' ⚠ ' + ', '.join(zero['rep'])
+                 + ' has cells whose replicates do not differ at all, which is '
+                   'a run that did not vary rather than a model that is stable.')
+    return tables, _verdict(
         'D1', 'Which representation is held constant?', fired=False, says=says)
 
 
