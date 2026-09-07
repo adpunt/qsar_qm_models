@@ -15549,8 +15549,36 @@ COMPLETED in between 23 seconds and 1 minute 26 seconds. `qrf` is in neither `de
 nor `censoring_pairs.json`, so the run-time gate prints SKIPPED and exits 0 — the design, not a
 fault. Their wall clock is irrelevant.
 
-**Only `val_svm` censoring, 12986386, is still open**, and it was cut off the end of the `sacct`
-that would have answered it.
+**`val_svm` censoring, 12986386, closed the same way.** All eighteen tasks COMPLETED in between
+40 seconds and 1 minute 10 seconds. `SVM` is not among the five pairs in `censoring_pairs.json`,
+so every task prints `=== SKIPPED: SVM x <rep> is not in <file>` and exits 0. **The 54-minute task
+the 1.13× rested on is not in this array** — the longest task here is 1 minute 10 seconds. Nothing
+to resubmit.
+
+**So all four of the "cannot be raised" jobs are closed, and three of them were closed by the same
+fact: a task that skips by design looks exactly like a task that ran.**
+
+##### The author's question, 2026-09-07: "not all of these completed jobs may be working"
+
+Right, and elapsed time cannot answer it. `COMPLETED` means exit 0, which a skipped task also
+gives. Two things can answer it, and neither is a job state.
+
+**The log says which it was.** A skipped task prints the line above before it loads any data.
+
+```bash
+cd /data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_validation_censoring
+grep -c '^=== SKIPPED' val_svm_*.out | grep ':0$'     # any log that did NOT skip
+```
+
+**What is on disk says whether rows were written.** Every laboratory job, breadth, depth and
+censoring, writes under one tree, one directory per (model, representation, dataset). A cell that
+ran and wrote nothing is a one-line file; a cell that skipped has no directory at all.
+
+```bash
+wc -l /data/stat-ecr/scat9264/KIRBy/results/validation_rerun/*/all_results*.csv | sort -n | head -30
+```
+
+If that comes back empty the path is wrong, not the run — check it before reading anything into it.
 
 This also confirms `model_hours.json`: it carries `qrf` at 20.867 measured task hours, and the
 longest real task was 20:51:30.
@@ -16128,6 +16156,37 @@ line turns it red. **The 33 MISSING are unaffected; they were always counted aga
 selection.** The named ones so far are `laplace` on ChemBERTa for `dnn_bnn_full_mve`,
 `gauche_rbf`, `het_gp_rbf` and `ngboost`, and `laplace` on ECFP4 for `dnn_bnn_full_mve` and
 `gauche_rbf`. The full list needs the check re-run after this fix.
+
+**Re-run on the cluster after the fix, 2026-09-07.** PARTIAL fell from 36 to 18, THIN from
+77 to 4, MISSING stayed at 33 and `59/113` is unchanged. Every row in the listing is now a
+combination `deep_run_pairs.json` names. The fix took.
+
+#### D4f. Thirteen of the eighteen PARTIAL rows are one post-processing step, not lost jobs
+
+The listing after the fix holds 20 rows, which is its cap. Of the 17 PARTIAL rows shown,
+**13 are `NO_CLEAN_BASELINE`** — nine for `gauche_rbf` on ECFP4, PDV and ChemBERTa under
+`grouped_shifted`, `grouped_wider` and `student_t_nu5`, and four for `svm`: `laplace` on all
+three representations and `outlier_p10` on ChemBERTa. The other four are `PARTIAL_LEVELS`,
+all under `censoring`, for `dnn_bnn_full_mve` on PDV, `gauche_rbf` on PDV, `het_gp_rbf` on
+ECFP4 and `ngboost` on PDV — that is the censoring submission still landing, on four of its
+five pairs.
+
+**A missing clean row is not a missing job.** The job scripts run the no-noise level under
+`gaussian` only, and `slurm_scripts_qm9_rerun/copy_zero_rows.py` fills the rest. §13.28
+recorded that it had copied nothing. Both reasons are now fixed:
+
+| what it did | why it was wrong | what it does now |
+|---|---|---|
+| compared a target's computed clean row against the NEWEST clean row in the reference file | the deep run appends a second clean block to the file the screen wrote, so a target written by the screen matches the OLDER block and was called a seed divergence | judges a target row against EVERY clean row the reference holds for that replicate; copies are still made from the newest |
+| counted disagreements for the whole run, so the first bad file stopped every file after it | one neural model on ChemBERTa left thirteen combinations with no clean row, and AUC_norm is retention against that row, so those combinations produced nothing at all | refuses that one file, names it, and goes on filling the others; the exit code is still 1 |
+
+Guard: `python slurm_scripts_qm9_rerun/test_copy_zero_rows.py` — four states, including a
+reference holding two clean blocks and a disagreement that must not stop the file after it.
+Both halves are registered in `scripts/check_fixes_fail_when_removed.py` and go red with
+their line removed.
+
+**Not yet run on the real results.** The command is in §13.29a's step list; until it runs,
+those 13 combinations still have nothing to divide by.
 
 #### D6. Sort & Slice — the 104 tasks, and the tool that would not print them — CHAT 5
 
