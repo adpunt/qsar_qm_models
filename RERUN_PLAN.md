@@ -17285,11 +17285,51 @@ three noise types — no decomposition, and no robustness curve either. They hav
 out-of-fold rows from the screen and the main grid under the other three noise types, and the
 laboratory uncertainty runs cover all seven conditions for them.
 
-**The author's options.** Add `dnn_vbll` and `mlp_bnn_full_mve` to `deep_run_pairs.json` —
-a widening, so `bash resubmit_selected.sh dnn_bnn_full_variational` and
-`bash resubmit_selected.sh mlp_bnn_full_mve`, 18 tasks each at `12:59:00` and `13:59:00`. Or
-leave it, and the paper says QM9's decomposition under the three depth-only noise types rests
-on two models rather than four. **Not chat 4's to take.**
+✅ **The author's decision, 2026-09-07: leave it.** *"I don't think I need all of them."*
+`dnn_vbll` and `mlp_bnn_full_mve` are NOT added to `deep_run_pairs.json`. On QM9 the
+decomposition under `student_t_nu5`, `outlier_p10` and `laplace` rests on `gauche_rbf` and
+`dnn_bnn_full_mve`; all four are covered under the other three noise types and on all three
+laboratory datasets. **Methods must say this**, and it is a sentence nobody has written.
+
+#### D4m. Is the out-of-fold pass asking the right question? — read in code 2026-09-07
+
+The author asked, because the wrong question is why the study was restarted. Read out of
+`models/models.py:1584` (`oof_predict`) and `scripts/process_and_train.py:3058`, not from a
+document.
+
+**The question it asks.** Does the uncertainty a model states for a molecule track how much
+that molecule's own label was corrupted. Three properties make that answerable, and each was
+a separate failure before:
+
+1. **The noise is read, not re-estimated.** `TrainingNoiseRecord.load` reads what the injector
+   recorded per molecule. The regression that used to guess the noise back out of the labels
+   is gone (§3.1c).
+2. **The molecule is scored by a model that never saw it.** The noise is injected once, before
+   the folds, so a molecule carries the same corruption whichever fold holds it, and the model
+   scoring it was fitted without it.
+3. **The out-of-fold rows are on the same footing as the test rows.** The inner split is
+   `GroupKFold` over the same Murcko scaffold groups as the outer split. Without that the fit
+   set holds close analogues of every scored molecule, so its uncertainty comes from an
+   interpolation regime while the test set is extrapolation, and the two do not compare. When
+   groups are missing or too few for the fold count the code prints `FALLBACK` and says the
+   regime has changed, rather than falling back in silence.
+
+**Why it has to be training molecules.** A test molecule's label is never corrupted, so an
+aleatoric/epistemic split written only for test rows cannot answer this at all — which is what
+the old files held.
+
+**Two things it still cannot answer, both by design and both needing a Methods sentence.**
+
+- **Under plain `gaussian` noise the per-molecule question is null on purpose.** Every molecule
+  gets the same noise scale, so there is nothing in one label to distinguish it from another's.
+  `q4_plain_correlation` in `scripts/uncertainty_stats.py:1040` says so in its own docstring
+  and reports the number anyway, as a LEAKAGE CHECK: a large value there would be evidence the
+  model saw its own molecule's draw.
+- **Under the grouped conditions the answer is about scaffold groups, not molecules.** The
+  noise is a property of the group and `GroupKFold` holds out whole groups, so within a scored
+  fold the variation is between groups. §3.1d already records this for the outer split.
+
+**Nothing here is unverified except the Methods sentences, which do not exist yet.**
 
 ⚠ **`het_gp_rbf` is now in the uncertainty runs on the laboratory side but not on QM9.**
 Commit `183cd46` made `GP-Hetero` the seventh uncertainty model, and
