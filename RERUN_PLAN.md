@@ -15604,9 +15604,20 @@ Two things changed, both on `additional_reps`:
 
 | file | what changed | proof |
 |---|---|---|
-| `scripts/fixed_causes.json` | new. One entry per failed cause that is fixed, each naming the commit that fixed it and the command that proves it | read by the tool at run time |
-| `scripts/failed_tasks.py` | prints a resubmission line for a FAILED task when its cause is in that file AND `git merge-base --is-ancestor` puts the named commit behind the HEAD of the checkout it is running in | `python scripts/test_slurm_status_tools.py` — 68 checks, exit 0 |
+| `scripts/fixed_causes.json` | new. One entry per failed cause that is fixed, each naming the commit that fixed it, the file its error message is raised from, and the command that proves it | read by the tool at run time |
+| `scripts/failed_tasks.py` | prints a resubmission line for a FAILED task when its cause is in that file AND `git merge-base --is-ancestor` puts the named commit behind the HEAD of the checkout it is running in | `python scripts/test_slurm_status_tools.py` — 72 checks, exit 0 |
 | `scripts/slurm_jobs.py` | every resubmission line for a QM9 or uncertainty script now carries `--account=stat-cadd --partition=long` | as above |
+
+Pushed as `5041b7b`, `2505da4` and `850cc40` on `additional_reps`. Three things in the
+registry are checked rather than asserted, each by the test: the commit is in the
+checkout, every error substring is still in the file that raises it, and the offline
+index rule matches the representation list the QM9 generator writes.
+
+**Adding another fixed cause is a data edit, not a code change** — one object in
+`scripts/fixed_causes.json` with the commit, the proof command, the file the error comes
+from and the substrings to match. `gauche_rbf`'s twenty tasks (chat 2) and the fifty
+laboratory tasks (chat 3) go in the same way once their cause is known. `c223ec3` is
+already in this checkout, so an entry naming it would verify today.
 
 **A document cannot declare a fix.** On the cluster, the checkout the tool reads is the
 one the jobs run, so the check is on the code. A commit that is not there prints a
