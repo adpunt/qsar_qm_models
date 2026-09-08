@@ -99,6 +99,7 @@ import figlib_guard as G  # noqa: E402
 import figlib_load as L  # noqa: E402
 import figlib_metrics as M  # noqa: E402
 import figlib_figures as FIG  # noqa: E402
+import figlib_tables as TAB  # noqa: E402
 import figlib_uncertainty as U  # noqa: E402
 
 STAGE_2_MESSAGE = (
@@ -331,7 +332,7 @@ def draw_figures(args, tables, verdicts):
     # rest become an additional file. The choice is the data's, not a taste.
     conditions = said.get('D2', {}).get('main_text') or []
 
-    drawn = []
+    drawn = [FIG.f1_noise_conditions(out)]
     if anova is not None and len(anova):
         drawn.append(FIG.f2_variance_decomposition(anova, out))
     if qm9 is not None and len(qm9) and conditions:
@@ -351,6 +352,37 @@ def draw_figures(args, tables, verdicts):
     return drawn
 
 
+def build_tables(args, tables, verdicts):
+    """The paper's seven tables, as CSV and as LaTeX fragments."""
+    out = Path(args.output_dir) / 'tables'
+    print(f'  tables into {out}')
+    said = {v['id']: v for v in verdicts}
+    rep = args.primary_rep or tables.get('_primary_rep')
+    qm9 = tables.get('auc_norm_qm9')
+    assay = tables.get('auc_norm_assay')
+
+    built = [TAB.t1_metrics(out), TAB.t2_conditions(out)]
+    if tables.get('anova_eta2') is not None and len(tables['anova_eta2']):
+        built.append(TAB.t3_variance(tables['anova_eta2'], out))
+    if qm9 is not None and len(qm9) and rep:
+        built.append(TAB.t4_robustness(qm9, out, rep))
+    if assay is not None and len(assay) and rep:
+        built.append(TAB.t4_robustness(assay, out, rep, dataset='logd'))
+    if tables.get('d10_probabilistic') is not None:
+        built.append(TAB.t5_probabilistic(tables['d10_probabilistic'], out))
+    if tables.get('d8_support') is not None or tables.get('d7_support') is not None:
+        built.append(TAB.t6_uncertainty(
+            tables.get('d8_support', tables.get('d7_support')),
+            tables.get('d7_q4'), tables.get('d7_q6'),
+            tables.get('d8_component_slopes'), out))
+    if tables.get('d9_rank_transfer') is not None:
+        built.append(TAB.t7_rank_transfer(tables['d9_rank_transfer'], out))
+
+    built = [b for b in built if b is not None]
+    print(f'  {len(built)} table slot(s) written. T6 needs the uncertainty runs.')
+    return built
+
+
 def main(argv=None):
     args = parse_args(argv)
     started = time.time()
@@ -362,9 +394,6 @@ def main(argv=None):
         pass
     C.apply_style()
 
-    if args.only == 'tables':
-        print(STAGE_2_MESSAGE)
-        return 2
 
     qm9, assay, merged, per_molecule = load_everything(args)
     if qm9 is None and assay is None:
@@ -376,6 +405,8 @@ def main(argv=None):
 
     if args.only in ('figures', 'all'):
         draw_figures(args, tables, verdicts)
+    if args.only in ('tables', 'all'):
+        build_tables(args, tables, verdicts)
 
     print('[3/3] writing')
     context = dict(C.provenance())

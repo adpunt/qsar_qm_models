@@ -112,6 +112,166 @@ def _fig(width_fraction=1.0, height=3.2, nrows=1, ncols=1, **kwargs):
 
 
 # ---------------------------------------------------------------------------
+# F1 -- METHODS: what each noise condition does to a label
+# ---------------------------------------------------------------------------
+
+def _methods_groups(n, n_groups=40, seed=7):
+    """Scaffold-like groups, so the grouped conditions have something to act on."""
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, n_groups, size=n)
+
+
+def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
+                        n_samples=2000, replicates=10):
+    """What each settled condition does to a label distribution, plus the panel
+    that shows the doses are matched.
+
+    DRAWN WITH THE REAL INJECTOR. The old version of this figure carried its own
+    reimplementation of six conditions -- all six retired in August -- and fell
+    through to zeros for every condition the study actually runs, so a Methods
+    figure claiming to show the noise scheme would have shown panels of no noise
+    at all. It also plotted thirteen names into a hard-coded six-panel grid and
+    raised before any other figure was reached. Conditions come from
+    noise_conditions.json and the panel count follows from it.
+
+    The last panel is the one nothing in the paper shows today and the one the
+    whole comparison rests on: **the amount of noise actually delivered by each
+    condition**. If the conditions do not deliver the same amount, every
+    difference between them is a difference in dose rather than in kind -- which
+    is what the six retired strategies turned out to be.
+    """
+    try:
+        from noiseInject import NoiseInjectorRegression, CONDITIONS
+    except Exception as exc:
+        print(f'  F1 not drawn: the Methods figure is drawn with the real '
+              f'injector and noiseInject will not import here ({exc}). Drawing '
+              f'it from a local reimplementation is what made this figure '
+              f'describe a scheme the study had already replaced.')
+        return None
+
+    conditions = [c for c in C.SETTLED_CONDITIONS if c in CONDITIONS]
+    if not conditions:
+        print(f'  F1 not drawn: the installed injector knows none of '
+              f'{C.SETTLED_CONDITIONS}')
+        return None
+    missing = [c for c in C.SETTLED_CONDITIONS if c not in CONDITIONS]
+    if missing:
+        print(f'  F1: settled conditions the installed injector does not know, '
+              f'omitted: {missing}')
+
+    rng = np.random.default_rng(42)
+    clean = np.concatenate([
+        rng.normal(-0.5, 0.30, n_samples // 3),
+        rng.normal(0.2, 0.40, n_samples // 3),
+        rng.normal(0.8, 0.25, n_samples // 3 + n_samples % 3)])
+    groups = _methods_groups(len(clean))
+    spread = float(np.std(clean))
+
+    def inject(condition, seed):
+        censoring = CONDITIONS[condition].get('strategy') == 'censoring'
+        dose = censored_fraction if censoring else level * spread
+        injector = NoiseInjectorRegression.from_condition(
+            condition, random_state=seed, selection_state=seed + 1337)
+        return injector.inject(clean, dose, groups=groups, reference=clean)
+
+    drawn = {c: inject(c, 42) for c in conditions}
+
+    # ONE bin grid for every panel. Recomputing bins per panel shifts the edges,
+    # and the SAME clean labels then draw a visibly different outline in each
+    # panel from identical data.
+    lo = min([clean.min()] + [v.min() for v in drawn.values()])
+    hi = max([clean.max()] + [v.max() for v in drawn.values()])
+    bins = np.linspace(lo, hi, 51)
+
+    # The delivered amount, over replicates, per condition.
+    delivered = []
+    for condition in conditions:
+        for seed in range(replicates):
+            noised = inject(condition, 1000 + seed)
+            delivered.append({
+                'condition': condition, 'seed': seed,
+                'delivered': float(np.sqrt(np.mean((noised - clean) ** 2)))})
+    delivered = pd.DataFrame(delivered)
+
+    ncols = 2
+    nrows = int(np.ceil(len(conditions) / ncols)) + 1      # +1 for the dose panel
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(C.TEXTWIDTH_IN,
+                              min(C.MAX_HEIGHT_IN, 1.35 * nrows)))
+    spec = fig.add_gridspec(nrows, ncols, hspace=0.95, wspace=0.18)
+
+    for index, condition in enumerate(conditions):
+        ax = fig.add_subplot(spec[index // ncols, index % ncols])
+        noised = drawn[condition]
+        colour = C.CONDITION_COLORS.get(condition, '#666666')
+        ax.hist(clean, bins=bins, density=True, alpha=0.15, color=C.CLEAN_COLOR)
+        ax.hist(noised, bins=bins, density=True, alpha=0.15, color=colour)
+        ax.hist(clean, bins=bins, density=True, histtype='step', linewidth=1.6,
+                color=C.CLEAN_COLOR, alpha=0.85)
+        ax.hist(noised, bins=bins, density=True, histtype='step', linewidth=1.6,
+                color=colour, alpha=0.85)
+        S.title(ax, 'abcdefghij'[index], C.condition_label(condition))
+        ax.set_yticks([])
+        for side in ('top', 'right', 'left'):
+            ax.spines[side].set_visible(False)
+        # Headroom so the annotation clears the bars.
+        ax.set_ylim(top=ax.get_ylim()[1] * 1.30)
+        amount = float(np.sqrt(np.mean((noised - clean) ** 2)))
+        ax.text(0.97, 0.94, f'delivered {amount:.2f}', transform=ax.transAxes,
+                ha='right', va='top', fontsize=7, color='#333333')
+        # Only the bottom histogram in each column, or the label lands on the
+        # title of the panel underneath it.
+        if index >= len(conditions) - ncols:
+            ax.set_xlabel('Label value', fontsize=8)
+
+    # The dose panel, across the full width.
+    ax = fig.add_subplot(spec[nrows - 1, :])
+    order = C.sort_conditions(conditions)
+    for position, condition in enumerate(order):
+        values = delivered[delivered['condition'] == condition]['delivered']
+        colour = C.CONDITION_COLORS.get(condition, '#666666')
+        ax.plot([position, position], [values.min(), values.max()],
+                color=colour, linewidth=1.2, alpha=0.7, zorder=2)
+        ax.scatter([position], [values.median()], s=50, color=colour, zorder=3)
+    target = level * spread
+    ax.axhline(target, color='#444444', linestyle='--', linewidth=0.9)
+    ax.annotate(f'asked for {target:.2f}', xy=(1.0, target), xycoords=('axes fraction', 'data'),
+                xytext=(3, 0), textcoords='offset points', fontsize=7,
+                va='center', color='#444444', annotation_clip=False)
+    # Censoring is NOT dose-matched and cannot be: it has no variance parameter
+    # and is not zero-mean, so it runs on its own axis. Saying that on the panel
+    # stops its lower point being read as a condition that failed to hit target.
+    censoring = [i for i, c in enumerate(order) if c.startswith('censoring')]
+    for position in censoring:
+        ax.annotate('own axis,\nnot dose-matched', xy=(position, 0),
+                    xycoords=('data', 'axes fraction'), xytext=(0, 4),
+                    textcoords='offset points', ha='center', va='bottom',
+                    fontsize=6, style='italic', color='#555555')
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels([C.condition_label(c) for c in order], rotation=25,
+                       ha='right', fontsize=8)
+    ax.set_ylabel('Delivered noise', fontsize=8)
+    S.title(ax, 'abcdefghij'[len(conditions)],
+            f'Amount actually delivered, {replicates} draws each')
+    ax.spines[['top', 'right']].set_visible(False)
+
+    caption('F1', f"""
+        What each settled noise condition does to a label distribution.
+        Panels (a) onward: the clean labels and the noised labels over each
+        other, same bins in every panel, at a level of {level:g} of the clean
+        label spread — censoring at {censored_fraction:.0%} of labels clipped,
+        because its level is a fraction clipped rather than a fraction of the
+        spread. Drawn with the injector the pipeline runs, not a
+        reimplementation. The final panel is the evidence that comparing
+        conditions is fair at all: the amount of noise actually delivered by
+        each, over {replicates} draws, against the amount the dose solver was
+        asked for. Without it, a difference between two conditions could be a
+        difference in dose rather than in kind — which is what the six
+        strategies this scheme replaced turned out to be.""")
+    return S.save(fig, Path(output_dir) / 'F1_noise_conditions.png')
+
+
+# ---------------------------------------------------------------------------
 # F2 -- Q1: model, representation, or their pairing
 # ---------------------------------------------------------------------------
 
