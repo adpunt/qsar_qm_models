@@ -309,20 +309,34 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
                          'spread': row.get(f'{column}_spread', np.nan)})
     long = pd.DataFrame(long)
 
-    fig, axes = _fig(height=5.4, nrows=len(outcomes), sharex=True)
+    # ONE category list for both panels. A condition can be missing from one
+    # outcome and not the other -- censoring has no accuracy at the reporting
+    # level, because its level axis is a fraction of labels clipped -- and
+    # letting each panel derive its own categories put a seven-group panel over
+    # a six-group axis, so every bar in it was labelled as its neighbour.
+    conditions = C.sort_conditions(long['condition'].unique())
+    fig, axes = _fig(height=5.8, nrows=len(outcomes), sharex=True)
     axes = np.atleast_1d(axes)
     for index, (ax, outcome) in enumerate(zip(axes, outcomes)):
         panel = long[long['outcome'] == outcome]
         S.grouped_bars(ax, panel, 'condition', 'factor', 'share',
                        spread='spread', labeller=str,
-                       colours=C.ANOVA_FACTOR_COLORS,
-                       legend=(index == 0))
+                       colours=C.ANOVA_FACTOR_COLORS, legend=False,
+                       categories=conditions, clip=(0, 100))
         ax.set_ylabel('Share of variance (%)')
         ax.set_ylim(0, 100)
         S.title(ax, 'abcd'[index] if index < 4 else str(index), outcome)
     axes[-1].set_xlabel('Noise condition')
+    S.shared_legend(fig, axes[0], ncol=4)
 
     n_reps = int(frame['n_replicates'].max()) if 'n_replicates' in frame else 0
+    empty = sorted(set(conditions) - set(
+        long[long['outcome'] == outcomes[-1]]['condition']))
+    missing_note = (
+        f' {", ".join(C.condition_label(c) for c in empty)} has no bar in the '
+        f'lower panel: its level axis is a fraction of labels clipped rather '
+        f'than a fraction of the label spread, so there is no accuracy at a '
+        f'reported level to decompose.' if empty else '')
     caption('F2', f"""
         How much of the variation in each outcome is explained by the choice of
         model, the choice of representation, the pairing of the two, and what is
@@ -330,9 +344,8 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         from a two-way analysis with sequential sums of squares; the four shares
         sum to 100 per cent. Whiskers span the {n_reps} replicates -- the
         decomposition is repeated on each one separately, which no previous
-        version of this figure could do because the robustness metric was
-        computed on a curve that had already been averaged over them.""")
-    fig.tight_layout()
+        version of this figure could do, because the robustness metric was
+        computed on a curve that had already been averaged over them.{missing_note}""")
     return S.save(fig, Path(output_dir) / 'F2_variance_decomposition.png')
 
 

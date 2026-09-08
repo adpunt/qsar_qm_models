@@ -262,12 +262,12 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     anova_rows = []
     if len(qm9_per):
         anova_rows.append(M.two_way_eta2_by_condition(qm9_per, 'auc_norm')
-                          .assign(outcome='robustness (AUC_norm)'))
+                          .assign(outcome='Robustness (AUC$_{norm}$)'))
         at_level = M.accuracy_at_reporting_level(qm9, 'qm9')
         if len(at_level):
             anova_rows.append(
                 M.two_way_eta2_by_condition(at_level, 'r2')
-                .assign(outcome='performance (R2 at the reporting level)'))
+                .assign(outcome='Accuracy (R$^2$ at the reported level)'))
     anova = pd.concat(anova_rows, ignore_index=True) if anova_rows \
         else pd.DataFrame()
     if len(anova):

@@ -369,7 +369,8 @@ def title(ax, letter, text):
 
 def grouped_bars(ax, frame, category, series, value, spread=None,
                  labeller=None, category_labeller=None, colours=None,
-                 legend=True, legend_ncol=4, stacked=False):
+                 legend=True, legend_ncol=4, stacked=False, categories=None,
+                 clip=None):
     """One group of bars per category, one bar per series member.
 
     `spread` names a column holding a half-height whisker -- how much that share
@@ -379,7 +380,12 @@ def grouped_bars(ax, frame, category, series, value, spread=None,
     """
     labeller = labeller or (lambda v: str(v))
     category_labeller = category_labeller or C.condition_label
-    categories = list(dict.fromkeys(frame[category]))
+    # `categories` is passed in wherever two panels share an x-axis. Letting
+    # each panel derive its own from its own data is how a seven-group panel
+    # ended up over a six-group axis, with every bar in it labelled as the
+    # condition next to the one it actually was.
+    categories = list(categories) if categories is not None \
+        else list(dict.fromkeys(frame[category]))
     members = list(dict.fromkeys(frame[series]))
     index = np.arange(len(categories))
     width = 0.8 / max(len(members), 1)
@@ -402,6 +408,12 @@ def grouped_bars(ax, frame, category, series, value, spread=None,
             if spread and spread in frame.columns:
                 whisk = np.array([sub[spread].get(c, np.nan) for c in categories],
                                  dtype=float)
+                if clip is not None:
+                    # A share of variance cannot be below 0 or above 100, so a
+                    # whisker that runs past either is drawn to the bound.
+                    lo = np.maximum(heights - whisk, clip[0])
+                    hi = np.minimum(heights + whisk, clip[1])
+                    whisk = np.vstack([heights - lo, hi - heights])
                 ax.errorbar(index + offset, heights, yerr=whisk, fmt='none',
                             ecolor='#333333', elinewidth=0.8, capsize=1.5)
 
