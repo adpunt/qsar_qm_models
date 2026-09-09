@@ -260,7 +260,103 @@ def _cached(cache_dir, key, paths, build):
 # QM9
 # ---------------------------------------------------------------------------
 
-def load_qm9(results_dir, cache_dir=None):
+#: How a cell that was run more than once is resolved. "last" is file append
+#: order and is what the loader did first -- it is not a choice, it is whichever
+#: task finished second.
+DUPLICATE_RULES = ('median', 'last', 'first')
+
+
+def _resolve_duplicates(df, key, rule='median'):
+    """Reduce cells that were run more than once, by a STATED rule.
+
+    Some tasks ran twice and appended to the same file. Nothing can be re-run,
+    so the copies have to be resolved rather than fixed, and the rule matters:
+    on the real data 326 duplicated cells disagree, 105 of them because the two
+    copies had different training data.
+
+    THE RULE, in order:
+
+    1. Where `standardisation_sd` differs between copies, the two runs did not
+       share a training set -- the standardisation is computed from the clean
+       training labels -- so they are not repeat measurements of one thing. The
+       copy matching the MAJORITY standardisation for that (model, rep,
+       condition) is kept, because the majority is the split the rest of the
+       cell was run on. The minority copy is dropped and counted.
+    2. Otherwise the copies are the same nominal run, differing only by
+       nondeterminism in the fit, and the MEDIAN across them is taken. That is
+       a summary of a repeated measurement; "the last one written" is a summary
+       of nothing.
+
+    `rule='last'` or `'first'` restores positional selection for comparison.
+    """
+    if rule not in DUPLICATE_RULES:
+        raise ValueError(f'duplicate rule {rule!r}; expected {DUPLICATE_RULES}')
+    duplicated = df.duplicated(subset=key, keep=False)
+    if not duplicated.any():
+        return df
+    if rule in ('last', 'first'):
+        return df.drop_duplicates(subset=key, keep=rule)
+
+    cell = [c for c in ('dataset', 'model', 'rep', 'condition') if c in df.columns]
+
+    # Two columns say a pair of copies are NOT repeat measurements of one thing,
+    # and a median across them would average two different experiments:
+    #   standardisation_sd -- computed from the clean TRAINING labels, so a
+    #     difference means a different training set;
+    #   params_source -- a copy fitted at the shared default against one fitted
+    #     at a tuned setting, which happens because --use-best-params re-reads
+    #     the tuned files inside every run and a task that ran before they
+    #     landed used the defaults.
+    # In both cases the copy matching the MAJORITY for that cell is kept: the
+    # majority is what the rest of the cell was run under.
+    for column, why in (('standardisation_sd',
+                         'their standardisation disagrees with the rest of '
+                         'their cell, so they were fitted on a different '
+                         'training set'),
+                        ('params_source',
+                         'they were fitted under different hyperparameters '
+                         'from the rest of their cell')):
+        if column not in df.columns or not cell:
+            continue
+        majority = (df.groupby(cell, dropna=False)[column]
+                    .agg(lambda s: s.mode().iloc[0] if len(s.mode()) else None)
+                    .rename('_majority').reset_index())
+        df = df.merge(majority, on=cell, how='left')
+        if pd.api.types.is_numeric_dtype(df[column]):
+            mismatched = (df[column].notna() & df['_majority'].notna()
+                          & ~np.isclose(df[column].astype(float),
+                                        df['_majority'].astype(float),
+                                        rtol=0, atol=1e-9))
+        else:
+            mismatched = (df[column].notna() & df['_majority'].notna()
+                          & (df[column].astype(str) != df['_majority'].astype(str)))
+        # Only drop where a matching copy of that cell survives, or the cell
+        # would vanish entirely.
+        good_keys = set(map(tuple, df.loc[~mismatched, key].to_numpy()))
+        drop = mismatched & pd.Series(
+            [tuple(k) in good_keys for k in df[key].to_numpy()], index=df.index)
+        if int(drop.sum()):
+            print(f'  {int(drop.sum())} row(s) dropped: {why}, so they are not '
+                  f'a repeat measurement of the same thing and a median across '
+                  f'them would average two different experiments')
+        df = df[~drop].drop(columns=['_majority'])
+
+    numeric = [c for c in df.columns
+               if c not in key and pd.api.types.is_numeric_dtype(df[c])]
+    still = df.duplicated(subset=key, keep=False)
+    if still.any():
+        print(f'  {int(still.sum())} row(s) in {int(df.loc[still].groupby(key, dropna=False).ngroups)} '
+              f'cell(s) were run more than once with the same settings; taking '
+              f'the median across copies rather than whichever finished last')
+        aggregated = (df.groupby(key, dropna=False, as_index=False)
+                      .agg({**{c: 'median' for c in numeric},
+                            **{c: 'first' for c in df.columns
+                               if c not in key and c not in numeric}}))
+        return aggregated
+    return df
+
+
+def load_qm9(results_dir, cache_dir=None, duplicate_rule='median'):
     """Every `anova_*.csv` in one directory, as one tidy frame."""
     results_dir = Path(results_dir)
     if not results_dir.is_dir():
@@ -330,9 +426,9 @@ def load_qm9(results_dir, cache_dir=None):
                 if _mixed:
                     print(f'  ⚠ {_mixed} duplicated cell-and-replicate(s) have copies '
                           f'fitted under DIFFERENT hyperparameters (params_source '
-                          f'differs between the copies). Keeping the last written is '
-                          f'file append order, not a choice. Decide which source you '
-                          f'want before quoting these.')
+                          f'differs between the copies). The copy matching the '
+                          f'majority for its cell is kept -- a median across '
+                          f'them would average a tuned fit with a default one.')
             if 'r2' in df.columns:
                 _spread = _grp['r2'].agg(lambda v: v.max() - v.min())
                 _far = _spread[_spread > 0.001]
@@ -451,12 +547,12 @@ def load_qm9(results_dir, cache_dir=None):
                      .value_counts())
             print(f'  {int(duplicated.sum())} duplicate QM9 row(s) dropped '
                   f'(same model, rep, condition, level and replicate), across '
-                  f'{len(where)} cell(s). Keeping the last written:')
+                  f'{len(where)} cell(s), resolved by the stated rule:')
             for (model, rep, condition), count in list(where.items())[:6]:
                 print(f'      {model} / {rep} / {condition}: {count} row(s)')
             if len(where) > 6:
                 print(f'      ... and {len(where) - 6} more cell(s)')
-            df = df[~duplicated]
+            df = _resolve_duplicates(df, key, duplicate_rule)
         out = df.reset_index(drop=True)
         if _disagreements is not None and len(_disagreements):
             # Carried on the frame so the entry point can write it
@@ -483,7 +579,8 @@ def _assay_dataset(name):
     return _ASSAY_DATASET_ALIASES.get(key, key)
 
 
-def load_assay_accuracy(dirs, cache_dir=None):
+def load_assay_accuracy(dirs, cache_dir=None,
+                        duplicate_rule='median'):
     """Every `all_results.csv` under one or more validation-rerun trees."""
     dirs = [Path(d) for d in (dirs or []) if d]
     paths = []
@@ -533,7 +630,7 @@ def load_assay_accuracy(dirs, cache_dir=None):
             where = (df.loc[duplicated, ['dataset', 'model', 'rep', 'condition']]
                      .value_counts())
             print(f'  {int(duplicated.sum())} duplicate assay row(s) dropped, '
-                  f'across {len(where)} cell(s). Keeping the last written:')
+                  f'across {len(where)} cell(s), resolved by the stated rule:')
             for keys, count in list(where.items())[:6]:
                 print('      ' + ' / '.join(str(k) for k in keys)
                       + f': {count} row(s)')

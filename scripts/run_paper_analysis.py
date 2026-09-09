@@ -138,6 +138,12 @@ def parse_args(argv=None):
                    help='the accuracy half only. The uncertainty statistics '
                         'read every per-molecule file, which is the expensive '
                         'part; this gets the other eight answers in seconds')
+    p.add_argument('--duplicate-rule', default='median',
+                   choices=['median', 'last', 'first'],
+                   help='how a cell that was run more than once is resolved. '
+                        'median is the default and is a stated rule; last is '
+                        'file append order, which is whichever task happened '
+                        'to finish second')
     p.add_argument('--max-uncertainty-files', type=int, default=None,
                    help='read only the first N per-molecule files. Makes the '
                         'uncertainty answers PARTIAL, and the run says so')
@@ -146,9 +152,11 @@ def parse_args(argv=None):
 
 def load_everything(args):
     print('[1/3] reading')
-    qm9 = L.load_qm9(args.qm9_dir, cache_dir=args.cache_dir)
+    qm9 = L.load_qm9(args.qm9_dir, cache_dir=args.cache_dir,
+                     duplicate_rule=args.duplicate_rule)
     assay = L.load_assay_accuracy(args.validation_dir,
-                                  cache_dir=args.cache_dir)
+                                  cache_dir=args.cache_dir,
+                                  duplicate_rule=args.duplicate_rule)
     merged = L.load_merged_uncertainty(args.uncertainty_dir)
 
     # NOT loaded here. Every row is one molecule at one noise level in one
