@@ -189,6 +189,16 @@ def two_way_eta2(df, response, f1='model', f2='rep'):
     n = len(y)
     if n < 4:
         return None
+    # One observation per cell means the saturated fit reproduces the data and
+    # the residual is arithmetically zero -- not a finding, arithmetic. Refuse
+    # rather than return a decomposition with no error term.
+    if n == d.groupby([f1, f2], dropna=False).ngroups:
+        raise G.GuardError(
+            f'a two-way decomposition was asked for on {n} rows in {n} cells: '
+            f'one observation each. The saturated fit reproduces the data '
+            f'exactly, so the residual is arithmetically zero and the other '
+            f'three shares are inflated to sum to 100 with no error term. Keep '
+            f'the replicate axis (RERUN_PLAN.md 0.6, guard 3).')
     total_ss = float(((y - y.mean()) ** 2).sum())
     if total_ss == 0:
         return None
@@ -219,33 +229,67 @@ def two_way_eta2(df, response, f1='model', f2='rep'):
     }
 
 
-def two_way_eta2_by_condition(df, response, min_cell=None, where='the ANOVA'):
-    """One decomposition per noise condition, with the replicate spread.
+#: A decomposition needs enough models to be one. Two models and three
+#: representations is six cells; the shares from that describe those two models
+#: and nothing about model choice in general.
+MIN_MODELS_FOR_ANOVA = 5
 
-    The spread comes from repeating the decomposition on each replicate
-    separately, which is the column table T3 asks for and no version of this
-    figure has ever carried.
+
+def two_way_eta2_by_condition(df, response, min_cell=None, min_models=None,
+                              where='the ANOVA'):
+    """One decomposition per noise condition, with a real sensitivity band.
+
+    ⚠️ THE SPREAD IS LEAVE-ONE-REPLICATE-OUT, NOT PER-REPLICATE, AND THAT IS THE
+    WHOLE POINT.
+
+    Decomposing a SINGLE replicate gives each (model, representation) cell
+    exactly one observation. The saturated fit then reproduces the data exactly,
+    the residual is arithmetically zero, and the other three shares are inflated
+    to sum to 100 with no error term at all. Done that way, every condition
+    reports a residual spread of exactly 0.0 while the other three carry spreads
+    of fifteen to twenty-five points -- which is what the first real run
+    produced, and it is failure mode 3 with a different face.
+
+    So the band is a jackknife: drop one replicate, decompose the remaining
+    nine, repeat. Every fit keeps nine observations per cell and a residual that
+    means something, and the spread across the ten fits says how much the answer
+    depends on any one replicate.
     """
     min_cell = C.MIN_CELL_ITERS if min_cell is None else min_cell
+    min_models = MIN_MODELS_FOR_ANOVA if min_models is None else min_models
     rows = []
     for condition, group in df.groupby('condition', dropna=False):
+        n_models = int(group['model'].nunique())
+        if n_models < min_models:
+            print(f'  {where}: {condition} has {n_models} model(s) and needs '
+                  f'{min_models}. A decomposition on that many describes those '
+                  f'models, not the choice of model -- skipped.')
+            continue
         G.assert_replicates(group, ['model', 'rep'], min_n=min_cell,
                             where=f'{where}, condition {condition}')
         overall = two_way_eta2(group, response)
         if overall is None:
             continue
-        per_replicate = []
-        for _, one in group.groupby('replicate', dropna=False):
-            got = two_way_eta2(one, response)
+
+        replicates = sorted(group['replicate'].dropna().unique())
+        jackknife = []
+        for left_out in replicates:
+            kept = group[group['replicate'] != left_out]
+            if kept['replicate'].nunique() < 2:
+                continue          # one replicate left is the saturated case
+            got = two_way_eta2(kept, response)
             if got is not None:
-                per_replicate.append(got)
+                jackknife.append(got)
+
         record = dict(condition=condition, response=response, **overall)
         for share in ('eta2_model', 'eta2_rep', 'eta2_interaction',
                       'eta2_residual'):
-            values = [p[share] for p in per_replicate]
+            values = [p[share] for p in jackknife]
             record[f'{share}_spread'] = (float(np.max(values) - np.min(values))
                                          if len(values) > 1 else np.nan)
-        record['n_replicates'] = len(per_replicate)
+        record['n_replicates'] = int(len(replicates))
+        record['n_jackknife'] = len(jackknife)
+        record['spread_is'] = 'leave-one-replicate-out'
         rows.append(record)
     return pd.DataFrame(rows)
 

@@ -276,6 +276,60 @@ def a_profile_correlation_refuses_a_pooled_index():
           f"{got['rho']:.3f}")
 
 
+def a_saturated_decomposition_is_refused():
+    """One observation per cell makes the residual arithmetically zero.
+
+    The first real run reported a residual spread of exactly 0.0 for every
+    condition while the other three shares carried spreads of fifteen to
+    twenty-five points. The band was being built by decomposing each replicate
+    SEPARATELY, which leaves one observation per (model, representation) cell:
+    the saturated fit reproduces the data, the residual is zero every time, and
+    the other three are inflated to sum to 100 with no error term.
+    """
+    import figlib_metrics as M
+    rng = np.random.default_rng(4)
+    rows = [{'condition': 'gaussian', 'model': m, 'rep': r, 'replicate': i,
+             'auc_norm': 0.9 - 0.02 * k + rng.normal(0, 0.01)}
+            for k, m in enumerate(['rf', 'svm', 'dnn', 'mlp', 'xgboost'])
+            for r in ['ecfp4', 'pdv', 'chemberta'] for i in range(10)]
+    frame = pd.DataFrame(rows)
+
+    try:
+        M.two_way_eta2(frame[frame['replicate'] == 0], 'auc_norm')
+    except AssertionError as exc:
+        assert 'arithmetically zero' in str(exc), str(exc)
+        print('    one replicate on its own is refused, not decomposed')
+    else:
+        raise AssertionError(
+            'a saturated decomposition returned shares with no error term')
+
+    out = M.two_way_eta2_by_condition(frame, 'auc_norm')
+    assert out['spread_is'].iloc[0] == 'leave-one-replicate-out', out['spread_is']
+    residual = float(out['eta2_residual_spread'].iloc[0])
+    assert residual > 0, (
+        'the residual band came out exactly zero again, which is the sign the '
+        'fits were saturated')
+    assert int(out['n_jackknife'].iloc[0]) == 10, out['n_jackknife']
+    print(f'    leave-one-out over 10 replicates: residual band '
+          f'{residual:.2f} points, not 0')
+
+
+def a_decomposition_needs_enough_models_to_be_one():
+    """The deep-run conditions ran on six named pairs. A decomposition over two
+    models describes those two models, not the choice of model."""
+    import figlib_metrics as M
+    rng = np.random.default_rng(5)
+    rows = [{'condition': c, 'model': m, 'rep': r, 'replicate': i,
+             'auc_norm': 0.9 + rng.normal(0, 0.01)}
+            for c, models in (('gaussian', ['rf', 'svm', 'dnn', 'mlp', 'xgboost']),
+                              ('laplace', ['rf', 'svm']))
+            for m in models for r in ['ecfp4', 'pdv', 'chemberta']
+            for i in range(10)]
+    out = M.two_way_eta2_by_condition(pd.DataFrame(rows), 'auc_norm')
+    assert set(out['condition']) == {'gaussian'}, sorted(set(out['condition']))
+    print('    a two-model condition is skipped and says why')
+
+
 def one_number_never_gets_two_names():
     assert G.metric_label('auc_norm') == 'AUC$_{norm}$'
     try:
@@ -320,6 +374,10 @@ def main():
         check('a filter that flips the sign is refused',
               a_filter_that_flips_the_sign_is_refused),
         check('censoring cannot rank models', censoring_cannot_rank_models),
+        check('a saturated decomposition is refused',
+              a_saturated_decomposition_is_refused),
+        check('a decomposition needs enough models to be one',
+              a_decomposition_needs_enough_models_to_be_one),
         check('a profile correlation refuses a pooled index',
               a_profile_correlation_refuses_a_pooled_index),
         check('one number never gets two names', one_number_never_gets_two_names),

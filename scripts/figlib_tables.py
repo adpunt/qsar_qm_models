@@ -171,10 +171,13 @@ def t3_variance(anova, output_dir, dataset='qm9'):
     return write(table, output_dir, f'T3_variance_decomposition_{dataset}',
                  'Share of variance explained by model, representation, their '
                  'pairing and the residual, per noise condition. The ± is half '
-                 'the range across replicates: the decomposition is repeated on '
-                 'each replicate separately. The assay datasets have no true '
-                 'replicates and their version of this table has no residual '
-                 'term for that reason.')
+                 'the leave-one-replicate-out range: the decomposition is '
+                 'repeated with each replicate dropped in turn, so every fit '
+                 'keeps a real error term. It is NOT a per-replicate spread -- '
+                 'decomposing one replicate leaves one observation per cell, '
+                 'and the residual is then arithmetically zero. The assay '
+                 'datasets have no true replicates and get no band at all for '
+                 'the same reason.')
 
 
 # ---------------------------------------------------------------------------
