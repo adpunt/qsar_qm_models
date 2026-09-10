@@ -1506,6 +1506,172 @@ def q6_error_ranking(df, split=None, min_n=_DEFAULT_MIN_N,
 
 
 # ---------------------------------------------------------------------------
+# E4 — the two curves F7 draws
+# ---------------------------------------------------------------------------
+
+#: Where each curve is sampled. A curve is stored at fixed fractions rather than
+#: at one point per molecule, because a cell holds tens of thousands of
+#: molecules and the picture is the same at 5% steps. The retention curve stops
+#: at 0.90: the last few molecules are one or two values and the error there is
+#: not a measurement.
+RETENTION_GRID = np.round(np.arange(0.0, 0.91, 0.05), 4)
+ENRICHMENT_GRID = np.round(np.arange(0.0, 1.001, 0.05), 4)
+
+
+def _retained_error(err, order, grid):
+    """Error left after discarding the leading `fraction` of `order`.
+
+    `order` runs most-discarded-first. Returns one value per grid point, in the
+    units `err` is already in.
+    """
+    err = np.asarray(err, dtype=np.float64)[order]
+    n = err.size
+    out = []
+    for fraction in grid:
+        keep = n - int(np.floor(fraction * n))
+        out.append(float(np.sqrt(np.nanmean(err[n - keep:] ** 2)))
+                   if keep > 0 else np.nan)
+    return out
+
+
+def error_retention_curve(df, split='train_oof', min_n=_DEFAULT_MIN_N,
+                          grid=None, extra_group_cols=None):
+    """The picture of question 6: throw molecules away most-uncertain first, and
+    see what the error on the ones you keep does.
+
+    The error is `|y_true_clean - y_pred|`, within one noise level, in the
+    label's own units -- the SAME error `q6_error_ranking` correlates against,
+    so the figure and the statistic are the same quantity. Using the error
+    against the noisy label here would mix in the corruption that was added to
+    the label, which is question 4's business.
+
+    Three series per cell, and the two references are what make the first one
+    readable:
+
+      `uncertainty`  discard in order of predicted uncertainty, largest first
+      `random`       discard nothing in particular -- flat at the full-set error
+      `oracle`       discard in order of TRUE error, largest first, which is the
+                     best any ordering could do
+
+    A model's uncertainty is worth the gap between its line and `random`, and
+    `oracle` is how much of that gap was available to be won.
+    """
+    _require_columns(df, ['uncertainty', 'y_true_clean', 'y_pred'],
+                     'error_retention_curve')
+    grid = RETENTION_GRID if grid is None else np.asarray(grid, dtype=float)
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        if not rec['n_sufficient']:
+            continue
+        scale = _label_scale_of(cell)
+        err = np.abs(cell['y_true_clean'].to_numpy(dtype=np.float64)
+                     - cell['y_pred'].to_numpy(dtype=np.float64)) * scale
+        unc = cell['uncertainty'].to_numpy(dtype=np.float64)
+        usable = np.isfinite(unc) & np.isfinite(err)
+        if usable.sum() < min_n:
+            continue
+        err, unc = err[usable], unc[usable]
+        series = {
+            # rankdata rather than argsort so ties do not order by row position,
+            # which would let a model that predicts ONE uncertainty for every
+            # molecule score like a real ranking.
+            'uncertainty': np.argsort(-rankdata(unc), kind='stable'),
+            'oracle': np.argsort(-rankdata(err), kind='stable'),
+        }
+        for name, order in series.items():
+            for fraction, value in zip(grid, _retained_error(err, order, grid)):
+                out = dict(rec)
+                out.update(series=name, fraction=float(fraction), value=value)
+                rows.append(out)
+        flat = float(np.sqrt(np.nanmean(err ** 2)))
+        for fraction in grid:
+            out = dict(rec)
+            out.update(series='random', fraction=float(fraction), value=flat)
+            rows.append(out)
+    out = pd.DataFrame(rows, columns=(_cell_cols(extra_group_cols)
+                                      + ['n', 'n_sufficient', 'series',
+                                         'fraction', 'value']))
+    out['statistic'] = 'error_retention_curve'
+    out['error_reference'] = 'clean_label'
+    out['error_units'] = 'label_units'
+    return out
+
+
+def enrichment_curve(df, split='train_oof', min_n=_DEFAULT_MIN_N,
+                     top_frac=0.10, grid=None, extra_group_cols=None):
+    """The picture of question 4: look at molecules most-suspicious first, and
+    see how many of the corrupted labels you have found by then.
+
+    Corrupted means the same thing it means in `q4_error_ratio` -- the molecules
+    in the top `top_frac` of the cell by the size of the injected noise -- so the
+    curve and the number cannot disagree about what a corrupted label is.
+
+    Three series per cell:
+
+      `ratio`   order by the out-of-fold error DIVIDED by the predicted
+                uncertainty. This is what question 4 asks about
+      `error`   order by the out-of-fold error alone. The reference that matters,
+                because the error already tracks the injected noise and the
+                question is whether the uncertainty ADDS to it
+      `random`  the diagonal
+
+    The area between `ratio` and `error` is `auc_delta` drawn out; a `ratio`
+    line sitting on the `error` line is the uncertainty adding nothing.
+    """
+    _require_columns(df, ['injected_noise', 'uncertainty', 'y_true_clean',
+                          'y_pred'], 'enrichment_curve')
+    grid = ENRICHMENT_GRID if grid is None else np.asarray(grid, dtype=float)
+    rows = []
+    for rec, cell in _cell_iter(df, split=split, min_n=min_n,
+                                extra_group_cols=extra_group_cols):
+        if not rec['n_sufficient']:
+            continue
+        eps = cell['injected_noise'].to_numpy(dtype=np.float64)
+        y = cell['y_true_clean'].to_numpy(dtype=np.float64)
+        p = cell['y_pred'].to_numpy(dtype=np.float64)
+        u = cell['uncertainty'].to_numpy(dtype=np.float64)
+        err = np.abs(y + eps - p)
+        size = np.abs(eps)
+        finite_size = size[np.isfinite(size)]
+        if not finite_size.size or np.unique(finite_size).size <= 1:
+            # Noise level zero: every molecule got exactly zero, so there is no
+            # corrupted set to find. The negative control working, not a gap.
+            continue
+        thr = np.quantile(finite_size, 1.0 - top_frac)
+        positive = size >= thr
+        if positive.all():
+            positive = size > thr
+        if positive.all() or not positive.any():
+            continue
+        usable = np.isfinite(u) & (u > 0) & np.isfinite(err)
+        ratio = np.where(usable, err / np.where(usable, u, 1.0), -np.inf)
+        n, n_pos = size.size, int(positive.sum())
+        rec = dict(rec, n_corrupted=n_pos, top_frac=top_frac)
+        for name, score in (('ratio', ratio), ('error', err)):
+            order = np.argsort(-rankdata(np.where(np.isfinite(score), score,
+                                                  -np.inf)), kind='stable')
+            found = np.cumsum(positive[order])
+            for fraction in grid:
+                k = int(np.ceil(fraction * n))
+                out = dict(rec)
+                out.update(series=name, fraction=float(fraction),
+                           value=float(found[k - 1] / n_pos) if k else 0.0)
+                rows.append(out)
+        for fraction in grid:
+            out = dict(rec)
+            out.update(series='random', fraction=float(fraction),
+                       value=float(fraction))
+            rows.append(out)
+    out = pd.DataFrame(rows, columns=(_cell_cols(extra_group_cols)
+                                      + ['n', 'n_sufficient', 'n_corrupted',
+                                         'top_frac', 'series', 'fraction',
+                                         'value']))
+    out['statistic'] = 'enrichment_curve'
+    return out
+
+
+# ---------------------------------------------------------------------------
 # diagnostics — statements about the inputs, not results
 # ---------------------------------------------------------------------------
 

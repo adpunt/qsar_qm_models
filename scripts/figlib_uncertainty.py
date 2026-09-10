@@ -257,6 +257,48 @@ def component_slopes(q5_frame):
     return out
 
 
+def curves(df, permutations=None):
+    """The two curves F7 draws, conditioned the same way the statistics are.
+
+    Both come straight from `uncertainty_stats`, so a curve cannot disagree with
+    the number printed beside it: the retention curve uses `q6_error_ranking`'s
+    error, and the enrichment curve uses `q4_error_ratio`'s definition of a
+    corrupted label. `permutations` is accepted and ignored, so this can be
+    called from the same place as the statistics.
+
+    Folds are collapsed here rather than in the figure. One fold is one fitted
+    model on its own molecules, so the curve is computed inside a fold and the
+    median across folds is what is kept, with the number of folds beside it.
+    """
+    oof = df[df['split'] == 'train_oof'] if 'split' in df.columns else df
+    if len(oof) == 0:
+        return {'retention': pd.DataFrame(), 'enrichment': pd.DataFrame()}
+    out = {}
+    for name, fn in (('retention', unc.error_retention_curve),
+                     ('enrichment', unc.enrichment_curve)):
+        got = fn(oof)
+        out[name] = _median_over_folds(got) if len(got) else got
+    return out
+
+
+def _median_over_folds(curve):
+    """One row per (cell without the fold, series, fraction)."""
+    keys = [c for c in unc.CELL_COLS if c != 'fold' and c in curve.columns]
+    keys += [c for c in ('series', 'fraction') if c in curve.columns]
+    out = (curve.groupby(keys, dropna=False)
+           .agg(value=('value', 'median'),
+                value_lo=('value', 'min'),
+                value_hi=('value', 'max'),
+                n_folds=('value', 'size'))
+           .reset_index())
+    for column in ('statistic', 'error_units', 'top_frac'):
+        if column in curve.columns:
+            values = curve[column].dropna().unique()
+            if len(values) == 1:
+                out[column] = values[0]
+    return out
+
+
 def discover(sources, pattern='*_uncertainty_values.csv'):
     """Every per-molecule file under the given roots, de-duplicated."""
     from pathlib import Path as _Path
@@ -299,6 +341,12 @@ def load(sources, dataset_name=None, strict=True, where='per-molecule rows',
     except unc.UncertaintySchemaError as exc:
         print(f'  {where}: NOT loaded -- {exc}')
         return None
+    if df is not None and 'dataset' in df.columns:
+        # One spelling, here, once. The loader writes 'QM9' and every accuracy
+        # table says 'qm9', so a figure filtering on the dataset matched
+        # nothing and returned None -- which looks exactly like "the runs have
+        # not landed yet".
+        df['dataset'] = df['dataset'].map(C.canonical_dataset)
     return df
 
 
@@ -337,7 +385,8 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
 
     print(f'  {where}: {len(files)} file(s), one at a time so the whole set '
           f'never has to fit in memory')
-    parts = {'support': [], 'q4': [], 'q5': [], 'q6': []}
+    parts = {'support': [], 'q4': [], 'q5': [], 'q6': [],
+             'retention': [], 'enrichment': []}
     skipped = []
     for index, path in enumerate(files, 1):
         try:
@@ -360,6 +409,9 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
             got = q6(df)
             if len(got):
                 parts['q6'].append(got)
+            for name, got in curves(df).items():
+                if len(got):
+                    parts[name].append(got)
         except Exception as exc:  # noqa: BLE001
             skipped.append((path.name, f'{type(exc).__name__}: {exc}'))
         finally:

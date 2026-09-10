@@ -297,6 +297,17 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
             q4 = stats.get('q4')
             q6 = stats.get('q6')
             slopes = stats.get('slopes')
+            # F6 draws the two components against the level, and F7 draws one
+            # of the two curves. All three come out of the same streaming pass,
+            # so the figures cannot disagree with the statistics beside them.
+            for key in ('q5', 'retention', 'enrichment'):
+                got = stats.get(key)
+                if got is not None and len(got):
+                    tables[f'unc_{key}'] = got
+            if support is not None and len(support):
+                tables['unc_support'] = support
+            if slopes is not None and len(slopes):
+                tables['unc_slopes'] = slopes
     collect(D.d7_uncertainty_option(q4, q6, support))
     collect(D.d8_decomposition(slopes, support))
     collect(D.d9_rank_transfer(qm9_summary, assay_summary))
@@ -305,16 +316,20 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
     # them out of the CSV sweep in write_report.
     tables['_qm9_accuracy'] = qm9
     tables['_primary_rep'] = primary
+    # R10 plots one mark per REPLICATE against its own clean baseline, so it
+    # needs the frame before the median across replicates is taken.
+    tables['_qm9_per_replicate'] = qm9_per
     return tables, verdicts
 
 
 def draw_figures(args, tables, verdicts):
-    """The figures that need only the accuracy results.
+    """Every figure the data supports, and nothing it does not.
 
-    F6 and F7 need the uncertainty runs; they are drawn when those land. Each
-    builder declares what it holds fixed and RAISES if the data still carries a
-    factor it has not accounted for, so a failure here is a real one and is not
-    caught.
+    F6 and F7 draw only when the uncertainty runs have landed; the contingent
+    ones draw only when their decision fired, which is what makes them
+    contingent. Each builder declares what it holds fixed and RAISES if the data
+    still carries a factor it has not accounted for, so a failure here is a real
+    one and is not caught.
     """
     out = Path(args.output_dir) / 'figures'
     print(f'[3/3] drawing into {out}')
@@ -353,10 +368,105 @@ def draw_figures(args, tables, verdicts):
     if assay is not None and len(assay) and rep:
         drawn.append(FIG.f8_assay(assay, out, rep))
 
+    drawn += _draw_contingent(tables, said, out, rep, conditions, qm9,
+                              accuracy, assay)
+    drawn += _draw_uncertainty(tables, said, out, rep, conditions)
+
     drawn = [d for d in drawn if d]
     FIG.write_captions(out)
-    print(f'  {len(drawn)} figure(s) and captions.md. F6 and F7 wait on the '
-          f'uncertainty runs.')
+    waiting = [n for n, k in (('F6', 'unc_q5'), ('F7', 'unc_retention'))
+               if tables.get(k) is None]
+    print(f'  {len(drawn)} figure(s) and captions.md.'
+          + (f' {" and ".join(waiting)} wait on the uncertainty runs.'
+             if waiting else ''))
+    return drawn
+
+
+def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
+    """The figures RERUN_PLAN.md 14.6 asks for only if the results ask for them.
+
+    Every one is drawn because a decision fired, and none is drawn otherwise --
+    that is the difference between a contingent figure and a figure nobody
+    chose. The decision id is named beside each so the trigger is traceable from
+    the picture back to the number.
+    """
+    drawn = []
+    first = (conditions or ['gaussian'])[0]
+
+    # row 6, fired by D5: one representation is an outlier, and the profile
+    # lines are the only figure that shows WHICH.
+    if said.get('D5', {}).get('fired') and qm9 is not None and len(qm9):
+        for condition in (conditions or [first]):
+            drawn.append(FIG.r6_representation_profile(qm9, out, condition))
+
+    # row 9, fired by D9: the two sides disagree on the ranking, so T7 is
+    # promoted from a table to a figure.
+    if said.get('D9', {}).get('fired') and tables.get('d9_rank_transfer') is not None:
+        drawn.append(FIG.r9_rank_transfer(tables['d9_rank_transfer'], out, rep,
+                                          condition=first))
+
+    # row 10, fired by D6: AUC_norm above 1 recurs. A count and a panel against
+    # the clean baseline, never a patched metric.
+    if said.get('D6', {}).get('fired') and tables.get('_qm9_per_replicate') is not None:
+        drawn.append(FIG.r10_auc_above_one(tables['_qm9_per_replicate'], out))
+
+    # row 15: the rank ladder, one chart per noise type, and the mirror holding
+    # a model fixed. Not contingent on a decision -- 5.4a asks for it outright.
+    if accuracy is not None and len(accuracy) and rep:
+        for condition in (conditions or [first]):
+            if condition != 'gaussian':
+                drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
+                                                        condition))
+        top = _most_robust_model(qm9, rep, first)
+        if top:
+            drawn.append(FIG.r15b_rank_against_level_by_rep(accuracy, out, top,
+                                                            first))
+    return drawn
+
+
+def _most_robust_model(summary, rep, condition):
+    """Which model the mirror chart holds fixed, chosen from the data.
+
+    The author's example was XGBoost and was given AS an example (5.4a), so the
+    choice follows the results: the most robust model at the held representation
+    under the first condition shown.
+    """
+    if summary is None or not len(summary):
+        return None
+    one = summary[(summary['rep'] == rep) & (summary['condition'] == condition)]
+    if not len(one):
+        return None
+    return str(one.sort_values('auc_norm', ascending=False)['model'].iloc[0])
+
+
+def _draw_uncertainty(tables, said, out, rep, conditions):
+    """F6 and F7, which need the per-molecule uncertainty rows.
+
+    F7 is one of three options and D7 picks which from the numbers. Drawing all
+    three would put the decision back in the reader's hands, which is what 14.6
+    rows 1 to 3 exist to prevent.
+    """
+    drawn = []
+    q5 = tables.get('unc_q5')
+    first = (conditions or ['gaussian'])[0]
+    if q5 is not None and len(q5):
+        for condition in (conditions or [first]):
+            got = FIG.f6_decomposition(q5, out, rep, condition,
+                                       slopes=tables.get('unc_slopes'),
+                                       support=tables.get('unc_support'))
+            if got:
+                drawn.append(got)
+                break          # one condition is the headline; the rest are T6
+    option = said.get('D7', {}).get('option')
+    if option in ('7A', '7B', '7C'):
+        drawn.append(FIG.f7_uncertainty(
+            option, out, rep, first,
+            retention=tables.get('unc_retention'),
+            enrichment=tables.get('unc_enrichment'),
+            q4=tables.get('d7_q4')))
+    elif tables.get('unc_retention') is not None:
+        print('  D7 is undecided, so no F7 is drawn. The three options are in '
+              'RERUN_PLAN.md 14.5 F7 and d7_q4.csv carries the numbers.')
     return drawn
 
 

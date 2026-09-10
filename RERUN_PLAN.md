@@ -15573,11 +15573,17 @@ scope block — it runs on five named pairs — and the guard quotes it.
 2. ~~**F4's top panel — one panel or two.**~~ ✅ **Two, pending a look at the rendered figure**
    (author, 2026-09-04). Build both panels, review, and fall back to one panel per model if it is
    cramped.
-3. **F6 — 6A, 6B or 6C.** Recommendation is 6A.
-4. **F7 — which of the three.** Depends on the results; §14.6 rows 1 to 3 say which result picks which.
+3. ~~**F6 — 6A, 6B or 6C.**~~ ✅ **6A, built 2026-09-10.** One panel per model, two lines in each.
+   §14.11.
+4. ~~**F7 — which of the three.**~~ ✅ **All three built 2026-09-10**, and D7 picks which one draws
+   off the numbers. Nothing is drawn while D7 says undecided. §14.11.
 5. **Which representation is held constant.** `PRIMARY_REP` is `pdv`; the author leans **ChemBERTa**.
-   To be settled from the screen, not from preference.
-6. **Is the averaging guard built before the first figure?** About a day. §14.2.
+   To be settled from the screen, not from preference. **The evidence is in `d1_representations.csv`
+   as of the 2026-09-09 run** — ECFP4 has 19 models over 7 conditions in 66 combinations, ChemBERTa
+   18 models over 6 conditions in 60, PDV 18 over 7 in 64; ChemBERTa is the best representation for
+   23 of 54 models against PDV's 18 and ECFP4's 5.
+6. ~~**Is the averaging guard built before the first figure?**~~ ✅ Built, and it is what caught the
+   F7C defect in §14.11.
 7. **Is the paired noise-type test written?** No compute, QM9 only. It is the only statistic that can
    put a p-value on §14.6 rows 7 and 8.
 8. **Is the small-loss criterion worth a re-run?** The learning-with-noisy-labels field's own way of
@@ -15585,6 +15591,71 @@ scope block — it runs on five named pairs — and the guard quotes it.
    in `citations.bib` and already cited in the Introduction. It needs in-fold training predictions,
    which neither pipeline writes. **The only item in this section that costs compute.**
 
+
+---
+
+### 14.11 WHAT WAS BUILT 2026-09-10 — the two remaining figures, four contingent ones, two defects
+
+Every slot in §14.5 now has code behind it. `scripts/test_figure_slots.py` draws each one on planted
+data and fails if a slot produces nothing, which is the state F6 and F7 were in: named in the plan,
+absent from the code, and indistinguishable in the output from "the results did not fire it".
+
+#### The figures
+
+| Slot | What it draws | Fires on |
+|---|---|---|
+| **F6** | Option 6A. One panel per model, two lines in each — aleatoric and epistemic — against the noise level, in the label's own units. A component that is one number per fit is not drawn and its support flag is printed on the panel instead (row 13) | the uncertainty runs |
+| **F7** | All three options. 7A the error-retention curve, 7B the enrichment curve, 7C the grid of `auc_delta`. **D7 picks one and only that one draws**; while D7 says undecided nothing is drawn and the reason is printed | the uncertainty runs, and D7 |
+| **R6** | F3 option 3B — the representation-profile lines. Bottom axis the six representations, side axis AUC_norm, one line per model | D5, row 6 |
+| **R9** | T7 promoted to a figure. Models down the side, rank on QM9 and rank on each assay dataset as separate dots | D9, row 9 |
+| **R10** | Every replicate's AUC_norm against the clean baseline it was measured from, with the values above 1.05 marked | D6, row 10 |
+| **R15b** | The mirror of R15 (§5.4a): hold one model and one noise type, plot every representation. The model is chosen from the data — the most robust at the held representation | always, where the levels exist |
+
+R15 now draws once per noise type shown, rather than at Gaussian alone.
+
+#### The two curves F7 needed, and they did not exist
+
+`uncertainty_stats.py` wrote AUC numbers and no curve points, so 7A and 7B had nothing to draw.
+`error_retention_curve` and `enrichment_curve` are new there, and each reuses the definition already
+in force so a curve cannot disagree with the number printed beside it: the retention curve takes
+`q6_error_ranking`'s error against the clean label, and the enrichment curve takes
+`q4_error_ratio`'s corrupted set, the tenth of molecules with the largest injected noise. Both are
+computed inside one fold and the median across folds is kept, so they stream one file at a time like
+every other statistic.
+
+#### Two defects found while building it
+
+- **The uncertainty side spells the dataset `QM9` and the accuracy side spells it `qm9`.** Every
+  figure that filters on the dataset matched nothing across that line and returned None — which is
+  indistinguishable from "the uncertainty runs have not landed". `figlib_config.canonical_dataset`
+  is applied once, in the loader. Without this F6 would have drawn an empty figure on the real data
+  and said nothing.
+- **F7C would have averaged over the noise level.** The grid took a median of `auc_delta` across
+  levels, and the averaging guard refused to draw it — sigma is a factor. It holds one level now,
+  the reporting level, like the two curve options.
+
+#### Kendall's W was `nan`, and the reason was structural
+
+It kept only models present under EVERY condition. Three conditions run on the whole roster and four
+run on the deep-run pairs alone, so that left 2 models and the statistic needs at least 3 — and a
+bare `nan` in `DECISIONS.md` read as "the rankings do not agree", which is a finding. It now drops
+the condition costing the most models until enough remain, names what it dropped, and refuses with a
+stated reason rather than returning `nan`.
+
+**Measured on the 2026-09-09 tables**, over the three conditions the whole roster ran:
+
+| Representation | Kendall's W | Models | Conditions |
+|---|---|---|---|
+| ECFP4 | 0.928 | 19 | 3 |
+| ChemBERTa | 0.909 | 17 | 3 |
+| PDV | 0.807 | 18 | 3 |
+
+#### R6 and R9 are drawn already, off the tables pulled on 2026-09-09
+
+They need no cluster time — `results/decisions/figures/R6_representation_profile_gaussian.png`,
+`..._grouped_shifted.png` and `R9_rank_transfer_ecfp4.png`. R6 shows what D5 fired on: at Gaussian,
+BNN-α (var. head) falls to 0.72 AUC_norm on MHG-GNN and VBLL-β (het.) to 0.74, while every other
+model on every other representation sits between 0.88 and 0.98.
 
 ---
 

@@ -12,11 +12,23 @@ from the numbers behind it.
   F2  model, representation, or their pairing          SHAPE D
   F3  WHICH model and WHICH representation             SHAPE C
   F4  what label noise costs you                       SHAPE A + SHAPE C
+  F6  the aleatoric/epistemic decomposition            SHAPE A, one panel per model
+  F7  does the uncertainty find the bad labels         SHAPE A (7A, 7B) or C (7C)
   F8  the assay datasets                               SHAPE C
-  R1  rank against noise level (contingent, 14.6 r15)  SHAPE A
-  R2  retention against clean baseline (contingent, r16)
 
-F6 and F7 need the uncertainty runs and are built when those land.
+The contingent ones. Each is drawn only when its decision fires, and the
+decision is 14.6's row number:
+
+  R6   representation profiles, F3 option 3B (row 6)   SHAPE A sideways
+  R9   rank transfer promoted from T7 (row 9)          SHAPE B
+  R10  where AUC_norm exceeds 1 (row 10)               scatter against baseline
+  R15  rank against noise level (row 15)               SHAPE A
+  R15b the same, holding a MODEL fixed (5.4a)          SHAPE A
+  R16  retention against clean baseline (row 16)       SHAPE A
+
+F6 and F7 need the per-molecule uncertainty rows and draw nothing without them.
+F7 is ONE of three options and D7 picks which; drawing all three would hand the
+choice back to the reader, which is what rows 1 to 3 exist to prevent.
 """
 from __future__ import annotations
 
@@ -770,3 +782,560 @@ def r16_decoupling(summary, output_dir, rep, dataset='qm9'):
         less to lose, and part of any apparent decoupling is arithmetic rather
         than a finding.""")
     return S.save(fig, Path(output_dir) / f'R16_decoupling_{rep}.png')
+
+
+# ---------------------------------------------------------------------------
+# F6 -- Q5 and the aleatoric/epistemic decomposition
+# ---------------------------------------------------------------------------
+
+def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
+                     dataset='qm9', max_panels=6):
+    """One small chart per model. Two lines in each: aleatoric and epistemic.
+
+    Option 6A, settled 2026-09-04 as a headline. The bottom axis is how much
+    noise was added to the training labels, seven positions, none on the left.
+    The side axis is how much uncertainty the model reported, in the label's own
+    units. Both lines are in every chart and keep the same two colours, so the
+    colours are learned once.
+
+    What you are looking for: the aleatoric line climbs and the epistemic line
+    stays flat. Both climbing is a model that has failed to separate them, and
+    that is drawn rather than hidden -- row 5 of the contingent list says the
+    failure looks like two lines climbing together, so the figure is the same.
+
+    A component that is one number per fit is NOT drawn: a flat line there is
+    arithmetic about the fit, not a property of the molecules. `figlib_uncertainty.q5`
+    has already dropped those rows, and the support flag is printed on the panel
+    instead so the absence is legible (row 13 -- a guard, not a choice).
+    """
+    frame = q5[(q5['dataset'] == dataset) & (q5['rep'] == rep)
+               & (q5['condition'] == condition)]
+    frame = frame[frame['component'].isin(['aleatoric', 'epistemic'])]
+    if 'split' in frame.columns:
+        oof = frame[frame['split'] == 'train_oof']
+        frame = oof if len(oof) else frame
+    if not len(frame):
+        return None
+
+    models = C.sort_models(frame['model'].unique())[:max_panels]
+    frame = frame[frame['model'].isin(models)]
+    title = G.declare(frame, 'F6',
+                      fixed={'dataset': dataset, 'rep': rep,
+                             'condition': condition},
+                      varies=('model', 'sigma'), aggregates=('fold',))
+
+    flags = {}
+    if support is not None and len(support):
+        for _, row in support.iterrows():
+            flags[str(row.get('model'))] = (str(row.get('aleatoric_support', '')),
+                                            str(row.get('epistemic_support', '')))
+    verdicts = {}
+    if slopes is not None and len(slopes):
+        for _, row in slopes.iterrows():
+            if str(row.get('condition')) == condition and str(row.get('rep')) == rep:
+                verdicts[str(row.get('model'))] = str(row.get('verdict', ''))
+
+    caption('F6', f"""
+        The two halves of the predicted uncertainty against the amount of noise
+        added to the training labels, one panel per model, on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}. One mark is the mean predicted
+        uncertainty over the molecules of one out-of-fold pass, in the label's
+        own units; the band is the range across folds. A model that is
+        attributing added label noise to the data has an aleatoric line that
+        climbs and an epistemic line that holds. A component that is one number
+        per fit is not drawn as a line, and its support flag is printed on the
+        panel instead. Verdicts are from the slopes, not read off the picture.""")
+
+    ncols = min(len(models), 4)
+    nrows = int(np.ceil(len(models) / ncols))
+    fig, axes = _fig(height=2.1 * nrows + 0.9, nrows=nrows, ncols=ncols,
+                     sharex=True)
+    axes = np.atleast_1d(axes).ravel()
+    for index, (ax, model) in enumerate(zip(axes, models)):
+        panel = frame[frame['model'] == model]
+        curve = (panel.groupby(['component', 'sigma'], dropna=False)
+                 .agg(value=('mean_uncertainty', 'median'),
+                      lo=('mean_uncertainty', 'min'),
+                      hi=('mean_uncertainty', 'max'))
+                 .reset_index())
+        for component in ('aleatoric', 'epistemic'):
+            one = curve[curve['component'] == component].sort_values('sigma')
+            if not len(one):
+                continue
+            colour = C.COMPONENT_COLORS[component]
+            ax.plot(one['sigma'], one['value'], marker='o', markersize=3.5,
+                    linewidth=1.4, color=colour,
+                    label=C.component_label(component))
+            ax.fill_between(one['sigma'], one['lo'], one['hi'], color=colour,
+                            alpha=0.15, linewidth=0)
+        drawn = set(curve['component'])
+        missing = [c for c in ('aleatoric', 'epistemic') if c not in drawn]
+        if missing and model in flags:
+            said = dict(zip(('aleatoric', 'epistemic'), flags[model]))
+            note = '; '.join(f'{c}: {said.get(c, "unrecorded")}'
+                             for c in missing)
+            S.stat_box(ax, f'not drawn -- {note}')
+        elif model in verdicts and verdicts[model]:
+            S.stat_box(ax, verdicts[model][:46])
+        S.title(ax, 'abcdefgh'[index], C.model_label(model))
+        ax.spines[['top', 'right']].set_visible(False)
+        if index % ncols == 0:
+            ax.set_ylabel('Mean predicted uncertainty\n(label units)')
+        if index >= len(models) - ncols:
+            ax.set_xlabel(LEVEL_AXIS)
+    for ax in axes[len(models):]:
+        ax.set_visible(False)
+    S.shared_legend(fig, axes[0], ncol=2)
+    return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
+
+
+# ---------------------------------------------------------------------------
+# F7 -- Q4 and Q6: does the uncertainty find the bad labels
+# ---------------------------------------------------------------------------
+
+def f7_uncertainty(option, output_dir, rep, condition, retention=None,
+                   enrichment=None, q4=None, dataset='qm9', sigma=None):
+    """Whichever of 7A, 7B and 7C the results chose. D7 makes that choice.
+
+    7A the error-retention curve, 7B the enrichment curve, 7C the grid of
+    `auc_delta` across conditions. All three answer the same question and only
+    one goes in the main text, so only one is drawn -- and which one is decided
+    from the numbers rather than from taste (RERUN_PLAN.md 14.6 rows 1 to 3).
+    """
+    if option == '7A':
+        return _f7a_retention(retention, output_dir, rep, condition,
+                              dataset=dataset, sigma=sigma)
+    if option == '7B':
+        return _f7b_enrichment(enrichment, output_dir, rep, condition,
+                               dataset=dataset, sigma=sigma)
+    if option == '7C':
+        return _f7c_grid(q4, output_dir, rep, dataset=dataset, sigma=sigma)
+    return None
+
+
+def _one_level(frame, sigma):
+    """The noise level a curve figure is drawn at, and it is one level.
+
+    A curve pooled over levels is a different curve at every level averaged
+    together. The reporting level is the default because it is the level every
+    accuracy number in the paper is quoted at.
+    """
+    if not len(frame):
+        return frame, None
+    levels = sorted(pd.unique(frame['sigma'].dropna()))
+    if sigma is None:
+        # reporting_level RAISES for a dataset whose level is unset, which is
+        # the point -- a silent default became the answer three times.
+        wanted = C.reporting_level(str(frame['dataset'].iloc[0]))
+        sigma = wanted if any(np.isclose(float(wanted), levels)) else max(levels)
+    return frame[np.isclose(frame['sigma'].astype(float), float(sigma))], sigma
+
+
+def _f7a_retention(retention, output_dir, rep, condition, dataset='qm9',
+                   sigma=None):
+    """SHAPE A. Bottom axis: the fraction of molecules thrown away, most
+    uncertain first. Side axis: the error left on the ones you keep.
+
+    One line per model, plus two grey reference lines -- throwing molecules away
+    at random, and throwing them away in order of true error, which is the best
+    any ordering could do. The gap between a model's line and the flat one is
+    what its uncertainty is worth.
+    """
+    if retention is None or not len(retention):
+        return None
+    frame = retention[(retention['dataset'] == dataset)
+                      & (retention['rep'] == rep)
+                      & (retention['condition'] == condition)]
+    frame, sigma = _one_level(frame, sigma)
+    if not len(frame):
+        return None
+    title = G.declare(frame, 'F7A',
+                      fixed={'dataset': dataset, 'rep': rep,
+                             'condition': condition, 'sigma': sigma},
+                      varies=('model',), aggregates=('fold', 'molecule'))
+
+    models = C.sort_models(frame[frame['series'] == 'uncertainty']['model'].unique())
+    caption('F7A', f"""
+        Error against the clean label after discarding the most uncertain
+        molecules, on {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}, at noise level {sigma}. Bottom axis: the
+        fraction of out-of-fold molecules discarded, most uncertain first. Side
+        axis: the root-mean-square error on the molecules that remain, in the
+        label's own units. One coloured line per model. The flat grey line is
+        discarding molecules at random and the lower grey line is discarding
+        them in order of true error, which is the best any ordering could do.
+        The gap between a model's line and the flat one is what its uncertainty
+        is worth.""")
+
+    fig, ax = _fig(height=3.4)
+    for model in models:
+        one = (frame[(frame['model'] == model) & (frame['series'] == 'uncertainty')]
+               .sort_values('fraction'))
+        ax.plot(one['fraction'], one['value'], marker=C.model_marker(model),
+                markersize=3.5, linewidth=1.4, alpha=0.9,
+                color=C.model_color(model), label=C.model_label(model))
+    for series in ('random', 'oracle'):
+        one = (frame[frame['series'] == series]
+               .groupby('fraction', dropna=False)['value'].median().reset_index())
+        if not len(one):
+            continue
+        ax.plot(one['fraction'], one['value'], linewidth=1.2,
+                linestyle=C.CURVE_STYLES[series], color=C.CURVE_COLORS[series],
+                label=C.curve_label(series), zorder=1)
+    ax.set_xlabel('Fraction of molecules discarded, most uncertain first')
+    ax.set_ylabel('RMSE on the molecules kept\n(label units)')
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=3)
+    return S.save(fig, Path(output_dir) / 'F7_error_retention.png')
+
+
+def _f7b_enrichment(enrichment, output_dir, rep, condition, dataset='qm9',
+                    sigma=None):
+    """SHAPE A. Bottom axis: the fraction of molecules looked at, most
+    suspicious first. Side axis: the fraction of the corrupted labels found.
+
+    The diagonal is what random picking gives. The second grey line is what
+    ordering by out-of-fold error alone gives -- and that is the reference that
+    matters, because the error already tracks the injected noise and the
+    question is whether the uncertainty ADDS to it.
+    """
+    if enrichment is None or not len(enrichment):
+        return None
+    frame = enrichment[(enrichment['dataset'] == dataset)
+                       & (enrichment['rep'] == rep)
+                       & (enrichment['condition'] == condition)]
+    frame, sigma = _one_level(frame, sigma)
+    if not len(frame):
+        return None
+    title = G.declare(frame, 'F7B',
+                      fixed={'dataset': dataset, 'rep': rep,
+                             'condition': condition, 'sigma': sigma},
+                      varies=('model',), aggregates=('fold', 'molecule'))
+
+    models = C.sort_models(frame[frame['series'] == 'ratio']['model'].unique())
+    top = frame['top_frac'].dropna()
+    top_frac = float(top.iloc[0]) if len(top) else 0.10
+    caption('F7B', f"""
+        How many of the corrupted labels you have found, on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}, at noise level {sigma}. Bottom axis: the
+        fraction of out-of-fold molecules inspected, most suspicious first. Side
+        axis: the fraction of the corrupted labels among them. Corrupted means
+        the {top_frac:.0%} of molecules that received the largest injected
+        noise, which is the same definition the Q4 statistic uses. One coloured
+        line per model, ordered by out-of-fold error divided by predicted
+        uncertainty. The straight grey diagonal is picking at random; the dashed
+        grey line is ordering by out-of-fold error alone, which is what the
+        uncertainty has to beat to have added anything.""")
+
+    fig, ax = _fig(height=3.4)
+    for model in models:
+        one = (frame[(frame['model'] == model) & (frame['series'] == 'ratio')]
+               .sort_values('fraction'))
+        ax.plot(one['fraction'], one['value'], marker=C.model_marker(model),
+                markersize=3.5, linewidth=1.4, alpha=0.9,
+                color=C.model_color(model), label=C.model_label(model))
+    for series in ('error', 'random'):
+        one = (frame[frame['series'] == series]
+               .groupby('fraction', dropna=False)['value'].median().reset_index())
+        if not len(one):
+            continue
+        ax.plot(one['fraction'], one['value'], linewidth=1.2,
+                linestyle=C.CURVE_STYLES[series], color=C.CURVE_COLORS[series],
+                label=C.curve_label(series), zorder=1)
+    ax.set_xlabel('Fraction of molecules inspected, most suspicious first')
+    ax.set_ylabel('Fraction of the corrupted labels found')
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=3)
+    return S.save(fig, Path(output_dir) / 'F7_enrichment.png')
+
+
+def _f7c_grid(q4, output_dir, rep, dataset='qm9', sigma=None):
+    """SHAPE C. Rows are the models, columns are the noise conditions, and the
+    number on each square is how much dividing the error by the uncertainty
+    improved the ranking of corrupted labels. Zero means it added nothing.
+
+    This is the option that shows a null across every condition rather than
+    asserting one in a sentence.
+
+    ONE noise level, like the two curve options. A square holding the median
+    across levels would be averaging over a factor: the same square would then
+    mean something different for a condition whose ladder is short. The guard
+    refuses it, which is how this was caught.
+    """
+    if q4 is None or not len(q4) or 'auc_delta' not in q4.columns:
+        return None
+    frame = q4[(q4['dataset'] == dataset) & (q4['rep'] == rep)]
+    frame = frame[frame['auc_delta'].notna()]
+    frame, sigma = _one_level(frame, sigma)
+    if not len(frame):
+        return None
+    title = G.declare(frame, 'F7C',
+                      fixed={'dataset': dataset, 'rep': rep, 'sigma': sigma},
+                      varies=('model', 'condition'),
+                      aggregates=('fold', 'molecule'))
+    cell = (frame.groupby(['model', 'condition'], dropna=False)
+            .agg(auc_delta=('auc_delta', 'median'),
+                 outside=('outside_null', 'mean') if 'outside_null'
+                 in frame.columns else ('auc_delta', 'size'))
+            .reset_index())
+    models = C.sort_models(cell['model'].unique())
+    conditions = C.sort_conditions(cell['condition'].unique())
+    caption('F7C', f"""
+        How much dividing the out-of-fold error by the predicted uncertainty
+        improved the ranking of corrupted labels, on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)}. Rows are models,
+        columns are noise conditions, and one square is the median across folds
+        at noise level {sigma}. Zero means the uncertainty added nothing to the
+        error alone. Grey squares were never run.""")
+    fig, ax = _fig(height=C.grid_height(len(models)))
+    image, _ = S.grid(ax, cell, 'model', 'condition', 'auc_delta',
+                      column_labeller=C.condition_label, vmin=-0.2, vmax=0.2,
+                      cmap='RdBu_r', row_order=models, column_order=conditions,
+                      fmt='{:+.2f}')
+    if image is not None:
+        bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+        bar.set_label('Improvement in ranking corrupted labels', fontsize=8)
+        bar.ax.tick_params(labelsize=7)
+    return S.save(fig, Path(output_dir) / 'F7_uncertainty_grid.png')
+
+
+# ---------------------------------------------------------------------------
+# R6 -- the representation profiles (14.6 row 6, F3 option 3B)
+# ---------------------------------------------------------------------------
+
+def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
+                              value='auc_norm'):
+    """SHAPE A turned sideways. Bottom axis: the six representations. Side axis:
+    robustness. One mark is a dot; dots belonging to one model are joined by a
+    line.
+
+    A model whose line is flat is robust whatever the representation; a line
+    that dives at one representation is the pairing, and you can see WHICH
+    representation causes it. This is the only figure that shows the case the
+    averaging rules exist to catch, and D5 fires it (row 6).
+    """
+    frame = summary[(summary['dataset'] == dataset)
+                    & (summary['condition'] == condition)]
+    if not len(frame):
+        return None
+    title = G.declare(frame, 'R6',
+                      fixed={'dataset': dataset, 'condition': condition},
+                      varies=('model', 'rep'))
+    reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
+    position = {r: i for i, r in enumerate(reps)}
+    models = C.sort_models(frame['model'].unique())
+    caption('R6', f"""
+        Robustness ({G.metric_label(value)}) of every model at every
+        representation, on {C.dataset_label(dataset)} under
+        {C.condition_label(condition)}. Bottom axis: the six representations.
+        Side axis: robustness. One mark is one model at one representation, the
+        median over replicates; dots belonging to one model are joined. A flat
+        line is a model that is robust whatever the representation. A line that
+        dives at one representation is the model-representation pairing, and the
+        dive names the representation responsible.""")
+    fig, ax = _fig(height=4.2)
+    for model in models:
+        one = frame[frame['model'] == model]
+        one = one[one['rep'].isin(reps)].copy()
+        if not len(one):
+            continue
+        one['x'] = one['rep'].map(position)
+        one = one.sort_values('x')
+        ax.plot(one['x'], one[value], marker=C.model_marker(model),
+                markersize=4, linewidth=1.3, alpha=0.85,
+                color=C.model_color(model), label=C.model_label(model))
+    ax.set_xticks(range(len(reps)))
+    ax.set_xticklabels([C.rep_label(r) for r in reps], rotation=20, ha='right')
+    ax.set_ylabel(G.metric_label(value))
+    ax.set_xlabel('Representation')
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=4)
+    return S.save(fig,
+                  Path(output_dir) / f'R6_representation_profile_{condition}.png')
+
+
+# ---------------------------------------------------------------------------
+# R9 -- rank transfer as a figure (14.6 row 9)
+# ---------------------------------------------------------------------------
+
+def r9_rank_transfer(transfer, output_dir, rep, condition='gaussian'):
+    """SHAPE B. Models down the side, rank along the bottom, one dot for the
+    QM9 rank and one for the rank on each assay dataset.
+
+    Promoted from T7 by D9, which fires when the two sides disagree on the
+    ranking. A model whose dots sit together transfers; a model whose dots are
+    far apart does not, and the spread along its row is the disagreement.
+    """
+    if transfer is None or not len(transfer):
+        return None
+    frame = transfer[(transfer['rep'] == rep)
+                     & (transfer['condition'] == condition)]
+    if not len(frame):
+        return None
+    G.declare(frame, 'R9', fixed={'rep': rep, 'condition': condition},
+              varies=('model', 'dataset'))
+
+    order = (frame.groupby('model', dropna=False)['qm9_rank'].median()
+             .sort_values().index.tolist())
+    rows = []
+    for model in order:
+        one = frame[frame['model'] == model]
+        rows.append({'model': model, 'dataset': 'qm9',
+                     'rank': float(one['qm9_rank'].median())})
+        for _, r in one.iterrows():
+            rows.append({'model': model, 'dataset': str(r['dataset']),
+                         'rank': float(r['assay_rank'])})
+    plotted = pd.DataFrame(rows)
+    caption('R9', f"""
+        Where each model ranks by robustness on QM9 and where it ranks on each
+        assay dataset, at {C.rep_label(rep)} under
+        {C.condition_label(condition)}. Models run down the side, ordered by
+        their QM9 rank. Rank 1 is the most robust. One mark is that model's rank
+        on one dataset; colour says which dataset. A model whose marks sit
+        together keeps its place across datasets. A model whose marks are spread
+        out does not, and the width of its row is the disagreement.""")
+    fig, ax = _fig(height=C.grid_height(len(order)))
+    colours = {'qm9': C.CLEAN_COLOR, 'logd': '#E69F00', 'caco2': '#009E73',
+               'herg': '#CC79A7'}
+    S.dot_rows(ax, plotted, 'model', 'rank', series='dataset',
+               labeller=C.dataset_label, colours=colours, legend_ncol=4)
+    # dot_rows puts its key inside the axes, which on nineteen rows lands on
+    # the bottom model's row and hides it. One key below the figure instead.
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.remove()
+    ax.set_xlabel('Rank by robustness (1 = most robust)')
+    S.shared_legend(fig, ax, ncol=4)
+    return S.save(fig, Path(output_dir) / f'R9_rank_transfer_{rep}.png')
+
+
+# ---------------------------------------------------------------------------
+# R10 -- where AUC_norm exceeds 1 (14.6 row 10)
+# ---------------------------------------------------------------------------
+
+def r10_auc_above_one(per_replicate, output_dir, dataset='qm9'):
+    """Where a model scores better with noise added than without, against the
+    clean baseline it started from.
+
+    Not a patched metric -- a count and a picture of where it happens. A cell
+    scoring above one almost always started from a low clean baseline, and that
+    is exactly what the bottom axis shows.
+    """
+    if per_replicate is None or not len(per_replicate):
+        return None
+    frame = per_replicate[per_replicate['dataset'] == dataset]
+    if 'baseline_r2' not in frame.columns or not len(frame):
+        return None
+    G.declare(frame, 'R10', fixed={'dataset': dataset},
+              varies=('model', 'rep', 'condition'), aggregates=('replicate',))
+    high = frame[frame['auc_norm'] > C.AUC_NORM_IMPLAUSIBLE_HIGH]
+    caption('R10', f"""
+        Every replicate's robustness against the clean baseline it was measured
+        from, on {C.dataset_label(dataset)}. One mark is one replicate of one
+        model at one representation under one noise condition. The horizontal
+        line is {C.AUC_NORM_IMPLAUSIBLE_HIGH}, above which a model retained more
+        than it started with. {len(high)} of {len(frame)} replicate values sit
+        above it. They cluster at low clean baselines, which is what the metric
+        does when the denominator is small; it is reported rather than
+        patched.""")
+    fig, ax = _fig(height=3.2)
+    ax.scatter(frame['baseline_r2'], frame['auc_norm'], s=8, alpha=0.25,
+               color='#999999', linewidth=0, label='every replicate')
+    if len(high):
+        ax.scatter(high['baseline_r2'], high['auc_norm'], s=14, alpha=0.85,
+                   color='#D55E00', linewidth=0,
+                   label=f'above {C.AUC_NORM_IMPLAUSIBLE_HIGH}')
+    ax.axhline(C.AUC_NORM_IMPLAUSIBLE_HIGH, color='#444444', linestyle='--',
+               linewidth=0.9)
+    ax.axvline(C.BASELINE_THRESHOLD, color='#444444', linestyle=':',
+               linewidth=0.9)
+    ax.annotate('clean-accuracy floor', xy=(C.BASELINE_THRESHOLD, 0.02),
+                xycoords=('data', 'axes fraction'), fontsize=6.5,
+                color='#444444', rotation=90, ha='right', va='bottom')
+    ax.set_xlabel('Clean R² the replicate started from')
+    ax.set_ylabel(G.metric_label('auc_norm'))
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=2)
+    return S.save(fig, Path(output_dir) / 'R10_auc_above_one.png')
+
+
+# ---------------------------------------------------------------------------
+# R15b -- the mirror of the rank chart (5.4a)
+# ---------------------------------------------------------------------------
+
+def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
+                                   dataset='qm9', baseline_gate=None):
+    """The mirror the author asked for: hold one noise type and one MODEL, and
+    plot every representation.
+
+    Same chart as R15 with the two factors swapped. The three rules for a
+    representation that stops working are the same three, and the R² is printed
+    beside the ranks for the same reason -- a rank hides whether two are a
+    thousandth apart or a fifth apart.
+    """
+    gate = C.BASELINE_THRESHOLD if baseline_gate is None else baseline_gate
+    frame = accuracy[(accuracy['dataset'] == dataset)
+                     & (accuracy['model'] == model)
+                     & (accuracy['condition'] == condition)]
+    if not len(frame):
+        return None
+    title = G.declare(frame, 'R15b',
+                      fixed={'dataset': dataset, 'model': model,
+                             'condition': condition},
+                      varies=('rep', 'sigma'), aggregates=('replicate',))
+    clean = (frame[frame['sigma'] == frame['sigma'].min()]
+             .groupby('rep')['r2'].median())
+    alive = clean[clean >= gate].index
+    frame = frame[frame['rep'].isin(alive)]
+    if not len(frame):
+        return None
+
+    ranked = []
+    for (sigma, replicate), group in frame.groupby(['sigma', 'replicate']):
+        order = group.set_index('rep')['r2'].rank(ascending=False)
+        for name, rank in order.items():
+            ranked.append({'rep': name, 'sigma': sigma, 'rank': rank})
+    ranks = (pd.DataFrame(ranked).groupby(['rep', 'sigma'], dropna=False)['rank']
+             .median().reset_index())
+    scores = (frame.groupby(['rep', 'sigma'], dropna=False)['r2'].median()
+              .reset_index())
+    ranks = ranks.merge(scores, on=['rep', 'sigma'], how='left')
+    # A representation that worked and then fell below the accuracy floor has
+    # its line CUT SHORT there rather than plunging to last place.
+    ranks = ranks[ranks['r2'] >= gate]
+
+    caption('R15b', f"""
+        Where each representation ranks against the others as the noise rises,
+        for {C.model_label(model)} on {C.dataset_label(dataset)} under
+        {C.condition_label(condition)}. Bottom axis: the noise level. Side axis:
+        rank, 1 at the top. One line per representation, and lines crossing are
+        representations trading places. Ranks are taken within each replicate
+        and then the median is shown. A line stops where that representation's
+        R² falls below {gate}, rather than plunging to last place. R² is printed
+        beside each mark, because a rank hides whether two are a thousandth
+        apart or a fifth apart.""")
+
+    fig, ax = _fig(height=3.4)
+    order = (ranks[ranks['sigma'] == ranks['sigma'].min()]
+             .sort_values('rank')['rep'].tolist())
+    for name in order:
+        one = ranks[ranks['rep'] == name].sort_values('sigma')
+        if not len(one):
+            continue
+        ax.plot(one['sigma'], one['rank'], marker='o', markersize=4,
+                linewidth=1.4, label=C.rep_label(name))
+        for _, row in one.iterrows():
+            ax.annotate(f"{row['r2']:.2f}",
+                        xy=(row['sigma'], row['rank']), fontsize=5.5,
+                        xytext=(0, 5), textcoords='offset points', ha='center',
+                        color='#555555')
+    ax.invert_yaxis()
+    ax.set_yticks(range(1, len(order) + 1))
+    ax.set_xlabel(LEVEL_AXIS)
+    ax.set_ylabel('Rank (1 = most accurate)')
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=3)
+    return S.save(
+        fig, Path(output_dir) / f'R15b_rank_by_rep_{model}_{condition}.png')

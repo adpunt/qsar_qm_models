@@ -343,6 +343,35 @@ UNCERTAINTY_COLORS = {
     'mlp_vbll_hetero': '#DDCC77', 'mlp_bnn_full_mve': '#999933',
 }
 
+#: The two halves of the uncertainty, and they keep these colours in every
+#: panel of F6 so the reader learns them once (RERUN_PLAN.md 14.5 F6).
+COMPONENT_COLORS = {'aleatoric': '#D55E00', 'epistemic': '#0072B2',
+                    'total': '#666666'}
+COMPONENT_LABELS = {'aleatoric': 'Aleatoric (data)',
+                    'epistemic': 'Epistemic (model)',
+                    'total': 'Total'}
+
+#: The three lines on each F7 panel. The two references are grey on purpose:
+#: they are what the model's own line is read against, not results themselves.
+CURVE_COLORS = {'uncertainty': '#0072B2', 'ratio': '#0072B2',
+                'error': '#666666', 'oracle': '#009E73', 'random': '#999999'}
+CURVE_LABELS = {'uncertainty': 'Ordered by predicted uncertainty',
+                'ratio': 'Ordered by error / uncertainty',
+                'error': 'Ordered by out-of-fold error alone',
+                'oracle': 'Ordered by true error (the best possible)',
+                'random': 'No ordering'}
+CURVE_STYLES = {'uncertainty': '-', 'ratio': '-', 'error': '--',
+                'oracle': ':', 'random': '--'}
+
+
+def component_label(name):
+    return COMPONENT_LABELS.get(str(name), str(name))
+
+
+def curve_label(name):
+    return CURVE_LABELS.get(str(name), str(name))
+
+
 #: Base model = circle, full Bayesian = square, VBLL = diamond, a per-molecule
 #: noise head = plus, a variance head = star.
 MODEL_MARKERS = {
@@ -435,6 +464,22 @@ DATASET_LABELS = {
 #: repeats, so they carry no error bar.
 REPLICATE_COLUMN = {'qm9': 'iteration'}
 FOLD_COLUMN = 'fold'
+
+
+#: The uncertainty loader names QM9 'QM9' and the accuracy side names it 'qm9'.
+#: Anything that filters on the dataset silently matches nothing across that
+#: line -- which is how F6 came to draw an empty figure without failing.
+DATASET_ALIASES = {'qm9': 'qm9', 'QM9': 'qm9', 'openadmet_logd': 'logd',
+                   'openadmet_caco2': 'caco2', 'chembl_herg_ki': 'herg',
+                   'herg_ki': 'herg', 'logd': 'logd', 'caco2': 'caco2',
+                   'herg': 'herg'}
+
+
+def canonical_dataset(name):
+    """One spelling per dataset, whichever producer wrote the row."""
+    key = str(name)
+    return DATASET_ALIASES.get(key, DATASET_ALIASES.get(key.lower(),
+                                                        key.lower()))
 
 
 def replicate_column(dataset):

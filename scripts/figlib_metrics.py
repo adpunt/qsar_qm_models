@@ -329,6 +329,46 @@ def simple_effects(df, response, group_col, factor_col):
 # Rank agreement and paired tests
 # ---------------------------------------------------------------------------
 
+#: Fewer models than this cannot be ranked against each other in a way anybody
+#: would report. Below it the statistic is refused rather than returned.
+MIN_RANKED_MODELS = 3
+
+
+def _widest_complete_block(table):
+    """The largest (conditions x models) block with no gaps in it.
+
+    Every condition is kept if enough models ran under all of them. Where they
+    did not -- and on this study they do not, because three conditions run on
+    the whole roster and four run only on the deep-run pairs -- keeping all the
+    conditions leaves two models, which is not a ranking. So the condition that
+    costs the most models is dropped, and again, until enough models remain.
+
+    Returns (block, conditions_dropped, reason). Dropping is reported, never
+    silent: "rankings agree across noise types" means nothing without the list
+    of noise types it was measured over.
+    """
+    dropped = []
+    work = table.copy()
+    while True:
+        block = work.dropna(axis=1, how='any')
+        if block.shape[1] >= MIN_RANKED_MODELS or work.shape[0] <= 2:
+            reason = ('every condition at this representation'
+                      if not dropped else
+                      f'computed over {work.shape[0]} of {table.shape[0]} '
+                      f'conditions: {", ".join(dropped)} ran on too few '
+                      f'models to rank, and keeping them left '
+                      f'{table.dropna(axis=1, how="any").shape[1]} model(s)')
+            return block, dropped, reason
+        # The condition whose absence frees the most models.
+        costs = {}
+        for condition in work.index:
+            costs[condition] = work.drop(index=condition).dropna(
+                axis=1, how='any').shape[1]
+        worst = max(costs, key=lambda c: (costs[c], str(c)))
+        dropped.append(str(worst))
+        work = work.drop(index=worst)
+
+
 def kendalls_w(auc_frame, rep, conditions=None, where="Kendall's W"):
     """Do model rankings agree across noise conditions, WITHIN one representation.
 
@@ -346,13 +386,24 @@ def kendalls_w(auc_frame, rep, conditions=None, where="Kendall's W"):
         else sorted(frame['condition'].dropna().unique()))
     frame = frame[frame['condition'].isin(usable)]
 
-    table = frame.pivot_table(index='condition', columns='model',
-                              values='auc_norm', aggfunc='median')
-    table = table.dropna(axis=1, how='any')
+    full = frame.pivot_table(index='condition', columns='model',
+                             values='auc_norm', aggfunc='median')
+    table, dropped, reason = _widest_complete_block(full)
     n_raters, n_items = table.shape
-    if n_raters < 2 or n_items < 3:
+    if n_raters < 2 or n_items < MIN_RANKED_MODELS:
+        # A bare NaN here read as "the rankings do not agree", which is a
+        # finding, when what happened is that too few models have every
+        # condition to rank at all. Say which.
         return {'kendall_w': np.nan, 'p_value': np.nan, 'n_models': n_items,
-                'n_conditions': n_raters, 'rep': rep, 'models': list(table.columns)}
+                'n_conditions': n_raters, 'rep': rep,
+                'models': list(table.columns),
+                'conditions': list(table.index),
+                'conditions_dropped': dropped,
+                'reason': (f'{n_items} model(s) have all {n_raters} '
+                           f'condition(s) at {rep}. Kendall\'s W needs at '
+                           f'least {MIN_RANKED_MODELS} models and 2 '
+                           f'conditions, so it is not computed rather than '
+                           f'reported as a number.')}
     ranks = table.rank(axis=1, ascending=False).to_numpy()
     rank_sums = ranks.sum(axis=0)
     ss_between = float(((rank_sums - rank_sums.mean()) ** 2).sum())
@@ -361,7 +412,9 @@ def kendalls_w(auc_frame, rep, conditions=None, where="Kendall's W"):
     chi2 = n_raters * (n_items - 1) * w
     p = float(1 - stats.chi2.cdf(chi2, n_items - 1))
     return {'kendall_w': float(w), 'p_value': p, 'n_models': n_items,
-            'n_conditions': n_raters, 'rep': rep, 'models': list(table.columns)}
+            'n_conditions': n_raters, 'rep': rep,
+            'models': list(table.columns), 'conditions': list(table.index),
+            'conditions_dropped': dropped, 'reason': reason}
 
 
 def wilcoxon_paired(frame, value, group_col, a, b, pair_on, where='a paired test'):

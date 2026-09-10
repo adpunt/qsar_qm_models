@@ -362,6 +362,10 @@ def d3_condition_separation(per_replicate, summary, rep):
     spread = pd.DataFrame(spread_rows)
 
     kendall = M.kendalls_w(summary, rep)
+    # Lists do not survive a CSV round trip as lists, and a column holding
+    # "['gaussian', 'laplace']" is unreadable in a spreadsheet.
+    kendall_row = {k: ('; '.join(str(x) for x in v) if isinstance(v, list) else v)
+                   for k, v in kendall.items()}
     n_sig = int(paired['significant'].sum()) if len(paired) else 0
     n_exceed = int(spread['exceeds_wobble'].sum()) if len(spread) else 0
     fired = n_sig > 0 or n_exceed > len(spread) / 2
@@ -370,13 +374,16 @@ def d3_condition_separation(per_replicate, summary, rep):
             f'across conditions than across replicates. '
             f"Kendall's W = {kendall['kendall_w']:.3f} "
             f"(p = {kendall['p_value']:.2g}, {kendall['n_models']} models, "
-            f"{kendall['n_conditions']} conditions, {C.rep_label(rep)} only). "
+            f"{kendall['n_conditions']} condition(s) -- "
+            f"{kendall_row.get('conditions', '')} -- at {C.rep_label(rep)}). "
+            + (f"{kendall['reason'].capitalize()}. "
+               if kendall.get('conditions_dropped') else '')
             + ('The kind of noise matters, so F4 gets its one-line-per-condition '
                'panel (row 7).' if fired else
                'Only the AMOUNT matters, not the kind -- which is a headline '
                'finding in its own right (row 8).'))
     return ({'d3_condition_pairs': paired, 'd3_condition_spread': spread,
-             'd3_kendall_w': pd.DataFrame([kendall])},
+             'd3_kendall_w': pd.DataFrame([kendall_row])},
             _verdict('D3', 'Do the noise types separate the models?',
                      fired=fired, says=says, n_significant=n_sig,
                      kendall_w=kendall['kendall_w']))
