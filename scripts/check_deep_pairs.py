@@ -81,6 +81,36 @@ def main(argv=None):
         print(f'no rows at condition {args.condition!r}')
         return 1
 
+    # WERE THESE FITTED UNDER THE SAME SETTINGS? The tuned hyperparameters
+    # landed on 2026-09-01 and --use-best-params re-reads that file inside every
+    # training run, so a task that started before it fitted at the shared
+    # defaults and one that started after fitted at the tuned setting. A cell
+    # containing both is not one experiment, and ranking models on it compares
+    # some tuned fits against some untuned ones.
+    if 'params_source' in frame.columns:
+        counts = frame['params_source'].value_counts(dropna=False)
+        print('\nHYPERPARAMETER SOURCE across the rows being ranked')
+        for source, n in counts.items():
+            print(f'  {str(source):24s} {n:>7,} rows  '
+                  f'({n / len(frame):.0%})')
+        cell = [c for c in ('model', 'rep', 'condition') if c in frame.columns]
+        mixed = frame.groupby(cell, dropna=False)['params_source'].nunique()
+        n_mixed = int((mixed > 1).sum())
+        if n_mixed:
+            print(f'  ⚠ {n_mixed} of {len(mixed)} cells contain BOTH. Those '
+                  f'cells mix tuned and untuned fits, so their replicates are '
+                  f'not repeats of one experiment and the ranking below '
+                  f'compares some tuned models against some untuned ones.')
+            worst = mixed[mixed > 1].head(6)
+            for keys, _ in worst.items():
+                print('      ' + ' / '.join(str(k) for k in
+                                            (keys if isinstance(keys, tuple)
+                                             else (keys,))))
+            if n_mixed > 6:
+                print(f'      ... and {n_mixed - 6} more')
+        else:
+            print('  every cell is internally consistent')
+
     print(f'\nTHE SCREEN, at {C.condition_label(args.condition)}, '
           f'AUC_norm integrated per replicate then medianed.')
     print('IN = currently in deep_run_pairs.json\n')
