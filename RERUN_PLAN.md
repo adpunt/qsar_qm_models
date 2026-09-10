@@ -11087,13 +11087,47 @@ the statistic comes out NaN and labelled `noise_size_constant` rather than as a 
 out-of-fold pass would roughly quadruple a task already queued at `10:59:00`, and the roster of
 six that answers the aleatoric-versus-epistemic question is untouched.
 
-**Open, laboratory side.** The same widening applies to `val_mlp-vbll-full-hetero.sh`, 18 tasks
-at `134:00:00`. Not submitted: `grep -c deep_run_pairs` on the cluster copy returns 0, so that
-script has no selection gate, and yet its depth array `12986361` and censoring array `12986380`
-both completed all 18 tasks in 31 to 125 seconds on 2026-09-05. What made them exit that fast is
-not established. Settle it by listing what they wrote before resubmitting anything:
-`ls -d $KIRBY/results/validation_rerun/mlp-vbll-full-hetero_*` and
-`wc -l $KIRBY/results/validation_rerun/mlp-vbll-full-hetero_*/all_results.csv`.
+**Laboratory side — MEASURED 2026-09-10, and only the depth run is owed.** The depth array
+`12986361` and the censoring array `12986380` each completed all 18 tasks in 31 to 125 seconds on
+2026-09-05, against 16 minutes to 2 hours for the same 18 tasks of the breadth array `12971629`.
+They wrote nothing. Read off disk rather than inferred:
+
+```
+noise_type
+gaussian           1260
+grouped_wider      1260
+grouped_shifted    1260
+```
+
+That is every row this model has, across all 36 files under
+`/data/stat-ecr/scat9264/KIRBy/results/validation_rerun/mlp-vbll-full-hetero_*/*/all_results*.csv`
+(18 directories, each holding `all_results.csv` and `all_results_partial.csv`, so each cell is
+counted twice). `student_t_nu5`, `outlier_p10`, `laplace` and `censoring` are absent, so the
+depth and censoring tasks skipped.
+
+- **Depth: one submission owed.** `val_mlp-vbll-full-hetero.sh`, 18 tasks, `134:00:00`, with
+  `--account=stat-cadd` and `--partition=long` written into the script. Regenerate with
+  `--runtime-selection $SEL --include-depth-conditions` and take the array line out of
+  `submit_all.sh`; do not type a range.
+- **Censoring: nothing owed.** `MLP-VBLL-Full-Hetero` is not in `censoring_pairs.json`, and
+  censoring is a settled five-pair condition (§13.13, five pairs confirmed 2026-09-07), not a
+  cross product. Those tasks skipped correctly.
+
+⚠️ **The live laboratory script has no selection gate at all** — `grep -c deep_run_pairs` on the
+cluster copy returns 0 — so whatever made those tasks exit in a minute was inside the KIRBy
+runner, not the job script. Regenerating with `--runtime-selection` gives the script the gate,
+and `mlp_vbll_hetero` is now in the file it reads.
+
+⚠️ **Regenerate before submitting, and the reason is the output path.** The 18 directories above
+are named `model_rep_dataset` with no condition set in them, because the breadth grid that wrote
+them predates the 2026-09-05 change. The runner does an unlocked read-modify-write of
+`all_results.csv`, so a depth run submitted from a script of that vintage would write into those
+same directories and take the breadth rows with it. A regenerate fixes it, checked rather than
+assumed: the freshly generated depth script writes to
+`results/validation_rerun/mlp-vbll-full-hetero_${rep_safe}_6cond_stud_outl_lapl_${dataset}`, its
+own directory, and carries the selection gate. Submitting the stale script is the only way to
+lose those rows.
+
 
 
 ### 13.19 EVERY EXPERIMENT COMMAND, IN ORDER — assembled 2026-09-04
