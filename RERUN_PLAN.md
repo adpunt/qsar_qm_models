@@ -11058,6 +11058,44 @@ python slurm_scripts_validation_rerun/merge_results.py
 
 ---
 
+#### Submission 11 — the deep run widened to eight models, 2026-09-10
+
+`slurm_scripts_qm9_rerun`, `bash resubmit_selected.sh mlp_bnn_full_variational_hetero` after a
+regenerate at `--max-hours 720`.
+
+| | |
+|---|---|
+| Job ID | **13099373** (one array) |
+| Script | `qm9_s2_mlp_bnn_full_variational_hetero.sh` |
+| Tasks | **18 of the array's 36** — indices 0,1,4,6,7,10,12,13,16,18,19,22,24,25,28,30,31,34, written by the generator, throttle 5 |
+| Wall / memory | `10:59:00`, 64G, `--partition=long`, `--account=stat-cadd` |
+| What it is | The NN-beta family had no model in the deep run at all. `mlp_vbll_hetero` is the beta mirror of `dnn_vbll_hetero`, and on the landed screen at gaussian it is second from the bottom on all three representations: AUC_norm 0.8913 ECFP4, 0.9080 PDV, 0.8536 ChemBERTa. It covers the missing family and the least-tolerant edge of §13.17 B at once |
+| Why a resubmission and not a JSON edit | `deep_run_pairs.json` is read when a task starts, so narrowing is free — but these 18 tasks had already started and skipped, and a task that skipped stays skipped |
+| Pushed as | `b376678` on `additional_reps`; the cluster confirmed `generator_labels` carries `mlp_bnn_full_variational_hetero` |
+
+⚠️ **The file carries three parallel name lists and the task gate reads `generator_labels` first**,
+falling back to `models` only when `generator_labels` is absent. A model written into `models`
+alone changes nothing and every task goes on skipping, silently. All three were updated together:
+`mlp_vbll_hetero` / `mlp_bnn_full_variational_hetero` / `MLP-VBLL-Full-Hetero`.
+
+**§13.27 D4j now covers THREE models, not two.** The generator warns that
+`dnn_bnn_full_variational_hetero`, `heteroscedastic_gp` and now
+`mlp_bnn_full_variational_hetero` are on the deep run but not on `uncertainty_pairs.json`, so
+`-u True` writes an uncertainty column scored on the test split where the injected noise is
+zero. D4j's decision — leave them off the uncertainty roster — applies unchanged to the third:
+the statistic comes out NaN and labelled `noise_size_constant` rather than as a value, the
+out-of-fold pass would roughly quadruple a task already queued at `10:59:00`, and the roster of
+six that answers the aleatoric-versus-epistemic question is untouched.
+
+**Open, laboratory side.** The same widening applies to `val_mlp-vbll-full-hetero.sh`, 18 tasks
+at `134:00:00`. Not submitted: `grep -c deep_run_pairs` on the cluster copy returns 0, so that
+script has no selection gate, and yet its depth array `12986361` and censoring array `12986380`
+both completed all 18 tasks in 31 to 125 seconds on 2026-09-05. What made them exit that fast is
+not established. Settle it by listing what they wrote before resubmitting anything:
+`ls -d $KIRBY/results/validation_rerun/mlp-vbll-full-hetero_*` and
+`wc -l $KIRBY/results/validation_rerun/mlp-vbll-full-hetero_*/all_results.csv`.
+
+
 ### 13.19 EVERY EXPERIMENT COMMAND, IN ORDER — assembled 2026-09-04
 
 **Every count below came from running the generator, not from typing.** Rebuild any of them the
