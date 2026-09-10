@@ -103,11 +103,11 @@ import figlib_tables as TAB  # noqa: E402
 import figlib_uncertainty as U  # noqa: E402
 
 STAGE_2_MESSAGE = (
-    'The figures and tables are Stage 2 and are not built yet. Stage 1 is the '
-    'guard, the loaders, the metrics and the decision report, because F3\'s '
-    'panel count, F7\'s option and the held-constant representation are all '
-    'inputs to drawing and are settled from the numbers first '
-    '(RERUN_PLAN.md 14.9). Run with --only decisions.')
+    'The decisions come first and the figures are drawn from them, not '
+    'alongside them: F3\'s panel count, F7\'s option and which contingent '
+    'figures exist at all are settled from the numbers before anything is '
+    'drawn (RERUN_PLAN.md 14.9, 14.11). A slot that drew nothing did not fire, '
+    'and the report says which.')
 
 
 def parse_args(argv=None):
@@ -300,10 +300,17 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
             # F6 draws the two components against the level, and F7 draws one
             # of the two curves. All three come out of the same streaming pass,
             # so the figures cannot disagree with the statistics beside them.
-            for key in ('q5', 'retention', 'enrichment'):
+            # The two curves are one row per (cell, series, fraction) and
+            # run to hundreds of thousands of rows, so they are carried for
+            # the figures and NOT written out; the leading underscore is what
+            # keeps them out of the CSV sweep. q5 is per cell and component,
+            # which is small and is what T6's slopes are read from.
+            if stats.get('q5') is not None and len(stats['q5']):
+                tables['unc_q5'] = stats['q5']
+            for key in ('retention', 'enrichment'):
                 got = stats.get(key)
                 if got is not None and len(got):
-                    tables[f'unc_{key}'] = got
+                    tables[f'_unc_{key}'] = got
             if support is not None and len(support):
                 tables['unc_support'] = support
             if slopes is not None and len(slopes):
@@ -374,7 +381,7 @@ def draw_figures(args, tables, verdicts):
 
     drawn = [d for d in drawn if d]
     FIG.write_captions(out)
-    waiting = [n for n, k in (('F6', 'unc_q5'), ('F7', 'unc_retention'))
+    waiting = [n for n, k in (('F6', 'unc_q5'), ('F7', '_unc_retention'))
                if tables.get(k) is None]
     print(f'  {len(drawn)} figure(s) and captions.md.'
           + (f' {" and ".join(waiting)} wait on the uncertainty runs.'
@@ -461,10 +468,10 @@ def _draw_uncertainty(tables, said, out, rep, conditions):
     if option in ('7A', '7B', '7C'):
         drawn.append(FIG.f7_uncertainty(
             option, out, rep, first,
-            retention=tables.get('unc_retention'),
-            enrichment=tables.get('unc_enrichment'),
+            retention=tables.get('_unc_retention'),
+            enrichment=tables.get('_unc_enrichment'),
             q4=tables.get('d7_q4')))
-    elif tables.get('unc_retention') is not None:
+    elif tables.get('_unc_retention') is not None:
         print('  D7 is undecided, so no F7 is drawn. The three options are in '
               'RERUN_PLAN.md 14.5 F7 and d7_q4.csv carries the numbers.')
     return drawn
@@ -497,7 +504,11 @@ def build_tables(args, tables, verdicts):
         built.append(TAB.t7_rank_transfer(tables['d9_rank_transfer'], out))
 
     built = [b for b in built if b is not None]
-    print(f'  {len(built)} table slot(s) written. T6 needs the uncertainty runs.')
+    missing = [n for n, k in (('T6', 'd8_support'), ('T7', 'd9_rank_transfer'))
+               if tables.get(k) is None]
+    print(f'  {len(built)} table slot(s) written.'
+          + (f' {", ".join(missing)} had nothing to build from.'
+             if missing else ''))
     return built
 
 

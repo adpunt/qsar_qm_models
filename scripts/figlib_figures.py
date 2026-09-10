@@ -845,11 +845,14 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
         attributing added label noise to the data has an aleatoric line that
         climbs and an epistemic line that holds. A component that is one number
         per fit is not drawn as a line, and its support flag is printed on the
-        panel instead. Verdicts are from the slopes, not read off the picture.""")
+        panel instead. The bottom axis is the noise level, a fraction of the
+        clean training label spread. Every panel starts at zero, so a component
+        that holds still looks like one. Verdicts are from the slopes, not read
+        off the picture.""")
 
     ncols = min(len(models), 4)
     nrows = int(np.ceil(len(models) / ncols))
-    fig, axes = _fig(height=2.1 * nrows + 0.9, nrows=nrows, ncols=ncols,
+    fig, axes = _fig(height=2.5 * nrows + 1.1, nrows=nrows, ncols=ncols,
                      sharex=True)
     axes = np.atleast_1d(axes).ravel()
     for index, (ax, model) in enumerate(zip(axes, models)):
@@ -873,21 +876,53 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
         missing = [c for c in ('aleatoric', 'epistemic') if c not in drawn]
         if missing and model in flags:
             said = dict(zip(('aleatoric', 'epistemic'), flags[model]))
-            note = '; '.join(f'{c}: {said.get(c, "unrecorded")}'
-                             for c in missing)
-            S.stat_box(ax, f'not drawn -- {note}')
-        elif model in verdicts and verdicts[model]:
-            S.stat_box(ax, verdicts[model][:46])
+            note = 'not drawn: ' + '; '.join(
+                f'{c} is {said.get(c, "unrecorded").replace("_", " ")}'
+                for c in missing)
+        else:
+            note = verdicts.get(model, '')
+        # From zero. A model whose model half really is flat wobbles by a
+        # thousandth, and a panel scaled to its own range turns that into a
+        # mountain -- which is the opposite of what the panel is claiming.
+        ax.set_ylim(bottom=0)
         S.title(ax, 'abcdefgh'[index], C.model_label(model))
+        if note:
+            _panel_note(ax, note)
         ax.spines[['top', 'right']].set_visible(False)
         if index % ncols == 0:
             ax.set_ylabel('Mean predicted uncertainty\n(label units)')
-        if index >= len(models) - ncols:
-            ax.set_xlabel(LEVEL_AXIS)
     for ax in axes[len(models):]:
         ax.set_visible(False)
+    # The short form of the bottom-axis label. The full one -- "fraction of
+    # label spread" -- is four times the panel width here, and the caption
+    # carries the unit instead.
+    for ax in axes[len(models) - ncols:len(models)]:
+        ax.set_xlabel('Noise level')
     S.shared_legend(fig, axes[0], ncol=2)
     return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
+
+
+def _panel_note(ax, text, width=24):
+    """A verdict printed inside a panel, wrapped to the panel's width.
+
+    Not `stat_box`, and not the title: at four panels across, a box wide enough
+    to hold "BOTH components rise -- the split failed" is wider than the panel
+    and lands on its neighbour, and the title slot belongs to the model's name.
+
+    Top left where the lines rise from the bottom, bottom left where they do
+    not -- a model whose uncertainty is flat and high fills the top of its
+    panel, and the note landed on the line.
+    """
+    import textwrap
+    low, high = ax.get_ylim()
+    span = (high - low) or 1.0
+    left = [line.get_ydata()[:3] for line in ax.get_lines()
+            if len(line.get_ydata())]
+    crowded = any(float(np.nanmax(y)) > low + 0.6 * span for y in left if len(y))
+    y, va = (0.03, 'bottom') if crowded else (0.97, 'top')
+    ax.text(0.03, y, '\n'.join(textwrap.wrap(text, width)),
+            transform=ax.transAxes, fontsize=6, va=va, ha='left',
+            color='#444444', linespacing=1.25)
 
 
 # ---------------------------------------------------------------------------
@@ -1045,7 +1080,7 @@ def _f7b_enrichment(enrichment, output_dir, rep, condition, dataset='qm9',
                 linestyle=C.CURVE_STYLES[series], color=C.CURVE_COLORS[series],
                 label=C.curve_label(series), zorder=1)
     ax.set_xlabel('Fraction of molecules inspected, most suspicious first')
-    ax.set_ylabel('Fraction of the corrupted labels found')
+    ax.set_ylabel('Fraction of the corrupted\nlabels found')
     ax.spines[['top', 'right']].set_visible(False)
     S.shared_legend(fig, ax, ncol=3)
     return S.save(fig, Path(output_dir) / 'F7_enrichment.png')

@@ -354,14 +354,16 @@ COMPONENT_LABELS = {'aleatoric': 'Aleatoric (data)',
 #: The three lines on each F7 panel. The two references are grey on purpose:
 #: they are what the model's own line is read against, not results themselves.
 CURVE_COLORS = {'uncertainty': '#0072B2', 'ratio': '#0072B2',
-                'error': '#666666', 'oracle': '#009E73', 'random': '#999999'}
+                'error': '#666666', 'oracle': '#009E73', 'random': '#AAAAAA'}
 CURVE_LABELS = {'uncertainty': 'Ordered by predicted uncertainty',
                 'ratio': 'Ordered by error / uncertainty',
                 'error': 'Ordered by out-of-fold error alone',
                 'oracle': 'Ordered by true error (the best possible)',
                 'random': 'No ordering'}
+#: 'random' is dotted and the palest, because on the enrichment curve it sits
+#: beside 'error' and two dashed grey lines cannot be told apart.
 CURVE_STYLES = {'uncertainty': '-', 'ratio': '-', 'error': '--',
-                'oracle': ':', 'random': '--'}
+                'oracle': ':', 'random': ':'}
 
 
 def component_label(name):

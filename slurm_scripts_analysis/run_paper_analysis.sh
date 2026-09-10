@@ -1,8 +1,14 @@
 #!/bin/bash
-# The decision report: every open figure choice in RERUN_PLAN.md 14.6 and 14.9,
-# with the number that settles it. Stage 1 -- no figures yet, by design.
+# The decision report AND the figures and tables: every open figure choice in
+# RERUN_PLAN.md 14.6 and 14.9, with the number that settles it, then every slot
+# the data supports drawn from those numbers.
 #
 #   sbatch run_paper_analysis.sh
+#
+# ONLY=decisions gets the report alone, which is what this did before F6 and F7
+# existed (2026-09-10, section 14.11). Nothing drawn is a taste: a contingent
+# figure appears only when its decision fired, and F7 draws whichever of its
+# three options D7 chose.
 #
 # Two things this does NOT do, and the old run_figures_v2.sh does both:
 #   * it does not `eval` a micromamba shell hook. micromamba has never worked on
@@ -68,6 +74,7 @@ python scripts/run_paper_analysis.py \
   --cache-dir "$QSAR/results/.figcache" \
   --permutations "${PERMUTATIONS:-200}" \
   ${SKIP_UNCERTAINTY:+--skip-uncertainty} \
-  --only decisions
+  --only "${ONLY:-all}"
 
 echo "done. read $QSAR/results/decisions/DECISIONS.md"
+echo "figures in $QSAR/results/decisions/figures, tables in .../tables"
