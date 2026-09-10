@@ -60,8 +60,35 @@ _ROOT = os.path.dirname(_HERE)
 
 GENERATOR_PATH = os.path.join(
     _ROOT, 'slurm_scripts_qm9_rerun', 'generate_scripts.py')
-KIRBY_PIPELINE_PATH = os.path.expanduser(
-    '~/repos/KIRBy/tests/alternative_data_noise_robustness.py')
+def _kirby_pipeline_path():
+    """Where the laboratory runner is, wherever this is running.
+
+    It was hardcoded to ~/repos/KIRBy, which is the laptop's layout. On ARC
+    the checkout is /data/stat-ecr/scat9264/KIRBy, so every gate that checks
+    the laboratory reader printed "not on this machine" and SKIPPED -- on
+    the one machine where that reader actually matters. A skip is not a
+    pass, and what it was not checking is whether the assay jobs read the
+    tuned settings at all or ran every model at its default.
+
+    $KIRBY first, because runenv.sh exports it; then the ARC path; then the
+    laptop's.
+    """
+    candidates = []
+    env = os.environ.get('KIRBY')
+    if env:
+        candidates.append(os.path.join(
+            env, 'tests', 'alternative_data_noise_robustness.py'))
+    candidates.append('/data/stat-ecr/scat9264/KIRBy/tests/'
+                      'alternative_data_noise_robustness.py')
+    candidates.append(os.path.expanduser(
+        '~/repos/KIRBy/tests/alternative_data_noise_robustness.py'))
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[-1]
+
+
+KIRBY_PIPELINE_PATH = _kirby_pipeline_path()
 
 
 def _generator():

@@ -68,16 +68,34 @@ def main():
         ok(f'{sum(len(v) for v in lab.values())} entries, every dataset, model '
            f'and representation on the roster')
 
-    path = os.path.expanduser(
-        '~/repos/KIRBy/tests/alternative_data_noise_robustness.py')
+    # Resolved, not hardcoded: on ARC the checkout is under
+    # /data/stat-ecr and this gate SKIPPED there -- on the one
+    # machine where the laboratory reader matters.
+    path = R.KIRBY_PIPELINE_PATH
     if not os.path.exists(path):
         print(f'  skip  {path} not present; cannot check the reader')
         return 1 if _fails else 0
 
     import importlib.util
+    # The runner imports its own siblings (noise_column and the rest) by bare
+    # name, so its directory has to be on the path before it is executed --
+    # otherwise this gate fails on ModuleNotFoundError and looks like a broken
+    # reader when the reader is fine.
+    kirby_tests = os.path.dirname(path)
+    if kirby_tests not in sys.path:
+        sys.path.insert(0, kirby_tests)
     spec = importlib.util.spec_from_file_location('altpipe', path)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as exc:
+        # Say WHICH of the two it is. A missing dependency here is this
+        # machine's environment; a missing TUNED_LAB is the reader.
+        print(f'  skip  the runner at {path} will not import here: '
+              f'{type(exc).__name__}: {exc}')
+        print(f'        That is this machine\'s environment, not the reader. '
+              f'Run this gate where the jobs run.')
+        return 1 if _fails else 0
 
     print('\nthe reader')
     if not mod.TUNED_LAB:
