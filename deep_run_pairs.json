@@ -1,6 +1,6 @@
 {
   "what_this_is": "The models and representations the DEEP RUN and CENSORING run on, on both pipelines. Read by every deep-run task WHEN IT STARTS, not when it was generated -- so this file can be edited at any time up to the moment a task begins, and that is the point of it.",
-  "the_rule": "RERUN_PLAN.md 13.17 B. Seeded 2026-09-05 with the six models the author settled on 2026-09-04, before the screen finished. SETTLED 2026-09-07: the author's call was to keep het_gp_rbf AND add dnn_vbll_hetero, so this is seven models. Re-read it with: python scripts/select_deep_run_pairs.py --results-dir results",
+  "the_rule": "RERUN_PLAN.md 13.17 B. Seeded 2026-09-05 with the six models the author settled on 2026-09-04, before the screen finished. SETTLED 2026-09-07: the author's call was to keep het_gp_rbf AND add dnn_vbll_hetero, so this is seven models. Re-read it with: python scripts/select_deep_run_pairs.py --results-dir results WIDENED 2026-09-10 to eight models: mlp_vbll_hetero added for the NN-beta family, which had nobody.",
   "one_way": "NARROWING this list later is free -- a task that is no longer listed skips and exits 0. WIDENING it means resubmitting the indices of the models you add, because a task that already skipped stays skipped.",
   "models": [
     "ngboost",
@@ -9,7 +9,8 @@
     "svm",
     "gauche_rbf",
     "dnn_bnn_full_mve",
-    "dnn_vbll_hetero"
+    "dnn_vbll_hetero",
+    "mlp_vbll_hetero"
   ],
   "generator_labels": [
     "ngboost",
@@ -18,7 +19,8 @@
     "svm",
     "gauche_rbf",
     "dnn_bnn_full_mve",
-    "dnn_bnn_full_variational_hetero"
+    "dnn_bnn_full_variational_hetero",
+    "mlp_bnn_full_variational_hetero"
   ],
   "validation_labels": [
     "NGBoost",
@@ -27,7 +29,8 @@
     "SVM",
     "GP",
     "BNN-Full-MVE",
-    "VBLL-Full-Hetero"
+    "VBLL-Full-Hetero",
+    "MLP-VBLL-Full-Hetero"
   ],
   "representations": [
     "ecfp4",
@@ -41,7 +44,8 @@
     "svm": "the only kernel model; covers a family nothing else does",
     "gauche_rbf": "author's addition, for the per-molecule uncertainty requirement: aleatoric x17.2 against epistemic x1.5, the cleanest separation in the roster (5.5i). KEPT 2026-09-07: the reading picks `gauche` for the Gaussian-process slot on its position in MODEL_ORDER, not on a score, and `gauche` is the Tanimoto kernel, defined on binary fingerprints alone -- taking it would leave the deep run with no Gaussian process on PDV or ChemBERTa",
     "dnn_bnn_full_mve": "author's addition: x2.5 against x1.1, and the literature's flagship variance-head case. KEPT 2026-09-07: the reading picks `dnn` for the plain-neural slot on MODEL_ORDER position, and dropping this model would leave censoring with one model emitting a per-molecule uncertainty where noise_conditions.json requires two",
-    "dnn_vbll_hetero": "author, 2026-09-07: added alongside het_gp_rbf. It is what the corrected reading picks for the least noise-tolerant slot -- lower auc_norm than het_gp_rbf on all nine combinations of three representations and three noise types, e.g. ECFP4 under gaussian 0.8838 against 0.9238 (RERUN_PLAN.md 13.27 D4a). Its 18 tasks had already skipped, so they need resubmitting: bash resubmit_selected.sh dnn_bnn_full_variational_hetero"
+    "dnn_vbll_hetero": "author, 2026-09-07: added alongside het_gp_rbf. It is what the corrected reading picks for the least noise-tolerant slot -- lower auc_norm than het_gp_rbf on all nine combinations of three representations and three noise types, e.g. ECFP4 under gaussian 0.8838 against 0.9238 (RERUN_PLAN.md 13.27 D4a). Its 18 tasks had already skipped, so they need resubmitting: bash resubmit_selected.sh dnn_bnn_full_variational_hetero",
+    "mlp_vbll_hetero": "author, 2026-09-10: the NN-beta family had no model in the deep run at all, and 13.17 B asks for one from each remaining family. This is the beta mirror of dnn_vbll_hetero, already in, and it sits second from the bottom of the ranking on all three representations under gaussian -- 0.8913 on ECFP4, 0.9080 on PDV, 0.8536 on ChemBERTa -- so it covers the missing family and the least-tolerant edge at once. Its 18 tasks of 36 had already skipped, so they need resubmitting: bash resubmit_selected.sh mlp_bnn_full_variational_hetero"
   },
   "provisional": false,
   "settled": "2026-09-07 by the author, on the corrected reading at six models over 20,224 result rows. Three slots were in question; one was decided by keeping both candidates and the other two by the reading having picked its candidates off MODEL_ORDER rather than off a number. RERUN_PLAN.md 13.27 D4."
