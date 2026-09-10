@@ -110,6 +110,25 @@ def main(argv=None):
                 print(f'      ... and {n_mixed - 6} more')
         else:
             print('  every cell is internally consistent')
+        # WHICH MODELS are tuned. Cells being internally consistent is not the
+        # end of it: if some models were tuned and others were not, the ranking
+        # below is partly a ranking of who got tuned. Only a few models in this
+        # study can be handed a setting that reaches them alone (RERUN_PLAN.md
+        # 5.7a), so an unequal split is expected -- and it lands on the model at
+        # the top of the ranking.
+        by_model = (frame.groupby('model')['params_source']
+                    .agg(lambda s: '/'.join(sorted(set(s.dropna().astype(str))))))
+        tuned = sorted(m for m, v in by_model.items() if 'tuned' in v)
+        untuned = sorted(m for m, v in by_model.items() if 'tuned' not in v)
+        if tuned and untuned:
+            print(f'  ⚠ {len(tuned)} model(s) were fitted at TUNED settings and '
+                  f'{len(untuned)} at the shared defaults:')
+            print(f'      tuned  : {[C.model_label(m) for m in tuned]}')
+            print(f'      default: {[C.model_label(m) for m in untuned][:8]}'
+                  + (' ...' if len(untuned) > 8 else ''))
+            print(f'    The ranking below therefore compares tuned models '
+                  f'against untuned ones. A model near the top that is in the '
+                  f'tuned list may be there because it was tuned.')
 
     print(f'\nTHE SCREEN, at {C.condition_label(args.condition)}, '
           f'AUC_norm integrated per replicate then medianed.')
