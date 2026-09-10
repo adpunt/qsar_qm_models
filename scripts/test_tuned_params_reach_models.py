@@ -410,7 +410,41 @@ def main():
     assert set(keys) == builders, (
         f'the fitted key list is stale: builders are {sorted(builders)}, '
         f'fitted are {sorted(keys)}')
-    for key in keys:
+    # THE MODELS THAT ACTUALLY HAVE TUNED SETTINGS GO FIRST.
+    #
+    # On 2026-09-10 this test died on an Intel MKL loader fault after checking
+    # rf, svm, xgboost, lgb and ngboost -- five models with NO tuned entry --
+    # and never reached dnn_bnn_full, dnn_bnn_full_variational, mlp_bnn_full or
+    # mlp_bnn_full_variational, which are the only four that have one. So the
+    # gate that exists to prove the QM9 settings arrive at a fit had verified
+    # nothing about any model whose settings could arrive, and the crash looked
+    # like an environment problem rather than an unchecked claim.
+    #
+    # Ordering by what is in the master file means a crash part-way through now
+    # costs the checks that matter least, not the ones that matter most.
+    tuned_now = set()
+    if os.path.exists(MASTER):
+        try:
+            with open(MASTER) as fh:
+                tuned_now = set(json.load(fh))
+        except Exception:
+            tuned_now = set()
+    # `keys` are BUILDER names (dnn, mlp, rf ...) and the master file is keyed
+    # by MODEL name (dnn_bnn_full, mlp_bnn_full_variational ...), so the test is
+    # which builders any tuned model resolves to -- BUILDER_OF read forwards,
+    # not backwards.
+    tuned_builders = {BUILDER_OF[m] for m in tuned_now if m in BUILDER_OF}
+
+    def _is_tuned(k):
+        return k in tuned_builders
+
+    first = [k for k in keys if _is_tuned(k)]
+    rest = [k for k in keys if not _is_tuned(k)]
+    ordered = first + rest
+    if tuned_now:
+        print(f'  {len(first)} builder(s) behind a tuned entry, checked first; '
+              f'{len(rest)} with no tuned settings to deliver')
+    for key in ordered:
         check_key_reaches(key, SYNTHETIC[key], tuner, rosters, 'synthetic')
 
     print('\nthe master file on disk')
