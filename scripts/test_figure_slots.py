@@ -237,6 +237,35 @@ def test_guards_still_bite(out):
               raised == '', raised[:90])
 
 
+def test_smoke_output_never_reaches_a_statistic():
+    """A smoke test writes a real model, representation and condition."""
+    print('  smoke-test output, which is indistinguishable once loaded')
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        FX.write_per_molecule(directory, models=['qrf'], reps=['pdv'],
+                              conditions=['gaussian'])
+        real = sorted(directory.glob('*_uncertainty_values.csv'))
+        smoke = directory / 'SMOKE_mve_dnn_uncertainty_values.csv'
+        smoke.write_bytes(real[0].read_bytes())
+        nested = directory / 'smoke_arc' / 'anything_uncertainty_values.csv'
+        nested.parent.mkdir()
+        nested.write_bytes(real[0].read_bytes())
+
+        found = U.discover([directory])
+        check('the SMOKE_ file is not read',
+              smoke not in found, str(smoke.name))
+        check('anything under smoke_arc/ is not read', nested not in found)
+        check('the real files still are', len(found) == len(real),
+              f'{len(found)} of {len(real)}')
+
+        # And it must not come back through the statistics either, which
+        # discover for themselves.
+        stats = U.statistics([directory], permutations=0)
+        check('the smoke rows reached no statistic',
+              stats.get('n_files') == len(real),
+              f"{stats.get('n_files')} file(s) read")
+
+
 def test_kendall_says_what_it_used():
     """Kendall's W is a number or a reason, and never a bare NaN."""
     print("  Kendall's W, where four conditions run on two models")
@@ -280,6 +309,7 @@ def main():
         test_uncertainty_figures(out)
         test_contingent_figures(out)
         test_guards_still_bite(out)
+        test_smoke_output_never_reaches_a_statistic()
         test_kendall_says_what_it_used()
     print()
     if FAILURES:

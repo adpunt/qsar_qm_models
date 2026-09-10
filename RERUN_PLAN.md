@@ -15634,6 +15634,22 @@ every other statistic.
   levels, and the averaging guard refused to draw it — sigma is a factor. It holds one level now,
   the reporting level, like the two curve options.
 
+#### The smoke test writes a real model, representation and condition
+
+`results/SMOKE_mve_dnn_uncertainty_values.csv` and `results/SMOKE_mve_mlp_uncertainty_values.csv`
+were on the cluster on 2026-09-10 and both load cleanly. Each says QM9,
+`dnn_bnn_full_mve`, PDV, Gaussian, fold 0, two noise levels, 360 molecules — a
+combination the study reports, and 360 molecules clears the 20-molecule sufficiency gate. Once
+loaded nothing distinguishes them from a task's output, so they would have entered Q4, Q5 and Q6 as
+measurements.
+
+Files from before the runner rewrite are already safe: the loader refuses them by name and lists
+what they are missing. These are not old, they are fake, and nothing was looking for that.
+`figlib_uncertainty.discover` drops anything named `SMOKE_*` or sitting under `smoke_arc/`, and
+**names what it dropped** — a quietly shorter file list is indistinguishable from tasks that have
+not landed, which is the question the pass is being run to answer. Guarded by
+`smoke_output_never_reaches_a_statistic` in `scripts/test_figure_slots.py`.
+
 #### Kendall's W was `nan`, and the reason was structural
 
 It kept only models present under EVERY condition. Three conditions run on the whole roster and four

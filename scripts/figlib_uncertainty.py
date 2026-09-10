@@ -299,10 +299,34 @@ def _median_over_folds(curve):
     return out
 
 
-def discover(sources, pattern='*_uncertainty_values.csv'):
-    """Every per-molecule file under the given roots, de-duplicated."""
+#: A smoke test writes the same columns a real task writes, so once it is loaded
+#: nothing tells the two apart -- `results/SMOKE_mve_dnn_uncertainty_values.csv`
+#: says qm9 / dnn_bnn_full_mve / pdv / gaussian, fold 0, 360 molecules at two
+#: levels, which is a cell the study reports and a sufficiency gate it passes.
+#: The naming is the only marker there is, and `launch_screen.sh:71` already
+#: treats `results/SMOKE_*.csv` as the convention.
+SMOKE_PREFIXES = ('SMOKE_',)
+SMOKE_DIRECTORIES = ('smoke_arc',)
+
+
+def is_smoke_test(path):
+    """A file a smoke test wrote, which must not reach a reported statistic."""
     from pathlib import Path as _Path
-    found, seen = [], set()
+    path = _Path(path)
+    if path.name.startswith(SMOKE_PREFIXES):
+        return True
+    return any(part in SMOKE_DIRECTORIES for part in path.parts)
+
+
+def discover(sources, pattern='*_uncertainty_values.csv', where='per-molecule'):
+    """Every per-molecule file under the given roots, de-duplicated.
+
+    Smoke-test output is dropped here and NAMED, never dropped quietly: a
+    silently shorter file list is indistinguishable from tasks that have not
+    landed, which is the question this whole pass is being run to answer.
+    """
+    from pathlib import Path as _Path
+    found, seen, smoke = [], set(), []
     for source in (sources or []):
         if not source:
             continue
@@ -311,9 +335,18 @@ def discover(sources, pattern='*_uncertainty_values.csv'):
                       else sorted(path.rglob(pattern)) if path.is_dir() else [])
         for c in candidates:
             key = str(c.resolve())
-            if key not in seen:
-                seen.add(key)
-                found.append(c)
+            if key in seen:
+                continue
+            seen.add(key)
+            (smoke if is_smoke_test(c) else found).append(c)
+    if smoke:
+        print(f'  {where}: {len(smoke)} smoke-test file(s) NOT read -- they '
+              f'carry a real model, representation and condition and would '
+              f'enter the reported statistics as measurements:')
+        for path in smoke[:5]:
+            print(f'      {path.name}')
+        if len(smoke) > 5:
+            print(f'      ... and {len(smoke) - 5} more')
     return found
 
 
