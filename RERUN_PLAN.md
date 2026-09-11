@@ -11105,10 +11105,33 @@ That is every row this model has, across all 36 files under
 counted twice). `student_t_nu5`, `outlier_p10`, `laplace` and `censoring` are absent, so the
 depth and censoring tasks skipped.
 
-- **Depth: one submission owed.** `val_mlp-vbll-full-hetero.sh`, 18 tasks, `134:00:00`, with
-  `--account=stat-cadd` and `--partition=long` written into the script. Regenerate with
-  `--runtime-selection $SEL --include-depth-conditions` and take the array line out of
-  `submit_all.sh`; do not type a range.
+- **Depth: SUBMITTED 2026-09-11 as job `13111529`.** `val_mlp-vbll-full-hetero.sh`, 18 tasks at
+  `--array=0-17%4`, `67:00:00`, `--account=stat-cadd` and `--partition=long` inside the script.
+  Nine of the 18 do work — three datasets times the three selected representations — and nine
+  exit on the gate. Generated into a NEW directory, `slurm_scripts_validation_depth3`, with the
+  conditions narrowed to the three depth-only ones:
+
+  ```bash
+  python generate_scripts.py --conditions student_t_nu5 outlier_p10 laplace \
+      --runtime-selection $SEL --out-dir $QSAR/slurm_scripts_validation_depth3
+  ```
+
+  **Why narrowed.** `--include-depth-conditions` emits six — the three depth ones and the three
+  the breadth grid already runs — and §13.19 STEP 5 says to narrow when the breadth grid has
+  landed for those pairs. It had: the row counts above are that evidence. The wall halves,
+  `134:00:00` to `67:00:00`.
+
+  **Why a new directory and not `slurm_scripts_validation_depth`.** Regenerating that one at
+  three conditions would rewrite all 19 models' depth scripts there, and the seven other
+  selected models are running their depth run from the six-condition versions in it.
+
+  **Why not `submit_all.sh`.** It submits all 19 arrays, and for the seven models already in the
+  selection those tasks would repeat work for real rather than skip. One `sbatch` line, copied
+  from `submit_all.sh` so no range is typed.
+
+  ⚠️ The generator REFUSES a non-default condition set written into its own directory:
+  *"would overwrite the breadth grid's nineteen val_*.sh and its submit_all.sh, with nothing to
+  restore them from"*. `--out-dir` is not optional here.
 - **Censoring: nothing owed.** `MLP-VBLL-Full-Hetero` is not in `censoring_pairs.json`, and
   censoring is a settled five-pair condition (§13.13, five pairs confirmed 2026-09-07), not a
   cross product. Those tasks skipped correctly.
