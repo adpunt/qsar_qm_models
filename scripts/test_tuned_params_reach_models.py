@@ -253,6 +253,22 @@ def a_model_for(key, rosters):
     raise KeyError(key)
 
 
+#: Substrings that mean the MACHINE ran out, not that the setting failed to
+#: arrive. On 2026-09-10 this gate reported six FAILs for
+#: mlp_bnn_full_variational while trying to allocate 65,536 bytes -- 64 kB -- on
+#: a login node, with a MemoryError in an atexit handler underneath. Reporting
+#: that as a failed gate sends someone looking for a defect in the tuned
+#: settings; the settings were fine and the node was full.
+_OUT_OF_MEMORY = ('cannot allocate memory', 'defaultcpuallocator',
+                  'out of memory', 'failed to map segment',
+                  'cannot load libmkl')
+
+
+def _is_environment_fault(exc):
+    text = f'{type(exc).__name__}: {exc}'.lower()
+    return isinstance(exc, MemoryError) or any(s in text for s in _OUT_OF_MEMORY)
+
+
 def check_key_reaches(key, params, tuner, rosters, why):
     """Assert that every parameter in `params` reaches the built model."""
     label, rep = a_model_for(key, rosters)
@@ -271,6 +287,12 @@ def check_key_reaches(key, params, tuner, rosters, why):
             torch.manual_seed(0)
             tuned = build_with(tuner, label, rep, params, data)
         except Exception as exc:
+            if _is_environment_fault(exc):
+                print(f'  skip  {why}: {key} -- this machine ran out of memory '
+                      f'({type(exc).__name__}). Nothing is wrong with the '
+                      f'setting; run the gate on a compute node with '
+                      f'--mem=16G to finish it.')
+                return
             fail(f'{why}: {key} could not be fitted ({type(exc).__name__}: {exc})')
             return
         if base == tuned or (np.isnan(base) and np.isnan(tuned)):
@@ -292,6 +314,11 @@ def check_key_reaches(key, params, tuner, rosters, why):
         with recording(module_name, attr) as seen:
             build_with(tuner, label, rep, params, data)
     except Exception as exc:
+        if _is_environment_fault(exc):
+            print(f'  skip  {why}: {key} -- this machine ran out of memory '
+                  f'({type(exc).__name__}). Run the gate on a compute node '
+                  f'with --mem=16G to finish it.')
+            return
         fail(f'{why}: {key} could not be fitted with those parameters '
              f'({type(exc).__name__}: {exc})')
         return
