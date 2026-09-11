@@ -411,9 +411,18 @@ def grouped_bars(ax, frame, category, series, value, spread=None,
                 if clip is not None:
                     # A share of variance cannot be below 0 or above 100, so a
                     # whisker that runs past either is drawn to the bound.
+                    #
+                    # The maximum is not decoration. A share comes back at
+                    # -1.6e-14 from the sequential sums of squares -- rounding,
+                    # not a negative share -- and clipping its lower arm to 0
+                    # then made that arm -1.6e-14 long, which matplotlib
+                    # refuses outright: "'yerr' must not contain negative
+                    # values". A whisker is a distance, so it is floored at
+                    # zero whatever the bar does.
                     lo = np.maximum(heights - whisk, clip[0])
                     hi = np.minimum(heights + whisk, clip[1])
-                    whisk = np.vstack([heights - lo, hi - heights])
+                    whisk = np.vstack([np.maximum(heights - lo, 0.0),
+                                       np.maximum(hi - heights, 0.0)])
                 ax.errorbar(index + offset, heights, yerr=whisk, fmt='none',
                             ecolor='#333333', elinewidth=0.8, capsize=1.5)
 

@@ -266,6 +266,85 @@ def test_smoke_output_never_reaches_a_statistic():
               f"{stats.get('n_files')} file(s) read")
 
 
+def test_a_whisker_is_never_negative(out):
+    """A share that comes back at -1.6e-14 must not stop the run."""
+    print('  the variance figure, where a share rounds below zero')
+    import figlib_shapes as S
+    import matplotlib.pyplot as plt
+
+    # Exactly what the cluster produced on 2026-09-11: the interaction share
+    # from the sequential sums of squares at -1.561606e-14. Clipping its lower
+    # arm to 0 made that arm negative by the same amount, and matplotlib
+    # refuses -- "'yerr' must not contain negative values".
+    frame = pd.DataFrame([
+        {'condition': 'gaussian', 'factor': 'Model', 'share': 56.6,
+         'spread': 3.0},
+        {'condition': 'gaussian', 'factor': 'Interaction',
+         'share': -1.561606e-14, 'spread': 4.5},
+        {'condition': 'gaussian', 'factor': 'Residual', 'share': 100.4,
+         'spread': 2.0},
+    ])
+    fig, ax = plt.subplots()
+    raised = ''
+    try:
+        S.grouped_bars(ax, frame, 'condition', 'factor', 'share',
+                       spread='spread', labeller=str, legend=False,
+                       clip=(0, 100))
+    except ValueError as exc:
+        raised = str(exc)
+    plt.close(fig)
+    check('a share rounding below zero still draws', raised == '',
+          raised[:80])
+
+    anova = pd.DataFrame([{
+        'dataset': 'qm9', 'condition': 'gaussian',
+        'outcome': 'Robustness (AUC$_{norm}$)', 'eta2_model': 56.6,
+        'eta2_rep': 23.2, 'eta2_interaction': -1.561606e-14,
+        'eta2_residual': 20.2, 'eta2_model_spread': 3.0,
+        'eta2_rep_spread': 2.0, 'eta2_interaction_spread': 4.5,
+        'eta2_residual_spread': 1.0, 'n_replicates': 10}])
+    path = FIG.f2_variance_decomposition(anova, out)
+    check('F2 drew', path is not None and Path(path).exists(), str(path))
+
+
+def test_the_caches_actually_write(out):
+    """Both caches were silently failing, so every re-run paid full price."""
+    print('  the two caches')
+    import figlib_load as L
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        FX.write_all(root)
+        cache = root / 'cache'
+
+        first = L.load_qm9(root / 'qm9', cache_dir=cache)
+        wrote = sorted(cache.glob('*.parquet'))
+        check('the accuracy cache wrote something', len(wrote) > 0,
+              f'{len(wrote)} file(s)')
+        # The QM9 loader puts a DataFrame in .attrs, which is what broke the
+        # parquet write: it goes into the metadata as JSON.
+        second = L.load_qm9(root / 'qm9', cache_dir=cache)
+        check('a cached read gives the same rows',
+              second is not None and len(second) == len(first),
+              f'{None if second is None else len(second)} vs {len(first)}')
+
+        FX.write_per_molecule(root / 'unc', models=['qrf'], reps=['pdv'],
+                              conditions=['gaussian'])
+        one = U.statistics([root / 'unc'], permutations=0, cache_dir=cache)
+        two = U.statistics([root / 'unc'], permutations=0, cache_dir=cache)
+        check('the uncertainty cache round-trips',
+              two.get('n_files') == one.get('n_files')
+              and len(two['q5']) == len(one['q5']),
+              f"{two.get('n_files')} file(s), {len(two['q5'])} q5 row(s)")
+
+        # A new file must invalidate it rather than be missed.
+        FX.write_per_molecule(root / 'unc', models=['ngboost'], reps=['pdv'],
+                              conditions=['gaussian'])
+        three = U.statistics([root / 'unc'], permutations=0, cache_dir=cache)
+        check('a file landing invalidates the cache',
+              three.get('n_files') == one.get('n_files') + 1,
+              f"{three.get('n_files')} vs {one.get('n_files')}")
+
+
 def test_kendall_says_what_it_used():
     """Kendall's W is a number or a reason, and never a bare NaN."""
     print("  Kendall's W, where four conditions run on two models")
@@ -310,6 +389,8 @@ def main():
         test_contingent_figures(out)
         test_guards_still_bite(out)
         test_smoke_output_never_reaches_a_statistic()
+        test_a_whisker_is_never_negative(out)
+        test_the_caches_actually_write(out)
         test_kendall_says_what_it_used()
     print()
     if FAILURES:

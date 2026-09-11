@@ -383,8 +383,66 @@ def load(sources, dataset_name=None, strict=True, where='per-molecule rows',
     return df
 
 
+# ---------------------------------------------------------------------------
+# The cache, because this pass is the expensive one
+# ---------------------------------------------------------------------------
+
+def _stats_fingerprint(files, **settings):
+    """What the answers depend on: the files, and the settings that change them.
+
+    The file list carries each path's size and modification time, so a task
+    landing a new file or rewriting an old one invalidates the cache without
+    anyone remembering to. `spec_hash` is in there too: a spec change changes
+    what the statistics mean.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    h.update(f'{C.spec_hash()}|{sorted(settings.items())}'.encode())
+    for path in sorted(str(f) for f in files):
+        st = Path(path).stat()
+        h.update(f'{path}|{int(st.st_mtime)}|{st.st_size}'.encode())
+    return h.hexdigest()[:16]
+
+
+_CACHE_KEYS = ('support', 'q4', 'q5', 'q6', 'slopes', 'retention', 'enrichment')
+
+
+def _read_stats_cache(directory):
+    if directory is None or not directory.is_dir():
+        return None
+    count = directory / 'n_files.txt'
+    if not count.exists():
+        return None
+    out = {}
+    try:
+        for key in _CACHE_KEYS:
+            target = directory / f'{key}.parquet'
+            out[key] = (pd.read_parquet(target) if target.exists()
+                        else pd.DataFrame())
+        out['n_files'] = int(count.read_text().strip())
+    except Exception as exc:  # pragma: no cover
+        print(f'  uncertainty cache unreadable ({exc}); recomputing')
+        return None
+    return out
+
+
+def _write_stats_cache(directory, out):
+    if directory is None:
+        return
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        for key in _CACHE_KEYS:
+            frame = out.get(key)
+            if frame is not None and len(frame):
+                frame.to_parquet(directory / f'{key}.parquet', index=False)
+        (directory / 'n_files.txt').write_text(str(out.get('n_files', 0)))
+    except Exception as exc:  # pragma: no cover
+        print(f'  could not write the uncertainty cache ({exc}); continuing')
+
+
 def statistics(sources, permutations=200, dataset_name=None, strict=True,
-               max_files=None, where='per-molecule rows', progress_every=10):
+               max_files=None, where='per-molecule rows', progress_every=10,
+               cache_dir=None):
     """Every uncertainty statistic, computed ONE FILE AT A TIME.
 
     WHY IT STREAMS
@@ -410,6 +468,19 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
     if not files:
         print(f'  {where}: no *_uncertainty_values.csv found')
         return {}
+    cache = None
+    if cache_dir is not None:
+        cache = Path(cache_dir) / ('unc_' + _stats_fingerprint(
+            files, permutations=permutations, max_files=max_files,
+            strict=strict, dataset_name=dataset_name))
+        got = _read_stats_cache(cache)
+        if got is not None:
+            print(f'  {where}: cache hit -- {got["n_files"]} file(s) already '
+                  f'summarised under these settings, so nothing is re-read. '
+                  f'A task landing a new file changes the fingerprint and this '
+                  f'recomputes by itself.')
+            return got
+
     if max_files is not None and len(files) > max_files:
         print(f'  {where}: {len(files)} files, reading the first {max_files} '
               f'(--max-uncertainty-files). The rest are NOT included and the '
@@ -471,4 +542,5 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
                     else pd.DataFrame())
     out['slopes'] = component_slopes(out['q5'])
     out['n_files'] = len(files)
+    _write_stats_cache(cache, out)
     return out

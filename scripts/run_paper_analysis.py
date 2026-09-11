@@ -291,7 +291,8 @@ def run_decisions(args, qm9, assay, merged, per_molecule):
               'so rather than report a null nothing measured')
     else:
         stats = U.statistics(per_molecule, permutations=args.permutations,
-                             max_files=args.max_uncertainty_files)
+                             max_files=args.max_uncertainty_files,
+                             cache_dir=args.cache_dir)
         if stats:
             support = stats.get('support')
             q4 = stats.get('q4')

@@ -244,13 +244,31 @@ def _cached(cache_dir, key, paths, build):
     if target.exists():
         try:
             print(f'  cache hit: {target.name}')
-            return pd.read_parquet(target)
+            frame = pd.read_parquet(target)
+            for extra in sorted(cache_dir.glob(f'{target.stem}.*.parquet')):
+                name = extra.name[len(target.stem) + 1:-len('.parquet')]
+                frame.attrs[name] = pd.read_parquet(extra)
+            return frame
         except Exception as exc:  # pragma: no cover
             print(f'  cache unreadable ({exc}); rebuilding')
     frame = build()
     if frame is not None and len(frame):
         try:
-            frame.to_parquet(target, index=False)
+            # `.attrs` goes into the parquet metadata as JSON, and the QM9
+            # loader puts a DataFrame there -- the duplicate disagreements. So
+            # every write failed with "Object of type DataFrame is not JSON
+            # serializable" and every re-run re-read the whole grid. The frames
+            # in attrs are written beside it and restored on a hit, because
+            # they are a finding rather than a detail.
+            plain = frame.copy()
+            side = {k: v for k, v in frame.attrs.items()
+                    if isinstance(v, pd.DataFrame)}
+            plain.attrs = {k: v for k, v in frame.attrs.items()
+                           if k not in side}
+            plain.to_parquet(target, index=False)
+            for name, extra in side.items():
+                extra.to_parquet(target.with_suffix(f'.{name}.parquet'),
+                                 index=False)
         except Exception as exc:  # pragma: no cover
             print(f'  could not write cache ({exc}); continuing')
     return frame

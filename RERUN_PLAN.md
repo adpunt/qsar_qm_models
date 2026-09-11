@@ -15689,6 +15689,49 @@ stated reason rather than returning `nan`.
 | ChemBERTa | 0.909 | 17 | 3 |
 | PDV | 0.807 | 18 | 3 |
 
+#### Three more found by the first real run — 2026-09-11
+
+The run reached the figures on 1,435 per-molecule files and 26,626 QM9 rows before stopping, so
+everything upstream of drawing worked on real data.
+
+- **F2 stopped the run on a share of −1.6×10⁻¹⁴.** That is rounding from the sequential sums of
+  squares, not a negative share. Clipping that bar's whisker to the 0 bound made its lower arm
+  −1.6×10⁻¹⁴ long, and matplotlib refuses a negative whisker outright: *"'yerr' must not contain
+  negative values"*. A whisker is a distance and is floored at zero whatever the bar does.
+- **The accuracy cache had never been written, once.** `could not write cache (Object of type
+  DataFrame is not JSON serializable)` — `.attrs` goes into the parquet metadata as JSON and the QM9
+  loader puts the duplicate-disagreement table there. Every run re-read the whole grid. Frames in
+  `.attrs` are written beside the cache file and restored on a hit, because they are a finding
+  rather than a detail.
+- **The per-molecule pass was not cached at all**, so the expensive half was paid again on every
+  run. `figlib_uncertainty.statistics` takes `cache_dir` and keys on each file's path, size and
+  modification time plus `spec_hash` and the settings that change the answers, so a task landing a
+  new file invalidates it without anyone remembering to.
+
+All three are pinned in `scripts/test_figure_slots.py`, the cache tests including the case where a
+new file must invalidate rather than be missed.
+
+#### What the first real run decided — 2026-09-11
+
+⚠️ Read these off `results/decisions/DECISIONS.md` rather than from here; this records that they
+fired, not their values.
+
+- **D7 FIRED on censoring** (§14.6 row 1): the uncertainty finds clipped labels better than the
+  error alone, outside the permutation band. F7 is the enrichment curve, option 7B, in the main
+  text.
+- **D8 FIRED.** The largest group is 343 pairs where only the epistemic half varies per molecule and
+  the aleatoric one is a single number per fit, so those two cannot be compared. The rest of the
+  breakdown is in `d8_component_slopes.csv`.
+- **648 of the 1,435 per-molecule files contributed nothing**, almost all with no out-of-fold rows —
+  the pre-rewrite files under `comprehensive_noise_study`, `phase0c_screen` and `validation_full`,
+  plus test-split-only output. The uncertainty answers rest on the remaining 787.
+- **657 duplicated cell-and-replicate pairs differ by more than 0.001 R², the largest by 0.8233**,
+  and 199 of them differ in `standardisation_sd`, so those two copies are not on one scale. This is
+  §13.30's thread and it is larger than the 2,155 rows recorded there.
+  `d0_duplicate_disagreements_qm9.csv` carries both copies of each, side by side.
+- **The ANOVA skipped Laplace, outlier and Student-t** — 2, 2 and 3 models against the 5 it needs —
+  so F2 and T3 cover the three broad-grid noise types until more of the deep run lands.
+
 #### R6 and R9 are drawn already, off the tables pulled on 2026-09-09
 
 They need no cluster time — `results/decisions/figures/R6_representation_profile_gaussian.png`,
