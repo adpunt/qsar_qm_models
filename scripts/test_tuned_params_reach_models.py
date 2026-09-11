@@ -253,6 +253,47 @@ def a_model_for(key, rosters):
     raise KeyError(key)
 
 
+#: What this gate needs to finish. Measured against what it actually does:
+#: import torch, rdkit, xgboost, lightgbm and deepchem, then fit eight synthetic
+#: models and four tuned ones.
+NEEDS_GB = 4.0
+
+
+def check_memory_before_starting():
+    """Say up front whether this machine can finish, rather than being killed.
+
+    A login node that runs out mid-way sends SIGKILL. Python cannot catch that,
+    so the run ends on the single word "Killed" with no indication of which
+    check was in flight or why -- and the last two attempts ended exactly there,
+    at different points, because login-node memory depends on who else is on it.
+
+    This does not refuse to run. It says what it needs, what is free, and the
+    one command that fixes it.
+    """
+    free_gb = None
+    try:
+        with open('/proc/meminfo') as fh:
+            for line in fh:
+                if line.startswith('MemAvailable:'):
+                    free_gb = int(line.split()[1]) / (1024 * 1024)
+                    break
+    except Exception:
+        return                                  # not Linux; nothing to say
+    if free_gb is None:
+        return
+    print(f'  memory: {free_gb:.1f} GB available, about {NEEDS_GB:.0f} GB '
+          f'needed')
+    if free_gb < NEEDS_GB:
+        print(f'  ⚠ that is not enough and this will be KILLED part-way '
+              f'through -- SIGKILL, which no handler here can catch, so it '
+              f'ends on the word "Killed" with nothing said about where.')
+        print(f'    Run it on a compute node instead:')
+        print(f'      srun --account=stat-cadd --partition=short --mem=16G '
+              f'--time=00:20:00 python {os.path.basename(__file__)}')
+        print(f'    A login node\'s free memory depends on who else is on it, '
+              f'so the same command can get further one hour and less the next.')
+
+
 #: Substrings that mean the MACHINE ran out, not that the setting failed to
 #: arrive. On 2026-09-10 this gate reported six FAILs for
 #: mlp_bnn_full_variational while trying to allocate 65,536 bytes -- 64 kB -- on
@@ -401,6 +442,7 @@ def main():
     print('file contract')
     check_file_contract(rosters)
 
+    check_memory_before_starting()
     print('\nsynthetic: every writable key, with a value nothing else would set')
     # ORDER MATTERS, and it is an environment fact rather than a preference.
     # LightGBM segfaults -- exit 139, no traceback -- if it fits in a process that
