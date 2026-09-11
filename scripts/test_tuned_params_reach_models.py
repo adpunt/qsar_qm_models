@@ -269,6 +269,25 @@ def _is_environment_fault(exc):
     return isinstance(exc, MemoryError) or any(s in text for s in _OUT_OF_MEMORY)
 
 
+def _release_memory():
+    """Give back what the last model held before building the next one.
+
+    Every check fits two networks and keeps nothing, but nothing frees them
+    either -- so the fits accumulate and the LAST model checked pays for all the
+    ones before it. That is why mlp_bnn_full_variational failed to allocate
+    64 kB on a login node while its three siblings, checked earlier, passed.
+    A gate should not need a compute node to fit a handful of synthetic rows.
+    """
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def check_key_reaches(key, params, tuner, rosters, why):
     """Assert that every parameter in `params` reaches the built model."""
     label, rep = a_model_for(key, rosters)
@@ -473,6 +492,7 @@ def main():
               f'{len(rest)} with no tuned settings to deliver')
     for key in ordered:
         check_key_reaches(key, SYNTHETIC[key], tuner, rosters, 'synthetic')
+        _release_memory()
 
     print('\nthe master file on disk')
     if not os.path.exists(MASTER):
@@ -486,13 +506,30 @@ def main():
                 fail(f'master file: {key!r} is not a key any builder asks for, '
                      f'so nothing will ever read it')
                 continue
+            # ONE FIT PER DISTINCT SETTING, not one per representation.
+            #
+            # 5.7ad settled one setting per MODEL, shared across all six
+            # representations, so this loop was fitting identical parameters six
+            # times over and printing six identical lines -- 24 fits where 4 do
+            # the same work. That is also where a login node ran out of memory:
+            # the last model checked paid for twenty-three fits before it.
+            #
+            # The representation is still checked against the roster for every
+            # entry; only the FIT is shared, and the message names every
+            # representation the setting covers so nothing is hidden.
+            by_setting = {}
             for rep, params in sorted(by_rep.items()):
                 if rep not in rosters.ALL_REPS:
                     fail(f'master file: {key}/{rep} — {rep!r} is not on the '
                          f'representation roster')
                     continue
-                check_key_reaches(key, params, tuner, rosters,
-                                  f'master file {key}/{rep}')
+                by_setting.setdefault(
+                    json.dumps(params, sort_keys=True), []).append(rep)
+            for blob, reps in by_setting.items():
+                covers = reps[0] if len(reps) == 1 else f'{len(reps)} reps'
+                check_key_reaches(key, json.loads(blob), tuner, rosters,
+                                  f'master file {key}/{covers}')
+                _release_memory()
 
     print()
     if FAILURES:
