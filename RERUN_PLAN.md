@@ -15757,6 +15757,29 @@ Pinned by `the_fast_null_gives_the_same_draws` in `scripts/test_uncertainty_stat
 ⚠️ **The two curve producers are 4.9 s of that 67 s and were shipped on 2026-09-10 without being
 timed.** They are needed — F7 draws from them and D7 fired — but the cost was not measured first.
 
+#### The analysis job was asking for what it does not use — resized 2026-09-12
+
+The author: *"This is taking too long this single full run needs to be sbatch."* It always could be;
+what stopped it was the size of the request. `13105402` sat on Priority overnight asking **128G for
+12 hours on `long`**, and none of those three numbers came from a measurement.
+
+| | was | is | why |
+|---|---|---|---|
+| memory | 128G | **32G** | The worst peak across ~1,400 finished tasks of this study is 4.1 GB (§13.23 B3), and the pass holds ONE file per worker — eight files, not the set |
+| wall | 12:00:00 | **03:00:00** | The 12 hours predate the speed work above. A three-hour job is what fits a backfill window, measured between 6 and 19 hours (§13.27 D2w) |
+| partition | `long` | **`short`** | `long` is a 30-day partition for a job of hours. `short` caps at 12:00:00, four times this wall |
+
+All three are raised on the **command line**, never as environment variables — `#SBATCH` lines are
+read by `sbatch` before any shell runs, so nothing in the script's own environment reaches them:
+
+```bash
+sbatch --mem=64G --time=06:00:00 --partition=medium \
+    slurm_scripts_analysis/run_paper_analysis.sh
+```
+
+The job now prints its own elapsed time and its `sacct` line at the end, so the next submission is
+sized from what the last one used rather than from a guess.
+
 #### What the first real run decided — 2026-09-11
 
 ⚠️ Read these off `results/decisions/DECISIONS.md` rather than from here; this records that they

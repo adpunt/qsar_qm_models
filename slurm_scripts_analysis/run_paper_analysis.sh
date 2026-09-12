@@ -16,14 +16,36 @@
 #     branch. The eval was silently a no-op.
 #   * it does not point at /data/stat-cadd/.../KIRBy. KIRBy moved to stat-ecr on
 #     2026-05-07 when stat-cadd hit quota; the old path is a stale checkout.
+# WHY THIS ASKS SO LITTLE, and it is the reason 13105402 sat on Priority
+# overnight while four-hour jobs ran past it.
+#
+#   memory   128G was never measured. The worst peak across ~1,400 finished
+#            tasks of this whole study is 4.1 GB (13.23 B3), and this pass holds
+#            ONE file per worker -- eight files, not the set. 32G is eight times
+#            the largest file this has ever been pointed at.
+#   time     12:00:00 predates the 2026-09-12 speed work: the permutation band
+#            was 72% of the run and the pass used one of eight cores (14.11).
+#            About 7x faster now, and the caches mean a second run reads
+#            neither the grid nor the per-molecule files.
+#   long     asks for a 30-day partition to do a job of hours. `short` caps at
+#            12:00:00, which is four times this wall, and a three-hour job is
+#            what fits a backfill window -- measured between 6 and 19 hours
+#            (13.27 D2w). Read `sinfo -s` before overriding.
+#
+# All three are overridable at submit time, because the file count only grows.
+# On the COMMAND LINE, not as environment variables -- these lines are read by
+# sbatch before any shell runs, so nothing in the script's own environment can
+# reach them, and a flag on the command line wins over the directive here:
+#   sbatch --mem=64G --time=06:00:00 --partition=medium \
+#       slurm_scripts_analysis/run_paper_analysis.sh
 #SBATCH --job-name=paper_analysis
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=12:00:00
-#SBATCH --partition=long
+#SBATCH --time=03:00:00
+#SBATCH --partition=short
 #SBATCH --account=stat-cadd
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --output=/data/stat-cadd/scat9264/qsar_qm_models/slurm_scripts_analysis/paper_analysis-%j.out
 #SBATCH --mail-user=adelaide.punt@stcatz.ox.ac.uk
 
@@ -76,5 +98,9 @@ python scripts/run_paper_analysis.py \
   ${SKIP_UNCERTAINTY:+--skip-uncertainty} \
   --only "${ONLY:-all}"
 
-echo "done. read $QSAR/results/decisions/DECISIONS.md"
+echo "done in ${SECONDS}s. read $QSAR/results/decisions/DECISIONS.md"
 echo "figures in $QSAR/results/decisions/figures, tables in .../tables"
+echo
+echo "what this cost, for the next submission:"
+sacct -j "${SLURM_JOB_ID:-0}" --format=JobID,Elapsed,MaxRSS,ReqMem,State -P 2>/dev/null \
+    || echo "  (sacct not available here; read it after the job ends)"
