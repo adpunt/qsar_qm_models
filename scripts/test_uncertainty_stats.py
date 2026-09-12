@@ -325,6 +325,51 @@ def test_permutation_null_naive_versus_correct():
     assert correct['null_kind'] == 'correct_recomputed'
 
 
+def test_the_fast_null_gives_the_same_draws():
+    """The speed-up must be a speed-up and not a different answer.
+
+    `_fast_permutation_draws` skips work the general loop repeats 200 times:
+    ranking the injected noise (permuting values permutes their ranks), the two
+    constant-input checks inside the correlation, and the finite mask. None of
+    those can change across permutations of the same values, and the draws must
+    come out identical -- these numbers are the band printed beside every Q4
+    statistic in the paper.
+    """
+    rng = np.random.default_rng(3)
+    n = 900
+    eps = rng.normal(0, 0.7, n)
+    y = rng.normal(0, 1, n)
+    p = y + np.abs(rng.normal(0, 0.2, n)) + 0.7 * np.abs(eps)
+    seed = 12345
+
+    import uncertainty_stats as us
+
+    fast = us._fast_permutation_draws('error_noise_spearman', True, y, p, eps,
+                                      200, seed)
+    general = np.empty(200)
+    gen_rng = np.random.default_rng(seed)
+    for k in range(200):
+        general[k] = us._stat_error_noise_spearman(
+            (y, p, gen_rng.permutation(eps), None), False)
+    assert np.allclose(fast, general, rtol=0, atol=0, equal_nan=True), (
+        f'the fast null diverged by {np.nanmax(np.abs(fast - general))}')
+
+    # It must REFUSE anything it cannot reproduce exactly, rather than
+    # approximate it. A non-finite row still donates its noise to the general
+    # loop's pool, so dropping it first would permute a smaller pool.
+    dirty = y.copy()
+    dirty[0] = np.nan
+    assert us._fast_permutation_draws('error_noise_spearman', True, dirty, p,
+                                      eps, 10, seed) is None
+    assert us._fast_permutation_draws('ratio_noise_spearman', True, y, p, eps,
+                                      10, seed) is None
+    assert us._fast_permutation_draws('error_noise_spearman', False, y, p,
+                                      eps, 10, seed) is None
+    # Noise level zero: the target is constant, so there is no null to draw.
+    assert us._fast_permutation_draws('error_noise_spearman', True, y, p,
+                                      np.zeros(n), 10, seed) is None
+
+
 def test_permutation_null_detects_real_leakage():
     """The correct null must still fire when the prediction really did see the
     noise, or it would be a null that never rejects anything."""

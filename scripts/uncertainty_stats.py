@@ -1291,6 +1291,75 @@ def _group_seed(name, recompute_error, seed, key):
     return int(hashlib.sha256(material.encode()).hexdigest()[:16], 16)
 
 
+def _finish_null(rec, finite, n_permutations):
+    """The band, the p-value and the verdict, from whatever draws came back."""
+    rec['n_permutations'] = int(finite.size)
+    if finite.size == 0 or not np.isfinite(rec.get('observed', np.nan)):
+        rec.update(null_mean=np.nan, null_lo=np.nan, null_hi=np.nan,
+                   p_value=np.nan, observed_inside_null=False)
+        return
+    rec['null_mean'] = float(finite.mean())
+    rec['null_lo'] = float(np.percentile(finite, 2.5))
+    rec['null_hi'] = float(np.percentile(finite, 97.5))
+    centre = rec['null_mean']
+    extreme = int((np.abs(finite - centre)
+                   >= abs(rec['observed'] - centre)).sum())
+    rec['p_value'] = (extreme + 1) / (finite.size + 1)
+    rec['observed_inside_null'] = bool(
+        rec['null_lo'] <= rec['observed'] <= rec['null_hi'])
+
+
+def _fast_permutation_draws(name, recompute_error, y, p, eps, n_permutations,
+                            group_seed):
+    """The same draws as the general loop, without redoing settled work.
+
+    THE SAME NUMBERS. Only for `error_noise_spearman` with the error recomputed,
+    which is the reported null and the one that costs: it was 48 of the 67
+    seconds a real file took, measured 2026-09-12.
+
+    Three things were repeated 200 times that only had to happen once:
+
+      * `rankdata(|eps|)` -- a permutation of the noise is a permutation of its
+        ranks, so the ranks are taken once and permuted with the same index.
+      * two `np.unique` calls inside `_spearman`, each sorting the whole array,
+        to check neither input is constant. That cannot change across
+        permutations of the same values.
+      * the finite mask, which depends on the values and not on their order.
+
+    Returns None for any other statistic, and the caller falls back to the
+    general loop. Pinned by `the_fast_null_gives_the_same_draws`.
+    """
+    if name != 'error_noise_spearman' or not recompute_error:
+        return None
+    # Only where every row is finite, and that is not fussiness. The general
+    # loop permutes the noise of EVERY row and lets `_spearman` drop the pairs
+    # that come out NaN, so a row with a missing prediction still donates its
+    # noise to the pool. Dropping those rows first would permute a smaller
+    # pool and give different draws -- a different answer, not a faster one.
+    if not (np.isfinite(y).all() and np.isfinite(p).all()
+            and np.isfinite(eps).all()) or eps.size < 3:
+        return None
+    size = np.abs(eps)
+    if np.unique(size).size < 2:
+        # Noise level zero: every molecule got exactly zero, so the target is
+        # constant and every draw is NaN. The general loop says so too.
+        return None
+    target = rankdata(size)
+    target = target - target.mean()
+    target_ss = float((target * target).sum())
+    rng = np.random.default_rng(group_seed)
+    n = eps.size
+    draws = np.empty(n_permutations, dtype=np.float64)
+    for k in range(n_permutations):
+        order = rng.permutation(n)
+        err = np.abs(y + eps[order] - p)
+        ra = rankdata(err)
+        ra = ra - ra.mean()
+        denom = np.sqrt(float((ra * ra).sum()) * target_ss)
+        draws[k] = ((ra * target[order]).sum() / denom) if denom else np.nan
+    return draws
+
+
 def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
                      recompute_error=True, seed=0, split='train_oof',
                      min_n=_DEFAULT_MIN_N, group_cols=None):
@@ -1359,6 +1428,15 @@ def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
             continue
 
         rec['observed'] = call(eps, use_cached=False)
+        fast = _fast_permutation_draws(
+            name, recompute_error, y, p, eps, n_permutations,
+            _group_seed(name, recompute_error, seed, key))
+        if fast is not None:
+            draws = fast
+            finite = draws[np.isfinite(draws)]
+            _finish_null(rec, finite, n_permutations)
+            rows.append(rec)
+            continue
         # The per-group seed must not come from the built-in hash(): Python
         # randomises string hashing per process unless PYTHONHASHSEED is fixed,
         # so the null band and its p-value came out different on every run of
@@ -1369,19 +1447,7 @@ def permutation_null(df, statistic='error_noise_spearman', n_permutations=200,
         for k in range(n_permutations):
             draws[k] = call(rng.permutation(eps), use_cached=not recompute_error)
         finite = draws[np.isfinite(draws)]
-        rec['n_permutations'] = int(finite.size)
-        if finite.size == 0 or not np.isfinite(rec['observed']):
-            rec.update(null_mean=np.nan, null_lo=np.nan, null_hi=np.nan,
-                       p_value=np.nan, observed_inside_null=False)
-        else:
-            rec['null_mean'] = float(finite.mean())
-            rec['null_lo'] = float(np.percentile(finite, 2.5))
-            rec['null_hi'] = float(np.percentile(finite, 97.5))
-            centre = rec['null_mean']
-            extreme = int((np.abs(finite - centre) >= abs(rec['observed'] - centre)).sum())
-            rec['p_value'] = (extreme + 1) / (finite.size + 1)
-            rec['observed_inside_null'] = bool(
-                rec['null_lo'] <= rec['observed'] <= rec['null_hi'])
+        _finish_null(rec, finite, n_permutations)
         rows.append(rec)
 
     out = pd.DataFrame(rows)

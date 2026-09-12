@@ -345,6 +345,39 @@ def test_the_caches_actually_write(out):
               f"{three.get('n_files')} vs {one.get('n_files')}")
 
 
+def test_workers_change_the_speed_and_not_the_answer():
+    """Eight workers must give the same tables as one."""
+    print('  the per-molecule pass, one worker against several')
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp)
+        FX.write_per_molecule(directory, models=['qrf', 'ngboost'],
+                              reps=['pdv'], conditions=['gaussian'],
+                              n_molecules=300, folds=2)
+        one = U.statistics([directory], permutations=30, workers=1,
+                           progress_every=0)
+        many = U.statistics([directory], permutations=30, workers=4,
+                            progress_every=0)
+        for key in ('support', 'q4', 'q5', 'q6', 'retention', 'enrichment'):
+            check(f'{key}: same number of rows',
+                  len(one[key]) == len(many[key]),
+                  f'{len(one[key])} against {len(many[key])}')
+        keys = ['dataset', 'model', 'rep', 'condition', 'sigma', 'fold']
+        cols = [c for c in ('auc_delta', 'rho_delta', 'null_lo', 'null_hi',
+                            'p_value') if c in one['q4'].columns]
+        a = one['q4'].sort_values(keys)[cols].to_numpy(dtype=float)
+        b = many['q4'].sort_values(keys)[cols].to_numpy(dtype=float)
+        check('every Q4 number is identical, not merely close',
+              np.allclose(a, b, rtol=0, atol=0, equal_nan=True),
+              f'largest difference {np.nanmax(np.abs(a - b)) if a.size else 0}')
+
+        # A pool that cannot start must not lose the run -- it costs hours.
+        broken = U.statistics([directory], permutations=30, workers=99,
+                              progress_every=0)
+        check('a pool that fails falls back rather than losing the run',
+              len(broken['q4']) == len(one['q4']),
+              f"{len(broken['q4'])} against {len(one['q4'])}")
+
+
 def test_kendall_says_what_it_used():
     """Kendall's W is a number or a reason, and never a bare NaN."""
     print("  Kendall's W, where four conditions run on two models")
@@ -391,6 +424,7 @@ def main():
         test_smoke_output_never_reaches_a_statistic()
         test_a_whisker_is_never_negative(out)
         test_the_caches_actually_write(out)
+        test_workers_change_the_speed_and_not_the_answer()
         test_kendall_says_what_it_used()
     print()
     if FAILURES:

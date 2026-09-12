@@ -440,9 +440,58 @@ def _write_stats_cache(directory, out):
         print(f'  could not write the uncertainty cache ({exc}); continuing')
 
 
+#: How many files are summarised at once. One file at a time was the memory
+#: rule, and it still is -- each worker holds ONE file, so N workers hold N,
+#: not the whole set. The pass is otherwise single-threaded on a node the job
+#: asked for eight cores of.
+def default_workers():
+    """The cores this task was actually given, capped where it stops helping."""
+    import os
+    given = os.environ.get('SLURM_CPUS_PER_TASK')
+    try:
+        n = int(given) if given else (os.cpu_count() or 1)
+    except ValueError:
+        n = os.cpu_count() or 1
+    return max(1, min(n, 8))
+
+
+def _summarise_one(args):
+    """Everything one per-molecule file contributes. Runs in a worker process.
+
+    Returns plain frames and the reason it gave nothing, never the rows -- a
+    worker handing back its file would put the whole set through a pipe, which
+    is the thing the streaming design exists to avoid.
+    """
+    path, dataset_name, strict, permutations = args
+    path = Path(path)
+    try:
+        df = load(None, dataset_name=dataset_name, strict=strict,
+                  where=path.name, paths=[path])
+    except Exception as exc:  # noqa: BLE001
+        return path.name, None, f'{type(exc).__name__}: {exc}', []
+    if df is None or not len(df):
+        return path.name, None, 'no usable rows', []
+    got = {}
+    try:
+        got['support'] = support_table(df)
+        got['q4'] = q4(df, permutations=permutations, where=path.name)
+        got['q5'] = q5(df)
+        got['q6'] = q6(df)
+        got.update(curves(df))
+    except Exception as exc:  # noqa: BLE001
+        return path.name, None, f'{type(exc).__name__}: {exc}', []
+    finally:
+        del df
+        gc.collect()
+    # The unmapped-name warning is process-global, so a worker's copy never
+    # reaches the parent unless it is carried back explicitly.
+    return path.name, {k: v for k, v in got.items() if v is not None and len(v)}, \
+        None, sorted(unc.unmapped_model_names())
+
+
 def statistics(sources, permutations=200, dataset_name=None, strict=True,
                max_files=None, where='per-molecule rows', progress_every=10,
-               cache_dir=None):
+               cache_dir=None, workers=None):
     """Every uncertainty statistic, computed ONE FILE AT A TIME.
 
     WHY IT STREAMS
@@ -487,42 +536,63 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
               f'uncertainty answers are partial.')
         files = files[:max_files]
 
-    print(f'  {where}: {len(files)} file(s), one at a time so the whole set '
-          f'never has to fit in memory')
+    n_workers = default_workers() if workers is None else max(1, int(workers))
+    print(f'  {where}: {len(files)} file(s), {n_workers} at a time -- each '
+          f'worker holds ONE file, so the whole set still never has to fit in '
+          f'memory')
     parts = {'support': [], 'q4': [], 'q5': [], 'q6': [],
              'retention': [], 'enrichment': []}
-    skipped = []
-    for index, path in enumerate(files, 1):
-        try:
-            df = load(None, dataset_name=dataset_name, strict=strict,
-                      where=str(path.name), paths=[path])
-        except Exception as exc:  # noqa: BLE001
-            skipped.append((path.name, f'{type(exc).__name__}: {exc}'))
-            continue
-        if df is None or not len(df):
-            skipped.append((path.name, 'no usable rows'))
-            continue
-        try:
-            parts['support'].append(support_table(df))
-            got = q4(df, permutations=permutations, where=path.name)
-            if len(got):
-                parts['q4'].append(got)
-            got = q5(df)
-            if len(got):
-                parts['q5'].append(got)
-            got = q6(df)
-            if len(got):
-                parts['q6'].append(got)
-            for name, got in curves(df).items():
-                if len(got):
-                    parts[name].append(got)
-        except Exception as exc:  # noqa: BLE001
-            skipped.append((path.name, f'{type(exc).__name__}: {exc}'))
-        finally:
-            del df
-            gc.collect()
+    skipped, unmapped_seen = [], set()
+    work = [(str(f), dataset_name, strict, permutations) for f in files]
+
+    def take(result, index):
+        name, got, why, unmapped = result
+        unmapped_seen.update(unmapped)
+        if why is not None:
+            skipped.append((name, why))
+        else:
+            for key, frame in got.items():
+                if key in parts:
+                    parts[key].append(frame)
         if progress_every and index % progress_every == 0:
-            print(f'    {index}/{len(files)}')
+            print(f'    {index}/{len(files)}', flush=True)
+
+    done = 0
+    if n_workers > 1:
+        try:
+            import multiprocessing
+            from concurrent.futures import ProcessPoolExecutor
+            # SPAWN, not fork. Forking a process that has already imported the
+            # boosting libraries and torch is what deadlocked a real run
+            # (RERUN_PLAN.md 2.8e): the child inherits a locked threading
+            # runtime and never comes back. A spawned worker imports cleanly.
+            # It costs a second of start-up each and buys a run that finishes.
+            ctx = multiprocessing.get_context('spawn')
+            with ProcessPoolExecutor(max_workers=n_workers,
+                                     mp_context=ctx) as pool:
+                # chunksize 1: the files differ by more than an order of
+                # magnitude in cost -- one with out-of-fold rows pays the
+                # permutation band and one without does not -- so a fixed
+                # block leaves one worker holding every expensive file while
+                # the rest finish.
+                for index, result in enumerate(
+                        pool.map(_summarise_one, work, chunksize=1), 1):
+                    take(result, index)
+                    done = index
+        except Exception as exc:  # noqa: BLE001
+            # A broken pool must not lose the run. It costs hours.
+            print(f'  {where}: the worker pool failed after {done} of '
+                  f'{len(files)} file(s) ({type(exc).__name__}: {exc}). '
+                  f'Falling back to one process, which is slower and gives '
+                  f'the same numbers.')
+            for key in parts:
+                parts[key].clear()
+            skipped.clear()
+            done = 0
+
+    if done == 0:
+        for index, item in enumerate(work, 1):
+            take(_summarise_one(item), index)
 
     if skipped:
         print(f'  {where}: {len(skipped)} file(s) contributed nothing:')
@@ -531,7 +601,7 @@ def statistics(sources, permutations=200, dataset_name=None, strict=True,
         if len(skipped) > 5:
             print(f'      ... and {len(skipped) - 5} more')
 
-    unmapped = unc.unmapped_model_names()
+    unmapped = sorted(unmapped_seen | set(unc.unmapped_model_names()))
     if unmapped:
         print(f'  WARNING: {where}: model name(s) unknown to model_names.json '
               f'and joining to nothing: {unmapped}')

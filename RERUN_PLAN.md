@@ -15711,6 +15711,52 @@ everything upstream of drawing worked on real data.
 All three are pinned in `scripts/test_figure_slots.py`, the cache tests including the case where a
 new file must invalidate rather than be missed.
 
+#### The analysis was slow, and where the time went — measured 2026-09-12
+
+The author, on being told a run fits in a four-hour allocation: *"4 HOURS FOR ANALYSIS. CLEARLY THAT
+IS NOT ACCEPTABLE."* Correct, and "four hours" was never a measurement — the run finished inside a
+four-hour allocation, which is an upper bound and nothing else.
+
+**Timed on one file the size of a real task**, 105,000 rows and 27.7 MB:
+
+| step | seconds |
+|---|---|
+| load | 4.4 |
+| support table | 0.5 |
+| **q4 with the 200-permutation band** | **48.2** |
+| q5 | 4.3 |
+| q6 | 1.6 |
+| the two curves F7 draws | 4.9 |
+
+The band is 72% of the cost. Two fixes, and **neither changes a number**:
+
+- **`_fast_permutation_draws`.** The loop repeated three things 200 times that only had to happen
+  once: ranking the injected noise — permuting values permutes their ranks, so the ranks are taken
+  once and permuted with the same index — the two `np.unique` calls inside the correlation, each
+  sorting the whole array to check neither input is constant, and the finite mask. About 1.6× on the
+  band, so about 1.4× on the run. **Bit-identical to the general loop at the same seed, maximum
+  difference 0.0 over 200 draws.** It refuses every case it cannot reproduce exactly — a non-finite
+  row, the ratio statistic, the naive null, noise level zero — because the general loop permutes the
+  noise of every row and lets the correlation drop the NaN pairs, so dropping those rows first would
+  permute a smaller pool. That is a different answer, not a faster one.
+- **The pass now uses the cores the job asked for.** It was single-threaded on a task requesting
+  eight. **Measured 5.4× on 8 workers over 16 files**, with every frame the same length and every Q4
+  number bit-identical. Each worker holds ONE file, so the memory rule is unchanged.
+
+Together, about 7× against what ran on 2026-09-11.
+
+Two choices in that, both about not losing a long run. **Spawn, not fork** — forking a process that
+has already imported the boosting libraries and torch is what deadlocked a real run (§2.8e), and a
+spawned worker imports cleanly for about a second of start-up each. And **a pool that fails falls
+back to one process** and says so, rather than taking the run down; that failure was hit for real
+while benchmarking.
+
+Pinned by `the_fast_null_gives_the_same_draws` in `scripts/test_uncertainty_stats.py` and
+`workers_change_the_speed_and_not_the_answer` in `scripts/test_figure_slots.py`.
+
+⚠️ **The two curve producers are 4.9 s of that 67 s and were shipped on 2026-09-10 without being
+timed.** They are needed — F7 draws from them and D7 fired — but the cost was not measured first.
+
 #### What the first real run decided — 2026-09-11
 
 ⚠️ Read these off `results/decisions/DECISIONS.md` rather than from here; this records that they
