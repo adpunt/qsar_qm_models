@@ -288,9 +288,11 @@ def _resolve_duplicates(df, key, rule='median'):
     """Reduce cells that were run more than once, by a STATED rule.
 
     Some tasks ran twice and appended to the same file. Nothing can be re-run,
-    so the copies have to be resolved rather than fixed, and the rule matters:
-    on the real data 326 duplicated cells disagree, 105 of them because the two
-    copies had different training data.
+    so the copies have to be resolved rather than fixed, and the rule matters --
+    on the real data a few hundred duplicated cells disagree and a quarter of
+    those disagree because the two copies had different training data. The count
+    changes with every task that lands, so it is not stated here; every run
+    writes its own to `d0_duplicate_disagreements_<dataset>.csv`.
 
     THE RULE, in order:
 

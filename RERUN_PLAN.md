@@ -18864,3 +18864,52 @@ the duplication is pure waste and the pending deep-run indices 0–8 can be canc
 copies disagree, the run has two hyperparameter regimes mixed inside one file and the choice of
 which to keep is an author decision, not an append order.
 
+
+#### 13.30a The copies DO disagree, and the rule that resolves them — measured 2026-09-12
+
+The question §13.30 left open is answered, from the run of 9 September 2026
+(`results/decisions/d0_duplicate_disagreements_qm9.csv`, 1,622 rows). One cell below is one
+model, one representation, one noise condition, one noise level, one replicate.
+
+| | count |
+|---|---|
+| QM9 cells whose copies disagree | 621 of about 26,100 |
+| cells whose copies were standardised differently — different training draw | 168 |
+| cells whose copies share a standardisation — nondeterminism in the fit | 453 |
+| median range in R² inside a disagreeing cell | 0.011 |
+| cells whose range in R² exceeds 0.05 | 43, of which 39 sit at level 0.75 or above |
+
+Only 2 of 1,622 rows carry `params_source=tuned`, so the two-hyperparameter-regime worry §13.30
+raised is not what this is. It is the training draw, and below that, the fit.
+
+**So the pending deep-run indices 0–8 are not pure waste and the cancellation §13.30 contemplated
+would lose real repeat measurements.** That is the author's call either way; the register entry
+above should no longer be read as pointing at a cancellation.
+
+`figlib_load.py` no longer keeps the last-written row — §13.30's description of it is superseded.
+`_resolve_duplicates` applies a stated rule: a copy whose `standardisation_sd` or `params_source`
+disagrees with the majority for its cell is dropped and counted, because it was not fitted on the
+same thing; copies that agree on both are one repeated measurement and the median across them is
+taken. `rule='last'`/`'first'` restore positional selection for comparison.
+
+The Limitations text for this is drafted at `PAPER_REVISION_GUIDE_FINAL.md` §L2, with the counts
+above and an instruction to refresh them from the final run.
+
+#### 13.30b Two definitions of AUC_norm are live — NOT reconciled
+
+`scripts/figlib_metrics.retention_auc_norm` and `generate_paper_figures_v2._retention_auc_norm`
+are the same three lines. What differs is when the replicates are combined:
+
+- **v2** averages R² across replicates at each level, then divides the averaged curve by the
+  averaged clean R².
+- **figlib** divides each replicate's own curve by that replicate's own clean R², then takes the
+  median of the ten AUC_norm values.
+
+A ratio does not commute with an average, so these are different numbers. **By how much is
+unmeasured** — there is no raw QM9 data on the laptop to measure it on.
+
+`select_deep_run_pairs.py` imports `calculate_robustness` from v2, so the deep-run selection was
+made under the v2 definition while every figure in the paper is built under the figlib one. The
+selection is already running, so this is not a correction to make mid-flight; it is a number to
+measure and a sentence to write. The measurement is one pass over `results/anova_*.csv` on the
+cluster comparing the two rankings, and it belongs with §14.9.

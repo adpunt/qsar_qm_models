@@ -733,6 +733,45 @@ in it is a property of the design rather than of the results.
 > that axis clean but means we do not measure whether a model could be retuned to resist noise
 > better than it does at its default.
 
+## L2. The cells that were run twice (append to the Limitations paragraph)
+
+Some tasks ran a second time and appended to the same results file, so a few cells hold more than one
+row. Nothing can be re-run, so the copies are resolved by a stated rule rather than by file order,
+and the rule is `figlib_load._resolve_duplicates`: where the standardisation differs between copies
+the two runs were fitted on different training draws and are not repeat measurements of one thing, so
+the copy matching the majority standardisation for that model, representation and condition is kept;
+where the standardisation matches, the copies differ only by nondeterminism in the fit and the median
+across them is taken.
+
+Two sentences to append:
+
+> A small number of configurations were fitted more than once and both fits were retained in the
+> results files. Where two fits of one configuration were standardised differently they were trained
+> on different draws of the training split and the fit matching the majority split for that model,
+> representation and noise condition is used; where they were standardised identically they differ
+> only by nondeterminism in fitting and the median across them is used, with every disagreeing cell
+> listed in Additional file [N].
+
+**The counts, and where they come from.** `results/decisions/d0_duplicate_disagreements_qm9.csv`,
+written by the run of 9 September 2026. **Refresh all six numbers from the final run's copy of that
+file before the paragraph goes into the paper** — every task that lands changes them.
+
+One cell is one model, one representation, one noise condition, one noise level, one replicate.
+
+| | 9 Sep 2026 run |
+|---|---|
+| QM9 cells whose copies disagree | 621 of about 26,100 (2.4%) |
+| rows involved | 1,622 |
+| cells where the copies were trained on different draws | 168 |
+| cells where the copies differ only by nondeterminism in the fit | 453 |
+| median range in R2 within a disagreeing cell | 0.011 |
+| cells whose range in R2 exceeds 0.05 | 43 |
+
+The 43 wide ones sit at the top of the noise ladder (39 of the 43 at levels 0.75 and above), where R2 is
+small and a swing of 0.2 is a large share of a small number. AUC_norm integrates the whole ladder, so
+a cell like that moves the robustness score by much less than it moves the single R2 it came from --
+**unmeasured**, and worth one sentence of measurement before the Limitations text claims it.
+
 **One thing this paragraph deliberately does not say.** It does not call the uncertainty results
 single-seed. On QM9 the out-of-fold uncertainty pass runs inside the grid tasks and is therefore
 replicated ten times like everything else; it is the assay side that has one fit per cell. The
