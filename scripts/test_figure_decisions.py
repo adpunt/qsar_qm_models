@@ -161,6 +161,43 @@ def d2_merges_identical_grids_and_keeps_different_ones():
     print('    every grid different -> every grid is a main-text panel')
 
 
+def d2_refuses_to_judge_a_condition_the_grid_barely_covers():
+    """A condition run on a handful of pairs is not a repeat of anything.
+
+    On the 9 September run laplace, outlier_p10 and student_t_nu5 overlapped the
+    other conditions on SIX model-and-representation cells out of about 110, and
+    six cells gave grouped_wider vs laplace a rank correlation of exactly 1.000.
+    That sent Laplace to an additional file as a repeat of a grid it had never
+    been run against. Six cells is not a grid.
+    """
+    s = flat_summary()
+    # One extra condition present on four models at one representation only --
+    # the shape a deep-run condition has while the rest of its array is queued.
+    # Four of eighteen cells, and every value copied from gaussian, so a rank
+    # correlation over them is a perfect 1.000 and the old rule merged it.
+    thin = pd.DataFrame([
+        {'dataset': 'qm9', 'model': m, 'rep': 'ecfp4', 'condition': 'laplace',
+         'auc_norm': {'rf': 0.92, 'svm': 0.88, 'ngboost': 0.93,
+                      'xgboost': 0.85}[m], 'auc_norm_spread': 0.01}
+        for m in ('rf', 'svm', 'ngboost', 'xgboost')])
+    wide = pd.concat([s, summary(thin.to_dict('records'))], ignore_index=True)
+    per = pd.concat([wide.assign(replicate=i) for i in range(10)],
+                    ignore_index=True)
+    per['auc_norm'] += np.random.default_rng(1).normal(0, 0.002, len(per))
+    tables, v = D.d2_grid_similarity(wide, per)
+
+    assert 'laplace' not in v['supplementary'], v['supplementary']
+    assert 'laplace' not in v['main_text'], v['main_text']
+    assert 'laplace' in v.get('not_judged', []), v.get('not_judged')
+    assert 'too few' in v['says'], v['says']
+    table = tables['d2_grid_similarity']
+    thin_rows = table[(table['a'] == 'laplace') | (table['b'] == 'laplace')]
+    assert len(thin_rows) and not thin_rows['enough_overlap'].any()
+    assert not thin_rows['grids_agree'].any()
+    print(f"    a condition on {int(thin_rows['n_cells'].max())} shared cell(s) "
+          f"is neither main text nor a repeat -- it is unjudged")
+
+
 def d3_fires_when_conditions_differ_and_not_when_they_do_not():
     identical = flat_summary()
     per = pd.concat([identical.assign(replicate=i) for i in range(10)],
@@ -402,6 +439,8 @@ def main():
               d1_flags_replicates_that_do_not_vary),
         check('D2 merges identical grids, keeps different ones',
               d2_merges_identical_grids_and_keeps_different_ones),
+        check('D2 refuses to judge a condition the grid barely covers',
+              d2_refuses_to_judge_a_condition_the_grid_barely_covers),
         check('D3 fires when the conditions differ and not when they do not',
               d3_fires_when_conditions_differ_and_not_when_they_do_not),
         check('D4 promotes simple effects only when the pairing wins',

@@ -369,12 +369,14 @@ def draw_figures(args, tables, verdicts):
     if qm9 is not None and len(qm9) and conditions:
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
     if accuracy is not None and len(accuracy) and qm9 is not None and rep:
-        drawn.append(FIG.f4_overview(accuracy, qm9, out, rep))
+        drawn.append(FIG.f4_overview(accuracy, qm9, out, rep,
+                                     excluded=tables.get('excluded_qm9')))
         drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
                                                 'gaussian'))
         drawn.append(FIG.r16_decoupling(qm9, out, rep))
     if assay is not None and len(assay) and rep:
-        drawn.append(FIG.f8_assay(assay, out, rep))
+        drawn.append(FIG.f8_assay(assay, out, rep,
+                                  excluded=tables.get('excluded_assay')))
 
     drawn += _draw_contingent(tables, said, out, rep, conditions, qm9,
                               accuracy, assay)
@@ -493,7 +495,13 @@ def build_tables(args, tables, verdicts):
     if qm9 is not None and len(qm9) and rep:
         built.append(TAB.t4_robustness(qm9, out, rep))
     if assay is not None and len(assay) and rep:
-        built.append(TAB.t4_robustness(assay, out, rep, dataset='logd'))
+        # Every assay dataset that landed gets its own T4. logd used to be
+        # hardcoded here, which silently dropped caco2 and herg -- a dataset is
+        # a FACTOR, and choosing one of three is the author's call to state, not
+        # a default to bury in a call site.
+        landed = set(assay['dataset'].dropna().unique()) - {'qm9'}
+        for name in [d for d in C.DATASET_ORDER if d in landed]:
+            built.append(TAB.t4_robustness(assay, out, rep, dataset=name))
     if tables.get('d10_probabilistic') is not None:
         built.append(TAB.t5_probabilistic(tables['d10_probabilistic'], out))
     if tables.get('d8_support') is not None or tables.get('d7_support') is not None:

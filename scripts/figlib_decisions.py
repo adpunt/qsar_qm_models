@@ -255,6 +255,16 @@ def d1_representation(summary, qm9=None):
 #: differences with the order scrambled.
 GRID_AGREEMENT_RHO = 0.90
 
+#: How much of the grid a pair of conditions must actually share before their
+#: agreement means anything. On the 9 September run the three deep-run
+#: conditions overlapped the others on SIX model-and-representation cells out of
+#: about 110, and six cells gave grouped_wider vs laplace a rank correlation of
+#: exactly 1.000 -- which sent Laplace to an additional file as a "repeat" of a
+#: grid it had never been run against. Six cells is not a grid. A pair below
+#: this share is recorded, reported, and never clustered.
+GRID_MIN_SHARED_SHARE = 0.5
+GRID_MIN_SHARED_CELLS = 8
+
 
 def d2_grid_similarity(summary, per_replicate=None):
     """Which noise conditions give the same model-by-representation grid.
@@ -280,18 +290,34 @@ def d2_grid_similarity(summary, per_replicate=None):
             gb = summary[summary['condition'] == b].set_index(
                 ['model', 'rep'])['auc_norm']
             shared = ga.index.intersection(gb.index)
-            if len(shared) < 4:
+            if len(shared) < 3:
                 continue
             x, y = ga.loc[shared].astype(float), gb.loc[shared].astype(float)
             rho, p = stats.spearmanr(x, y)
             mad = float(np.abs(x - y).mean())
-            same = bool(rho >= GRID_AGREEMENT_RHO
-                        and np.isfinite(wobble) and mad <= wobble)
             rows.append({'a': a, 'b': b, 'rho': float(rho), 'p_value': float(p),
                          'mean_abs_difference': mad,
                          'replicate_wobble': wobble,
-                         'grids_agree': same, 'n_cells': int(len(shared))})
+                         'n_cells': int(len(shared))})
     table = pd.DataFrame(rows)
+
+    # THE OVERLAP GATE. A pair is only allowed to declare two grids the same if
+    # the two grids were actually run over the same ground. The widest overlap
+    # in the table is what a full comparison looks like; anything under half of
+    # it is a handful of cells and says nothing about the rest of the roster.
+    thin = pd.Series(dtype=bool)
+    if len(table):
+        widest = int(table['n_cells'].max())
+        floor = max(GRID_MIN_SHARED_CELLS,
+                    int(round(GRID_MIN_SHARED_SHARE * widest)))
+        table['enough_overlap'] = table['n_cells'] >= floor
+        table['overlap_floor'] = floor
+        table['grids_agree'] = (
+            table['enough_overlap']
+            & (table['rho'] >= GRID_AGREEMENT_RHO)
+            & np.isfinite(wobble)
+            & (table['mean_abs_difference'] <= wobble))
+        thin = ~table['enough_overlap']
 
     # One representative per cluster of agreeing conditions.
     parent = {c: c for c in usable}
@@ -309,18 +335,40 @@ def d2_grid_similarity(summary, per_replicate=None):
     main_text = C.sort_conditions([members[0] for members in clusters.values()])
     supplementary = [c for c in usable if c not in main_text]
 
+    # A condition every one of whose comparisons was too thin is not a repeat of
+    # anything and must not be described as one. It is a condition the grid does
+    # not yet cover, and that is a different sentence in the paper.
+    judged = set()
+    if len(table):
+        ok = table[table['enough_overlap']]
+        judged = set(ok['a']) | set(ok['b'])
+    unjudged = [c for c in usable if c not in judged]
+    supplementary = [c for c in supplementary if c not in unjudged]
+    main_text = [c for c in main_text if c not in unjudged]
+
     says = (f'F3 shows {len(main_text)} panel(s): '
             + ', '.join(C.condition_label(c) for c in main_text) + '. '
             + (f'Held back as repeats of one of those: '
-               f'{", ".join(C.condition_label(c) for c in supplementary)}.'
+               f'{", ".join(C.condition_label(c) for c in supplementary)}. '
                if supplementary else
-               'Every grid differs from every other, so every one is a '
-               'main-text panel and F3 is the largest figure in the paper.'))
+               'Every grid that could be compared differs from every other, '
+               'so each is a main-text panel and F3 is the largest figure in '
+               'the paper. ')
+            + (f'{len(unjudged)} condition(s) could not be judged either way -- '
+               f'{", ".join(C.condition_label(c) for c in unjudged)} share too '
+               f'few model-and-representation cells with the rest of the grid '
+               f'to say whether their picture repeats it '
+               f'({int(table.loc[thin, "n_cells"].max()) if thin.any() else 0} '
+               f'cells at most, against a floor of '
+               f'{int(table["overlap_floor"].iloc[0]) if len(table) else 0}). '
+               f'They are neither main text nor an additional file until the '
+               f'deep run fills them in.'
+               if unjudged else ''))
     return ({'d2_grid_similarity': table},
             _verdict('D2', 'How many noise types does F3 show, and which?',
                      fired=bool(supplementary), says=says,
                      main_text=main_text, supplementary=supplementary,
-                     replicate_wobble=wobble))
+                     not_judged=unjudged, replicate_wobble=wobble))
 
 
 # ---------------------------------------------------------------------------

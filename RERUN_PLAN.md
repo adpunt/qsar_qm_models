@@ -18913,3 +18913,61 @@ made under the v2 definition while every figure in the paper is built under the 
 selection is already running, so this is not a correction to make mid-flight; it is a number to
 measure and a sentence to write. The measurement is one pass over `results/anova_*.csv` on the
 cluster comparing the two rankings, and it belongs with §14.9.
+
+#### 14.11e TWELVE DEFECTS READ OFF THE RENDERED FIGURES — 2026-09-12
+
+The run of 2026-09-12 13:45 finished in 6,351 s (1 h 46 m) inside the 3-hour wall and wrote 18
+figure files and 8 table slots. The pictures were then opened one at a time. Twelve defects, all
+fixed in this commit, with a test on the first.
+
+**Would have put a false sentence in the paper.**
+
+| | |
+|---|---|
+| what | D2 called Laplace, Outlier and Student-*t* repeats of the Gaussian grid |
+| why | the rule clustered two conditions on as few as 4 shared model-and-representation cells. Gaussian vs Grouped-wider is judged on 107–109 cells; Gaussian vs Laplace on **6**, and Grouped-wider vs Laplace scored ρ = 1.000 on those six |
+| fix | a pair now needs at least half the widest overlap in the table, floor 8 cells (`GRID_MIN_SHARED_SHARE`, `GRID_MIN_SHARED_CELLS`). A condition all of whose comparisons are thin is reported as **not judged** — neither main text nor an additional file |
+| replayed | on the 9 Sep numbers the three deep conditions come out unjudged, "9 cells at most against a floor of 54"; Grouped-wider stays supplementary on its 109 cells |
+| open | the half is a chosen number, not a measured one. The author may set it harder |
+
+**Mislabelled what was run.**
+
+- F4 panel c and F8 printed `not run` on cells that RAN and were then dropped by `robustness()`
+  (no clean level, clean accuracy under the gate, fewer than three levels). F4 showed it inside one
+  figure: panel b drew NGBoost's full curves for the three deep conditions while panel c called the
+  same three "not run". `S.grid` now takes `excluded=` and prints `excluded` instead, from the
+  `excluded_<dataset>` frame that was already being written and never read.
+- **T4 existed for logD only** — `dataset='logd'` was hardcoded at the call site in
+  `run_paper_analysis.build_tables`, so Caco-2 and hERG had no robustness table while F8 drew all
+  three. Now one T4 per assay dataset that landed.
+
+**Hid the line a decision rests on.** F7's error-alone reference curve was drawn at `zorder=1`,
+underneath six model curves that lie on top of each other — in the key, invisible on the panel.
+It is the comparison D7 fired on. Now drawn last, above the models, with a white casing.
+
+**Figures that could not be checked.**
+
+- F7, R6 and R15b carried no title: no dataset, no representation, no condition, no level. Every
+  panel in this study is ONE representation and a figure that does not name it cannot be checked
+  against §14.2. Titles added to all three, header line added to F6.
+- F6: four of six panels had no numbers on the bottom axis — `sharex` hides them on all but the
+  last row, and six panels in a four-wide grid leaves two top-row panels with nothing beneath.
+  They carried the words "Noise level" over a bare line.
+- F1 had no side-axis label and never said which of the two outlines was the clean labels.
+- F2 had four blank condition slots with nothing written in them, which reads as four zeroes.
+- R9 drew two dots on top of each other wherever two datasets share a rank; the composite colour is
+  in no legend. `S.dot_rows` now dodges each series onto its own line within the row.
+
+**Figures that did not say what they found.**
+
+- R15b's two R² labels printed on the same spot wherever two representations tie.
+- R10 flagged 8 replicates above 1.05 and named none of them. Six are one cell at clean R² ≈ 0.515
+  scoring up to 1.55. Each cell is now labelled with model, representation, condition and count.
+
+**Two results, not defects.** D4 did not fire — the model-representation pairing is the largest
+source of variance in 0 of 10 rows. And NGBoost is LAST for accuracy at every level on ECFP4 (R15)
+and FIRST for robustness (F4c, 0.98); R16 puts the correlation between clean accuracy and
+robustness at ρ = 0.13, n.s., over 66 cells.
+
+**The number to watch.** D0: 1,474 of 1,553 cells complete. The 79 that are not are the same cells
+that make the three deep conditions too thin for D2.

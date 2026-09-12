@@ -224,6 +224,12 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
                 color=colour, alpha=0.85)
         S.title(ax, 'abcdefghij'[index], C.condition_label(condition))
         ax.set_yticks([])
+        # No numbers on the side axis -- it is a density and the number means
+        # nothing to a reader -- but the axis must still SAY what it is. Without
+        # this the panels had an unlabelled vertical direction and nothing on
+        # the figure said which of the two outlines was the clean labels.
+        if index % ncols == 0:
+            ax.set_ylabel('Share of\nlabels', fontsize=7)
         for side in ('top', 'right', 'left'):
             ax.spines[side].set_visible(False)
         # Headroom so the annotation clears the bars.
@@ -266,6 +272,19 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
     S.title(ax, 'abcdefghij'[len(conditions)],
             f'Amount actually delivered, {replicates} draws each')
     ax.spines[['top', 'right']].set_visible(False)
+
+    # WHICH OUTLINE IS WHICH. Every histogram panel draws the clean labels in
+    # one colour and the noised ones in that condition's colour, and nothing on
+    # the figure said so -- a reader had two outlines and no way to tell which
+    # was the before and which the after.
+    from matplotlib.lines import Line2D
+    fig.legend(handles=[
+        Line2D([0], [0], color=C.CLEAN_COLOR, linewidth=1.6,
+               label='Clean labels'),
+        Line2D([0], [0], color='#666666', linewidth=1.6,
+               label='After the noise (each panel in its own colour)')],
+        loc='lower center', ncol=2, frameon=False, fontsize=7.5,
+        bbox_to_anchor=(0.5, -0.012))
 
     caption('F1', f"""
         What each settled noise condition does to a label distribution.
@@ -338,6 +357,20 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
         ax.set_ylabel('Share of variance (%)')
         ax.set_ylim(0, 100)
         S.title(ax, 'abcd'[index] if index < 4 else str(index), outcome)
+        # AN EMPTY SLOT SAYS WHY IT IS EMPTY. Both panels share one category
+        # list so they line up, which means each one has gaps where the other
+        # has bars -- censoring has no accuracy at a reported level, and the
+        # three deep-run conditions have no robustness because their cells were
+        # dropped. Four blank slots with nothing written in them read as four
+        # zeroes.
+        have = set(panel.dropna(subset=['share'])['condition'])
+        for position, condition in enumerate(conditions):
+            if condition in have:
+                continue
+            ax.annotate('no value\n(see the excluded table)',
+                        xy=(position, 2), xycoords=('data', 'data'),
+                        ha='center', va='bottom', fontsize=5.5,
+                        style='italic', color='#777777', rotation=90)
     axes[-1].set_xlabel('Noise condition')
     S.shared_legend(fig, axes[0], ncol=4)
 
@@ -421,9 +454,29 @@ def f3_model_by_representation(summary, output_dir, conditions,
 # F4 -- Q2 and Q3: what label noise costs you
 # ---------------------------------------------------------------------------
 
+def _excluded_keys(excluded, keys, **where):
+    """The grid cells that RAN and were then dropped, keyed as the grid is.
+
+    `robustness()` returns these with a reason: no clean level on the ladder, a
+    clean accuracy under the gate, fewer than three levels to integrate. Every
+    one of them ran. Printing "not run" on them states that the experiment was
+    never done, which on the deep-run conditions is false -- those tasks
+    finished and their accuracy is in the line panels of the same figure.
+    """
+    if excluded is None or not len(excluded):
+        return set()
+    frame = excluded
+    for column, value in where.items():
+        if column in frame.columns:
+            frame = frame[frame[column] == value]
+    if not len(frame) or any(k not in frame.columns for k in keys):
+        return set()
+    return set(map(tuple, frame[list(keys)].drop_duplicates().to_numpy()))
+
+
 def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                 reference_condition='gaussian', focus_model=None,
-                top_models=8):
+                top_models=8, excluded=None):
     """Three panels.
 
     a) Accuracy against noise level, one line per model, at one noise condition.
@@ -502,8 +555,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                 .rename(columns={'baseline_r2': 'auc_norm'}))
     both = pd.concat([baseline, summ[['model', 'condition', 'auc_norm']]],
                      ignore_index=True)
+    dropped = _excluded_keys(excluded, ('model', 'condition'),
+                             dataset=dataset, rep=rep)
     S.grid(ax_c, both, 'model', 'condition', 'auc_norm',
-           vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1],
+           vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1], excluded=dropped,
            row_order=order, separate_first_column=True,
            column_order=['clean'] + C.sort_conditions(
                [c for c in summ['condition'].unique()]),
@@ -532,7 +587,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         rather than only the amount. (c) Robustness by model and condition,
         models ordered by robustness under the reference condition. The first
         column is clean accuracy and is deliberately uncoloured: it is the
-        quantity the rest are a fraction of. Censoring appears nowhere here --
+        quantity the rest are a fraction of. A grey cell marked "not run" was
+        never fitted; one marked "excluded" ran and was then dropped, and the
+        reason -- no clean level on its ladder, a clean accuracy under the gate,
+        or fewer than three levels to integrate -- is in the excluded table. Censoring appears nowhere here --
         its level axis is a fraction of labels clipped rather than a fraction of
         the label spread, so it shares neither an axis nor a colour scale, and
         it runs on a named subset of pairs that cannot rank models.""")
@@ -543,7 +601,7 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
 # F8 -- the assay datasets
 # ---------------------------------------------------------------------------
 
-def f8_assay(summary, output_dir, rep, value='auc_norm'):
+def f8_assay(summary, output_dir, rep, value='auc_norm', excluded=None):
     """One grid per assay dataset: models down the side, conditions across.
 
     THE PANELS SPLIT WHEN THEY WOULD NOT BE LEGIBLE. Three datasets, each with a
@@ -578,7 +636,9 @@ def f8_assay(summary, output_dir, rep, value='auc_norm'):
         {G.metric_label('r2')} and is deliberately uncoloured: it is the
         quantity the others are a fraction of, not a measurement on the same
         scale. Colour is on one fixed range across all panels so they can be
-        compared directly. Grey cells were never run. There are no error bars:
+        compared directly. A grey cell marked "not run" is a combination that
+        was never fitted; one marked "excluded" ran and was then dropped, with
+        the reason in the excluded table. There are no error bars:
         one fit per cell with the seed pinned, and the five scaffold folds are a
         partition of one dataset rather than repeats of an experiment.
         Censoring is absent because it runs on a named subset of pairs and
@@ -615,9 +675,20 @@ def f8_assay(summary, output_dir, rep, value='auc_norm'):
                               column_labeller=lambda c: (
                                   'Clean R²' if c == 'clean'
                                   else C.condition_label(c)),
-                              vmin=lo, vmax=hi)
-            letter = 'abc'[datasets.index(dataset)]
-            S.title(ax, letter, C.dataset_label(dataset))
+                              vmin=lo, vmax=hi,
+                              excluded=_excluded_keys(
+                                  excluded, ('model', 'condition'),
+                                  dataset=dataset, rep=rep))
+            # ONE FIGURE PER DATASET GETS NO PANEL LETTER. A lone panel called
+            # "a)" promises a "b)" that is in a different file, and the
+            # representation has to be on the panel because every grid in this
+            # study is one representation and pooling them is the defect the
+            # whole guard exists for.
+            name = f'{C.dataset_label(dataset)}, {C.rep_label(rep)}'
+            if len(group) > 1:
+                S.title(ax, 'abc'[datasets.index(dataset)], name)
+            else:
+                ax.set_title(name, fontweight='bold', fontsize=9, loc='left')
         if image is not None:
             bar = fig.colorbar(image, ax=list(axes), fraction=0.02, pad=0.02)
             bar.set_label(G.metric_label(value), fontsize=8)
@@ -896,8 +967,21 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
     # The short form of the bottom-axis label. The full one -- "fraction of
     # label spread" -- is four times the panel width here, and the caption
     # carries the unit instead.
+    # sharex hides the tick NUMBERS on every row but the last. With six panels
+    # in a four-wide grid the top row's last two panels have nothing beneath
+    # them, so they were carrying the words "Noise level" over a bare line with
+    # no numbers on it. Any panel that is the bottom of its own column gets its
+    # numbers back.
     for ax in axes[len(models) - ncols:len(models)]:
         ax.set_xlabel('Noise level')
+        ax.tick_params(labelbottom=True)
+    # The representation is on the figure, not only in the caption. Every grid
+    # and every panel in this study is ONE representation and pooling them is
+    # the defect the guard exists for; a figure that does not say which one it
+    # is cannot be checked.
+    fig.suptitle(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
+                 f'{C.condition_label(condition)}',
+                 fontsize=9, fontweight='bold', x=0.01, ha='left')
     S.shared_legend(fig, axes[0], ncol=2)
     return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
 
@@ -1071,14 +1155,26 @@ def _f7b_enrichment(enrichment, output_dir, rep, condition, dataset='qm9',
         ax.plot(one['fraction'], one['value'], marker=C.model_marker(model),
                 markersize=3.5, linewidth=1.4, alpha=0.9,
                 color=C.model_color(model), label=C.model_label(model))
+    # ON TOP, NOT UNDERNEATH. The error-alone curve is the line the whole
+    # decision rests on -- whether the uncertainty adds anything to it -- and at
+    # zorder 1 it sat behind a cluster of six model curves that lie on top of
+    # each other, so it was in the key and invisible on the panel. Drawn last,
+    # thicker, above the models, and in white-edged black so it reads against
+    # any of them.
     for series in ('error', 'random'):
         one = (frame[frame['series'] == series]
                .groupby('fraction', dropna=False)['value'].median().reset_index())
         if not len(one):
             continue
-        ax.plot(one['fraction'], one['value'], linewidth=1.2,
+        ax.plot(one['fraction'], one['value'],
+                linewidth=2.6, color='white', alpha=0.85, zorder=4,
+                solid_capstyle='round')
+        ax.plot(one['fraction'], one['value'], linewidth=1.4,
                 linestyle=C.CURVE_STYLES[series], color=C.CURVE_COLORS[series],
-                label=C.curve_label(series), zorder=1)
+                label=C.curve_label(series), zorder=5)
+    ax.set_title(f'{C.dataset_label(dataset)}, {C.rep_label(rep)}, '
+                 f'{C.condition_label(condition)}, noise level {sigma}',
+                 fontweight='bold', fontsize=9, loc='left')
     ax.set_xlabel('Fraction of molecules inspected, most suspicious first')
     ax.set_ylabel('Fraction of the corrupted\nlabels found')
     ax.spines[['top', 'right']].set_visible(False)
@@ -1185,6 +1281,8 @@ def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
     ax.set_xticklabels([C.rep_label(r) for r in reps], rotation=20, ha='right')
     ax.set_ylabel(G.metric_label(value))
     ax.set_xlabel('Representation')
+    ax.set_title(f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
+                 fontweight='bold', fontsize=9, loc='left')
     ax.spines[['top', 'right']].set_visible(False)
     S.shared_legend(fig, ax, ncol=4)
     return S.save(fig,
@@ -1282,6 +1380,21 @@ def r10_auc_above_one(per_replicate, output_dir, dataset='qm9'):
         ax.scatter(high['baseline_r2'], high['auc_norm'], s=14, alpha=0.85,
                    color='#D55E00', linewidth=0,
                    label=f'above {C.AUC_NORM_IMPLAUSIBLE_HIGH}')
+        # NAME THEM. The whole point of this figure is WHERE it happens, and a
+        # bare orange dot names nothing -- six of them stacked at one clean
+        # baseline are six replicates of a single cell that the reader cannot
+        # identify. Each cell is labelled once, at its highest replicate.
+        for key, group in high.groupby(['model', 'rep', 'condition'],
+                                       dropna=False):
+            worst = group.loc[group['auc_norm'].idxmax()]
+            model, representation, cond = key
+            ax.annotate(f'{C.model_label(model)} / {C.rep_label(representation)}'
+                        f' / {C.condition_label(cond)}'
+                        f'  ({len(group)} rep.)',
+                        xy=(float(worst['baseline_r2']),
+                            float(worst['auc_norm'])),
+                        xytext=(6, 2), textcoords='offset points',
+                        fontsize=5.5, color='#8A3B00', va='bottom')
     ax.axhline(C.AUC_NORM_IMPLAUSIBLE_HIGH, color='#444444', linestyle='--',
                linewidth=0.9)
     ax.axvline(C.BASELINE_THRESHOLD, color='#444444', linestyle=':',
@@ -1355,6 +1468,11 @@ def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
     fig, ax = _fig(height=3.4)
     order = (ranks[ranks['sigma'] == ranks['sigma'].min()]
              .sort_values('rank')['rep'].tolist())
+    # TWO REPRESENTATIONS TIED AT ONE LEVEL SHARE A MARK, and at a fixed offset
+    # their two R2 labels printed over each other -- a tie at level 0 came out
+    # as one unreadable smear of two numbers. Each label after the first at a
+    # position is lifted clear.
+    taken = {}
     for name in order:
         one = ranks[ranks['rep'] == name].sort_values('sigma')
         if not len(one):
@@ -1362,14 +1480,20 @@ def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
         ax.plot(one['sigma'], one['rank'], marker='o', markersize=4,
                 linewidth=1.4, label=C.rep_label(name))
         for _, row in one.iterrows():
+            spot = (round(float(row['sigma']), 6), round(float(row['rank']), 3))
+            nth = taken.get(spot, 0)
+            taken[spot] = nth + 1
             ax.annotate(f"{row['r2']:.2f}",
                         xy=(row['sigma'], row['rank']), fontsize=5.5,
-                        xytext=(0, 5), textcoords='offset points', ha='center',
-                        color='#555555')
+                        xytext=(0, 5 + 7 * nth), textcoords='offset points',
+                        ha='center', color='#555555')
     ax.invert_yaxis()
     ax.set_yticks(range(1, len(order) + 1))
     ax.set_xlabel(LEVEL_AXIS)
     ax.set_ylabel('Rank (1 = most accurate)')
+    ax.set_title(f'{C.model_label(model)} on {C.dataset_label(dataset)}, '
+                 f'{C.condition_label(condition)}',
+                 fontweight='bold', fontsize=9, loc='left')
     ax.spines[['top', 'right']].set_visible(False)
     S.shared_legend(fig, ax, ncol=3)
     return S.save(

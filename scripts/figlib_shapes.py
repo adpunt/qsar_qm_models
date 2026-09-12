@@ -204,8 +204,15 @@ def line_chart(ax, frame, x, y, series, spread=None, labeller=None,
 def dot_rows(ax, frame, row, value, series=None, labeller=None,
              row_labeller=None, colours=None, reference=None,
              reference_label=None, spread_low=None, spread_high=None,
-             legend_ncol=3):
-    """One row per level of `row`; one dot per level of `series` on that row."""
+             legend_ncol=3, dodge=True):
+    """One row per level of `row`; one dot per level of `series` on that row.
+
+    `dodge` nudges each series onto its own line within the row. Without it two
+    series landing on the same value draw one dot on top of another: the pair
+    blends into a colour that is in no legend, and a reader counts three dots
+    where four datasets were plotted. Ranks collide constantly -- there are only
+    nineteen of them and four datasets -- so this is on by default.
+    """
     labeller = labeller or (lambda v: str(v))
     row_labeller = row_labeller or C.model_label
     rows = list(dict.fromkeys(frame[row]))
@@ -220,10 +227,16 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
                         [position[r[row]]] * 2, color=C.CLEAN_COLOR,
                         linewidth=1.2, alpha=0.5, zorder=2)
     else:
-        for name, group in frame.groupby(series, dropna=False, sort=False,
-                                         observed=True):
-            ax.scatter(group[value], [position[r] for r in group[row]], s=50,
-                       alpha=0.7, label=labeller(name), zorder=3,
+        names = list(dict.fromkeys(frame[series]))
+        span = 0.42 if (dodge and len(names) > 1) else 0.0
+        step = (span / (len(names) - 1)) if len(names) > 1 else 0.0
+        for index, name in enumerate(names):
+            group = frame[frame[series] == name]
+            offset = (index * step) - span / 2 if span else 0.0
+            ax.scatter(group[value],
+                       [position[r] + offset for r in group[row]], s=44,
+                       alpha=0.85, label=labeller(name), zorder=3,
+                       linewidth=0.4, edgecolor='white',
                        color=(colours or {}).get(name, C.model_color(name)))
         _order_legend(ax, legend_ncol, loc='best', fontsize=8)
 
@@ -249,7 +262,8 @@ def dot_rows(ax, frame, row, value, series=None, labeller=None,
 def grid(ax, frame, rows, columns, value, row_labeller=None,
          column_labeller=None, fmt='{:.2f}', vmin=None, vmax=None,
          cmap='viridis', separate_first_column=False, row_order=None,
-         column_order=None, never_run='not run', annotate=True):
+         column_order=None, never_run='not run', annotate=True,
+         excluded=None, excluded_label='excluded'):
     """A square per combination, the number printed on it.
 
     `vmin` and `vmax` are REQUIRED in practice: pass the fixed anchor for the
@@ -259,6 +273,13 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
 
     A combination that was never run is grey and labelled, so an absence cannot
     be read as a low value -- the colour map's own dark end is a low value.
+
+    `excluded` separates the two ways a cell can be empty. A cell that never ran
+    says so; a cell that RAN and was then dropped -- no clean level on the
+    ladder, a clean accuracy under the gate, too few levels to integrate -- says
+    `excluded` instead, and the reason is in `excluded_<dataset>.csv`. Calling
+    the second one "not run" is a false statement about the experiment, and it
+    was doing exactly that on the deep-run conditions.
 
     `separate_first_column` draws a gutter after the first column, which is how
     the clean baseline sits beside the robustness grid without being mistaken
@@ -327,7 +348,10 @@ def grid(ax, frame, rows, columns, value, row_labeller=None,
             for j in range(data.shape[1]):
                 v = data[i, j]
                 if np.isnan(v):
-                    ax.text(j, i, never_run, ha='center', va='center',
+                    key = (table.index[i], table.columns[j])
+                    word = (excluded_label if excluded and key in excluded
+                            else never_run)
+                    ax.text(j, i, word, ha='center', va='center',
                             fontsize=6, color='#333333', style='italic',
                             zorder=3)
                     continue
