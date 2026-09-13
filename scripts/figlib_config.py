@@ -244,7 +244,25 @@ def apply_style():
     plt.rcParams.update(RCPARAMS)
 
 
-CLEAN_COLOR = '#0072B2'  # used ONLY for clean (no-noise) data
+CLEAN_COLOR = '#0072B2'  # used ONLY for clean (no-noise) data as a SERIES
+
+#: The clean labels drawn as the BACKDROP another distribution sits on -- the
+#: author's call 2026-09-13. In F1 the clean labels are not one of the things
+#: being compared, they are the reference every panel repeats, and in blue they
+#: competed with the condition's own colour for attention.
+CLEAN_BACKDROP_COLOR = '#8A8A8A'
+
+#: The label's own unit, per dataset, for any axis that carries a magnitude in
+#: label units rather than a ratio. QM9's HOMO-LUMO gap is in eV (the pipeline's
+#: clean labels average 6.82 with a spread of 1.28); the three assay endpoints
+#: are logD, log Caco-2 efflux and pKi, all log units.
+DATASET_UNITS = {'qm9': 'eV', 'logd': 'log units', 'caco2': 'log units',
+                 'herg': 'log units'}
+
+
+def dataset_unit(name):
+    return DATASET_UNITS.get(canonical_dataset(name), 'label units')
+
 
 CONDITION_COLORS = {
     'gaussian': '#E31A1C',
@@ -347,8 +365,12 @@ UNCERTAINTY_COLORS = {
 #: panel of F6 so the reader learns them once (RERUN_PLAN.md 14.5 F6).
 COMPONENT_COLORS = {'aleatoric': '#D55E00', 'epistemic': '#0072B2',
                     'total': '#666666'}
-COMPONENT_LABELS = {'aleatoric': 'Aleatoric (data)',
-                    'epistemic': 'Epistemic (model)',
+#: The parenthetical glosses are gone (the author's call, 2026-09-13): the two
+#: words are the field's own and a reader of this journal knows them, so the
+#: gloss was two extra words on every legend to no purpose. What each component
+#: MEANS belongs in Methods, once.
+COMPONENT_LABELS = {'aleatoric': 'Aleatoric',
+                    'epistemic': 'Epistemic',
                     'total': 'Total'}
 
 #: The three lines on each F7 panel. The two references are grey on purpose:

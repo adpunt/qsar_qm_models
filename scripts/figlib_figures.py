@@ -206,7 +206,7 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
     delivered = pd.DataFrame(delivered)
 
     ncols = 2
-    nrows = int(np.ceil(len(conditions) / ncols)) + 1      # +1 for the dose panel
+    nrows = int(np.ceil(len(conditions) / ncols))
     import matplotlib.pyplot as plt
     fig = plt.figure(figsize=(C.TEXTWIDTH_IN,
                               min(C.MAX_HEIGHT_IN, 1.35 * nrows)))
@@ -216,10 +216,11 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         ax = fig.add_subplot(spec[index // ncols, index % ncols])
         noised = drawn[condition]
         colour = C.CONDITION_COLORS.get(condition, '#666666')
-        ax.hist(clean, bins=bins, density=True, alpha=0.15, color=C.CLEAN_COLOR)
+        ax.hist(clean, bins=bins, density=True, alpha=0.18,
+                color=C.CLEAN_BACKDROP_COLOR)
         ax.hist(noised, bins=bins, density=True, alpha=0.15, color=colour)
         ax.hist(clean, bins=bins, density=True, histtype='step', linewidth=1.6,
-                color=C.CLEAN_COLOR, alpha=0.85)
+                color=C.CLEAN_BACKDROP_COLOR, alpha=0.9)
         ax.hist(noised, bins=bins, density=True, histtype='step', linewidth=1.6,
                 color=colour, alpha=0.85)
         S.title(ax, 'abcdefghij'[index], C.condition_label(condition))
@@ -242,49 +243,28 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         if index >= len(conditions) - ncols:
             ax.set_xlabel('Label value', fontsize=8)
 
-    # The dose panel, across the full width.
-    ax = fig.add_subplot(spec[nrows - 1, :])
-    order = C.sort_conditions(conditions)
-    for position, condition in enumerate(order):
-        values = delivered[delivered['condition'] == condition]['delivered']
-        colour = C.CONDITION_COLORS.get(condition, '#666666')
-        ax.plot([position, position], [values.min(), values.max()],
-                color=colour, linewidth=1.2, alpha=0.7, zorder=2)
-        ax.scatter([position], [values.median()], s=50, color=colour, zorder=3)
-    target = level * spread
-    ax.axhline(target, color='#444444', linestyle='--', linewidth=0.9)
-    ax.annotate(f'asked for {target:.2f}', xy=(1.0, target), xycoords=('axes fraction', 'data'),
-                xytext=(3, 0), textcoords='offset points', fontsize=7,
-                va='center', color='#444444', annotation_clip=False)
-    # Censoring is NOT dose-matched and cannot be: it has no variance parameter
-    # and is not zero-mean, so it runs on its own axis. Saying that on the panel
-    # stops its lower point being read as a condition that failed to hit target.
-    censoring = [i for i, c in enumerate(order) if c.startswith('censoring')]
-    for position in censoring:
-        ax.annotate('own axis,\nnot dose-matched', xy=(position, 0),
-                    xycoords=('data', 'axes fraction'), xytext=(0, 4),
-                    textcoords='offset points', ha='center', va='bottom',
-                    fontsize=6, style='italic', color='#555555')
-    ax.set_xticks(range(len(order)))
-    ax.set_xticklabels([C.condition_label(c) for c in order], rotation=25,
-                       ha='right', fontsize=8)
-    ax.set_ylabel('Delivered noise', fontsize=8)
-    S.title(ax, 'abcdefghij'[len(conditions)],
-            f'Amount actually delivered, {replicates} draws each')
-    ax.spines[['top', 'right']].set_visible(False)
-
-    # WHICH OUTLINE IS WHICH. Every histogram panel draws the clean labels in
-    # one colour and the noised ones in that condition's colour, and nothing on
-    # the figure said so -- a reader had two outlines and no way to tell which
-    # was the before and which the after.
-    from matplotlib.lines import Line2D
-    fig.legend(handles=[
-        Line2D([0], [0], color=C.CLEAN_COLOR, linewidth=1.6,
-               label='Clean labels'),
-        Line2D([0], [0], color='#666666', linewidth=1.6,
-               label='After the noise (each panel in its own colour)')],
-        loc='lower center', ncol=2, frameon=False, fontsize=7.5,
-        bbox_to_anchor=(0.5, -0.012))
+    # THE DOSE PANEL IS GONE -- the author's call, 2026-09-13. It showed that
+    # every condition delivers the amount it was asked for, which is a
+    # precondition of the comparison rather than a result, and it is one
+    # sentence of text. The numbers are still computed and printed here so that
+    # sentence can be written from a measurement rather than from memory, and
+    # they are written to a CSV beside the figure.
+    summary = (delivered.groupby('condition')['delivered']
+               .agg(['median', 'min', 'max']).reset_index())
+    summary['asked_for'] = level * spread
+    summary['off_by'] = (summary['median'] - summary['asked_for']).abs()
+    dose_path = Path(output_dir) / 'F1_delivered_dose.csv'
+    summary.to_csv(dose_path, index=False)
+    matched = summary[~summary['condition'].str.startswith('censoring')]
+    if len(matched):
+        worst = matched.loc[matched['off_by'].idxmax()]
+        print(f'  F1: the dose check is a CSV, not a panel. Asked for '
+              f'{level * spread:.4f} in label units; the dose-matched '
+              f'conditions delivered between {matched["median"].min():.4f} and '
+              f'{matched["median"].max():.4f}, worst off by '
+              f'{worst["off_by"]:.4f} ({C.condition_label(worst["condition"])}). '
+              f'Censoring is not dose-matched and cannot be. '
+              f'Written to {dose_path.name}.')
 
     caption('F1', f"""
         What each settled noise condition does to a label distribution.
@@ -293,12 +273,9 @@ def f1_noise_conditions(output_dir, level=0.5, censored_fraction=0.25,
         label spread — censoring at {censored_fraction:.0%} of labels clipped,
         because its level is a fraction clipped rather than a fraction of the
         spread. Drawn with the injector the pipeline runs, not a
-        reimplementation. The final panel is the evidence that comparing
-        conditions is fair at all: the amount of noise actually delivered by
-        each, over {replicates} draws, against the amount the dose solver was
-        asked for. Without it, a difference between two conditions could be a
-        difference in dose rather than in kind — which is what the six
-        strategies this scheme replaced turned out to be.""")
+        reimplementation. That the conditions deliver the same amount of noise,
+        and so differ in kind rather than in dose, is reported in the text and
+        measured in F1_delivered_dose.csv rather than drawn as a panel.""")
     return S.save(fig, Path(output_dir) / 'F1_noise_conditions.png')
 
 
@@ -356,7 +333,14 @@ def f2_variance_decomposition(anova, output_dir, dataset='qm9'):
                        categories=conditions, clip=(0, 100))
         ax.set_ylabel('Share of variance (%)')
         ax.set_ylim(0, 100)
-        S.title(ax, 'abcd'[index] if index < 4 else str(index), outcome)
+        # WHICH LEVEL. The accuracy panel is R2 at ONE noise level and the
+        # title never said which, so a reader could not tell whether the shares
+        # were a property of the study or of a setting.
+        level = C.reporting_level(dataset)
+        heading = str(outcome)
+        for phrase in ('the reported level', 'the reporting level'):
+            heading = heading.replace(phrase, f'noise level {level:g}')
+        S.title(ax, 'abcd'[index] if index < 4 else str(index), heading)
         # AN EMPTY SLOT SAYS WHY IT IS EMPTY. Both panels share one category
         # list so they line up, which means each one has gaps where the other
         # has bars -- censoring has no accuracy at a reported level, and the
@@ -477,21 +461,22 @@ def _excluded_keys(excluded, keys, **where):
 def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                 reference_condition='gaussian', focus_model=None,
                 top_models=8, excluded=None):
-    """Three panels.
+    """THREE FIGURES, not three panels -- the author's call, 2026-09-13.
 
-    a) Accuracy against noise level, one line per model, at one noise condition.
-    b) Accuracy against noise level, one line per noise CONDITION, for one
-       model -- the picture of "does the kind of noise matter" that nothing else
-       in the paper shows.
-    c) A grid: models down the side, conditions across the bottom, robustness on
-       each square, WITH THE CLEAN ACCURACY AS A SEPARATE FIRST COLUMN behind a
-       white gutter. That column is what stops a retention fraction ever being
-       printed without the thing it is a fraction of.
+    One figure was 170 mm wide and 250 mm tall carrying two line charts and a
+    nineteen-row grid. The bands across replicates are a real measurement and
+    at that size none of them could be read, and the two line charts sat side
+    by side looking like two views of one thing when they hold different things
+    fixed.
+
+    F4a  accuracy against noise level, one line per MODEL, at one noise type.
+    F4b  accuracy against noise level, one line per NOISE TYPE, for one model.
+    F4c  the grid: models down the side, noise types across, robustness on each
+         square, with clean accuracy as an uncoloured first column.
 
     Censoring is on none of them: its bottom axis is a fraction of labels
     clipped, not a fraction of the label spread, so it cannot share an axis or a
-    colour scale. It also runs on five named pairs and cannot rank models at
-    all, which figlib_guard refuses outright.
+    colour scale, and it runs on five named pairs and cannot rank models.
     """
     acc = accuracy[(accuracy['dataset'] == dataset) & (accuracy['rep'] == rep)]
     rankable = G.ranking_conditions(sorted(acc['condition'].dropna().unique()))
@@ -507,7 +492,10 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
     order = order or C.sort_models(acc['model'].unique())
     focus_model = focus_model or (order[0] if order else None)
     keep = order[:top_models]
+    level = C.reporting_level(dataset)
+    written = []
 
+    # ---- F4a: the models, under one noise type ----------------------------
     curves = (acc[acc['model'].isin(keep)
                   & (acc['condition'] == reference_condition)]
               .groupby(['model', 'sigma'], as_index=False)
@@ -518,38 +506,63 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
         fixed={'dataset': dataset, 'rep': rep,
                'condition': reference_condition},
         varies=('model', 'sigma'), aggregates=('replicate',))
-
-    by_condition = (acc[acc['model'] == focus_model]
-                    .groupby(['condition', 'sigma'], as_index=False)
-                    .agg(r2=('r2', 'median'),
-                         spread=('r2', lambda v: float(v.std(ddof=0)))))
-
-    level = C.reporting_level(dataset)
-    # Three FULL-WIDTH panels, stacked. Two line charts side by side ran their
-    # axis labels into each other and left no room for a key.
-    import matplotlib.pyplot as plt
-    height = min(C.MAX_HEIGHT_IN, 3.4 + C.grid_height(len(order)))
-    fig = plt.figure(figsize=(C.TEXTWIDTH_IN, height))
-    spec = fig.add_gridspec(3, 1, height_ratios=[1.0, 1.0, 0.20 * len(order) + 1.0],
-                            hspace=0.42)
-
-    ax_a = fig.add_subplot(spec[0])
-    S.line_chart(ax_a, curves, 'sigma', 'r2', 'model', spread='spread',
+    fig, ax = _fig(height=4.0)
+    S.line_chart(ax, curves, 'sigma', 'r2', 'model', spread='spread',
                  labeller=C.model_label, reference_x=level,
                  reference_label='reported at', legend=False)
-    ax_a.set_ylabel(G.metric_label('r2'))
-    S.title(ax_a, 'a', f'{C.condition_label(reference_condition)}, '
-            f'{len(keep)} most robust models')
+    ax.set_ylabel(G.metric_label('r2'))
+    ax.set_xlabel(LEVEL_AXIS)
+    ax.set_title(f'Models across {C.condition_label(reference_condition)} '
+                 f'noise — {C.dataset_label(dataset)}, {C.rep_label(rep)}',
+                 fontweight='bold', fontsize=9, loc='left')
+    ax.spines[['top', 'right']].set_visible(False)
+    S.shared_legend(fig, ax, ncol=4)
+    caption('F4a', f"""
+        What label noise costs you, on {title}. One line per model, the
+        {len(keep)} most robust under {C.condition_label(reference_condition)}.
+        Bottom axis: the amount of noise put into the training labels, as a
+        fraction of the clean training label spread. Side axis: R2 on held-out
+        molecules. The shaded band around each line is the spread across the ten
+        replicates; the dashed vertical line marks the level every table in the
+        paper reports at.""")
+    written.append(S.save(fig, Path(output_dir) / 'F4a_models_under_noise.png'))
 
-    ax_b = fig.add_subplot(spec[1], sharex=ax_a)
-    S.line_chart(ax_b, by_condition, 'sigma', 'r2', 'condition',
-                 spread='spread', labeller=C.condition_label,
-                 colours=C.CONDITION_COLORS, reference_x=level, legend=False)
-    ax_b.set_xlabel(LEVEL_AXIS)
-    ax_b.set_ylabel(G.metric_label('r2'))
-    S.title(ax_b, 'b', f'{C.model_label(focus_model)}, every condition')
+    # ---- F4b: one model, across every noise type ---------------------------
+    if focus_model:
+        by_condition = (acc[acc['model'] == focus_model]
+                        .groupby(['condition', 'sigma'], as_index=False)
+                        .agg(r2=('r2', 'median'),
+                             spread=('r2', lambda v: float(v.std(ddof=0)))))
+        G.declare(acc[acc['model'] == focus_model], 'F4b',
+                  fixed={'dataset': dataset, 'rep': rep, 'model': focus_model},
+                  varies=('condition', 'sigma'), aggregates=('replicate',))
+        fig, ax = _fig(height=4.0)
+        S.line_chart(ax, by_condition, 'sigma', 'r2', 'condition',
+                     spread='spread', labeller=C.condition_label,
+                     colours=C.CONDITION_COLORS, reference_x=level,
+                     reference_label='reported at', legend=False)
+        ax.set_ylabel(G.metric_label('r2'))
+        ax.set_xlabel(LEVEL_AXIS)
+        ax.set_title(f'{C.model_label(focus_model)} across noise types — '
+                     f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
+                     fontweight='bold', fontsize=9, loc='left')
+        ax.spines[['top', 'right']].set_visible(False)
+        S.shared_legend(fig, ax, ncol=3)
+        caption('F4b', f"""
+            Whether the KIND of noise matters or only the amount, for
+            {C.model_label(focus_model)} on {C.dataset_label(dataset)} at
+            {C.rep_label(rep)}. One line per noise type, same axes as the
+            previous figure. Lines that lie on top of each other mean this model
+            cannot tell the noise types apart at a matched dose; lines that
+            separate mean the shape of the noise costs something beyond its
+            size. Censoring is absent: its level is a fraction of labels clipped
+            rather than a fraction of the label spread, so it does not share
+            this bottom axis.""")
+        written.append(S.save(
+            fig, Path(output_dir) /
+            f'F4b_{focus_model}_across_noise_types.png'))
 
-    ax_c = fig.add_subplot(spec[2])
+    # ---- F4c: the grid -----------------------------------------------------
     baseline = (summ.groupby('model', as_index=False)['baseline_r2'].median()
                 .assign(condition='clean')
                 .rename(columns={'baseline_r2': 'auc_norm'}))
@@ -557,44 +570,32 @@ def f4_overview(accuracy, summary, output_dir, rep, dataset='qm9',
                      ignore_index=True)
     dropped = _excluded_keys(excluded, ('model', 'condition'),
                              dataset=dataset, rep=rep)
-    S.grid(ax_c, both, 'model', 'condition', 'auc_norm',
-           vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1], excluded=dropped,
-           row_order=order, separate_first_column=True,
-           column_order=['clean'] + C.sort_conditions(
-               [c for c in summ['condition'].unique()]),
-           column_labeller=lambda c: ('Clean R²' if c == 'clean'
-                                      else C.condition_label(c)))
-    S.title(ax_c, 'c', f'{G.metric_label("auc_norm")} by model and condition')
-
-    # A KEY PER PANEL, inside it. Panel a's key is models and panel b's is noise
-    # conditions -- different things that cannot share a legend, and merging
-    # them produced one strip of eighteen entries that then sat on top of panel
-    # c's column labels. Each panel's key is small, in two columns, in the
-    # corner its own lines leave empty.
-    # BESIDE the panel, not inside it. Lines that fall left to right leave no
-    # corner free -- every placement inside the axes sat on data.
-    for ax in (ax_a, ax_b):
-        ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1.02), ncol=1,
-                  fontsize=6.5, frameon=False, handlelength=1.2,
-                  handletextpad=0.4, labelspacing=0.35)
-
-    caption('F4', f"""
-        What label noise costs you, on {title}. (a) Accuracy against the amount
-        of noise for the most robust models under one condition; the shaded band
-        is the spread across replicates and the dashed line marks the level
-        every table reports at. (b) The same for one model under every
-        condition, which is the picture of whether the KIND of noise matters
-        rather than only the amount. (c) Robustness by model and condition,
-        models ordered by robustness under the reference condition. The first
+    fig, ax = _fig(height=C.grid_height(len(order)))
+    image, _ = S.grid(ax, both, 'model', 'condition', 'auc_norm',
+                      vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1],
+                      excluded=dropped,
+                      row_order=order, separate_first_column=True,
+                      column_order=['clean'] + C.sort_conditions(
+                          [c for c in summ['condition'].unique()]),
+                      column_labeller=lambda c: ('Clean R²' if c == 'clean'
+                                                 else C.condition_label(c)))
+    bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+    bar.set_label(G.metric_label('auc_norm'), fontsize=8)
+    bar.ax.tick_params(labelsize=7)
+    ax.set_title(f'Robustness by model and noise type — '
+                 f'{C.dataset_label(dataset)}, {C.rep_label(rep)}',
+                 fontweight='bold', fontsize=9, loc='left')
+    caption('F4c', f"""
+        Robustness ({G.metric_label('auc_norm')}) by model and noise type on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)}, models ordered by
+        robustness under {C.condition_label(reference_condition)}. The first
         column is clean accuracy and is deliberately uncoloured: it is the
-        quantity the rest are a fraction of. A grey cell marked "not run" was
-        never fitted; one marked "excluded" ran and was then dropped, and the
-        reason -- no clean level on its ladder, a clean accuracy under the gate,
-        or fewer than three levels to integrate -- is in the excluded table. Censoring appears nowhere here --
-        its level axis is a fraction of labels clipped rather than a fraction of
-        the label spread, so it shares neither an axis nor a colour scale, and
-        it runs on a named subset of pairs that cannot rank models.""")
-    return S.save(fig, Path(output_dir) / 'F4_overview.png')
+        quantity the rest are a fraction of. A grey square marked "not run" was
+        never fitted; one marked "excluded" ran and was dropped, with the reason
+        -- no clean level on its ladder, a clean accuracy under the gate, or
+        fewer than three levels to integrate -- in the excluded table.""")
+    written.append(S.save(fig, Path(output_dir) / 'F4c_robustness_grid.png'))
+    return written[0] if written else None
 
 
 # ---------------------------------------------------------------------------
@@ -900,28 +901,18 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
         for _, row in support.iterrows():
             flags[str(row.get('model'))] = (str(row.get('aleatoric_support', '')),
                                             str(row.get('epistemic_support', '')))
+    notes = []
     verdicts = {}
     if slopes is not None and len(slopes):
         for _, row in slopes.iterrows():
             if str(row.get('condition')) == condition and str(row.get('rep')) == rep:
                 verdicts[str(row.get('model'))] = str(row.get('verdict', ''))
 
-    caption('F6', f"""
-        The two halves of the predicted uncertainty against the amount of noise
-        added to the training labels, one panel per model, on
-        {C.dataset_label(dataset)} at {C.rep_label(rep)} under
-        {C.condition_label(condition)}. One mark is the mean predicted
-        uncertainty over the molecules of one out-of-fold pass, in the label's
-        own units; the band is the range across folds. A model that is
-        attributing added label noise to the data has an aleatoric line that
-        climbs and an epistemic line that holds. A component that is one number
-        per fit is not drawn as a line, and its support flag is printed on the
-        panel instead. The bottom axis is the noise level, a fraction of the
-        clean training label spread. Every panel starts at zero, so a component
-        that holds still looks like one. Verdicts are from the slopes, not read
-        off the picture.""")
-
-    ncols = min(len(models), 4)
+    # A SHAPE THAT DIVIDES. Six panels came out as four across the top and two
+    # underneath, which reads as two figures. The columns are chosen so the rows
+    # are equal where the count allows it: six becomes three by two.
+    ncols = next((c for c in (3, 4, 2) if len(models) % c == 0 and len(models) // c <= 3),
+                 min(len(models), 3))
     nrows = int(np.ceil(len(models) / ncols))
     fig, axes = _fig(height=2.5 * nrows + 1.1, nrows=nrows, ncols=ncols,
                      sharex=True)
@@ -957,11 +948,14 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
         # mountain -- which is the opposite of what the panel is claiming.
         ax.set_ylim(bottom=0)
         S.title(ax, 'abcdefgh'[index], C.model_label(model))
+        # THE NOTE GOES TO THE CAPTION. Text laid over the data is text a reader
+        # has to work around; the caption is where a journal expects it and
+        # where it can be read at its own pace. Collected here, printed there.
         if note:
-            _panel_note(ax, note)
+            notes.append(f'({"abcdefgh"[index]}) {C.model_label(model)}: {note}')
         ax.spines[['top', 'right']].set_visible(False)
         if index % ncols == 0:
-            ax.set_ylabel('Mean predicted uncertainty\n(label units)')
+            ax.set_ylabel(f'Mean predicted uncertainty\n({C.dataset_unit(dataset)})')
     for ax in axes[len(models):]:
         ax.set_visible(False)
     # The short form of the bottom-axis label. The full one -- "fraction of
@@ -983,6 +977,24 @@ def f6_decomposition(q5, output_dir, rep, condition, slopes=None, support=None,
                  f'{C.condition_label(condition)}',
                  fontsize=9, fontweight='bold', x=0.01, ha='left')
     S.shared_legend(fig, axes[0], ncol=2)
+
+    # WRITTEN AFTER THE PANELS, because it carries what each panel found. Those
+    # sentences used to be printed over the data.
+    caption('F6', f"""
+        The two halves of the predicted uncertainty against the amount of noise
+        added to the training labels, one panel per model, on
+        {C.dataset_label(dataset)} at {C.rep_label(rep)} under
+        {C.condition_label(condition)}. One mark is the mean predicted
+        uncertainty over the molecules of one out-of-fold pass, in
+        {C.dataset_unit(dataset)}; the band is the range across folds. The
+        bottom axis is the noise level, a fraction of the clean training label
+        spread. A model that is attributing added label noise to the data has a
+        data line that climbs and a model line that holds. Every panel starts at
+        zero, so a component that holds still looks like one. A component that
+        is one number per fit rather than one per molecule is not drawn, and
+        which those are is said here: {' '.join(notes) if notes else
+        'every component shown varies per molecule.'} These readings come from
+        the fitted slopes, not from the picture.""")
     return S.save(fig, Path(output_dir) / 'F6_decomposition.png')
 
 
@@ -1091,8 +1103,11 @@ def _f7a_retention(retention, output_dir, rep, condition, dataset='qm9',
     for model in models:
         one = (frame[(frame['model'] == model) & (frame['series'] == 'uncertainty')]
                .sort_values('fraction'))
+        # SEMI-TRANSPARENT, because six of these lie on top of each other and
+        # an opaque line hides every line drawn before it -- a reader counts one
+        # curve where six agree (the author, 2026-09-13).
         ax.plot(one['fraction'], one['value'], marker=C.model_marker(model),
-                markersize=3.5, linewidth=1.4, alpha=0.9,
+                markersize=3.5, linewidth=1.4, alpha=0.55,
                 color=C.model_color(model), label=C.model_label(model))
     for series in ('random', 'oracle'):
         one = (frame[frame['series'] == series]
@@ -1237,54 +1252,70 @@ def _f7c_grid(q4, output_dir, rep, dataset='qm9', sigma=None):
 # ---------------------------------------------------------------------------
 
 def r6_representation_profile(summary, output_dir, condition, dataset='qm9',
-                              value='auc_norm'):
-    """SHAPE A turned sideways. Bottom axis: the six representations. Side axis:
-    robustness. One mark is a dot; dots belonging to one model are joined by a
-    line.
+                              value='auc_norm', outliers=None):
+    """A GRID, not a line chart -- the author's call, 2026-09-13.
 
-    A model whose line is flat is robust whatever the representation; a line
-    that dives at one representation is the pairing, and you can see WHICH
-    representation causes it. This is the only figure that shows the case the
-    averaging rules exist to catch, and D5 fires it (row 6).
+    Models down the side, representations across the bottom, robustness on each
+    square, and a heavy outline around every cell that sits outside the range of
+    that model's other representations by more than the replicate spread.
+
+    It was nineteen lines over six categories, and the two things it had to show
+    -- which cells are outliers, and that most models are flat -- were both lost
+    in the hairball. A line between two representations also draws a slope
+    between two categories that have no order, so the eye reads a trend that
+    cannot exist. The grid keeps the outlier marks, which are the finding (D5),
+    and drops the false slope.
     """
     frame = summary[(summary['dataset'] == dataset)
                     & (summary['condition'] == condition)]
     if not len(frame):
         return None
-    title = G.declare(frame, 'R6',
-                      fixed={'dataset': dataset, 'condition': condition},
-                      varies=('model', 'rep'))
+    G.declare(frame, 'R6',
+              fixed={'dataset': dataset, 'condition': condition},
+              varies=('model', 'rep'))
     reps = [r for r in C.REP_LABELS if r in set(frame['rep'])]
-    position = {r: i for i, r in enumerate(reps)}
     models = C.sort_models(frame['model'].unique())
+
+    marked = set()
+    if outliers is not None and len(outliers):
+        flagged = outliers[(outliers['condition'] == condition)
+                           & outliers.get('is_outlier', False)]
+        marked = set(map(tuple, flagged[['model', 'rep']].to_numpy()))
+
+    fig, ax = _fig(height=C.grid_height(len(models)))
+    image, table = S.grid(ax, frame, 'model', 'rep', value,
+                          row_order=models, column_order=reps,
+                          column_labeller=C.rep_label,
+                          vmin=C.AUC_RANGE[0], vmax=C.AUC_RANGE[1])
+    # The outline is the point of the figure: one cell of a model's row that its
+    # other representations do not reach.
+    import matplotlib.patches as mpatches
+    drawn = 0
+    for i, model in enumerate(table.index):
+        for j, representation in enumerate(table.columns):
+            if (model, representation) not in marked:
+                continue
+            ax.add_patch(mpatches.Rectangle(
+                (j - 0.5, i - 0.5), 1, 1, fill=False, edgecolor='#111111',
+                linewidth=2.0, zorder=4))
+            drawn += 1
+    bar = fig.colorbar(image, ax=ax, fraction=0.03, pad=0.02)
+    bar.set_label(G.metric_label(value), fontsize=8)
+    bar.ax.tick_params(labelsize=7)
+    ax.set_title(f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
+                 fontweight='bold', fontsize=9, loc='left')
+
     caption('R6', f"""
         Robustness ({G.metric_label(value)}) of every model at every
         representation, on {C.dataset_label(dataset)} under
-        {C.condition_label(condition)}. Bottom axis: the six representations.
-        Side axis: robustness. One mark is one model at one representation, the
-        median over replicates; dots belonging to one model are joined. A flat
-        line is a model that is robust whatever the representation. A line that
-        dives at one representation is the model-representation pairing, and the
-        dive names the representation responsible.""")
-    fig, ax = _fig(height=4.2)
-    for model in models:
-        one = frame[frame['model'] == model]
-        one = one[one['rep'].isin(reps)].copy()
-        if not len(one):
-            continue
-        one['x'] = one['rep'].map(position)
-        one = one.sort_values('x')
-        ax.plot(one['x'], one[value], marker=C.model_marker(model),
-                markersize=4, linewidth=1.3, alpha=0.85,
-                color=C.model_color(model), label=C.model_label(model))
-    ax.set_xticks(range(len(reps)))
-    ax.set_xticklabels([C.rep_label(r) for r in reps], rotation=20, ha='right')
-    ax.set_ylabel(G.metric_label(value))
-    ax.set_xlabel('Representation')
-    ax.set_title(f'{C.dataset_label(dataset)}, {C.condition_label(condition)}',
-                 fontweight='bold', fontsize=9, loc='left')
-    ax.spines[['top', 'right']].set_visible(False)
-    S.shared_legend(fig, ax, ncol=4)
+        {C.condition_label(condition)}. Rows are models, columns are the six
+        representations, and the number on each square is the median over
+        replicates. {drawn} square(s) are outlined: those are the cells that sit
+        outside the range of that model's other representations by more than the
+        spread across replicates, which is what a model-representation pairing
+        looks like when it is real rather than noise. A model whose row is one
+        flat colour is a model that does not care which representation it is
+        given.""")
     return S.save(fig,
                   Path(output_dir) / f'R6_representation_profile_{condition}.png')
 
@@ -1412,6 +1443,86 @@ def r10_auc_above_one(per_replicate, output_dir, dataset='qm9'):
 # ---------------------------------------------------------------------------
 # R15b -- the mirror of the rank chart (5.4a)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Two findings that are sentences, not figures (the author, 2026-09-13)
+# ---------------------------------------------------------------------------
+
+def sentence_auc_above_one(per_replicate, dataset='qm9'):
+    """Which cells retain more than they started with, in one sentence.
+
+    R10 drew this as eight marked points among eight thousand grey ones. The
+    picture named nothing; the sentence names every cell.
+    """
+    if per_replicate is None or not len(per_replicate):
+        return ''
+    frame = per_replicate[per_replicate['dataset'] == dataset]
+    if not len(frame) or 'baseline_r2' not in frame.columns:
+        return ''
+    high = frame[frame['auc_norm'] > C.AUC_NORM_IMPLAUSIBLE_HIGH]
+    if not len(high):
+        return (f'No replicate on {C.dataset_label(dataset)} scored above '
+                f'{C.AUC_NORM_IMPLAUSIBLE_HIGH} -- no model retained more '
+                f'accuracy under noise than it had without it.')
+    named = []
+    for key, group in high.groupby(['model', 'rep', 'condition'], dropna=False):
+        model, representation, condition = key
+        named.append(
+            f'{C.model_label(model)} on {C.rep_label(representation)} under '
+            f'{C.condition_label(condition)} '
+            f'({len(group)} of its replicates, clean R2 '
+            f'{group["baseline_r2"].median():.2f}, highest '
+            f'{group["auc_norm"].max():.2f})')
+    return (f'{len(high)} of {len(frame)} replicate values on '
+            f'{C.dataset_label(dataset)} scored above '
+            f'{C.AUC_NORM_IMPLAUSIBLE_HIGH}, meaning the model retained more '
+            f'accuracy with noise added than it had without it. Every one '
+            f'began from a low clean baseline, which is what the ratio does '
+            f'when its denominator is small: '
+            + '; '.join(named) + '. Reported rather than patched.')
+
+
+def sentence_rank_by_rep(accuracy, model, condition, dataset='qm9',
+                         baseline_gate=None):
+    """Whether the representations change places as the noise rises.
+
+    R15b drew six nearly flat lines to say "they do not". This says it, and
+    names the one that moves.
+    """
+    gate = C.BASELINE_THRESHOLD if baseline_gate is None else baseline_gate
+    frame = accuracy[(accuracy['dataset'] == dataset)
+                     & (accuracy['model'] == model)
+                     & (accuracy['condition'] == condition)]
+    if not len(frame):
+        return ''
+    ranks = (frame.groupby(['rep', 'sigma'], dropna=False)['r2'].median()
+             .reset_index())
+    ranks = ranks[ranks['r2'] >= gate]
+    if not len(ranks):
+        return ''
+    wide = ranks.pivot_table(index='rep', columns='sigma', values='r2')
+    order = wide.rank(ascending=False, axis=0)
+    lo, hi = float(ranks['sigma'].min()), float(ranks['sigma'].max())
+    if lo not in order.columns or hi not in order.columns:
+        return ''
+    moved = (order[hi] - order[lo])
+    movers = moved[moved.abs() >= 1].sort_values()
+    steady = [C.rep_label(r) for r in moved[moved.abs() < 1].index]
+    if not len(movers):
+        return (f'For {C.model_label(model)} on {C.dataset_label(dataset)} '
+                f'under {C.condition_label(condition)}, the six '
+                f'representations hold their order from clean labels to noise '
+                f'level {hi:g}: none changes place.')
+    named = '; '.join(
+        f'{C.rep_label(r)} moves {abs(int(round(d)))} place(s) '
+        f'{"up" if d < 0 else "down"}' for r, d in movers.items())
+    return (f'For {C.model_label(model)} on {C.dataset_label(dataset)} under '
+            f'{C.condition_label(condition)}, the representations hold their '
+            f'order from clean labels to noise level {hi:g} with '
+            f'{len(movers)} exception(s) -- {named}. '
+            + (f'The other {len(steady)} ({", ".join(steady)}) do not change '
+               f'place.' if steady else ''))
+
 
 def r15b_rank_against_level_by_rep(accuracy, output_dir, model, condition,
                                    dataset='qm9', baseline_gate=None):

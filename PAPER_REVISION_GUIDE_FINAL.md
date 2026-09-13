@@ -1107,6 +1107,68 @@ in it is a property of the design rather than of the results.
 > axis clean but means we do not measure whether a model could be retuned to resist noise better
 > than it does at its default.
 
+## L1. Four findings that are text, not figures (author's call, 2026-09-13)
+
+Four things were being drawn as figures that are one or two sentences each. The measurements are
+still made; the run writes them to `results/decisions/figures/notes_for_the_text.md` and
+`F1_delivered_dose.csv`, so each sentence below is filled from a number rather than from memory.
+**Refresh every number from the final run before it goes into the paper.**
+
+### L1-i. The noise conditions deliver what they were asked for (Methods, after the dose-matching sentence)
+
+F1 carried a final panel showing the amount of noise each condition actually delivered against the
+amount the dose solver was asked for. It is a precondition of the comparison rather than a result,
+so it becomes one sentence and a supplementary CSV.
+
+> Across ten independent draws, every dose-matched condition delivered within [X] of the requested
+> amount, so a difference between two conditions is a difference in the kind of noise and not in
+> how much of it was applied; censoring is excluded from this check because it has no variance
+> parameter to match.
+
+Fill [X] from `F1_delivered_dose.csv`, column `off_by`, the largest value over the dose-matched
+conditions. The run prints the sentence's numbers to the log.
+
+### L1-ii. Which models have a component that does not vary per molecule (Methods, in M5)
+
+F6 printed a note over the data of any panel whose aleatoric or epistemic half is one number per fit
+rather than one per molecule. That belongs in the text, once, for all models, rather than on the
+picture.
+
+> For [N] of the model-and-representation combinations examined, only the epistemic component
+> varies from molecule to molecule: the observation-noise term is a single learned value broadcast
+> across the dataset, so for those models the question of which individual molecules the model finds
+> unreliable has no answer to give. For a further [M], the reverse holds. The support flags
+> distinguishing these cases are reported for every combination in Additional file [k].
+
+Off the run of 2026-09-12 (**refresh**): N = 343, M = 103, out of the combinations D8 examined; 259
+combinations separate cleanly (aleatoric rises, epistemic holds), 161 show both components rising
+together, and 43 show neither moving.
+
+### L1-iii. AUC_norm above one (Results, beside the robustness table)
+
+R10 drew this as eight marked points among eight thousand grey ones, and the picture named none of
+the cells. The sentence names all of them; the run writes it.
+
+> [N] of [M] replicate values retained more accuracy with noise added than without it (AUC_norm
+> above 1.05). Every one began from a low clean baseline, which is what a ratio does when its
+> denominator is small; the cells are named in Additional file [k] and the metric is reported as
+> measured rather than clipped.
+
+On 2026-09-12 that was 9 of 9 replicates above the threshold on QM9, concentrated in
+**BNN-α (var. head) on MHG-GNN** (clean R² 0.52, reaching AUC_norm 1.54) and
+**VBLL-β (het.) on MHG-GNN** (clean R² 0.51).
+
+### L1-iv. The representation ranking does not move with noise (Results)
+
+R15b drew six nearly flat lines to say the representations keep their order. One sentence, with the
+exception named. The run writes it from the data.
+
+> For [model] the six representations hold their order from clean labels through to the highest
+> noise level, with [the exception(s)] the only change of place — so the choice of representation
+> is not something that has to be revisited once labels are known to be noisy.
+
+---
+
 ## L2. The cells that were run twice (append to the Limitations paragraph)
 
 Some tasks ran a second time and appended to the same results file, so a few cells hold more than one

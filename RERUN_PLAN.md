@@ -19369,3 +19369,67 @@ robustness at ρ = 0.13, n.s., over 66 cells.
 
 **The number to watch.** D0: 1,474 of 1,553 cells complete. The 79 that are not are the same cells
 that make the three deep conditions too thin for D2.
+
+#### 14.11f THE AUTHOR'S READING OF THE FIGURES — 2026-09-13
+
+The author opened the 2026-09-12 figures and returned notes. What is settled and done, what is
+open, and what needs building.
+
+**Done in this commit.**
+
+| figure | was | is |
+|---|---|---|
+| F1 | clean labels in blue, competing with each condition's own colour; a dose panel across the bottom | clean labels grey (`CLEAN_BACKDROP_COLOR`); the dose panel deleted, its numbers printed and written to `F1_delivered_dose.csv` |
+| F2 | the accuracy panel title said "at the reported level" | the title carries the number |
+| F4 | one figure, two line charts and a 19-row grid at 170 mm — the replicate bands unreadable, the two line charts looking like two views of one thing | three figures: **F4a** models across one noise type, **F4b** one model across noise types, **F4c** the grid. Titles in the author's words |
+| F6 | four panels over two; text laid over the data; "label units"; "Aleatoric (data)" | 3 x 2; the notes moved into the caption; **eV** on QM9 and log units on the assay sets (`C.dataset_unit`); "Aleatoric" / "Epistemic" |
+| F7 | opaque lines hiding each other | semi-transparent, pending the decision below |
+| R6 | nineteen lines over six categories, with a slope drawn between representations that have no order | a grid with the D5 outlier cells outlined |
+| R10 | a scatter naming no cell | **not a figure.** `FIG.sentence_auc_above_one` writes it |
+| R15b | six flat lines saying the order does not change | **not a figure.** `FIG.sentence_rank_by_rep` writes it |
+
+The two sentences land in `results/decisions/figures/notes_for_the_text.md`, and
+`PAPER_REVISION_GUIDE_FINAL.md` §L1 holds all four text-instead-of-figure items with their numbers.
+
+**Settled by this reading.**
+
+- **The word is *noise type*, or *condition*.** Not "strategy" — that word belongs to the six
+  retired strategies that turned out to be one strategy at six doses, and reusing it invites a
+  reviewer to think those are what is being compared. §0 already bans "arm" and "stage"; this
+  closes the third.
+- **Censoring is not missing.** It runs on the five pairs `censoring_pairs.json` names, per dataset,
+  which is why it cannot rank models and is absent from F4 and F8. It is the condition D7 fired on.
+- **Residual in F2 is between-replicate variance** — same model, same representation, same noise
+  type, same level, different seed. The earlier ANOVA figures had no residual because the metric was
+  computed on a curve already averaged over replicates. Under censoring it is 97.5%.
+
+**Open, and the author's to answer.**
+
+1. **Which models appear in the LINE charts.** All nineteen makes R15 and F4a a hairball. The
+   variants are pairs and the pairing is the experiment — a plain BNN predicts a mean and has no
+   data-noise term at all, its `_mve` variant does, and that is what makes F6 and T6 answerable, so
+   none of them can leave the STUDY. Proposal: all nineteen stay in the heatmaps, the line charts
+   carry one model per family (RF, XGBoost, NGBoost, SVM, GP, NN-α, NN-β), and the variants are
+   compared against their own base in a rebuilt family-comparison figure (below).
+2. **Does F7 live.** It is a lift curve: molecules sorted by predicted uncertainty, worst first,
+   against how many of the corrupted labels have been found. NGBoost lies on the diagonal past 60%
+   because it has ONE uncertainty number per fit for its model half, so past a point it is not
+   ranking anything — a property of NGBoost, not a result. The same finding in an ordinary metric is
+   `q4`'s Spearman correlation between predicted uncertainty and injected noise size against its
+   permutation band, which T6 already carries. Options: delete F7 and let T6 carry it; redraw as one
+   bar per model with the null band; keep the curve.
+3. **Which model F4b holds fixed.** `--focus-model` added. The default is a reading off the data
+   (most robust at the primary representation under the reference condition) and is NOT a
+   recommendation; the author raised RF.
+4. Unchanged and still open: which representation the main-text tables hold fixed (§14.9 item 5).
+
+**To build, both recovered from `paper.tex` and both answering a note above.**
+
+- **The family comparison** (`fig_nn_family_comparison.png` in the submitted paper): R² against the
+  noise level for the NN-α family, the NN-β family, and RF against QRF, in three panels. Nothing in
+  the current set compares a model against its own Bayesian version, which is the only place the
+  `var. head` and `het.` variants mean anything. This is where they go when they leave the main
+  line charts.
+- **One representation against another** (`fig_interaction.png` panel b): AUC_norm on PDV against
+  AUC_norm on ECFP4, one point per model, with a Spearman correlation. R16 is NOT this — R16 is
+  clean accuracy against robustness. This is the compact form of the §14.9 item 5 evidence.

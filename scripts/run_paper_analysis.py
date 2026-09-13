@@ -126,6 +126,13 @@ def parse_args(argv=None):
                    help='the representation held constant where a figure must '
                         'hold one. Open (RERUN_PLAN.md 14.9 item 5); D1 lays '
                         'out the evidence and this flag applies the answer')
+    p.add_argument('--focus-model', default=None,
+                   help='the model held constant on F4b, the chart of one '
+                        'model across every noise type. Default: the most '
+                        'robust model at the primary representation under the '
+                        'reference condition, which is a reading off the data '
+                        'and not a recommendation. RF and QRF are the obvious '
+                        'alternatives -- see d1_auc_norm_by_model.csv')
     p.add_argument('--cache-dir', default=None,
                    help='parquet cache for the parsed results')
     p.add_argument('--only', default='decisions',
@@ -370,6 +377,7 @@ def draw_figures(args, tables, verdicts):
         drawn.append(FIG.f3_model_by_representation(qm9, out, conditions))
     if accuracy is not None and len(accuracy) and qm9 is not None and rep:
         drawn.append(FIG.f4_overview(accuracy, qm9, out, rep,
+                                     focus_model=args.focus_model,
                                      excluded=tables.get('excluded_qm9')))
         drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
                                                 'gaussian'))
@@ -407,7 +415,9 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
     # lines are the only figure that shows WHICH.
     if said.get('D5', {}).get('fired') and qm9 is not None and len(qm9):
         for condition in (conditions or [first]):
-            drawn.append(FIG.r6_representation_profile(qm9, out, condition))
+            drawn.append(FIG.r6_representation_profile(
+                qm9, out, condition,
+                outliers=tables.get('d5_representation_outlier')))
 
     # row 9, fired by D9: the two sides disagree on the ranking, so T7 is
     # promoted from a table to a figure.
@@ -415,10 +425,14 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
         drawn.append(FIG.r9_rank_transfer(tables['d9_rank_transfer'], out, rep,
                                           condition=first))
 
-    # row 10, fired by D6: AUC_norm above 1 recurs. A count and a panel against
-    # the clean baseline, never a patched metric.
+    # row 10, fired by D6: AUC_norm above 1 recurs. NOT A FIGURE -- the author's
+    # call, 2026-09-13. A scatter of eight orange dots among eight thousand grey
+    # ones is a sentence pretending to be a picture. The cells are named in a
+    # sentence instead, written where the paper can quote it.
     if said.get('D6', {}).get('fired') and tables.get('_qm9_per_replicate') is not None:
-        drawn.append(FIG.r10_auc_above_one(tables['_qm9_per_replicate'], out))
+        _note_for_the_text(out, 'AUC_norm above 1',
+                           FIG.sentence_auc_above_one(
+                               tables['_qm9_per_replicate']))
 
     # row 15: the rank ladder, one chart per noise type, and the mirror holding
     # a model fixed. Not contingent on a decision -- 5.4a asks for it outright.
@@ -427,11 +441,34 @@ def _draw_contingent(tables, said, out, rep, conditions, qm9, accuracy, assay):
             if condition != 'gaussian':
                 drawn.append(FIG.r15_rank_against_level(accuracy, out, rep,
                                                         condition))
+        # The mirror chart -- one model, the representations ranked against the
+        # noise level -- is NOT A FIGURE either (the author, 2026-09-13). The
+        # ranking barely moves, and "it barely moves, except for one" is a
+        # sentence. Written out as one.
         top = _most_robust_model(qm9, rep, first)
         if top:
-            drawn.append(FIG.r15b_rank_against_level_by_rep(accuracy, out, top,
-                                                            first))
+            _note_for_the_text(out, 'representation ranking against noise',
+                               FIG.sentence_rank_by_rep(accuracy, top, first))
     return drawn
+
+
+def _note_for_the_text(out, heading, sentence):
+    """A finding that is one sentence, written where the paper can quote it.
+
+    Two slots were drawn as figures and are not figure-shaped: eight marked
+    points among eight thousand, and a ranking that does not change. Deleting
+    them would lose the measurement, so the measurement is written down instead
+    and `notes_for_the_text.md` is what PAPER_REVISION_GUIDE_FINAL.md quotes.
+    """
+    if not sentence:
+        return
+    path = Path(out) / 'figures' / 'notes_for_the_text.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text() if path.exists() else '# Findings that are one sentence\n'
+    if heading not in existing:
+        existing += f'\n## {heading}\n\n{sentence}\n'
+        path.write_text(existing)
+    print(f'  {heading}: {sentence}')
 
 
 def _most_robust_model(summary, rep, condition):
